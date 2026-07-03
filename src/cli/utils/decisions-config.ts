@@ -6,30 +6,29 @@ import { getDecisionsConfigPath } from './project-paths.js';
 /**
  * Merged decisions agent configuration from global and project-level config files.
  *
- * Mirrors the shape of LearningConfig in learn.ts — decisions agent is a sibling
- * pipeline with the same runtime knobs (model, throttle, daily cap, debug).
+ * The background dream worker (background-dream-update, spawned by spawn-dream-worker)
+ * has no daily-run cap or throttle of its own — it is gated by queue non-emptiness
+ * (spawn-dream-worker only spawns when the dream queue is non-empty or a leftover
+ * .processing batch exists) rather than a fixed daily/minute budget, so those knobs
+ * were dropped in the dream-system simplification.
  */
 export interface DecisionsConfig {
-  /** Maximum number of background runs per day. Default: 3 */
-  max_daily_runs: number;
-  /** Minimum minutes between consecutive runs. Default: 5 */
-  throttle_minutes: number;
-  /** Model alias for the background Dream agent. Default: 'sonnet' */
+  /** Model alias for the detached dream worker. Default: 'opus' */
   model: string;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
 
 const DEFAULTS: DecisionsConfig = {
-  max_daily_runs: 3,
-  throttle_minutes: 5,
-  model: 'sonnet',
+  model: 'opus',
   debug: false,
 };
 
 /**
  * Apply a single JSON config layer onto a DecisionsConfig, returning a new object.
  * Skips fields with wrong types. Swallows parse errors — callers see defaults.
+ * Unknown/dropped fields (e.g. a pre-simplification config still on disk with
+ * max_daily_runs/throttle_minutes) are silently ignored, not an error.
  */
 export function applyDecisionsConfigLayer(
   config: DecisionsConfig,
@@ -38,14 +37,6 @@ export function applyDecisionsConfigLayer(
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
     return {
-      max_daily_runs:
-        typeof raw.max_daily_runs === 'number'
-          ? raw.max_daily_runs
-          : config.max_daily_runs,
-      throttle_minutes:
-        typeof raw.throttle_minutes === 'number'
-          ? raw.throttle_minutes
-          : config.throttle_minutes,
       model:
         typeof raw.model === 'string' ? raw.model : config.model,
       debug:

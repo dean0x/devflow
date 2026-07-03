@@ -12,9 +12,12 @@ import {
   getDecisionsManifestPath,
   getDecisionsLockDir,
   getDecisionsNotificationsPath,
-  getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
   getDecisionsDisabledSentinel,
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
+  getDreamLastOkPath,
+  getDreamWorkerLockDir,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
@@ -161,42 +164,12 @@ export const decisionsCommand = new Command('decisions')
     if (options.configure) {
       p.intro(color.bgCyan(color.black(' Decisions Configuration ')));
 
-      const maxRuns = await p.text({
-        message: 'Maximum background runs per day',
-        placeholder: '3',
-        defaultValue: '3',
-        validate: (v) => {
-          const n = Number(v);
-          if (isNaN(n) || n < 1 || n > 50) return 'Enter a number between 1 and 50';
-          return undefined;
-        },
-      });
-      if (p.isCancel(maxRuns)) {
-        p.cancel('Configuration cancelled.');
-        return;
-      }
-
-      const throttle = await p.text({
-        message: 'Throttle interval (minutes between runs)',
-        placeholder: '5',
-        defaultValue: '5',
-        validate: (v) => {
-          const n = Number(v);
-          if (isNaN(n) || n < 1 || n > 60) return 'Enter a number between 1 and 60';
-          return undefined;
-        },
-      });
-      if (p.isCancel(throttle)) {
-        p.cancel('Configuration cancelled.');
-        return;
-      }
-
       const model = await p.select({
         message: 'Model for decision detection',
         options: [
-          { value: 'sonnet', label: 'Sonnet', hint: 'Recommended — good balance of quality and speed' },
+          { value: 'opus', label: 'Opus', hint: 'Recommended — highest quality for detection + curation judgment' },
+          { value: 'sonnet', label: 'Sonnet', hint: 'Good balance of quality and speed' },
           { value: 'haiku', label: 'Haiku', hint: 'Fastest, lowest cost' },
-          { value: 'opus', label: 'Opus', hint: 'Highest quality, highest cost' },
         ],
       });
       if (p.isCancel(model)) {
@@ -226,8 +199,6 @@ export const decisionsCommand = new Command('decisions')
       }
 
       const config = {
-        max_daily_runs: Number(maxRuns),
-        throttle_minutes: Number(throttle),
         model,
         debug: debugMode,
       };
@@ -252,9 +223,25 @@ export const decisionsCommand = new Command('decisions')
 
     // --- --reset ---
     if (options.reset) {
-      const lockDir = getDecisionsLockDir(process.cwd());
+      const gitRoot = await getGitRoot();
+      if (!gitRoot) {
+        p.log.warn('Could not resolve git root — reset not performed');
+        return;
+      }
 
-      // Acquire lock to prevent conflict with running background decisions agent.
+      // Never touch a project where a live background-dream-update worker holds
+      // .devflow/dream/.worker.lock — it is that worker's sole concurrency guard.
+      // This is a plain existence check, not a lock acquisition: we skip entirely
+      // rather than racing the worker.
+      try {
+        await fs.access(getDreamWorkerLockDir(gitRoot));
+        p.log.error('A background dream worker is currently running. Try again in a moment.');
+        return;
+      } catch { /* no live worker — safe to proceed */ }
+
+      const lockDir = getDecisionsLockDir(gitRoot);
+
+      // Acquire lock to prevent conflict with a concurrent `devflow decisions` invocation.
       try {
         await fs.mkdir(lockDir);
       } catch {
@@ -264,12 +251,14 @@ export const decisionsCommand = new Command('decisions')
 
       try {
         const stateFilePaths = [
-          getDecisionsLogPath(process.cwd()),
-          getDecisionsManifestPath(process.cwd()),
-          getDecisionsNotificationsPath(process.cwd()),
-          getDecisionsRunsTodayPath(process.cwd()),
-          getDecisionsBatchIdsPath(process.cwd()),
-          getDecisionsConfigPath(process.cwd()),
+          getDecisionsLogPath(gitRoot),
+          getDecisionsManifestPath(gitRoot),
+          getDecisionsNotificationsPath(gitRoot),
+          getDecisionsBatchIdsPath(gitRoot),
+          getDecisionsConfigPath(gitRoot),
+          getDreamPendingTurnsPath(gitRoot),
+          getDreamPendingTurnsProcessingPath(gitRoot),
+          getDreamLastOkPath(gitRoot),
         ];
 
         if (process.stdin.isTTY) {
@@ -293,19 +282,24 @@ export const decisionsCommand = new Command('decisions')
 
         // Remove decisions sentinel directory if present (may contain .disabled or other files).
         try {
-          await fs.rm(getDecisionsDir(process.cwd()), { recursive: true, force: true });
+          await fs.rm(getDecisionsDir(gitRoot), { recursive: true, force: true });
         } catch { /* best effort */ }
 
-        // Clean dream state files
-        const dreamDir = getDreamDir(process.cwd());
-        for (const f of ['.decisions-runs-today']) {
+        // Clean legacy dream marker-pipeline stamps (pre-dream-system-simplification
+        // installs — config.json and the new .pending-turns.jsonl/.last-dream-ok are
+        // handled above/never touched here).
+        const dreamDir = getDreamDir(gitRoot);
+        for (const f of ['.decisions-runs-today', '.curation-last', '.processor-spawned-at']) {
           try { await fs.unlink(path.join(dreamDir, f)); } catch { /* may not exist */ }
         }
-        // Clean dream decisions markers
+        // Clean legacy per-session decisions/curation markers (.json/.processing/.retries/.failed)
         try {
           const dreamFiles = await fs.readdir(dreamDir);
           for (const f of dreamFiles) {
-            if (f.startsWith('decisions.') && f.endsWith('.json')) {
+            const isLegacyMarker =
+              (f.startsWith('decisions.') || f.startsWith('curation.')) &&
+              (f.endsWith('.json') || f.endsWith('.processing') || f.endsWith('.retries') || f.endsWith('.failed'));
+            if (isLegacyMarker) {
               try { await fs.unlink(path.join(dreamDir, f)); } catch { /* ignore */ }
             }
           }
@@ -320,8 +314,23 @@ export const decisionsCommand = new Command('decisions')
 
     // --- --clear ---
     if (options.clear) {
+      const gitRoot = await getGitRoot();
+      if (!gitRoot) {
+        p.log.warn('Could not resolve git root — clear not performed');
+        return;
+      }
+
+      // Never touch a project where a live background-dream-update worker holds
+      // .devflow/dream/.worker.lock — it is that worker's sole concurrency guard.
       try {
-        await fs.access(logPath);
+        await fs.access(getDreamWorkerLockDir(gitRoot));
+        p.log.error('A background dream worker is currently running. Try again in a moment.');
+        return;
+      } catch { /* no live worker — safe to proceed */ }
+
+      const decisionsLogPath = getDecisionsLogPath(gitRoot);
+      try {
+        await fs.access(decisionsLogPath);
       } catch {
         p.log.info('No decisions log to clear.');
         return;
@@ -338,7 +347,17 @@ export const decisionsCommand = new Command('decisions')
         }
       }
 
-      await fs.writeFile(logPath, '', 'utf-8');
+      await fs.writeFile(decisionsLogPath, '', 'utf-8');
+
+      // Drain the dream (decisions-detection) queue and stamps so stale turns don't
+      // process on the next spawn — mirrors memory.ts's drain-on-disable behavior
+      // for the sibling memory queue.
+      await Promise.all([
+        fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+        fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+        fs.unlink(getDreamLastOkPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+      ]);
+
       p.log.success('Decisions log cleared.');
       return;
     }

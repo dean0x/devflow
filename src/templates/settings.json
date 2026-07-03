@@ -9,7 +9,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook stop-update-memory",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-turn",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook memory-worker",
             "timeout": 10
           }
         ]
@@ -21,6 +30,24 @@
           {
             "type": "command",
             "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook session-start-memory",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook session-start-context",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook spawn-dream-worker",
             "timeout": 10
           }
         ]

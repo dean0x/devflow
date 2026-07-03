@@ -360,15 +360,20 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// dream-decisions SKILL.md content-presence assertions (AC-F1, AC-F2)
+// dream-procedure.md content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the SKILL contains the creation-bar
+// These lightweight checks verify that the procedure contains the creation-bar
 // elements required by the plan. They do not test LLM judgment — that is
 // validated by the Tester agent via scenarios. They lock the prose contract
-// so that the SKILL cannot accidentally regress on the key phrases.
+// so that the procedure cannot accidentally regress on the key phrases.
+//
+// The standalone dream-decisions SKILL.md was retired when the dream system
+// was simplified to a detached `claude -p` worker (background-dream-update)
+// that reads scripts/hooks/dream-procedure.md directly — it is not a Claude
+// Code skill (skills do not load in `claude -p` sessions).
 
-describe('dream-decisions SKILL.md creation-bar contract', () => {
-  const SKILL_PATH = path.join(ROOT, 'shared/skills/dream-decisions/SKILL.md');
+describe('dream-procedure.md creation-bar contract', () => {
+  const SKILL_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
 
   let skillContent: string;
   beforeAll(() => {
@@ -376,7 +381,7 @@ describe('dream-decisions SKILL.md creation-bar contract', () => {
   });
 
   it('contains abstain-by-default stance', () => {
-    expect(skillContent).toContain('Most sessions produce nothing');
+    expect(skillContent).toContain('Most runs produce nothing');
     expect(skillContent).toContain('If unsure, record nothing');
   });
 
@@ -393,13 +398,14 @@ describe('dream-decisions SKILL.md creation-bar contract', () => {
     expect(skillContent).toContain('reinforce it');
   });
 
-  it('instructs agent to use assign-anchor and prohibits decisions-append', () => {
-    // The SKILL must instruct the agent to use assign-anchor for promotion
+  it('instructs agent to use assign-anchor for promotion, never invents numbers itself', () => {
+    // The procedure must instruct the agent to use assign-anchor for promotion
     expect(skillContent).toContain('assign-anchor');
-    // The SKILL must prohibit decisions-append (mentioning it only to forbid it)
-    expect(skillContent).toContain('NEVER call `decisions-append`');
-    // Must NOT contain a positive instruction to call decisions-append
+    // decisions-append is retired tooling and is not mentioned at all (nothing
+    // positively instructs calling it — there is no lingering reference to forbid).
     expect(skillContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
+    expect(skillContent).not.toContain('decisions-append');
+    expect(skillContent).toContain('NEVER invent an ADR-NNN/PF-NNN number');
   });
 
   it('has no numeric confidence gate (ADR-008)', () => {

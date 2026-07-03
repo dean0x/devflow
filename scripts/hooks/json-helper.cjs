@@ -26,7 +26,6 @@
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
-//   read-dream <file> <field>             Read field from dream JSON (allowed fields only; returns [] on any error)
 
 'use strict';
 
@@ -328,14 +327,6 @@ function parseArgs(argList) {
 
 if (require.main === module) {
 try {
-  // Route to domain modules first; fall through to the main switch if not handled.
-  if (op === 'read-dream') {
-    const dreamOps = require('./lib/dream-ops.cjs');
-    if (dreamOps.handle(op, args, process.cwd())) {
-      process.exit(0);
-    }
-  }
-
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());

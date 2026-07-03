@@ -577,6 +577,76 @@ describe('DW8: CLI contract — allowedTools without skip-permissions, env flag,
 });
 
 // =============================================================================
+// DW9 — AC-C5: model resolution (project decisions.json -> global -> opus default)
+// =============================================================================
+describe('DW9: AC-C5 — model resolution defaults to opus, project config wins', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdu-dw9-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdu-dw9-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdu-dw9-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
+    seedDreamQueue(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('defaults to opus when neither project nor global decisions.json sets a model', () => {
+    const { argvCapture } = createRealAgentShim(shimDir, projectDir);
+    runWorker(projectDir, homeDir, shimDir);
+    const argv = fs.readFileSync(argvCapture, 'utf-8');
+    expect(argv).toContain('--model opus');
+  });
+
+  it('project decisions.json model field overrides the opus default', () => {
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'decisions', 'decisions.json'),
+      JSON.stringify({ model: 'haiku' }),
+    );
+    const { argvCapture } = createRealAgentShim(shimDir, projectDir);
+    runWorker(projectDir, homeDir, shimDir);
+    const argv = fs.readFileSync(argvCapture, 'utf-8');
+    expect(argv).toContain('--model haiku');
+  });
+
+  it('global decisions.json model field is used when project config is absent', () => {
+    fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, '.devflow', 'decisions.json'),
+      JSON.stringify({ model: 'sonnet' }),
+    );
+    const { argvCapture } = createRealAgentShim(shimDir, projectDir);
+    runWorker(projectDir, homeDir, shimDir);
+    const argv = fs.readFileSync(argvCapture, 'utf-8');
+    expect(argv).toContain('--model sonnet');
+  });
+
+  it('project decisions.json wins over global when both set a model', () => {
+    fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, '.devflow', 'decisions.json'),
+      JSON.stringify({ model: 'sonnet' }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'decisions', 'decisions.json'),
+      JSON.stringify({ model: 'haiku' }),
+    );
+    const { argvCapture } = createRealAgentShim(shimDir, projectDir);
+    runWorker(projectDir, homeDir, shimDir);
+    const argv = fs.readFileSync(argvCapture, 'utf-8');
+    expect(argv).toContain('--model haiku');
+  });
+});
+
+// =============================================================================
 // AC-C3 — dream-procedure.md contract (pinned)
 // =============================================================================
 describe('AC-C3: dream-procedure.md contract', () => {

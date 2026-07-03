@@ -48,15 +48,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    // The Dream agent lives here (always-installed foundation plugin) because the
-    // session-start-context hook spawns Agent(subagent_type="Dream") unconditionally
-    // for the decisions/knowledge/curation subsystems — independent of whether
-    // the ambient plugin is installed. Declaring it only in devflow-ambient would break
-    // the dream subsystem under `devflow init --no-ambient` (agents install per selected
-    // plugin, unlike skills which install universally). Predecessor was the universally
-    // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
-    agents: ['dream'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-curation'],
+    agents: [],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
@@ -152,7 +145,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Keyword + plan auto-detection',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
     skills: [
       'review-methodology',
       'security',
@@ -294,6 +287,11 @@ export const LEGACY_COMMAND_NAMES: string[] = [
  */
 export const LEGACY_AGENT_NAMES: string[] = [
   'shepherd',
+  // Dream system simplification: the Dream subagent (Agent(subagent_type="Dream"))
+  // is retired — decisions detection + curation now run via a detached `claude -p`
+  // worker (background-dream-update, spawned by spawn-dream-worker) that reads
+  // scripts/hooks/dream-procedure.md directly, not a Claude Code subagent.
+  'dream',
 ];
 
 /**
@@ -536,21 +534,22 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:research:orch',
   'devflow:release:orch',
   // v3.x dream per-task skills: bare names for pre-namespace installs.
-  // NOTE: dream-decisions and dream-curation are STILL-ACTIVE skills (declared in
-  // DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
-  // These bare entries exist solely to clean up pre-namespace V2.x installs where
-  // skills were written without the devflow: prefix. On current installs the post-install
-  // fs.rm targets a bare path (e.g. ~/.claude/skills/dream-decisions) that does not exist
-  // — a harmless no-op. Do NOT remove these entries: upgrading users from V2.x need the
-  // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
+  // dream-decisions and dream-curation are now ALSO fully removed (dream system
+  // simplification: the detached background-dream-update worker reads
+  // scripts/hooks/dream-procedure.md directly instead of loading these as
+  // Claude Code skills), joining dream-memory and dream-knowledge below. These
+  // bare entries clean up pre-namespace V2.x installs where skills were written
+  // without the devflow: prefix — a harmless no-op on current installs.
   'dream-memory',
   'dream-knowledge',
   'dream-decisions',
   'dream-curation',
-  // v3.x dream-memory + dream-knowledge removal: namespaced names for cleanup of the
-  // installed devflow:dream-memory / devflow:dream-knowledge skills (both fully removed).
+  // Namespaced names for cleanup of the installed devflow:dream-* skills (all
+  // 4 dream per-task skills are now fully removed).
   'devflow:dream-memory',
   'devflow:dream-knowledge',
+  'devflow:dream-decisions',
+  'devflow:dream-curation',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup

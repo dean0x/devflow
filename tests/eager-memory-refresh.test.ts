@@ -5,11 +5,13 @@
  * Covers AC-F1/F2/F3, AC-F4 (injection states), AC-F5/F6/F7, AC-C2/C3/C4,
  * AC-P3 (double-spawn), and no-regression scenarios.
  *
- * Design constraint: tests that exercise dream-capture with a stale trigger MUST
- * supply a fake claude shim on PATH (prepended before the system PATH). This
- * prevents the nohup-spawned background-memory-update worker from invoking the
- * real claude binary and hanging for 120s. Tests that only check queue-write
- * behavior use a fresh trigger file so the 120s throttle prevents any spawn.
+ * The capture/spawn split: queue-append lives in capture-turn (never throttles,
+ * never spawns — see tests/capture-hooks.test.ts for its dedicated coverage),
+ * while the 120s throttle + detached background-memory-update spawn lives in
+ * memory-worker. Design constraint: tests that exercise memory-worker with a
+ * stale trigger MUST supply a fake claude shim on PATH (prepended before the
+ * system PATH). This prevents the nohup-spawned background-memory-update worker
+ * from invoking the real claude binary and hanging for 120s.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,9 +21,9 @@ import * as path from 'path';
 import * as os from 'os';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
-const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
+const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
+const MEMORY_WORKER_HOOK = path.join(HOOKS_DIR, 'memory-worker');
 const SESSION_START_MEMORY_HOOK = path.join(HOOKS_DIR, 'session-start-memory');
-const SESSION_START_CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 
 // ---------------------------------------------------------------------------
@@ -186,7 +188,7 @@ function initGitRepo(dir: string): void {
 // =============================================================================
 // S1 — AC-F2/F3/C3: background-memory-update happy path
 //
-// We run background-memory-update DIRECTLY (not via dream-capture) to avoid
+// We run background-memory-update DIRECTLY (not via memory-worker) to avoid
 // the nohup-detach complexity. The fake claude shim writes a deterministic file.
 // =============================================================================
 describe('S1: end-to-end happy path — background-memory-update worker (AC-F2/F3/C3)', () => {
@@ -234,68 +236,6 @@ describe('S1: end-to-end happy path — background-memory-update worker (AC-F2/F
 
   it('AC-C3: no memory.json or memory.processing marker in .devflow/dream/', () => {
     runWorker(projectDir, homeDir, shimDir);
-
-    const dreamDir = path.join(projectDir, '.devflow', 'dream');
-    const memMarkers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));
-    expect(memMarkers).toHaveLength(0);
-  });
-});
-
-// =============================================================================
-// S1b — AC-F1: dream-capture touches trigger before spawning (throttle gate)
-//
-// We use a fake claude shim on PATH so the nohup-spawned worker does not
-// invoke the real claude binary.
-// =============================================================================
-describe('S1b: AC-F1 — dream-capture touches .working-memory-last-trigger', () => {
-  let projectDir: string;
-  let homeDir: string;
-  let shimDir: string;
-
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s1b-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s1b-home-'));
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s1b-shim-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
-    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    createFakeClaudeShim(shimDir, memFile);
-    seedQueue(projectDir);
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-    fs.rmSync(shimDir, { recursive: true, force: true });
-  });
-
-  it('trigger file is touched (mtime refreshed) after throttle expires', () => {
-    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
-    fs.writeFileSync(triggerFile, '');
-    backdateMtime(triggerFile, 600); // 10 minutes ago — throttle expired
-
-    runHookWithFakeClaude(
-      CAPTURE_HOOK,
-      { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello' },
-      homeDir,
-      shimDir
-    );
-
-    const triggerStat = fs.statSync(triggerFile);
-    expect(triggerStat.mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
-
-  it('no memory.json or memory.processing marker created by dream-capture (AC-C3)', () => {
-    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
-    fs.writeFileSync(triggerFile, '');
-    backdateMtime(triggerFile, 600);
-
-    runHookWithFakeClaude(
-      CAPTURE_HOOK,
-      { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello' },
-      homeDir,
-      shimDir
-    );
 
     const dreamDir = path.join(projectDir, '.devflow', 'dream');
     const memMarkers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));
@@ -438,15 +378,14 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
 });
 
 // =============================================================================
-// S3 — AC-F6: PATH without claude binary
+// S3 — AC-F6: capture-turn is throttle-agnostic (queue-append only)
 //
-// We keep trigger file FRESH (no backdating) so dream-capture throttles and
-// does NOT try to spawn the worker. This lets us verify exit-0 and queue
-// behavior without PATH manipulation worries.
-// We test the capture-hook's "no claude found" exit path in S3b by explicitly
-// using the fake shim approach with the trigger backdated.
+// capture-turn never reads the trigger file at all — it only appends to the
+// queue. These tests verify exit-0 and queue-append behavior regardless of
+// trigger-file state. We test memory-worker's "no claude found" exit path
+// separately in S3b.
 // =============================================================================
-describe('S3: AC-F6 — capture hook behavior when claude binary absent on PATH', () => {
+describe('S3: AC-F6 — capture-turn queue-append is unaffected by trigger/throttle state', () => {
   let projectDir: string;
   let homeDir: string;
 
@@ -456,7 +395,8 @@ describe('S3: AC-F6 — capture hook behavior when claude binary absent on PATH'
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
     seedQueue(projectDir);
-    // Fresh trigger (< 120s) — throttle will prevent spawn attempt
+    // Fresh trigger (< 120s) — irrelevant to capture-turn, present only to prove
+    // capture-turn ignores it entirely (that's memory-worker's concern).
     fs.writeFileSync(
       path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger'), ''
     );
@@ -467,18 +407,18 @@ describe('S3: AC-F6 — capture hook behavior when claude binary absent on PATH'
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('dream-capture exits 0 even when throttled (queue append only)', () => {
+  it('capture-turn exits 0 regardless of trigger-file state (queue append only)', () => {
     const { exitCode } = runHook(
-      CAPTURE_HOOK,
+      CAPTURE_TURN_HOOK,
       { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello world' },
       homeDir
     );
     expect(exitCode).toBe(0);
   });
 
-  it('queue still receives new turn (throttle does not block capture)', () => {
+  it('queue still receives new turn (capture-turn never consults the trigger file)', () => {
     runHook(
-      CAPTURE_HOOK,
+      CAPTURE_TURN_HOOK,
       { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello world' },
       homeDir
     );
@@ -488,9 +428,9 @@ describe('S3: AC-F6 — capture hook behavior when claude binary absent on PATH'
     expect(lines.length).toBeGreaterThan(0);
   });
 
-  it('AC-F4/State C: after throttled capture, session-start-memory shows REFRESH FAILING', () => {
+  it('AC-F4/State C: after a capture with no worker run, session-start-memory shows REFRESH FAILING', () => {
     runHook(
-      CAPTURE_HOOK,
+      CAPTURE_TURN_HOOK,
       { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello world' },
       homeDir
     );
@@ -513,12 +453,12 @@ describe('S3: AC-F6 — capture hook behavior when claude binary absent on PATH'
 // S3b — AC-F6 source code: "no claude" path exits 0, logs skip message
 // =============================================================================
 describe('S3b: AC-F6 source code — no-claude exit logged correctly', () => {
-  it('dream-capture code logs SKIP when claude binary not found', () => {
-    const captureSrc = fs.readFileSync(CAPTURE_HOOK, 'utf-8');
-    expect(captureSrc).toContain('claude binary not found');
-    expect(captureSrc).toContain('worker not spawned (queue intact)');
+  it('memory-worker code logs SKIP when claude binary not found', () => {
+    const workerSrc = fs.readFileSync(MEMORY_WORKER_HOOK, 'utf-8');
+    expect(workerSrc).toContain('claude binary not found');
+    expect(workerSrc).toContain('worker not spawned (queue intact)');
     // Exit must be 0 (not a hard failure)
-    expect(captureSrc).toContain('exit 0');
+    expect(workerSrc).toContain('exit 0');
   });
 });
 
@@ -581,7 +521,7 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
     const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
     expect(fs.existsSync(okFile)).toBe(false);
 
-    // .processing must be retained for dream-recover crash recovery.
+    // .processing must be retained for session-start-memory's own cold-path crash recovery (S19).
     const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
     expect(fs.existsSync(processingFile)).toBe(true);
   }, 20000); // 20s timeout: 2s watchdog sleep + 5s SIGTERM grace + margin
@@ -703,41 +643,6 @@ describe('S6: AC-F5 — user-only queue skips LLM', () => {
 });
 
 // =============================================================================
-// S7 — AC-F7: memory:false in config
-// =============================================================================
-describe('S7: AC-F7 — memory:false in dream config gates dream-capture', () => {
-  let projectDir: string;
-  let homeDir: string;
-
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s7-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s7-home-'));
-    writeDreamConfig(projectDir, { memory: false });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('memory:false — no queue append, no trigger touch, no dream marker', () => {
-    runHook(
-      CAPTURE_HOOK,
-      { cwd: projectDir, session_id: 'test', last_assistant_message: 'hello' },
-      homeDir
-    );
-
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger'))).toBe(false);
-
-    const dreamDir = path.join(projectDir, '.devflow', 'dream');
-    const markers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));
-    expect(markers).toHaveLength(0);
-  });
-});
-
-// =============================================================================
 // S8 — AC-C2/C4: Security — prompt via STDIN, DEVFLOW_BG_UPDATER, feedback loop
 // =============================================================================
 describe('S8: AC-C2/C4 — security constraints', () => {
@@ -789,24 +694,6 @@ describe('S8: AC-C2/C4 — security constraints', () => {
       fs.rmSync(projectDir, { recursive: true, force: true });
       fs.rmSync(homeDir, { recursive: true, force: true });
       fs.rmSync(shimDir, { recursive: true, force: true });
-    }
-  });
-
-  it('dream-capture with DEVFLOW_BG_UPDATER=1 exits early — no queue write', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s8-'));
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s8-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
-    try {
-      runHook(
-        CAPTURE_HOOK,
-        { cwd: tmpDir, session_id: 'test', last_assistant_message: 'hello' },
-        homeDir,
-        { DEVFLOW_BG_UPDATER: '1' }
-      );
-      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      fs.rmSync(homeDir, { recursive: true, force: true });
     }
   });
 });
@@ -861,75 +748,11 @@ describe('S9: AC-C4 — .devflow/ local-by-default with the feature-knowledge ca
 });
 
 // =============================================================================
-// S10 — No-regression: session-start-context decisions/knowledge agents
-// =============================================================================
-describe('S10: No-regression — session-start-context decisions/knowledge unaffected', () => {
-  let projectDir: string;
-  let homeDir: string;
-
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s10-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s10-home-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
-    initGitRepo(projectDir);
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('decisions.json marker → DREAM MAINTENANCE directive emitted, not memory', () => {
-    fs.writeFileSync(
-      path.join(projectDir, '.devflow', 'dream', 'decisions.test123.json'),
-      JSON.stringify({ type: 'decisions', session_id: 'test123' })
-    );
-
-    const { stdout } = runHook(SESSION_START_CONTEXT_HOOK, { cwd: projectDir }, homeDir);
-    const parsed = JSON.parse(stdout.trim()) as { hookSpecificOutput?: { additionalContext?: string } };
-    const ctx = parsed?.hookSpecificOutput?.additionalContext ?? '';
-
-    expect(ctx).toContain('DREAM MAINTENANCE');
-    expect(ctx).toContain('decisions');
-    expect(ctx).not.toMatch(/Agent\(.*memory.*\)/i);
-  });
-
-  it('stale memory.json marker deleted unconditionally (NOT in Dream directive)', () => {
-    const markerPath = path.join(projectDir, '.devflow', 'dream', 'memory.json');
-    fs.writeFileSync(markerPath, JSON.stringify({ type: 'memory' }));
-
-    runHook(SESSION_START_CONTEXT_HOOK, { cwd: projectDir }, homeDir);
-
-    expect(fs.existsSync(markerPath)).toBe(false);
-  });
-
-  it('decisions usage scanner exits 0 when ADR-1/PF-1 appear in assistant message', () => {
-    // Use a FRESH trigger file (< 120s) so dream-capture throttles before spawning the worker
-    const memDir = path.join(projectDir, '.devflow', 'memory');
-    fs.mkdirSync(memDir, { recursive: true });
-    fs.writeFileSync(path.join(memDir, '.working-memory-last-trigger'), '');
-
-    fs.writeFileSync(
-      path.join(projectDir, '.devflow', 'decisions', 'decisions-log.jsonl'), ''
-    );
-
-    const { exitCode } = runHook(
-      CAPTURE_HOOK,
-      { cwd: projectDir, session_id: 'test', last_assistant_message: 'I applied ADR-1 and also PF-1 here' },
-      homeDir
-    );
-
-    expect(exitCode).toBe(0);
-  });
-});
-
-// =============================================================================
-// S11 — AC-C3: No memory.* marker in .devflow/dream/ after dream-capture
+// S11 — AC-C3: No memory.* marker in .devflow/dream/ after a memory-worker spawn
 //
 // Uses fake claude on PATH so the nohup-spawned worker uses the shim, not real claude.
 // =============================================================================
-describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after dream-capture', () => {
+describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after a memory-worker spawn', () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -956,10 +779,10 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after dream-captu
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('no memory.* file in .devflow/dream/ after dream-capture (no marker created)', () => {
+  it('no memory.* file in .devflow/dream/ after memory-worker spawns the updater (no marker created)', () => {
     runHookWithFakeClaude(
-      CAPTURE_HOOK,
-      { cwd: projectDir, session_id: 'test', last_assistant_message: 'some response' },
+      MEMORY_WORKER_HOOK,
+      { cwd: projectDir },
       homeDir,
       shimDir
     );
@@ -1584,9 +1407,9 @@ exit 0
 // =============================================================================
 // S19 — session-start-memory cold-path recovery for orphaned .pending-turns.processing
 //
-// Mirrors dream-recover's dream_recover_stale logic (duplicated, not sourced —
-// session-start-memory has no dependency on dream-recover). Age >300s + no
-// existing .jsonl -> recovered; .jsonl present -> left alone (non-clobber).
+// session-start-memory owns this recovery itself (self-contained, no external
+// helper dependency). Age >300s + no existing .jsonl -> recovered; .jsonl
+// present -> left alone (non-clobber).
 // =============================================================================
 describe('S19: session-start-memory cold-path .pending-turns.processing recovery', () => {
   let projectDir: string;

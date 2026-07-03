@@ -113,100 +113,89 @@ function readDecisionsMd(dir: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// dream-curation SKILL.md content-presence assertions
+// dream-procedure.md content-presence assertions (AC-C3)
+//
+// The standalone dream-decisions/dream-curation SKILL.md files were retired
+// when the dream system was simplified to a detached `claude -p` worker
+// (background-dream-update) that reads scripts/hooks/dream-procedure.md
+// directly — it is not a Claude Code skill (skills do not load in `claude -p`
+// sessions). The Iron-Law strings this describe pins are the same contract
+// the old SKILL.md files enforced, now consolidated into one procedure doc.
 // ---------------------------------------------------------------------------
 
-describe('dream-curation SKILL.md curation contract (Phase 6)', () => {
-  const SKILL_PATH = path.join(ROOT, 'shared/skills/dream-curation/SKILL.md');
-  let skillContent: string;
+describe('dream-procedure.md curation contract (AC-C3)', () => {
+  const PROCEDURE_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
+  let procedureContent: string;
 
   beforeAll(() => {
-    skillContent = fs.readFileSync(SKILL_PATH, 'utf8');
+    procedureContent = fs.readFileSync(PROCEDURE_PATH, 'utf8');
   });
 
-  it('Iron Law says "RETIRE BY STATUS — THE LEDGER IS THE SOURCE OF TRUTH"', () => {
-    expect(skillContent).toContain('RETIRE BY STATUS');
-    expect(skillContent).toContain('THE LEDGER IS THE SOURCE OF TRUTH');
+  it('Iron Law says assign-anchor owns numbering, render owns the .md, never hand-edit', () => {
+    expect(procedureContent).toContain('assign-anchor OWNS NUMBERING');
+    expect(procedureContent).toContain('render OWNS THE .md');
+    expect(procedureContent).toContain('NEVER HAND-EDIT');
   });
 
-  it('states .md files are rendered views, never hand-edited', () => {
-    expect(skillContent).toContain('never hand-edited');
-    // Or equivalent phrasing
-    expect(skillContent).toMatch(/rendered|pure render/i);
+  it('instructs to call retire-anchor for deprecation/retirement, never hand-edit the .md', () => {
+    expect(procedureContent).toContain('retire-anchor');
+    expect(procedureContent).toContain('RETIRE BY STATUS');
+    expect(procedureContent).toContain('never hand-edit the .md');
   });
 
-  it('instructs to call retire-anchor for deprecation/retirement', () => {
-    expect(skillContent).toContain('retire-anchor');
-    expect(skillContent).toContain('decisions_status');
+  it('states inputs are read-only (except where noted)', () => {
+    expect(procedureContent).toContain('Inputs (read-only, except where noted)');
   });
 
-  it('does NOT contain the old 3-call lock/Edit dance instruction', () => {
-    // The old SKILL had explicit bash acquire/release around an Edit tool call
-    expect(skillContent).not.toContain('_ACQUIRED=false');
-    expect(skillContent).not.toContain('NEVER re-acquire it inside this window');
-    // Old step: "Edit tool call: flip the Status line"
-    expect(skillContent).not.toMatch(/Edit tool call.*flip/);
+  it('writes only via merge-observation/assign-anchor/retire-anchor/rotate-observations', () => {
+    expect(procedureContent).toContain('merge-observation');
+    expect(procedureContent).toContain('assign-anchor');
+    expect(procedureContent).toContain('retire-anchor');
+    expect(procedureContent).toContain('rotate-observations');
   });
 
-  it('does NOT instruct direct .md editing for status changes', () => {
-    // The old instruction was to edit "- **Status**: Deprecated" directly
-    expect(skillContent).not.toContain('Flip its status to `- **Status**: Deprecated`');
-    expect(skillContent).not.toContain('directly editing two lines');
+  it('touches .last-dream-ok as the final success signal', () => {
+    expect(procedureContent).toContain('.devflow/dream/.last-dream-ok');
+    expect(procedureContent).toContain('LAST');
   });
 
-  it('does NOT reference decisions-append positively', () => {
-    // decisions-append is removed; SKILL must not instruct to use it
-    // (it may mention it only in a prohibition context — but the old positive "decisions-append adds" is gone)
-    expect(skillContent).not.toContain('decisions-append adds');
-    expect(skillContent).not.toContain('decisions-append` adds');
+  it('writes an optional last-run-summary only when the ledger changed', () => {
+    expect(procedureContent).toContain('dream/last-run-summary');
+    expect(procedureContent).toMatch(/if nothing changed, do NOT create this file/i);
   });
 
-  it('references assign-anchor as the writer (for new entries)', () => {
-    // SKILL may reference assign-anchor in the context of how retire-anchor relates to assign-anchor
-    // OR in the count-active command description — either way the concept is present
-    expect(skillContent).toContain('assign-anchor');
-  });
-
-  it('contains rotation step under .observations.lock', () => {
-    expect(skillContent).toContain('rotate-observations');
-    expect(skillContent).toContain('.observations.lock');
-  });
-
-  it('rotation step is for archiving stale observing rows (AC-F9)', () => {
-    expect(skillContent).toContain('observing');
-    expect(skillContent).toMatch(/30 days|30-day/);
-    // never archives anchored rows
-    expect(skillContent).toMatch(/never touch.*anchor|never.*anchor.*archived/i);
+  it('contains the abstain-by-default creation bar', () => {
+    expect(procedureContent).toContain('abstain-by-default');
+    expect(procedureContent).toMatch(/most runs produce nothing/i);
   });
 
   it('contains ADR-XOR-PF awareness note', () => {
-    expect(skillContent).toContain('ADR-XOR-PF');
-    // forward-looking / concrete failure distinction
-    expect(skillContent).toContain('forward-looking');
-    expect(skillContent).toContain('Concrete failure');
+    expect(procedureContent).toContain('ADR-XOR-PF');
+    expect(procedureContent).toContain('forward-looking');
+    expect(procedureContent).toContain('Concrete failure');
   });
 
   it('contains dedup awareness note', () => {
-    expect(skillContent).toMatch(/dedup|near-duplicate/i);
+    expect(procedureContent).toMatch(/dedup|near-duplicate/i);
   });
 
-  it('7-day window is keyed off the ledger date field', () => {
-    // Not the .md file content
-    expect(skillContent).toContain("ledger row's");
-    expect(skillContent).toContain('date` field');
+  it('bounds curation to at most 5 changes per run', () => {
+    // \s+ tolerates an incidental mid-sentence line wrap in the markdown source
+    // (a literal newline between "curation" and "changes", not just a space).
+    expect(procedureContent).toMatch(/≤5\s+curation\s+changes/);
+    expect(procedureContent).toContain('stop after 5 changes');
   });
 
-  it('describes recoverability: re-activating a retired entry + render restores it (AC-F6)', () => {
-    expect(skillContent).toContain('Recoverability');
-    expect(skillContent).toMatch(/re-activat|re.render/i);
+  it('7-day protection window is keyed off the ledger date field', () => {
+    expect(procedureContent).toContain('7-day protection window');
+    expect(procedureContent).toContain("ledger row's");
+    expect(procedureContent).toContain('date` field');
   });
 
-  it('never hold both .decisions.lock and .observations.lock simultaneously (ADR-017)', () => {
-    expect(skillContent).toContain('ADR-017');
-    expect(skillContent).not.toContain('hold both');
-    // The statement is actually "never hold both" — check the SKILL advises separation
-    expect(skillContent).toContain('.observations.lock');
-    expect(skillContent).toContain('.decisions.lock');
+  it('rotation step is for archiving stale observing rows (AC-F9)', () => {
+    expect(procedureContent).toContain('observing');
+    expect(procedureContent).toMatch(/30 days|30-day/);
+    expect(procedureContent).toMatch(/never touches anchored|never touch.*anchor/i);
   });
 });
 
@@ -434,39 +423,41 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
 });
 
 // ---------------------------------------------------------------------------
-// AC-F9: rotation step — curation SKILL contract
+// AC-F9: rotation step — dream-procedure.md contract
 // Already tested at the op level in ledger-ops.test.ts; here we verify
-// the curation SKILL wires it correctly (contract-level check).
+// the procedure wires it correctly (contract-level check).
 // ---------------------------------------------------------------------------
 
 describe('AC-F9: rotation step wired into curation (contract check)', () => {
-  const SKILL_PATH = path.join(ROOT, 'shared/skills/dream-curation/SKILL.md');
-  let skillContent: string;
+  const PROCEDURE_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
+  let procedureContent: string;
 
   beforeAll(() => {
-    skillContent = fs.readFileSync(SKILL_PATH, 'utf8');
+    procedureContent = fs.readFileSync(PROCEDURE_PATH, 'utf8');
   });
 
-  it('SKILL calls rotate-observations before selecting curation candidates', () => {
-    // The rotation step must appear BEFORE "LLM judgment" in the SKILL
-    const rotateIdx = skillContent.indexOf('rotate-observations');
-    const judgmentIdx = skillContent.indexOf('LLM judgment');
+  it('procedure calls rotate-observations before selecting curation retire/merge candidates', () => {
+    // The rotation step must appear BEFORE the Part 2 "LLM judgment" (retire/merge
+    // candidate selection) — use lastIndexOf since Part 1 has its own earlier
+    // "LLM judgment" heading (the creation-bar one) that rotation is NOT gated by.
+    const rotateIdx = procedureContent.indexOf('rotate-observations');
+    const judgmentIdx = procedureContent.lastIndexOf('LLM judgment');
     expect(rotateIdx).toBeGreaterThan(-1);
     expect(judgmentIdx).toBeGreaterThan(-1);
     expect(rotateIdx).toBeLessThan(judgmentIdx);
   });
 
-  it('SKILL says rotation runs under .observations.lock', () => {
+  it('procedure says rotation runs under .observations.lock (self-locking)', () => {
     // The relevant paragraph must mention .observations.lock near rotate-observations
-    const rotateIdx = skillContent.indexOf('rotate-observations');
+    const rotateIdx = procedureContent.indexOf('rotate-observations');
     // Check within 400 chars of the rotate-observations mention
-    const context = skillContent.slice(Math.max(0, rotateIdx - 400), rotateIdx + 400);
+    const context = procedureContent.slice(Math.max(0, rotateIdx - 400), rotateIdx + 400);
     expect(context).toContain('.observations.lock');
   });
 
-  it('SKILL states rotation archives stale observing rows and never touches anchored rows', () => {
-    expect(skillContent).toContain('anchored');
-    expect(skillContent).toContain('archive');
+  it('procedure states rotation archives stale observing rows and never touches anchored rows', () => {
+    expect(procedureContent).toContain('anchored');
+    expect(procedureContent).toContain('archive');
   });
 
   it('rotateObservations internal function: anchored rows never archived (AC-F9 contract)', () => {

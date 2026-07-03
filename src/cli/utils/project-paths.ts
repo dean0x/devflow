@@ -56,6 +56,26 @@ export function getDreamConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'dream', 'config.json');
 }
 
+/** .devflow/dream/.pending-turns.jsonl — decisions detection queue (dual-write with memory queue) */
+export function getDreamPendingTurnsPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.jsonl');
+}
+
+/** .devflow/dream/.pending-turns.processing — atomic claim during background-dream-update processing */
+export function getDreamPendingTurnsProcessingPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.processing');
+}
+
+/** .devflow/dream/.last-dream-ok — touched by the agent on successful dream worker completion */
+export function getDreamLastOkPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.last-dream-ok');
+}
+
+/** .devflow/dream/.worker.lock — mkdir-based lock directory held by a live background-dream-update run */
+export function getDreamWorkerLockDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.worker.lock');
+}
+
 // ---------------------------------------------------------------------------
 // Decisions files
 // ---------------------------------------------------------------------------
@@ -123,11 +143,6 @@ export function getObservationsLockDir(projectRoot: string): string {
 /** .devflow/decisions/.decisions-notifications.json */
 export function getDecisionsNotificationsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');
-}
-
-/** .devflow/decisions/.decisions-runs-today */
-export function getDecisionsRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-runs-today');
 }
 
 /** .devflow/decisions/.decisions-batch-ids */

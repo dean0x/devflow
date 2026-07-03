@@ -16,9 +16,7 @@
     "enforcement",
     "foundation"
   ],
-  "agents": [
-    "dream"
-  ],
+  "agents": [],
   "skills": [
     "apply-decisions",
     "apply-feature-knowledge",
@@ -28,9 +26,7 @@
     "boundary-validation",
     "test-driven-development",
     "testing",
-    "dependency-research",
-    "dream-decisions",
-    "dream-curation"
+    "dependency-research"
   ],
   "rules": [
     "security",

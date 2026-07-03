@@ -266,6 +266,38 @@ describe('capture-turn', () => {
     expect(exitCode).toBe(0);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
+
+  it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
+    const { exitCode } = runHook(
+      CAPTURE_TURN,
+      { cwd: projectDir, session_id: 't', last_assistant_message: 'hi' },
+      homeDir,
+      { DEVFLOW_BG_UPDATER: '1' },
+    );
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
+  });
+
+  it('content truncated at 2000 chars', () => {
+    const longMessage = 'b'.repeat(5000);
+    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: longMessage }, homeDir);
+    const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
+    expect((mem[0].content as string).length).toBe(2000 + '... [truncated]'.length);
+  });
+
+  it('ignores legacy response_text field — only last_assistant_message gates capture', () => {
+    // Regression guard (PF-006 lineage): a payload carrying only the old field name
+    // (response_text) and not last_assistant_message must produce zero appends.
+    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', response_text: 'this should be ignored' }, homeDir);
+    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
+  });
+
+  it('creates its own log file tagged [capture-turn] on successful capture', () => {
+    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'hello' }, homeDir);
+    const logFile = workerLogPath(projectDir, homeDir, 'capture-turn');
+    expect(fs.existsSync(logFile)).toBe(true);
+    expect(fs.readFileSync(logFile, 'utf-8')).toContain('[capture-turn]');
+  });
 });
 
 // =============================================================================
@@ -652,5 +684,36 @@ describe('spawn-dream-worker', () => {
     runHook(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, { PATH: '/usr/bin:/bin' }); // no claude -> returns fast regardless
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(2000);
+  });
+});
+
+// =============================================================================
+// capture-prompt + capture-turn integration
+// =============================================================================
+describe('capture-prompt + capture-turn integration', () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-home-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('user turn then assistant turn are appended in order to both queues', () => {
+    runHook(CAPTURE_PROMPT, { cwd: projectDir, session_id: 'integ', prompt: 'implement feature X' }, homeDir);
+    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 'integ', last_assistant_message: 'done' }, homeDir);
+
+    for (const queue of ['memory', 'dream'] as const) {
+      const rows = readJsonl(path.join(projectDir, '.devflow', queue, '.pending-turns.jsonl'));
+      expect(rows).toEqual([
+        { role: 'user', content: 'implement feature X', ts: expect.any(Number) },
+        { role: 'assistant', content: 'done', ts: expect.any(Number) },
+      ]);
+    }
   });
 });

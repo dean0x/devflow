@@ -6,37 +6,32 @@ import { exec } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
 
 describe('addMemoryHooks', () => {
-  it('adds all 5 dream hook types to empty settings', () => {
+  it('adds all 3 memory hook types to empty settings', () => {
     const result = addMemoryHooks('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('dream-dispatch');
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('dream-capture');
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('dream-evaluate');
+    expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+    expect(settings.hooks.SessionEnd).toBeUndefined();
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('memory-worker');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
     expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
   });
 
-  it('preserves existing ambient preamble hook when adding dream hooks', () => {
+  it('does not touch UserPromptSubmit — owned by capture.ts, not memory.ts', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/run-hook preamble' }] }],
       },
     });
     const result = addMemoryHooks(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    // Ambient preamble preserved alongside dream-dispatch
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('preamble');
-    expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('dream-dispatch');
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
     expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
   });
@@ -51,9 +46,7 @@ describe('addMemoryHooks', () => {
   it('adds only missing hooks when partial state (1 hook missing)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/dream-dispatch', timeout: 10 }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture', timeout: 10 }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/path/dream-evaluate', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker', timeout: 10 }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
       },
     });
@@ -61,39 +54,11 @@ describe('addMemoryHooks', () => {
     const settings = JSON.parse(result);
 
     // Existing hooks preserved
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     // Missing hook added
     expect(settings.hooks.PreCompact).toHaveLength(1);
     expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
-  });
-
-  it('adds UserPromptSubmit dream-dispatch alongside existing preamble', () => {
-    // Simulate a partial install that already has ambient preamble
-    const input = JSON.stringify({
-      hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture', timeout: 10 }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/path/dream-evaluate', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory', timeout: 10 }] }],
-      },
-    });
-    const result = addMemoryHooks(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    // dream-dispatch added; preamble kept
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
-    const commands = settings.hooks.UserPromptSubmit.map((m: { hooks: { command: string }[] }) => m.hooks[0].command);
-    expect(commands.some((c: string) => c.includes('preamble'))).toBe(true);
-    expect(commands.some((c: string) => c.includes('dream-dispatch'))).toBe(true);
-    // Other hooks unchanged
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    expect(settings.hooks.SessionStart).toHaveLength(1);
-    expect(settings.hooks.PreCompact).toHaveLength(1);
   });
 
   it('creates hooks object if missing', () => {
@@ -109,12 +74,8 @@ describe('addMemoryHooks', () => {
     const result = addMemoryHooks('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('dream-dispatch');
     expect(settings.hooks.Stop[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('dream-capture');
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('run-hook');
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('dream-evaluate');
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('memory-worker');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('run-hook');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
     expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('run-hook');
@@ -138,16 +99,14 @@ describe('addMemoryHooks', () => {
     const result = addMemoryHooks('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(10);
-    expect(settings.hooks.SessionEnd[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.PreCompact[0].hooks[0].timeout).toBe(10);
   });
 });
 
 describe('removeMemoryHooks', () => {
-  it('removes all 5 dream hook types', () => {
+  it('removes all 3 memory hook types', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
     const result = removeMemoryHooks(withHooks);
     const settings = JSON.parse(result);
@@ -155,29 +114,22 @@ describe('removeMemoryHooks', () => {
     expect(settings.hooks).toBeUndefined();
   });
 
-  it('preserves ambient preamble when removing dream hooks', () => {
+  it('does not touch UserPromptSubmit — owned by capture.ts, not memory.ts', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: 'preamble' }] },
-          { hooks: [{ type: 'command', command: '/path/dream-dispatch' }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook capture-prompt' }] },
         ],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/path/dream-evaluate' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
       },
     });
     const result = removeMemoryHooks(input);
     const settings = JSON.parse(result);
 
-    // Ambient preamble preserved; dream-dispatch removed
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('preamble');
+    // UserPromptSubmit is untouched — both entries survive; only Stop is cleared
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
     expect(settings.hooks.Stop).toBeUndefined();
-    expect(settings.hooks.SessionEnd).toBeUndefined();
-    expect(settings.hooks.SessionStart).toBeUndefined();
-    expect(settings.hooks.PreCompact).toBeUndefined();
   });
 
   it('is idempotent — safe to call when not present', () => {
@@ -192,7 +144,7 @@ describe('removeMemoryHooks', () => {
   it('cleans empty hook type arrays', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -212,8 +164,8 @@ describe('removeMemoryHooks', () => {
   it('removes only the hooks that exist (partial)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
-        // UserPromptSubmit, SessionEnd, SessionStart, PreCompact already missing
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
+        // SessionStart, PreCompact already missing
       },
     });
     const result = removeMemoryHooks(input);
@@ -226,9 +178,7 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       statusLine: { type: 'command' },
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/dream-dispatch' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/path/dream-evaluate' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
       },
@@ -245,16 +195,14 @@ describe('removeMemoryHooks', () => {
     const reEnabled = addMemoryHooks(disabled, '/home/user/.devflow');
     const settings = JSON.parse(reEnabled);
 
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
   });
 });
 
 describe('hasMemoryHooks', () => {
-  it('returns true when all 5 dream hooks present', () => {
+  it('returns true when all 3 memory hooks present', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
     expect(hasMemoryHooks(withHooks)).toBe(true);
   });
@@ -263,28 +211,26 @@ describe('hasMemoryHooks', () => {
     expect(hasMemoryHooks('{}')).toBe(false);
   });
 
-  it('returns false when partial (1 of 5)', () => {
+  it('returns false when partial (1 of 3)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);
   });
 
-  it('returns false when partial (4 of 5 — missing SessionEnd)', () => {
+  it('returns false when partial (2 of 3 — missing PreCompact)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/dream-dispatch' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);
   });
 
-  it('returns false for ambient preamble only (not a dream hook)', () => {
+  it('returns false when only unrelated hooks (e.g. ambient preamble) are present', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
@@ -295,37 +241,35 @@ describe('hasMemoryHooks', () => {
 });
 
 describe('countMemoryHooks', () => {
-  it('returns 5 when all dream hooks present', () => {
+  it('returns 3 when all memory hooks present', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
-    expect(countMemoryHooks(withHooks)).toBe(5);
+    expect(countMemoryHooks(withHooks)).toBe(3);
   });
 
   it('returns 0 when none present', () => {
     expect(countMemoryHooks('{}')).toBe(0);
   });
 
-  it('returns correct partial count (2 of 5)', () => {
+  it('returns correct partial count (2 of 3)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
       },
     });
     expect(countMemoryHooks(input)).toBe(2);
   });
 
-  it('does not count ambient preamble as dream-dispatch', () => {
+  it('does not count unrelated UserPromptSubmit hooks toward the memory count', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/dream-capture' }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/path/dream-evaluate' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
       },
     });
-    // preamble does not match 'dream-dispatch' marker
-    expect(countMemoryHooks(input)).toBe(4);
+    expect(countMemoryHooks(input)).toBe(3);
   });
 });
 
@@ -333,14 +277,12 @@ describe('countMemoryHooks accepts parsed Settings', () => {
   it('accepts a parsed Settings object (not just JSON string)', () => {
     const settings = {
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/dream-dispatch', timeout: 10 }] }],
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/dream-capture', timeout: 10 }] }],
-        SessionEnd: [{ hooks: [{ type: 'command' as const, command: '/path/dream-evaluate', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
         SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
         PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
       },
     };
-    expect(countMemoryHooks(settings)).toBe(5);
+    expect(countMemoryHooks(settings)).toBe(3);
     expect(hasMemoryHooks(settings)).toBe(true);
   });
 
@@ -353,7 +295,7 @@ describe('countMemoryHooks accepts parsed Settings', () => {
   it('accepts parsed Settings with partial hooks', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/dream-capture', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
         SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
       },
     };
@@ -518,9 +460,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('accepts a parsed Settings object and returns JSON string', () => {
     const settings = {
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/dream-dispatch', timeout: 10 }] }],
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/dream-capture', timeout: 10 }] }],
-        SessionEnd: [{ hooks: [{ type: 'command' as const, command: '/path/dream-evaluate', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
         SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
         PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
       },
@@ -533,7 +473,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('does not mutate the original Settings object when passed by reference', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/dream-capture', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
       },
     };
     removeMemoryHooks(settings);
@@ -544,7 +484,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('consistent API: string and Settings produce same result', () => {
     const settingsObj = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/dream-capture', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
       },
     };
     const resultFromObj = removeMemoryHooks(settingsObj);
@@ -667,8 +607,8 @@ describe('session-start-context hook integration', () => {
   });
 });
 
-describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
-  it('removes sidecar-dispatch from UserPromptSubmit (v3 sidecar→dream rename)', () => {
+describe('removeMemoryHooks removes legacy hook registrations', () => {
+  it('removes sidecar-dispatch from UserPromptSubmit (v3 sidecar→dream rename) — legacy sweep only, UserPromptSubmit untouched otherwise', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
@@ -750,6 +690,30 @@ describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
           { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
           { hooks: [{ type: 'command', command: '/path/run-hook session-end-decisions', timeout: 10 }] },
           { hooks: [{ type: 'command', command: '/path/run-hook session-end-knowledge-refresh', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeMemoryHooks(input);
+    const settings = JSON.parse(result);
+
+    // Legacy pre-sidecar SessionEnd hooks removed via LEGACY_HOOK_MARKERS
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('removes the dream-dispatch/dream-capture/dream-evaluate marker pipeline (dream system simplification)', () => {
+    // Upgrading users still carry the pre-cutover dream-* hook registrations —
+    // these are swept via LEGACY_HOOK_MARKERS, not MEMORY_HOOK_CONFIG (which no
+    // longer includes UserPromptSubmit or SessionEnd at all).
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/run-hook dream-dispatch', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook preamble', timeout: 10 }] },
+        ],
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/run-hook dream-capture', timeout: 10 }] },
+        ],
+        SessionEnd: [
           { hooks: [{ type: 'command', command: '/path/run-hook dream-evaluate', timeout: 10 }] },
         ],
       },
@@ -757,11 +721,15 @@ describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
     const result = removeMemoryHooks(input);
     const settings = JSON.parse(result);
 
-    // Legacy hooks removed; dream-evaluate (new hook) removed by MEMORY_HOOK_CONFIG
-    expect(settings.hooks).toBeUndefined();
+    // dream-dispatch removed; preamble preserved
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+    // Stop and SessionEnd cleared entirely (only legacy entries were present)
+    expect(settings.hooks.Stop).toBeUndefined();
+    expect(settings.hooks.SessionEnd).toBeUndefined();
   });
 
-  it('handles mix of old and new hooks — removes all', () => {
+  it('handles mix of old and new hooks — removes all legacy, preserves current registrations', () => {
     // Simulate an upgrading user with both old and new hooks installed
     const input = JSON.stringify({
       hooks: {
@@ -772,6 +740,7 @@ describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
         Stop: [
           { hooks: [{ type: 'command', command: '/path/run-hook stop-update-memory', timeout: 10 }] },
           { hooks: [{ type: 'command', command: '/path/run-hook dream-capture', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook memory-worker', timeout: 10 }] },
         ],
         SessionEnd: [
           { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
@@ -788,6 +757,9 @@ describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
     const result = removeMemoryHooks(input);
     const settings = JSON.parse(result);
 
+    // Every entry present (across both legacy-swept and current MEMORY_HOOK_CONFIG
+    // arrays) was either a legacy marker or a current memory hook, so nothing
+    // survives — the whole `hooks` object is cleaned up entirely.
     expect(settings.hooks).toBeUndefined();
   });
 });

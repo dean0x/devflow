@@ -52,124 +52,6 @@ function parseHookOutput(rawOutput: string): string {
   return hookOutput.additionalContext as string;
 }
 
-// ─── Part B: Sentinel guards for dream capture hooks ──────────────────────
-
-describe('sentinel guard: dream-dispatch', () => {
-  const HOOK = path.join(HOOKS_DIR, 'dream-dispatch');
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('captures user prompt normally when memory enabled (no config)', () => {
-    mkMemoryDir(tmpDir);
-    const input = sessionInput(tmpDir, { prompt: 'test prompt' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
-  });
-
-  it('exits early and writes nothing when config has memory: false', () => {
-    mkMemoryDir(tmpDir);
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
-    const input = sessionInput(tmpDir, { prompt: 'test prompt' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-  });
-});
-
-describe('sentinel guard: dream-capture', () => {
-  const HOOK = path.join(HOOKS_DIR, 'dream-capture');
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('appends assistant turn normally when memory enabled (no config)', () => {
-    mkMemoryDir(tmpDir);
-    // Write stale WORKING-MEMORY.md so throttle passes
-    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(memFile, '## Now\n- testing');
-    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
-    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
-  });
-
-  it('exits early when config has memory: false', () => {
-    mkMemoryDir(tmpDir);
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
-    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-  });
-
-  it('captures when stop_reason is "tool_use" and last_assistant_message is present', () => {
-    // Regression: the old code filtered on stop_reason=end_turn, which meant tool_use
-    // stops with a valid last_assistant_message were silently dropped. After the rename,
-    // stop_reason is ignored — only last_assistant_message presence gates capture.
-    mkMemoryDir(tmpDir);
-    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(memFile, '## Now\n- testing');
-    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
-    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-    const input = sessionInput(tmpDir, {
-      stop_reason: 'tool_use',
-      last_assistant_message: 'response with tool call',
-    });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    // Capture must proceed regardless of stop_reason value
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
-  });
-
-  it('ignores legacy response_text field (avoids PF-006)', () => {
-    // Regression guard: when input carries only the old field name (response_text)
-    // and NOT the new field (last_assistant_message), ASSISTANT_MSG is empty and
-    // the hook must exit without creating the queue file.
-    mkMemoryDir(tmpDir);
-    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(memFile, '## Now\n- testing');
-    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
-    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-    const input = sessionInput(tmpDir, {
-      stop_reason: 'end_turn',
-      response_text: 'this should be ignored',
-    });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    // Queue must NOT be created — old field name carries no capture value
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-  });
-
-  it('creates log file on successful capture', () => {
-    mkMemoryDir(tmpDir);
-    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(memFile, '## Now\n- testing');
-    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
-    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
-    // Create a temp home so log writes land in our temp dir
-    const tmpHome = fs.mkdtempSync(os.tmpdir() + '/devflow-log-home-');
-    try {
-      execSync(`bash "${HOOK}"`, {
-        input,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, HOME: tmpHome },
-      });
-      const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
-      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.dream-capture.log');
-      expect(fs.existsSync(logFile)).toBe(true);
-      const content = fs.readFileSync(logFile, 'utf-8');
-      expect(content).toContain('[dream-capture]');
-    } finally {
-      fs.rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('sentinel guard: pre-compact-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
   let tmpDir: string;
@@ -231,39 +113,6 @@ describe('sentinel guard: session-start-memory', () => {
   });
 });
 
-// ─── Part C: Sentinel guard for dream-evaluate hook ────────────────────────
-
-describe('sentinel guard: dream-evaluate', () => {
-  const HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('exits cleanly when no session_id is provided', () => {
-    mkMemoryDir(tmpDir);
-    const input = JSON.stringify({ cwd: tmpDir });
-    expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly for DEVFLOW_BG_LEARNER=1 (feedback loop guard)', () => {
-    expect(() => {
-      execSync(`DEVFLOW_BG_LEARNER=1 bash "${HOOK}"`, { stdio: 'ignore' });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly when .devflow/memory/ does not exist (no markers written)', () => {
-    const input = sessionInput(tmpDir);
-    expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-    // Should not create any dream marker files
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream'))).toBe(false);
-  });
-});
-
 // ─── Part D: Decisions scanner fix ──────────────────────────────────────────
 
 describe('sentinel guard: decisions-usage-scan.cjs', () => {
@@ -298,23 +147,15 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
   });
 });
 
-describe('sentinel guard: dream-capture decisions scanner gating', () => {
-  const HOOK = path.join(HOOKS_DIR, 'dream-capture');
+describe('sentinel guard: capture-turn decisions scanner gating', () => {
+  const HOOK = path.join(HOOKS_DIR, 'capture-turn');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  function writeStaleWorkingMemory(dir: string): void {
-    const memFile = path.join(dir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(memFile, '## Now\n- stale memory');
-    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
-    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-  }
-
   it('does NOT run scanner when decisions/.disabled exists', () => {
     mkMemoryDir(tmpDir);
-    writeStaleWorkingMemory(tmpDir);
     writeDisabledSentinel(path.join(tmpDir, '.devflow', 'decisions', '.disabled'));
     // Create usage file to detect if scanner would have run
     const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
@@ -331,7 +172,6 @@ describe('sentinel guard: dream-capture decisions scanner gating', () => {
 
   it('runs scanner when decisions/.disabled absent', () => {
     mkMemoryDir(tmpDir);
-    writeStaleWorkingMemory(tmpDir);
     // Create usage file to detect scanner run
     const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
@@ -495,6 +335,75 @@ describe('context hook registration', () => {
   });
 });
 
+// ─── Part A: dream hook registration (spawn-dream-worker) ──────────────────
+//
+// spawn-dream-worker is always-on (SessionStart), like session-start-context —
+// registered unconditionally by init, removed by uninstall. Follows the same
+// add/remove/has contract as context hook registration above.
+
+describe('dream hook registration', () => {
+  it('addDreamHook adds spawn-dream-worker to SessionStart', async () => {
+    const { addDreamHook } = await import('../src/cli/commands/init.js');
+    const result = addDreamHook('{}', '/home/user/.devflow');
+    const settings = JSON.parse(result);
+    expect(settings.hooks?.SessionStart).toBeDefined();
+    const hookPresent = settings.hooks.SessionStart.some(
+      (m: { hooks: { command: string }[] }) =>
+        m.hooks.some((h: { command: string }) => h.command.includes('spawn-dream-worker')),
+    );
+    expect(hookPresent).toBe(true);
+  });
+
+  it('removeDreamHook removes spawn-dream-worker from settings', async () => {
+    const { addDreamHook, removeDreamHook } = await import('../src/cli/commands/init.js');
+    const withHook = addDreamHook('{}', '/home/user/.devflow');
+    const removed = removeDreamHook(withHook);
+    const settings = JSON.parse(removed);
+    const hookPresent = settings.hooks?.SessionStart?.some(
+      (m: { hooks: { command: string }[] }) =>
+        m.hooks.some((h: { command: string }) => h.command.includes('spawn-dream-worker')),
+    ) ?? false;
+    expect(hookPresent).toBe(false);
+  });
+
+  it('hasDreamHook returns true when hook registered', async () => {
+    const { addDreamHook, hasDreamHook } = await import('../src/cli/commands/init.js');
+    const withHook = addDreamHook('{}', '/home/user/.devflow');
+    expect(hasDreamHook(withHook)).toBe(true);
+  });
+
+  it('hasDreamHook returns false when hook absent', async () => {
+    const { hasDreamHook } = await import('../src/cli/commands/init.js');
+    expect(hasDreamHook('{}')).toBe(false);
+  });
+
+  it('addDreamHook is idempotent', async () => {
+    const { addDreamHook } = await import('../src/cli/commands/init.js');
+    const first = addDreamHook('{}', '/home/user/.devflow');
+    const second = addDreamHook(first, '/home/user/.devflow');
+    expect(second).toBe(first);
+  });
+
+  it('removeDreamHook preserves other SessionStart hooks (session-start-memory, session-start-context)', async () => {
+    const { addDreamHook, removeDreamHook } = await import('../src/cli/commands/init.js');
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] },
+        ],
+      },
+    });
+    const withDream = addDreamHook(input, '/home/user/.devflow');
+    const removed = removeDreamHook(withDream);
+    const settings = JSON.parse(removed);
+    expect(settings.hooks?.SessionStart).toHaveLength(2);
+    const commands = settings.hooks.SessionStart.map((m: { hooks: { command: string }[] }) => m.hooks[0].command);
+    expect(commands.some((c: string) => c.includes('session-start-memory'))).toBe(true);
+    expect(commands.some((c: string) => c.includes('session-start-context'))).toBe(true);
+  });
+});
+
 // ─── Part E: manageSentinel utility ─────────────────────────────────────────
 
 describe('manageSentinel utility', () => {
@@ -550,9 +459,9 @@ describe('manageSentinel utility', () => {
 // session-start-context, session-start-memory, and pre-compact-memory had no
 // re-entrancy guard at all (a latent pre-existing gap): the memory or dream
 // worker's own nested claude -p session fires these SessionStart/PreCompact
-// hooks too. Guards were added additively — these are NEW test cases; the
-// existing guard describes above (dream-dispatch, dream-capture,
-// dream-evaluate) are untouched.
+// hooks too. capture-prompt, capture-turn, and capture-question carry the
+// equivalent DEVFLOW_BG_UPDATER/DEVFLOW_BG_DREAM guards and are covered in
+// tests/capture-hooks.test.ts.
 
 describe('sentinel guard: session-start-context DEVFLOW_BG_* re-entrancy', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');

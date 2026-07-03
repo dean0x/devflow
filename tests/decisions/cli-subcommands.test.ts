@@ -16,9 +16,7 @@ import * as os from 'os';
 
 vi.mock('../../src/cli/utils/decisions-config.js', () => ({
   loadDecisionsConfig: vi.fn(() => ({
-    max_daily_runs: 3,
-    throttle_minutes: 5,
-    model: 'sonnet',
+    model: 'opus',
     debug: false,
   })),
 }));
@@ -274,12 +272,11 @@ describe('decisions --clear log truncation', () => {
 // ---------------------------------------------------------------------------
 
 describe('decisions --reset target files', () => {
-  it('reset targets decisions-specific state files only', () => {
-    const resetFiles = [
+  it('reset targets decisions-specific state files (.devflow/decisions/)', () => {
+    const decisionsStateFiles = [
       'decisions-log.jsonl',
       '.decisions-manifest.json',
       '.decisions-notifications.json',
-      '.decisions-runs-today',
       '.decisions-batch-ids',
       'decisions.json',
     ];
@@ -291,7 +288,7 @@ describe('decisions --reset target files', () => {
       'WORKING-MEMORY.md',
     ];
 
-    for (const f of resetFiles) {
+    for (const f of decisionsStateFiles) {
       expect(
         f.includes('decision') || f.includes('decisions'),
         `Expected "${f}" to contain "decision" or "decisions"`,
@@ -299,34 +296,70 @@ describe('decisions --reset target files', () => {
     }
 
     for (const f of preservedFiles) {
-      expect(resetFiles).not.toContain(f);
+      expect(decisionsStateFiles).not.toContain(f);
+    }
+  });
+
+  it('reset also targets the dream (decisions-detection) queue and success stamp (.devflow/dream/)', () => {
+    // Not decision-prefixed by name — these live in .devflow/dream/, the queue the
+    // detached background-dream-update worker claims from. Reset must drain them
+    // too so a re-enable doesn't process stale pre-reset turns.
+    const dreamQueueFiles = [
+      '.pending-turns.jsonl',
+      '.pending-turns.processing',
+      '.last-dream-ok',
+    ];
+
+    const preservedDreamFiles = [
+      'config.json', // shared multi-feature config — reset must never touch this
+    ];
+
+    for (const f of preservedDreamFiles) {
+      expect(dreamQueueFiles).not.toContain(f);
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// --reset dream cleanup: verify dream state files are targeted
+// --reset dream cleanup: verify legacy marker-pipeline state files are targeted
 // ---------------------------------------------------------------------------
 
 describe('decisions --reset dream state cleanup', () => {
-  it('dream cleanup targets .decisions-runs-today and decisions.*.json markers', () => {
+  it('dream cleanup targets legacy stamp files (.decisions-runs-today, .curation-last, .processor-spawned-at)', () => {
     const dreamFilesToClean = [
       '.decisions-runs-today',
+      '.curation-last',
+      '.processor-spawned-at',
     ];
-    const dreamMarkerPattern = /^decisions\..+\.json$/;
 
     for (const f of dreamFilesToClean) {
-      expect(f).toContain('decisions');
+      expect(f.startsWith('.')).toBe(true);
+    }
+  });
+
+  it('dream cleanup targets legacy decisions.*/curation.* markers across all 4 suffixes', () => {
+    const dreamMarkerPattern = /^(decisions|curation)\..+\.(json|processing|retries|failed)$/;
+
+    for (const f of [
+      'decisions.abc123.json',
+      'decisions.session-xyz.processing',
+      'decisions.abc123.retries',
+      'decisions.abc123.failed',
+      'curation.abc123.json',
+      'curation.abc123.processing',
+    ]) {
+      expect(dreamMarkerPattern.test(f)).toBe(true);
     }
 
-    expect(dreamMarkerPattern.test('decisions.abc123.json')).toBe(true);
-    expect(dreamMarkerPattern.test('decisions.session-xyz.json')).toBe(true);
-    expect(dreamMarkerPattern.test('learning.abc123.json')).toBe(false);
-    expect(dreamMarkerPattern.test('decisions.json')).toBe(false);
+    // Never touches: learning markers (pipeline removed separately), the shared
+    // config.json, or the new .pending-turns.jsonl/.processing queue files.
+    for (const f of ['learning.abc123.json', 'decisions.json', 'config.json', '.pending-turns.jsonl', '.pending-turns.processing']) {
+      expect(dreamMarkerPattern.test(f)).toBe(false);
+    }
   });
 
   it('dream cleanup does not target learning state files', () => {
-    const decisionsDreamFiles = ['.decisions-runs-today'];
+    const decisionsDreamFiles = ['.decisions-runs-today', '.curation-last', '.processor-spawned-at'];
     const learningFiles = ['.learning-runs-today', '.learning-sessions'];
 
     for (const lf of learningFiles) {

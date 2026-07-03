@@ -21,6 +21,10 @@ import {
   getFeaturesDir,
   getDocsDir,
   getDreamConfigPath,
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
+  getDreamLastOkPath,
+  getDreamWorkerLockDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
@@ -34,7 +38,6 @@ import {
   getDecisionsUsageLockDir,
   getObservationsLockDir,
   getDecisionsNotificationsPath,
-  getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
   getWorkingMemoryPath,
   getBackupPath,
@@ -84,6 +87,22 @@ describe('project-paths TypeScript module', () => {
     it('getDreamConfigPath returns .devflow/dream/config.json', () => {
       expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
     });
+
+    it('getDreamPendingTurnsPath returns .devflow/dream/.pending-turns.jsonl', () => {
+      expect(getDreamPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.jsonl');
+    });
+
+    it('getDreamPendingTurnsProcessingPath returns .devflow/dream/.pending-turns.processing', () => {
+      expect(getDreamPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.processing');
+    });
+
+    it('getDreamLastOkPath returns .devflow/dream/.last-dream-ok', () => {
+      expect(getDreamLastOkPath(ROOT)).toBe('/some/project/.devflow/dream/.last-dream-ok');
+    });
+
+    it('getDreamWorkerLockDir returns .devflow/dream/.worker.lock', () => {
+      expect(getDreamWorkerLockDir(ROOT)).toBe('/some/project/.devflow/dream/.worker.lock');
+    });
   });
 
   describe('decisions files', () => {
@@ -125,10 +144,6 @@ describe('project-paths TypeScript module', () => {
 
     it('getDecisionsNotificationsPath returns .devflow/decisions/.decisions-notifications.json', () => {
       expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-notifications.json');
-    });
-
-    it('getDecisionsRunsTodayPath returns .devflow/decisions/.decisions-runs-today', () => {
-      expect(getDecisionsRunsTodayPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-runs-today');
     });
 
     it('getDecisionsBatchIdsPath returns .devflow/decisions/.decisions-batch-ids', () => {
@@ -231,6 +246,10 @@ describe('CJS project-paths parity', () => {
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
     { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
+    { name: 'getDreamPendingTurnsPath', ts: getDreamPendingTurnsPath, cjs: cjsPaths.getDreamPendingTurnsPath },
+    { name: 'getDreamPendingTurnsProcessingPath', ts: getDreamPendingTurnsProcessingPath, cjs: cjsPaths.getDreamPendingTurnsProcessingPath },
+    { name: 'getDreamLastOkPath', ts: getDreamLastOkPath, cjs: cjsPaths.getDreamLastOkPath },
+    { name: 'getDreamWorkerLockDir', ts: getDreamWorkerLockDir, cjs: cjsPaths.getDreamWorkerLockDir },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },
@@ -244,7 +263,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsUsageLockDir', ts: getDecisionsUsageLockDir, cjs: cjsPaths.getDecisionsUsageLockDir },
     { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
-    { name: 'getDecisionsRunsTodayPath', ts: getDecisionsRunsTodayPath, cjs: cjsPaths.getDecisionsRunsTodayPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },

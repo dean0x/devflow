@@ -11,6 +11,8 @@ import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
+import { removeCaptureHooks } from './capture.js';
+import { removeDreamHook } from './dream.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
@@ -399,6 +401,8 @@ export const uninstallCommand = new Command('uninstall')
           // Remove all Devflow hooks and flags in one pass (idempotent)
           let settingsContent = await removeAmbientHook(originalContent);
           settingsContent = removeMemoryHooks(settingsContent);
+          settingsContent = removeCaptureHooks(settingsContent);
+          settingsContent = removeDreamHook(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
           settingsContent = removeContextHook(settingsContent);
           settingsContent = stripFlags(settingsContent);

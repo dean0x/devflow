@@ -17,30 +17,41 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 
 /**
- * Map of hook event type → filename marker for the dream hooks.
- * Five hooks total: UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact.
+ * Map of hook event type → filename marker for the memory hooks.
+ * Three hooks total: Stop, SessionStart, PreCompact.
+ *
+ * UserPromptSubmit and SessionEnd are NOT memory.ts's concern anymore: queue-append
+ * (formerly UserPromptSubmit/dream-dispatch, Stop/dream-capture) now lives in
+ * capture.ts (capture-prompt, capture-turn — always-on, not feature-gated at the
+ * hook-registration level), and SessionEnd (dream-evaluate) was removed entirely —
+ * decisions detection is a SessionStart-spawned detached worker now (see dream.ts).
+ *
+ * Stop-array ordering contract: memory-worker MUST be registered AFTER capture-turn
+ * in the Stop hook array (append-before-spawn — memory-worker's throttle/spawn
+ * decision assumes the current turn was already appended by capture-turn earlier
+ * in the same Stop event). Enforced by init.ts's registration order, not here.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
-  UserPromptSubmit: 'dream-dispatch',
-  Stop: 'dream-capture',
-  SessionEnd: 'dream-evaluate',
+  Stop: 'memory-worker',
   SessionStart: 'session-start-memory',
   PreCompact: 'pre-compact-memory',
 };
 
 /**
- * Legacy hook filename markers from the pre-sidecar 8-hook system and the v3 sidecar→dream rename.
- * Used by removeMemoryHooks to clean up hooks from upgrading users.
+ * Legacy hook filename markers from the pre-sidecar 8-hook system, the v3
+ * sidecar→dream rename, and the dream-system-simplification cutover (dream-dispatch/
+ * dream-capture/dream-evaluate marker pipeline retired in favor of capture.ts +
+ * dream.ts). Used by removeMemoryHooks to clean up hooks from upgrading users.
  */
 const LEGACY_HOOK_MARKERS: Record<string, string[]> = {
-  UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch'],
-  Stop: ['stop-update-memory', 'stop-update-learning', 'sidecar-capture'],
-  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh', 'sidecar-evaluate'],
+  UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch', 'dream-dispatch'],
+  Stop: ['stop-update-memory', 'stop-update-learning', 'sidecar-capture', 'dream-capture'],
+  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh', 'sidecar-evaluate', 'dream-evaluate'],
 };
 
 /**
- * Add all 5 memory hooks (UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact) to settings JSON.
- * Idempotent — skips hooks that already exist. Returns unchanged JSON if all 5 present.
+ * Add all 3 memory hooks (Stop, SessionStart, PreCompact) to settings JSON.
+ * Idempotent — skips hooks that already exist. Returns unchanged JSON if all 3 present.
  */
 export function addMemoryHooks(settingsJson: string, devflowDir: string): string {
   const settings: Settings = JSON.parse(settingsJson);
@@ -140,14 +151,14 @@ export function removeMemoryHooks(input: string | Settings): string {
 }
 
 /**
- * Check if ALL 5 memory hooks are registered in settings JSON or parsed Settings object.
+ * Check if ALL 3 memory hooks are registered in settings JSON or parsed Settings object.
  */
 export function hasMemoryHooks(input: string | Settings): boolean {
   return countMemoryHooks(input) === Object.keys(MEMORY_HOOK_CONFIG).length;
 }
 
 /**
- * Count how many of the 5 memory hooks are present (0-5).
+ * Count how many of the 3 memory hooks are present (0-3).
  * Accepts either a JSON string or a parsed Settings object.
  */
 export function countMemoryHooks(input: string | Settings): number {
