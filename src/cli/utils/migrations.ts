@@ -958,6 +958,80 @@ const MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Per-project: remove stale marker-pipeline files from `.devflow/dream/` left over
+ * from the pre-dream-system-simplification decisions/curation flow (session-start-context's
+ * old Section 2 + dream-collect-tasks/dream-recover — all retired in favor of the
+ * detached background-dream-update worker, which needs no markers, just the queue
+ * file + a rename-to-claim `.processing` batch).
+ *
+ * MUST NOT touch: config.json (shared multi-feature config — memory/decisions/knowledge
+ * keys), the NEW `.pending-turns.jsonl`/`.pending-turns.processing` queue (dream.ts's
+ * queue, claimed by background-dream-update itself), `.last-dream-ok` (the new worker's
+ * success stamp), or `.worker.lock` (the new worker's own concurrency guard).
+ *
+ * `.decisions-runs-today` historically lived at `.devflow/dream/.decisions-runs-today`
+ * (written by the now-deleted eval-decisions module via $DREAM_DIR, NOT under
+ * `.devflow/decisions/` despite the similar name) — swept from its real location here.
+ *
+ * Mirrors purge-stale-memory-markers-v1 in shape.
+ */
+const MIGRATION_PURGE_DREAM_MARKER_PIPELINE: Migration<'per-project'> = {
+  id: 'purge-dream-marker-pipeline-v1',
+  description: 'Remove stale decisions.*/curation.* markers and legacy stamps from the retired dream marker pipeline',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const dreamDir = path.join(ctx.projectRoot, '.devflow', 'dream');
+    let removed = 0;
+
+    // Fixed-name legacy stamps.
+    const fixed = [
+      path.join(dreamDir, '.decisions-runs-today'),
+      path.join(dreamDir, '.curation-last'),
+      path.join(dreamDir, '.processor-spawned-at'),
+    ];
+    for (const filePath of fixed) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+      }
+    }
+
+    // Per-session marker variants: (decisions|curation).*.{json,processing,retries,failed}
+    try {
+      const entries = await fs.readdir(dreamDir);
+      for (const entry of entries) {
+        const isLegacyMarker =
+          (entry.startsWith('decisions.') || entry.startsWith('curation.')) &&
+          (entry.endsWith('.json') || entry.endsWith('.processing') ||
+            entry.endsWith('.retries') || entry.endsWith('.failed'));
+        if (isLegacyMarker) {
+          try {
+            await fs.unlink(path.join(dreamDir, entry));
+            removed++;
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== 'ENOENT') throw err;
+          }
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+    }
+
+    const infos: string[] = [];
+    if (removed > 0) {
+      infos.push(`Removed ${removed} stale dream marker-pipeline file(s)`);
+    }
+
+    return { infos, warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -975,6 +1049,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
   MIGRATION_DECISIONS_LEDGER_UNIFY,
   MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
+  MIGRATION_PURGE_DREAM_MARKER_PIPELINE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
