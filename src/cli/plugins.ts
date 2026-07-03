@@ -48,7 +48,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    agents: [],
+    agents: ['dream'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
@@ -145,7 +145,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Keyword + plan auto-detection',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
     skills: [
       'review-methodology',
       'security',
@@ -287,11 +287,6 @@ export const LEGACY_COMMAND_NAMES: string[] = [
  */
 export const LEGACY_AGENT_NAMES: string[] = [
   'shepherd',
-  // Dream system simplification: the Dream subagent (Agent(subagent_type="Dream"))
-  // is retired — decisions detection + curation now run via a detached `claude -p`
-  // worker (background-dream-update, spawned by spawn-dream-worker) that reads
-  // scripts/hooks/dream-procedure.md directly, not a Claude Code subagent.
-  'dream',
 ];
 
 /**
@@ -533,19 +528,11 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:pipeline:orch',
   'devflow:research:orch',
   'devflow:release:orch',
-  // v3.x dream per-task skills: bare names for pre-namespace installs.
-  // dream-decisions and dream-curation are now ALSO fully removed (dream system
-  // simplification: the detached background-dream-update worker reads
-  // scripts/hooks/dream-procedure.md directly instead of loading these as
-  // Claude Code skills), joining dream-memory and dream-knowledge below. These
-  // bare entries clean up pre-namespace V2.x installs where skills were written
-  // without the devflow: prefix — a harmless no-op on current installs.
+  // v3.x dream per-task skills: bare and namespaced names for cleanup
   'dream-memory',
   'dream-knowledge',
   'dream-decisions',
   'dream-curation',
-  // Namespaced names for cleanup of the installed devflow:dream-* skills (all
-  // 4 dream per-task skills are now fully removed).
   'devflow:dream-memory',
   'devflow:dream-knowledge',
   'devflow:dream-decisions',
