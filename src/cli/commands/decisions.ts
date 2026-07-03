@@ -388,6 +388,22 @@ export const decisionsCommand = new Command('decisions')
         const decisionsDir = getDecisionsDir(gitRoot);
         await fs.mkdir(decisionsDir, { recursive: true });
         await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
+
+        // Drain the dream (decisions-detection) queue so stale turns don't process
+        // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
+        // sibling memory queue. Skipped entirely while a live background-dream-update
+        // worker holds .devflow/dream/.worker.lock — never delete a live worker's
+        // inputs (same rule as the existing --clear/--reset code above).
+        try {
+          await fs.access(getDreamWorkerLockDir(gitRoot));
+          p.log.warn('A background dream worker is currently running — queue drain skipped.');
+        } catch {
+          await Promise.all([
+            fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+            fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          ]);
+        }
+
         await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
         p.log.success('Decisions learning disabled — configuration updated');
       } else {

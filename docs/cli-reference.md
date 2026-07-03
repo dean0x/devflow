@@ -79,7 +79,7 @@ npx devflow-kit ambient --status     # Show current status
 
 ```bash
 npx devflow-kit decisions --enable     # Register the decisions hook
-npx devflow-kit decisions --disable    # Remove the decisions hook
+npx devflow-kit decisions --disable    # Remove the decisions hook (also drains the pending dream queue)
 npx devflow-kit decisions --status     # Show status and entry counts
 npx devflow-kit decisions list         # List all decisions and pitfalls
 npx devflow-kit decisions --configure  # Interactive config (model, debug, scope)

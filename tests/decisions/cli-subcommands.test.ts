@@ -26,6 +26,10 @@ vi.mock('../../src/cli/utils/paths.js', () => ({
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
 }));
 
+vi.mock('../../src/cli/utils/git.js', () => ({
+  getGitRoot: vi.fn(),
+}));
+
 vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
@@ -47,6 +51,18 @@ import {
   loadAndCountObservations,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
+import * as p from '@clack/prompts';
+import { getGitRoot } from '../../src/cli/utils/git.js';
+import { decisionsCommand } from '../../src/cli/commands/decisions.js';
+import {
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
+  getDreamWorkerLockDir,
+  getDreamLastOkPath,
+  getDreamConfigPath,
+  getDecisionsDisabledSentinel,
+  getPendingTurnsPath,
+} from '../../src/cli/utils/project-paths.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -365,5 +381,97 @@ describe('decisions --reset dream state cleanup', () => {
     for (const lf of learningFiles) {
       expect(decisionsDreamFiles).not.toContain(lf);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --disable drains the dream (decisions-detection) pending-turns queue —
+// mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
+// Skipped entirely while a live background-dream-update worker holds
+// .devflow/dream/.worker.lock (same rule as the existing --clear/--reset code).
+// ---------------------------------------------------------------------------
+
+describe('decisions --disable drains the dream pending-turns queue', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    // Commander retains _optionValues across repeated parseAsync() calls on the
+    // same Command instance (no built-in reset between calls). Production always
+    // starts a fresh process per invocation, so clear state here to match that
+    // reality and keep these tests order-independent.
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeDreamQueueFiles(root: string): void {
+    fs.mkdirSync(path.join(root, '.devflow', 'dream'), { recursive: true });
+    fs.writeFileSync(getDreamPendingTurnsPath(root), '{"role":"user"}\n');
+    fs.writeFileSync(getDreamPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+  }
+
+  it('deletes queue + processing files and flips config/sentinel when no worker lock is held', async () => {
+    writeDreamQueueFiles(tmpDir);
+    fs.writeFileSync(getDreamLastOkPath(tmpDir), 'ok');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+
+    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    expect(config.decisions).toBe(false);
+    expect(fs.existsSync(getDecisionsDisabledSentinel(tmpDir))).toBe(true);
+
+    // Never touched by decisions --disable
+    expect(fs.existsSync(getDreamLastOkPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
+  });
+
+  it('skips the drain but still flips config/sentinel when the dream worker lock is held', async () => {
+    writeDreamQueueFiles(tmpDir);
+    fs.mkdirSync(getDreamWorkerLockDir(tmpDir), { recursive: true });
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    // Never deleted while the worker lock is held
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(true);
+
+    // Gate still flips
+    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    expect(config.decisions).toBe(false);
+    expect(fs.existsSync(getDecisionsDisabledSentinel(tmpDir))).toBe(true);
+
+    expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining('background dream worker'));
+  });
+
+  it('does not delete anything on --enable', async () => {
+    writeDreamQueueFiles(tmpDir);
+
+    await decisionsCommand.parseAsync(['--enable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(true);
+  });
+
+  it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {
+    writeDreamQueueFiles(tmpDir);
+    // getGitRoot already resolves to tmpDir regardless of the real cwd (exactly as
+    // `git rev-parse --show-toplevel` would from any subdirectory). Point cwd at a
+    // decoy path to prove the drain never falls back to process.cwd() instead of
+    // the resolved gitRoot.
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
   });
 });
