@@ -82,7 +82,7 @@ npx devflow-kit decisions --enable     # Register the decisions hook
 npx devflow-kit decisions --disable    # Remove the decisions hook
 npx devflow-kit decisions --status     # Show status and entry counts
 npx devflow-kit decisions list         # List all decisions and pitfalls
-npx devflow-kit decisions --configure  # Interactive config (model, throttle)
+npx devflow-kit decisions --configure  # Interactive config (model, debug, scope)
 npx devflow-kit decisions --review     # Review observations or capacity
 npx devflow-kit decisions --purge      # Remove invalid entries
 npx devflow-kit decisions --clear      # Reset all observations
