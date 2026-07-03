@@ -1,11 +1,10 @@
 /**
  * tests/capture-hooks.test.ts
  *
- * Tests for the Phase 1/2 capture + dispatch layer of the dream system
- * simplification: capture-prompt, capture-turn, capture-question,
- * memory-worker, and spawn-dream-worker. A dedicated file (mirroring
- * eager-memory-refresh.test.ts's precedent for a redesign-scoped test file)
- * rather than adding to the already-large shell-hooks.test.ts.
+ * Tests for the capture layer of the dream system: capture-prompt,
+ * capture-turn, capture-question, and memory-worker. A dedicated file
+ * (mirroring eager-memory-refresh.test.ts's precedent for a redesign-scoped
+ * test file) rather than adding to the already-large shell-hooks.test.ts.
  *
  * Harness idioms follow eager-memory-refresh.test.ts: fake-claude PATH shim,
  * temp dirs, DEVFLOW_BG_WATCHDOG_SECS override, execSync + JSON stdin. Real
@@ -23,7 +22,6 @@ const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
 const CAPTURE_TURN = path.join(HOOKS_DIR, 'capture-turn');
 const CAPTURE_QUESTION = path.join(HOOKS_DIR, 'capture-question');
 const MEMORY_WORKER = path.join(HOOKS_DIR, 'memory-worker');
-const SPAWN_DREAM_WORKER = path.join(HOOKS_DIR, 'spawn-dream-worker');
 
 // ---------------------------------------------------------------------------
 // Harness helpers (mirrors eager-memory-refresh.test.ts)
@@ -146,14 +144,6 @@ describe('capture-prompt', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
   });
 
-  it('AC-F4: decisions disabled via .disabled sentinel -> no dream-queue append (memory unaffected)', () => {
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'decisions', '.disabled'), '');
-    runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
-  });
-
   it('both disabled -> zero appends, no scaffolding', () => {
     writeDreamConfig(projectDir, { memory: false, decisions: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
@@ -163,12 +153,6 @@ describe('capture-prompt', () => {
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
     const { exitCode } = runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir, { DEVFLOW_BG_UPDATER: '1' });
-    expect(exitCode).toBe(0);
-    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
-  });
-
-  it('AC-F14: DEVFLOW_BG_DREAM=1 -> exit 0, zero filesystem writes', () => {
-    const { exitCode } = runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir, { DEVFLOW_BG_DREAM: '1' });
     expect(exitCode).toBe(0);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
@@ -254,17 +238,6 @@ describe('capture-turn', () => {
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     expect(updated.entries['ADR-001'].cites).toBe(1);
-  });
-
-  it('AC-F14: DEVFLOW_BG_DREAM=1 -> exit 0, zero filesystem writes', () => {
-    const { exitCode } = runHook(
-      CAPTURE_TURN,
-      { cwd: projectDir, session_id: 't', last_assistant_message: 'hi' },
-      homeDir,
-      { DEVFLOW_BG_DREAM: '1' },
-    );
-    expect(exitCode).toBe(0);
-    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
@@ -460,13 +433,9 @@ describe('capture-question', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
   });
 
-  it('AC-F14: both BG guards -> exit 0, zero writes', () => {
+  it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero writes', () => {
     const r1 = runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir, { DEVFLOW_BG_UPDATER: '1' });
     expect(r1.exitCode).toBe(0);
-    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
-
-    const r2 = runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir, { DEVFLOW_BG_DREAM: '1' });
-    expect(r2.exitCode).toBe(0);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 });
@@ -538,7 +507,7 @@ describe('memory-worker', () => {
     expect(fs.readFileSync(logFile, 'utf-8')).toContain('Starting (CWD=');
   });
 
-  it('both BG guards prevent spawn', () => {
+  it('BG_UPDATER guard prevents spawn', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
@@ -546,10 +515,6 @@ describe('memory-worker', () => {
     backdateMtime(triggerFile, 600);
 
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_BG_UPDATER: '1' });
-    expect(fs.statSync(triggerFile).mtimeMs).toBeLessThan(Date.now() - 590 * 1000 + 15000);
-
-    backdateMtime(triggerFile, 600);
-    runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_BG_DREAM: '1' });
     // Trigger must still be stale — guard fired before the throttle check even ran
     const age = Date.now() - fs.statSync(triggerFile).mtimeMs;
     expect(age).toBeGreaterThan(590 * 1000);
@@ -565,125 +530,6 @@ describe('memory-worker', () => {
 
     const age = Date.now() - fs.statSync(triggerFile).mtimeMs;
     expect(age).toBeGreaterThan(590 * 1000);
-  });
-});
-
-// =============================================================================
-// spawn-dream-worker
-// =============================================================================
-describe('spawn-dream-worker', () => {
-  let projectDir: string;
-  let homeDir: string;
-  let shimDir: string;
-
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdw-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdw-home-'));
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdw-shim-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-    fs.rmSync(shimDir, { recursive: true, force: true });
-  });
-
-  function fakeClaudeShim(): void {
-    const bin = path.join(shimDir, 'claude');
-    fs.writeFileSync(bin, `#!/bin/bash\nsleep 0.2\n`);
-    fs.chmodSync(bin, 0o755);
-  }
-
-  async function waitForWorkerLog(): Promise<string> {
-    const logFile = workerLogPath(projectDir, homeDir, 'background-dream-update');
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !fs.existsSync(logFile)) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
-  }
-
-  it('queue non-empty + claude present -> spawns background-dream-update', async () => {
-    fakeClaudeShim();
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-
-    runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-
-    const log = await waitForWorkerLog();
-    expect(log).toContain('Starting (CWD=');
-  });
-
-  it('empty queue + no .processing -> no spawn', async () => {
-    runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fs.existsSync(workerLogPath(projectDir, homeDir, 'background-dream-update'))).toBe(false);
-  });
-
-  it('leftover .processing alone (empty queue) -> spawns', async () => {
-    fakeClaudeShim();
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.processing'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-
-    runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-
-    const log = await waitForWorkerLog();
-    expect(log).toContain('Starting (CWD=');
-  });
-
-  it('config decisions:false blocks spawn independently', async () => {
-    writeDreamConfig(projectDir, { decisions: false });
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-
-    runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fs.existsSync(workerLogPath(projectDir, homeDir, 'background-dream-update'))).toBe(false);
-  });
-
-  it('.disabled sentinel blocks spawn independently of the config field', async () => {
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'decisions', '.disabled'), '');
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-
-    runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fs.existsSync(workerLogPath(projectDir, homeDir, 'background-dream-update'))).toBe(false);
-  });
-
-  it('claude absent from PATH -> clean no-op, no error', () => {
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-    const { exitCode } = runHook(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, { PATH: '/usr/bin:/bin' });
-    expect(exitCode).toBe(0);
-  });
-
-  it('never emits stdout, regardless of outcome', () => {
-    fakeClaudeShim();
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-    const { stdout } = runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir);
-    expect(stdout.trim()).toBe('');
-  });
-
-  it('AC-F14: both BG guards -> exit 0, no spawn', async () => {
-    fakeClaudeShim();
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), JSON.stringify({ role: 'assistant', content: 'x', ts: 1 }) + '\n');
-
-    const r1 = runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_BG_DREAM: '1' });
-    expect(r1.exitCode).toBe(0);
-    const r2 = runHookWithPath(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_BG_UPDATER: '1' });
-    expect(r2.exitCode).toBe(0);
-
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fs.existsSync(workerLogPath(projectDir, homeDir, 'background-dream-update'))).toBe(false);
-  });
-
-  it('AC-P2: synchronous portion completes quickly (no jq parse of the queue)', () => {
-    // A large queue file should not slow down the gate check itself, since it
-    // only ever does `test -s` (existence + non-empty), never a jq/node parse.
-    const bigQueue = Array.from({ length: 500 }, (_, i) => JSON.stringify({ role: 'assistant', content: `line ${i}`, ts: i })).join('\n') + '\n';
-    fs.writeFileSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'), bigQueue);
-    const start = Date.now();
-    runHook(SPAWN_DREAM_WORKER, { cwd: projectDir }, homeDir, { PATH: '/usr/bin:/bin' }); // no claude -> returns fast regardless
-    const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(2000);
   });
 });
 

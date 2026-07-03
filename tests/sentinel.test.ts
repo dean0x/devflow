@@ -115,24 +115,14 @@ describe('sentinel guard: session-start-memory', () => {
 
 // ─── Part D: Decisions scanner fix ──────────────────────────────────────────
 
-describe('sentinel guard: decisions-usage-scan.cjs', () => {
+describe('decisions-usage-scan.cjs', () => {
   const SCANNER = path.join(HOOKS_DIR, 'decisions-usage-scan.cjs');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits 0 when decisions/.disabled exists', () => {
-    mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'decisions', '.disabled'));
-    // Even with ADR-001 in input, scanner should skip
-    const response = 'applies ADR-001 and avoids PF-001';
-    expect(() => {
-      execSync(`printf '%s' "${response}" | node "${SCANNER}" --cwd "${tmpDir}"`, { stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
-
-  it('processes citations when decisions/.disabled absent', () => {
+  it('processes citations (gating lives in the caller, not the scanner)', () => {
     mkMemoryDir(tmpDir);
     // Create usage file with a known entry
     const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
@@ -147,16 +137,19 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
   });
 });
 
-describe('sentinel guard: capture-turn decisions scanner gating', () => {
+describe('config guard: capture-turn decisions scanner gating', () => {
   const HOOK = path.join(HOOKS_DIR, 'capture-turn');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('does NOT run scanner when decisions/.disabled exists', () => {
+  it('does NOT run scanner when dream config has decisions: false', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'decisions', '.disabled'));
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
+      JSON.stringify({ decisions: false }),
+    );
     // Create usage file to detect if scanner would have run
     const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
@@ -170,7 +163,7 @@ describe('sentinel guard: capture-turn decisions scanner gating', () => {
     expect(updated.entries['ADR-001'].cites).toBe(0);
   });
 
-  it('runs scanner when decisions/.disabled absent', () => {
+  it('runs scanner when decisions enabled (config absent defaults true)', () => {
     mkMemoryDir(tmpDir);
     // Create usage file to detect scanner run
     const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
@@ -225,11 +218,14 @@ describe('sentinel guard: session-start-context', () => {
     expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
-  it('skips decisions TL;DR when decisions/.disabled exists', () => {
+  it('skips decisions TL;DR when dream config has decisions: false', () => {
     mkMemoryDir(tmpDir);
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
-    writeDisabledSentinel(path.join(decisionsDir, '.disabled'));
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
+      JSON.stringify({ decisions: false }),
+    );
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // No output (nothing else to inject in this minimal test)
@@ -454,16 +450,15 @@ describe('manageSentinel utility', () => {
   });
 });
 
-// ─── Part F: DEVFLOW_BG_* re-entrancy guards (AC-F14) ──────────────────────
+// ─── Part F: DEVFLOW_BG_UPDATER re-entrancy guards (AC-F14) ─────────────────
 //
-// session-start-context, session-start-memory, and pre-compact-memory had no
-// re-entrancy guard at all (a latent pre-existing gap): the memory or dream
-// worker's own nested claude -p session fires these SessionStart/PreCompact
-// hooks too. capture-prompt, capture-turn, and capture-question carry the
-// equivalent DEVFLOW_BG_UPDATER/DEVFLOW_BG_DREAM guards and are covered in
-// tests/capture-hooks.test.ts.
+// The memory worker's own nested claude -p session fires SessionStart and
+// PreCompact hooks too — session-start-context, session-start-memory, and
+// pre-compact-memory must all bail out before any read or write.
+// capture-prompt, capture-turn, and capture-question carry the equivalent
+// guard and are covered in tests/capture-hooks.test.ts.
 
-describe('sentinel guard: session-start-context DEVFLOW_BG_* re-entrancy', () => {
+describe('re-entrancy guard: session-start-context DEVFLOW_BG_UPDATER', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');
   let tmpDir: string;
 
@@ -479,25 +474,16 @@ describe('sentinel guard: session-start-context DEVFLOW_BG_* re-entrancy', () =>
     expect(output).toBe('');
   });
 
-  it('outputs nothing when DEVFLOW_BG_DREAM=1, even with a decisions TL;DR present', () => {
-    mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
-    const input = sessionInput(tmpDir);
-    const output = execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    expect(output).toBe('');
-  });
-
-  it('DEVFLOW_BG_DREAM=1 makes zero filesystem writes (no .gitignore/.devflow scaffolding)', () => {
+  it('DEVFLOW_BG_UPDATER=1 makes zero filesystem writes (no .gitignore/.devflow scaffolding)', () => {
     // A fresh tmpDir with no .devflow/ at all — the guard must fire before
     // ensure-root-gitignore or any other write-side-effect runs.
     const input = sessionInput(tmpDir);
-    execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 });
 
-describe('sentinel guard: session-start-memory DEVFLOW_BG_* re-entrancy', () => {
+describe('re-entrancy guard: session-start-memory DEVFLOW_BG_UPDATER', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-memory');
   let tmpDir: string;
 
@@ -512,28 +498,20 @@ describe('sentinel guard: session-start-memory DEVFLOW_BG_* re-entrancy', () => 
     expect(output).toBe('');
   });
 
-  it('outputs nothing when DEVFLOW_BG_DREAM=1, even with WORKING-MEMORY.md present', () => {
-    mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
-    const input = sessionInput(tmpDir);
-    const output = execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    expect(output).toBe('');
-  });
-
-  it('DEVFLOW_BG_DREAM=1 does not recover a stale .pending-turns.processing (guard fires before the cold-path check)', () => {
+  it('DEVFLOW_BG_UPDATER=1 does not recover a stale .pending-turns.processing (guard fires before the cold-path check)', () => {
     mkMemoryDir(tmpDir);
     const proc = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.processing');
     fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'x', ts: 1 }) + '\n');
     const old = new Date(Date.now() - 600 * 1000);
     fs.utimesSync(proc, old, old);
     const input = sessionInput(tmpDir);
-    execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(proc)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
-describe('sentinel guard: pre-compact-memory DEVFLOW_BG_* re-entrancy', () => {
+describe('re-entrancy guard: pre-compact-memory DEVFLOW_BG_UPDATER', () => {
   const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
   let tmpDir: string;
 
@@ -545,15 +523,6 @@ describe('sentinel guard: pre-compact-memory DEVFLOW_BG_* re-entrancy', () => {
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
-  });
-
-  it('does not write backup.json when DEVFLOW_BG_DREAM=1', () => {
-    mkMemoryDir(tmpDir);
-    const input = sessionInput(tmpDir);
-    expect(() => {
-      execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
   });

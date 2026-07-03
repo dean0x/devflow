@@ -345,14 +345,12 @@ describe('queue_read_gates', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function readGates(config: Record<string, unknown> | null, sentinelExists: boolean): { memory: string; decisions: string; exitCode: number } {
+  function readGates(config: Record<string, unknown> | null): { memory: string; decisions: string; exitCode: number } {
     const configPath = path.join(tmpDir, 'config.json');
     if (config !== null) fs.writeFileSync(configPath, JSON.stringify(config));
-    const sentinelPath = path.join(tmpDir, '.disabled');
-    if (sentinelExists) fs.writeFileSync(sentinelPath, '');
 
     const { stdout, exitCode } = runWithQueueAppend(`
-      queue_read_gates "${configPath}" "${sentinelPath}"
+      queue_read_gates "${configPath}"
       echo "MEMORY=$_QG_MEMORY"
       echo "DECISIONS=$_QG_DECISIONS"
     `);
@@ -362,31 +360,25 @@ describe('queue_read_gates', () => {
   }
 
   it('both default to true when config is missing', () => {
-    const r = readGates(null, false);
+    const r = readGates(null);
     expect(r).toMatchObject({ memory: 'true', decisions: 'true', exitCode: 0 });
   });
 
   it('reads both explicit fields in one pass', () => {
-    const r = readGates({ memory: true, decisions: false }, false);
+    const r = readGates({ memory: true, decisions: false });
     expect(r).toMatchObject({ memory: 'true', decisions: 'false' });
   });
 
   it('memory:false, decisions field absent -> memory false, decisions defaults true', () => {
-    const r = readGates({ memory: false }, false);
+    const r = readGates({ memory: false });
     expect(r).toMatchObject({ memory: 'false', decisions: 'true' });
   });
 
-  it('sentinel forces decisions false independent of the config field', () => {
-    const r = readGates({ decisions: true }, true);
-    expect(r).toMatchObject({ decisions: 'false' });
-  });
-
-  it('never exits non-zero even when the sentinel is absent (set -e safety)', () => {
-    // Regression guard: queue_read_gates's last statement must not leak a bare
-    // `[ -f sentinel ] && x=y` truthiness as the function's own return code —
-    // that would abort any `set -e` caller whenever the sentinel is absent
-    // (the common case).
-    const r = readGates({}, false);
+  it('never exits non-zero (set -e safety)', () => {
+    // Regression guard: queue_read_gates's exit status must never leak the
+    // truthiness of its last internal test into a `set -e` caller that
+    // invokes it as a plain statement.
+    const r = readGates({});
     expect(r.exitCode).toBe(0);
   });
 });

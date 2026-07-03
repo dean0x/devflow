@@ -277,11 +277,9 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Write observation to log, then promote via assign-anchor
-      execSync(
-        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
+      // Seed the observation directly (one JSONL row, as the Dream agent
+      // appends it), then promote via assign-anchor
+      fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
         `node "${JSON_HELPER}" assign-anchor decision obs_formattest1`,
         { cwd: tmpDir, encoding: 'utf8' }
@@ -322,11 +320,9 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Write observation to log, then promote via assign-anchor
-      execSync(
-        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
+      // Seed the observation directly (one JSONL row, as the Dream agent
+      // appends it), then promote via assign-anchor
+      fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
         `node "${JSON_HELPER}" assign-anchor pitfall obs_pfformattest1`,
         { cwd: tmpDir, encoding: 'utf8' }
@@ -360,74 +356,70 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// dream-procedure.md content-presence assertions (AC-F1, AC-F2)
+// Dream agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the procedure contains the creation-bar
-// elements required by the plan. They do not test LLM judgment — that is
-// validated by the Tester agent via scenarios. They lock the prose contract
-// so that the procedure cannot accidentally regress on the key phrases.
-//
-// The standalone dream-decisions SKILL.md was retired when the dream system
-// was simplified to a detached `claude -p` worker (background-dream-update)
-// that reads scripts/hooks/dream-procedure.md directly — it is not a Claude
-// Code skill (skills do not load in `claude -p` sessions).
+// These lightweight checks verify that the Dream agent instructions
+// (shared/agents/dream.md) contain the required creation-bar elements. They do
+// not test LLM judgment — that is validated by the Tester agent via scenarios.
+// They lock the prose contract so the agent cannot accidentally regress on the
+// key phrases.
 
-describe('dream-procedure.md creation-bar contract', () => {
-  const SKILL_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
+describe('Dream agent creation-bar contract', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
 
-  let skillContent: string;
+  let agentContent: string;
   beforeAll(() => {
-    skillContent = fs.readFileSync(SKILL_PATH, 'utf8');
+    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
   });
 
   it('contains abstain-by-default stance', () => {
-    expect(skillContent).toContain('Most runs produce nothing');
-    expect(skillContent).toContain('If unsure, record nothing');
+    expect(agentContent).toContain('Most runs produce nothing');
+    expect(agentContent).toContain('If unsure, record nothing');
   });
 
   it('contains ADR-XOR-PF hard rule', () => {
-    expect(skillContent).toContain('ADR-XOR-PF');
+    expect(agentContent).toContain('ADR-XOR-PF');
     // "never both" may span a line break — check both forms
-    expect(skillContent).toMatch(/never\s+both/);
-    expect(skillContent).toContain('Concrete failure');
-    expect(skillContent).toContain('forward-looking');
+    expect(agentContent).toMatch(/never\s+both/);
+    expect(agentContent).toContain('Concrete failure');
+    expect(agentContent).toContain('forward-looking');
   });
 
   it('contains dedup-before-create rule', () => {
-    expect(skillContent).toContain('Dedup before creating');
-    expect(skillContent).toContain('reinforce it');
+    expect(agentContent).toContain('Dedup before creating');
+    expect(agentContent).toContain('reinforce that row');
   });
 
   it('instructs agent to use assign-anchor for promotion, never invents numbers itself', () => {
-    // The procedure must instruct the agent to use assign-anchor for promotion
-    expect(skillContent).toContain('assign-anchor');
+    // The agent must be instructed to use assign-anchor for promotion
+    expect(agentContent).toContain('assign-anchor');
     // decisions-append is retired tooling and is not mentioned at all (nothing
     // positively instructs calling it — there is no lingering reference to forbid).
-    expect(skillContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
-    expect(skillContent).not.toContain('decisions-append');
-    expect(skillContent).toContain('NEVER invent an ADR-NNN/PF-NNN number');
+    expect(agentContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
+    expect(agentContent).not.toContain('decisions-append');
+    expect(agentContent).toContain('NEVER invent an ADR-NNN/PF-NNN number');
   });
 
   it('has no numeric confidence gate (ADR-008)', () => {
     // Must not contain a numeric confidence threshold that acts as a gate
-    expect(skillContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
-    expect(skillContent).not.toContain('0.65');
-    expect(skillContent).not.toContain('0.95');
+    expect(agentContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
+    expect(agentContent).not.toContain('0.65');
+    expect(agentContent).not.toContain('0.95');
   });
 
   it('states confidence is metadata, not a gate', () => {
-    expect(skillContent).toContain('NOT a gate');
+    expect(agentContent).toContain('NOT a gate');
   });
 
   it('Iron Law references assign-anchor and render, not decisions-append', () => {
     // Verify Iron Law line
-    expect(skillContent).toContain('assign-anchor OWNS NUMBERING');
-    expect(skillContent).toContain('render OWNS THE .md');
-    expect(skillContent).toContain('NEVER HAND-EDIT');
+    expect(agentContent).toContain('assign-anchor OWNS NUMBERING');
+    expect(agentContent).toContain('render OWNS THE .md');
+    expect(agentContent).toContain('NEVER HAND-EDIT');
   });
 
   it('negative examples list both NOT-a-decision and NOT-a-pitfall', () => {
-    expect(skillContent).toContain('NOT a decision');
-    expect(skillContent).toContain('NOT a pitfall');
+    expect(agentContent).toContain('NOT a decision');
+    expect(agentContent).toContain('NOT a pitfall');
   });
 });

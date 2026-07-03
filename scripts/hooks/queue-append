@@ -25,16 +25,15 @@
 #   from dream config themselves (see queue_read_gates below for the one-fork
 #   combined read that keeps this to a single config subprocess per hook).
 #
-# queue_read_gates <dream_config_path> <decisions_disabled_sentinel_path>
+# queue_read_gates <dream_config_path>
 #   Reads BOTH the "memory" and "decisions" fields from dream config.json in a
 #   SINGLE subprocess fork (AC-P1 -- exactly one config-read fork per capture
 #   hook, not two). Sets _QG_MEMORY and _QG_DECISIONS ("true"/"false") in the
-#   caller's scope. Missing config file -> both default "true". decisions is
-#   further forced "false" when the sentinel path exists (dual-signal gate:
-#   config field AND sentinel). The two values are newline-separated rather
-#   than using a control-character delimiter: they are always the literal
-#   strings "true"/"false", never arbitrary content, so a plain newline split
-#   is unambiguous and easy to review (no invisible bytes hiding in the source).
+#   caller's scope. Missing config file -> both default "true". The two values
+#   are newline-separated rather than using a control-character delimiter:
+#   they are always the literal strings "true"/"false", never arbitrary
+#   content, so a plain newline split is unambiguous and easy to review (no
+#   invisible bytes hiding in the source).
 
 queue_append_row() {
   local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"
@@ -85,7 +84,7 @@ queue_append_both() {
 }
 
 queue_read_gates() {
-  local _qg_config="$1" _qg_sentinel="$2"
+  local _qg_config="$1"
   _QG_MEMORY="true"
   _QG_DECISIONS="true"
 
@@ -113,13 +112,9 @@ queue_read_gates() {
     fi
   fi
 
-  if [ -f "$_qg_sentinel" ]; then
-    _QG_DECISIONS="false"
-  fi
   # Explicit return: this function's meaning is "populate _QG_* outputs," not a
   # success/failure signal, so its exit status must never leak the truthiness of
-  # the last internal test into the caller (a bare `[ -f x ] && y=z` as the final
-  # statement would return 1 whenever the sentinel is absent — the common case —
-  # aborting any `set -e` caller that invokes this function as a plain statement).
+  # the last internal test into a `set -e` caller that invokes this function as
+  # a plain statement.
   return 0
 }

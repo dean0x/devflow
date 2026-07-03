@@ -113,89 +113,86 @@ function readDecisionsMd(dir: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// dream-procedure.md content-presence assertions (AC-C3)
+// Dream agent content-presence assertions (AC-C3)
 //
-// The standalone dream-decisions/dream-curation SKILL.md files were retired
-// when the dream system was simplified to a detached `claude -p` worker
-// (background-dream-update) that reads scripts/hooks/dream-procedure.md
-// directly — it is not a Claude Code skill (skills do not load in `claude -p`
-// sessions). The Iron-Law strings this describe pins are the same contract
-// the old SKILL.md files enforced, now consolidated into one procedure doc.
+// The Dream agent (shared/agents/dream.md) is the sole decisions processor:
+// it claims the queue, reads the data files directly, and writes through the
+// three ledger ops. These describe pins hold the curation contract strings in
+// place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
-describe('dream-procedure.md curation contract (AC-C3)', () => {
-  const PROCEDURE_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
-  let procedureContent: string;
+describe('Dream agent curation contract (AC-C3)', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+  let agentContent: string;
 
   beforeAll(() => {
-    procedureContent = fs.readFileSync(PROCEDURE_PATH, 'utf8');
+    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
   });
 
   it('Iron Law says assign-anchor owns numbering, render owns the .md, never hand-edit', () => {
-    expect(procedureContent).toContain('assign-anchor OWNS NUMBERING');
-    expect(procedureContent).toContain('render OWNS THE .md');
-    expect(procedureContent).toContain('NEVER HAND-EDIT');
+    expect(agentContent).toContain('assign-anchor OWNS NUMBERING');
+    expect(agentContent).toContain('render OWNS THE .md');
+    expect(agentContent).toContain('NEVER HAND-EDIT');
   });
 
   it('instructs to call retire-anchor for deprecation/retirement, never hand-edit the .md', () => {
-    expect(procedureContent).toContain('retire-anchor');
-    expect(procedureContent).toContain('RETIRE BY STATUS');
-    expect(procedureContent).toContain('never hand-edit the .md');
+    expect(agentContent).toContain('retire-anchor');
+    expect(agentContent).toContain('RETIRE BY STATUS');
+    expect(agentContent).toContain('never hand-edit the .md');
   });
 
-  it('states inputs are read-only (except where noted)', () => {
-    expect(procedureContent).toContain('Inputs (read-only, except where noted)');
+  it('names the inputs the agent reads directly', () => {
+    expect(agentContent).toContain('Inputs (read directly with your Read tool)');
   });
 
-  it('writes only via merge-observation/assign-anchor/retire-anchor/rotate-observations', () => {
-    expect(procedureContent).toContain('merge-observation');
-    expect(procedureContent).toContain('assign-anchor');
-    expect(procedureContent).toContain('retire-anchor');
-    expect(procedureContent).toContain('rotate-observations');
+  it('routes all ledger writes through assign-anchor/retire-anchor/rotate-observations', () => {
+    expect(agentContent).toContain('assign-anchor');
+    expect(agentContent).toContain('retire-anchor');
+    expect(agentContent).toContain('rotate-observations');
   });
 
-  it('touches .last-dream-ok as the final success signal', () => {
-    expect(procedureContent).toContain('.devflow/dream/.last-dream-ok');
-    expect(procedureContent).toContain('LAST');
+  it('deletes the claim file as the final act (consume-then-delete)', () => {
+    expect(agentContent).toContain('.devflow/dream/.pending-turns.processing');
+    expect(agentContent).toContain('FINAL act');
   });
 
-  it('writes an optional last-run-summary only when the ledger changed', () => {
-    expect(procedureContent).toContain('dream/last-run-summary');
-    expect(procedureContent).toMatch(/if nothing changed, do NOT create this file/i);
+  it('run visibility is the final message — no status file', () => {
+    expect(agentContent).toMatch(/final message is the run's only\s+visibility surface/);
+    expect(agentContent).toMatch(/no status file/);
   });
 
   it('contains the abstain-by-default creation bar', () => {
-    expect(procedureContent).toContain('abstain-by-default');
-    expect(procedureContent).toMatch(/most runs produce nothing/i);
+    expect(agentContent).toContain('abstain-by-default');
+    expect(agentContent).toMatch(/most runs produce nothing/i);
   });
 
   it('contains ADR-XOR-PF awareness note', () => {
-    expect(procedureContent).toContain('ADR-XOR-PF');
-    expect(procedureContent).toContain('forward-looking');
-    expect(procedureContent).toContain('Concrete failure');
+    expect(agentContent).toContain('ADR-XOR-PF');
+    expect(agentContent).toContain('forward-looking');
+    expect(agentContent).toContain('Concrete failure');
   });
 
   it('contains dedup awareness note', () => {
-    expect(procedureContent).toMatch(/dedup|near-duplicate/i);
+    expect(agentContent).toMatch(/dedup|near-duplicate/i);
   });
 
   it('bounds curation to at most 5 changes per run', () => {
     // \s+ tolerates an incidental mid-sentence line wrap in the markdown source
     // (a literal newline between "curation" and "changes", not just a space).
-    expect(procedureContent).toMatch(/≤5\s+curation\s+changes/);
-    expect(procedureContent).toContain('stop after 5 changes');
+    expect(agentContent).toMatch(/≤5\s+curation\s+changes/);
+    expect(agentContent).toContain('stop after 5 changes');
   });
 
   it('7-day protection window is keyed off the ledger date field', () => {
-    expect(procedureContent).toContain('7-day protection window');
-    expect(procedureContent).toContain("ledger row's");
-    expect(procedureContent).toContain('date` field');
+    expect(agentContent).toContain('7-day protection window');
+    expect(agentContent).toContain("ledger row's");
+    expect(agentContent).toContain('date` field');
   });
 
   it('rotation step is for archiving stale observing rows (AC-F9)', () => {
-    expect(procedureContent).toContain('observing');
-    expect(procedureContent).toMatch(/30 days|30-day/);
-    expect(procedureContent).toMatch(/never touches anchored|never touch.*anchor/i);
+    expect(agentContent).toContain('observing');
+    expect(agentContent).toMatch(/30 days|30-day/);
+    expect(agentContent).toMatch(/never touches anchored|never touch.*anchor/i);
   });
 });
 
@@ -423,41 +420,38 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
 });
 
 // ---------------------------------------------------------------------------
-// AC-F9: rotation step — dream-procedure.md contract
+// AC-F9: rotation step — Dream agent contract
 // Already tested at the op level in ledger-ops.test.ts; here we verify
-// the procedure wires it correctly (contract-level check).
+// the agent instructions wire it correctly (contract-level check).
 // ---------------------------------------------------------------------------
 
 describe('AC-F9: rotation step wired into curation (contract check)', () => {
-  const PROCEDURE_PATH = path.join(ROOT, 'scripts/hooks/dream-procedure.md');
-  let procedureContent: string;
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+  let agentContent: string;
 
   beforeAll(() => {
-    procedureContent = fs.readFileSync(PROCEDURE_PATH, 'utf8');
+    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
   });
 
-  it('procedure calls rotate-observations before selecting curation retire/merge candidates', () => {
-    // The rotation step must appear BEFORE the Part 2 "LLM judgment" (retire/merge
-    // candidate selection) — use lastIndexOf since Part 1 has its own earlier
-    // "LLM judgment" heading (the creation-bar one) that rotation is NOT gated by.
-    const rotateIdx = procedureContent.indexOf('rotate-observations');
-    const judgmentIdx = procedureContent.lastIndexOf('LLM judgment');
+  it('agent runs rotate-observations before selecting curation retire/merge candidates', () => {
+    // The Part 2 rotation step must appear BEFORE the Part 2 "LLM judgment"
+    // (retire/merge candidate selection) — use lastIndexOf on both since the
+    // Environment section and Part 1 have earlier mentions.
+    const rotateIdx = agentContent.lastIndexOf('Rotate stale observations first');
+    const judgmentIdx = agentContent.lastIndexOf('LLM judgment');
     expect(rotateIdx).toBeGreaterThan(-1);
     expect(judgmentIdx).toBeGreaterThan(-1);
     expect(rotateIdx).toBeLessThan(judgmentIdx);
   });
 
-  it('procedure says rotation runs under .observations.lock (self-locking)', () => {
-    // The relevant paragraph must mention .observations.lock near rotate-observations
-    const rotateIdx = procedureContent.indexOf('rotate-observations');
-    // Check within 400 chars of the rotate-observations mention
-    const context = procedureContent.slice(Math.max(0, rotateIdx - 400), rotateIdx + 400);
-    expect(context).toContain('.observations.lock');
+  it('agent must call the ops plainly — they self-lock; no external lock allowed', () => {
+    expect(agentContent).toMatch(/self-locks? internally/i);
+    expect(agentContent).toMatch(/never wrap them in a lock/i);
   });
 
-  it('procedure states rotation archives stale observing rows and never touches anchored rows', () => {
-    expect(procedureContent).toContain('anchored');
-    expect(procedureContent).toContain('archive');
+  it('agent states rotation archives stale observing rows and never touches anchored rows', () => {
+    expect(agentContent).toContain('anchored');
+    expect(agentContent).toContain('archive');
   });
 
   it('rotateObservations internal function: anchored rows never archived (AC-F9 contract)', () => {

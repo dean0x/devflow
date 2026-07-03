@@ -202,12 +202,12 @@ describe('settings.json template: AC-C2 complete hook seed shape', () => {
     expect(commands[1]).toContain('run-hook memory-worker');
   });
 
-  it('SessionStart keeps the AC-C2 order: [session-start-memory, session-start-context, spawn-dream-worker]', async () => {
+  it('SessionStart keeps the AC-C2 order: [session-start-memory, session-start-context]', async () => {
     const hooks = await loadHooks();
     const commands = hooks.SessionStart.map((m) => m.hooks[0].command);
+    expect(commands).toHaveLength(2);
     expect(commands[0]).toContain('run-hook session-start-memory');
     expect(commands[1]).toContain('run-hook session-start-context');
-    expect(commands[2]).toContain('run-hook spawn-dream-worker');
   });
 
   it('PreCompact seeds pre-compact-memory', async () => {

@@ -116,7 +116,7 @@ rewrite the whole file:
   `devflow decisions --list/--status`) depend on this shape. `type` is `decision` or
   `pitfall`; pitfall `details` read `"area: X; issue: Y; impact: Z; resolution: W"`;
   timestamps are UTC ISO (`date -u +%Y-%m-%dT%H:%M:%SZ`). Estimate `confidence` honestly —
-  it is curation metadata, not a gate; do not inflate it.
+  it is curation metadata only, NOT a gate; do not inflate it.
 
 - **Reinforce an existing row** — use the Edit tool to replace that row's single line:
   increment `observations`, union `evidence` (dedupe, cap 10), update `last_seen`, and

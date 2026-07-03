@@ -12,12 +12,10 @@ dbg() { :; }
 
 set -e
 
-# Re-entrancy guards — before hook-bootstrap to minimize background session
-# overhead. A latent pre-existing gap: this hook had no guard against firing
-# from within the memory or dream worker's own nested claude -p session
-# (SessionStart fires on every session, including a detached worker's).
+# Re-entrancy guard — before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires SessionStart hooks
+# too (SessionStart fires on every session, including a detached worker's).
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
-if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

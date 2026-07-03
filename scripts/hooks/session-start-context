@@ -1,24 +1,26 @@
 #!/bin/bash
 
 # SessionStart Hook: Cross-Feature Context Injection
-# Always-on hook that injects decisions TL;DR as additionalContext.
-# Sections are independently gated by feature sentinels — this hook itself is never disabled.
+# Always-on hook that injects decisions context as additionalContext. Sections
+# are gated by the `decisions` field in dream config (config-only, ADR-001) —
+# this hook itself is never disabled.
 #
-# Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled), plus the
-# detached dream worker's optional last-run-summary (see background-dream-update /
-# dream-procedure.md — spawned separately by the spawn-dream-worker hook).
+# Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
+# Section 2: Dream maintenance directive — when captured turns are pending in
+# the dream queue (or a crashed run left a stale .processing batch), instructs
+# the main model to spawn the background Dream agent with the resolved model.
+# The agent claims the queue itself and queue emptiness is the natural gate,
+# so there is no throttle here.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
 
 # set -e intentionally omitted: a failure in this section must not crash the hook.
 
-# Re-entrancy guards — before hook-bootstrap to minimize background session
-# overhead. The memory worker's and dream worker's own claude -p sessions fire
-# SessionStart hooks; without this guard a nested session would re-inject its
-# own context. A latent pre-existing gap for DEVFLOW_BG_UPDATER too (this hook
-# previously had no re-entrancy guard at all).
-if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
+# Re-entrancy guard — before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires SessionStart hooks;
+# without this guard the nested session would re-inject its own context (and
+# receive a Dream spawn directive it must never act on).
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
@@ -41,7 +43,7 @@ devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
-# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -62,9 +64,15 @@ DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
-# --- Section 1.5: Project Decisions TL;DR ---
-# Skipped if decisions feature is disabled via sentinel.
-if [ ! -f "$DECISIONS_CONTENT_DIR/.disabled" ]; then
+# --- Decisions gate (config-only) ---
+DREAM_CONFIG="$DREAM_DIR/config.json"
+DECISIONS_ENABLED="true"
+if [ -f "$DREAM_CONFIG" ]; then
+  DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
+fi
+
+# --- Section 1: Project Decisions TL;DR ---
+if [ "$DECISIONS_ENABLED" = "true" ]; then
   DECISIONS_DIR="$DECISIONS_CONTENT_DIR"
   # Heal older installs that have .devflow/ but not .devflow/decisions/
   if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$DECISIONS_DIR" ]; then
@@ -93,27 +101,55 @@ ${DECISIONS_SECTION}"
       fi
     fi
   fi
+fi
 
-  # --- AC-F15: dream worker last-run-summary (agent-written, injected once) ---
-  # The dream worker (background-dream-update) writes this file only when it
-  # changed the ledger. Inject its content next to the decisions TL;DR, then
-  # delete it — no file means no injection and no error.
-  _SC_LAST_RUN_SUMMARY="$DREAM_DIR/last-run-summary"
-  if [ -f "$_SC_LAST_RUN_SUMMARY" ]; then
-    _SC_SUMMARY_CONTENT=$(cat "$_SC_LAST_RUN_SUMMARY" 2>/dev/null || true)
-    if [ -n "$_SC_SUMMARY_CONTENT" ]; then
-      _SC_SUMMARY_SECTION="--- DREAM LAST RUN ---
-$_SC_SUMMARY_CONTENT"
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
+# --- Section 2: Dream maintenance directive ---
+# Emitted when captured turns are waiting: queue non-empty, or a leftover
+# .processing batch whose owner crashed (stale mtime, 900s threshold — same
+# family the Dream agent itself uses to discriminate live from crashed). A
+# FRESH .processing means a live Dream agent already owns the batch, so the
+# directive is suppressed even if new turns queued since its claim.
+if [ "$DECISIONS_ENABLED" = "true" ]; then
+  QUEUE_FILE="$DREAM_DIR/.pending-turns.jsonl"
+  PROCESSING_FILE="$DREAM_DIR/.pending-turns.processing"
+  PROCESSING_STALE_SECS=900
 
-${_SC_SUMMARY_SECTION}"
-      else
-        CONTEXT="$_SC_SUMMARY_SECTION"
-      fi
-      dbg "last-run-summary injected"
+  DREAM_WORK=""
+  if [ -f "$PROCESSING_FILE" ]; then
+    source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+    _SC_PROC_MTIME=$(get_mtime "$PROCESSING_FILE" 2>/dev/null || true)
+    _SC_NOW=$(date +%s)
+    if [ -n "$_SC_PROC_MTIME" ] && [ $(( _SC_NOW - _SC_PROC_MTIME )) -ge "$PROCESSING_STALE_SECS" ]; then
+      DREAM_WORK="stale-processing"
+    else
+      dbg "dream directive suppressed: fresh .processing (live agent owns the batch)"
     fi
-    rm -f "$_SC_LAST_RUN_SUMMARY" 2>/dev/null || true
+  elif [ -s "$QUEUE_FILE" ]; then
+    DREAM_WORK="queue"
+  fi
+
+  if [ -n "$DREAM_WORK" ]; then
+    # Model resolution: project decisions.json → global ~/.devflow/decisions.json → opus
+    DREAM_MODEL=""
+    if [ -f "$DECISIONS_CONTENT_DIR/decisions.json" ]; then
+      DREAM_MODEL=$(json_field_file "$DECISIONS_CONTENT_DIR/decisions.json" "model" "")
+    fi
+    if [ -z "$DREAM_MODEL" ] && [ -f "$HOME/.devflow/decisions.json" ]; then
+      DREAM_MODEL=$(json_field_file "$HOME/.devflow/decisions.json" "model" "")
+    fi
+    DREAM_MODEL="${DREAM_MODEL:-opus}"
+
+    dbg "dream directive emitted (reason=$DREAM_WORK model=$DREAM_MODEL)"
+    DREAM_SECTION="--- DREAM MAINTENANCE ---
+Captured turns are pending in the decisions queue. Spawn the background Dream agent (one non-blocking call). Do not narrate, summarize, or ask — just spawn it, then continue with the user's request.
+Agent(subagent_type=\"Dream\", model=\"$DREAM_MODEL\", run_in_background: true, prompt: \"Process the pending decisions queue per your agent instructions. Project root: $PROJECT_ROOT\")"
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${DREAM_SECTION}"
+    else
+      CONTEXT="$DREAM_SECTION"
+    fi
   fi
 fi
 

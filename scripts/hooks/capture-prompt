@@ -11,13 +11,11 @@ dbg() { :; }
 
 set -e
 
-# Feedback-loop guards -- before hook-bootstrap to minimize background session
-# overhead. Only the two LIVE worker flags: the memory worker's own claude -p
-# session, and the dream worker's own claude -p session, both fire
-# UserPromptSubmit-adjacent hooks on their nested turns; bail out immediately
+# Feedback-loop guard -- before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires
+# UserPromptSubmit-adjacent hooks on its nested turns; bail out immediately
 # rather than double-capturing a background session's own prompts.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
-if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -61,7 +59,7 @@ fi
 source "$SCRIPT_DIR/queue-append" || { echo "capture-prompt: failed to source queue-append" >&2; exit 1; }
 
 # --- AC-P1: exactly ONE config-read fork, fetching both memory + decisions fields ---
-queue_read_gates "$DREAM_DIR/config.json" "$DEVFLOW_DIR/decisions/.disabled"
+queue_read_gates "$DREAM_DIR/config.json"
 MEMORY_ENABLED="$_QG_MEMORY"
 DECISIONS_ENABLED="$_QG_DECISIONS"
 

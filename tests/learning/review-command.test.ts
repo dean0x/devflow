@@ -174,53 +174,6 @@ describe('observation attention flags detection', () => {
   });
 });
 
-describe('count-active op (ledger-based)', () => {
-  // Phase 8: count-active now reads from decisions-ledger.jsonl exclusively.
-  // The legacy .md-file-path calling convention (count-active <file.md> type)
-  // has been removed since all projects are now on the ledger model.
-
-  let tmpDir: string;
-  let decisionsDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-review-'));
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  function writeLedger(rows: object[]): void {
-    const ledgerPath = path.join(decisionsDir, 'decisions-ledger.jsonl');
-    fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
-  }
-
-  it('count-active counts Accepted decision anchors from ledger', () => {
-    writeLedger([
-      { anchor_id: 'ADR-001', type: 'decision', pattern: 'Active entry', decisions_status: 'Accepted' },
-      { anchor_id: 'ADR-002', type: 'decision', pattern: 'Another active', decisions_status: 'Accepted' },
-    ]);
-    const result = JSON.parse(runHelper(`count-active "${tmpDir}" decision`));
-    expect(result.count).toBe(2);
-  });
-
-  it('count-active returns 0 when ledger is absent', () => {
-    // No ledger file — absent ledger means 0 active
-    const result = JSON.parse(runHelper(`count-active "${tmpDir}" decision`));
-    expect(result.count).toBe(0);
-  });
-
-  it('count-active counts Active pitfall anchors from ledger', () => {
-    writeLedger([
-      { anchor_id: 'PF-001', type: 'pitfall', pattern: 'Active pitfall', decisions_status: 'Active' },
-    ]);
-    const result = JSON.parse(runHelper(`count-active "${tmpDir}" pitfall`));
-    expect(result.count).toBe(1);
-  });
-});
-
 describe('--dismiss-capacity notification', () => {
   let tmpDir: string;
   let memoryDir: string;
@@ -255,8 +208,7 @@ describe('--dismiss-capacity notification', () => {
 });
 
 describe('staleness filter (mayBeStale only)', () => {
-  // After removal of needsReview and softCapExceeded, only mayBeStale remains as a
-  // stale-detection flag. The LLM Dream agent uses staleness.cjs output as a
+  // mayBeStale is the sole stale-detection flag on an observation. It is a
   // signal (not auto-deletion) to deprioritize reinforcing observations whose
   // referenced files are missing.
 

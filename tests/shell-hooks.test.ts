@@ -31,8 +31,6 @@ const HOOK_SCRIPTS = [
   'capture-turn',
   'capture-question',
   'memory-worker',
-  'spawn-dream-worker',
-  'background-dream-update',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1063,25 +1061,26 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 });
 
 // =============================================================================
-// session-start-context: AC-F15 dream last-run-summary injection (inject-once-then-delete)
+// session-start-context Section 2: Dream maintenance directive
 // =============================================================================
 //
-// background-dream-update (see dream-procedure.md) writes .devflow/dream/last-run-summary
-// only when it changed the ledger. session-start-context injects its content next to the
-// decisions TL;DR, under a "--- DREAM LAST RUN ---" header, then deletes the file — no
-// file means no injection and no error. The re-entrancy guards (DEVFLOW_BG_DREAM /
-// DEVFLOW_BG_UPDATER) sit at the very top of the hook, before any filesystem writes or
-// deletes, so a nested dream/memory-worker session must never consume the summary file.
+// When the dream queue holds captured turns (or a crashed run left a stale
+// .processing batch), session-start-context emits a "--- DREAM MAINTENANCE ---"
+// directive instructing the main model to spawn the background Dream agent with
+// the resolved model (project decisions.json → global ~/.devflow/decisions.json
+// → opus). A FRESH .processing (younger than 900s) means a live agent already
+// owns the batch, so the directive is suppressed. Gate is config-only: the
+// `decisions` field in dream config.
 
-describe('session-start-context: AC-F15 dream last-run-summary injection', () => {
+describe('session-start-context: dream maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-lastrun-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-lastrun-home-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-dream-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-dream-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
   });
@@ -1091,28 +1090,39 @@ describe('session-start-context: AC-F15 dream last-run-summary injection', () =>
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  function summaryPath(dir: string): string {
-    return path.join(dir, '.devflow', 'dream', 'last-run-summary');
+  const queuePath = (dir: string) => path.join(dir, '.devflow', 'dream', '.pending-turns.jsonl');
+  const processingPath = (dir: string) => path.join(dir, '.devflow', 'dream', '.pending-turns.processing');
+
+  function seedQueue(dir: string): void {
+    fs.writeFileSync(queuePath(dir), '{"role":"user","content":"we chose X over Y","ts":1}\n');
   }
 
-  it('injects last-run-summary content under the DREAM LAST RUN header and deletes the file', () => {
-    fs.writeFileSync(summaryPath(tmpDir), 'Materialized ADR-009 from 2 dialog pairs.');
+  function contextOf(stdout: string): string {
+    return JSON.parse(stdout).hookSpecificOutput.additionalContext;
+  }
+
+  it('emits the directive when the queue is non-empty: Dream agent, background, default opus', () => {
+    seedQueue(tmpDir);
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
 
-    const json = JSON.parse(stdout);
-    const ctx = json.hookSpecificOutput.additionalContext;
-    expect(ctx).toContain('--- DREAM LAST RUN ---');
-    expect(ctx).toContain('Materialized ADR-009 from 2 dialog pairs.');
-
-    // Inject-once-then-delete: the file must be gone after injection.
-    expect(fs.existsSync(summaryPath(tmpDir))).toBe(false);
+    const ctx = contextOf(stdout);
+    expect(ctx).toContain('--- DREAM MAINTENANCE ---');
+    expect(ctx).toContain('subagent_type="Dream"');
+    expect(ctx).toContain('model="opus"');
+    expect(ctx).toContain('run_in_background: true');
+    expect(ctx).toContain('Do not narrate');
+    // The prompt names the project root the agent must operate from
+    // (non-git tmp dir → df_resolve_root falls back to the cwd as given).
+    expect(ctx).toContain(`Project root: ${tmpDir}`);
+    // The directive never spawns anything itself — the queue is untouched.
+    expect(fs.existsSync(queuePath(tmpDir))).toBe(true);
   });
 
-  it('no summary file present -> output lacks the DREAM LAST RUN header, exit 0', () => {
-    // Seed a decisions TL;DR so CONTEXT is non-empty and there is real JSON output
-    // to inspect (a hard assertion rather than a conditional on empty stdout).
+  it('no directive when the queue is empty or absent', () => {
+    // Zero-byte queue file (the -s test) + a TL;DR so there is JSON output to inspect.
+    fs.writeFileSync(queuePath(tmpDir), '');
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
@@ -1121,22 +1131,76 @@ describe('session-start-context: AC-F15 dream last-run-summary injection', () =>
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-
-    const json = JSON.parse(stdout);
-    const ctx = json.hookSpecificOutput.additionalContext;
-    expect(ctx).not.toContain('DREAM LAST RUN');
+    expect(contextOf(stdout)).not.toContain('DREAM MAINTENANCE');
   });
 
-  it('DEVFLOW_BG_DREAM=1 -> no injection, summary file survives (guard precedes all writes/deletes)', () => {
-    fs.writeFileSync(summaryPath(tmpDir), 'Should not be touched.');
+  it('decisions:false in dream config suppresses the directive (and the TL;DR)', () => {
+    seedQueue(tmpDir);
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
+      JSON.stringify({ decisions: false }),
+    );
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
+    );
 
-    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, { DEVFLOW_BG_DREAM: '1' });
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
     expect(stdout.trim()).toBe('');
+  });
 
-    // The guard exits before the AC-F15 read/inject/delete block ever runs.
-    expect(fs.existsSync(summaryPath(tmpDir))).toBe(true);
-    expect(fs.readFileSync(summaryPath(tmpDir), 'utf-8')).toBe('Should not be touched.');
+  it('DEVFLOW_BG_UPDATER=1 -> empty stdout even with a pending queue (guard precedes everything)', () => {
+    seedQueue(tmpDir);
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, { DEVFLOW_BG_UPDATER: '1' });
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(fs.existsSync(queuePath(tmpDir))).toBe(true);
+  });
+
+  it('fresh .processing suppresses the directive even when new turns queued since the claim', () => {
+    seedQueue(tmpDir);
+    fs.writeFileSync(processingPath(tmpDir), '{"role":"user","content":"claimed","ts":1}\n');
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim() === '' || !contextOf(stdout).includes('DREAM MAINTENANCE')).toBe(true);
+  });
+
+  it('stale .processing (older than 900s) emits the directive even with an empty queue', () => {
+    fs.writeFileSync(processingPath(tmpDir), '{"role":"user","content":"orphaned","ts":1}\n');
+    const past = new Date(Date.now() - 1000 * 1000); // ~16.7 min ago, past the 900s threshold
+    fs.utimesSync(processingPath(tmpDir), past, past);
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(ctx).toContain('--- DREAM MAINTENANCE ---');
+    expect(ctx).toContain('subagent_type="Dream"');
+  });
+
+  it('model resolution: project decisions.json wins', () => {
+    seedQueue(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.json'),
+      JSON.stringify({ model: 'haiku', debug: false }),
+    );
+    // Global config present too — project must win.
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'decisions.json'), JSON.stringify({ model: 'sonnet' }));
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(contextOf(stdout)).toContain('model="haiku"');
+  });
+
+  it('model resolution: global ~/.devflow/decisions.json used when the project sets none', () => {
+    seedQueue(tmpDir);
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'decisions.json'), JSON.stringify({ model: 'sonnet' }));
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(contextOf(stdout)).toContain('model="sonnet"');
   });
 });
 

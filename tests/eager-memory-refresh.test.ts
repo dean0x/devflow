@@ -1485,14 +1485,11 @@ describe('S19: session-start-memory cold-path .pending-turns.processing recovery
 });
 
 // =============================================================================
-// S20 — Worker self-guard symmetry: background-memory-update previously guarded
-// only DEVFLOW_BG_DREAM at its top; background-dream-update guards both
-// DEVFLOW_BG_DREAM and DEVFLOW_BG_UPDATER. Both guards must fire before any
-// filesystem interaction (queue claim, memory write, or even hook-log-init),
-// mirroring the same "guard precedes all writes" invariant proven for
-// background-dream-update.
+// S20 — Worker self-guard: background-memory-update's DEVFLOW_BG_UPDATER guard
+// must fire before any filesystem interaction (queue claim, memory write, or
+// even hook-log-init) so a nested worker session can never cascade a refresh.
 // =============================================================================
-describe('S20: DEVFLOW_BG_* self-guard symmetry (worker re-entrancy)', () => {
+describe('S20: DEVFLOW_BG_UPDATER self-guard (worker re-entrancy)', () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -1515,11 +1512,11 @@ describe('S20: DEVFLOW_BG_* self-guard symmetry (worker re-entrancy)', () => {
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('DEVFLOW_BG_DREAM=1: exits 0 before claiming the queue — queue untouched, no memory write, no log', () => {
+  it('DEVFLOW_BG_UPDATER=1: exits 0 before claiming the queue — queue untouched, no memory write, no log', () => {
     const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
-    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { DEVFLOW_BG_DREAM: '1' });
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { DEVFLOW_BG_UPDATER: '1' });
 
     expect(exitCode).toBe(0);
     // Guard fires before the "claim queue atomically" step — queue is neither
@@ -1529,19 +1526,6 @@ describe('S20: DEVFLOW_BG_* self-guard symmetry (worker re-entrancy)', () => {
     // The fake claude shim (which writes memFile) must never run.
     expect(fs.existsSync(memFile)).toBe(false);
     // Guard fires before hook-log-init is sourced — no log file at all.
-    expect(fs.existsSync(workerLogPath(projectDir, homeDir))).toBe(false);
-  });
-
-  it('DEVFLOW_BG_UPDATER=1: exits 0 before claiming the queue — queue untouched, no memory write, no log', () => {
-    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
-    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-
-    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { DEVFLOW_BG_UPDATER: '1' });
-
-    expect(exitCode).toBe(0);
-    expect(fs.existsSync(queueFile)).toBe(true);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(false);
-    expect(fs.existsSync(memFile)).toBe(false);
     expect(fs.existsSync(workerLogPath(projectDir, homeDir))).toBe(false);
   });
 });

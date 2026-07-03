@@ -12,7 +12,6 @@ dbg() { :; }
 set -e
 
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
-if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

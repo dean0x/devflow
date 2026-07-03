@@ -24,8 +24,9 @@
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
-//   decisions-usage-scan                  Scan session context for ADR/PF cite counts
+//   assign-anchor <type> <obs_id>         Claim next ADR/PF number, render both .md files
+//   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
+//   rotate-observations [<log>] [<arch>]  Archive observing rows older than 30 days
 
 'use strict';
 
@@ -37,8 +38,6 @@ const args = process.argv.slice(3);
 
 const { safePath } = require('./lib/safe-path.cjs');
 const {
-  getDecisionsFilePath,
-  getPitfallsFilePath,
   getDecisionsUsagePath,
   getDecisionsLockDir,
   getDecisionsLedgerPath,
@@ -48,8 +47,6 @@ const {
 } = require('./lib/project-paths.cjs');
 const {
   initDecisionsContent,
-  formatDecisionBody,
-  formatPitfallBody,
   toLedgerRow,
 } = require('./lib/decisions-format.cjs');
 const {
@@ -81,15 +78,6 @@ function parseJsonl(file) {
   return lines.map(l => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
-}
-
-// --- Learning system constants ---
-// (Phase 3: deterministic confidence/promotion constants removed.
-//  The LLM now sets confidence/status/quality_ok fields directly.)
-
-function learningLog(msg) {
-  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-  process.stderr.write(`[${ts}] ${msg}\n`);
 }
 
 /**
@@ -161,26 +149,6 @@ function nextAnchorFromLedger(ledgerRows, type) {
   }
   const nextN = (maxN + 1).toString().padStart(3, '0');
   return { anchorId: `${prefix}-${nextN}`, nextN };
-}
-
-/**
- * Count active anchored rows of the given type in the ledger.
- * Active = decisions_status is undefined | 'Accepted' | 'Active'.
- *
- * @param {object[]} ledgerRows - All rows from the ledger
- * @param {'decision'|'pitfall'} type
- * @returns {number}
- */
-function countActiveLedgerRows(ledgerRows, type) {
-  const INACTIVE = new Set(['Deprecated', 'Superseded', 'Retired']);
-  let count = 0;
-  for (const row of ledgerRows) {
-    if (row.type !== type) continue;
-    if (!row.anchor_id) continue;
-    if (row.decisions_status && INACTIVE.has(row.decisions_status)) continue;
-    count++;
-  }
-  return count;
 }
 
 /**
@@ -298,12 +266,6 @@ function rotateObservations(logPath, archivePath, nowMs) {
   writeJsonlAtomic(logPath, kept);
 
   return stale.length;
-}
-
-function mergeEvidence(oldEvidence, newEvidence) {
-  const flat = [...(oldEvidence || []), ...(newEvidence || [])];
-  const unique = [...new Set(flat)];
-  return unique.slice(0, 10);
 }
 
 function parseArgs(argList) {
@@ -517,138 +479,6 @@ try {
           diff_stat: data.diff || '',
         },
       }, null, 2));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // merge-observation <log> <newObsJson>
-    // ID-keyed reinforce op: if the id exists in the log, increment count, merge evidence,
-    // update last_seen, and store LLM-provided confidence/status/quality_ok verbatim.
-    // If the id is new, insert a new entry with LLM-provided fields verbatim.
-    // D11: ID collision with different-type entry → suffix _b to avoid trampling.
-    // D12: evidence array capped at 10 (FIFO).
-    // D53: merge-observation self-locks INTERNALLY on .devflow/dream/.observations.lock,
-    // mirroring assign-anchor's internal locking on .decisions.lock. These remain two
-    // distinct lock domains — a caller that also needs .decisions.lock (e.g. immediately
-    // promoting via assign-anchor) must acquire it only AFTER this call returns; never hold
-    // both simultaneously (ADR-017). Callers must NOT wrap this op in their own
-    // .observations.lock mkdir — doing so would nest against this self-lock and time out.
-    // -------------------------------------------------------------------------
-    case 'merge-observation': {
-      const logFile = safePath(args[0]);
-      const newObsJson = args[1];
-      let newObs;
-      try { newObs = JSON.parse(newObsJson); } catch {
-        process.stderr.write('merge-observation: invalid JSON for new observation\n');
-        process.exit(1);
-      }
-
-      const moProjectRoot = process.cwd();
-      const moLockDir = getObservationsLockDir(moProjectRoot);
-      fs.mkdirSync(path.dirname(moLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(moLockDir, 30000, 60000)) {
-        process.stderr.write(`merge-observation: timeout acquiring lock at ${moLockDir}\n`);
-        process.exit(1);
-      }
-
-      try {
-        // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
-        // The prior batch-merge op created the dir; merge-observation matches that so callers
-        // do not need to pre-create the log directory.
-        const logDir = path.dirname(logFile);
-        if (!fs.existsSync(logDir)) {
-          fs.mkdirSync(logDir, { recursive: true });
-        }
-
-        let logEntries = [];
-        if (fs.existsSync(logFile)) {
-          logEntries = parseJsonl(logFile);
-        }
-        const logMap = new Map(logEntries.map(e => [e.id, e]));
-        const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-
-        // ID-keyed lookup: match by obs_xxx id only
-        const existing = logMap.get(newObs.id);
-        let merged = false;
-
-        if (existing) {
-          // Reinforce: increment count, merge evidence (FIFO cap 10), update last_seen.
-          // Store LLM-provided confidence/status/quality_ok verbatim (no recalculation).
-          const newCount = (existing.observations || 0) + 1;
-          existing.observations = newCount;
-          existing.evidence = mergeEvidence(existing.evidence || [], newObs.evidence || []);
-          if (typeof newObs.confidence === 'number') existing.confidence = newObs.confidence;
-          if (newObs.status) existing.status = newObs.status;
-          existing.last_seen = nowIso;
-          if (newObs.pattern) existing.pattern = newObs.pattern;
-          if (newObs.details) existing.details = newObs.details;
-          if (newObs.quality_ok === true) existing.quality_ok = true;
-          // Passthrough new ledger fields from incoming obs (if LLM sets them)
-          if (newObs.anchor_id !== undefined) existing.anchor_id = newObs.anchor_id;
-          if (newObs.date !== undefined) existing.date = newObs.date;
-          if (newObs.decisions_status !== undefined) existing.decisions_status = newObs.decisions_status;
-          if (newObs.amendments !== undefined) existing.amendments = newObs.amendments;
-          if (newObs.raw_body !== undefined) existing.raw_body = newObs.raw_body;
-
-          merged = true;
-          learningLog(`merge-observation: merged into ${existing.id} (count=${newCount})`);
-        } else {
-          // D11: ID collision recovery
-          let newId = newObs.id;
-          if (logMap.has(newId)) {
-            newId = newId + '_b';
-            learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
-          }
-          const entry = {
-            id: newId,
-            type: newObs.type,
-            pattern: newObs.pattern,
-            confidence: typeof newObs.confidence === 'number' ? newObs.confidence : 0,
-            observations: 1,
-            first_seen: nowIso,
-            last_seen: nowIso,
-            status: newObs.status || 'observing',
-            evidence: (newObs.evidence || []).slice(0, 10),
-            details: newObs.details || '',
-            quality_ok: newObs.quality_ok === true,
-          };
-          // Passthrough new ledger fields if present on the new obs
-          if (newObs.anchor_id !== undefined) entry.anchor_id = newObs.anchor_id;
-          if (newObs.date !== undefined) entry.date = newObs.date;
-          if (newObs.decisions_status !== undefined) entry.decisions_status = newObs.decisions_status;
-          if (newObs.amendments !== undefined) entry.amendments = newObs.amendments;
-          if (newObs.raw_body !== undefined) entry.raw_body = newObs.raw_body;
-
-          logMap.set(newId, entry);
-          learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
-        }
-
-        writeJsonlAtomic(logFile, Array.from(logMap.values()));
-        console.log(JSON.stringify({ merged, id: existing ? existing.id : newObs.id }));
-      } finally {
-        releaseLock(moLockDir);
-      }
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // count-active <worktree> <type>
-    // D23: Count active anchored rows from the ledger.
-    //
-    //   count-active <worktree> <type>    — reads ledger; returns 0 when absent
-    //
-    // The legacy .md-file-path calling convention (count-active <file.md> type)
-    // has been removed — all projects are now on the ledger model.
-    // -------------------------------------------------------------------------
-    case 'count-active': {
-      const caArg = safePath(args[0]);
-      const entryType = args[1]; // 'decision' or 'pitfall'
-
-      const caLedgerPath = getDecisionsLedgerPath(caArg);
-      const caLedgerRows = parseLedger(caLedgerPath);
-      const count = countActiveLedgerRows(caLedgerRows, entryType);
-      console.log(JSON.stringify({ count }));
       break;
     }
 
@@ -882,7 +712,6 @@ try {
 // Expose helpers for unit testing (only when required as a module, not run as CLI)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    countActiveLedgerRows,
     readUsageFile,
     writeUsageFile,
     registerUsageEntry,
