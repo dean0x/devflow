@@ -192,11 +192,11 @@ if [ "$TOTAL_LINES" -eq 0 ]; then
 fi
 
 # --- Resolve model: project decisions.json, then global, then "opus" default. ---
-# NOTE: this "opus" default is intentionally DIFFERENT from DecisionsConfig's own
-# TS-side default ("sonnet" — src/cli/utils/decisions-config.ts, used elsewhere for
-# unconfigured projects); the plan calls for this worker specifically to default to
-# opus. An explicit `model` set by a prior `devflow decisions --configure` still wins
-# either way, since it is read before the default is applied.
+# Mirrors DecisionsConfig's own default (src/cli/utils/decisions-config.ts) — kept
+# in sync intentionally. The literal fallback is duplicated here (rather than
+# calling into the TS loader) because this worker reads the raw JSON config files
+# directly. An explicit `model` set by a prior `devflow decisions --configure`
+# still wins either way, since it is read before the default is applied.
 MODEL=""
 if [ -f "$DECISIONS_CONFIG_PROJECT" ]; then
   MODEL=$(json_field_file "$DECISIONS_CONFIG_PROJECT" "model" "")

@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Dream System: memory-worker (Stop Hook)
-# Lifted from dream-capture's 120s-throttle + nohup-spawn block. Registered
-# AFTER capture-turn in the Stop hook array so append-before-spawn ordering is
-# preserved by array position. This hook does NOT append to any queue itself --
-# capture-turn already did that earlier in the same Stop event.
+# Owns the 120s-throttle + nohup-spawn logic for background-memory-update.
+# Registered AFTER capture-turn in the Stop hook array so append-before-spawn
+# ordering is preserved by array position. This hook does NOT append to any
+# queue itself -- capture-turn already did that earlier in the same Stop event.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }

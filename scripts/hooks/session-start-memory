@@ -62,14 +62,12 @@ if [ -f "$DREAM_CONFIG" ]; then
 fi
 
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---
-# Mirrors dream-recover's dream_recover_stale .pending-turns.processing logic
-# (memory stale threshold 300s), duplicated here (not sourced) so this hook has
-# no dependency on dream-recover — which is scheduled for removal once the old
-# Section-2 pending-work flow is retired. background-memory-update is the
-# PRIMARY recovery owner: it re-merges a leftover .processing under its own
-# lock on every spawn. This is the COLD-PATH fallback for when the worker
-# never re-spawns (memory disabled mid-flight, host offline, etc.): a
-# SessionStart arriving >300s after the crash with no intervening Stop hook.
+# Self-contained (not sourced from a shared helper): applies a 300s stale-age
+# gate to .pending-turns.processing. background-memory-update is the PRIMARY
+# recovery owner: it re-merges a leftover .processing under its own lock on
+# every spawn. This is the COLD-PATH fallback for when the worker never
+# re-spawns (memory disabled mid-flight, host offline, etc.): a SessionStart
+# arriving >300s after the crash with no intervening Stop hook.
 # Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
 # so a concurrent session's fresh queue is never overwritten.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }

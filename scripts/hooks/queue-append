@@ -15,9 +15,9 @@
 #   Appends one JSONL row {role, content, ts} to <queue_file>. Creates the file
 #   with mode 0600 (umask 077) if absent. After appending, truncates from 200 to
 #   the newest 100 lines under a lock (dream_lock_acquire on "<queue_file>.lock",
-#   2s timeout) -- mirrors dream-capture's own overflow guard. The append itself
-#   is intentionally lock-free (accepted-class race shared with the pre-existing
-#   memory design -- see the design doc's "Append-vs-claim race" note).
+#   2s timeout). The append itself is intentionally lock-free (accepted-class
+#   race shared with the pre-existing memory design -- see the design doc's
+#   "Append-vs-claim race" note).
 #
 # queue_append_both <memory_queue> <dream_queue> <memory_enabled> <dream_enabled> <role> <content> <ts>
 #   Calls queue_append_row for each queue whose *_enabled flag is "true". Each
@@ -30,12 +30,11 @@
 #   SINGLE subprocess fork (AC-P1 -- exactly one config-read fork per capture
 #   hook, not two). Sets _QG_MEMORY and _QG_DECISIONS ("true"/"false") in the
 #   caller's scope. Missing config file -> both default "true". decisions is
-#   further forced "false" when the sentinel path exists (dual-signal gate,
-#   mirroring dream-capture/dream-evaluate's existing convention). The two
-#   values are newline-separated rather than using a control-character
-#   delimiter: they are always the literal strings "true"/"false", never
-#   arbitrary content, so a plain newline split is unambiguous and easy to
-#   review (no invisible bytes hiding in the source).
+#   further forced "false" when the sentinel path exists (dual-signal gate:
+#   config field AND sentinel). The two values are newline-separated rather
+#   than using a control-character delimiter: they are always the literal
+#   strings "true"/"false", never arbitrary content, so a plain newline split
+#   is unambiguous and easy to review (no invisible bytes hiding in the source).
 
 queue_append_row() {
   local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"

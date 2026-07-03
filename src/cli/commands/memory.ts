@@ -20,11 +20,10 @@ import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
  * Map of hook event type → filename marker for the memory hooks.
  * Three hooks total: Stop, SessionStart, PreCompact.
  *
- * UserPromptSubmit and SessionEnd are NOT memory.ts's concern anymore: queue-append
- * (formerly UserPromptSubmit/dream-dispatch, Stop/dream-capture) now lives in
- * capture.ts (capture-prompt, capture-turn — always-on, not feature-gated at the
- * hook-registration level), and SessionEnd (dream-evaluate) was removed entirely —
- * decisions detection is a SessionStart-spawned detached worker now (see dream.ts).
+ * UserPromptSubmit and SessionEnd are not memory.ts's concern: prompt/turn capture
+ * lives in capture.ts (capture-prompt, capture-turn — always-on, not feature-gated
+ * at the hook-registration level), and decisions detection is a SessionStart-spawned
+ * detached worker rather than a SessionEnd hook (see dream.ts).
  *
  * Stop-array ordering contract: memory-worker MUST be registered AFTER capture-turn
  * in the Stop hook array (append-before-spawn — memory-worker's throttle/spawn

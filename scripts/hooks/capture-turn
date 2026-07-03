@@ -4,13 +4,11 @@
 # Dual-append: writes the assistant turn to BOTH the memory queue and the
 # dream queue, each independently gated by its own feature flag (AC-F4). Runs
 # the decisions usage scanner (D29 grep-first) regardless of which queue is
-# gated on/off -- mirrors dream-capture's existing "memory-disabled projects
-# still run the usage scanner" behavior. Modeled on dream-capture (which stays
-# in place, unmodified, serving callers still on the pre-cutover pipeline) but
-# the 120s-throttle/nohup-spawn block does NOT carry over -- that now lives in
-# memory-worker, registered separately in the Stop hook array AFTER this hook
-# so append-before-spawn ordering is preserved by array position, not by
-# anything in this script. This hook never spawns a process (AC-F5).
+# gated on/off -- memory-disabled projects still run the usage scanner. The
+# 120s-throttle/nohup-spawn block lives in memory-worker, registered
+# separately in the Stop hook array AFTER this hook so append-before-spawn
+# ordering is preserved by array position, not by anything in this script.
+# This hook never spawns a process (AC-F5).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -33,7 +31,6 @@ dbg "INPUT length=${#INPUT}"
 
 # Resolve project directory and assistant response in one subprocess.
 # Uses ASCII SOH (0x01) as delimiter; split with parameter expansion (bash 3.2 safe).
-# Mirrors dream-capture's own CWD/ASSISTANT_MSG split.
 if [ "$_HAS_JQ" = "true" ]; then
   _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")') || { dbg "EXIT: jq failed"; exit 0; }
 else

@@ -2,10 +2,9 @@
 
 # Dream System: capture-prompt (UserPromptSubmit Hook)
 # Dual-append: writes the user turn to BOTH the memory queue and the dream
-# queue, each independently gated by its own feature flag (AC-F4). Modeled on
-# dream-dispatch (which stays in place, unmodified, serving callers still on
-# the pre-cutover pipeline) but delegates the actual JSONL-write logic to the
-# shared queue-append helper instead of duplicating it inline.
+# queue, each independently gated by its own feature flag (AC-F4). Delegates
+# the actual JSONL-write logic to the shared queue-append helper rather than
+# duplicating it inline.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
