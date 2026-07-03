@@ -61,19 +61,9 @@ export function getDreamPendingTurnsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.jsonl');
 }
 
-/** .devflow/dream/.pending-turns.processing — atomic claim during background-dream-update processing */
+/** .devflow/dream/.pending-turns.processing — atomic claim held by the Dream agent while processing */
 export function getDreamPendingTurnsProcessingPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.processing');
-}
-
-/** .devflow/dream/.last-dream-ok — touched by the agent on successful dream worker completion */
-export function getDreamLastOkPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', '.last-dream-ok');
-}
-
-/** .devflow/dream/.worker.lock — mkdir-based lock directory held by a live background-dream-update run */
-export function getDreamWorkerLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', '.worker.lock');
 }
 
 // ---------------------------------------------------------------------------
@@ -88,11 +78,6 @@ export function getDecisionsFilePath(projectRoot: string): string {
 /** .devflow/decisions/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'pitfalls.md');
-}
-
-/** .devflow/decisions/.disabled — sentinel that gates decisions sections */
-export function getDecisionsDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.disabled');
 }
 
 /** .devflow/decisions/decisions.json — project-level decisions config */

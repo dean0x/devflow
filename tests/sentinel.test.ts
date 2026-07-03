@@ -1,6 +1,7 @@
 /**
- * Tests for sentinel-based disable guards across memory and learning hooks,
- * the new session-start-context hook, CLI sentinel management, and decisions scanner.
+ * Tests for config-based disable guards across memory and decisions hooks,
+ * the session-start-context hook, hook registration utilities, and the
+ * decisions usage scanner.
  *
  * Test order follows TDD RED-GREEN-REFACTOR.
  */
@@ -9,7 +10,6 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { manageSentinel } from '../src/cli/utils/sentinel.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 
@@ -24,12 +24,6 @@ function mkMemoryDir(base: string): void {
   fs.mkdirSync(path.join(base, '.devflow', 'dream'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'decisions'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
-}
-
-function writeDisabledSentinel(sentinelPath: string): void {
-  const dir = path.dirname(sentinelPath);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(sentinelPath, '', 'utf-8');
 }
 
 function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): string {
@@ -331,29 +325,26 @@ describe('context hook registration', () => {
   });
 });
 
-// ─── Part A: dream hook registration (spawn-dream-worker) ──────────────────
+// ─── Part A: dream hook upgrade cleanup (spawn-dream-worker) ────────────────
 //
-// spawn-dream-worker is always-on (SessionStart), like session-start-context —
-// registered unconditionally by init, removed by uninstall. Follows the same
-// add/remove/has contract as context hook registration above.
+// The spawn-dream-worker SessionStart hook belonged to the retired detached
+// dream worker. removeDreamHook/hasDreamHook exist for upgrade cleanup only:
+// init and uninstall strip any stale entry left by a prior install.
 
-describe('dream hook registration', () => {
-  it('addDreamHook adds spawn-dream-worker to SessionStart', async () => {
-    const { addDreamHook } = await import('../src/cli/commands/init.js');
-    const result = addDreamHook('{}', '/home/user/.devflow');
-    const settings = JSON.parse(result);
-    expect(settings.hooks?.SessionStart).toBeDefined();
-    const hookPresent = settings.hooks.SessionStart.some(
-      (m: { hooks: { command: string }[] }) =>
-        m.hooks.some((h: { command: string }) => h.command.includes('spawn-dream-worker')),
-    );
-    expect(hookPresent).toBe(true);
+describe('dream hook upgrade cleanup', () => {
+  const SETTINGS_WITH_DREAM_HOOK = JSON.stringify({
+    hooks: {
+      SessionStart: [
+        { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory' }] },
+        { hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] },
+        { hooks: [{ type: 'command', command: '/path/run-hook spawn-dream-worker', timeout: 10 }] },
+      ],
+    },
   });
 
-  it('removeDreamHook removes spawn-dream-worker from settings', async () => {
-    const { addDreamHook, removeDreamHook } = await import('../src/cli/commands/init.js');
-    const withHook = addDreamHook('{}', '/home/user/.devflow');
-    const removed = removeDreamHook(withHook);
+  it('removeDreamHook removes a stale spawn-dream-worker entry from settings', async () => {
+    const { removeDreamHook } = await import('../src/cli/commands/init.js');
+    const removed = removeDreamHook(SETTINGS_WITH_DREAM_HOOK);
     const settings = JSON.parse(removed);
     const hookPresent = settings.hooks?.SessionStart?.some(
       (m: { hooks: { command: string }[] }) =>
@@ -362,91 +353,31 @@ describe('dream hook registration', () => {
     expect(hookPresent).toBe(false);
   });
 
-  it('hasDreamHook returns true when hook registered', async () => {
-    const { addDreamHook, hasDreamHook } = await import('../src/cli/commands/init.js');
-    const withHook = addDreamHook('{}', '/home/user/.devflow');
-    expect(hasDreamHook(withHook)).toBe(true);
-  });
-
-  it('hasDreamHook returns false when hook absent', async () => {
-    const { hasDreamHook } = await import('../src/cli/commands/init.js');
-    expect(hasDreamHook('{}')).toBe(false);
-  });
-
-  it('addDreamHook is idempotent', async () => {
-    const { addDreamHook } = await import('../src/cli/commands/init.js');
-    const first = addDreamHook('{}', '/home/user/.devflow');
-    const second = addDreamHook(first, '/home/user/.devflow');
-    expect(second).toBe(first);
-  });
-
   it('removeDreamHook preserves other SessionStart hooks (session-start-memory, session-start-context)', async () => {
-    const { addDreamHook, removeDreamHook } = await import('../src/cli/commands/init.js');
-    const input = JSON.stringify({
-      hooks: {
-        SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] },
-        ],
-      },
-    });
-    const withDream = addDreamHook(input, '/home/user/.devflow');
-    const removed = removeDreamHook(withDream);
+    const { removeDreamHook } = await import('../src/cli/commands/init.js');
+    const removed = removeDreamHook(SETTINGS_WITH_DREAM_HOOK);
     const settings = JSON.parse(removed);
     expect(settings.hooks?.SessionStart).toHaveLength(2);
     const commands = settings.hooks.SessionStart.map((m: { hooks: { command: string }[] }) => m.hooks[0].command);
     expect(commands.some((c: string) => c.includes('session-start-memory'))).toBe(true);
     expect(commands.some((c: string) => c.includes('session-start-context'))).toBe(true);
   });
-});
 
-// ─── Part E: manageSentinel utility ─────────────────────────────────────────
-
-describe('manageSentinel utility', () => {
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('creates sentinel file when disabled=false', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
-    await manageSentinel(sentinelPath, false);
-    expect(fs.existsSync(sentinelPath)).toBe(true);
+  it('removeDreamHook returns settings unchanged when no stale entry exists', async () => {
+    const { removeDreamHook } = await import('../src/cli/commands/init.js');
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] }],
+      },
+    });
+    expect(removeDreamHook(input)).toBe(input);
+    expect(removeDreamHook('{}')).toBe('{}');
   });
 
-  it('creates parent directories when they do not exist', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
-    await manageSentinel(sentinelPath, false);
-    expect(fs.existsSync(sentinelPath)).toBe(true);
-  });
-
-  it('removes sentinel file when enabled=true', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.learning-disabled');
-    writeDisabledSentinel(sentinelPath);
-    await manageSentinel(sentinelPath, true);
-    expect(fs.existsSync(sentinelPath)).toBe(false);
-  });
-
-  it('is idempotent when enabling with no sentinel present', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
-    // No sentinel exists — enabling again should not throw
-    await expect(manageSentinel(sentinelPath, true)).resolves.toBeUndefined();
-    expect(fs.existsSync(sentinelPath)).toBe(false);
-  });
-
-  it('is idempotent when disabling with sentinel already present', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
-    writeDisabledSentinel(sentinelPath);
-    await expect(manageSentinel(sentinelPath, false)).resolves.toBeUndefined();
-    expect(fs.existsSync(sentinelPath)).toBe(true);
-  });
-
-  it('disable then enable removes the sentinel', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
-    await manageSentinel(sentinelPath, false);
-    expect(fs.existsSync(sentinelPath)).toBe(true);
-    await manageSentinel(sentinelPath, true);
-    expect(fs.existsSync(sentinelPath)).toBe(false);
+  it('hasDreamHook detects a stale entry and its absence', async () => {
+    const { hasDreamHook } = await import('../src/cli/commands/init.js');
+    expect(hasDreamHook(SETTINGS_WITH_DREAM_HOOK)).toBe(true);
+    expect(hasDreamHook('{}')).toBe(false);
   });
 });
 

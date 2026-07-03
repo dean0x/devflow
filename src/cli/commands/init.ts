@@ -33,17 +33,16 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
-import { addDreamHook, removeDreamHook } from './dream.js';
+import { removeDreamHook } from './dream.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
-import { manageSentinel } from '../utils/sentinel.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
-import { getDecisionsDisabledSentinel, getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
+import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -51,7 +50,7 @@ export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, disc
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
-export { addDreamHook, removeDreamHook, hasDreamHook } from './dream.js';
+export { removeDreamHook, hasDreamHook } from './dream.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
@@ -1096,19 +1095,16 @@ export const initCommand = new Command('init')
       } catch { /* ignore */ }
     }
 
-    // Clean up legacy hook scripts and lib files (paths relative to hooksDir)
+    // Clean up legacy hook scripts and lib files left by prior installs
+    // (paths relative to hooksDir; copyDirectory is additive, so stale files
+    // must be actively swept on init or they linger after upgrade)
     const LEGACY_HOOK_FILES = [
       'ambient-prompt',
-      // Ambient simplification: session-start-classification removed (plan detection + commands rule)
       'session-start-classification',
-      // kb → knowledge rename: hook scripts replaced by session-end-knowledge-refresh / background-knowledge-refresh
       'session-end-kb-refresh',
       'background-kb-refresh',
-      // kb → knowledge rename: CJS module (now removed — knowledge pipeline is write-through)
       'lib/feature-kb.cjs',
-      // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
       'background-learning',
-      // Pre-sidecar hooks replaced by the dream hooks (dream-capture/dispatch/evaluate)
       'prompt-capture-memory',
       'stop-update-memory',
       'stop-update-learning',
@@ -1116,13 +1112,8 @@ export const initCommand = new Command('init')
       'session-end-decisions',
       'session-end-knowledge-refresh',
       'background-knowledge-refresh',
-      // Learning pipeline removed: eval-learning/eval-reinforce no longer sourced by dream-evaluate
       'eval-learning',
       'eval-reinforce',
-      // Dream system simplification: marker-pipeline scripts replaced by capture-prompt/
-      // capture-turn/capture-question (queue-append) + spawn-dream-worker/background-dream-update
-      // (detached worker) — see capture.ts/dream.ts. copyDirectory is additive, so these must be
-      // actively swept on init or they linger in ~/.devflow/scripts/hooks/ after upgrade.
       'dream-capture',
       'dream-dispatch',
       'dream-evaluate',
@@ -1133,6 +1124,10 @@ export const initCommand = new Command('init')
       'dream-recover',
       'lib/transcript-filter.cjs',
       'lib/dream-ops.cjs',
+      'spawn-dream-worker',
+      'background-dream-update',
+      'dream-procedure.md',
+      'lib/staleness.cjs',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1181,14 +1176,10 @@ export const initCommand = new Command('init')
       const cleanedForContext = removeContextHook(content);
       content = addContextHook(cleanedForContext, devflowDir);
 
-      // Dream hook — always-on (SessionStart, like the context hook above), remove-then-add
-      // for upgrade safety. spawn-dream-worker internally gates on the decisions dual-signal
-      // (dream/config.json + .devflow/decisions/.disabled) before spawning anything — no
-      // CLI-level enable/disable toggle here. MUST run after addContextHook above so
-      // spawn-dream-worker lands last in the SessionStart array (AC-C2 ordering:
-      // session-start-memory, session-start-context, spawn-dream-worker).
-      const cleanedForDream = removeDreamHook(content);
-      content = addDreamHook(cleanedForDream, devflowDir);
+      // Dream hook upgrade cleanup — the spawn-dream-worker SessionStart hook is
+      // retired (the session-start-context directive spawns the Dream agent);
+      // strip any stale entry left in settings.json by a prior install.
+      content = removeDreamHook(content);
 
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
@@ -1218,12 +1209,6 @@ export const initCommand = new Command('init')
         }
       }
     } catch { /* settings.json may not exist yet */ }
-
-
-    // Manage runtime-disable sentinel for decisions gating.
-    if (gitRoot) {
-      await manageSentinel(getDecisionsDisabledSentinel(gitRoot), decisionsEnabled);
-    }
 
     // Write dream config.json to manage per-feature enable/disable at runtime.
     // Uses writeConfig (full atomic write) rather than three updateFeature calls because

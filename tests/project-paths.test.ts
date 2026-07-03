@@ -23,11 +23,8 @@ import {
   getDreamConfigPath,
   getDreamPendingTurnsPath,
   getDreamPendingTurnsProcessingPath,
-  getDreamLastOkPath,
-  getDreamWorkerLockDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
@@ -95,14 +92,6 @@ describe('project-paths TypeScript module', () => {
     it('getDreamPendingTurnsProcessingPath returns .devflow/dream/.pending-turns.processing', () => {
       expect(getDreamPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.processing');
     });
-
-    it('getDreamLastOkPath returns .devflow/dream/.last-dream-ok', () => {
-      expect(getDreamLastOkPath(ROOT)).toBe('/some/project/.devflow/dream/.last-dream-ok');
-    });
-
-    it('getDreamWorkerLockDir returns .devflow/dream/.worker.lock', () => {
-      expect(getDreamWorkerLockDir(ROOT)).toBe('/some/project/.devflow/dream/.worker.lock');
-    });
   });
 
   describe('decisions files', () => {
@@ -112,10 +101,6 @@ describe('project-paths TypeScript module', () => {
 
     it('getPitfallsFilePath returns .devflow/decisions/pitfalls.md', () => {
       expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/pitfalls.md');
-    });
-
-    it('getDecisionsDisabledSentinel returns .devflow/decisions/.disabled', () => {
-      expect(getDecisionsDisabledSentinel(ROOT)).toBe('/some/project/.devflow/decisions/.disabled');
     });
 
     it('getDecisionsConfigPath returns .devflow/decisions/decisions.json', () => {
@@ -248,11 +233,8 @@ describe('CJS project-paths parity', () => {
     { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
     { name: 'getDreamPendingTurnsPath', ts: getDreamPendingTurnsPath, cjs: cjsPaths.getDreamPendingTurnsPath },
     { name: 'getDreamPendingTurnsProcessingPath', ts: getDreamPendingTurnsProcessingPath, cjs: cjsPaths.getDreamPendingTurnsProcessingPath },
-    { name: 'getDreamLastOkPath', ts: getDreamLastOkPath, cjs: cjsPaths.getDreamLastOkPath },
-    { name: 'getDreamWorkerLockDir', ts: getDreamWorkerLockDir, cjs: cjsPaths.getDreamWorkerLockDir },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
-    { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },
     { name: 'getDecisionsConfigPath', ts: getDecisionsConfigPath, cjs: cjsPaths.getDecisionsConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },

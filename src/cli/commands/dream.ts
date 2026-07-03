@@ -1,52 +1,14 @@
-import * as path from 'path';
 import type { Settings, HookMatcher } from '../utils/hooks.js';
 
-// ─── Dream worker hook utilities ───────────────────────────────────────────
+// ─── Dream worker hook cleanup ──────────────────────────────────────────────
 //
-// spawn-dream-worker (SessionStart) is always-on, like session-start-context
-// (context.ts) and the capture bundle (capture.ts) — registered unconditionally
-// by init, removed by uninstall. There is no per-feature toggle at the hook
-// registration level: the hook internally gates on the decisions dual-signal
-// (dream/config.json's `decisions` field AND the `.devflow/decisions/.disabled`
-// sentinel) before deciding whether to spawn background-dream-update. Follows
-// the context.ts add/remove/has pattern.
+// The spawn-dream-worker SessionStart hook belonged to the retired detached
+// dream worker. Decisions processing runs as the directive-spawned Dream agent
+// (session-start-context Section 2), which needs no hook registration of its
+// own. remove/has exist for upgrade cleanup: init and uninstall strip any
+// stale entry left in settings.json by a prior install.
 
 const SPAWN_DREAM_WORKER_MARKER = 'spawn-dream-worker';
-
-/**
- * Add the spawn-dream-worker hook to SessionStart in settings JSON.
- * Idempotent — returns unchanged JSON if hook already present.
- */
-export function addDreamHook(settingsJson: string, devflowDir: string): string {
-  if (hasDreamHook(settingsJson)) {
-    return settingsJson;
-  }
-
-  const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${SPAWN_DREAM_WORKER_MARKER}`;
-  const newEntry: HookMatcher = {
-    hooks: [
-      {
-        type: 'command',
-        command: hookCommand,
-        timeout: 10,
-      },
-    ],
-  };
-
-  if (!settings.hooks.SessionStart) {
-    settings.hooks.SessionStart = [];
-  }
-
-  settings.hooks.SessionStart.push(newEntry);
-
-  return JSON.stringify(settings, null, 2) + '\n';
-}
 
 /**
  * Remove the spawn-dream-worker hook from settings JSON.
@@ -62,7 +24,7 @@ export function removeDreamHook(settingsJson: string): string {
 
   const before = settings.hooks.SessionStart.length;
   settings.hooks.SessionStart = settings.hooks.SessionStart.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(SPAWN_DREAM_WORKER_MARKER)),
+    (matcher: HookMatcher) => !matcher.hooks.some((h) => h.command.includes(SPAWN_DREAM_WORKER_MARKER)),
   );
 
   if (settings.hooks.SessionStart.length === before) {

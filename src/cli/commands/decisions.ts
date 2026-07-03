@@ -13,11 +13,8 @@ import {
   getDecisionsLockDir,
   getDecisionsNotificationsPath,
   getDecisionsBatchIdsPath,
-  getDecisionsDisabledSentinel,
   getDreamPendingTurnsPath,
   getDreamPendingTurnsProcessingPath,
-  getDreamLastOkPath,
-  getDreamWorkerLockDir,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
@@ -69,8 +66,8 @@ export const decisionsCommand = new Command('decisions')
     if (!hasFlag) {
       p.intro(color.bgCyan(color.black(' Decisions Learning ')));
       p.note(
-        `${color.cyan('devflow decisions --enable')}      Register decisions hook\n` +
-        `${color.cyan('devflow decisions --disable')}     Remove decisions hook\n` +
+        `${color.cyan('devflow decisions --enable')}      Enable decisions detection\n` +
+        `${color.cyan('devflow decisions --disable')}     Disable decisions detection (drains queue)\n` +
         `${color.cyan('devflow decisions --status')}      Show decisions status\n` +
         `${color.cyan('devflow decisions --list')}        Show all observations\n` +
         `${color.cyan('devflow decisions --configure')}   Configuration wizard\n` +
@@ -229,16 +226,6 @@ export const decisionsCommand = new Command('decisions')
         return;
       }
 
-      // Never touch a project where a live background-dream-update worker holds
-      // .devflow/dream/.worker.lock — it is that worker's sole concurrency guard.
-      // This is a plain existence check, not a lock acquisition: we skip entirely
-      // rather than racing the worker.
-      try {
-        await fs.access(getDreamWorkerLockDir(gitRoot));
-        p.log.error('A background dream worker is currently running. Try again in a moment.');
-        return;
-      } catch { /* no live worker — safe to proceed */ }
-
       const lockDir = getDecisionsLockDir(gitRoot);
 
       // Acquire lock to prevent conflict with a concurrent `devflow decisions` invocation.
@@ -258,7 +245,6 @@ export const decisionsCommand = new Command('decisions')
           getDecisionsConfigPath(gitRoot),
           getDreamPendingTurnsPath(gitRoot),
           getDreamPendingTurnsProcessingPath(gitRoot),
-          getDreamLastOkPath(gitRoot),
         ];
 
         if (process.stdin.isTTY) {
@@ -280,14 +266,13 @@ export const decisionsCommand = new Command('decisions')
           } catch { /* may not exist */ }
         }
 
-        // Remove decisions sentinel directory if present (may contain .disabled or other files).
+        // Remove the decisions directory if present (rendered files, ledger, config).
         try {
           await fs.rm(getDecisionsDir(gitRoot), { recursive: true, force: true });
         } catch { /* best effort */ }
 
-        // Clean legacy dream marker-pipeline stamps (pre-dream-system-simplification
-        // installs — config.json and the new .pending-turns.jsonl/.last-dream-ok are
-        // handled above/never touched here).
+        // Clean legacy dream marker-pipeline stamps from old installs
+        // (config.json and the queue files are handled above/never touched here).
         const dreamDir = getDreamDir(gitRoot);
         for (const f of ['.decisions-runs-today', '.curation-last', '.processor-spawned-at']) {
           try { await fs.unlink(path.join(dreamDir, f)); } catch { /* may not exist */ }
@@ -320,14 +305,6 @@ export const decisionsCommand = new Command('decisions')
         return;
       }
 
-      // Never touch a project where a live background-dream-update worker holds
-      // .devflow/dream/.worker.lock — it is that worker's sole concurrency guard.
-      try {
-        await fs.access(getDreamWorkerLockDir(gitRoot));
-        p.log.error('A background dream worker is currently running. Try again in a moment.');
-        return;
-      } catch { /* no live worker — safe to proceed */ }
-
       const decisionsLogPath = getDecisionsLogPath(gitRoot);
       try {
         await fs.access(decisionsLogPath);
@@ -349,13 +326,13 @@ export const decisionsCommand = new Command('decisions')
 
       await fs.writeFile(decisionsLogPath, '', 'utf-8');
 
-      // Drain the dream (decisions-detection) queue and stamps so stale turns don't
-      // process on the next spawn — mirrors memory.ts's drain-on-disable behavior
-      // for the sibling memory queue.
+      // Drain the dream (decisions-detection) queue so stale turns don't process
+      // on the next session — mirrors memory.ts's drain-on-disable behavior for
+      // the sibling memory queue. A mid-run Dream agent whose claimed batch
+      // vanishes aborts without changes — the desired outcome of clearing.
       await Promise.all([
         fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
         fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-        fs.unlink(getDreamLastOkPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
       ]);
 
       p.log.success('Decisions log cleared.');
@@ -367,10 +344,6 @@ export const decisionsCommand = new Command('decisions')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'decisions', true);
-        // Remove decisions/.disabled sentinel if present (kept for session-start-context gating)
-        try {
-          await fs.unlink(getDecisionsDisabledSentinel(gitRoot));
-        } catch { /* may not exist */ }
         await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
         p.log.success('Decisions learning enabled — configuration updated');
         p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
@@ -384,25 +357,15 @@ export const decisionsCommand = new Command('decisions')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'decisions', false);
-        // Create decisions/.disabled sentinel (gates session-start-context decisions section)
-        const decisionsDir = getDecisionsDir(gitRoot);
-        await fs.mkdir(decisionsDir, { recursive: true });
-        await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
 
         // Drain the dream (decisions-detection) queue so stale turns don't process
         // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
-        // sibling memory queue. Skipped entirely while a live background-dream-update
-        // worker holds .devflow/dream/.worker.lock — never delete a live worker's
-        // inputs (same rule as the existing --clear/--reset code above).
-        try {
-          await fs.access(getDreamWorkerLockDir(gitRoot));
-          p.log.warn('A background dream worker is currently running — queue drain skipped.');
-        } catch {
-          await Promise.all([
-            fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-            fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-          ]);
-        }
+        // sibling memory queue. Unconditional: a mid-run Dream agent whose claimed
+        // batch vanishes aborts without changes — the desired outcome of disabling.
+        await Promise.all([
+          fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+        ]);
 
         await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
         p.log.success('Decisions learning disabled — configuration updated');

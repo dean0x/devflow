@@ -51,16 +51,12 @@ import {
   loadAndCountObservations,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
-import * as p from '@clack/prompts';
 import { getGitRoot } from '../../src/cli/utils/git.js';
 import { decisionsCommand } from '../../src/cli/commands/decisions.js';
 import {
   getDreamPendingTurnsPath,
   getDreamPendingTurnsProcessingPath,
-  getDreamWorkerLockDir,
-  getDreamLastOkPath,
   getDreamConfigPath,
-  getDecisionsDisabledSentinel,
   getPendingTurnsPath,
 } from '../../src/cli/utils/project-paths.js';
 
@@ -316,14 +312,13 @@ describe('decisions --reset target files', () => {
     }
   });
 
-  it('reset also targets the dream (decisions-detection) queue and success stamp (.devflow/dream/)', () => {
+  it('reset also targets the dream (decisions-detection) queue (.devflow/dream/)', () => {
     // Not decision-prefixed by name — these live in .devflow/dream/, the queue the
-    // detached background-dream-update worker claims from. Reset must drain them
-    // too so a re-enable doesn't process stale pre-reset turns.
+    // Dream agent claims from. Reset must drain them too so a re-enable doesn't
+    // process stale pre-reset turns.
     const dreamQueueFiles = [
       '.pending-turns.jsonl',
       '.pending-turns.processing',
-      '.last-dream-ok',
     ];
 
     const preservedDreamFiles = [
@@ -387,8 +382,8 @@ describe('decisions --reset dream state cleanup', () => {
 // ---------------------------------------------------------------------------
 // --disable drains the dream (decisions-detection) pending-turns queue —
 // mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
-// Skipped entirely while a live background-dream-update worker holds
-// .devflow/dream/.worker.lock (same rule as the existing --clear/--reset code).
+// Unconditional: a mid-run Dream agent whose claimed batch vanishes aborts
+// without changes, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
 describe('decisions --disable drains the dream pending-turns queue', () => {
@@ -414,9 +409,8 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     fs.writeFileSync(getDreamPendingTurnsProcessingPath(root), '{"role":"user"}\n');
   }
 
-  it('deletes queue + processing files and flips config/sentinel when no worker lock is held', async () => {
+  it('deletes queue + processing files and flips config (memory queue untouched)', async () => {
     writeDreamQueueFiles(tmpDir);
-    fs.writeFileSync(getDreamLastOkPath(tmpDir), 'ok');
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
 
@@ -427,29 +421,30 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
     expect(config.decisions).toBe(false);
-    expect(fs.existsSync(getDecisionsDisabledSentinel(tmpDir))).toBe(true);
 
-    // Never touched by decisions --disable
-    expect(fs.existsSync(getDreamLastOkPath(tmpDir))).toBe(true);
+    // The sibling memory queue is never touched by decisions --disable
     expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
   });
 
-  it('skips the drain but still flips config/sentinel when the dream worker lock is held', async () => {
+  it('does not create a .disabled sentinel (gate is config-only)', async () => {
     writeDreamQueueFiles(tmpDir);
-    fs.mkdirSync(getDreamWorkerLockDir(tmpDir), { recursive: true });
 
     await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
 
-    // Never deleted while the worker lock is held
-    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(true);
-    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'decisions', '.disabled'))).toBe(false);
+  });
 
-    // Gate still flips
+  it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
+    writeDreamQueueFiles(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream', '.worker.lock'), { recursive: true });
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+
     const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
     expect(config.decisions).toBe(false);
-    expect(fs.existsSync(getDecisionsDisabledSentinel(tmpDir))).toBe(true);
-
-    expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining('background dream worker'));
   });
 
   it('does not delete anything on --enable', async () => {
