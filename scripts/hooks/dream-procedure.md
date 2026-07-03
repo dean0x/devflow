@@ -101,8 +101,8 @@ the ledger is within the past 7 days. The window key is the ledger row's `date` 
 Read active entry counts:
 
 ```bash
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active "decision"
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active "pitfall"
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active "$(pwd)" "decision"
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active "$(pwd)" "pitfall"
 ```
 
 Cite counts come from `.decisions-usage.json` directly (no scan step here —

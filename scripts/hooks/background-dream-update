@@ -246,6 +246,18 @@ if [ "$STALE_THRESHOLD" -le "$_WATCHDOG_TOTAL" ]; then
   exit 1
 fi
 
+# --- Establish cwd == project root for the agent session ---
+# dream-procedure.md drives the claude child with project-root-relative paths
+# (.devflow/decisions/...) and "$(pwd)" (staleness.cjs, render-decisions.cjs,
+# count-active). This worker can be spawned with a CWD deep inside the project
+# (see resolve-project-root — e.g. a .devflow/-nested subdir), so process cwd is
+# NOT guaranteed to equal the project root. cd there now so the agent's relative
+# paths and $(pwd) resolve under $PROJECT_ROOT rather than a subdir (which would
+# render decisions into a stray nested .devflow/ or the wrong location). Every
+# worker-side path below is absolute, so this cd is safe for the rest of the script.
+# On failure we leave .pending-turns.processing for the next spawn to recover.
+cd "$PROJECT_ROOT" || { log "FAIL: cannot cd to project root '$PROJECT_ROOT' — leaving .processing for recovery"; exit 0; }
+
 # --- Run claude -p with watchdog ---
 # D37: Enable job control (set -m) only around the spawn so bash gives claude its OWN
 # process group (PGID == CLAUDE_PID) even in this non-interactive script — see
