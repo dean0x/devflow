@@ -91,7 +91,12 @@ export function addCaptureHooks(settingsJson: string, devflowDir: string): strin
  * Preserves non-capture hooks (e.g. ambient preamble on UserPromptSubmit, memory-worker on Stop).
  */
 export function removeCaptureHooks(input: string | Settings): string {
-  const settingsJson = typeof input === 'string' ? input : JSON.stringify(input);
+  // No-change return must match the formatted style of the mutating return
+  // below (2-space indent + trailing newline) so object callers can't
+  // observe a different representation depending on whether a change
+  // happened. String input is returned byte-identical (no re-formatting).
+  const settingsJson =
+    typeof input === 'string' ? input : JSON.stringify(input, null, 2) + '\n';
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : structuredClone(input);
 
   if (!settings.hooks) {

@@ -90,6 +90,10 @@ export default async function decisionsCounts(
   if (decisions > 0) parts.push(`${decisions} decision${decisions !== 1 ? 's' : ''}`);
   if (pitfalls > 0) parts.push(`${pitfalls} pitfall${pitfalls !== 1 ? 's' : ''}`);
 
+  // Intentionally one dimmed clause (unlike config-counts, which dims each
+  // part and joins with a middot for a list of independent facts): "Learning:
+  // N decisions, M pitfalls" reads as a single sentence, so the whole string
+  // is dimmed once and parts are comma-joined rather than middot-separated.
   const raw = `Learning: ${parts.join(', ')}`;
   return { text: dim(raw), raw };
 }

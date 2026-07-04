@@ -4,6 +4,7 @@
 // exclusion, and graceful fallback when the ledger is missing or unreadable.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -12,6 +13,12 @@ import decisionsCounts, {
 } from '../src/cli/hud/components/decisions-counts.js';
 import { stripAnsi } from '../src/cli/hud/colors.js';
 import type { DecisionsCountsData, GatherContext } from '../src/cli/hud/types.js';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
+const require = createRequire(import.meta.url);
+const { isActive: cjsIsActive } = require(
+  path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs'),
+) as { isActive: (row: Record<string, unknown>) => boolean };
 
 // Helper: build a minimal ledger JSONL row with the given fields
 function makeRow(type: string, extra: Record<string, unknown> = {}): string {
@@ -156,4 +163,53 @@ describe('decisionsCounts component', () => {
     expect(result).not.toBeNull();
     expect(stripAnsi(result!.text)).toBe(result!.raw);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Contract test (D309): the HUD's active-row semantics must mirror
+// render-decisions.cjs exactly, or the counts shown by the HUD would drift
+// from the entries visible in decisions.md/pitfalls.md. This pins the
+// mirror by comparing gatherDecisionsCounts' active/inactive determination
+// (via count presence) against the cjs renderer's own isActive() for the
+// full status matrix, rather than duplicating INACTIVE_STATUSES here.
+// ---------------------------------------------------------------------------
+describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
+  let tmpDir: string;
+  let ledgerPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-decisions-mirror-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const statusMatrix: Array<string | undefined> = [
+    undefined,
+    'Accepted',
+    'Active',
+    'Deprecated',
+    'Superseded',
+    'Retired',
+    'SomeFutureStatus',
+  ];
+
+  it.each(statusMatrix)(
+    'agrees with render-decisions.cjs isActive() for decisions_status=%s',
+    (status) => {
+      const row: Record<string, unknown> = { type: 'decision', anchor_id: 'ADR-001' };
+      if (status !== undefined) row.decisions_status = status;
+
+      fs.writeFileSync(ledgerPath, JSON.stringify(row) + '\n');
+
+      const expectedActive = cjsIsActive(row);
+      const counts = gatherDecisionsCounts(tmpDir);
+      const actualActive = counts !== null && counts.decisions === 1;
+
+      expect(actualActive).toBe(expectedActive);
+    },
+  );
 });

@@ -210,6 +210,17 @@ describe('removeCaptureHooks', () => {
     expect(settings.hooks.Stop).toHaveLength(1);
   });
 
+  it('formats the no-change return identically for object input regardless of whether a change occurred', () => {
+    // No capture hooks present, so this is a no-op — but the object-input
+    // return must still be pretty-printed with a trailing newline, matching
+    // the format used when a change does occur (see the mutating-path test
+    // above, which parses via JSON.parse and would mask a formatting drift).
+    const settings = { hooks: { Stop: [{ hooks: [{ type: 'command' as const, command: '/path/other-hook', timeout: 10 }] }] } };
+    const result = removeCaptureHooks(settings);
+
+    expect(result).toBe(JSON.stringify(settings, null, 2) + '\n');
+  });
+
   it('toggle cycle: enable → disable → enable produces clean state', () => {
     const enabled = addCaptureHooks('{}', '/home/user/.devflow');
     const disabled = removeCaptureHooks(enabled);
