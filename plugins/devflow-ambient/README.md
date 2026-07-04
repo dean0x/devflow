@@ -1,61 +1,51 @@
 # devflow-ambient
 
-Ambient mode — keyword dispatch and plan auto-detection. A `UserPromptSubmit` hook detects first-word keywords (`implement`, `explore`, `research`, `debug`, `plan`) and invokes the matching workflow skill, or detects structured implementation plans (`## Goal` / `## Steps` / `## Files`) and invokes `devflow:implement` automatically.
+Ambient mode — orchestrator charter + plan handoff. Two presence-gated hooks make every git-repo session an orchestrator session: a `~200-token` charter injected at session start and a per-prompt reminder that steers the main model to delegate work to agents and devflow workflows. Plan-mode handoffs (`Implement the following plan:`) auto-run `devflow:implement`.
 
 ## Activation
 
 ```bash
-devflow ambient --enable    # Register ambient mode hook
-devflow ambient --disable   # Remove hook
+devflow ambient --enable    # Register orchestrator hooks
+devflow ambient --disable   # Remove hooks
 devflow ambient --status    # Check if enabled
 ```
 
 ## How It Works
 
-The `preamble` UserPromptSubmit hook uses two coexisting detection paths. Both are controlled by the same `devflow ambient` toggle.
+Ambient mode registers two hooks, both controlled by the same toggle. Both are silent outside git repos.
 
-### Keyword detection
+### Session charter (SessionStart)
 
-When a prompt's first word (case-insensitive) is one of `implement`, `explore`, `research`, `debug`, or `plan`:
+`session-start-orchestrator` injects the orchestrator charter as `additionalContext` at every session start (startup, `/clear`, resume, compact). The charter:
 
-- The prompt must have at least one word after the keyword (bare `plan` alone does nothing).
-- The prompt must not end in `?` (questions are suppressed — "explore A or B?" produces no output).
-- The model is told to briefly announce the invoked workflow, then invoke `devflow:<keyword>` via the Skill tool, passing the text after the keyword as the task input.
+- Establishes the main session as a pure orchestrator
+- Grades sub-agents by complexity: haiku (mechanical), sonnet (defined execution), opus (analysis/design/research)
+- Lists devflow workflows for real-scale work: `devflow:implement`, `devflow:plan`, `devflow:research`, etc.
+- Carries a plan-handoff fallback bullet in case `UserPromptSubmit` does not fire for the auto-injected new-session prompt
 
-**Example triggers:**
+### Per-prompt dispatch (UserPromptSubmit)
+
+`preamble` runs on every prompt with three behaviors:
+
+1. **Plan-handoff fast-path** — if prompt begins `Implement the following plan:` (Claude Code's native plan-mode handoff prefix), injects a directive to immediately invoke `devflow:implement` with the full plan.
+2. **Slash skip** — slash commands (`/...`) receive no output.
+3. **Orchestrator reminder** — all other prompts get a 2-line reminder to coordinate rather than produce.
+
+**Plan handoff example:**
 
 ```
-implement the auth module
-Explore the payments flow
-RESEARCH caching options
-debug: why the tests fail
-plan a new feature
+Implement the following plan:
+
+## Add rate limiting
+
+1. Add middleware
+2. Configure limits
+3. Write tests
 ```
 
-### Plan detection
+## Upgrade Note
 
-When a prompt contains all three of `## Goal`, `## Steps`, and `## Files` (and the keyword path did not fire), the hook invokes `devflow:implement` to execute the plan.
-
-```markdown
-## Goal
-Description of what to implement.
-
-## Steps
-1. First step
-2. Second step
-
-## Files
-- path/to/file.ts
-- path/to/test.ts
-```
-
-### Command coverage
-
-Auto-triggered by ambient mode: `implement`, `explore`, `research`, `debug`, `plan`.
-
-Remaining commands require explicit slash commands: `/code-review`, `/resolve`, `/release`, `/self-review`, `/bug-analysis`.
-
-Normal prompts produce zero overhead — the hook exits without output.
+After upgrading, run `devflow init` to register the new `session-start-orchestrator` hook. Existing installs with only the `preamble` hook are in partial state — `devflow ambient --enable` repairs it.
 
 ## Skills
 

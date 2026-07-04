@@ -183,7 +183,7 @@ export const initCommand = new Command('init')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
-  .option('--ambient', 'Enable ambient mode (keyword + plan auto-detection)')
+  .option('--ambient', 'Enable ambient mode (orchestrator charter + plan handoff)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -530,18 +530,17 @@ export const initCommand = new Command('init')
         ambientEnabled = options.ambient;
       } else {
         p.note(
-          'Detects workflow intent in your prompt and runs it automatically.\n' +
-          'Start a prompt with implement, explore, research, debug, or plan\n' +
-          '(or paste a structured plan) and the matching workflow runs —\n' +
-          'no slash command needed.\n\n' +
-          'Zero overhead for normal prompts.',
+          'Puts every session (git repos only) in orchestrator posture:\n' +
+          'a ~200-token charter at session start plus a per-prompt reminder\n' +
+          'steer the main model to delegate work to agents and devflow workflows\n' +
+          'instead of doing it mainline. Plan-mode handoffs auto-run devflow:implement.',
           'Ambient Mode',
         );
         const ambientChoice = await p.select({
           message: 'Enable ambient mode?',
           options: [
             { value: true, label: 'Yes', hint: 'Recommended' },
-            { value: false, label: 'No', hint: 'Manual skill loading via slash commands' },
+            { value: false, label: 'No', hint: 'Plain sessions — no charter, no reminder' },
           ],
         });
         if (p.isCancel(ambientChoice)) {

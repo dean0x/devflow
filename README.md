@@ -135,7 +135,7 @@ For deep dives: [Working Memory](docs/working-memory.md) | [CLI Reference](docs/
 npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit list                    # List available plugins
-npx devflow-kit ambient --enable        # Toggle ambient mode
+npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
 npx devflow-kit decisions --enable      # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit security --status       # Show / manage the security deny list

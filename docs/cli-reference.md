@@ -18,7 +18,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
-| `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
+| `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--decisions` / `--no-decisions` | Enable/disable decisions agent (default: on) |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
@@ -55,7 +55,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-release` | Core | Adaptive release with learned configuration |
 | `devflow-self-review` | Core | Simplifier + Scrutinizer |
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
-| `devflow-ambient` | Core | Ambient mode (plan auto-detection) |
+| `devflow-ambient` | Core | Ambient mode (orchestrator charter + plan handoff) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
 | `devflow-audit-claude` | Optional | CLAUDE.md file audit |
 | `devflow-typescript` | Language | TypeScript patterns |
@@ -70,9 +70,9 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 ## Ambient Mode
 
 ```bash
-npx devflow-kit ambient --enable     # Enable always-on ambient mode
+npx devflow-kit ambient --enable     # Enable ambient mode (orchestrator charter + plan handoff)
 npx devflow-kit ambient --disable    # Disable ambient mode
-npx devflow-kit ambient --status     # Show current status
+npx devflow-kit ambient --status     # Show current status (partial state detected and reported)
 ```
 
 ## Decisions

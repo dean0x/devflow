@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Ambient mode — orchestrator charter + plan handoff** (BREAKING): Two-hook orchestrator system replaces both old ambient detection paths (first-word keyword dispatch and 3-marker plan detection). A `SessionStart` hook (`session-start-orchestrator`) injects a static ~200-token charter establishing the main model as a pure orchestrator, grading sub-agents by complexity. A `UserPromptSubmit` hook (`preamble`) handles three cases: prompts beginning `Implement the following plan:` auto-run `devflow:implement`; slash commands are silenced; all other prompts get a 2-line orchestrator reminder. Both hooks are silent outside git repos. A sourced `git-marker` helper provides a pure-bash bounded upward walk (64 levels, no subprocess). **Upgrade**: run `devflow init` to register the new `session-start-orchestrator` hook.
 - **`agent-teams` Claude Code flag**: bespoke Agent Teams machinery removed; teammate-mode enablement now via the optional `agent-teams` flag (`devflow flags --enable agent-teams`), which sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. The flag defaults to OFF.
 
 ### Removed

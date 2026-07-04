@@ -57,8 +57,11 @@ devflow/
 │       ├── dream-lock               # Shared helper: mkdir-based locking
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
 │       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + the Dream agent spawn directive when the queue is pending
+│       ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
+│       ├── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── preamble                 # UserPromptSubmit hook: ambient keyword + plan auto-detection (zero overhead for normal prompts)
+│       ├── preamble                 # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
+│       ├── git-marker               # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
 │       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
 │       ├── hook-bootstrap           # Shared helper: sources debug-trace + common setup
 │       ├── hook-log-init            # Shared helper: log initialization
@@ -190,7 +193,8 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the dream queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- DREAM MAINTENANCE ---` directive instructing the main model to spawn the background Dream agent with the resolved model (project → global `decisions.json` → `opus` default) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
-| `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
+| `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the orchestrator charter as `additionalContext`; silent outside git repos |
+| `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`), slash skip, and orchestrator reminder; silent outside git repos |
 
 **Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which rewrites `WORKING-MEMORY.md` directly via `claude -p`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR and, when the dream queue has pending turns, the Dream maintenance directive — the main model spawns the Dream agent in the background, which claims the queue atomically, performs decision/pitfall detection and curation directly against the data files, deletes the claimed batch as its final act, and reports a 1–3 line summary.
 

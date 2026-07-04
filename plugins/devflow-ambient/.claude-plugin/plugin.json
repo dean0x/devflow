@@ -1,6 +1,6 @@
 {
   "name": "devflow-ambient",
-  "description": "Plan auto-detection",
+  "description": "Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff",
   "author": {
     "name": "Dean0x"
   },
@@ -10,8 +10,9 @@
   "license": "MIT",
   "keywords": [
     "ambient",
-    "plan",
-    "detection"
+    "orchestrator",
+    "delegation",
+    "plan-handoff"
   ],
   "agents": [
     "coder",
