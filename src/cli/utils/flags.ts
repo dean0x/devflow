@@ -66,6 +66,30 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'setting', key: 'showClearContextOnPlanAccept', value: true },
     defaultEnabled: true,
   },
+  {
+    id: 'disable-bundled-skills',
+    label: 'Disable bundled skills',
+    description: "Remove Claude Code's built-in skills and workflows (devflow provides its own)",
+    hint: 'Cleaner skill list',
+    target: { type: 'setting', key: 'disableBundledSkills', value: true },
+    defaultEnabled: true,
+  },
+  {
+    id: 'pin-sonnet-4-6',
+    label: 'Pin Sonnet to 4.6',
+    description: 'Pin the default Sonnet model to claude-sonnet-4-6',
+    hint: 'Stable, deterministic Sonnet version',
+    target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL', value: 'claude-sonnet-4-6' },
+    defaultEnabled: true,
+  },
+  {
+    id: 'disable-mouse-clicks',
+    label: 'Disable mouse clicks',
+    description: 'Disable mouse click/drag/hover in fullscreen (keeps wheel scroll)',
+    hint: 'Prevents accidental clicks',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS', value: '1' },
+    defaultEnabled: true,
+  },
   // === Optional (default OFF) — skip these if you're unsure ===
   {
     id: 'brief',
