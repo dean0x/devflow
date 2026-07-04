@@ -197,6 +197,42 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
     expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
+
+  it('sweeps stale SessionStart classification hook from prior installs on --enable', async () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+        ],
+      },
+    });
+    const result = await addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Classification removed, orchestrator added, preamble added
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).not.toContain('session-start-classification');
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+  });
+
+  it('sweeps stale classification hook and returns changed JSON even when both current hooks already present', async () => {
+    // Both current hooks present but a stale classification hook is also there.
+    // addAmbientHook must sweep the stale hook and return new JSON (not take the early-return path).
+    const withBoth = JSON.parse(await addAmbientHook('{}', '/home/user/.devflow'));
+    withBoth.hooks.SessionStart.push({
+      hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }],
+    });
+    const inputWithStale = JSON.stringify(withBoth);
+
+    const result = await addAmbientHook(inputWithStale, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(result).not.toBe(inputWithStale);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+  });
 });
 
 describe('removeAmbientHook', () => {

@@ -48,6 +48,17 @@ function filterHookEntries(
   return true;
 }
 
+/** Add a hook entry for an event if the marker is not already present. Returns true when an entry was added. */
+function ensureHook(settings: Settings, eventName: string, marker: string, entry: HookMatcher): boolean {
+  if (settings.hooks?.[eventName]?.some((m) => m.hooks.some((h) => h.command.includes(marker)))) {
+    return false;
+  }
+  settings.hooks ??= {};
+  settings.hooks[eventName] ??= [];
+  settings.hooks[eventName].push(entry);
+  return true;
+}
+
 const isLegacy = (matcher: HookMatcher) =>
   matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
 
@@ -88,46 +99,20 @@ export async function removeLegacyCommandsRule(): Promise<void> {
 export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
   let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
+  // Sweep stale classification hook from prior installs — symmetric with removeAmbientHook
+  changed = filterHookEntries(settings, 'SessionStart', isClassification) || changed;
 
   // --- UserPromptSubmit: preamble hook (git-gated reminder + plan-handoff fast-path) ---
-  const hasPreamble = settings.hooks?.UserPromptSubmit?.some((m) =>
-    m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
-  );
-
-  if (!hasPreamble) {
-    settings.hooks ??= {};
-    settings.hooks.UserPromptSubmit ??= [];
-    settings.hooks.UserPromptSubmit.push({
-      hooks: [
-        {
-          type: 'command',
-          command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble',
-          timeout: 5,
-        },
-      ],
-    });
-    changed = true;
-  }
+  changed = ensureHook(
+    settings, 'UserPromptSubmit', PREAMBLE_HOOK_MARKER,
+    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble', timeout: 5 }] },
+  ) || changed;
 
   // --- SessionStart: orchestrator charter hook (git-gated charter injection) ---
-  const hasOrchestratorHook = settings.hooks?.SessionStart?.some((m) =>
-    m.hooks.some((h) => h.command.includes(ORCHESTRATOR_HOOK_MARKER)),
-  );
-
-  if (!hasOrchestratorHook) {
-    settings.hooks ??= {};
-    settings.hooks.SessionStart ??= [];
-    settings.hooks.SessionStart.push({
-      hooks: [
-        {
-          type: 'command',
-          command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-orchestrator',
-          timeout: 10,
-        },
-      ],
-    });
-    changed = true;
-  }
+  changed = ensureHook(
+    settings, 'SessionStart', ORCHESTRATOR_HOOK_MARKER,
+    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-orchestrator', timeout: 10 }] },
+  ) || changed;
 
   // --- Purge legacy commands rule (runs before early-return so stale files are always removed) ---
   await removeLegacyCommandsRule();
@@ -223,17 +208,32 @@ export const ambientCommand = new Command('ambient')
       settingsContent = '{}';
     }
 
+    // Parse settings once, guarded against corrupt files.
+    // hasAmbientHook / hasOrchestratorHook accept Settings directly to avoid re-parsing.
+    let parsedSettings: Settings;
+    try {
+      parsedSettings = JSON.parse(settingsContent) as Settings;
+    } catch (err) {
+      p.log.error(`Could not parse settings.json: ${(err as Error).message}`);
+      return;
+    }
+
     if (options.status) {
-      const enabled = hasAmbientHook(settingsContent);
+      const enabled = hasAmbientHook(parsedSettings);
       if (enabled) {
-        const hasOrchestrator = hasOrchestratorHook(settingsContent);
+        const hasOrchestrator = hasOrchestratorHook(parsedSettings);
         if (!hasOrchestrator) {
           p.log.info(`Ambient mode: ${color.green('enabled')} ${color.dim('(partial — run devflow ambient --enable to repair)')}`);
         } else {
           p.log.info(`Ambient mode: ${color.green('enabled')}`);
         }
       } else {
-        p.log.info(`Ambient mode: ${color.dim('disabled')}`);
+        const hasOrchestrator = hasOrchestratorHook(parsedSettings);
+        if (hasOrchestrator) {
+          p.log.info(`Ambient mode: ${color.dim('disabled')} ${color.dim('(partial — run devflow ambient --enable to repair)')}`);
+        } else {
+          p.log.info(`Ambient mode: ${color.dim('disabled')}`);
+        }
       }
       return;
     }
@@ -244,8 +244,7 @@ export const ambientCommand = new Command('ambient')
     //   may not yet reflect the correct location).
     let devflowDir: string = getDevFlowDirectory();
     try {
-      const settings: Settings = JSON.parse(settingsContent);
-      const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
+      const stopHook = parsedSettings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {
         const hookBinary = stopHook.split(' ')[0];
         const inferred = path.resolve(hookBinary, '..', '..', '..');
@@ -256,8 +255,7 @@ export const ambientCommand = new Command('ambient')
         }
       }
     } catch (err) {
-      // JSON.parse can fail on a corrupt settings file; log and keep canonical default.
-      p.log.warn(`Could not parse settings.json for devflow directory resolution: ${(err as Error).message}`);
+      p.log.warn(`Could not resolve devflow directory from Stop hook: ${(err as Error).message}`);
     }
 
     if (options.enable) {
