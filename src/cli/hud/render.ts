@@ -45,17 +45,11 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
 /**
  * Line groupings for smart layout.
  * Components are assigned to lines and only rendered if enabled.
- * null entries denote section breaks (blank line between sections).
  */
-const LINE_GROUPS: (ComponentId[] | null)[] = [
-  // Section 1: Info (3 lines)
+const LINE_GROUPS: ComponentId[][] = [
   ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
-  ['contextUsage', 'usageQuota'],
+  ['contextUsage', 'usageQuota', 'todoProgress'],
   ['model', 'configCounts', 'sessionCost'],
-  // --- section break ---
-  null,
-  // Section 2: Activity
-  ['todoProgress'],
   ['decisionsCounts'],
   ['notifications'],
   ['versionBadge'],
@@ -65,7 +59,8 @@ const SEPARATOR = dim(' \u00B7 ');
 
 /**
  * Render all enabled components into a multi-line HUD string.
- * Components that return null are excluded. Empty lines are skipped.
+ * Components that return null are excluded. Lines with no rendered
+ * components are skipped.
  */
 export async function render(ctx: GatherContext): Promise<string> {
   const enabled = new Set(ctx.config.components);
@@ -90,25 +85,15 @@ export async function render(ctx: GatherContext): Promise<string> {
 
   await Promise.all(promises);
 
-  // Assemble lines using smart layout with section breaks
+  // Assemble lines using smart layout
   const lines: string[] = [];
-  let pendingBreak = false;
 
   for (const entry of LINE_GROUPS) {
-    if (entry === null) {
-      if (lines.length > 0) pendingBreak = true;
-      continue;
-    }
-
     const lineResults = entry
       .filter((id) => enabled.has(id) && results.has(id))
       .map((id) => results.get(id)!);
 
     if (lineResults.length > 0) {
-      if (pendingBreak) {
-        lines.push('');
-        pendingBreak = false;
-      }
       // Separate multi-line results (containing newlines) from single-line
       const singleLine: string[] = [];
       for (const r of lineResults) {
