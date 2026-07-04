@@ -14,6 +14,13 @@ dbg() { :; }
 
 # set -e intentionally omitted: guard clauses ensure fail-open exit 0 on all paths.
 
+# Re-entrancy guard — before hook-bootstrap to minimize background session overhead.
+# The memory worker's own claude -p session fires UserPromptSubmit; without this guard
+# the nested background session would receive the orchestrator reminder (or, on a
+# matching prompt, a plan-handoff directive) it must never act on. Mirrors the sibling
+# capture-prompt UserPromptSubmit hook and session-start-orchestrator.
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

@@ -647,6 +647,20 @@ describe('preamble — orchestrator charter mode', () => {
       // No plan handoff directive fired — this is the key AC-F12 assertion
       expect(out).not.toContain('plan handoff');
     });
+
+    // --- Background-session re-entrancy guard ---
+
+    it('F13: DEVFLOW_BG_UPDATER=1 → empty stdout (no injection into nested bg sessions) [AC-F9]', () => {
+      // The background memory worker (claude -p) runs in the project git root and fires
+      // UserPromptSubmit; the guard must suppress the orchestrator reminder there.
+      const input = JSON.stringify({ cwd: tmpDir, prompt: 'refresh working memory from these turns' });
+      const out = execSync(`bash "${PREAMBLE_HOOK}"`, {
+        input,
+        env: { ...process.env, DEVFLOW_BG_UPDATER: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString();
+      expect(out).toBe('');
+    });
   });
 
   // -------------------------------------------------------------------------
