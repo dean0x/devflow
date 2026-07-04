@@ -13,6 +13,8 @@ export interface HookEntry {
 }
 
 export interface HookMatcher {
+  /** Tool-name filter for PostToolUse/PreToolUse hooks (e.g. "AskUserQuestion"). Absent = matches all. */
+  matcher?: string;
   hooks: HookEntry[];
 }
 

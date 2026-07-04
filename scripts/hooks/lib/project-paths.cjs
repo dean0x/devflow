@@ -55,6 +55,16 @@ function getDreamConfigPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'dream', 'config.json');
 }
 
+/** .devflow/dream/.pending-turns.jsonl — decisions detection queue (dual-write with memory queue) */
+function getDreamPendingTurnsPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.jsonl');
+}
+
+/** .devflow/dream/.pending-turns.processing — atomic claim held by the Dream agent while processing */
+function getDreamPendingTurnsProcessingPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.processing');
+}
+
 // ---------------------------------------------------------------------------
 // Decisions files
 // ---------------------------------------------------------------------------
@@ -67,11 +77,6 @@ function getDecisionsFilePath(projectRoot) {
 /** .devflow/decisions/pitfalls.md */
 function getPitfallsFilePath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', 'pitfalls.md');
-}
-
-/** .devflow/decisions/.disabled — sentinel that gates decisions sections */
-function getDecisionsDisabledSentinel(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'decisions', '.disabled');
 }
 
 /** .devflow/decisions/decisions.json — project-level decisions config */
@@ -122,11 +127,6 @@ function getObservationsLockDir(projectRoot) {
 /** .devflow/decisions/.decisions-notifications.json */
 function getDecisionsNotificationsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');
-}
-
-/** .devflow/decisions/.decisions-runs-today */
-function getDecisionsRunsTodayPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-runs-today');
 }
 
 /** .devflow/decisions/.decisions-batch-ids */
@@ -213,10 +213,11 @@ module.exports = {
   getDocsDir,
   // Dream files
   getDreamConfigPath,
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
   // Decisions files
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
@@ -227,7 +228,6 @@ module.exports = {
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
   getDecisionsNotificationsPath,
-  getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
   // Memory files
   getWorkingMemoryPath,

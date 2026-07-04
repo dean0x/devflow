@@ -12,6 +12,11 @@ dbg() { :; }
 
 set -e
 
+# Re-entrancy guard — before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires SessionStart hooks
+# too (SessionStart fires on every session, including a detached worker's).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -32,7 +37,7 @@ devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
-# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -51,6 +56,35 @@ if [ -f "$DREAM_CONFIG" ]; then
   if [ "$MEMORY_ENABLED" = "false" ]; then
     dbg "EXIT: memory disabled in dream config"
     exit 0
+  fi
+fi
+
+# --- D56c cold-path recovery: orphaned .pending-turns.processing ---
+# Self-contained (not sourced from a shared helper): applies a 300s stale-age
+# gate to .pending-turns.processing. background-memory-update is the PRIMARY
+# recovery owner: it re-merges a leftover .processing under its own lock on
+# every spawn. This is the COLD-PATH fallback for when the worker never
+# re-spawns (memory disabled mid-flight, host offline, etc.): a SessionStart
+# arriving >300s after the crash with no intervening Stop hook.
+# Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
+# so a concurrent session's fresh queue is never overwritten.
+source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
+_SSM_PT_PROC="$MEMORY_DIR/.pending-turns.processing"
+_SSM_PT_JSONL="$MEMORY_DIR/.pending-turns.jsonl"
+if [ -f "$_SSM_PT_PROC" ]; then
+  _SSM_PT_MTIME=$(get_mtime "$_SSM_PT_PROC" 2>/dev/null || true)
+  _SSM_PT_MTIME="${_SSM_PT_MTIME:-0}"
+  _SSM_NOW_PT=$(date +%s)
+  _SSM_PT_AGE=$(( _SSM_NOW_PT - _SSM_PT_MTIME ))
+  if [ "$_SSM_PT_AGE" -gt 300 ]; then
+    if [ ! -f "$_SSM_PT_JSONL" ]; then
+      mv "$_SSM_PT_PROC" "$_SSM_PT_JSONL" 2>/dev/null || true
+      dbg "Recovered orphaned .pending-turns.processing (age ${_SSM_PT_AGE}s)"
+      log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl (cold path)"
+    else
+      dbg "Stale .pending-turns.processing skipped — .pending-turns.jsonl already exists"
+      log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
+    fi
   fi
 fi
 

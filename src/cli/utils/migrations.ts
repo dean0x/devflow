@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir, getFeaturesDir } from './project-paths.js';
+import { sweepLegacyDreamMarkers } from './dream-cleanup.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -958,6 +959,93 @@ const MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Per-project: remove stale marker-pipeline files (`decisions.*`/`curation.*`
+ * markers and their fixed-name stamps) from `.devflow/dream/`.
+ *
+ * MUST NOT touch: config.json (shared multi-feature config — memory/decisions/knowledge
+ * keys) or the `.pending-turns.jsonl`/`.pending-turns.processing` queue files (live
+ * inputs of the Dream agent). Worker-era state files are owned by
+ * purge-dream-worker-state-v1 below.
+ *
+ * `.decisions-runs-today` historically lived at `.devflow/dream/.decisions-runs-today`
+ * (via $DREAM_DIR, NOT under `.devflow/decisions/` despite the similar name) — swept
+ * from its real location here.
+ *
+ * Mirrors purge-stale-memory-markers-v1 in shape.
+ */
+const MIGRATION_PURGE_DREAM_MARKER_PIPELINE: Migration<'per-project'> = {
+  id: 'purge-dream-marker-pipeline-v1',
+  description: 'Remove stale decisions.*/curation.* markers and legacy stamps from the retired dream marker pipeline',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const dreamDir = path.join(ctx.projectRoot, '.devflow', 'dream');
+    const removed = await sweepLegacyDreamMarkers(dreamDir);
+
+    const infos: string[] = [];
+    if (removed > 0) {
+      infos.push(`Removed ${removed} stale dream marker-pipeline file(s)`);
+    }
+
+    return { infos, warnings: [] };
+  },
+};
+
+/**
+ * Per-project: remove inert state files left by the retired detached dream
+ * worker (background-dream-update). Decisions processing now runs as the
+ * directive-spawned Dream agent, whose only state is the queue itself:
+ *   - .devflow/decisions/.disabled   — runtime sentinel (gate is config-only now)
+ *   - .devflow/dream/.last-dream-ok  — worker success stamp
+ *   - .devflow/dream/last-run-summary — inject-once summary file
+ *   - .devflow/dream/.worker.lock/   — worker concurrency lock (directory)
+ *
+ * MUST NOT touch: config.json or the `.pending-turns.jsonl`/`.processing`
+ * queue files — both are live inputs of the current architecture.
+ *
+ * Mirrors purge-stale-memory-markers-v1 in shape.
+ */
+const MIGRATION_PURGE_DREAM_WORKER_STATE: Migration<'per-project'> = {
+  id: 'purge-dream-worker-state-v1',
+  description: 'Remove .disabled sentinel, .last-dream-ok, last-run-summary, and .worker.lock left by the retired detached dream worker',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    let removed = 0;
+
+    const files = [
+      path.join(devflowDir, 'decisions', '.disabled'),
+      path.join(devflowDir, 'dream', '.last-dream-ok'),
+      path.join(devflowDir, 'dream', 'last-run-summary'),
+    ];
+    for (const filePath of files) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+      }
+    }
+
+    // Lock is a directory (mkdir-based) — remove recursively.
+    try {
+      await fs.rm(path.join(devflowDir, 'dream', '.worker.lock'), { recursive: true });
+      removed++;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+    }
+
+    const infos: string[] = [];
+    if (removed > 0) {
+      infos.push(`Removed ${removed} inert dream-worker state file(s)`);
+    }
+
+    return { infos, warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -975,6 +1063,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
   MIGRATION_DECISIONS_LEDGER_UNIFY,
   MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
+  MIGRATION_PURGE_DREAM_MARKER_PIPELINE,
+  MIGRATION_PURGE_DREAM_WORKER_STATE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

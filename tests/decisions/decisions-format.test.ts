@@ -244,10 +244,11 @@ describe('buildTldrLine', () => {
 // ---------------------------------------------------------------------------
 // json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by running merge-observation + assign-anchor via the CLI and
-// checking the output matches what formatDecisionBody/formatPitfallBody would
-// produce.  This ensures the write path delegates to decisions-format.cjs
-// correctly (AC-A8: decisions-append is removed; assign-anchor is the writer).
+// We verify this by seeding an observation row directly (as the Dream agent
+// appends it), promoting via assign-anchor, and checking the output matches
+// what formatDecisionBody/formatPitfallBody would produce. This ensures the
+// write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
+// is the sole writer).
 
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -277,11 +278,9 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Write observation to log, then promote via assign-anchor
-      execSync(
-        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
+      // Seed the observation directly (one JSONL row, as the Dream agent
+      // appends it), then promote via assign-anchor
+      fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
         `node "${JSON_HELPER}" assign-anchor decision obs_formattest1`,
         { cwd: tmpDir, encoding: 'utf8' }
@@ -322,11 +321,9 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Write observation to log, then promote via assign-anchor
-      execSync(
-        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
+      // Seed the observation directly (one JSONL row, as the Dream agent
+      // appends it), then promote via assign-anchor
+      fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
         `node "${JSON_HELPER}" assign-anchor pitfall obs_pfformattest1`,
         { cwd: tmpDir, encoding: 'utf8' }
@@ -360,68 +357,70 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// dream-decisions SKILL.md content-presence assertions (AC-F1, AC-F2)
+// Dream agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the SKILL contains the creation-bar
-// elements required by the plan. They do not test LLM judgment — that is
-// validated by the Tester agent via scenarios. They lock the prose contract
-// so that the SKILL cannot accidentally regress on the key phrases.
+// These lightweight checks verify that the Dream agent instructions
+// (shared/agents/dream.md) contain the required creation-bar elements. They do
+// not test LLM judgment — that is validated by the Tester agent via scenarios.
+// They lock the prose contract so the agent cannot accidentally regress on the
+// key phrases.
 
-describe('dream-decisions SKILL.md creation-bar contract', () => {
-  const SKILL_PATH = path.join(ROOT, 'shared/skills/dream-decisions/SKILL.md');
+describe('Dream agent creation-bar contract', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
 
-  let skillContent: string;
+  let agentContent: string;
   beforeAll(() => {
-    skillContent = fs.readFileSync(SKILL_PATH, 'utf8');
+    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
   });
 
   it('contains abstain-by-default stance', () => {
-    expect(skillContent).toContain('Most sessions produce nothing');
-    expect(skillContent).toContain('If unsure, record nothing');
+    expect(agentContent).toContain('Most runs produce nothing');
+    expect(agentContent).toContain('If unsure, record nothing');
   });
 
   it('contains ADR-XOR-PF hard rule', () => {
-    expect(skillContent).toContain('ADR-XOR-PF');
+    expect(agentContent).toContain('ADR-XOR-PF');
     // "never both" may span a line break — check both forms
-    expect(skillContent).toMatch(/never\s+both/);
-    expect(skillContent).toContain('Concrete failure');
-    expect(skillContent).toContain('forward-looking');
+    expect(agentContent).toMatch(/never\s+both/);
+    expect(agentContent).toContain('Concrete failure');
+    expect(agentContent).toContain('forward-looking');
   });
 
   it('contains dedup-before-create rule', () => {
-    expect(skillContent).toContain('Dedup before creating');
-    expect(skillContent).toContain('reinforce it');
+    expect(agentContent).toContain('Dedup before creating');
+    expect(agentContent).toContain('reinforce that row');
   });
 
-  it('instructs agent to use assign-anchor and prohibits decisions-append', () => {
-    // The SKILL must instruct the agent to use assign-anchor for promotion
-    expect(skillContent).toContain('assign-anchor');
-    // The SKILL must prohibit decisions-append (mentioning it only to forbid it)
-    expect(skillContent).toContain('NEVER call `decisions-append`');
-    // Must NOT contain a positive instruction to call decisions-append
-    expect(skillContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
+  it('instructs agent to use assign-anchor for promotion, never invents numbers itself', () => {
+    // The agent must be instructed to use assign-anchor for promotion
+    expect(agentContent).toContain('assign-anchor');
+    // decisions-append is retired tooling and is not mentioned at all (nothing
+    // positively instructs calling it — there is no lingering reference to forbid).
+    expect(agentContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
+    expect(agentContent).not.toContain('decisions-append');
+    expect(agentContent).toContain('NEVER invent an ADR-NNN/PF-NNN number');
   });
 
   it('has no numeric confidence gate (ADR-008)', () => {
     // Must not contain a numeric confidence threshold that acts as a gate
-    expect(skillContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
-    expect(skillContent).not.toContain('0.65');
-    expect(skillContent).not.toContain('0.95');
+    expect(agentContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
+    expect(agentContent).not.toContain('0.65');
+    expect(agentContent).not.toContain('0.95');
   });
 
   it('states confidence is metadata, not a gate', () => {
-    expect(skillContent).toContain('NOT a gate');
+    expect(agentContent).toContain('NOT a gate');
   });
 
   it('Iron Law references assign-anchor and render, not decisions-append', () => {
     // Verify Iron Law line
-    expect(skillContent).toContain('assign-anchor OWNS NUMBERING');
-    expect(skillContent).toContain('render OWNS THE .md');
-    expect(skillContent).toContain('NEVER HAND-EDIT');
+    expect(agentContent).toContain('assign-anchor OWNS NUMBERING');
+    expect(agentContent).toContain('render OWNS THE .md');
+    expect(agentContent).toContain('NEVER HAND-EDIT');
   });
 
   it('negative examples list both NOT-a-decision and NOT-a-pitfall', () => {
-    expect(skillContent).toContain('NOT a decision');
-    expect(skillContent).toContain('NOT a pitfall');
+    expect(agentContent).toContain('NOT a decision');
+    expect(agentContent).toContain('NOT a pitfall');
   });
 });

@@ -4,12 +4,44 @@
     "command": "${DEVFLOW_DIR}/scripts/hud.sh"
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-question",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook stop-update-memory",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-turn",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook memory-worker",
             "timeout": 10
           }
         ]
@@ -21,6 +53,15 @@
           {
             "type": "command",
             "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook session-start-memory",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook session-start-context",
             "timeout": 10
           }
         ]

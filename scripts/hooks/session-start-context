@@ -1,17 +1,27 @@
 #!/bin/bash
 
 # SessionStart Hook: Cross-Feature Context Injection
-# Always-on hook that injects decisions TL;DR as additionalContext.
-# Sections are independently gated by feature sentinels — this hook itself is never disabled.
+# Always-on hook that injects decisions context as additionalContext. Sections
+# are gated by the `decisions` field in dream config (config-only, ADR-001) —
+# this hook itself is never disabled.
 #
-# Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
-# Section 2: Dream pending-work (emits directive when pending tasks detected)
+# Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
+# Section 2: Dream maintenance directive — when captured turns are pending in
+# the dream queue (or a crashed run left a stale .processing batch), instructs
+# the main model to spawn the background Dream agent with the resolved model.
+# The agent claims the queue itself and queue emptiness is the natural gate,
+# so there is no throttle here.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
 
-# set -e intentionally omitted: sections 1.5 and 2 are independent —
-# a failure in one must not prevent the others from running.
+# set -e intentionally omitted: a failure in this section must not crash the hook.
+
+# Re-entrancy guard — before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires SessionStart hooks;
+# without this guard the nested session would re-inject its own context (and
+# receive a Dream spawn directive it must never act on).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,7 +43,7 @@ devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
-# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -48,16 +58,21 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 CONTEXT=""
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
-# --- Section 1.5: Project Decisions TL;DR ---
-# Skipped if decisions feature is disabled via sentinel.
-if [ ! -f "$DECISIONS_CONTENT_DIR/.disabled" ]; then
+# --- Decisions gate (config-only) ---
+DREAM_CONFIG="$DREAM_DIR/config.json"
+DECISIONS_ENABLED="true"
+if [ -f "$DREAM_CONFIG" ]; then
+  DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
+fi
+
+# --- Section 1: Project Decisions TL;DR ---
+if [ "$DECISIONS_ENABLED" = "true" ]; then
   DECISIONS_DIR="$DECISIONS_CONTENT_DIR"
   # Heal older installs that have .devflow/ but not .devflow/decisions/
   if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$DECISIONS_DIR" ]; then
@@ -88,117 +103,62 @@ ${DECISIONS_SECTION}"
   fi
 fi
 
-# --- Section 2: Dream Pending-Work ---
-# Detects pending dream tasks and emits a directive to spawn a background Dream agent.
-# Guards: processor-spawn throttle (120s window) prevents duplicate emissions on rapid
-# SessionStart events (e.g., /clear or compact).
-# Requires: dream-recover + dream-collect-tasks helpers (sourced inline below).
-# No set -e: any failure must not affect prior sections.
-#
-# D57a: Per-session .processing suffix (collision fix).
-#   Each eval-* module writes marker files as {type}.{session_id}.json, where
-#   session_id is the Claude session ID passed to the hook. When the Dream agent
-#   claims a marker it renames it to {type}.{session_id}.processing. This suffix
-#   prevents two concurrent Dream agent instances (from two simultaneous SessionStart
-#   events) from racing on the same marker file — each session only claims its own
-#   markers.
-#
-# D57b: 120s processor-spawn throttle.
-#   SessionStart fires on /clear, compact, and every new window open. Without
-#   a throttle, three rapid /clear commands would spawn three background agents
-#   all processing the same pending markers. The 120s window (.processor-spawned-at)
-#   ensures only one Dream agent is spawned per burst. The throttle is written
-#   atomically (temp+mv) so concurrent SessionStart events read a consistent value.
-#
-# D57c: Heartbeat rationale.
-#   The Dream agent touches each in-flight .processing file at the start of
-#   every phase. dream-recover uses the mtime to determine staleness (1800s
-#   threshold for non-memory types). The touch refreshes the mtime so a legitimate
-#   long-running Dream agent is not yanked mid-phase. Pairs with D56a thresholds.
+# --- Section 2: Dream maintenance directive ---
+# Emitted when captured turns are waiting: queue non-empty, or a leftover
+# .processing batch whose owner crashed (stale mtime, 900s threshold — same
+# family the Dream agent itself uses to discriminate live from crashed). A
+# FRESH .processing means a live Dream agent already owns the batch, so the
+# directive is suppressed even if new turns queued since its claim.
+if [ "$DECISIONS_ENABLED" = "true" ]; then
+  QUEUE_FILE="$DREAM_DIR/.pending-turns.jsonl"
+  PROCESSING_FILE="$DREAM_DIR/.pending-turns.processing"
+  PROCESSING_STALE_SECS=900
 
-# Source helpers — soft-fail if absent (e.g., on older installs before rebuild).
-# All sourced helpers follow the no-set-e discipline and exit cleanly on failure.
-_SC2_HELPERS_OK="false"
-if [ -f "$SCRIPT_DIR/get-mtime" ] && [ -f "$SCRIPT_DIR/dream-recover" ] && [ -f "$SCRIPT_DIR/dream-collect-tasks" ]; then
-  source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
-  source "$SCRIPT_DIR/dream-lock" 2>/dev/null || true
-  source "$SCRIPT_DIR/dream-recover" 2>/dev/null || true
-  source "$SCRIPT_DIR/dream-collect-tasks" 2>/dev/null || true
-  _SC2_HELPERS_OK="true"
-fi
-
-if [ "$_SC2_HELPERS_OK" = "true" ]; then
-  # Determine feature enabled-state.
-  # Primary: dream/config.json fields; secondary: runtime sentinel for decisions.
-  # Only decisions is gated here (per ADR-016; avoids PF-009).
-  _SC2_DEC_EN="true"
-
-  _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"
-  if [ -f "$_SC2_DREAM_CONFIG" ]; then
-    _SC2_DEC_EN=$(json_field_file "$_SC2_DREAM_CONFIG" "decisions" "true")
-  fi
-  # Sentinel override for decisions
-  [ -f "$DEVFLOW_DIR/decisions/.disabled" ] && _SC2_DEC_EN="false"
-
-  dbg "Section2: dec=$_SC2_DEC_EN"
-
-  # Step 1: recover stale .processing markers so they become collectable in step 2
-  if [ -d "$DREAM_DIR" ]; then
-    dream_recover_stale "$DREAM_DIR" "$MEMORY_DIR" || true
-  fi
-
-  # Step 2: collect pending marker task types
-  dream_collect_tasks "$DREAM_DIR" "$_SC2_DEC_EN" || true
-
-  # Emit directive if tasks pending, subject to processor-spawn throttle.
-  if [ -n "$_DREAM_TASKS" ]; then
-    _SC2_SPAWNED_AT_FILE="$DREAM_DIR/.processor-spawned-at"
-    _SC2_THROTTLE=120
-    _SC2_EMIT="true"
-    _SC2_NOW=$(date +%s)
-
-    if [ -f "$_SC2_SPAWNED_AT_FILE" ]; then
-      _SC2_LAST_SPAWN=$(cat "$_SC2_SPAWNED_AT_FILE" 2>/dev/null | tr -dc '0-9' || true)
-      _SC2_LAST_SPAWN="${_SC2_LAST_SPAWN:-0}"
-      _SC2_SPAWN_AGE=$(( _SC2_NOW - _SC2_LAST_SPAWN ))
-      if [ "$_SC2_SPAWN_AGE" -lt "$_SC2_THROTTLE" ]; then
-        _SC2_EMIT="false"
-        dbg "Section2: processor-spawn throttled (spawned ${_SC2_SPAWN_AGE}s ago)"
-        log "Dream processor-spawn throttled (${_SC2_SPAWN_AGE}s < ${_SC2_THROTTLE}s): tasks=$_DREAM_TASKS"
-      fi
+  DREAM_WORK=""
+  if [ -f "$PROCESSING_FILE" ]; then
+    source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+    _SC_PROC_MTIME=$(get_mtime "$PROCESSING_FILE" 2>/dev/null || true)
+    _SC_NOW=$(date +%s)
+    if [ -n "$_SC_PROC_MTIME" ] && [ $(( _SC_NOW - _SC_PROC_MTIME )) -ge "$PROCESSING_STALE_SECS" ]; then
+      DREAM_WORK="stale-processing"
+    else
+      dbg "dream directive suppressed: fresh .processing (live agent owns the batch)"
     fi
-
-    if [ "$_SC2_EMIT" = "true" ]; then
-      # Write/refresh .processor-spawned-at atomically
-      _SC2_SPAWN_TMP="$DREAM_DIR/.processor-spawned-at.tmp.$$"
-      printf '%s' "$_SC2_NOW" > "$_SC2_SPAWN_TMP" 2>/dev/null && mv "$_SC2_SPAWN_TMP" "$_SC2_SPAWNED_AT_FILE" 2>/dev/null || rm -f "$_SC2_SPAWN_TMP" 2>/dev/null || true
-
-      # Build the per-task spawn directive (one Agent() call per pending task with a
-      # hardcoded task→model map). Logic lives in dream_build_spawn_directive
-      # (sourced from dream-collect-tasks); it sets _DREAM_DIRECTIVE, mirroring the
-      # dream_collect_tasks → _DREAM_TASKS contract. Empty result → no known types.
-      dream_build_spawn_directive "$_DREAM_TASKS"
-
-      if [ -n "$_DREAM_DIRECTIVE" ]; then
-        if [ -n "$CONTEXT" ]; then
-          CONTEXT="${CONTEXT}
-
-${_DREAM_DIRECTIVE}"
-        else
-          CONTEXT="$_DREAM_DIRECTIVE"
-        fi
-        dbg "Section2: emitted per-task dream directive (tasks=$_DREAM_TASKS)"
-        log "Dream per-task directive emitted: tasks=$_DREAM_TASKS"
-      else
-        dbg "Section2: tasks present but no known types to spawn — skipping directive"
-        log "Dream directive skipped: no known task types in tasks=$_DREAM_TASKS"
-      fi
-    fi
-  else
-    dbg "Section2: no pending dream tasks"
+  elif [ -s "$QUEUE_FILE" ]; then
+    DREAM_WORK="queue"
   fi
-else
-  dbg "Section2: helpers not available — skip"
+
+  if [ -n "$DREAM_WORK" ]; then
+    # Model resolution: project decisions.json → global ~/.devflow/decisions.json → opus
+    DREAM_MODEL=""
+    if [ -f "$DECISIONS_CONTENT_DIR/decisions.json" ]; then
+      DREAM_MODEL=$(json_field_file "$DECISIONS_CONTENT_DIR/decisions.json" "model" "")
+    fi
+    if [ -z "$DREAM_MODEL" ] && [ -f "$HOME/.devflow/decisions.json" ]; then
+      DREAM_MODEL=$(json_field_file "$HOME/.devflow/decisions.json" "model" "")
+    fi
+    DREAM_MODEL="${DREAM_MODEL:-opus}"
+    # Allowlist before interpolating into the injected directive (defense in depth --
+    # decisions.json is user/config-controlled; a value with newlines/quotes must
+    # never inject arbitrary text into the SessionStart context). Fallback matches
+    # decisions-config.ts DEFAULTS.model (duplicated-by-design, see feature KB).
+    case "$DREAM_MODEL" in
+      opus|sonnet|haiku) ;;
+      *) DREAM_MODEL="opus" ;;
+    esac
+
+    dbg "dream directive emitted (reason=$DREAM_WORK model=$DREAM_MODEL)"
+    DREAM_SECTION="--- DREAM MAINTENANCE ---
+Captured turns are pending in the decisions queue. Spawn the background Dream agent (one non-blocking call). Do not narrate, summarize, or ask — just spawn it, then continue with the user's request.
+Agent(subagent_type=\"Dream\", model=\"$DREAM_MODEL\", run_in_background: true, prompt: \"Process the pending decisions queue per your agent instructions. Project root: $PROJECT_ROOT\")"
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${DREAM_SECTION}"
+    else
+      CONTEXT="$DREAM_SECTION"
+    fi
+  fi
 fi
 
 # --- Output ---

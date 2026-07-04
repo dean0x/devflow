@@ -16,9 +16,7 @@ import * as os from 'os';
 
 vi.mock('../../src/cli/utils/decisions-config.js', () => ({
   loadDecisionsConfig: vi.fn(() => ({
-    max_daily_runs: 3,
-    throttle_minutes: 5,
-    model: 'sonnet',
+    model: 'opus',
     debug: false,
   })),
 }));
@@ -26,6 +24,10 @@ vi.mock('../../src/cli/utils/decisions-config.js', () => ({
 vi.mock('../../src/cli/utils/paths.js', () => ({
   getClaudeDirectory: vi.fn(() => '/home/user/.claude'),
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
+}));
+
+vi.mock('../../src/cli/utils/git.js', () => ({
+  getGitRoot: vi.fn(),
 }));
 
 vi.mock('@clack/prompts', () => ({
@@ -49,6 +51,16 @@ import {
   loadAndCountObservations,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
+import { getGitRoot } from '../../src/cli/utils/git.js';
+import { decisionsCommand } from '../../src/cli/commands/decisions.js';
+import * as p from '@clack/prompts';
+import {
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
+  getDreamConfigPath,
+  getPendingTurnsPath,
+  getDecisionsLogPath,
+} from '../../src/cli/utils/project-paths.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -274,12 +286,11 @@ describe('decisions --clear log truncation', () => {
 // ---------------------------------------------------------------------------
 
 describe('decisions --reset target files', () => {
-  it('reset targets decisions-specific state files only', () => {
-    const resetFiles = [
+  it('reset targets decisions-specific state files (.devflow/decisions/)', () => {
+    const decisionsStateFiles = [
       'decisions-log.jsonl',
       '.decisions-manifest.json',
       '.decisions-notifications.json',
-      '.decisions-runs-today',
       '.decisions-batch-ids',
       'decisions.json',
     ];
@@ -291,7 +302,7 @@ describe('decisions --reset target files', () => {
       'WORKING-MEMORY.md',
     ];
 
-    for (const f of resetFiles) {
+    for (const f of decisionsStateFiles) {
       expect(
         f.includes('decision') || f.includes('decisions'),
         `Expected "${f}" to contain "decision" or "decisions"`,
@@ -299,38 +310,218 @@ describe('decisions --reset target files', () => {
     }
 
     for (const f of preservedFiles) {
-      expect(resetFiles).not.toContain(f);
+      expect(decisionsStateFiles).not.toContain(f);
+    }
+  });
+
+  it('reset also targets the dream (decisions-detection) queue (.devflow/dream/)', () => {
+    // Not decision-prefixed by name — these live in .devflow/dream/, the queue the
+    // Dream agent claims from. Reset must drain them too so a re-enable doesn't
+    // process stale pre-reset turns.
+    const dreamQueueFiles = [
+      '.pending-turns.jsonl',
+      '.pending-turns.processing',
+    ];
+
+    const preservedDreamFiles = [
+      'config.json', // shared multi-feature config — reset must never touch this
+    ];
+
+    for (const f of preservedDreamFiles) {
+      expect(dreamQueueFiles).not.toContain(f);
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// --reset dream cleanup: verify dream state files are targeted
+// --reset dream cleanup: verify legacy marker-pipeline state files are targeted
 // ---------------------------------------------------------------------------
 
 describe('decisions --reset dream state cleanup', () => {
-  it('dream cleanup targets .decisions-runs-today and decisions.*.json markers', () => {
+  it('dream cleanup targets legacy stamp files (.decisions-runs-today, .curation-last, .processor-spawned-at)', () => {
     const dreamFilesToClean = [
       '.decisions-runs-today',
+      '.curation-last',
+      '.processor-spawned-at',
     ];
-    const dreamMarkerPattern = /^decisions\..+\.json$/;
 
     for (const f of dreamFilesToClean) {
-      expect(f).toContain('decisions');
+      expect(f.startsWith('.')).toBe(true);
+    }
+  });
+
+  it('dream cleanup targets legacy decisions.*/curation.* markers across all 4 suffixes', () => {
+    const dreamMarkerPattern = /^(decisions|curation)\..+\.(json|processing|retries|failed)$/;
+
+    for (const f of [
+      'decisions.abc123.json',
+      'decisions.session-xyz.processing',
+      'decisions.abc123.retries',
+      'decisions.abc123.failed',
+      'curation.abc123.json',
+      'curation.abc123.processing',
+    ]) {
+      expect(dreamMarkerPattern.test(f)).toBe(true);
     }
 
-    expect(dreamMarkerPattern.test('decisions.abc123.json')).toBe(true);
-    expect(dreamMarkerPattern.test('decisions.session-xyz.json')).toBe(true);
-    expect(dreamMarkerPattern.test('learning.abc123.json')).toBe(false);
-    expect(dreamMarkerPattern.test('decisions.json')).toBe(false);
+    // Never touches: learning markers (pipeline removed separately), the shared
+    // config.json, or the new .pending-turns.jsonl/.processing queue files.
+    for (const f of ['learning.abc123.json', 'decisions.json', 'config.json', '.pending-turns.jsonl', '.pending-turns.processing']) {
+      expect(dreamMarkerPattern.test(f)).toBe(false);
+    }
   });
 
   it('dream cleanup does not target learning state files', () => {
-    const decisionsDreamFiles = ['.decisions-runs-today'];
+    const decisionsDreamFiles = ['.decisions-runs-today', '.curation-last', '.processor-spawned-at'];
     const learningFiles = ['.learning-runs-today', '.learning-sessions'];
 
     for (const lf of learningFiles) {
       expect(decisionsDreamFiles).not.toContain(lf);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --disable drains the dream (decisions-detection) pending-turns queue —
+// mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
+// Unconditional: a mid-run Dream agent whose claimed batch vanishes aborts
+// without changes, which is the desired outcome of disabling.
+// ---------------------------------------------------------------------------
+
+describe('decisions --disable drains the dream pending-turns queue', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    // Commander retains _optionValues across repeated parseAsync() calls on the
+    // same Command instance (no built-in reset between calls). Production always
+    // starts a fresh process per invocation, so clear state here to match that
+    // reality and keep these tests order-independent.
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeDreamQueueFiles(root: string): void {
+    fs.mkdirSync(path.join(root, '.devflow', 'dream'), { recursive: true });
+    fs.writeFileSync(getDreamPendingTurnsPath(root), '{"role":"user"}\n');
+    fs.writeFileSync(getDreamPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+  }
+
+  it('deletes queue + processing files and flips config (memory queue untouched)', async () => {
+    writeDreamQueueFiles(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+
+    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    expect(config.decisions).toBe(false);
+
+    // The sibling memory queue is never touched by decisions --disable
+    expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
+  });
+
+  it('does not create a .disabled sentinel (gate is config-only)', async () => {
+    writeDreamQueueFiles(tmpDir);
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'decisions', '.disabled'))).toBe(false);
+  });
+
+  it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
+    writeDreamQueueFiles(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream', '.worker.lock'), { recursive: true });
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+
+    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    expect(config.decisions).toBe(false);
+  });
+
+  it('does not delete anything on --enable', async () => {
+    writeDreamQueueFiles(tmpDir);
+
+    await decisionsCommand.parseAsync(['--enable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(true);
+  });
+
+  it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {
+    writeDreamQueueFiles(tmpDir);
+    // getGitRoot already resolves to tmpDir regardless of the real cwd (exactly as
+    // `git rev-parse --show-toplevel` would from any subdirectory). Point cwd at a
+    // decoy path to prove the drain never falls back to process.cwd() instead of
+    // the resolved gitRoot.
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+
+    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --list resolves the log from the git root, not process.cwd() — regression
+// for the class of bug where --list run from a subdirectory of the repo
+// would look for a decisions log under the (nonexistent) subdirectory path
+// instead of the real one at the git root.
+// ---------------------------------------------------------------------------
+
+describe('decisions --list resolves log path from git root, not process.cwd()', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('finds the decisions log at the git root even when cwd is a subdirectory', async () => {
+    const logPath = getDecisionsLogPath(tmpDir);
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.writeFileSync(logPath, makeDecisionLog([
+      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
+    ]));
+
+    // getGitRoot is mocked to resolve to tmpDir regardless of the real cwd
+    // (exactly as `git rev-parse --show-toplevel` would from a subdirectory).
+    // Point cwd at a decoy path to prove --list never falls back to
+    // process.cwd() instead of the resolved gitRoot.
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+
+    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+
+    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
+  });
+
+  it('falls back to process.cwd() when not in a git project', async () => {
+    vi.mocked(getGitRoot).mockResolvedValue(null);
+    const cwdLogPath = getDecisionsLogPath(tmpDir);
+    fs.mkdirSync(path.dirname(cwdLogPath), { recursive: true });
+    fs.writeFileSync(cwdLogPath, makeDecisionLog([
+      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
+    ]));
+    vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+
+    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+
+    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
   });
 });

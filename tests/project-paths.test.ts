@@ -21,9 +21,10 @@ import {
   getFeaturesDir,
   getDocsDir,
   getDreamConfigPath,
+  getDreamPendingTurnsPath,
+  getDreamPendingTurnsProcessingPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
@@ -34,7 +35,6 @@ import {
   getDecisionsUsageLockDir,
   getObservationsLockDir,
   getDecisionsNotificationsPath,
-  getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
   getWorkingMemoryPath,
   getBackupPath,
@@ -84,6 +84,14 @@ describe('project-paths TypeScript module', () => {
     it('getDreamConfigPath returns .devflow/dream/config.json', () => {
       expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
     });
+
+    it('getDreamPendingTurnsPath returns .devflow/dream/.pending-turns.jsonl', () => {
+      expect(getDreamPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.jsonl');
+    });
+
+    it('getDreamPendingTurnsProcessingPath returns .devflow/dream/.pending-turns.processing', () => {
+      expect(getDreamPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.processing');
+    });
   });
 
   describe('decisions files', () => {
@@ -93,10 +101,6 @@ describe('project-paths TypeScript module', () => {
 
     it('getPitfallsFilePath returns .devflow/decisions/pitfalls.md', () => {
       expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/pitfalls.md');
-    });
-
-    it('getDecisionsDisabledSentinel returns .devflow/decisions/.disabled', () => {
-      expect(getDecisionsDisabledSentinel(ROOT)).toBe('/some/project/.devflow/decisions/.disabled');
     });
 
     it('getDecisionsConfigPath returns .devflow/decisions/decisions.json', () => {
@@ -125,10 +129,6 @@ describe('project-paths TypeScript module', () => {
 
     it('getDecisionsNotificationsPath returns .devflow/decisions/.decisions-notifications.json', () => {
       expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-notifications.json');
-    });
-
-    it('getDecisionsRunsTodayPath returns .devflow/decisions/.decisions-runs-today', () => {
-      expect(getDecisionsRunsTodayPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-runs-today');
     });
 
     it('getDecisionsBatchIdsPath returns .devflow/decisions/.decisions-batch-ids', () => {
@@ -231,9 +231,10 @@ describe('CJS project-paths parity', () => {
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
     { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
+    { name: 'getDreamPendingTurnsPath', ts: getDreamPendingTurnsPath, cjs: cjsPaths.getDreamPendingTurnsPath },
+    { name: 'getDreamPendingTurnsProcessingPath', ts: getDreamPendingTurnsProcessingPath, cjs: cjsPaths.getDreamPendingTurnsProcessingPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
-    { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },
     { name: 'getDecisionsConfigPath', ts: getDecisionsConfigPath, cjs: cjsPaths.getDecisionsConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
@@ -244,7 +245,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsUsageLockDir', ts: getDecisionsUsageLockDir, cjs: cjsPaths.getDecisionsUsageLockDir },
     { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
-    { name: 'getDecisionsRunsTodayPath', ts: getDecisionsRunsTodayPath, cjs: cjsPaths.getDecisionsRunsTodayPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },

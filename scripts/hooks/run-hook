@@ -20,4 +20,12 @@ CMDBLOCK
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_NAME="$1"
 shift
+# Exit 0 (never fail the host event) when the named script is absent — covers the
+# init upgrade-swap window and hand-edited settings.json entries pointing at a
+# hook that was renamed or removed (e.g. an old dream-* registration surviving
+# past a cutover before `devflow init` re-runs and sweeps it via LEGACY_HOOK_FILES).
+if [ ! -f "$SCRIPT_DIR/${HOOK_NAME}" ]; then
+  echo "run-hook: '${HOOK_NAME}' not found in $SCRIPT_DIR — skipping" >&2
+  exit 0
+fi
 exec bash "$SCRIPT_DIR/${HOOK_NAME}" "$@"

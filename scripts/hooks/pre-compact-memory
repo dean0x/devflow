@@ -12,6 +12,11 @@ dbg() { :; }
 
 set -e
 
+# Re-entrancy guard — before hook-bootstrap to minimize background session
+# overhead. The memory worker's own claude -p session fires hooks too
+# (PreCompact can fire mid-session on a long-running detached worker).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/hook-bootstrap" "pre-compact-memory"
@@ -32,7 +37,7 @@ devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
-# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -44,8 +49,7 @@ DREAM_DIR="$DEVFLOW_DIR/dream"
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "pre-compact-memory"
 
-# Check dream config — single source of truth for memory enabled/disabled (ADR-001 clean break).
-# The legacy .working-memory-disabled sentinel is not checked: dream config supersedes it.
+# Check dream config — single source of truth for memory enabled/disabled (ADR-001).
 DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ -f "$DREAM_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")

@@ -4,14 +4,15 @@ Devflow automatically preserves session context across restarts, `/clear`, and c
 
 ## How it works
 
-Three shell hooks plus one detached worker run behind the scenes:
+A capture/spawn split across always-on hooks plus one detached worker run behind the scenes:
 
 | Hook / Worker | When | What |
 |---------------|------|------|
-| **Stop** (`dream-capture`) | After each response | Captures the user/assistant turns to `.pending-turns.jsonl`. After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), touches `.working-memory-last-trigger` then spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model haiku`). No `memory.json` dream marker is written — memory refresh happens directly via the detached worker, not via the Dream subagent. |
-| **`background-memory-update`** (detached worker spawned by Stop) | Triggered by `dream-capture` after throttle expires | Drains `.pending-turns.jsonl` → renames to `.pending-turns.processing` (atomic claim) → calls `claude -p` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing` and touches `.last-refresh-ok`. On failure: leaves `.processing` for `dream-recover` to recover at next SessionStart. User-only queues (no assistant turn) are truncated without an LLM run. |
-| **SessionStart** (`session-start-memory`) | On startup, `/clear`, resume, compaction | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled header. Uses the `<!-- memory-head: <sha> branch: <name> -->` stamp on line 1 to determine state: **A** in-sync (stamp SHA = HEAD), **B** drifted (stamp SHA is an ancestor of HEAD — shows commits since last write), or **C** refresh-failing banner (queue non-empty AND `.last-refresh-ok` missing or >600s old). Memory refresh is **not** a Dream task — `session-start-memory` only reads and injects. |
-| **SessionStart** (`session-start-context`) | On startup, `/clear`, resume, compaction | Emits the DREAM MAINTENANCE directive (throttled to 120s) when pending Dream markers are present (decisions/knowledge/curation). Also injects decisions TL;DR + learned behaviors. Memory is NOT a Dream task — the Dream agent handles only decisions/knowledge/curation. |
+| **Stop** (`capture-turn`) | After each response | Appends the assistant turn to `.pending-turns.jsonl` (and, independently gated, to the sibling dream queue — see the Decisions pipeline in the project CLAUDE.md). Never spawns anything. |
+| **Stop** (`memory-worker`, registered immediately after `capture-turn`) | After each response | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), touches `.working-memory-last-trigger` then spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model haiku`). |
+| **`background-memory-update`** (detached worker spawned by `memory-worker`) | Triggered by `memory-worker` after throttle expires | Drains `.pending-turns.jsonl` → renames to `.pending-turns.processing` (atomic claim) → calls `claude -p` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing` and touches `.last-refresh-ok`. On failure: leaves `.processing` for `session-start-memory` to recover at next SessionStart. User-only queues (no assistant turn) are truncated without an LLM run. |
+| **SessionStart** (`session-start-memory`) | On startup, `/clear`, resume, compaction | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled header. Uses the `<!-- memory-head: <sha> branch: <name> -->` stamp on line 1 to determine state: **A** in-sync (stamp SHA = HEAD), **B** drifted (stamp SHA is an ancestor of HEAD — shows commits since last write), or **C** refresh-failing banner (queue non-empty AND `.last-refresh-ok` missing or >600s old). Also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path — no external helper dependency). |
+| **SessionStart** (`session-start-context`) | On startup, `/clear`, resume, compaction | Injects the decisions TL;DR and, when the dream queue has pending turns, the Dream maintenance directive (spawns the background Dream agent). |
 | **PreCompact** | Before context compaction | Backs up git state + WORKING-MEMORY.md snapshot to `backup.json`. |
 
 Working memory is **per-project** — scoped to each repo's `.devflow/` directory. Multiple sessions across different repos don't interfere.
@@ -43,13 +44,13 @@ devflow memory --status                # Check current state
     └── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas)
 ```
 
-Note: `dream/memory.{session}.json` markers no longer exist — memory refresh is handled by the detached Stop-hook worker, not the Dream subagent. Decisions, knowledge, and curation still use Dream markers.
+Note: no marker files are involved anywhere in this flow — memory refresh is handled entirely by the queue + detached Stop-hook worker above. Decisions detection and curation follow the same pattern via a separate queue at `.devflow/dream/.pending-turns.jsonl` and a SessionStart-spawned detached worker (see the project CLAUDE.md's Decisions pipeline section).
 
 Debug logs are stored at `~/.devflow/logs/{project-slug}/`.
 
 ## Working Memory Sections
 
-The `background-memory-update` worker (detached `claude -p` process spawned by `dream-capture`) maintains these sections in `WORKING-MEMORY.md`:
+The `background-memory-update` worker (detached `claude -p` process spawned by `memory-worker`) maintains these sections in `WORKING-MEMORY.md`:
 
 | Section | Purpose |
 |---------|---------|

@@ -56,6 +56,16 @@ export function getDreamConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'dream', 'config.json');
 }
 
+/** .devflow/dream/.pending-turns.jsonl — decisions detection queue (dual-write with memory queue) */
+export function getDreamPendingTurnsPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.jsonl');
+}
+
+/** .devflow/dream/.pending-turns.processing — atomic claim held by the Dream agent while processing */
+export function getDreamPendingTurnsProcessingPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.processing');
+}
+
 // ---------------------------------------------------------------------------
 // Decisions files
 // ---------------------------------------------------------------------------
@@ -68,11 +78,6 @@ export function getDecisionsFilePath(projectRoot: string): string {
 /** .devflow/decisions/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'pitfalls.md');
-}
-
-/** .devflow/decisions/.disabled — sentinel that gates decisions sections */
-export function getDecisionsDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.disabled');
 }
 
 /** .devflow/decisions/decisions.json — project-level decisions config */
@@ -123,11 +128,6 @@ export function getObservationsLockDir(projectRoot: string): string {
 /** .devflow/decisions/.decisions-notifications.json */
 export function getDecisionsNotificationsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');
-}
-
-/** .devflow/decisions/.decisions-runs-today */
-export function getDecisionsRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-runs-today');
 }
 
 /** .devflow/decisions/.decisions-batch-ids */

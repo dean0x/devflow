@@ -1900,3 +1900,315 @@ describe('purge-dead-working-memory-sentinel-v1 migration', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// purge-dream-marker-pipeline-v1 (per-project)
+// Sweeps decisions.*/curation.* markers and fixed-name stamps from the retired
+// marker pipeline. The queue files and config.json are live inputs of the
+// Dream agent and must survive.
+// avoids PF-004 (idempotency means a buggy run is never re-swept — the rethrow
+//   contract must be correct on the first attempt)
+// ---------------------------------------------------------------------------
+
+describe('purge-dream-marker-pipeline-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-dream-markers-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-dream-marker-pipeline-v1');
+    if (!m) throw new Error('purge-dream-marker-pipeline-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-dream-marker-pipeline-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('removes legacy fixed-name stamps: .decisions-runs-today, .curation-last, .processor-spawned-at', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.decisions-runs-today'), '2026-01-01\t2', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.curation-last'), '1234567890', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.processor-spawned-at'), '1234567890', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, '.decisions-runs-today'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, '.curation-last'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, '.processor-spawned-at'))).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  it('removes per-session decisions.*/curation.* markers across all 4 suffixes', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    for (const type of ['decisions', 'curation']) {
+      for (const suffix of ['json', 'processing', 'retries', 'failed']) {
+        await fs.writeFile(path.join(dreamDir, `${type}.abc123.${suffix}`), '{}', 'utf-8');
+      }
+    }
+
+    await getMigration().run(makeCtx());
+
+    for (const type of ['decisions', 'curation']) {
+      for (const suffix of ['json', 'processing', 'retries', 'failed']) {
+        await expect(fs.access(path.join(dreamDir, `${type}.abc123.${suffix}`))).rejects.toThrow();
+      }
+    }
+  });
+
+  it('does NOT touch config.json (shared multi-feature config)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    const configContent = JSON.stringify({ memory: true, decisions: true, knowledge: true });
+    await fs.writeFile(path.join(dreamDir, 'config.json'), configContent, 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const survived = await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8');
+    expect(survived).toBe(configContent);
+  });
+
+  it('does NOT touch the new .pending-turns.jsonl/.pending-turns.processing queue', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.jsonl'), '{"role":"user","content":"hi","ts":1}\n', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.processing'), '{"role":"user","content":"hi","ts":1}\n', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dreamDir, '.pending-turns.processing'))).resolves.toBeUndefined();
+  });
+
+  it('does NOT touch .last-dream-ok or .worker.lock (owned by purge-dream-worker-state-v1)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.last-dream-ok'), '', 'utf-8');
+    await fs.mkdir(path.join(dreamDir, '.worker.lock'), { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, '.last-dream-ok'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dreamDir, '.worker.lock'))).resolves.toBeUndefined();
+  });
+
+  it('is a no-op when dream dir does not exist', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is idempotent (ENOENT-safe on second run)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.decisions-runs-today'), '2026-01-01\t2', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('returns empty infos when nothing to remove', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'config.json'), '{}', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+  });
+
+  it('appears after purge-dead-working-memory-sentinel-v1 in MIGRATIONS array', () => {
+    const deadIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    const dreamIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dream-marker-pipeline-v1');
+    expect(deadIdx).toBeGreaterThanOrEqual(0);
+    expect(dreamIdx).toBeGreaterThan(deadIdx);
+  });
+
+  it('rethrows non-ENOENT errors from fixed-file unlink (avoids PF-004 silent-swallow)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.decisions-runs-today'), '2026-01-01\t2', 'utf-8');
+
+    const originalUnlink = fs.unlink.bind(fs);
+    const spy = vi.spyOn(fs, 'unlink').mockImplementation(async (p: fs.PathLike) => {
+      const filePath = p.toString();
+      if (filePath.endsWith('.decisions-runs-today')) {
+        const err = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        throw err;
+      }
+      return originalUnlink(p as Parameters<typeof originalUnlink>[0]);
+    });
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rethrows non-ENOENT errors from readdir (avoids PF-004 silent-swallow)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+
+    const spy = vi.spyOn(fs, 'readdir').mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    );
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// purge-dream-worker-state-v1 (per-project)
+// Removes inert state files left by the retired detached dream worker:
+// decisions/.disabled, dream/.last-dream-ok, dream/last-run-summary, and the
+// dream/.worker.lock directory. The queue files and config.json are live
+// inputs of the Dream agent and must survive.
+// ---------------------------------------------------------------------------
+
+describe('purge-dream-worker-state-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-dream-worker-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-dream-worker-state-v1');
+    if (!m) throw new Error('purge-dream-worker-state-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope, after purge-dream-marker-pipeline-v1', () => {
+    const markerIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dream-marker-pipeline-v1');
+    const workerIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dream-worker-state-v1');
+    expect(workerIdx).toBeGreaterThan(markerIdx);
+    expect(MIGRATIONS[workerIdx].scope).toBe('per-project');
+  });
+
+  it('removes .disabled sentinel, .last-dream-ok, last-run-summary, and the .worker.lock dir', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, '.disabled'), '', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.last-dream-ok'), '', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'last-run-summary'), 'Materialized ADR-009.', 'utf-8');
+    await fs.mkdir(path.join(dreamDir, '.worker.lock'), { recursive: true });
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(decisionsDir, '.disabled'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, '.last-dream-ok'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'last-run-summary'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, '.worker.lock'))).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  it('does NOT touch config.json or the queue files', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    const configContent = JSON.stringify({ memory: true, decisions: true, knowledge: true });
+    await fs.writeFile(path.join(dreamDir, 'config.json'), configContent, 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.jsonl'), '{"role":"user","content":"hi","ts":1}\n', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.processing'), '{"role":"user","content":"hi","ts":1}\n', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, '.last-dream-ok'), '', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    expect(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8')).toBe(configContent);
+    await expect(fs.access(path.join(dreamDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dreamDir, '.pending-turns.processing'))).resolves.toBeUndefined();
+  });
+
+  it('is a no-op when nothing exists (fresh project) and idempotent on second run', async () => {
+    const first = await getMigration().run(makeCtx());
+    expect(first?.infos ?? []).toEqual([]);
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('rethrows non-ENOENT errors from unlink (avoids PF-004 silent-swallow)', async () => {
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, '.disabled'), '', 'utf-8');
+
+    const spy = vi.spyOn(fs, 'unlink').mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    );
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

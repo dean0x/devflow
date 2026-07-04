@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # background-memory-update — Eager working-memory refresh worker
-# Spawned as a detached background process by dream-capture (Stop hook) after the
+# Spawned as a detached background process by memory-worker (Stop hook) after the
 # 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (haiku) →
 # rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
 #
@@ -14,13 +14,23 @@
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
 #               on its next spawn it merges leftover .processing back into the queue (lines ~141-156).
-#               dream_recover_stale (session-start-context) is the COLD-PATH fallback for when this
+#               session-start-memory's own cold-path recovery is the fallback for when this
 #               worker never re-spawns (e.g. memory disabled mid-flight, host offline); it applies a
 #               300s age gate before acting on .processing. No action needed here — the two paths
 #               are correctly separated by the lock boundary.
 # User-only:    truncates queue without LLM run (no fabrication)
 
 set -e
+
+# Re-entrancy guard: a nested memory-worker claude -p session (DEVFLOW_BG_UPDATER=1
+# in its env) fires Stop hooks on its own turns. If those hooks ever chain into
+# spawning this worker, bail out immediately rather than cascading a memory
+# refresh out of a nested worker session (belt-and-suspenders alongside the
+# equivalent guard in memory-worker, which is the intended sole spawn site).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then
+  echo "background-memory-update: EXIT: bg_updater" >&2
+  exit 0
+fi
 
 CWD="$1"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
@@ -127,26 +137,29 @@ if ! acquire_lock; then
   exit 0
 fi
 
-# --- Orphan-only auto-clean: if queue has no assistant turn, truncate and exit ---
+# --- Orphan-only auto-clean: if queue has no assistant/qa turn, truncate and exit ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
+# A qa row (captured Q&A pair) counts as content-bearing here too — it carries
+# the same synthesis-worthy signal as an assistant turn (AC-F10). This check
+# and the TURNS_TEXT extraction loop below must agree on that.
 # When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
 # and allow the run to proceed — conservative: better to attempt than to truncate blindly.
 if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
-    _HAS_ASSISTANT=$(jq -r 'select(.role=="assistant") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+    _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
     # for repo paths containing quotes or special characters — applies ADR-008 plumbing principle)
-    _HAS_ASSISTANT=$(node -e '
+    _HAS_CONTENT=$(node -e '
       const f = process.argv[1];
       const lines = require("fs").readFileSync(f, "utf8").split("\n");
       for (const l of lines) {
-        try { const o = JSON.parse(l); if (o.role === "assistant") { process.stdout.write("assistant"); break; } } catch {}
+        try { const o = JSON.parse(l); if (o.role === "assistant" || o.role === "qa") { process.stdout.write(o.role); break; } } catch {}
       }
     ' "$QUEUE_FILE" 2>/dev/null || echo "")
   fi
-  if [ -z "$_HAS_ASSISTANT" ]; then
-    log "User-only queue (no assistant turn) — truncating without LLM run"
+  if [ -z "$_HAS_CONTENT" ]; then
+    log "User-only queue (no assistant/qa turn) — truncating without LLM run"
     rm -f "$QUEUE_FILE" 2>/dev/null || true
     exit 0
   fi
@@ -250,6 +263,15 @@ Turn ${TURN_COUNT}:
 Assistant: ${CONTENT}
 "
     fi
+  elif [ "$ROLE" = "qa" ]; then
+    # Captured AskUserQuestion Q&A pair — a self-contained stanza, not paired
+    # with CURRENT_USER (a qa row can arrive mid-turn, between a user prompt
+    # and its eventual assistant reply; leave CURRENT_USER buffered untouched).
+    TURN_COUNT=$(( TURN_COUNT + 1 ))
+    TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+Q&A: ${CONTENT}
+"
   fi
 done <<EOF
 $EXTRACTED
@@ -335,8 +357,8 @@ WATCHDOG_SECS="${DEVFLOW_BG_WATCHDOG_SECS:-120}"
 WATCHDOG_KILL_GRACE_SECS=5  # grace period between SIGTERM and SIGKILL
 
 # NASA/JPL Rule 5 — runtime assertion: STALE_THRESHOLD must exceed the watchdog's
-# total in-flight time so that break_stale_lock and dream-recover's cold-path recovery
-# can never evict a still-live worker.  If DEVFLOW_BG_WATCHDOG_SECS is raised above
+# total in-flight time so that break_stale_lock and session-start-memory's cold-path
+# recovery can never evict a still-live worker.  If DEVFLOW_BG_WATCHDOG_SECS is raised above
 # 294 (leaving < 1s margin), this will fail loudly rather than silently corrupt the
 # safety guarantee.  Checked before spawning claude so a bad override is caught early.
 # avoids PF-011
@@ -390,8 +412,8 @@ wait "$WD_PID" 2>/dev/null || true
 
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
   log "FAIL: claude -p killed by watchdog after ${WATCHDOG_SECS}s"
-  # Leave .processing for crash recovery (dream-recover D56c).
-  # Retry-count ceiling: this worker is rate-bounded to one spawn per 120s by dream-capture's
+  # Leave .processing for crash recovery (session-start-memory's D56c cold path).
+  # Retry-count ceiling: this worker is rate-bounded to one spawn per 120s by memory-worker's
   # throttle (.working-memory-last-trigger mtime). Persistent failure is surfaced to the user
   # via session-start-memory State C (stale .last-refresh-ok) rather than a retry counter here,
   # keeping this plumbing script simple (applies ADR-008).
@@ -429,7 +451,7 @@ if [ "$UPDATED" = "true" ]; then
   touch "$OK_FILE" 2>/dev/null || true
   log "SUCCESS: queue drained, .last-refresh-ok touched"
 else
-  # Leave .processing for dream-recover D56c; do NOT touch .last-refresh-ok
+  # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
   log "FAIL: verification failed — leaving .processing for recovery"
 fi
 

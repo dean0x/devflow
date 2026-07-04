@@ -37,6 +37,7 @@ function makeCtx(
     transcript: null,
     usage: null,
     configCounts: null,
+    decisionsCounts: null,
     costHistory: null,
     config: {
       enabled: true,
@@ -86,7 +87,7 @@ describe('render', () => {
     expect(raw).toContain('30%');
   });
 
-  it('shows activity section with todos and config counts', async () => {
+  it('renders todos at the end of the capacity line', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
       usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
@@ -104,17 +105,18 @@ describe('render', () => {
       },
     });
     const output = await render(ctx);
-    const lines = output.split('\n').filter((l) => l.length > 0);
+    const lines = output.split('\n').map((l) => stripAnsi(l));
 
-    // 3 info lines + blank + todo line = 4+
-    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect(lines).toHaveLength(3);
+    const capacityLine = lines.find((l) => l.includes('Context'));
+    expect(capacityLine).toBeDefined();
+    expect(capacityLine).toContain('5h');
+    expect(capacityLine!.endsWith('2/4 todos')).toBe(true);
     const raw = stripAnsi(output);
-    expect(raw).toContain('2/4 todos');
     expect(raw).toContain('2 CLAUDE.md');
     expect(raw).toContain('3 rules');
     expect(raw).toContain('1 MCPs');
     expect(raw).toContain('4 hooks');
-    expect(raw).toContain('5h');
   });
 
   it('components that return null are excluded', async () => {
@@ -140,7 +142,7 @@ describe('render', () => {
     expect(raw).not.toContain('feat/test');
   });
 
-  it('inserts blank line between info and activity sections', async () => {
+  it('emits no blank lines between groups', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
       usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
@@ -150,28 +152,14 @@ describe('render', () => {
         todos: { completed: 1, total: 3 },
         skills: [],
       },
+      decisionsCounts: { decisions: 3, pitfalls: 1 },
     });
     const output = await render(ctx);
     const lines = output.split('\n');
 
-    // Should contain an empty line between info and activity sections
-    expect(lines).toContain('');
-    // Empty line should be between non-empty lines
-    const emptyIdx = lines.indexOf('');
-    expect(emptyIdx).toBeGreaterThan(0);
-    expect(emptyIdx).toBeLessThan(lines.length - 1);
-  });
-
-  it('no blank line when activity section is empty', async () => {
-    const ctx = makeCtx({
-      sessionStartTime: Date.now() - 5 * 60 * 1000,
-      usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
-    });
-    const output = await render(ctx);
-    const lines = output.split('\n');
-
-    // No empty lines — no activity components have data
+    expect(lines.length).toBeGreaterThanOrEqual(4);
     expect(lines.every((l) => l.length > 0)).toBe(true);
+    expect(stripAnsi(lines[lines.length - 1])).toBe('Learning: 3 decisions, 1 pitfall');
   });
 });
 
@@ -203,7 +191,7 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 14 components (sessionDuration retained but omitted from defaults; learningCounts removed)', () => {
-    expect(HUD_COMPONENTS).toHaveLength(14);
+  it('HUD_COMPONENTS has 15 components (sessionDuration retained but omitted from defaults)', () => {
+    expect(HUD_COMPONENTS).toHaveLength(15);
   });
 });

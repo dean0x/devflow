@@ -81,7 +81,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 
 Some skills exist in `shared/skills/` but are not distributed to any plugin. They serve as on-disk format specifications consumed by background processes, not by agents or commands.
 
-- **decisions-format** — Format spec for `.devflow/decisions/decisions.md` and `pitfalls.md` (entry format, lock protocol). Consumed by the background Dream agent via `json-helper.cjs decisions-append`. Not distributed to plugins per D9.
+- **decisions-format** — Format spec for `.devflow/decisions/decisions.md` and `pitfalls.md` (entry format, lock protocol). Consumed by the `assign-anchor`/`retire-anchor` render path in `json-helper.cjs`, driven by the background Dream agent. Not distributed to plugins per D9.
 
 ## How Skills Activate
 

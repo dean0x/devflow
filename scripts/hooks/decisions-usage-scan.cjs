@@ -6,7 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getMemoryDir, getDecisionsDisabledSentinel, getDecisionsUsagePath, getDecisionsUsageLockDir } = require('./lib/project-paths.cjs');
+const { getMemoryDir, getDecisionsUsagePath, getDecisionsUsageLockDir } = require('./lib/project-paths.cjs');
 
 // Parse --cwd argument
 const cwdIdx = process.argv.indexOf('--cwd');
@@ -26,9 +26,6 @@ const cwd = path.resolve(rawCwd);
 
 const memoryDir = getMemoryDir(cwd);
 if (!fs.existsSync(memoryDir)) process.exit(0); // no .devflow/memory dir — nothing to scan
-
-// Skip if decisions feature is disabled (sentinel file)
-if (fs.existsSync(getDecisionsDisabledSentinel(cwd))) process.exit(0);
 
 // Read stdin synchronously
 let input = '';

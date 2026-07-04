@@ -48,15 +48,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    // The Dream agent lives here (always-installed foundation plugin) because the
-    // session-start-context hook spawns Agent(subagent_type="Dream") unconditionally
-    // for the decisions/knowledge/curation subsystems — independent of whether
-    // the ambient plugin is installed. Declaring it only in devflow-ambient would break
-    // the dream subsystem under `devflow init --no-ambient` (agents install per selected
-    // plugin, unlike skills which install universally). Predecessor was the universally
-    // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
     agents: ['dream'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-curation'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
@@ -535,22 +528,15 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:pipeline:orch',
   'devflow:research:orch',
   'devflow:release:orch',
-  // v3.x dream per-task skills: bare names for pre-namespace installs.
-  // NOTE: dream-decisions and dream-curation are STILL-ACTIVE skills (declared in
-  // DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
-  // These bare entries exist solely to clean up pre-namespace V2.x installs where
-  // skills were written without the devflow: prefix. On current installs the post-install
-  // fs.rm targets a bare path (e.g. ~/.claude/skills/dream-decisions) that does not exist
-  // — a harmless no-op. Do NOT remove these entries: upgrading users from V2.x need the
-  // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
+  // v3.x dream per-task skills: bare and namespaced names for cleanup
   'dream-memory',
   'dream-knowledge',
   'dream-decisions',
   'dream-curation',
-  // v3.x dream-memory + dream-knowledge removal: namespaced names for cleanup of the
-  // installed devflow:dream-memory / devflow:dream-knowledge skills (both fully removed).
   'devflow:dream-memory',
   'devflow:dream-knowledge',
+  'devflow:dream-decisions',
+  'devflow:dream-curation',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup

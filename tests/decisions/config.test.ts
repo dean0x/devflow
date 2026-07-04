@@ -31,20 +31,9 @@ function ensureDir(dir: string): void {
 
 describe('applyDecisionsConfigLayer', () => {
   const base: DecisionsConfig = {
-    max_daily_runs: 3,
-    throttle_minutes: 5,
-    model: 'sonnet',
+    model: 'opus',
     debug: false,
   };
-
-  it('overrides individual numeric fields', () => {
-    const result = applyDecisionsConfigLayer(
-      base,
-      JSON.stringify({ max_daily_runs: 10 }),
-    );
-    expect(result.max_daily_runs).toBe(10);
-    expect(result.throttle_minutes).toBe(5); // unchanged
-  });
 
   it('overrides model string field', () => {
     const result = applyDecisionsConfigLayer(base, JSON.stringify({ model: 'haiku' }));
@@ -56,14 +45,6 @@ describe('applyDecisionsConfigLayer', () => {
     expect(result.debug).toBe(true);
   });
 
-  it('ignores non-numeric max_daily_runs', () => {
-    const result = applyDecisionsConfigLayer(
-      base,
-      JSON.stringify({ max_daily_runs: 'lots' }),
-    );
-    expect(result.max_daily_runs).toBe(3);
-  });
-
   it('ignores non-boolean debug', () => {
     const result = applyDecisionsConfigLayer(base, JSON.stringify({ debug: 'yes' }));
     expect(result.debug).toBe(false);
@@ -71,14 +52,14 @@ describe('applyDecisionsConfigLayer', () => {
 
   it('ignores non-string model', () => {
     const result = applyDecisionsConfigLayer(base, JSON.stringify({ model: 42 }));
-    expect(result.model).toBe('sonnet');
+    expect(result.model).toBe('opus');
   });
 
   it('returns a new object — does not mutate input', () => {
     const input: DecisionsConfig = { ...base };
-    const result = applyDecisionsConfigLayer(input, JSON.stringify({ max_daily_runs: 99 }));
-    expect(result.max_daily_runs).toBe(99);
-    expect(input.max_daily_runs).toBe(3); // not mutated
+    const result = applyDecisionsConfigLayer(input, JSON.stringify({ model: 'sonnet' }));
+    expect(result.model).toBe('sonnet');
+    expect(input.model).toBe('opus'); // not mutated
     expect(result).not.toBe(input);
   });
 
@@ -91,6 +72,18 @@ describe('applyDecisionsConfigLayer', () => {
   it('handles empty JSON object — preserves all defaults', () => {
     const result = applyDecisionsConfigLayer(base, '{}');
     expect(result).toEqual(base);
+  });
+
+  it('ignores dropped legacy fields (max_daily_runs/throttle_minutes) without error', () => {
+    // On-disk configs from before the dream-system simplification may still carry
+    // these fields — they must load without error and be silently ignored.
+    const result = applyDecisionsConfigLayer(
+      base,
+      JSON.stringify({ max_daily_runs: 7, throttle_minutes: 15, model: 'haiku' }),
+    );
+    expect(result).toEqual({ model: 'haiku', debug: false });
+    expect((result as Record<string, unknown>).max_daily_runs).toBeUndefined();
+    expect((result as Record<string, unknown>).throttle_minutes).toBeUndefined();
   });
 });
 
@@ -128,39 +121,37 @@ describe('loadDecisionsConfig', () => {
 
   it('returns all defaults when no config files exist', () => {
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.max_daily_runs).toBe(3);
-    expect(config.throttle_minutes).toBe(5);
-    expect(config.model).toBe('sonnet');
+    expect(config.model).toBe('opus');
     expect(config.debug).toBe(false);
   });
 
   it('global config overrides defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { max_daily_runs: 7 });
+    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.max_daily_runs).toBe(7);
-    expect(config.throttle_minutes).toBe(5); // default preserved
+    expect(config.model).toBe('haiku');
+    expect(config.debug).toBe(false); // default preserved
   });
 
   it('project config overrides global config', () => {
     writeJson(devflowDir, 'decisions.json', {
-      max_daily_runs: 7,
       model: 'haiku',
+      debug: true,
     });
     writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
-      max_daily_runs: 2,
+      model: 'sonnet',
     });
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.max_daily_runs).toBe(2); // project wins
-    expect(config.model).toBe('haiku'); // global preserved when project doesn't set
+    expect(config.model).toBe('sonnet'); // project wins
+    expect(config.debug).toBe(true); // global preserved when project doesn't set
   });
 
   it('project config alone overrides defaults', () => {
     writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
-      model: 'opus',
+      model: 'sonnet',
     });
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.model).toBe('opus');
-    expect(config.max_daily_runs).toBe(3); // default
+    expect(config.model).toBe('sonnet');
+    expect(config.debug).toBe(false); // default
   });
 
   it('invalid JSON in global config returns defaults without crashing', () => {
@@ -170,35 +161,46 @@ describe('loadDecisionsConfig', () => {
       'utf-8',
     );
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.max_daily_runs).toBe(3);
-    expect(config.model).toBe('sonnet');
+    expect(config.model).toBe('opus');
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { max_daily_runs: 7 });
+    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
     fs.writeFileSync(
       path.join(projectCwd, '.devflow', 'decisions', 'decisions.json'),
       'bad json',
       'utf-8',
     );
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.max_daily_runs).toBe(7); // global applied
-    expect(config.model).toBe('sonnet'); // default
+    expect(config.model).toBe('haiku'); // global applied
   });
 
   it('partial project override preserves global fields', () => {
     writeJson(devflowDir, 'decisions.json', {
-      throttle_minutes: 15,
       model: 'haiku',
     });
     writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
       debug: true,
     });
     const config = loadDecisionsConfig(projectCwd);
-    expect(config.throttle_minutes).toBe(15); // from global
     expect(config.model).toBe('haiku'); // from global
     expect(config.debug).toBe(true); // from project
-    expect(config.max_daily_runs).toBe(3); // default
   });
 
+  it('AC-C5: model defaults to opus (not sonnet) when nothing configures it', () => {
+    const config = loadDecisionsConfig(projectCwd);
+    expect(config.model).toBe('opus');
+  });
+
+  it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {
+    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+      max_daily_runs: 3,
+      throttle_minutes: 5,
+      model: 'haiku',
+    });
+    const config = loadDecisionsConfig(projectCwd);
+    expect(config.model).toBe('haiku');
+    expect((config as Record<string, unknown>).max_daily_runs).toBeUndefined();
+    expect((config as Record<string, unknown>).throttle_minutes).toBeUndefined();
+  });
 });

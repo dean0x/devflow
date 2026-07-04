@@ -29,7 +29,6 @@ const jsonHelper = require(
   path.join(ROOT, 'scripts/hooks/json-helper.cjs')
 ) as {
   nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
-  countActiveLedgerRows: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => number;
   rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
   registerUsageEntry: (projectRoot: string, anchorId: string) => void;
   writeJsonlAtomic: (file: string, entries: object[]) => void;
@@ -195,51 +194,6 @@ describe('nextAnchorFromLedger', () => {
     );
     const { anchorId } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
     expect(anchorId).toBe('ADR-101');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// countActiveLedgerRows — unit tests
-// ---------------------------------------------------------------------------
-
-describe('countActiveLedgerRows', () => {
-  it('counts Accepted decisions', () => {
-    const rows = [
-      makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
-    ];
-    expect(jsonHelper.countActiveLedgerRows(rows, 'decision')).toBe(2);
-  });
-
-  it('excludes Retired decisions', () => {
-    const rows = [
-      makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Retired' }),
-    ];
-    expect(jsonHelper.countActiveLedgerRows(rows, 'decision')).toBe(1);
-  });
-
-  it('excludes Deprecated decisions', () => {
-    const rows = [
-      makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Deprecated' }),
-    ];
-    expect(jsonHelper.countActiveLedgerRows(rows, 'decision')).toBe(0);
-  });
-
-  it('excludes unanchored rows', () => {
-    const rows = [
-      makeObsRow({ type: 'decision' }), // no anchor_id
-    ];
-    expect(jsonHelper.countActiveLedgerRows(rows, 'decision')).toBe(0);
-  });
-
-  it('counts only matching type', () => {
-    const rows = [
-      makeLedgerRow({ anchor_id: 'ADR-001', type: 'decision', decisions_status: 'Accepted' }),
-      { ...makeLedgerRow({ anchor_id: 'PF-001', id: 'obs_pf', decisions_status: 'Active' }), type: 'pitfall' },
-    ];
-    expect(jsonHelper.countActiveLedgerRows(rows, 'decision')).toBe(1);
-    expect(jsonHelper.countActiveLedgerRows(rows, 'pitfall')).toBe(1);
   });
 });
 
