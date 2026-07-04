@@ -160,20 +160,29 @@ json_array_item() {
 
 # --- Multi-field batched extraction ---
 
-# Extract cwd and prompt from stdin JSON in a single subprocess.
-# Uses ASCII SOH (U+0001) as delimiter — safe for prompts containing tabs or backslashes,
-# and compatible with bash 3.2 parameter expansion (unlike NUL byte).
+# Extract cwd and an arbitrary top-level field from stdin JSON in a single
+# subprocess. Uses ASCII SOH (U+0001) as delimiter -- safe for field values
+# containing tabs or backslashes, and compatible with bash 3.2 parameter
+# expansion (unlike NUL byte). Always written as the \u0001 jq escape (never
+# a literal control byte) so the delimiter stays visible in source review.
 # Caller pattern (zero extra subprocesses for the split):
-#   FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+#   FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_field "last_assistant_message")
 #   CWD="${FIELDS%%$'\001'*}"
-#   PROMPT="${FIELDS#*$'\001'}"
-# This replaces the @tsv/@cut pattern, which corrupts tab chars in prompts to "\t".
-json_extract_cwd_prompt() {
+#   VALUE="${FIELDS#*$'\001'}"
+# This replaces the @tsv/@cut pattern, which corrupts tab chars in field values to "\t".
+json_extract_cwd_field() {
+  local field="$1"
   if [ "$_HAS_JQ" = "true" ]; then
-    jq -r '(.cwd // "") + "\u0001" + (.prompt // "")' 2>/dev/null
+    jq -r --arg f "$field" '(.cwd // "") + "\u0001" + (.[$f] // "")' 2>/dev/null
   else
-    node "$_JSON_HELPER" extract-cwd-prompt
+    node "$_JSON_HELPER" extract-cwd-field "$field"
   fi
+}
+
+# Thin wrapper over json_extract_cwd_field -- kept as a named function since
+# it is the most common call site (capture-prompt, preamble).
+json_extract_cwd_prompt() {
+  json_extract_cwd_field "prompt"
 }
 
 # --- Transcript extraction ---

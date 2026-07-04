@@ -29,10 +29,12 @@
 # absent/errored tool_response -> exit 0, zero writes; non-AskUserQuestion
 # tool_name -> exit 0 (defensive, even though the hook is matcher-scoped).
 
+# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
 
 set -e
 
+# Feedback-loop guard -- before hook-bootstrap to minimize background session overhead.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -28,15 +28,10 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 INPUT=$(cat)
 dbg "INPUT length=${#INPUT}"
 
-# Resolve project directory and assistant response in one subprocess.
-# Uses ASCII SOH (0x01) as delimiter; split with parameter expansion (bash 3.2 safe).
-if [ "$_HAS_JQ" = "true" ]; then
-  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")') || { dbg "EXIT: jq failed"; exit 0; }
-else
-  _FIELDS=$(printf '%s' "$INPUT" | node -e "
-    const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    process.stdout.write((j.cwd||'')+'\x01'+(j.last_assistant_message||''))") || { dbg "EXIT: node failed"; exit 0; }
-fi
+# Resolve project directory and assistant response in one subprocess via the
+# shared json_extract_cwd_field helper (json-parse) -- keeps the SOH delimiter
+# and jq/node fallback pair defined in exactly one place, shared with capture-prompt.
+_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_field "last_assistant_message") || { dbg "EXIT: extraction failed"; exit 0; }
 CWD="${_FIELDS%%$'\001'*}"
 ASSISTANT_MSG="${_FIELDS#*$'\001'}"
 
