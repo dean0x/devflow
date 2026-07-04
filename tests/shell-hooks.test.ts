@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 
@@ -457,19 +458,29 @@ describe('preamble — orchestrator charter mode', () => {
   let tmpDir: string;   // has a .git dir → git gate passes
   let noGitDir: string; // plain dir, no .git → git gate rejects
 
-  // Exact output templates — tests assert byte equality to detect injection
-  const HANDOFF_TEMPLATE =
-    "The user's prompt is a plan handoff (it begins with `Implement the following plan:`). " +
-    "In one short sentence, tell the user you're invoking `devflow:implement`. " +
-    'Then immediately invoke it with the Skill tool, passing the full plan ' +
-    '(everything after the handoff prefix) as the skill input so it can be executed. ' +
-    'Do not pause to ask whether to proceed.';
+  // HANDOFF_TEMPLATE and REMINDER_TEMPLATE are imported from tests/fixtures/ambient-templates.ts
+  // to keep this file and tests/integration/ambient-activation.test.ts in sync.
 
-  const REMINDER_TEMPLATE =
-    "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, " +
-    'and debug loops via the Agent tool (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research) ' +
-    'or the matching devflow workflow skill.\n' +
-    'Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports.';
+  beforeAll(() => {
+    // Guard: verify that os.tmpdir() is not inside a git repository.
+    // If it were, noGitDir (created in beforeEach) would have a .git ancestor and
+    // the git gate would pass — making F6a/F6b assert empty output against a prompt
+    // that actually goes through the full dispatch (producing reminder output instead).
+    const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gitguard-'));
+    try {
+      const result = execSync(
+        `bash -c 'source "${path.join(HOOKS_DIR, 'git-marker')}"; df_has_git_marker "$PROBE" && printf YES || printf NO'`,
+        { stdio: 'pipe', env: { ...process.env, PROBE: probe } },
+      ).toString().trim();
+      if (result === 'YES') {
+        throw new Error(
+          `os.tmpdir() (${os.tmpdir()}) has a .git ancestor — non-git preamble tests cannot run safely on this machine.`,
+        );
+      }
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
+    }
+  });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-test-'));
@@ -634,18 +645,22 @@ describe('preamble — orchestrator charter mode', () => {
 
     // --- 256-window bound ---
 
-    it('F12: 300 leading spaces before prefix → no plan handoff (prefix beyond 256-byte window) [AC-F12]', () => {
-      // 300 leading spaces fill the 256-byte HEAD window with whitespace; after stripping,
-      // HEAD is empty — plan handoff does NOT fire. Silent exit (AC-F4 whitespace rule applies).
+    it('F12a: 300 leading spaces → HEAD collapses to empty after strip → silent exit [AC-F12]', () => {
+      // HEAD = PROMPT[0:256] = 256 spaces.  After whitespace-strip, HEAD = "".
+      // The empty-HEAD branch fires: exit 0, no output (same as F4f whitespace-only rule).
       const prompt = ' '.repeat(300) + 'Implement the following plan: add caching';
       const out = runPreamble(prompt);
-      // Either empty (whitespace-only HEAD) or reminder — never the handoff directive
-      if (out.length > 0) {
-        const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-        expect(parsed.hookSpecificOutput.additionalContext).not.toBe(HANDOFF_TEMPLATE);
-      }
-      // No plan handoff directive fired — this is the key AC-F12 assertion
-      expect(out).not.toContain('plan handoff');
+      expect(out).toBe('');
+    });
+
+    it('F12b: non-space prefix pushed past byte 256 → reminder, not handoff directive [AC-F12]', () => {
+      // HEAD = PROMPT[0:256] = 'a' × 256.  After strip, HEAD = 'a' × 256.
+      // Does not match the handoff prefix → orchestrator reminder branch fires.
+      const prompt = 'a'.repeat(260) + 'Implement the following plan: add caching';
+      const out = runPreamble(prompt);
+      expect(out.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
     });
 
     // --- Background-session re-entrancy guard ---
@@ -808,6 +823,27 @@ describe('preamble — orchestrator charter mode', () => {
       expect(codeLines).not.toMatch(/\$\(\s*[a-zA-Z]/);
     });
 
+    it('P1b: git-marker source is pure bash — no subprocess calls (no git command, awk, sed, tr, $())', () => {
+      // git-marker is sourced on every UserPromptSubmit call; it must never spawn a
+      // subprocess.  A reintroduced `git rev-parse` or similar would pass the preamble
+      // P1 scan but this test would catch it in git-marker itself.
+      // Note: `.git` appears as a path string literal ("$_dir/.git") which is fine —
+      // we check for `git` as a command invocation (git followed by whitespace+word),
+      // not as a path component.
+      const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker'), 'utf-8');
+      const codeLines = src
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('#'))
+        .join('\n');
+
+      // `git rev-parse`, `git status`, etc. — git used as a command (not `.git` path literal)
+      expect(codeLines).not.toMatch(/\bgit\s+\w/);
+      expect(codeLines).not.toMatch(/\bawk\b/);
+      expect(codeLines).not.toMatch(/\bsed\b/);
+      expect(codeLines).not.toMatch(/\btr\b/);
+      expect(codeLines).not.toMatch(/\$\(\s*[a-zA-Z]/);
+    });
+
     it('P2/P3: wall-time on large prompt is bounded — delta < 500ms and ratio < 5×', () => {
       // O(1) dispatch (capped at 256 bytes); wall-time difference is dominated by JSON parsing.
       // Thresholds are intentionally generous — correctness test, not a benchmark.
@@ -838,6 +874,96 @@ describe('preamble — orchestrator charter mode', () => {
       expect(delta).toBeLessThan(500);
       expect(ratio).toBeLessThan(5);
     });
+  });
+});
+
+// =============================================================================
+// git-marker helper: df_has_git_marker behavioral tests
+// =============================================================================
+//
+// git-marker is sourced on every UserPromptSubmit call via preamble.  Tests here
+// exercise df_has_git_marker directly so a regression in the helper is caught
+// without relying on end-to-end preamble invocations.
+// =============================================================================
+
+describe('git-marker helper: df_has_git_marker', () => {
+  const GIT_MARKER_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker');
+
+  /**
+   * Source git-marker and run df_has_git_marker on the given directory.
+   * Returns true (exit 0) when a .git marker is found, false (exit 1) when not.
+   * The directory is passed via the DEVFLOW_GM_TEST_DIR env var to avoid
+   * shell-quoting issues with special characters in tmpdir paths.
+   */
+  function hasGitMarker(dir: string): boolean {
+    try {
+      execSync(
+        `bash -c 'source "${GIT_MARKER_SRC}"; df_has_git_marker "$DEVFLOW_GM_TEST_DIR"'`,
+        { stdio: 'pipe', env: { ...process.env, DEVFLOW_GM_TEST_DIR: dir } },
+      );
+      return true; // exit 0 → found
+    } catch {
+      return false; // exit 1 → not found
+    }
+  }
+
+  let repoDir: string; // has a .git dir
+
+  beforeEach(() => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-test-'));
+    fs.mkdirSync(path.join(repoDir, '.git'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('returns true for the repo root (contains .git directory)', () => {
+    expect(hasGitMarker(repoDir)).toBe(true);
+  });
+
+  it('returns true for a nested subdirectory inside a git repo', () => {
+    const subDir = path.join(repoDir, 'src', 'auth');
+    fs.mkdirSync(subDir, { recursive: true });
+    expect(hasGitMarker(subDir)).toBe(true);
+  });
+
+  it('returns true when .git is a plain file (worktree / submodule style)', () => {
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-wt-'));
+    try {
+      fs.writeFileSync(path.join(worktreeDir, '.git'), 'gitdir: /some/path/.git');
+      expect(hasGitMarker(worktreeDir)).toBe(true);
+    } finally {
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false for a plain directory with no .git ancestor', () => {
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-nogit-'));
+    try {
+      expect(hasGitMarker(nonGitDir)).toBe(false);
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false for empty string (immediate termination via [ -z "$_dir" ] guard)', () => {
+    expect(hasGitMarker('')).toBe(false);
+  });
+
+  it('returns false for "/" (terminates at [ "$_dir" = "/" ] guard with no .git at root)', () => {
+    // Assumes the filesystem root is not a git repository.
+    // If /.git exists on this machine, skip rather than fail.
+    if (fs.existsSync('/.git')) return;
+    expect(hasGitMarker('/')).toBe(false);
+  });
+
+  it('returns false and terminates within 64 iterations for a >64-level-deep non-existent path', () => {
+    // The function walks at most 64 ancestor levels ([ "$_i" -lt 64 ] bound).
+    // A non-existent path with 70+ levels has no .git anywhere in its non-existent
+    // ancestry — the loop exhausts its budget and returns 1 without hanging.
+    const deepPath = '/devflow-bound-test/' + 'x/'.repeat(70) + 'leaf';
+    expect(hasGitMarker(deepPath)).toBe(false);
   });
 });
 
@@ -944,7 +1070,8 @@ describe('session-start-orchestrator', () => {
     }
   });
 
-  it('AC-F10: oversize charter (>4096 chars) → empty stdout, exit 0 (fail-open)', () => {
+  it('AC-F10: oversize charter (>4096 chars, i.e. 4097) → empty stdout, exit 0 (fail-open)', () => {
+    // The guard is `[ "${#CHARTER}" -gt 4096 ]` so 4097+ bytes are rejected.
     const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-bigcharter-'));
     try {
       copyHookDepsToDir(hooksTemp);
@@ -953,6 +1080,24 @@ describe('session-start-orchestrator', () => {
       const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
       expect(stdout).toBe('');
       expect(exitCode).toBe(0);
+    } finally {
+      fs.rmSync(hooksTemp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-F10: charter at exact 4096-byte boundary → accepted, non-empty stdout', () => {
+    // The guard is `[ "${#CHARTER}" -gt 4096 ]` (-gt, not -ge).
+    // Exactly 4096 bytes passes the guard and is injected as additionalContext.
+    const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-exactcharter-'));
+    try {
+      copyHookDepsToDir(hooksTemp);
+      fs.mkdirSync(path.join(hooksTemp, 'assets'));
+      fs.writeFileSync(path.join(hooksTemp, 'assets', 'orchestrator-charter.md'), 'x'.repeat(4096));
+      const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
+      expect(exitCode).toBe(0);
+      expect(stdout.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe('x'.repeat(4096));
     } finally {
       fs.rmSync(hooksTemp, { recursive: true, force: true });
     }
