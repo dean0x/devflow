@@ -17,6 +17,7 @@ import sessionDuration from './components/session-duration.js';
 import usageQuota from './components/usage-quota.js';
 import todoProgress from './components/todo-progress.js';
 import configCounts from './components/config-counts.js';
+import decisionsCounts from './components/decisions-counts.js';
 import sessionCost from './components/session-cost.js';
 import releaseInfo from './components/release-info.js';
 import worktreeCount from './components/worktree-count.js';
@@ -34,6 +35,7 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   usageQuota,
   todoProgress,
   configCounts,
+  decisionsCounts,
   sessionCost,
   releaseInfo,
   worktreeCount,
@@ -54,6 +56,7 @@ const LINE_GROUPS: (ComponentId[] | null)[] = [
   null,
   // Section 2: Activity
   ['todoProgress'],
+  ['decisionsCounts'],
   ['notifications'],
   ['versionBadge'],
 ];

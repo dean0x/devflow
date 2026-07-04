@@ -33,6 +33,7 @@ export type ComponentId =
   | 'usageQuota'
   | 'todoProgress'
   | 'configCounts'
+  | 'decisionsCounts'
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount'
@@ -115,6 +116,14 @@ export interface ConfigCountsData {
 }
 
 /**
+ * Decisions/pitfalls counts data for the decisionsCounts component.
+ */
+export interface DecisionsCountsData {
+  decisions: number;
+  pitfalls: number;
+}
+
+/**
  * D24: Notification data for the HUD notifications component.
  */
 export interface NotificationData {
@@ -134,6 +143,7 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
+  decisionsCounts: DecisionsCountsData | null;
   notifications?: NotificationData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
