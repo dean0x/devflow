@@ -59,19 +59,23 @@ function ensureHook(settings: Settings, eventName: string, marker: string, entry
   return true;
 }
 
-const isLegacy = (matcher: HookMatcher) =>
-  matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
+function isLegacy(matcher: HookMatcher): boolean {
+  return matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
+}
 
-const isAmbient = (matcher: HookMatcher) =>
-  matcher.hooks.some((h) =>
+function isAmbient(matcher: HookMatcher): boolean {
+  return matcher.hooks.some((h) =>
     h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
   );
+}
 
-const isClassification = (matcher: HookMatcher) =>
-  matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
+function isClassification(matcher: HookMatcher): boolean {
+  return matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
+}
 
-const isOrchestrator = (matcher: HookMatcher) =>
-  matcher.hooks.some((h) => h.command.includes(ORCHESTRATOR_HOOK_MARKER));
+function isOrchestrator(matcher: HookMatcher): boolean {
+  return matcher.hooks.some((h) => h.command.includes(ORCHESTRATOR_HOOK_MARKER));
+}
 
 /**
  * Remove the legacy commands awareness rule file left by prior installs.
@@ -98,26 +102,22 @@ export async function removeLegacyCommandsRule(): Promise<void> {
  */
 export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
-  let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
+  const removedLegacy = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
   // Sweep stale classification hook from prior installs — symmetric with removeAmbientHook
-  changed = filterHookEntries(settings, 'SessionStart', isClassification) || changed;
-
-  // --- UserPromptSubmit: preamble hook (git-gated reminder + plan-handoff fast-path) ---
-  changed = ensureHook(
+  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const addedPreamble = ensureHook(
     settings, 'UserPromptSubmit', PREAMBLE_HOOK_MARKER,
     { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble', timeout: 5 }] },
-  ) || changed;
-
-  // --- SessionStart: orchestrator charter hook (git-gated charter injection) ---
-  changed = ensureHook(
+  );
+  const addedOrchestrator = ensureHook(
     settings, 'SessionStart', ORCHESTRATOR_HOOK_MARKER,
     { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-orchestrator', timeout: 10 }] },
-  ) || changed;
+  );
 
-  // --- Purge legacy commands rule (runs before early-return so stale files are always removed) ---
+  // Purge legacy commands rule (runs before early-return so stale files are always removed)
   await removeLegacyCommandsRule();
 
-  if (!changed) return settingsJson;
+  if (!removedLegacy && !removedClassification && !addedPreamble && !addedOrchestrator) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -220,20 +220,14 @@ export const ambientCommand = new Command('ambient')
 
     if (options.status) {
       const enabled = hasAmbientHook(parsedSettings);
+      const hasOrchestrator = hasOrchestratorHook(parsedSettings);
+      const repairHint = enabled !== hasOrchestrator
+        ? ` ${color.dim('(partial — run devflow ambient --enable to repair)')}`
+        : '';
       if (enabled) {
-        const hasOrchestrator = hasOrchestratorHook(parsedSettings);
-        if (!hasOrchestrator) {
-          p.log.info(`Ambient mode: ${color.green('enabled')} ${color.dim('(partial — run devflow ambient --enable to repair)')}`);
-        } else {
-          p.log.info(`Ambient mode: ${color.green('enabled')}`);
-        }
+        p.log.info(`Ambient mode: ${color.green('enabled')}${repairHint}`);
       } else {
-        const hasOrchestrator = hasOrchestratorHook(parsedSettings);
-        if (hasOrchestrator) {
-          p.log.info(`Ambient mode: ${color.dim('disabled')} ${color.dim('(partial — run devflow ambient --enable to repair)')}`);
-        } else {
-          p.log.info(`Ambient mode: ${color.dim('disabled')}`);
-        }
+        p.log.info(`Ambient mode: ${color.dim('disabled')}${repairHint}`);
       }
       return;
     }
