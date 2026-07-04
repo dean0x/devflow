@@ -54,6 +54,19 @@ function printUsage(): void {
   p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
 }
 
+/**
+ * Resolve the git root for a state-mutating subcommand, warning and
+ * returning null if the caller isn't inside a git project. `actionSuffix`
+ * completes "Could not resolve git root — {actionSuffix}".
+ */
+async function requireGitRoot(actionSuffix: string): Promise<string | null> {
+  const gitRoot = await getGitRoot();
+  if (!gitRoot) {
+    p.log.warn(`Could not resolve git root — ${actionSuffix}`);
+  }
+  return gitRoot;
+}
+
 async function handleStatus(): Promise<void> {
   const gitRoot = await getGitRoot();
   if (!gitRoot) {
@@ -192,11 +205,8 @@ async function handleConfigure(): Promise<void> {
 }
 
 async function handleReset(): Promise<void> {
-  const gitRoot = await getGitRoot();
-  if (!gitRoot) {
-    p.log.warn('Could not resolve git root — reset not performed');
-    return;
-  }
+  const gitRoot = await requireGitRoot('reset not performed');
+  if (!gitRoot) return;
 
   const lockDir = getDecisionsLockDir(gitRoot);
 
@@ -258,11 +268,8 @@ async function handleReset(): Promise<void> {
 }
 
 async function handleClear(): Promise<void> {
-  const gitRoot = await getGitRoot();
-  if (!gitRoot) {
-    p.log.warn('Could not resolve git root — clear not performed');
-    return;
-  }
+  const gitRoot = await requireGitRoot('clear not performed');
+  if (!gitRoot) return;
 
   const decisionsLogPath = getDecisionsLogPath(gitRoot);
   try {
@@ -295,33 +302,29 @@ async function handleClear(): Promise<void> {
 }
 
 async function handleEnable(): Promise<void> {
-  const gitRoot = await getGitRoot();
-  if (gitRoot) {
-    await updateFeature(gitRoot, 'decisions', true);
-    await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
-    p.log.success('Decisions learning enabled — configuration updated');
-    p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
-  } else {
-    p.log.warn('Could not resolve git root — configuration not updated');
-  }
+  const gitRoot = await requireGitRoot('configuration not updated');
+  if (!gitRoot) return;
+
+  await updateFeature(gitRoot, 'decisions', true);
+  await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
+  p.log.success('Decisions learning enabled — configuration updated');
+  p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
 }
 
 async function handleDisable(): Promise<void> {
-  const gitRoot = await getGitRoot();
-  if (gitRoot) {
-    await updateFeature(gitRoot, 'decisions', false);
+  const gitRoot = await requireGitRoot('configuration not updated');
+  if (!gitRoot) return;
 
-    // Drain the dream (decisions-detection) queue so stale turns don't process
-    // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
-    // sibling memory queue. Unconditional: a mid-run Dream agent whose claimed
-    // batch vanishes aborts without changes — the desired outcome of disabling.
-    await drainDreamQueue(gitRoot);
+  await updateFeature(gitRoot, 'decisions', false);
 
-    await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
-    p.log.success('Decisions learning disabled — configuration updated');
-  } else {
-    p.log.warn('Could not resolve git root — configuration not updated');
-  }
+  // Drain the dream (decisions-detection) queue so stale turns don't process
+  // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
+  // sibling memory queue. Unconditional: a mid-run Dream agent whose claimed
+  // batch vanishes aborts without changes — the desired outcome of disabling.
+  await drainDreamQueue(gitRoot);
+
+  await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
+  p.log.success('Decisions learning disabled — configuration updated');
 }
 
 // ---------------------------------------------------------------------------
