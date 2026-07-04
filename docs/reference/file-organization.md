@@ -169,7 +169,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Dream hooks (UserPromptSubmit, Stop, SessionStart, SessionEnd, PreCompact)
+- `hooks` - Capture + Dream hooks (UserPromptSubmit, PostToolUse, Stop, SessionStart, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
@@ -204,8 +204,8 @@ Knowledge files in `.devflow/decisions/` capture decisions and pitfalls that age
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|
-| `decisions.md` | ADR-NNN (sequential) | The detached dream worker via `assign-anchor` | Architectural decisions — why choices were made |
-| `pitfalls.md` | PF-NNN (sequential) | The detached dream worker via `assign-anchor` | Known gotchas, fragile areas, past bugs |
+| `decisions.md` | ADR-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
 
 Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
 
