@@ -1,7 +1,7 @@
 ---
 feature: dream-capture-system
 name: Dream & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update detached worker, the Dream agent (shared/agents/dream.md), the session-start-context dream directive, or the dream/decisions config toggles. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, background-memory-update, Dream agent, dream directive, DREAM MAINTENANCE, DEVFLOW_BG_UPDATER, dream config, dream-lock."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update detached worker, the Dream agent (shared/agents/dream.md), the session-start-context dream directive, or the dream/decisions config toggles. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, background-memory-update, Dream agent, dream directive, DREAM MAINTENANCE, DEVFLOW_BG_UPDATER, dream config, dream-lock, json_extract_cwd_field, dream-cleanup, DREAM_MODEL allowlist."
 category: architecture
 directories:
   - scripts/hooks
@@ -11,7 +11,9 @@ directories:
   - src/cli/commands/memory.ts
   - src/cli/commands/decisions.ts
   - src/cli/utils/decisions-config.ts
+  - src/cli/utils/dream-cleanup.ts
   - src/cli/utils/project-paths.ts
+  - src/cli/hud/components/decisions-counts.ts
 created: 2026-07-03
 updated: 2026-07-04
 ---
@@ -115,6 +117,21 @@ call order (`addCaptureHooks` before `addMemoryHooks`). `memory-worker`'s thrott
 decision assumes the current turn was already appended earlier in the same Stop event
 (append-before-spawn); reversing the array order would spawn the worker one turn behind.
 
+**Shared cwd+field extraction (`json_extract_cwd_field`)**: `capture-turn` no longer inlines its
+own jq/node two-field split. The single home of the `cwd`-plus-arbitrary-field extraction is
+`json_extract_cwd_field <field>` in `scripts/hooks/json-parse`, backed by the `extract-cwd-field`
+node op in `json-helper.cjs` for the no-jq fallback. Both branches delimit the two output values
+with ASCII SOH (0x01) — written only as the jq `` escape or the node `'\x01'` literal, **never
+as a literal control byte in source** (an invariant enforced during review: grep for a raw SOH
+byte across every hook source must come up empty). Callers split with bash-3.2-safe parameter
+expansion: `CWD="${_FIELDS%%$'\001'*}"`, `VALUE="${_FIELDS#*$'\001'}"`.
+
+`json_extract_cwd_prompt` (extracting `cwd` + `prompt`) is now a **thin delegating wrapper**
+around `json_extract_cwd_field "prompt"` — it exists only because `capture-prompt` and
+`preamble` are its two call sites and a named function reads better than repeating the field
+name at each call site. `capture-turn` calls `json_extract_cwd_field "last_assistant_message"`
+directly since its field name differs from the wrapper's hardcoded `"prompt"`.
+
 ### 2. memory-worker → background-memory-update
 
 `memory-worker` owns ONLY the throttle + spawn decision — it never touches a queue file
@@ -165,10 +182,8 @@ kill "$WD_PID" 2>/dev/null; wait "$WD_PID" 2>/dev/null  # cancel watchdog before
 
 Without `set -m`, the background `claude` child would inherit this script's own process group,
 and `kill -TERM -"$CLAUDE_PID"` (the **negative** PID form kills an entire process group) would
-kill the worker script itself along with `claude` — a self-kill bug. `set -m` is toggled back
-off immediately after capturing `CLAUDE_PID` so it doesn't affect anything spawned afterward.
-The watchdog subshell is cancelled as soon as `claude` exits, specifically to avoid a stray
-`kill` hitting an unrelated, recycled PID after this script has already moved on.
+kill the worker script itself along with `claude` — a self-kill bug. The watchdog subshell is
+cancelled as soon as `claude` exits, to avoid a stray `kill` hitting a recycled PID later.
 
 ### 3. session-start-context Section 2 → Dream agent
 
@@ -181,7 +196,13 @@ The watchdog subshell is cancelled as soon as `claude` exits, specifically to av
 - otherwise `.pending-turns.jsonl` non-empty (`-s`) → emit.
 
 When emitting, it resolves the model — project `decisions/decisions.json` → global
-`~/.devflow/decisions.json` → `"opus"` — and injects a directive instructing the main model to
+`~/.devflow/decisions.json` → `"opus"` — then validates the resolved value against a bash
+`case "$DREAM_MODEL" in opus|sonnet|haiku) ;; *) DREAM_MODEL="opus" ;; esac` allowlist before
+ever interpolating it into the directive text. This is defense-in-depth: `decisions.json` is
+user/config-controlled, so a value containing newlines, quotes, or arbitrary text must never
+reach the SessionStart `additionalContext` the main model receives verbatim. The `opus`
+fallback deliberately matches `decisions-config.ts`'s `DEFAULTS.model` (see the "duplicated by
+design" gotcha below). After validation, it injects a directive instructing the main model to
 spawn `Agent(subagent_type="Dream", model="<resolved>", run_in_background: true, prompt:
 "Process the pending decisions queue per your agent instructions. Project root: <root>")`
 without narrating. Queue emptiness is the natural gate: no throttle, no lock, no
@@ -239,6 +260,8 @@ Contract tests pin these strings: `tests/dream-agent.test.ts` (frontmatter, clai
 negatives — the agent must NOT reference `count-active`, `staleness.cjs`, `merge-observation`,
 `.last-dream-ok`, or `last-run-summary`) and `tests/decisions/dream-curation.test.ts` +
 `decisions-format.test.ts` (Iron Law, creation bar, curation bounds).
+`tests/hud-decisions-counts.test.ts` adds a further contract pinning the HUD's own active-row
+semantics — see Component Interactions #6.
 
 ### 5. SessionStart injection (session-start-context, session-start-memory)
 
@@ -262,6 +285,18 @@ back to `.pending-turns.jsonl`, but only if the live queue file doesn't already 
 spawn); this is only the fallback for when the worker never respawns at all. The dream side
 needs no equivalent cold path: the Dream agent's own stale-merge in Step 0 is the recovery.
 
+### 6. HUD decisions/pitfalls counts (src/cli/hud/components/decisions-counts.ts)
+
+`gatherDecisionsCounts` reads `decisions-ledger.jsonl` directly (the render source of truth, not
+the rendered `.md` files) and counts active rows by type, mirroring `render-decisions.cjs`'s own
+`isActive()` exactly: a row counts when `anchor_id` is set and `decisions_status` is either
+absent or outside `INACTIVE_STATUSES` (`Deprecated`, `Superseded`, `Retired`). This mirror is no
+longer an unenforced convention — `tests/hud-decisions-counts.test.ts` `require()`s
+`scripts/hooks/lib/render-decisions.cjs`'s exported `isActive()` directly and asserts the TS and
+CJS implementations agree across the **full** `decisions_status` matrix (every known status
+value plus absent/undefined). If either side's status-set changes without the other, this test
+fails — the mirror is a pinned contract, not a documentation claim.
+
 ## Integration Patterns
 
 **Re-entrancy guard convention**: every hook in this system AND the memory worker check
@@ -284,6 +319,22 @@ removed by a single-feature disable because they are shared plumbing across feat
 mid-run Dream agent whose claimed batch vanishes aborts without changes, which is the desired
 outcome of disabling.
 
+**`decisions.ts` is a thin router over named handlers**: the command's `.action` callback only
+dispatches — `handleStatus`, `handleList`, `handleConfigure`, `handleReset`, `handleClear`,
+`handleEnable`, `handleDisable` each own their full path resolution and I/O. The four
+state-mutating handlers share a `requireGitRoot(actionSuffix)` guard, resolving the git root once
+instead of each handler re-implementing the check. `--status`/`--list` now also resolve the
+decisions log via `getGitRoot()` (cwd fallback only outside a git repo) — previously they
+resolved from `process.cwd()` unconditionally, diverging from `--clear`/`--reset`/`--disable`
+when invoked from a subdirectory.
+
+**`dream-cleanup.ts` centralizes the two dream-side cleanup predicates**: `sweepLegacyDreamMarkers
+(dreamDir)` (fixed stamps `.decisions-runs-today`/`.curation-last`/`.processor-spawned-at` plus
+per-session `decisions.*`/`curation.*` files) is shared by `devflow decisions --reset` and the
+`purge-dream-marker-pipeline-v1` migration. `drainDreamQueue(gitRoot)` (ENOENT-tolerant unlink of
+both queue files) is shared by `devflow decisions --clear` and `--disable` — each predicate now
+has exactly one implementation, imported by both consumers, instead of hand-copied duplicates.
+
 **Array-order contracts are enforced entirely by `init.ts`**: `capture-turn`/`memory-worker`
 ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 `addMemoryHooks` in `init.ts`'s single read-modify-write pass over `settings.json`. Reordering
@@ -299,33 +350,41 @@ those calls silently breaks the contract with no runtime error.
   log message content (only lengths) — "SECURITY: Never log ASSISTANT_MSG or INPUT content —
   may contain secrets."
 - **No daily/throttle cap on the dream side**: `DecisionsConfig` has no
-  `max_daily_runs`/`throttle_minutes` (a legacy config on disk with those keys is silently
-  ignored). Processing is bounded by queue non-emptiness at directive time.
-- **Memory lock duration is watchdog-derived, not arbitrary**: the memory worker asserts that
-  its lock's stale-threshold (300s) exceeds its own watchdog's total in-flight time
-  (`WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS` = 125s) with margin. Raising the
-  `DEVFLOW_BG_WATCHDOG_SECS` override without re-verifying this invariant risks a live worker's
-  lock being stale-broken out from under it. The dream side's equivalent constant is the shared
-  900s `.processing` staleness threshold used by both the hook (suppress) and the agent
-  (exit-vs-merge) — change it in both places or the discriminator desyncs.
+  `max_daily_runs`/`throttle_minutes` (a legacy config with those keys is silently ignored).
+  Processing is bounded by queue non-emptiness at directive time.
+- **Memory lock duration is watchdog-derived, not arbitrary**: the worker's lock stale-threshold
+  (300s) exceeds its watchdog's total in-flight time (`WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS`
+  = 125s) with margin. The dream side's equivalent constant is the shared 900s `.processing`
+  staleness threshold used by both the hook (suppress) and the agent (exit-vs-merge) — change it
+  in both places or the discriminator desyncs.
+- **No literal SOH bytes in hook source**: the ASCII SOH (0x01) delimiter used by
+  `json_extract_cwd_field` must only appear as the jq `` escape or the node `'\x01'` literal —
+  never a raw control byte pasted into source. Checked by review, not an automated test.
 
 ## Anti-Patterns
 
 - **Wrapping `assign-anchor`/`retire-anchor`/`rotate-observations` in your own lock
   acquisition**: all three self-lock internally; an external lock around them nests against the
   internal one and times out.
-- **Whole-file rewrites of `decisions-log.jsonl`**: the Dream agent appends or Edit-replaces
-  one JSONL row at a time. A whole-file rewrite races the capture-side `decisions-usage-scan`
-  and any concurrent op's atomic log update.
-- **Hand-editing `decisions.md`/`pitfalls.md`**: they are deterministically rendered from
-  `decisions-ledger.jsonl` by `render-decisions.cjs`; any manual edit is silently overwritten on
-  the next `assign-anchor`/`retire-anchor` call.
+- **Whole-file rewrites of `decisions-log.jsonl`**: the Dream agent appends or Edit-replaces one
+  JSONL row at a time — a whole-file rewrite races the capture-side `decisions-usage-scan` and
+  any concurrent op's atomic log update.
+- **Hand-editing `decisions.md`/`pitfalls.md`**: deterministically rendered from
+  `decisions-ledger.jsonl` by `render-decisions.cjs`; a manual edit is silently overwritten on the
+  next `assign-anchor`/`retire-anchor` call.
 - **Adding a throttle, lock, or status file to the dream side**: the design intentionally has
   none — queue emptiness gates the directive, the atomic `mv` settles races, `.processing`
   mtime discriminates live from crashed, and the agent's final message is the visibility
   surface. New state files here are machinery regression.
-- **Passing raw queue content into the directive or worker argv**: paths only; the processor
+- **Passing raw queue content into the directive or worker argv**: paths only — the processor
   reads content itself.
+- **Re-implementing the cwd+field split inline in a new capture hook**: any new hook that needs
+  `cwd` plus one other top-level field should call `json_extract_cwd_field <field>` (or the
+  `json_extract_cwd_prompt` wrapper if the field is `prompt`) rather than hand-rolling a new
+  jq/node two-value split — that was the exact duplication this pass removed from `capture-turn`.
+- **Interpolating `DREAM_MODEL` (or any config-sourced string) into a directive without an
+  allowlist**: `session-start-context` validates against the `opus|sonnet|haiku` `case` allowlist
+  before use; a new call site that skips this check reopens the injection risk it closes.
 
 ## Gotchas
 
@@ -340,57 +399,63 @@ those calls silently breaks the contract with no runtime error.
   read-modify-write, preserving keys it doesn't own — a naive overwrite silently disables
   sibling features. The read-modify-write is intentionally non-atomic (accepted: CLI toggles are
   single-threaded, human-paced actions).
-- **Hooks snapshot at session start**: registering a hook for the FIRST time (a project's first
-  `devflow init`, or the first `devflow memory --enable` on an install that had zero memory
-  hooks) only takes effect for a NEW Claude Code session — the currently running session already
-  loaded its hook list from `settings.json`. Toggling an ALREADY-REGISTERED hook's underlying
-  feature (e.g. `--disable` then `--enable`) takes effect on the very next hook invocation within
-  the same session, because every hook script re-reads `dream/config.json` fresh on every run.
+- **Hooks snapshot at session start**: registering a hook for the FIRST time only takes effect
+  for a NEW Claude Code session — the running session already loaded its hook list from
+  `settings.json`. Toggling an ALREADY-REGISTERED hook's feature takes effect on the very next
+  invocation within the same session, since every hook script re-reads `dream/config.json` fresh.
 - **Directive spawn depends on model compliance**: the hook only *asks* the main model to spawn
   the Dream agent. A model that skips the spawn delays processing to the next session — the
-  queue persists (bounded by the 200→100 overflow truncation), so nothing is lost, but nothing
-  is processed either. This is an accepted trade against the deleted worker machinery.
+  queue persists (bounded by 200→100 overflow truncation), so nothing is lost, but nothing is
+  processed either — an accepted trade against the deleted worker machinery.
 - **`claude -p` sessions receive the directive too**: SessionStart hooks fire in non-interactive
-  sessions (except the memory worker's own, which the `DEVFLOW_BG_UPDATER` guard excludes). An
-  unrelated `claude -p` run in the project may receive — and may or may not act on — the
-  directive. Accepted-class exposure.
+  sessions (except the memory worker's own, excluded by `DEVFLOW_BG_UPDATER`). An unrelated
+  `claude -p` run may receive — and may or may not act on — the directive. Accepted-class exposure.
 - **The project-root prompt**: the directive's prompt carries `Project root: <root>` because a
-  session can start in a subdirectory; the agent runs every command from that root, so
-  `$(pwd)`-relative op invocations (`render-decisions.cjs render "$(pwd)"`) resolve correctly.
+  session can start in a subdirectory; the agent runs commands from that root so `$(pwd)`-relative
+  op invocations (`render-decisions.cjs render "$(pwd)"`) resolve correctly.
 - **Accepted append-vs-claim race**: `queue_append_row`'s overflow truncation is read-then-replace
-  (`tail -100 file > tmp && mv tmp file`), not an in-place lock-held write. A lock-free
-  concurrent append landing between the `tail` snapshot and the `mv` can be silently dropped.
-  This is a known, accepted race class — the guarantee that actually holds is "the file is never
-  corrupted" (every surviving line is valid JSON), not "no data is ever lost under a genuine
-  race." The same acceptance covers a double stale-reclaim: two sessions that both start >900s
-  after a crash can both re-claim the same batch (sub-second window); dedup rules and
-  `assign-anchor`'s preconditions bound the damage to redundant analysis.
+  (`tail -100 file > tmp && mv tmp file`), not an in-place lock-held write — a lock-free
+  concurrent append landing between the `tail` snapshot and the `mv` can be silently dropped. The
+  guarantee that actually holds is "the file is never corrupted", not "no data is ever lost." The
+  same acceptance covers a double stale-reclaim: two sessions starting >900s after a crash can
+  both re-claim the same batch; dedup rules and `assign-anchor`'s preconditions bound the damage
+  to redundant analysis.
 - **AskUserQuestion fixtures are empirically pinned, not invented**: `capture-question`'s parser
   was built against real payload samples mined from `~/.claude/projects` (see
-  `tests/capture-hooks.test.ts`) because no genuine cancelled/interrupted or free-text ("Other")
-  sample could be found anywhere on the machine despite an exhaustive search. The one real
-  errored sample has `tool_response` as a **plain string** (`"InputValidationError: [...]"`),
-  not an object. The handling contract this produced: any non-object `tool_response`, and any
-  cancelled/absent shape, degrades to "zero rows, exit 0" rather than guessing at an unobserved
-  shape — do not add special-case handling for a shape you haven't mined a real sample of.
+  `tests/capture-hooks.test.ts`) — no genuine cancelled/interrupted or free-text ("Other") sample
+  could be found despite an exhaustive search. The one real errored sample has `tool_response` as
+  a **plain string** (`"InputValidationError: [...]"`), not an object. Handling contract: any
+  non-object `tool_response`, and any cancelled/absent shape, degrades to "zero rows, exit 0"
+  rather than guessing at an unobserved shape.
 - **Memory/dream file isolation is a hard invariant**: `cleanQueueFiles`
   (`devflow memory --clear`) touches only `getPendingTurnsPath`/`getPendingTurnsProcessingPath`
   under `memory/`, and skips a project entirely while `.working-memory.lock` is held.
   `devflow decisions --clear`/`--reset` resolve the git root explicitly and drain only the
-  dream queue + decisions state. Neither command's cleanup logic ever crosses into the sibling
+  dream queue + decisions state (via the shared `drainDreamQueue`/`sweepLegacyDreamMarkers`
+  helpers in `dream-cleanup.ts`). Neither command's cleanup logic ever crosses into the sibling
   feature's files.
 - **The `opus` default is duplicated by design, in two languages**: `decisions-config.ts`'s
-  `DEFAULTS.model` and `session-start-context`'s bash `DREAM_MODEL` resolution both implement
-  the same project-`decisions.json` → global-`~/.devflow/decisions.json` → `"opus"` precedence
-  independently, because the hook reads raw JSON directly rather than shelling out to the TS
-  loader. Changing one default without the other silently desyncs the CLI-reported default from
-  the directive's actual behavior.
+  `DEFAULTS.model` and `session-start-context`'s bash `DREAM_MODEL` resolution both implement the
+  same project→global→`"opus"` precedence independently (the hook reads raw JSON directly rather
+  than shelling out to the TS loader). Changing one default without the other silently desyncs
+  the CLI-reported default from the directive's actual behavior — and the bash side additionally
+  allowlist-validates the resolved value before interpolating it, a check the TS loader has no
+  equivalent for.
+- **`json_extract_cwd_field` is the one place both jq and node branches must stay in lockstep**:
+  changing the delimiter or field-defaulting behavior in one branch without the other
+  reintroduces the jq/node divergence this extraction was meant to eliminate. Both
+  `capture-turn`'s `last_assistant_message` field and `capture-prompt`/`preamble`'s `prompt`
+  field (via `json_extract_cwd_prompt`) go through this single function now.
 
 ## Key Files
 
 - `scripts/hooks/capture-prompt`, `capture-turn`, `capture-question` — the three always-on
-  capture hooks; all three source `queue-append` and share the truncate → `queue_read_gates` →
-  `queue_append_both` shape
+  capture hooks; share the truncate → `queue_read_gates` → `queue_append_both` shape.
+  `capture-prompt`/`capture-turn` also share `json_extract_cwd_field`/`json_extract_cwd_prompt`.
+- `scripts/hooks/json-parse` — sources `_HAS_JQ`/`_JSON_AVAILABLE` and every `json_*` helper,
+  including `json_extract_cwd_field` (single home of the SOH delimiter) and its wrapper
+- `scripts/hooks/json-helper.cjs` — node fallback for every `json_*` op, including
+  `extract-cwd-field` backing `json_extract_cwd_field` when `jq` is unavailable
 - `scripts/hooks/queue-append` — shared helper: `queue_append_row`, `queue_append_both`,
   `queue_read_gates` (single-fork config read)
 - `scripts/hooks/memory-worker` — Stop-hook 120s throttle + touch-before-spawn +
@@ -398,7 +463,8 @@ those calls silently breaks the contract with no runtime error.
 - `scripts/hooks/background-memory-update` — detached memory-refresh worker (haiku,
   skip-permissions, 300s/90s lock, 120s watchdog)
 - `scripts/hooks/session-start-context` — SessionStart injection: decisions TL;DR (Section 1) +
-  Dream maintenance directive with model resolution (Section 2)
+  Dream maintenance directive with model resolution + `opus|sonnet|haiku` allowlist validation
+  (Section 2)
 - `shared/agents/dream.md` — the Dream agent: claim protocol, detection bar, curation bounds,
   consume-then-delete finishing
 - `scripts/hooks/session-start-memory` — 3-state memory header + D56c cold path
@@ -407,21 +473,28 @@ those calls silently breaks the contract with no runtime error.
 - `src/cli/commands/capture.ts` — hook (de)registration for the always-on capture bundle
 - `src/cli/commands/dream.ts` — `removeDreamHook`/`hasDreamHook` upgrade cleanup of the retired
   spawn-dream-worker settings entry
-- `src/cli/commands/memory.ts`, `decisions.ts` — CLI toggles, `cleanQueueFiles`,
-  `--clear`/`--reset`, unconditional disable-drain
+- `src/cli/commands/memory.ts`, `decisions.ts` — CLI toggles, `cleanQueueFiles`; `decisions.ts`'s
+  `.action` is a thin router to `handleStatus`/`handleList`/`handleConfigure`/`handleReset`/`handleClear`/`handleEnable`/`handleDisable`, sharing the `requireGitRoot` guard
+- `src/cli/utils/dream-cleanup.ts` — `sweepLegacyDreamMarkers` (shared by `decisions --reset` and
+  `purge-dream-marker-pipeline-v1`) and `drainDreamQueue` (shared by `--clear`/`--disable`)
 - `src/cli/utils/decisions-config.ts` — TS `DecisionsConfig` loader (`model`, `debug` only)
 - `src/cli/utils/project-paths.ts` — single source of truth for every path referenced above; has
   a required CJS mirror at `scripts/hooks/lib/project-paths.cjs`
+- `src/cli/hud/components/decisions-counts.ts` — HUD counts component; active-row semantics
+  contract-tested against `scripts/hooks/lib/render-decisions.cjs`'s `isActive()`
+- `tests/config-disable-guards.test.ts` (renamed from `tests/sentinel.test.ts`) — guards on the
+  config-only disable contract across memory/decisions
+- `tests/hud-decisions-counts.test.ts` — pins HUD/CJS `isActive()` agreement across the full
+  `decisions_status` matrix
 
 ## Related
 
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — sibling `.devflow/` persistence
-  layer; contrast its write-through/in-command model against this system's queue + background
-  processors.
-- ADR-001 — the config-only gate (no sentinel files) and the `purge-dream-worker-state-v1`
-  migration follow the clean-break precedent ADR-001 established.
+  layer; contrast its write-through/in-command model against this system's queue + background processors.
+- ADR-001 — the config-only gate (no sentinel files) and `purge-dream-worker-state-v1` follow
+  the clean-break precedent ADR-001 established.
 - ADR-002 — contrast: unlike `.devflow/features/`, none of `.devflow/memory/`, `.devflow/dream/`,
-  or `.devflow/decisions/` are git-tracked; every file in this system stays local and gitignored.
+  or `.devflow/decisions/` are git-tracked; every file here stays local and gitignored.
 - ADR-003 — this knowledge base documents the current end state only, per ADR-003.
 - `docs/working-memory.md`, `docs/reference/file-organization.md` — user-facing docs for the
   same architecture; consistent source for the file-tree summary above.
