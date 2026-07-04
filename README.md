@@ -16,7 +16,7 @@ Claude Code is powerful. But every session starts from scratch. Context evaporat
 
 Devflow fixes this. Install once, forget about it. Your code gets better automatically.
 
-It detects when you paste a structured plan so it can auto-execute — no classification overhead for normal prompts. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
+A charter injected at session start turns the main session into a pure orchestrator — no per-prompt workflow detection, no classification overhead. Plan-mode handoffs auto-run `devflow:implement`. Complex tasks get a full TDD harness with quality gates at every step.
 
 ## See it work
 
@@ -41,7 +41,7 @@ you: add rate limiting to the /api/upload endpoint
 
 ## What you get
 
-**Ambient intelligence.** Devflow detects workflow intent — start a prompt with `implement`, `explore`, `research`, `debug`, or `plan`, or paste a structured plan, and the matching workflow runs automatically. Normal prompts get zero overhead, no classification step. No slash commands needed. Init and forget.
+**Ambient intelligence.** A charter injected at session start turns the main session into a pure orchestrator. Normal prompts get a 2-line delegation reminder; plan-mode handoffs (`Implement the following plan:`) auto-run `devflow:implement`; slash commands pass through unchanged. No keyword detection, no classification overhead. Init and forget.
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 

@@ -28,9 +28,10 @@ Pure-bash dispatch on the first 256 bytes of the prompt (after leading whitespac
 
 | Prompt condition | Output |
 |---|---|
-| First word begins `Implement the following plan:` | Fixed devflow:implement handoff directive |
-| First word is `/` | Silent exit 0 (slash commands pass through) |
-| Anything else (including empty-after-strip) | 2-line orchestrator delegation reminder |
+| Empty after whitespace strip | Silent exit 0 |
+| Begins `Implement the following plan:` | Fixed devflow:implement handoff directive |
+| Begins `/` (slash command) | Silent exit 0 |
+| Anything else | 2-line orchestrator delegation reminder |
 
 ### orchestrator-charter.md
 

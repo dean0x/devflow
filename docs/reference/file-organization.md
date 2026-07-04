@@ -20,7 +20,7 @@ devflow/
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
-├── plugins/                          # Plugin collection (21 plugins)
+├── plugins/                          # Plugin collection (22 plugins)
 │   ├── devflow-plan/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
