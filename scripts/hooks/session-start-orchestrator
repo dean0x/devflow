@@ -37,6 +37,8 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
+source "$SCRIPT_DIR/hook-log-init" "session-start-orchestrator"
+
 source "$SCRIPT_DIR/git-marker" || true
 if ! df_has_git_marker "$CWD" 2>/dev/null; then dbg "EXIT: not a git repo"; exit 0; fi
 
@@ -47,5 +49,6 @@ if [ -z "$CHARTER" ]; then dbg "EXIT: charter empty"; exit 0; fi
 if [ "${#CHARTER}" -gt 4096 ]; then dbg "EXIT: charter exceeds cap (${#CHARTER})"; exit 0; fi
 
 dbg "OUTPUT_LENGTH=${#CHARTER}"
+log "Injecting charter (${#CHARTER} chars)"
 json_session_output "$CHARTER"
 dbg "=== HOOK COMPLETE ==="

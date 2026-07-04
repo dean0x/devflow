@@ -7,7 +7,7 @@ df_has_git_marker() {
   local _dir="$1" _i=0
   while [ "$_i" -lt 64 ]; do
     [ -e "$_dir/.git" ] && return 0
-    [ "$_dir" = "/" ] || [ -z "$_dir" ] && return 1
+    if [ "$_dir" = "/" ] || [ -z "$_dir" ]; then return 1; fi
     _dir="${_dir%/*}"
     [ -z "$_dir" ] && _dir="/"
     _i=$((_i + 1))

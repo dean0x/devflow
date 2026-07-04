@@ -66,6 +66,9 @@ elif [[ "$HEAD" == "Implement the following plan:"* ]]; then
 elif [[ "$HEAD" == "/"* ]]; then
   dbg "EXIT: slash command — no reminder"
 else
+  # Model-tier taxonomy (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research)
+  # is cross-referenced with the full routing table in orchestrator-charter.md.
+  # Update both together if routing changes.
   dbg "ORCHESTRATOR_REMINDER injected"
   json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, and debug loops via the Agent tool (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research) or the matching devflow workflow skill.
 Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports."
