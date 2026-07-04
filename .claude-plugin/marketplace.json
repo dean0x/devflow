@@ -136,13 +136,13 @@
     {
       "name": "devflow-ambient",
       "source": "./plugins/devflow-ambient",
-      "description": "Ambient mode — classifies intent and applies proportional effort (skills for guided work, agent orchestration for complex tasks)",
+      "description": "Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff",
       "version": "1.8.3",
       "keywords": [
         "ambient",
-        "routing",
-        "quality",
-        "tdd"
+        "orchestrator",
+        "delegation",
+        "plan-handoff"
       ]
     },
     {

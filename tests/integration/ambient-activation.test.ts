@@ -40,14 +40,19 @@ describe.skipIf(!isClaudeAvailable())('devflow ambient plan handoff', () => {
     console.log(`plan handoff: ${result.durationMs}ms. Skills: [${result.skills.join(', ')}]`);
   });
 
-  it('normal prompt — hook outputs nothing, no skills loaded', async () => {
+  it('normal prompt — orchestrator reminder does not trigger a skill invocation', async () => {
     const result = await runClaudeStreaming('what does the config module do?', {
       timeout: 20000,
-      systemPrompt: false,
+      // A normal prompt gets the 2-line orchestrator reminder — it must steer toward
+      // delegation without auto-invoking any devflow workflow skill.
+      systemPrompt:
+        "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, " +
+        'and debug loops via the Agent tool (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research) ' +
+        'or the matching devflow workflow skill.\n' +
+        'Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports.',
     });
-    // No preamble injection for a normal prompt
     expect(hasSkillInvocations(result)).toBe(false);
-    console.log(`non-plan prompt: ${result.durationMs}ms`);
+    console.log(`reminder prompt: ${result.durationMs}ms`);
   });
 
   // T-5 empirical outcome: pending live verification
