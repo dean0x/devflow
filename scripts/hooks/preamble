@@ -9,10 +9,10 @@
 #   2. Slash skip: no reminder for slash commands (/...).
 #   3. Orchestrator reminder (2 lines): all other prompts get a delegation reminder.
 
-# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
+# Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
 
-set -e
+# set -e intentionally omitted: guard clauses ensure fail-open exit 0 on all paths.
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
