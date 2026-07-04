@@ -7,6 +7,7 @@ import { gatherGitStatus } from './git.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
+import { gatherDecisionsCounts } from './components/decisions-counts.js';
 import { getActiveNotification } from './notifications.js';
 import { render } from './render.js';
 import type { GatherContext, StdinData, UsageData } from './types.js';
@@ -86,6 +87,7 @@ async function run(): Promise<string> {
     components.has('todoProgress') ||
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
+  const needsDecisionsCounts = components.has('decisionsCounts');
   const needsNotifications = components.has('notifications');
   const needsSessionCost = components.has('sessionCost');
 
@@ -114,6 +116,11 @@ async function run(): Promise<string> {
     ? gatherConfigCounts(cwd)
     : null;
 
+  // Decisions/pitfalls counts (fast, synchronous filesystem read)
+  const decisionsCountsData = needsDecisionsCounts
+    ? gatherDecisionsCounts(cwd)
+    : null;
+
   // D24: Notification data (fast, synchronous filesystem read)
   const notificationsData = needsNotifications
     ? getActiveNotification(cwd)
@@ -140,6 +147,7 @@ async function run(): Promise<string> {
     transcript,
     usage,
     configCounts: configCountsData,
+    decisionsCounts: decisionsCountsData,
     notifications: notificationsData,
     costHistory,
     config: { ...config, components: resolved } as GatherContext['config'],

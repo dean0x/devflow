@@ -22,6 +22,7 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
   'usageQuota',
   'todoProgress',
   'configCounts',
+  'decisionsCounts',
   'notifications',
 ];
 
