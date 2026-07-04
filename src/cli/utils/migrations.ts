@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir, getFeaturesDir } from './project-paths.js';
+import { sweepLegacyDreamMarkers } from './dream-cleanup.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -979,46 +980,7 @@ const MIGRATION_PURGE_DREAM_MARKER_PIPELINE: Migration<'per-project'> = {
   scope: 'per-project',
   async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
     const dreamDir = path.join(ctx.projectRoot, '.devflow', 'dream');
-    let removed = 0;
-
-    // Fixed-name legacy stamps.
-    const fixed = [
-      path.join(dreamDir, '.decisions-runs-today'),
-      path.join(dreamDir, '.curation-last'),
-      path.join(dreamDir, '.processor-spawned-at'),
-    ];
-    for (const filePath of fixed) {
-      try {
-        await fs.unlink(filePath);
-        removed++;
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT') throw err; // unexpected — surface to runner
-      }
-    }
-
-    // Per-session marker variants: (decisions|curation).*.{json,processing,retries,failed}
-    try {
-      const entries = await fs.readdir(dreamDir);
-      for (const entry of entries) {
-        const isLegacyMarker =
-          (entry.startsWith('decisions.') || entry.startsWith('curation.')) &&
-          (entry.endsWith('.json') || entry.endsWith('.processing') ||
-            entry.endsWith('.retries') || entry.endsWith('.failed'));
-        if (isLegacyMarker) {
-          try {
-            await fs.unlink(path.join(dreamDir, entry));
-            removed++;
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code !== 'ENOENT') throw err;
-          }
-        }
-      }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
-    }
+    const removed = await sweepLegacyDreamMarkers(dreamDir);
 
     const infos: string[] = [];
     if (removed > 0) {

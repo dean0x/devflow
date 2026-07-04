@@ -53,11 +53,13 @@ import {
 } from '../../src/cli/utils/observations.js';
 import { getGitRoot } from '../../src/cli/utils/git.js';
 import { decisionsCommand } from '../../src/cli/commands/decisions.js';
+import * as p from '@clack/prompts';
 import {
   getDreamPendingTurnsPath,
   getDreamPendingTurnsProcessingPath,
   getDreamConfigPath,
   getPendingTurnsPath,
+  getDecisionsLogPath,
 } from '../../src/cli/utils/project-paths.js';
 
 // ---------------------------------------------------------------------------
@@ -468,5 +470,58 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --list resolves the log from the git root, not process.cwd() — regression
+// for the class of bug where --list run from a subdirectory of the repo
+// would look for a decisions log under the (nonexistent) subdirectory path
+// instead of the real one at the git root.
+// ---------------------------------------------------------------------------
+
+describe('decisions --list resolves log path from git root, not process.cwd()', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('finds the decisions log at the git root even when cwd is a subdirectory', async () => {
+    const logPath = getDecisionsLogPath(tmpDir);
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.writeFileSync(logPath, makeDecisionLog([
+      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
+    ]));
+
+    // getGitRoot is mocked to resolve to tmpDir regardless of the real cwd
+    // (exactly as `git rev-parse --show-toplevel` would from a subdirectory).
+    // Point cwd at a decoy path to prove --list never falls back to
+    // process.cwd() instead of the resolved gitRoot.
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+
+    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+
+    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
+  });
+
+  it('falls back to process.cwd() when not in a git project', async () => {
+    vi.mocked(getGitRoot).mockResolvedValue(null);
+    const cwdLogPath = getDecisionsLogPath(tmpDir);
+    fs.mkdirSync(path.dirname(cwdLogPath), { recursive: true });
+    fs.writeFileSync(cwdLogPath, makeDecisionLog([
+      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
+    ]));
+    vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+
+    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+
+    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
   });
 });
