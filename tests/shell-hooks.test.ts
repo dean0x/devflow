@@ -1202,5 +1202,20 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(contextOf(stdout)).toContain('model="sonnet"');
   });
+
+  it('model resolution: an invalid/unallowlisted model value falls back to opus (defense in depth)', () => {
+    seedQueue(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.json'),
+      JSON.stringify({ model: 'gpt-5\ninjected", "evil": "payload' }),
+    );
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    const ctx = contextOf(stdout);
+    expect(ctx).toContain('model="opus"');
+    expect(ctx).not.toContain('injected');
+    expect(ctx).not.toContain('evil');
+  });
 });
 

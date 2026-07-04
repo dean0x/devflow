@@ -229,8 +229,8 @@ describe('capture-turn', () => {
   it('decisions usage scanner still runs when memory is disabled', () => {
     writeDreamConfig(projectDir, { memory: false });
     // decisions-usage-scan.cjs itself no-ops when .devflow/memory/ is absent
-    // (its own guard) — pre-create it, matching sentinel.test.ts's mkMemoryDir
-    // convention.
+    // (its own guard) — pre-create it, matching config-disable-guards.test.ts's
+    // mkMemoryDir convention.
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
     const usagePath = path.join(projectDir, '.devflow', 'decisions', '.decisions-usage.json');

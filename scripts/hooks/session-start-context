@@ -138,6 +138,14 @@ if [ "$DECISIONS_ENABLED" = "true" ]; then
       DREAM_MODEL=$(json_field_file "$HOME/.devflow/decisions.json" "model" "")
     fi
     DREAM_MODEL="${DREAM_MODEL:-opus}"
+    # Allowlist before interpolating into the injected directive (defense in depth --
+    # decisions.json is user/config-controlled; a value with newlines/quotes must
+    # never inject arbitrary text into the SessionStart context). Fallback matches
+    # decisions-config.ts DEFAULTS.model (duplicated-by-design, see feature KB).
+    case "$DREAM_MODEL" in
+      opus|sonnet|haiku) ;;
+      *) DREAM_MODEL="opus" ;;
+    esac
 
     dbg "dream directive emitted (reason=$DREAM_WORK model=$DREAM_MODEL)"
     DREAM_SECTION="--- DREAM MAINTENANCE ---

@@ -16,7 +16,7 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function mkTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sentinel-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-test-'));
 }
 
 function mkMemoryDir(base: string): void {
@@ -46,7 +46,7 @@ function parseHookOutput(rawOutput: string): string {
   return hookOutput.additionalContext as string;
 }
 
-describe('sentinel guard: pre-compact-memory', () => {
+describe('config guard: pre-compact-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
   let tmpDir: string;
 
@@ -66,7 +66,7 @@ describe('sentinel guard: pre-compact-memory', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
   });
 
-  it('writes backup.json when sentinel absent', () => {
+  it('writes backup.json when disable guard absent', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir);
     expect(() => {
@@ -77,7 +77,7 @@ describe('sentinel guard: pre-compact-memory', () => {
   });
 });
 
-describe('sentinel guard: session-start-memory', () => {
+describe('config guard: session-start-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-memory');
   let tmpDir: string;
 
@@ -95,7 +95,7 @@ describe('sentinel guard: session-start-memory', () => {
     expect(output).toBe('');
   });
 
-  it('outputs context when sentinel absent and WORKING-MEMORY.md exists', () => {
+  it('outputs context when disable guard absent and WORKING-MEMORY.md exists', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
@@ -175,7 +175,7 @@ describe('config guard: capture-turn decisions scanner gating', () => {
 
 // ─── Part A: session-start-context hook ──────────────────────────────────────
 
-describe('sentinel guard: session-start-context', () => {
+describe('config guard: session-start-context', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');
   let tmpDir: string;
 
