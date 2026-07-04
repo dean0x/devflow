@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 // NOTE: Intentional sync I/O throughout. This test file only reads static fixture files
 // from the local repo during test discovery — no async I/O benefit, and sync keeps every
 // test function synchronous (simpler assertions, no `await` boilerplate).
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as path from 'path';
 import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
 
@@ -401,9 +401,19 @@ describe('Format 5: Hook script skill references', () => {
       return statSync(fullPath).isFile();
     });
 
-    expect(hookFiles.length, 'should find at least one hook script').toBeGreaterThan(0);
+    // Also scan files in assets/ subdirectory (static prose assets shipped with hooks).
+    const assetsDir = path.join(hooksDir, 'assets');
+    const assetFiles = existsSync(assetsDir)
+      ? readdirSync(assetsDir)
+          .filter(f => statSync(path.join(assetsDir, f)).isFile())
+          .map(f => `assets/${f}`)
+      : [];
 
-    for (const file of hookFiles) {
+    const allHookFiles = [...hookFiles, ...assetFiles];
+
+    expect(allHookFiles.length, 'should find at least one hook script').toBeGreaterThan(0);
+
+    for (const file of allHookFiles) {
       const filePath = path.join(hooksDir, file);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);

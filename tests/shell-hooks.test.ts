@@ -847,7 +847,7 @@ describe('preamble — orchestrator charter mode', () => {
 
 describe('session-start-orchestrator', () => {
   const ORCHESTRATOR_HOOK = path.join(HOOKS_DIR, 'session-start-orchestrator');
-  const CHARTER_FILE = path.resolve(__dirname, '..', 'scripts', 'hooks', 'orchestrator-charter.md');
+  const CHARTER_FILE = path.resolve(__dirname, '..', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md');
 
   let tmpDir: string;   // has a .git dir
   let homeDir: string;
@@ -948,7 +948,8 @@ describe('session-start-orchestrator', () => {
     const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-bigcharter-'));
     try {
       copyHookDepsToDir(hooksTemp);
-      fs.writeFileSync(path.join(hooksTemp, 'orchestrator-charter.md'), 'x'.repeat(4097));
+      fs.mkdirSync(path.join(hooksTemp, 'assets'));
+      fs.writeFileSync(path.join(hooksTemp, 'assets', 'orchestrator-charter.md'), 'x'.repeat(4097));
       const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
       expect(stdout).toBe('');
       expect(exitCode).toBe(0);

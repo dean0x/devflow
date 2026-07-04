@@ -40,7 +40,7 @@ dbg "CWD=$CWD"
 source "$SCRIPT_DIR/git-marker" || true
 if ! df_has_git_marker "$CWD" 2>/dev/null; then dbg "EXIT: not a git repo"; exit 0; fi
 
-CHARTER_FILE="$SCRIPT_DIR/orchestrator-charter.md"
+CHARTER_FILE="$SCRIPT_DIR/assets/orchestrator-charter.md"
 if [ ! -f "$CHARTER_FILE" ]; then dbg "EXIT: charter missing"; exit 0; fi
 CHARTER=$(cat "$CHARTER_FILE")
 if [ -z "$CHARTER" ]; then dbg "EXIT: charter empty"; exit 0; fi

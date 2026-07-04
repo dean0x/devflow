@@ -20,7 +20,7 @@ This design replaced two previous detection-based approaches (first-word keyword
 
 ### Hook 1: session-start-orchestrator (SessionStart, timeout 10)
 
-Reads `scripts/hooks/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and under 4096 bytes; missing or oversized charter exits 0 silently.
+Reads `scripts/hooks/assets/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and under 4096 bytes; missing or oversized charter exits 0 silently.
 
 ### Hook 2: preamble (UserPromptSubmit, timeout 5)
 
@@ -34,7 +34,7 @@ Pure-bash dispatch on the first 256 bytes of the prompt (after leading whitespac
 
 ### orchestrator-charter.md
 
-A static markdown file at `scripts/hooks/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, and the plan-handoff fallback bullet. The 4096-byte runtime cap in the hook enforces a minimum footprint.
+A static markdown file at `scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, and the plan-handoff fallback bullet. The 4096-byte runtime cap in the hook enforces a minimum footprint.
 
 ### git-marker (sourced helper)
 
@@ -93,7 +93,7 @@ The system can land in two kinds of partial state. Both are repaired by `--enabl
 The string `Implement the following plan:` appears verbatim in two places:
 
 1. `scripts/hooks/preamble` — the fast-path match condition in the UserPromptSubmit dispatch
-2. `scripts/hooks/orchestrator-charter.md` — the plan-handoff fallback bullet under SessionStart
+2. `scripts/hooks/assets/orchestrator-charter.md` — the plan-handoff fallback bullet under SessionStart
 
 This is intentional. SessionStart provably fires (via `SessionStart:clear`) in plan-handoff sessions even if UserPromptSubmit does not fire for Claude Code's auto-injected handoff prompt. The charter's fallback bullet covers that gap. Both files carry a cross-reference comment flagging the duplication. If Claude Code changes the handoff format, both files must be updated together.
 
@@ -139,7 +139,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 - `scripts/hooks/preamble` — UserPromptSubmit hook: dispatch logic, plan-handoff fast-path, orchestrator reminder
 - `scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, additionalContext output
-- `scripts/hooks/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet lives here
+- `scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet lives here
 - `scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk
 - `src/cli/commands/ambient.ts` — TypeScript management: `addAmbientHook`, `removeAmbientHook`, `hasAmbientHook`, `ambientCommand`
 - `tests/shell-hooks.test.ts` — Shell integration tests (suites 1–4 for preamble, suite for session-start-orchestrator)

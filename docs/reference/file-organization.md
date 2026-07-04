@@ -58,7 +58,6 @@ devflow/
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
 │       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + the Dream agent spawn directive when the queue is pending
 │       ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
-│       ├── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
 │       ├── preamble                 # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
 │       ├── git-marker               # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
@@ -72,6 +71,8 @@ devflow/
 │       ├── decisions-usage-scan.cjs # Decisions usage scanning
 │       ├── json-helper.cjs          # Node.js jq-equivalent operations
 │       ├── json-parse               # Shell wrapper: jq with node fallback
+│       ├── assets/                  # Static prose assets shipped with hooks
+│       │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │       └── lib/                     # Node.js helper modules
 │           ├── decisions-index.cjs    # Decisions index builder
 │           ├── project-paths.cjs      # Project slug + path resolution

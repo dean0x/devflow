@@ -79,7 +79,8 @@ devflow/
 ├── plugins/devflow-*/      # 22 plugins (12 core + 9 optional language/ecosystem + 1 optional workflow)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Capture + memory + dream + ambient hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], dream-lock, session-start-memory, session-start-context, session-start-orchestrator, orchestrator-charter.md [static charter asset], pre-compact-memory, preamble, git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
+│   └── hooks/              # Capture + memory + dream + ambient hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], dream-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
+│       └── assets/         # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, decisions, flags, knowledge, rules, debug)
 ├── .claude-plugin/         # Marketplace registry
 ├── .devflow/               # Per-project runtime data — local by default; EXCEPTION: features/ knowledge bases (index.md + {slug}/KNOWLEDGE.md) are tracked & shared via git (ensure-root-gitignore writes the carve-out)
