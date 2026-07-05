@@ -307,7 +307,7 @@ export const uninstallCommand = new Command('uninstall')
               if (updated !== settings) {
                 await fs.writeFile(settingsPath, updated, 'utf-8');
                 if (verbose) {
-                  p.log.success('Ambient mode hook removed from settings.json');
+                  p.log.success('Ambient mode hooks removed from settings.json');
                 }
               }
             } catch { /* settings.json may not exist */ }

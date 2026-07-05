@@ -33,12 +33,13 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(5);
   });
 
-  it('does NOT add SessionStart classification hook', async () => {
+  it('adds SessionStart orchestrator hook', async () => {
     const result = await addAmbientHook('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    // New architecture: no SessionStart classification hook
-    expect(settings.hooks.SessionStart).toBeUndefined();
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+    expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(10);
   });
 
   it('adds alongside existing hooks', async () => {
@@ -52,8 +53,9 @@ describe('addAmbientHook', () => {
 
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    // No SessionStart added
-    expect(settings.hooks.SessionStart).toBeUndefined();
+    // Orchestrator SessionStart hook added
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
   });
 
   it('adds alongside existing UserPromptSubmit hooks', async () => {
@@ -70,7 +72,7 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
 
-  it('preserves existing SessionStart hooks (session-start-memory) — does not touch them', async () => {
+  it('preserves existing SessionStart hooks (session-start-memory) and adds orchestrator', async () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] }],
@@ -79,16 +81,51 @@ describe('addAmbientHook', () => {
     const result = await addAmbientHook(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    // SessionStart untouched — still only has session-start-memory
-    expect(settings.hooks.SessionStart).toHaveLength(1);
+    // SessionStart has session-start-memory (preserved) + session-start-orchestrator (added)
+    expect(settings.hooks.SessionStart).toHaveLength(2);
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.SessionStart[1].hooks[0].command).toContain('session-start-orchestrator');
   });
 
-  it('is idempotent — does not add duplicate hooks', async () => {
+  it('partial repair — adds orchestrator when preamble already present', async () => {
+    const withPreambleOnly = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] }],
+      },
+    });
+    const result = await addAmbientHook(withPreambleOnly, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Preamble unchanged, orchestrator added
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+  });
+
+  it('partial repair — adds preamble when only orchestrator present', async () => {
+    const withOrchestratorOnly = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] }],
+      },
+    });
+    const result = await addAmbientHook(withOrchestratorOnly, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Orchestrator preserved, preamble added
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+  });
+
+  it('is idempotent — does not add duplicate hooks (both preamble and orchestrator)', async () => {
     const first = await addAmbientHook('{}', '/home/user/.devflow');
     const second = await addAmbientHook(first, '/home/user/.devflow');
 
     expect(second).toBe(first);
+    // Verify counts
+    const settings = JSON.parse(second);
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
   });
 
   it('purges legacy rule even when preamble hook already present (ordering invariant)', async () => {
@@ -115,15 +152,16 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
   });
 
-  it('uses correct devflowDir path in command via run-hook wrapper', async () => {
+  it('uses correct devflowDir path in commands via run-hook wrapper', async () => {
     const result = await addAmbientHook('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
     const preambleCmd = settings.hooks.UserPromptSubmit[0].hooks[0].command;
+    const orchestratorCmd = settings.hooks.SessionStart[0].hooks[0].command;
 
     expect(preambleCmd).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
     expect(preambleCmd).toContain('preamble');
-    // No classification command — no SessionStart hook added
-    expect(settings.hooks.SessionStart).toBeUndefined();
+    expect(orchestratorCmd).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(orchestratorCmd).toContain('session-start-orchestrator');
   });
 
   it('replaces legacy ambient-prompt hook with new preamble hook', async () => {
@@ -159,6 +197,42 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
     expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
+
+  it('sweeps stale SessionStart classification hook from prior installs on --enable', async () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+        ],
+      },
+    });
+    const result = await addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Classification removed, orchestrator added, preamble added
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).not.toContain('session-start-classification');
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+  });
+
+  it('sweeps stale classification hook and returns changed JSON even when both current hooks already present', async () => {
+    // Both current hooks present but a stale classification hook is also there.
+    // addAmbientHook must sweep the stale hook and return new JSON (not take the early-return path).
+    const withBoth = JSON.parse(await addAmbientHook('{}', '/home/user/.devflow'));
+    withBoth.hooks.SessionStart.push({
+      hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }],
+    });
+    const inputWithStale = JSON.stringify(withBoth);
+
+    const result = await addAmbientHook(inputWithStale, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(result).not.toBe(inputWithStale);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-orchestrator');
+  });
 });
 
 describe('removeAmbientHook', () => {
@@ -171,9 +245,17 @@ describe('removeAmbientHook', () => {
     vi.restoreAllMocks();
   });
 
-  it('removes ambient hook — clears UserPromptSubmit', async () => {
-    const withHook = await addAmbientHook('{}', '/home/user/.devflow');
-    const result = await removeAmbientHook(withHook);
+  it('removes ambient hooks — clears both UserPromptSubmit and SessionStart', async () => {
+    const withBoth = await addAmbientHook('{}', '/home/user/.devflow');
+    const result = await removeAmbientHook(withBoth);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('removes orchestrator SessionStart hook', async () => {
+    const withBoth = await addAmbientHook('{}', '/home/user/.devflow');
+    const result = await removeAmbientHook(withBoth);
     const settings = JSON.parse(result);
 
     expect(settings.hooks).toBeUndefined();
@@ -194,7 +276,43 @@ describe('removeAmbientHook', () => {
     const result = await removeAmbientHook(input);
     const settings = JSON.parse(result);
 
-    // session-start-memory preserved, session-start-classification cleaned up
+    // session-start-memory preserved, session-start-classification and preamble cleaned up
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+  });
+
+  it('removes orchestrator-only hook (partial state cleanup)', async () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+        ],
+      },
+    });
+    const result = await removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('removes both orchestrator and classification SessionStart hooks at once', async () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+        ],
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+        ],
+      },
+    });
+    const result = await removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    // Only session-start-memory preserved
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
     expect(settings.hooks.UserPromptSubmit).toBeUndefined();
@@ -246,7 +364,7 @@ describe('removeAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit).toBeUndefined();
   });
 
-  it('is idempotent — safe to call when not present', async () => {
+  it('is idempotent — safe to call when neither preamble nor orchestrator present', async () => {
     const input = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }] } });
     const result = await removeAmbientHook(input);
 
@@ -417,6 +535,23 @@ describe('hasAmbientHook', () => {
       },
     });
     expect(hasAmbientHook(input)).toBe(false);
+  });
+
+  it('returns false for orchestrator-only SessionStart hook (broken partial state = disabled)', () => {
+    // Orchestrator without preamble is partial state — treated as disabled (preamble-authoritative)
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+        ],
+      },
+    });
+    expect(hasAmbientHook(input)).toBe(false);
+  });
+
+  it('returns true when both preamble and orchestrator hooks are present', async () => {
+    const withBoth = await addAmbientHook('{}', '/home/user/.devflow');
+    expect(hasAmbientHook(withBoth)).toBe(true);
   });
 });
 

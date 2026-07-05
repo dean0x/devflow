@@ -170,6 +170,8 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 
 ## Ambient Mode
 
-Not a command — a zero-overhead enhancement:
+Not a command — a two-hook orchestrator system (git repos only):
 
-**Plan auto-detection** — A `UserPromptSubmit` hook detects structured plans (containing `## Goal`, `## Steps`, and `## Files`) and auto-invokes `/implement`. Normal prompts produce zero output.
+**Orchestrator charter** — A `SessionStart` hook (`session-start-orchestrator`) injects a ~200-token charter that establishes the main session as a pure orchestrator, grading sub-agents by complexity (haiku/sonnet/opus) and listing devflow workflows for real-scale work.
+
+**Per-prompt dispatch** — A `UserPromptSubmit` hook (`preamble`) handles three cases: (1) prompts beginning `Implement the following plan:` invoke `devflow:implement`; (2) slash commands are silenced; (3) all other prompts get a 2-line orchestrator reminder. Both hooks are silent outside git repos.

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Sourced helper: df_has_git_marker <dir> — returns 0 if <dir> or any of its
+# ancestors (bounded, max 64 levels) contains a .git entry (dir or file).
+# Pure bash, no subprocess — safe for the per-prompt UserPromptSubmit hot path.
+# The -e test covers both .git directories and worktree/submodule .git files.
+df_has_git_marker() {
+  local _dir="$1" _i=0
+  while [ "$_i" -lt 64 ]; do
+    [ -e "$_dir/.git" ] && return 0
+    if [ "$_dir" = "/" ] || [ -z "$_dir" ]; then return 1; fi
+    _dir="${_dir%/*}"
+    [ -z "$_dir" ] && _dir="/"
+    _i=$((_i + 1))
+  done
+  return 1
+}

@@ -143,7 +143,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-ambient',
-    description: 'Keyword + plan auto-detection',
+    description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: ['/ambient'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
     skills: [

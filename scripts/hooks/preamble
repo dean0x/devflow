@@ -1,17 +1,25 @@
 #!/bin/bash
 
 # Devflow Preamble: UserPromptSubmit Hook
-# Two detection paths — emits nothing when neither fires:
-#   1. First-word keyword dispatch: if the prompt starts with one of
-#      implement/explore/research/debug/plan (any case) followed by at least one
-#      additional word, inject a directive to invoke devflow:<keyword> via the Skill tool.
-#   2. Structured plan: if the prompt contains ## Goal, ## Steps, and ## Files markers,
-#      inject a directive to invoke devflow:implement via the Skill tool.
+# Three behaviors (git repos only — silent outside a git tree):
+#   1. Plan-handoff fast-path: if prompt begins `Implement the following plan:` (Claude Code's
+#      native plan-mode handoff), inject a directive to invoke devflow:implement immediately.
+#      NOTE: the literal prefix is duplicated in orchestrator-charter.md (fallback bullet)
+#      and scripts/hooks/preamble — update both together if Claude Code changes the handoff format.
+#   2. Slash skip: no reminder for slash commands (/...).
+#   3. Orchestrator reminder (2 lines): all other prompts get a delegation reminder.
 
-# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
+# Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
 
-set -e
+# set -e intentionally omitted: guard clauses ensure fail-open exit 0 on all paths.
+
+# Re-entrancy guard — before hook-bootstrap to minimize background session overhead.
+# The memory worker's own claude -p session fires UserPromptSubmit; without this guard
+# the nested background session would receive the orchestrator reminder (or, on a
+# matching prompt, a plan-handoff directive) it must never act on. Mirrors the sibling
+# capture-prompt UserPromptSubmit hook and session-start-orchestrator.
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -37,42 +45,33 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
-# --- First-word workflow keyword detection (strict guard) ---
-# Bound work to the first 256 bytes (the keyword lives at the very start); avoids
-# pathological parameter-expansion scans on huge pasted prompts. Pure bash 3.2:
-# no subprocess, no ${var,,} (macOS bash is 3.2).
+# --- Git-repo gate (pure bash, bounded walk) ---
+source "$SCRIPT_DIR/git-marker" || true
+if ! df_has_git_marker "$CWD" 2>/dev/null; then dbg "EXIT: not a git repo"; exit 0; fi
+
+# --- Prompt dispatch (pure bash 3.2; no subprocess in this block) ---
+# The plan-handoff prefix is a Claude Code protocol marker (native "execute plan
+# in new session" handoff), matched literally — plumbing, not semantic detection.
+# Duplicated in orchestrator-charter.md (fallback bullet); update both together.
+# Known bound: prefix must appear within the first 256 bytes after whitespace
+# strip (native handoffs have zero leading whitespace).
 HEAD="${PROMPT:0:256}"
 HEAD="${HEAD#"${HEAD%%[![:space:]]*}"}"   # strip leading whitespace/newlines
-TOKEN="${HEAD%%[[:space:]]*}"             # first whitespace-delimited token (may carry punct)
-REST="${HEAD#"$TOKEN"}"                    # text after first token
-REST="${REST#"${REST%%[![:space:]]*}"}"   # strip its leading whitespace
-WORD="${TOKEN%[[:punct:]]}"               # strip one trailing punct: "Debug:" -> "Debug"
 
-# Canonical lowercase skill name; nocasematch makes the match case-insensitive AND the
-# case arms yield the lowercase form — no external tools required.
-shopt -s nocasematch
-case "$WORD" in
-  implement) SKILL=implement ;;
-  explore)   SKILL=explore ;;
-  research)  SKILL=research ;;
-  debug)     SKILL=debug ;;
-  plan)      SKILL=plan ;;  # Note: `plan` keyword → devflow:plan; the structured-plan path below → devflow:implement
-  *)         SKILL="" ;;
-esac
-shopt -u nocasematch
-
-# Fire when the first word is a workflow keyword followed by at least one more word.
-# Prompts that end with a question mark still count — command-style prompts often
-# close with a clarifying question ("implement X … should I use Redis?"), so a
-# trailing-'?' exclusion would produce false negatives.
-if [[ -n "$SKILL" && -n "$REST" ]]; then
-  dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
-  json_prompt_output "The user's prompt begins with the \`$SKILL\` keyword, which signals the \`devflow:$SKILL\` workflow. In one short sentence, tell the user you're invoking \`devflow:$SKILL\`. Then immediately invoke it with the Skill tool, passing the user's full request (everything after the leading \`$SKILL\` keyword) as the skill input. Do not pause to ask whether to proceed."
-elif [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
-  dbg "EXECUTION_PLAN detected — injecting directive"
-  json_prompt_output "The user's prompt is a structured implementation plan (it contains ## Goal, ## Steps, and ## Files). In one short sentence, tell the user you're invoking \`devflow:implement\`. Then immediately invoke it with the Skill tool, passing the full plan as the skill input so it can be executed. Do not pause to ask whether to proceed."
+if [ -z "$HEAD" ]; then
+  dbg "EXIT: empty prompt"
+elif [[ "$HEAD" == "Implement the following plan:"* ]]; then
+  dbg "PLAN_HANDOFF detected — injecting devflow:implement directive"
+  json_prompt_output "The user's prompt is a plan handoff (it begins with \`Implement the following plan:\`). In one short sentence, tell the user you're invoking \`devflow:implement\`. Then immediately invoke it with the Skill tool, passing the full plan (everything after the handoff prefix) as the skill input so it can be executed. Do not pause to ask whether to proceed."
+elif [[ "$HEAD" == "/"* ]]; then
+  dbg "EXIT: slash command — no reminder"
 else
-  dbg "No keyword or plan markers detected — no output"
+  # Model-tier taxonomy (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research)
+  # is cross-referenced with the full routing table in orchestrator-charter.md.
+  # Update both together if routing changes.
+  dbg "ORCHESTRATOR_REMINDER injected"
+  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, and debug loops via the Agent tool (haiku=mechanical, sonnet=defined execution, opus=analysis/design/research) or the matching devflow workflow skill.
+Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports."
 fi
 
 dbg "=== HOOK COMPLETE ==="

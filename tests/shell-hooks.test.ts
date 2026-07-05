@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 
@@ -19,8 +20,10 @@ const HOOK_SCRIPTS = [
   'hook-log-init',
   'session-start-memory',
   'session-start-context',
+  'session-start-orchestrator',
   'pre-compact-memory',
   'preamble',
+  'git-marker',
   'json-parse',
   'get-mtime',
   'ensure-devflow-init',
@@ -445,24 +448,52 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
 });
 
 // =============================================================================
-// preamble keyword detection — Suites 1-4
+// preamble — orchestrator charter mode (Suites 1-4)
 // =============================================================================
 
-describe('preamble keyword detection', () => {
+describe('preamble — orchestrator charter mode', () => {
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
   const PREAMBLE_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'preamble');
 
-  let tmpDir: string;
+  let tmpDir: string;   // has a .git dir → git gate passes
+  let noGitDir: string; // plain dir, no .git → git gate rejects
+
+  // HANDOFF_TEMPLATE and REMINDER_TEMPLATE are imported from tests/fixtures/ambient-templates.ts
+  // to keep this file and tests/integration/ambient-activation.test.ts in sync.
+
+  beforeAll(() => {
+    // Guard: verify that os.tmpdir() is not inside a git repository.
+    // If it were, noGitDir (created in beforeEach) would have a .git ancestor and
+    // the git gate would pass — making F6a/F6b assert empty output against a prompt
+    // that actually goes through the full dispatch (producing reminder output instead).
+    const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gitguard-'));
+    try {
+      const result = execSync(
+        `bash -c 'source "${path.join(HOOKS_DIR, 'git-marker')}"; df_has_git_marker "$PROBE" && printf YES || printf NO'`,
+        { stdio: 'pipe', env: { ...process.env, PROBE: probe } },
+      ).toString().trim();
+      if (result === 'YES') {
+        throw new Error(
+          `os.tmpdir() (${os.tmpdir()}) has a .git ancestor — non-git preamble tests cannot run safely on this machine.`,
+        );
+      }
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
+    }
+  });
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-kw-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.git'));  // git gate must pass
+    noGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-nogit-'));
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(noGitDir, { recursive: true, force: true });
   });
 
-  /** Run the preamble hook and return stdout as a string. */
+  /** Run the preamble hook in a git repo and return stdout. */
   function runPreamble(prompt: string, cwd?: string): string {
     const dir = cwd ?? tmpDir;
     const input = JSON.stringify({ cwd: dir, prompt });
@@ -472,136 +503,220 @@ describe('preamble keyword detection', () => {
     }).toString();
   }
 
-  /** Expected additionalContext message for a matched skill. */
-  function expectedContext(skill: string): string {
-    return (
-      `The user's prompt begins with the \`${skill}\` keyword, which signals the ` +
-      `\`devflow:${skill}\` workflow. In one short sentence, tell the user you're invoking ` +
-      `\`devflow:${skill}\`. Then immediately invoke it with the Skill tool, passing the user's ` +
-      `full request (everything after the leading \`${skill}\` keyword) as the skill input. ` +
-      `Do not pause to ask whether to proceed.`
-    );
+  /** Run the preamble hook in a non-git dir. */
+  function runPreambleNoGit(prompt: string): string {
+    const input = JSON.stringify({ cwd: noGitDir, prompt });
+    return execSync(`bash "${PREAMBLE_HOOK}"`, {
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString();
   }
 
   // -------------------------------------------------------------------------
-  // Suite 1 — Functionality (F1–F11)
+  // Suite 1 — Functionality
   // -------------------------------------------------------------------------
 
   describe('Suite 1 — Functionality', () => {
-    const matchCases: Array<{ prompt: string; expectedSkill: string; label: string }> = [
-      { prompt: 'implement the cache',       expectedSkill: 'implement', label: 'F1a: implement' },
-      { prompt: 'plan a caching layer',      expectedSkill: 'plan',      label: 'F1b: plan' },
-      { prompt: 'Explore the auth flow',     expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
-      { prompt: 'RESEARCH options now',      expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
-      { prompt: 'debug: why it hangs',       expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
-      // F6a/F6b: the trailing-'?' guard (Guard B) was removed — a command-style prompt that
-      // closes with a clarifying/rhetorical question still dispatches. Keyword + ≥1 word wins.
-      { prompt: 'explore A or B?',           expectedSkill: 'explore',   label: 'F6a: trailing-? no longer suppressed' },
-      { prompt: 'debug this?  ',             expectedSkill: 'debug',     label: 'F6b: trailing-? + whitespace no longer suppressed' },
-      // F13: the hook strips leading whitespace/newlines from HEAD before extracting the
-      // first token, so prompts with leading newlines/spaces still dispatch correctly (ADR-014).
-      { prompt: '\n\n  implement the cache', expectedSkill: 'implement', label: 'F13: leading newlines/spaces still match' },
-    ];
+    // --- Plan-handoff fast-path ---
 
-    const noMatchCases: Array<{ prompt: string; label: string }> = [
-      { prompt: 'implementation of X',   label: 'F4a: implementation (prefix, not word)' },
-      { prompt: 'researching Y',          label: 'F4b: researching (suffix)' },
-      { prompt: 'debugger Z',             label: 'F4c: debugger (suffix)' },
-      { prompt: 'explorer mode',          label: 'F4d: explorer (suffix)' },
-      { prompt: 'implement',              label: 'F5a: bare implement (no following word)' },
-      { prompt: 'plan',                   label: 'F5b: bare plan (no following word)' },
-      { prompt: 'fix the auth bug',       label: 'F9: non-keyword first word' },
-      { prompt: '# Implement Command\n## Usage\n...', label: 'F11: # prefix not a keyword' },
-      // F12: WORD="${TOKEN%[[:punct:]]}" strips exactly ONE trailing punct char.
-      // "implement..." → TOKEN="implement..." → WORD="implement.." (still has two dots) → no case match.
-      { prompt: 'implement... the cache', label: 'F12: multi-char trailing punct — only ONE punct stripped, no match' },
-    ];
-
-    for (const { prompt, expectedSkill, label } of matchCases) {
-      it(`${label} → emits directive for ${expectedSkill}`, () => {
-        const out = runPreamble(prompt);
-        const parsed = JSON.parse(out) as {
-          hookSpecificOutput: { hookEventName: string; additionalContext: string };
-        };
-        expect(parsed.hookSpecificOutput.additionalContext).toContain(`\`devflow:${expectedSkill}\``);
-        expect(parsed.hookSpecificOutput.additionalContext).toContain('Skill tool');
-        // Case-insensitive: skill name in output is always lowercase (F2)
-        expect(parsed.hookSpecificOutput.additionalContext).not.toContain(expectedSkill.toUpperCase());
-      });
-    }
-
-    for (const { prompt, label } of noMatchCases) {
-      it(`${label} → empty stdout`, () => {
-        const out = runPreamble(prompt);
-        expect(out).toBe('');
-      });
-    }
-
-    it('F7: marker path intact — plan body with ## Goal/Steps/Files but no leading keyword', () => {
-      const planBody = '## Goal\nBuild a cache\n## Steps\n1. Add\n## Files\ncache.ts';
-      const out = runPreamble(planBody);
-      const parsed = JSON.parse(out) as {
-        hookSpecificOutput: { additionalContext: string };
-      };
-      expect(parsed.hookSpecificOutput.additionalContext).toContain('devflow:implement');
-    });
-
-    it('F8: keyword + markers → keyword wins, exactly ONE directive', () => {
-      const prompt = 'implement the cache\n## Goal\nbuild it\n## Steps\n1\n## Files\ncache.ts';
+    it('F3a: native handoff flavor (prefix + \\n\\n + plan + transcript suffix) → handoff directive', () => {
+      const prompt =
+        'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests\n\n' +
+        '...before exiting plan mode (if you are in plan mode), read the full transcript at: /tmp/session.jsonl';
       const out = runPreamble(prompt);
-      const parsed = JSON.parse(out) as {
-        hookSpecificOutput: { additionalContext: string };
-      };
-      // Keyword path fires: mentions the skill and Skill tool
-      expect(parsed.hookSpecificOutput.additionalContext).toContain('`devflow:implement`');
-      expect(parsed.hookSpecificOutput.additionalContext).toContain('Skill tool');
-      // EXECUTION_PLAN marker text must NOT appear (keyword won)
-      expect(parsed.hookSpecificOutput.additionalContext).not.toContain('EXECUTION_PLAN detected');
-      // Only one hookSpecificOutput key at the top level
-      expect(Object.keys(JSON.parse(out))).toEqual(['hookSpecificOutput']);
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
     });
 
-    it('F10: matched output contains backtick-wrapped skill name and instructs announce-then-invoke-via-Skill-tool', () => {
-      const out = runPreamble('research the auth options');
-      const parsed = JSON.parse(out) as {
-        hookSpecificOutput: { additionalContext: string };
-      };
-      const ctx = parsed.hookSpecificOutput.additionalContext;
-      expect(ctx).toContain('`devflow:research`');
-      expect(ctx).toContain('Skill tool');
-      expect(ctx).toContain("tell the user you're invoking");
+    it('F3b: same-session handoff flavor (prefix + space + plan text) → handoff directive', () => {
+      const out = runPreamble('Implement the following plan: add caching to the system');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
+    });
+
+    it('F3c: modest leading whitespace before prefix → handoff directive', () => {
+      const out = runPreamble('  \n\nImplement the following plan: add caching');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
+    });
+
+    it('F3d: prefix mid-prompt → reminder (not handoff)', () => {
+      const out = runPreamble('Please Implement the following plan: add X');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F3e: lowercase prefix → reminder (prefix is case-sensitive)', () => {
+      const out = runPreamble('implement the following plan: add X');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F3f: prefix without colon → reminder (literal match requires colon)', () => {
+      const out = runPreamble('Implement the following plan now — add caching');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    // --- Slash / empty skip ---
+
+    it('F4a: slash command → empty stdout', () => {
+      expect(runPreamble('/implement foo')).toBe('');
+    });
+
+    it('F4b: slash command with leading spaces → empty stdout', () => {
+      expect(runPreamble('  /help now')).toBe('');
+    });
+
+    it('F4c: bare slash → empty stdout', () => {
+      expect(runPreamble('/')).toBe('');
+    });
+
+    it('F4d: path-like prompt → empty stdout (slash prefix)', () => {
+      expect(runPreamble('/Users/dean/x.ts')).toBe('');
+    });
+
+    it('F4e: empty prompt → empty stdout', () => {
+      expect(runPreamble('')).toBe('');
+    });
+
+    it('F4f: whitespace-only prompt → empty stdout', () => {
+      expect(runPreamble('   \n\n  ')).toBe('');
+    });
+
+    // --- Orchestrator reminder (normal prompts) ---
+
+    it('F2a: normal prompt → reminder template exact', () => {
+      const out = runPreamble('fix the auth bug');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F5a: old keyword prompt (implement the cache) → reminder, not directive [AC-F5]', () => {
+      const out = runPreamble('implement the cache');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F5b: old keyword prompt (plan a caching layer) → reminder, not directive [AC-F5]', () => {
+      const out = runPreamble('plan a caching layer');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F5c: 3-marker plan body (## Goal/Steps/Files) → reminder, not directive [AC-F5]', () => {
+      const out = runPreamble('## Goal\nBuild a cache\n## Steps\n1. Add\n## Files\ncache.ts');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    // --- Git gate ---
+
+    it('F6a: non-git CWD → empty stdout for normal prompt [AC-F6]', () => {
+      expect(runPreambleNoGit('fix the auth bug')).toBe('');
+    });
+
+    it('F6b: non-git CWD → empty stdout for handoff prompt [AC-F6]', () => {
+      expect(runPreambleNoGit('Implement the following plan: add caching')).toBe('');
+    });
+
+    it('F6c: .git as a plain FILE (worktree style) → fires correctly', () => {
+      const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-wt-'));
+      try {
+        fs.writeFileSync(path.join(worktreeDir, '.git'), 'gitdir: /some/path/.git');
+        const out = runPreamble('fix the auth bug', worktreeDir);
+        expect(out.length).toBeGreaterThan(0);
+        const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+        expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+      } finally {
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+      }
+    });
+
+    it('F6d: .git in ancestor dir (subdir of git repo) → fires correctly', () => {
+      const subDir = path.join(tmpDir, 'src', 'auth');
+      fs.mkdirSync(subDir, { recursive: true });
+      // tmpDir already has .git — subDir is a child of the repo
+      const out = runPreamble('fix the auth bug', subDir);
+      expect(out.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    // --- 256-window bound ---
+
+    it('F12a: 300 leading spaces → HEAD collapses to empty after strip → silent exit [AC-F12]', () => {
+      // HEAD = PROMPT[0:256] = 256 spaces.  After whitespace-strip, HEAD = "".
+      // The empty-HEAD branch fires: exit 0, no output (same as F4f whitespace-only rule).
+      const prompt = ' '.repeat(300) + 'Implement the following plan: add caching';
+      const out = runPreamble(prompt);
+      expect(out).toBe('');
+    });
+
+    it('F12b: non-space prefix pushed past byte 256 → reminder, not handoff directive [AC-F12]', () => {
+      // HEAD = PROMPT[0:256] = 'a' × 256.  After strip, HEAD = 'a' × 256.
+      // Does not match the handoff prefix → orchestrator reminder branch fires.
+      const prompt = 'a'.repeat(260) + 'Implement the following plan: add caching';
+      const out = runPreamble(prompt);
+      expect(out.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    // --- Background-session re-entrancy guard ---
+
+    it('F13: DEVFLOW_BG_UPDATER=1 → empty stdout (no injection into nested bg sessions) [AC-F9]', () => {
+      // The background memory worker (claude -p) runs in the project git root and fires
+      // UserPromptSubmit; the guard must suppress the orchestrator reminder there.
+      const input = JSON.stringify({ cwd: tmpDir, prompt: 'refresh working memory from these turns' });
+      const out = execSync(`bash "${PREAMBLE_HOOK}"`, {
+        input,
+        env: { ...process.env, DEVFLOW_BG_UPDATER: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString();
+      expect(out).toBe('');
     });
   });
 
   // -------------------------------------------------------------------------
-  // Suite 2 — API contract (C1–C7)
+  // Suite 2 — API contract (C1–C6)
   // -------------------------------------------------------------------------
 
   describe('Suite 2 — API contract', () => {
-    it('C1/C6: matched output has exactly one top-level key hookSpecificOutput with correct schema', () => {
-      const out = runPreamble('explore the codebase');
+    it('C1/C6a: handoff output has exactly one top-level key hookSpecificOutput with correct schema', () => {
+      const out = runPreamble('Implement the following plan: add caching');
       const parsed = JSON.parse(out) as Record<string, unknown>;
-      // Exactly one top-level key
       expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
       const hso = parsed.hookSpecificOutput as Record<string, unknown>;
       expect(hso.hookEventName).toBe('UserPromptSubmit');
       expect(typeof hso.additionalContext).toBe('string');
       expect((hso.additionalContext as string).length).toBeGreaterThan(0);
-      // No extra keys
       expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
     });
 
-    it('C2: empty stdout on no-match — zero bytes', () => {
-      const out = runPreamble('fix the login bug');
-      expect(out.length).toBe(0);
+    it('C1/C6b: reminder output has correct schema', () => {
+      const out = runPreamble('fix the auth bug');
+      const parsed = JSON.parse(out) as Record<string, unknown>;
+      expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
+      const hso = parsed.hookSpecificOutput as Record<string, unknown>;
+      expect(hso.hookEventName).toBe('UserPromptSubmit');
+      expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
     });
 
-    it('C3a: exit code 0 on keyword match', () => {
-      expect(() => runPreamble('implement the cache')).not.toThrow();
+    it('C2: empty stdout on slash → zero bytes', () => {
+      expect(runPreamble('/implement foo').length).toBe(0);
     });
 
-    it('C3b: exit code 0 on no-match', () => {
-      expect(() => runPreamble('fix the login bug')).not.toThrow();
+    it('C2: empty stdout on empty prompt → zero bytes', () => {
+      expect(runPreamble('').length).toBe(0);
+    });
+
+    it('C3a: exit code 0 on handoff match', () => {
+      expect(() => runPreamble('Implement the following plan: add caching')).not.toThrow();
+    });
+
+    it('C3b: exit code 0 on reminder (normal prompt)', () => {
+      expect(() => runPreamble('fix the auth bug')).not.toThrow();
     });
 
     it('C3c: exit code 0 on empty prompt', () => {
@@ -615,37 +730,31 @@ describe('preamble keyword detection', () => {
       }).not.toThrow();
     });
 
-    it('C4: no file I/O on keyword match — tmpDir unchanged', () => {
-      const before = fs.readdirSync(tmpDir);
-      runPreamble('implement the cache');
-      const after = fs.readdirSync(tmpDir);
-      expect(after).toEqual(before);
-      const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
-      expect(fs.existsSync(queueFile)).toBe(false);
+    it('C4: no file I/O on handoff — tmpDir unchanged (only .git present)', () => {
+      const before = fs.readdirSync(tmpDir).sort();
+      runPreamble('Implement the following plan: add caching');
+      expect(fs.readdirSync(tmpDir).sort()).toEqual(before);
     });
 
-    it('C4: no file I/O on no-match — tmpDir unchanged', () => {
-      const before = fs.readdirSync(tmpDir);
-      runPreamble('fix the login bug');
-      const after = fs.readdirSync(tmpDir);
-      expect(after).toEqual(before);
+    it('C4: no file I/O on reminder — tmpDir unchanged', () => {
+      const before = fs.readdirSync(tmpDir).sort();
+      runPreamble('fix the auth bug');
+      expect(fs.readdirSync(tmpDir).sort()).toEqual(before);
     });
 
-    it('C5: preamble source contains no bash-4-only ${var,,} or ${var^^} lowercasing in non-comment code', () => {
+    it('C5: preamble source contains no bash-4-only ${var,,} or ${var^^} in non-comment code', () => {
       const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
-      // Strip comment lines to avoid false positives from documentation text
       const codeLines = src
         .split('\n')
         .filter((line) => !line.trimStart().startsWith('#'))
         .join('\n');
-      // Bash 3.2 guard: these patterns indicate bash 4+ only syntax
       expect(codeLines).not.toMatch(/\$\{[^}]+,,\}/);
       expect(codeLines).not.toMatch(/\$\{[^}]+\^\^\}/);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Suite 3 — Security / fuzz (C7)
+  // Suite 3 — Security / fuzz (C3 zero-interpolation)
   // -------------------------------------------------------------------------
 
   describe('Suite 3 — Security / fuzz', () => {
@@ -661,23 +770,30 @@ describe('preamble keyword detection', () => {
     ];
 
     for (const { label, tail } of hostilePayloads) {
-      it(`C7: hostile tail (${label}) — exit 0, valid JSON, no injection in output`, () => {
-        const prompt = `implement ${tail}`;
-        // Write to file to avoid execSync stdin buffer limits on large payloads
-        const inputFile = path.join(tmpDir, `input-${label.replace(/\W/g, '_')}.json`);
+      it(`C3: hostile tail after handoff prefix (${label}) — fixed handoff template, no injection`, () => {
+        const prompt = `Implement the following plan: ${tail}`;
+        const inputFile = path.join(tmpDir, `input-handoff-${label.replace(/\W/g, '_')}.json`);
         fs.writeFileSync(inputFile, JSON.stringify({ cwd: tmpDir, prompt }));
         const out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
           stdio: ['pipe', 'pipe', 'pipe'],
         }).toString();
+        const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+        expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
+      });
 
-        // Valid JSON
-        const parsed = JSON.parse(out) as {
-          hookSpecificOutput: { additionalContext: string };
-        };
-        const ctx = parsed.hookSpecificOutput.additionalContext;
-
-        // additionalContext EQUALS the expected fixed template — no user text leaks through
-        expect(ctx).toBe(expectedContext('implement'));
+      it(`C3: hostile standalone prompt (${label}) — fixed reminder template, no injection`, () => {
+        const prompt = `${tail}`;
+        const inputFile = path.join(tmpDir, `input-stand-${label.replace(/\W/g, '_')}.json`);
+        fs.writeFileSync(inputFile, JSON.stringify({ cwd: tmpDir, prompt }));
+        // Run only if prompt doesn't start with / (which would be silenced)
+        const head = tail.trimStart().slice(0, 256);
+        if (head.startsWith('/')) return; // slash-prefix → empty, not reminder
+        const out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).toString();
+        if (out.length === 0) return; // empty (e.g., whitespace-only) → no assertion needed
+        const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+        expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
       });
     }
   });
@@ -687,37 +803,50 @@ describe('preamble keyword detection', () => {
   // -------------------------------------------------------------------------
 
   describe('Suite 4 — Performance', () => {
-    it('P1: no subprocess calls in new keyword detection block (awk/sed/tr/$() absent)', () => {
+    it('P1: no subprocess calls in git-gate + dispatch blocks (awk/sed/tr/$() absent)', () => {
       const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
-      // Locate the keyword detection block (between the "First-word" comment and the elif)
-      const blockStart = src.indexOf('# --- First-word workflow keyword detection');
-      const blockEnd = src.indexOf('elif [[ "$PROMPT" == *"## Goal"*', blockStart);
+      // Locate the git-gate block through to end of dispatch
+      const blockStart = src.indexOf('# --- Git-repo gate');
+      const blockEnd = src.indexOf('dbg "=== HOOK COMPLETE ===');
       expect(blockStart).toBeGreaterThan(-1);
       expect(blockEnd).toBeGreaterThan(blockStart);
       const block = src.slice(blockStart, blockEnd);
 
-      // Strip comment lines and string literals (backtick-quoted text inside string values)
-      // to avoid false positives from documentation in comments or in the directive string.
       const codeLines = block
         .split('\n')
         .filter((line) => !line.trimStart().startsWith('#'))
         .join('\n');
 
-      // No awk, sed, or tr commands on code lines
       expect(codeLines).not.toMatch(/\bawk\b/);
       expect(codeLines).not.toMatch(/\bsed\b/);
       expect(codeLines).not.toMatch(/\btr\b/);
-      // No command substitution $( cmd ) on code lines
-      // (backtick-quoted names inside string literals are allowed — they are not execution)
+      expect(codeLines).not.toMatch(/\$\(\s*[a-zA-Z]/);
+    });
+
+    it('P1b: git-marker source is pure bash — no subprocess calls (no git command, awk, sed, tr, $())', () => {
+      // git-marker is sourced on every UserPromptSubmit call; it must never spawn a
+      // subprocess.  A reintroduced `git rev-parse` or similar would pass the preamble
+      // P1 scan but this test would catch it in git-marker itself.
+      // Note: `.git` appears as a path string literal ("$_dir/.git") which is fine —
+      // we check for `git` as a command invocation (git followed by whitespace+word),
+      // not as a path component.
+      const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker'), 'utf-8');
+      const codeLines = src
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('#'))
+        .join('\n');
+
+      // `git rev-parse`, `git status`, etc. — git used as a command (not `.git` path literal)
+      expect(codeLines).not.toMatch(/\bgit\s+\w/);
+      expect(codeLines).not.toMatch(/\bawk\b/);
+      expect(codeLines).not.toMatch(/\bsed\b/);
+      expect(codeLines).not.toMatch(/\btr\b/);
       expect(codeLines).not.toMatch(/\$\(\s*[a-zA-Z]/);
     });
 
     it('P2/P3: wall-time on large prompt is bounded — delta < 500ms and ratio < 5×', () => {
-      // Methodology: the keyword detection itself is O(1) (capped at 256 bytes via HEAD="${PROMPT:0:256}").
-      // The total wall-time difference is dominated by JSON parsing of the full prompt, not our detection.
-      // We assert that the DELTA is bounded (< 500ms) and the ratio does not blow up exponentially (< 5×).
-      // These thresholds are intentionally generous — tighter bounds belong in a dedicated benchmark,
-      // not in a correctness test suite.
+      // O(1) dispatch (capped at 256 bytes); wall-time difference is dominated by JSON parsing.
+      // Thresholds are intentionally generous — correctness test, not a benchmark.
       const K = 5;
 
       function median(times: number[]): number {
@@ -733,8 +862,8 @@ describe('preamble keyword detection', () => {
         });
       }
 
-      const smallPrompt = 'implement the auth module';
-      const largePrompt = `implement ${'x'.repeat(200_000)}`;
+      const smallPrompt = 'fix the auth module';
+      const largePrompt = `fix ${'x'.repeat(200_000)}`;
 
       const smallMs = median(measureMs(smallPrompt));
       const largeMs = median(measureMs(largePrompt));
@@ -745,6 +874,240 @@ describe('preamble keyword detection', () => {
       expect(delta).toBeLessThan(500);
       expect(ratio).toBeLessThan(5);
     });
+  });
+});
+
+// =============================================================================
+// git-marker helper: df_has_git_marker behavioral tests
+// =============================================================================
+//
+// git-marker is sourced on every UserPromptSubmit call via preamble.  Tests here
+// exercise df_has_git_marker directly so a regression in the helper is caught
+// without relying on end-to-end preamble invocations.
+// =============================================================================
+
+describe('git-marker helper: df_has_git_marker', () => {
+  const GIT_MARKER_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker');
+
+  /**
+   * Source git-marker and run df_has_git_marker on the given directory.
+   * Returns true (exit 0) when a .git marker is found, false (exit 1) when not.
+   * The directory is passed via the DEVFLOW_GM_TEST_DIR env var to avoid
+   * shell-quoting issues with special characters in tmpdir paths.
+   */
+  function hasGitMarker(dir: string): boolean {
+    try {
+      execSync(
+        `bash -c 'source "${GIT_MARKER_SRC}"; df_has_git_marker "$DEVFLOW_GM_TEST_DIR"'`,
+        { stdio: 'pipe', env: { ...process.env, DEVFLOW_GM_TEST_DIR: dir } },
+      );
+      return true; // exit 0 → found
+    } catch {
+      return false; // exit 1 → not found
+    }
+  }
+
+  let repoDir: string; // has a .git dir
+
+  beforeEach(() => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-test-'));
+    fs.mkdirSync(path.join(repoDir, '.git'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('returns true for the repo root (contains .git directory)', () => {
+    expect(hasGitMarker(repoDir)).toBe(true);
+  });
+
+  it('returns true for a nested subdirectory inside a git repo', () => {
+    const subDir = path.join(repoDir, 'src', 'auth');
+    fs.mkdirSync(subDir, { recursive: true });
+    expect(hasGitMarker(subDir)).toBe(true);
+  });
+
+  it('returns true when .git is a plain file (worktree / submodule style)', () => {
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-wt-'));
+    try {
+      fs.writeFileSync(path.join(worktreeDir, '.git'), 'gitdir: /some/path/.git');
+      expect(hasGitMarker(worktreeDir)).toBe(true);
+    } finally {
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false for a plain directory with no .git ancestor', () => {
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gm-nogit-'));
+    try {
+      expect(hasGitMarker(nonGitDir)).toBe(false);
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false for empty string (immediate termination via [ -z "$_dir" ] guard)', () => {
+    expect(hasGitMarker('')).toBe(false);
+  });
+
+  it('returns false for "/" (terminates at [ "$_dir" = "/" ] guard with no .git at root)', () => {
+    // Assumes the filesystem root is not a git repository.
+    // If /.git exists on this machine, skip rather than fail.
+    if (fs.existsSync('/.git')) return;
+    expect(hasGitMarker('/')).toBe(false);
+  });
+
+  it('returns false and terminates within 64 iterations for a >64-level-deep non-existent path', () => {
+    // The function walks at most 64 ancestor levels ([ "$_i" -lt 64 ] bound).
+    // A non-existent path with 70+ levels has no .git anywhere in its non-existent
+    // ancestry — the loop exhausts its budget and returns 1 without hanging.
+    const deepPath = '/devflow-bound-test/' + 'x/'.repeat(70) + 'leaf';
+    expect(hasGitMarker(deepPath)).toBe(false);
+  });
+});
+
+// =============================================================================
+// session-start-orchestrator: orchestrator charter injection
+// =============================================================================
+
+describe('session-start-orchestrator', () => {
+  const ORCHESTRATOR_HOOK = path.join(HOOKS_DIR, 'session-start-orchestrator');
+  const CHARTER_FILE = path.resolve(__dirname, '..', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md');
+
+  let tmpDir: string;   // has a .git dir
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.git'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-home-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  /** Copy the hook + all sourced dependencies to destDir so tests can manipulate the charter. */
+  function copyHookDepsToDir(destDir: string): void {
+    const deps = ['hook-bootstrap', 'debug-trace', 'json-parse', 'json-helper.cjs', 'git-marker', 'session-start-orchestrator'];
+    for (const f of deps) {
+      const src = path.join(HOOKS_DIR, f);
+      const dest = path.join(destDir, f);
+      fs.cpSync(src, dest);
+      try { fs.chmodSync(dest, fs.statSync(src).mode); } catch { /* ignore */ }
+    }
+  }
+
+  it('AC-C1: SessionStart envelope — correct schema', () => {
+    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
+    expect(stdout.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
+    const hso = parsed.hookSpecificOutput as Record<string, unknown>;
+    expect(hso.hookEventName).toBe('SessionStart');
+    expect(typeof hso.additionalContext).toBe('string');
+    expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
+  });
+
+  it('AC-F1: additionalContext contains ORCHESTRATOR CHARTER', () => {
+    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('ORCHESTRATOR CHARTER');
+  });
+
+  it('AC-F1: additionalContext contains plan-handoff prefix and devflow:implement', () => {
+    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    const ctx = parsed.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('Implement the following plan:');
+    expect(ctx).toContain('devflow:implement');
+  });
+
+  it('AC-F1: additionalContext contains model-tier names (haiku, sonnet, opus)', () => {
+    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    const ctx = parsed.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('haiku');
+    expect(ctx).toContain('sonnet');
+    expect(ctx).toContain('opus');
+  });
+
+  it('AC-F9: DEVFLOW_BG_UPDATER=1 → empty stdout (no injection into nested bg sessions)', () => {
+    const { stdout, exitCode } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir, { DEVFLOW_BG_UPDATER: '1' });
+    expect(stdout).toBe('');
+    expect(exitCode).toBe(0);
+  });
+
+  it('AC-F6: non-git CWD → empty stdout', () => {
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-nogit-'));
+    try {
+      const { stdout, exitCode } = runHook(ORCHESTRATOR_HOOK, { cwd: nonGitDir }, homeDir);
+      expect(stdout).toBe('');
+      expect(exitCode).toBe(0);
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-C4: bad CWD → empty stdout', () => {
+    const { stdout, exitCode } = runHook(ORCHESTRATOR_HOOK, { cwd: '/nonexistent/path/devflow-orch' }, homeDir);
+    expect(stdout).toBe('');
+    expect(exitCode).toBe(0);
+  });
+
+  it('AC-F10: charter missing → empty stdout, exit 0 (fail-open)', () => {
+    const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-nocharter-'));
+    try {
+      copyHookDepsToDir(hooksTemp);
+      // orchestrator-charter.md intentionally NOT copied
+      const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
+      expect(stdout).toBe('');
+      expect(exitCode).toBe(0);
+    } finally {
+      fs.rmSync(hooksTemp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-F10: oversize charter (>4096 chars, i.e. 4097) → empty stdout, exit 0 (fail-open)', () => {
+    // The guard is `[ "${#CHARTER}" -gt 4096 ]` so 4097+ bytes are rejected.
+    const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-bigcharter-'));
+    try {
+      copyHookDepsToDir(hooksTemp);
+      fs.mkdirSync(path.join(hooksTemp, 'assets'));
+      fs.writeFileSync(path.join(hooksTemp, 'assets', 'orchestrator-charter.md'), 'x'.repeat(4097));
+      const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
+      expect(stdout).toBe('');
+      expect(exitCode).toBe(0);
+    } finally {
+      fs.rmSync(hooksTemp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-F10: charter at exact 4096-byte boundary → accepted, non-empty stdout', () => {
+    // The guard is `[ "${#CHARTER}" -gt 4096 ]` (-gt, not -ge).
+    // Exactly 4096 bytes passes the guard and is injected as additionalContext.
+    const hooksTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-orch-exactcharter-'));
+    try {
+      copyHookDepsToDir(hooksTemp);
+      fs.mkdirSync(path.join(hooksTemp, 'assets'));
+      fs.writeFileSync(path.join(hooksTemp, 'assets', 'orchestrator-charter.md'), 'x'.repeat(4096));
+      const { stdout, exitCode } = runHook(path.join(hooksTemp, 'session-start-orchestrator'), { cwd: tmpDir }, homeDir);
+      expect(exitCode).toBe(0);
+      expect(stdout.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).toBe('x'.repeat(4096));
+    } finally {
+      fs.rmSync(hooksTemp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-P3: repo charter asset exists, is non-empty, and is <4096 chars', () => {
+    expect(fs.existsSync(CHARTER_FILE)).toBe(true);
+    const content = fs.readFileSync(CHARTER_FILE, 'utf-8');
+    expect(content.length).toBeGreaterThan(0);
+    expect(content.length).toBeLessThan(4096);
   });
 });
 

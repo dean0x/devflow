@@ -82,14 +82,6 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL', value: 'claude-sonnet-4-6' },
     defaultEnabled: true,
   },
-  {
-    id: 'disable-mouse-clicks',
-    label: 'Disable mouse clicks',
-    description: 'Disable mouse click/drag/hover in fullscreen (keeps wheel scroll)',
-    hint: 'Prevents accidental clicks',
-    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS', value: '1' },
-    defaultEnabled: true,
-  },
   // === Optional (default OFF) — skip these if you're unsure ===
   {
     id: 'brief',
