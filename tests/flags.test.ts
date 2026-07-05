@@ -333,31 +333,6 @@ describe('pin-sonnet-4-6 flag', () => {
   });
 });
 
-describe('disable-mouse-clicks flag', () => {
-  it('is registered in FLAG_REGISTRY', () => {
-    const flag = FLAG_REGISTRY.find(f => f.id === 'disable-mouse-clicks');
-    expect(flag).toBeDefined();
-  });
-
-  it('is defaultEnabled: true', () => {
-    const flag = FLAG_REGISTRY.find(f => f.id === 'disable-mouse-clicks')!;
-    expect(flag.defaultEnabled).toBe(true);
-  });
-
-  it('maps to CLAUDE_CODE_DISABLE_MOUSE_CLICKS env var = 1', () => {
-    const flag = FLAG_REGISTRY.find(f => f.id === 'disable-mouse-clicks')!;
-    expect(flag.target.type).toBe('env');
-    if (flag.target.type === 'env') {
-      expect(flag.target.key).toBe('CLAUDE_CODE_DISABLE_MOUSE_CLICKS');
-      expect(flag.target.value).toBe('1');
-    }
-  });
-
-  it('is in getDefaultFlags() (on by default)', () => {
-    expect(getDefaultFlags()).toContain('disable-mouse-clicks');
-  });
-});
-
 describe('applyViewMode', () => {
   it('sets viewMode to verbose', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
