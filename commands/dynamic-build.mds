@@ -339,8 +339,10 @@ Fix all findings in this batch. Self-verify your fix compiles (background-Bash +
       }
     }
     fixedFindings = fixedFindings.concat(fixedThisCycle);
-    // survivingFindings = only findings NOT addressed (fix Coder dead/failed or deferred)
-    survivingFindings = notAddressed;
+    // survivingFindings accumulates findings NOT addressed across ALL cycles (fix Coder dead/failed
+    // or deferred). A delta cycle only re-reviews fix commits, so an earlier unaddressed finding can
+    // never re-surface — overwriting here would silently drop it and let overallVerdict falsely read PASS.
+    survivingFindings = survivingFindings.concat(notAddressed);
   }
 
   return { cyclesRun, survivingFindings, fixedFindings, coverageGaps: allCoverageGaps };
