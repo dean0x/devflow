@@ -51,14 +51,10 @@ Two distinct LLM-authored-script bugs have crashed whole runs in the field: `Typ
 - **`meta` is a pure literal** — `name` and `description` present; NO variables, function calls, spreads, or template interpolation anywhere inside `meta`.
 - **Every `pipeline(x, …)` / `parallel(x)` first argument is a real array** — never a function, object, or possibly-undefined value. If it derives from a prior agent result, coerce it: `parallel((maybeList || []).map(...))`.
 - **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining (e.g. `result?.findings`, `seal?.num`). This is the `SEAL.num` crash class: an agent returned a shape without `num`, so `SEAL.num` threw.
-- **`.filter(Boolean)` before mapping over `agent()` / `parallel()` results** — an agent can return `null` (skipped, or died after retries); strip nulls before `.map` or field access.
+- **`.filter(Boolean)` before mapping over `agent()` / `parallel()` results** — an agent can return `null` (skipped, or died after retries); strip nulls before `.map` or field access. filter(Boolean) is crash-safety only; it must never convert missing required coverage into success.
 - **`phase()` titles match the phases declared in `meta`** — every `phase("…")` call has a matching declared phase, and vice-versa.
 
-Then run a cheap syntax gate: write the authored script to a scratch temp file (e.g. `/tmp/df-wf-check.js`) purely to validate it, run `node --check /tmp/df-wf-check.js`, and only then pass the script text to the `Workflow` tool as usual. `node --check` catches SYNTAX errors only — it does NOT catch the runtime type errors above, so the checklist is the real safeguard.
-
-### --dry-run affordance
-
-If the user's input includes `--dry-run`, PRINT the authored workflow script (inside a fenced code block) for inspection, then STOP — do not invoke the Workflow tool. This lets the user review the script before execution. For a large or novel script, prefer this dry-run path by default — eyeball the script once before the first live run.
+Then run a cheap syntax gate: write the authored script to a fresh, run-unique scratch file `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js` (a NEW filename every run — never reuse a prior run's path, as rewriting an existing file trips write guards), run `node --check` on that file, and only then pass the script text to the `Workflow` tool as usual. `node --check` catches SYNTAX errors only — it does NOT catch the runtime type errors above, so the checklist is the real safeguard.
 
 ### Budget scaling
 

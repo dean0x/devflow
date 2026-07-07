@@ -1,6 +1,6 @@
 ---
 description: Parallel wave planning — plan-challenge every ticket, produce acceptance criteria + test plans, auto-resolve decisions against the preference profile, output DECISIONS-NEEDED.md
-argument-hint: "[tickets-dir | issue-list | --dry-run]"
+argument-hint: "[tickets-dir | issue-list]"
 output-dir: plugins/devflow-dynamic/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
@@ -64,10 +64,6 @@ Determine the ticket source (in priority order):
 - Inline ticket descriptions passed as args
 
 Read or note the tickets. The agents will read them in full; you need the list and any key constraints.
-
-**4. Detect --dry-run**
-
-If the user passed `--dry-run`: print the workflow script in a fenced code block and STOP — do not invoke the Workflow tool.
 
 ---
 

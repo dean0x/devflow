@@ -1,6 +1,6 @@
 ---
 description: Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue
-argument-hint: "[initiative | spec-doc | --dry-run]"
+argument-hint: "[initiative | spec-doc]"
 output-dir: plugins/devflow-dynamic/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
@@ -68,10 +68,6 @@ Before writing the workflow, propose a candidate ticket slate to the user:
 - The confirmed slate becomes the `candidates` array in the workflow script.
 
 This is the human gate before the pipeline runs — the user sees and edits the roadmap before agents invest in drafting.
-
-**4. Detect --dry-run**
-
-If the user passed `--dry-run`: after proposing the slate (step 3), print the workflow script you would author in a fenced code block and STOP — do not invoke the Workflow tool.
 
 ---
 

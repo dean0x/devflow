@@ -31,11 +31,11 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 
 **Evaluator panel** (only if a plan exists):
 - Run `evaluator_panel()` — see that block for the panel composition
-- If any critical lens returns MISALIGNED: Coder fix (max 2 retries) → Gate 1 → re-evaluate (Gate 2 loops within itself on its own demanded change)
+- If any critical lens returns MISALIGNED: fix-and-continue — the demanded fixes are applied by a Coder that self-verifies its own build (batched per the review-loop batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds.
 
 **Tester** (only if acceptance criteria exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
-- FAIL → Coder fix (max 2 retries) → Gate 1 → re-test
+- FAIL → fix-and-continue — a Coder applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds.
 
 **When Gate 2 inputs are absent:**
 - No plan → skip Evaluator panel silently (note in output: "Gate 2 Evaluator skipped — no plan available")
@@ -82,6 +82,8 @@ For each cycle:
 
 **Step 1 — Spawn reviewers in parallel (one agent() per focus)**
 
+**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3).
+
 Core reviewers (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
 Conditional by file type detected in the diff (add these when relevant):
@@ -96,6 +98,10 @@ Conditional by file type detected in the diff (add these when relevant):
 - `package.json` / `go.mod` / `Cargo.toml` / etc. → dependencies
 - Markdown / doc files → documentation
 
+**Spawn pacing:** launch reviewers in staggered chunks of 4–6 (sequential groups of parallel spawns) — the full roster is preserved, paced to avoid 429 batch death.
+
+**Reviewer result contract:** every reviewer MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD reviewer is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A cycle with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
+
 Each Reviewer gets `agentType: "Reviewer"` with its focus baked into the prompt. Total: 8–19 reviewers per cycle.
 
 **Step 2 — Adversarial finding verification**
@@ -109,9 +115,9 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 **Step 3 — Early exit or fix**
 
-If no surviving findings: break (early exit — do not run unnecessary cycles).
+If no surviving findings and `coverageGaps` is empty: break (early exit — do not run unnecessary cycles).
 
-If survivors remain: Coder fixes them (batched per concurrency doctrine — see `concurrency_doctrine()`). The fixing Coder **self-verifies its own fix builds** (build/typecheck per the Coder's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validator, no Simplifier, no Scrutinizer, no Evaluator, no Tester between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: before the fix phase, record `preFixSha` (`git rev-parse HEAD` via a haiku Git agent) — this SHA defines the next cycle's delta-review scope. Then batch the confirmed findings for fixing: group by relationship — same file → same batch; related → sequential; independent → parallel; max 5 findings per batch. Never hand one Coder an unbounded findings list (a 40-finding dump is how fixes fall through the cracks). One Coder per batch; independent batches spawned via `parallel()`, dependent batches sequentially. After fixes: update `reviewBaseSha = preFixSha`. Findings addressed by the fix Coders are reported FIXED (with `fixedInCycle` + commit SHAs), trusted by design; note that cycles 2+ DELTA REVIEW re-checks earlier fixes for free. `survivingFindings` = only findings NOT addressed (fix Coder dead/failed or deferred). The fixing Coder **self-verifies its own fix builds** (build/typecheck per the Coder's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validator, no Simplifier, no Scrutinizer, no Evaluator, no Tester between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -137,21 +143,32 @@ The Workflow runtime KILLS any sub-agent that emits no output for 180 seconds. A
 
 **RULE: any agent (Validator, Coder, Tester) running a build / test / compile / install that may run silent for more than ~120s MUST run it in the BACKGROUND and POLL — never as a single silent foreground command.**
 
+Build commands are NEVER wrapped in `sh -c`, `bash -c`, or inline interpreters (`python3 -c`, `node -e`). Invoke commands directly with the step-1 redirect form — permission systems deny wrapper-invoked commands that would be allowed directly.
+
 Mechanical procedure (spike-verified — a workflow sub-agent survived a 253s job this way):
 
+0. **Pre-load Monitor:** before launching any background task, load the `Monitor` tool via ToolSearch (`select:Monitor`).
 1. Choose ONE unique base path for this run and reuse it verbatim in steps 1–3, e.g. `BASE=/tmp/df-build-<ticket-slug>`. Launch the command with the Bash tool using `run_in_background: true`:
    ```
    <build/test command> > <BASE>.log 2>&1; echo "EXIT=$?" > <BASE>.done
    ```
    This returns immediately with a background task id — do NOT block on it.
-2. Poll with the `Monitor` tool (load it first via ToolSearch `select:Monitor` if it is not already available). Arm ONE monitor that emits a heartbeat well under 180s AND exits when the job finishes:
+2. Arm ONE Monitor that emits a heartbeat well under 180s AND exits when the job finishes:
    - description: short, e.g. `await <build cmd>`
    - persistent: false
    - timeout_ms: comfortably ABOVE the expected job time (e.g. 600000)
    - command: `until [ -f <BASE>.done ]; do echo building; sleep 25; done; echo BUILD_DONE; cat <BASE>.done`
 
    The `building` heartbeat every 25s (≪ 180s) is delivered as a notification that re-invokes you, so the watchdog never sees a >180s gap. `BUILD_DONE` + the `EXIT=` line signal completion.
+
+   **Exit-code honesty:** the background task's own exit status is meaningless (the trailing `echo` always exits 0). ALWAYS read the `EXIT=` value written inside `<BASE>.done` — that is the authoritative result.
+
+   **Bounded polling:** arm ONE Monitor then stop acting. On Monitor timeout, re-arm at most 2× (never more than 3 total Monitor calls per build). If the build has not finished after 3 Monitor calls: record the state and escalate — never babysit. A Coder burned 241k tokens polling one build.
 3. When the monitor reports `BUILD_DONE`: the job PASSES iff `<BASE>.done` contains `EXIT=0`. Read `<BASE>.log` for output/failure detail.
+
+**Cheapest-sufficient validation:** iterate with the fastest check that proves the change — `tsc --noEmit`, `cargo check`, `go vet`, a single test file — the ecosystem's cheapest sufficient signal. Reserve expensive full/optimized builds and whole-suite runs for the final gates only.
+
+**One build gate per phase:** batch related fixes, validate once. A fix-pass Coder runs ONE light check over its whole batch — never several invocations per small fix. Do NOT validate after every individual mutation; validate once after the batch is complete.
 
 **Scope commands to stay short.** During the engine, PREFER crate/package-scoped builds and tests — `cargo build -p <crate>`, `cargo test -p <crate>`, `npm test -- <path>`, `go test ./pkg/...` — over the whole workspace. The full-workspace regression is the human's job after the wave (the wave already hands the integrated branch back to the user). Scoping keeps most commands under the watchdog window and under budget.
 
@@ -173,19 +190,34 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
     {
       "focus": "string — reviewer focus area",
       "finding": "string — description",
-      "severity": "critical | high | medium | low"
+      "severity": "critical | high | medium | low",
+      "status": "surviving"
     }
   ],
+  "fixedFindings": [
+    {
+      "focus": "string — reviewer focus area",
+      "finding": "string — description",
+      "severity": "critical | high | medium | low",
+      "status": "fixed",
+      "fixedInCycle": "number — cycle when fixed",
+      "commitShas": ["string — commit SHAs from the fix Coder"]
+    }
+  ],
+  "reviewCoverage": {
+    "failedFocuses": ["string — focus areas where reviewer died after retry"],
+    "complete": "boolean — true iff no coverage gaps"
+  },
   "escalations": [
     {
-      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution",
+      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash",
       "description": "string"
     }
   ],
   "filesChanged": ["string — list of modified file paths"],
   "gate2": {
-    "evaluatorVerdict": "PASS | FAIL | SKIPPED",
-    "testerVerdict": "PASS | FAIL | SKIPPED",
+    "evaluatorVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
+    "testerVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
     "skipReasons": ["string — why a gate was skipped, if applicable"]
   }
 }
@@ -200,6 +232,7 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
 3. **All written code passes Gate 1.** No code merge, commit, or handoff before Validator + Simplifier + Scrutinizer (in that order).
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
 5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
+6. **No unauthorized GitHub side-effects.** Sub-agents NEVER create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. Proposed follow-ups go in the run report.
 @end
 
 @export gate1_postcode

@@ -1,6 +1,6 @@
 ---
 description: Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents
-argument-hint: "[ticket | issue-url | plan-doc | --dry-run]"
+argument-hint: "[ticket | issue-url | plan-doc]"
 output-dir: plugins/devflow-dynamic/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
@@ -176,12 +176,12 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluator" }),
     ]);
     evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
-      // Gate-2-demanded fix: a plain Coder fix that self-verifies its OWN build.
-      // No inline Gate 1 (Validator/Simplifier/Scrutinizer) here — the final Gate 1 (#2)
+      // C4: fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
       // after the review loop is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluator panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
 Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Coder" });
+      evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
 
@@ -193,10 +193,11 @@ For any test/build command that may run silent >120s, use the background-Bash + 
 Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Tester" });
     testerVerdict = testerResult.verdict;
     if (testerVerdict === "FAIL") {
-      // Gate-2-demanded QA fix: plain Coder fix that self-verifies. No inline Gate 1.
+      // C4: fix-and-continue — no re-test, no inline Gate 1.
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testerResult.failures}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Coder" });
+      testerVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
 
@@ -208,26 +209,61 @@ const reviewResult = await phase("review-loop", async () => {
   const changedFiles = implResult.filesChanged || [];
   const maxCycles = changedFiles.length <= 20 ? 2 : 3;  // judgment heuristic, budget-scaled
 
+  // C1: track reviewBaseSha for delta-scoped review cycles
+  let reviewBaseSha = gitSetup?.baseSha || null;
   let cyclesRun = 0;
   let survivingFindings = [];
+  let fixedFindings = [];
+  let allCoverageGaps = [];
+
+  // Reviewer focus list (order = index mapping for dead-reviewer detection)
+  const reviewFocuses = ["security", "architecture", "performance", "complexity", "consistency", "regression", "testing", "reliability"];
 
   for (let cycle = 1; cycle <= maxCycles; cycle++) {
     cyclesRun = cycle;
 
-    // Spawn core reviewers in parallel + conditional by file type
-    const reviewers = await parallel([
-      () => agent(`Security review of changes on branch ${BRANCH}. Focus: injection, auth, secrets, trust boundaries.`, { agentType: "Reviewer" }),
-      () => agent(`Architecture review of changes on branch ${BRANCH}. Focus: SOLID, coupling, layering, boundaries.`, { agentType: "Reviewer" }),
-      () => agent(`Performance review of changes on branch ${BRANCH}. Focus: N+1, memory leaks, I/O bottlenecks.`, { agentType: "Reviewer" }),
-      () => agent(`Complexity review of changes on branch ${BRANCH}. Focus: cyclomatic complexity, deep nesting, long functions.`, { agentType: "Reviewer" }),
-      () => agent(`Consistency review of changes on branch ${BRANCH}. Focus: naming conventions, pattern deviations, API style.`, { agentType: "Reviewer" }),
-      () => agent(`Regression review of changes on branch ${BRANCH}. Focus: removed exports, changed signatures, behavior changes.`, { agentType: "Reviewer" }),
-      () => agent(`Testing review of changes on branch ${BRANCH}. Focus: test coverage, behavior assertions, brittle patterns.`, { agentType: "Reviewer" }),
-      () => agent(`Reliability review of changes on branch ${BRANCH}. Focus: unbounded loops, missing assertions, error handling.`, { agentType: "Reviewer" }),
-    ]);
+    // C1: cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only
+    const reviewScope = cycle === 1
+      ? `Review the full branch diff on branch ${BRANCH} (base to HEAD).`
+      : `DELTA REVIEW: review only the fix commits from ${reviewBaseSha} to HEAD on branch ${BRANCH}. Verify those fixes are sound; do not re-review unchanged code.`;
 
-    const allFindings = reviewers.flatMap(r => r.findings || []);
-    if (allFindings.length === 0) break;  // early exit
+    // C2: spawn reviewers in staggered chunks of 5 to avoid 429 batch death
+    const chunkSize = 5;
+    const reviewerThunks = reviewFocuses.map(focus =>
+      () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
+Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": [], "findings": []}`, { agentType: "Reviewer" })
+    );
+
+    let rawReviewers = [];
+    for (let i = 0; i < reviewerThunks.length; i += chunkSize) {
+      const chunk = await parallel(reviewerThunks.slice(i, i + chunkSize));
+      rawReviewers = rawReviewers.concat(chunk);
+    }
+
+    // C2: dead-reviewer detection — retry once; record coverageGaps
+    const coverageGaps = [];
+    const liveReviewers = [];
+    for (let i = 0; i < rawReviewers.length; i++) {
+      const r = rawReviewers[i];
+      const focus = reviewFocuses[i];
+      if (!r || r.reviewed !== true) {
+        // Dead reviewer: retry once sequentially
+        const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": [], "findings": []}`, { agentType: "Reviewer" });
+        if (!retry || retry.reviewed !== true) {
+          coverageGaps.push(focus);
+          log(`review coverage incomplete: ${focus}`);
+        } else {
+          liveReviewers.push(retry);
+        }
+      } else {
+        liveReviewers.push(r);
+      }
+    }
+    allCoverageGaps = allCoverageGaps.concat(coverageGaps);
+
+    const allFindings = liveReviewers.flatMap(r => r.findings || []);
+    // C2: early exit requires BOTH no findings AND no coverage gaps
+    if (allFindings.length === 0 && coverageGaps.length === 0) break;
 
     // Adversarial verification — bounded 2-3 agent panel, majority-survives
     // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
@@ -249,22 +285,65 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
       )
     );
 
-    survivingFindings = allFindings.filter((_, i) =>
+    const confirmedFindings = allFindings.filter((_, i) =>
       panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
     );
 
-    if (survivingFindings.length === 0) break;  // early exit — clean review
+    if (confirmedFindings.length === 0 && coverageGaps.length === 0) break;  // early exit — clean review
 
-    // Coder fixes survivors (sequential per concurrency doctrine). The fixing Coder
-    // SELF-VERIFIES its own fix compiles — NO Gate 1 (Validator/Simplifier/Scrutinizer)
-    // between review cycles. The single final Gate 1 (#2) after this loop is the build gate.
-    await agent(`Fix the following confirmed review findings on branch ${BRANCH}:
-${survivingFindings.map(f => `- ${f.description} (${f.severity})`).join("\n")}
+    // C1: record preFixSha before fixes (defines next cycle's DELTA REVIEW scope)
+    const preFixAgent = await agent(`Run git rev-parse HEAD on branch ${BRANCH} and return the SHA.`, { agentType: "Git" });
+    const preFixSha = preFixAgent?.sha || reviewBaseSha;
 
-Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.`, { agentType: "Coder" });
+    // C3: batched fix Coders — group by file; max 5 findings per batch; independent batches in parallel.
+    // Never hand one Coder an unbounded findings list (a 40-finding dump is how fixes fall through the cracks).
+    const MAX_BATCH = 5;  // max 5 findings per batch
+    const fileGroups = {};
+    for (const f of confirmedFindings) {
+      const key = f.file || "misc";
+      if (!fileGroups[key]) fileGroups[key] = [];
+      fileGroups[key].push(f);
+    }
+    const batches = [];
+    let currentBatch = [];
+    for (const findings of Object.values(fileGroups)) {
+      for (const f of findings) {
+        currentBatch.push(f);
+        if (currentBatch.length >= MAX_BATCH) { batches.push(currentBatch); currentBatch = []; }
+      }
+    }
+    if (currentBatch.length > 0) batches.push(currentBatch);
+
+    // Spawn fix Coders — independent batches run in parallel (same-file batches already grouped)
+    const fixResults = await parallel(batches.map((batch, batchIdx) => () =>
+      agent(`Fix the following confirmed review findings on branch ${BRANCH} (batch ${batchIdx + 1} of ${batches.length}):
+${batch.map(f => `- ${f.description} (${f.severity})`).join("\n")}
+
+Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message and report commit SHAs.`, { agentType: "Coder" })
+    ));
+
+    // C1: update reviewBaseSha for next cycle's DELTA REVIEW
+    reviewBaseSha = preFixSha;
+
+    // C3: track findings disposition — FIXED vs SURVIVING
+    const fixedThisCycle = [];
+    const notAddressed = [];
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      if (fixResults[batchIdx] && !fixResults[batchIdx]?.failed) {
+        fixedThisCycle.push(...batches[batchIdx].map(f => ({
+          ...f, status: "fixed", fixedInCycle: cycle,
+          commitShas: fixResults[batchIdx]?.commitShas || []
+        })));
+      } else {
+        notAddressed.push(...batches[batchIdx]);
+      }
+    }
+    fixedFindings = fixedFindings.concat(fixedThisCycle);
+    // survivingFindings = only findings NOT addressed (fix Coder dead/failed or deferred)
+    survivingFindings = notAddressed;
   }
 
-  return { cyclesRun, survivingFindings };
+  return { cyclesRun, survivingFindings, fixedFindings, coverageGaps: allCoverageGaps };
 });
 
 // Phase 5.5: Gate 1 #2 — FINAL post-fix gate (full Validator → Simplifier → Scrutinizer).
@@ -297,6 +376,10 @@ Self-verify your fix compiles. Commit fixes with conventional-commit message.`, 
   return { verdict: "PASS" };
 });
 
+// C4: PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
+const coverageGaps = reviewResult.coverageGaps || [];
+const overallVerdict = reviewResult.survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";
+
 // Phase 6: Report
 return phase("report", () =>
   agent(`Synthesize the build run for ticket ${TICKET} on branch ${BRANCH}:
@@ -305,10 +388,12 @@ return phase("report", () =>
 - Gate 2 result: ${JSON.stringify(gate2)}
 - Review cycles: ${reviewResult.cyclesRun}
 - Final Gate 1 (#2 post-fix): ${JSON.stringify(gate1Final)}
-- Surviving findings: ${JSON.stringify(reviewResult.survivingFindings)}
-- Overall verdict: ${reviewResult.survivingFindings.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL"}
+- Findings disposition:
+  - FIXED: ${reviewResult.fixedFindings?.length || 0} findings fixed across cycles (trusted by design; do NOT present as outstanding; never cite pre-fix line numbers)
+  - SURVIVING: ${reviewResult.survivingFindings?.length || 0} findings not addressed (fix Coder failed or deferred): ${JSON.stringify(reviewResult.survivingFindings)}
+- Overall verdict: ${overallVerdict}
 
-Write a concise report. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesizer" })
+Write a concise report. Present only surviving findings as outstanding — never present FIXED findings as outstanding. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesizer" })
 );
 ```
 
@@ -349,6 +434,41 @@ When WAVE mode is detected, author a workflow that wraps the single-ticket engin
 **Wave workflow structure (author after the SINGLE engine blocks above):**
 
 The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` (or the user's current branch). Per-ticket branches are `ticket/<slug>`. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validator (build + test). Escalations accumulate in a list; the final report lists all of them.
+
+Wave skeleton — compact reference (see `wave_loop()` doctrine for full semantics):
+
+```js
+// Wave round loop: Designer reader → per-ticket try/catch → cascade quarantine via next reader
+const waveState = { quarantined: [], round: 0 };
+while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS) {
+  waveState.round++;
+
+  // Designer reader (opus) applies vacuous-truth rule: a ticket with no unmet dependencies is ALWAYS ready
+  const waveRead = await agent(
+    `Wave round ${waveState.round}: which tickets are ready?
+Remaining: ${JSON.stringify(remainingTickets)}
+Quarantined (cascade block — do NOT schedule dependents of these): ${JSON.stringify(waveState.quarantined)}
+Vacuous-truth rule: a ticket with no named unmet dependency is ALWAYS ready.
+Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": "id", "reason": "string"}]}`,
+    { agentType: "Designer" }
+  );
+
+  for (const ticketId of (waveRead?.ready || [])) {
+    try {
+      const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT);
+      if (engineResult.verdict === "PASS") {
+        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Run Validator (build + test) after merge.`, { agentType: "Git" });
+      } else {
+        waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
+      }
+    } catch (err) {
+      // One ticket's crash/stall never kills the wave — quarantine it; cascade propagates to dependents via the next reader round
+      waveState.quarantined.push({ ticket: ticketId, reason: `engine crash: ${String(err)}` });
+    }
+    remainingTickets = remainingTickets.filter(t => t !== ticketId);
+  }
+}
+```
 
 ---
 

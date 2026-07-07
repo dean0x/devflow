@@ -1,6 +1,6 @@
 ---
 description: Full-pipeline wave driver — sequence dynamic-tickets → dynamic-plan → dynamic-build with human gates between runs
-argument-hint: "[initiative | --dry-run]"
+argument-hint: "[initiative]"
 output-dir: plugins/devflow-dynamic/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
@@ -32,8 +32,6 @@ Before starting, verify:
 1. **An initiative is provided.** If the user only typed `/devflow:dynamic-wave` with no input, ask: "What initiative or feature do you want to build? Provide a description or a spec document path."
 2. **GitHub:** check whether `gh` is authenticated (`gh auth status`). Note the result — `dynamic-tickets` and `dynamic-plan` handle the fallback paths; you don't need to block.
 3. **Preference profile:** check whether `~/.devflow/preference-profile.md` exists. If not, suggest: "Run /devflow:dynamic-profile first to generate a preference profile — it helps /devflow:dynamic-plan auto-resolve design decisions. You can skip this and proceed without one."
-
-If `--dry-run` was passed: describe what each gate would do and STOP — do not run any commands.
 
 ---
 
