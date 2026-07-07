@@ -263,7 +263,12 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    // After Fix 2: coder.md and reviewer.md use Skill tool invocations instead of install paths.
+    // After Phase 2 redesign: reviewer.md reads focus skill files via the Read tool using
+    // install paths (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder
+    // is not matched by extractInstallPaths, so no false capture occurs.
+    // Coder.md invokes domain skills (typescript, go, etc.) via Skill tool — those are not
+    // install-path references. Frontmatter-listed skills are pre-activated and must never
+    // be re-invoked via the Skill tool (enforced by the structural test below).
     for (const file of agentFiles) {
       const content = readFileSync(path.join(agentsDir, file), 'utf-8');
       const refs = extractInstallPaths(content);
@@ -993,6 +998,44 @@ describe('Cross-component runtime alignment', () => {
         hasSkillRef,
         `coder.md domain skill section should reference 'devflow:${skill}'`,
       ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural invariant: agents never Skill-invoke their own frontmatter skills
+// Permanent regression guard for PF-002 (skill re-entrancy guard).
+// If an agent has `devflow:X` in its frontmatter skills:, it must NOT also
+// contain `Skill(skill="devflow:X")` in its body — frontmatter skills are
+// pre-activated by the runtime and a re-invocation would cause a guard-string
+// return ('already running') or a no-op skip, both of which are bugs.
+// ---------------------------------------------------------------------------
+
+describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
+  it('every shared/agents/*.md has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
+    const agentsDir = path.join(ROOT, 'shared', 'agents');
+    const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+    const skillCallPattern = /Skill\(skill="devflow:([\w-]+)"\)/g;
+
+    for (const file of agentFiles) {
+      const filePath = path.join(agentsDir, file);
+      const content = readFileSync(filePath, 'utf-8');
+      const frontmatterSkills = new Set(parseFrontmatterSkills(content));
+
+      // Strip frontmatter block before scanning for Skill() calls, so that the
+      // skills: block itself (which lists devflow:NAME entries) is not scanned.
+      const frontmatterEnd = content.indexOf('\n---\n', 4);
+      const body = frontmatterEnd >= 0 ? content.slice(frontmatterEnd + 5) : content;
+
+      skillCallPattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = skillCallPattern.exec(body)) !== null) {
+        const skillName = match[1];
+        expect(
+          frontmatterSkills.has(skillName),
+          `shared/agents/${file}: re-entrancy violation — Skill(skill="devflow:${skillName}") is invoked in the body, but '${skillName}' is listed in frontmatter skills (pre-activated skills must never be re-invoked via Skill tool)`,
+        ).toBe(false);
+      }
     }
   });
 });
