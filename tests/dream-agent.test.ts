@@ -44,12 +44,9 @@ describe('dream agent', () => {
       expect(tools.sort()).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']);
     });
 
-    it('declares no skills in frontmatter (invoke-only architecture)', () => {
-      // Dream curates the decisions ledger directly — it does not consume DECISIONS_CONTEXT
-      // via the apply-decisions algorithm. No frontmatter skills: block is needed.
-      // avoids PF-002 (invoke-only architecture: all skill loading is Skill-tool-at-runtime).
+    it('references only the apply-decisions skill', () => {
       const skills = parseYamlList(frontmatter, 'skills');
-      expect(skills).toEqual([]);
+      expect(skills).toEqual(['devflow:apply-decisions']);
     });
   });
 

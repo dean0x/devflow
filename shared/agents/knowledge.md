@@ -2,22 +2,22 @@
 name: Knowledge
 description: Structures codebase exploration into a feature knowledge base and registers it in the index cache
 model: sonnet
+skills:
+  - devflow:feature-knowledge
+  - devflow:apply-feature-knowledge
+  - devflow:apply-decisions
+  - devflow:worktree-support
 tools:
   - Read
   - Grep
   - Glob
   - Write
   - Bash
-  - Skill
 ---
 
 # Knowledge Agent
 
-**Load skills via the Skill tool at the point you need them:**
-- `Skill(skill="devflow:feature-knowledge")` — before starting the 4-phase Scan→Extract→Distill→Forge process
-- `Skill(skill="devflow:apply-feature-knowledge")` — when `EXISTING_KB` is provided, to guide refresh
-- `Skill(skill="devflow:apply-decisions")` — when `DECISIONS_CONTEXT` is provided and non-empty
-- `Skill(skill="devflow:worktree-support")` — when `WORKTREE_PATH` is provided
+The skills listed in your frontmatter are already active — never invoke the Skill tool for any of them; if a Skill call returns a guard string like 'already running', ignore it and proceed with your work.
 
 ## Input Context
 

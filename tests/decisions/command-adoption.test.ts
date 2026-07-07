@@ -64,10 +64,10 @@ describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form
 })
 
 // -------------------------------------------------------------------------
-// Consumer agents — must load devflow:apply-decisions via Skill tool (invoke-only architecture)
+// Consumer agents — must reference devflow:apply-decisions in skills frontmatter
 // -------------------------------------------------------------------------
 
-describe('Consumer agents — devflow:apply-decisions loaded via Skill tool', () => {
+describe('Consumer agents — devflow:apply-decisions in skills frontmatter', () => {
   const agents: Array<[string, string]> = [
     ['resolver.md', 'shared/agents/resolver.md'],
     ['designer.md', 'shared/agents/designer.md'],
@@ -76,17 +76,22 @@ describe('Consumer agents — devflow:apply-decisions loaded via Skill tool', ()
   ]
 
   for (const [label, relPath] of agents) {
-    it(`${label} loads devflow:apply-decisions via Skill tool in body`, () => {
+    it(`${label} references devflow:apply-decisions in skills frontmatter`, () => {
       const content = loadFile(relPath)
-      // invoke-only architecture: no frontmatter skills: block; skill loaded at runtime via Skill tool
-      expect(content).toContain('Skill(skill="devflow:apply-decisions")')
+      // Extract frontmatter (between first --- and second ---)
+      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
+      expect(frontmatterMatch).toBeTruthy()
+      const frontmatter = frontmatterMatch![1]
+      expect(frontmatter).toContain('devflow:apply-decisions')
     })
   }
 
-  it('simplifier.md does NOT invoke devflow:apply-decisions (code-shape role, not quality gate)', () => {
+  it('simplifier.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
     const content = loadFile('shared/agents/simplifier.md')
-    // simplifier is a code-shape agent — it should not load apply-decisions anywhere
-    expect(content).not.toContain('Skill(skill="devflow:apply-decisions")')
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
+    expect(frontmatterMatch).toBeTruthy()
+    const frontmatter = frontmatterMatch![1]
+    expect(frontmatter).not.toContain('devflow:apply-decisions')
   })
 })
 

@@ -216,15 +216,29 @@ describe('Format 1: Plugin manifest skill arrays', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Format 2: Agent frontmatter — invoke-only architecture
-// All skill loading is done at runtime via the Skill tool at the point of need.
-// No agent declares a `skills:` frontmatter block. This structurally prevents
-// PF-002 (skill re-entrancy guard): with nothing preloaded, the re-entrancy
-// guard can never fire.
+// Format 2: Agent frontmatter
 // ---------------------------------------------------------------------------
 
-describe('Format 2: Agent frontmatter skills — invoke-only architecture', () => {
-  it('no shared agent declares a skills: block in frontmatter (invoke-only architecture)', () => {
+describe('Format 2: Agent frontmatter skills', () => {
+  it('every skill in shared agent frontmatter exists in canonical set', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
+
+    for (const file of agentFiles) {
+      const filePath = path.join(ROOT, 'shared', 'agents', file);
+      const content = readFileSync(filePath, 'utf-8');
+      const skillNames = parseFrontmatterSkills(content);
+
+      for (const skill of skillNames) {
+        expect(
+          canonicalSkills.has(skill),
+          `shared/agents/${file}: frontmatter skill '${skill}' is not in canonical getAllSkillNames()`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('every shared agent declares at least one skill in frontmatter', () => {
     const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
 
     for (const file of agentFiles) {
@@ -234,29 +248,8 @@ describe('Format 2: Agent frontmatter skills — invoke-only architecture', () =
 
       expect(
         skillNames.length,
-        `shared/agents/${file}: frontmatter skills: block found — agents must not preload skills; load via Skill tool at runtime instead (invoke-only architecture, avoids PF-002)`,
-      ).toBe(0);
-    }
-  });
-
-  it('no tracked plugin agent declares a skills: block in frontmatter (invoke-only architecture)', () => {
-    const trackedPluginAgentPaths = execSync("git ls-files 'plugins/*/agents/*.md'", {
-      cwd: ROOT,
-      encoding: 'utf8',
-    })
-      .trim()
-      .split('\n')
-      .filter(Boolean);
-
-    for (const relPath of trackedPluginAgentPaths) {
-      const filePath = path.join(ROOT, relPath);
-      const content = readFileSync(filePath, 'utf-8');
-      const skillNames = parseFrontmatterSkills(content);
-
-      expect(
-        skillNames.length,
-        `${relPath}: frontmatter skills: block found — agents must not preload skills; load via Skill tool at runtime instead (invoke-only architecture, avoids PF-002)`,
-      ).toBe(0);
+        `shared/agents/${file}: parseFrontmatterSkills returned empty — missing or malformed skills: block in frontmatter`,
+      ).toBeGreaterThan(0);
     }
   });
 });
@@ -271,10 +264,12 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    // reviewer.md loads the focus skill via the Skill tool — it does not use install paths.
+    // reviewer.md reads focus skill files directly via the Read tool using the install path
+    // (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder is not matched
+    // by extractInstallPaths, so no false capture occurs.
     // coder.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
-    // not install-path references. All skill loading is done at runtime via the Skill tool
-    // at the point of need (invoke-only architecture — no frontmatter preloading).
+    // not install-path references. Frontmatter-listed skills are pre-activated and must never
+    // be re-invoked via the Skill tool (enforced by the structural test below).
     for (const file of agentFiles) {
       const content = readFileSync(path.join(agentsDir, file), 'utf-8');
       const refs = extractInstallPaths(content);
@@ -315,8 +310,8 @@ describe('Format 3: Install path references', () => {
       }
     }
 
-    // Invoke-only architecture: command files load skills via the Skill tool, never via ~/.claude/skills install paths.
-    expect(totalRefs, 'command files must not reference skill install paths — load via the Skill tool').toBe(0);
+    // code-review, resolve commands both have install path references
+    expect(totalRefs, 'command files should have install path references').toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -1009,18 +1004,12 @@ describe('Cross-component runtime alignment', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural invariant: agents never re-invoke a frontmatter-preloaded skill
+// Structural invariant: agents never Skill-invoke their own frontmatter skills
 // Permanent regression guard for PF-002 (skill re-entrancy guard).
-//
-// New architecture: no agent declares `skills:` in its frontmatter. All skill
-// loading happens at runtime via the Skill tool at the point of need. This makes
-// PF-002's hazard structurally impossible — nothing is preloaded, so the
-// re-entrancy guard can never fire.
-//
-// This guard remains in place to catch any future regression where a developer
-// re-adds a `skills:` frontmatter block to an agent and also adds a Skill() call
-// for the same skill. The Format 2 tests above ensure no agent has a skills: block
-// at all; this guard provides a redundant safety net.
+// If an agent has `devflow:X` in its frontmatter skills:, it must NOT also
+// contain `Skill(skill="devflow:X")` in its body — frontmatter skills are
+// pre-activated by the runtime and a re-invocation would cause a guard-string
+// return ('already running') or a no-op skip, both of which are bugs.
 // ---------------------------------------------------------------------------
 
 describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
@@ -1048,9 +1037,6 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
     for (const filePath of [...sharedAgentPaths, ...trackedPluginAgentPaths]) {
       const label = path.relative(ROOT, filePath);
       const content = readFileSync(filePath, 'utf-8');
-      // Under the invoke-only architecture, parseFrontmatterSkills returns [] for all agents.
-      // The re-entrancy check below is vacuously satisfied but kept as a regression guard:
-      // if a future change re-adds a skills: block AND a Skill() call, this will catch it.
       const frontmatterSkills = new Set(parseFrontmatterSkills(content));
 
       // Strip frontmatter block before scanning for Skill() calls, so that the
@@ -1064,7 +1050,7 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
         const skillName = match[1];
         expect(
           frontmatterSkills.has(skillName),
-          `${label}: re-entrancy violation — Skill(skill="devflow:${skillName}") is invoked in the body, but '${skillName}' is listed in frontmatter skills (preloaded skills must never be re-invoked via Skill tool — avoids PF-002)`,
+          `${label}: re-entrancy violation — Skill(skill="devflow:${skillName}") is invoked in the body, but '${skillName}' is listed in frontmatter skills (pre-activated skills must never be re-invoked via Skill tool)`,
         ).toBe(false);
       }
     }

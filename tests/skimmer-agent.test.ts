@@ -25,11 +25,10 @@ describe('skimmer agent', () => {
     tools = parseToolsFromFrontmatter(content);
   });
 
-  it('has tools restricted to Bash, Read, and Skill only', () => {
-    expect(tools).toHaveLength(3);
+  it('has tools restricted to Bash and Read only', () => {
+    expect(tools).toHaveLength(2);
     expect(tools).toContain('Bash');
     expect(tools).toContain('Read');
-    expect(tools).toContain('Skill');
   });
 
   it('does NOT use root scan in code examples', () => {

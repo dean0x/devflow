@@ -243,9 +243,9 @@ When the Designer reader returns an empty ready set but tickets remain, the engi
 
 The `--dry-run` flag is present ONLY in `dynamic-profile.mds`. It was removed from `dynamic-build`, `dynamic-plan`, `dynamic-tickets`, and `dynamic-wave` (C7 of PR #252). The test suite pins its absence. Do not re-add it to those commands.
 
-### Skill loading — invoke-only architecture (avoids PF-002)
+### Skill re-entrancy in Reviewer and Evaluator agents
 
-No agent declares a `skills:` frontmatter block. All skill loading is done at runtime via the Skill tool at the point of need. This makes PF-002's hazard structurally impossible: the re-entrancy guard (`devflow:X already running`) can only fire when a skill is both preloaded via frontmatter AND invoked via Skill tool — with nothing preloaded, that path cannot be reached. When writing agent prompts for Reviewer, Evaluator, BugAnalyzer, or any other agent, instruct the agent to `Skill(skill="devflow:X")` directly — no frontmatter declaration needed or permitted.
+Agents that preload a skill via frontmatter `skills:` must never be instructed to invoke that same skill via the Skill tool in their body prompt. The re-entrancy guard returns a guard string (`devflow:X already running`), the agent treats it as a terminal instruction, returns with 0 tool uses, and the Workflow counts it as success — silently masking zero review coverage. Applies PF-002. When writing agent prompts for Reviewer and Evaluator, give full context directly; do not rely on Skill-tool re-invocation of a preloaded skill.
 
 ### Acceptance criteria quality bar
 
@@ -272,5 +272,5 @@ Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the m
 ## Related
 
 - ADR-003 (leave-the-end-state): applies to compiled output — when removing or renaming doctrine blocks, strip residue (tombstone comments, `*_old` names, guards for now-impossible states). The test suite pins the current doctrine literals; outdated pinned strings that remain after a partial rename fail tests rather than silently passing.
-- PF-002 (skill re-entrancy guard-string bail): structurally prevented by the invoke-only architecture (no frontmatter `skills:` blocks). The gotcha above explains why; cited here for traceability.
+- PF-002 (skill re-entrancy guard-string bail): relevant to every `agent()` call with `agentType: "Reviewer"` or `"Evaluator"` — never instruct these agents to invoke via Skill tool the same skill their frontmatter preloads.
 - `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 5 dynamic commands.

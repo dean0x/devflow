@@ -85,35 +85,31 @@ Some skills exist in `shared/skills/` but are not distributed to any plugin. The
 
 ## How Skills Activate
 
-Skills activate through one guaranteed mechanism:
+Skills activate through two guaranteed mechanisms:
 
-1. **Runtime Skill-tool invocation** — Agents load skills at the point of need by calling `Skill(skill="devflow:<name>")`. This is the sole activation path. No agent declares a `skills:` frontmatter block.
+1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
+2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
 The `activation: file-patterns` frontmatter is metadata for documentation purposes. Claude Code does not currently use glob patterns to trigger skills.
 
-### Invoke-only architecture (avoids PF-002)
+### Frontmatter preload and Skill-tool invocation are mutually exclusive
 
-All skill loading happens at runtime via the Skill tool at the point of need. No agent declares a `skills:` frontmatter block. This design structurally prevents PF-002: the skill re-entrancy guard (`devflow:<name> already running`) can only fire when a skill is both preloaded via frontmatter AND invoked via Skill tool. With no frontmatter preloading, re-entrancy is impossible.
+A skill loaded via `skills:` frontmatter is already active when the agent starts. Invoking that same skill again via the Skill tool hits a re-entrancy guard that returns a string like `devflow:<skill-name> already running`. An agent that mistakes this guard string for a terminal instruction will do zero real work while the orchestrating Workflow reports success — the failure is invisible. **Every agent file must contain no `Skill(skill="devflow:<name>")` call where `<name>` appears in that agent's own frontmatter `skills:` list.**
 
-The `devflow:<skill-name> already running` guard string is the failure signature of the PF-002 bug class. If you observe an agent completing in under 5 seconds with no tool calls and the orchestrator reports success, re-entrancy from a re-introduced `skills:` block is the most likely cause.
+The `devflow:<skill-name> already running` guard string is the failure signature of this class of bug. If you observe an agent completing in under 5 seconds with no tool calls, re-entrancy is the most likely cause.
 
-### Example: Agent Skill Loading
+### Example: Agent Frontmatter
 
 ```yaml
 ---
 name: Coder
+skills: software-design, git, patterns, ...
 ---
-
-# Coder Agent
-
-**Load skills via the Skill tool at the point you need them:**
-- `Skill(skill="devflow:software-design")` — for design patterns
-- `Skill(skill="devflow:git")` — before committing
 ```
 
-Skills are loaded when needed, not at agent startup.
+All listed skills are loaded when the Coder agent is spawned.
 
 ## Skill File Template
 
