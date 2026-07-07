@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 // from the local repo during test discovery — no async I/O benefit, and sync keeps every
 // test function synchronous (simpler assertions, no `await` boilerplate).
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { execSync } from 'child_process';
 import * as path from 'path';
 import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
 
@@ -1012,13 +1013,29 @@ describe('Cross-component runtime alignment', () => {
 // ---------------------------------------------------------------------------
 
 describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
-  it('every shared/agents/*.md has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
+  it('every shared/agents/*.md and tracked plugin agents/*.md has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
-    const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+    const sharedAgentPaths = readdirSync(agentsDir)
+      .filter(f => f.endsWith('.md'))
+      .map(f => path.join(agentsDir, f));
+
+    // Also scan tracked plugin agent copies (not gitignored build-distributed copies).
+    // plugins/devflow-plan/agents/designer.md is git-tracked and hand-maintained alongside
+    // shared/agents/designer.md — a re-entrant Skill() reintroduced there must be caught.
+    // avoids PF-002
+    const trackedPluginAgentPaths = execSync("git ls-files 'plugins/*/agents/*.md'", {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map(f => path.join(ROOT, f));
+
     const skillCallPattern = /Skill\(skill="devflow:([\w-]+)"\)/g;
 
-    for (const file of agentFiles) {
-      const filePath = path.join(agentsDir, file);
+    for (const filePath of [...sharedAgentPaths, ...trackedPluginAgentPaths]) {
+      const label = path.relative(ROOT, filePath);
       const content = readFileSync(filePath, 'utf-8');
       const frontmatterSkills = new Set(parseFrontmatterSkills(content));
 
@@ -1033,7 +1050,7 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
         const skillName = match[1];
         expect(
           frontmatterSkills.has(skillName),
-          `shared/agents/${file}: re-entrancy violation — Skill(skill="devflow:${skillName}") is invoked in the body, but '${skillName}' is listed in frontmatter skills (pre-activated skills must never be re-invoked via Skill tool)`,
+          `${label}: re-entrancy violation — Skill(skill="devflow:${skillName}") is invoked in the body, but '${skillName}' is listed in frontmatter skills (pre-activated skills must never be re-invoked via Skill tool)`,
         ).toBe(false);
       }
     }

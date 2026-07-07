@@ -610,8 +610,13 @@ describe('compiled knowledge commands — no stale call-site references', () => 
 describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
   let compiled: string;
 
-  // Earlier describe blocks have already compiled the file; we just read it here.
   beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
     compiled = await fs.readFile(
       path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands', 'dynamic-build.md'),
       'utf-8',
@@ -657,9 +662,12 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
   });
 
   it('C8: scratch path is run-unique — old fixed filename /tmp/df-wf-check.js is gone', () => {
-    // New form: /tmp/df-wf-check-<meta.name>-<epoch-seconds>.js — the .js suffix is after
-    // the run-unique segment, so the old fixed name "/tmp/df-wf-check.js" cannot appear.
+    // Absence guard: old fixed name must be gone.
     expect(compiled).not.toContain('/tmp/df-wf-check.js');
+    // Positive guards: new run-unique prefix and doctrine phrase must be present so that
+    // removing or renaming the scratch-path mechanism causes this test to fail.
+    expect(compiled).toContain('df-wf-check-');
+    expect(compiled).toContain('run-unique scratch file');
   });
 
   it('C9: no unauthorized GitHub side-effects doctrine', () => {
@@ -676,6 +684,15 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 describe('compiled dynamic commands: --dry-run removal (C7)', () => {
   const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets', 'dynamic-wave'] as const;
   const DYNAMIC_DIR = path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands');
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
 
   it('dynamic-build, plan, tickets, wave do NOT contain --dry-run', async () => {
     for (const basename of DRY_RUN_ABSENT) {
