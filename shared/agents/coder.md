@@ -60,14 +60,13 @@ You receive from orchestrator:
 
 When you apply a decision from `.devflow/decisions/decisions.md` or avoid a pitfall from `.devflow/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
 
-2. **Load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails or returns 'already running', skip that skill and continue — domain skills are optional enhancements, not required for task completion.
+2. **Load domain skills**: Before any analysis, invoke the Skill tool for the domain skills matching the language and stack of the code being touched:
    - `backend` (TypeScript): `Skill(skill="devflow:typescript")`
    - `backend` (Go): `Skill(skill="devflow:go")`
    - `backend` (Java): `Skill(skill="devflow:java")`
    - `backend` (Python): `Skill(skill="devflow:python")`
    - `backend` (Rust): `Skill(skill="devflow:rust")`
    - `frontend`: `Skill(skill="devflow:react")`, `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:accessibility")`, `Skill(skill="devflow:ui-design")`
-   - `tests`: `Skill(skill="devflow:typescript")`
    - `fullstack`: Combine backend + frontend skills
 
 3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
