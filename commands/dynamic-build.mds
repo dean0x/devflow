@@ -297,8 +297,7 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     const preFixAgent = await agent(`Run git rev-parse HEAD on branch ${BRANCH}.
 Return exactly: {"sha": "<40-hex-commit-sha>"}`, { agentType: "Git" });
     // Accept only a valid 40-hex SHA — if shape drifts, widen to prior base (never narrow the review window)
-    const rawSha = preFixAgent?.sha;
-    const preFixSha = (typeof rawSha === "string" && /^[0-9a-f]{40}$/.test(rawSha)) ? rawSha : reviewBaseSha;
+    const preFixSha = /^[0-9a-f]{40}$/.test(preFixAgent?.sha) ? preFixAgent.sha : reviewBaseSha;
 
     // Batched fix Coders — one file per set of sub-batches; max 5 findings per sub-batch.
     // Sub-batches for the SAME file run sequentially (never two Coders editing the same file concurrently —
