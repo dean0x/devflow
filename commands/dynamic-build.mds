@@ -222,8 +222,9 @@ const reviewResult = await phase("review-loop", async () => {
   for (let cycle = 1; cycle <= maxCycles; cycle++) {
     cyclesRun = cycle;
 
-    // Cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only
-    const reviewScope = cycle === 1
+    // Cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only.
+    // If reviewBaseSha is falsy (base unrecorded), fall back to full-branch scope — never interpolate null.
+    const reviewScope = (cycle === 1 || !reviewBaseSha)
       ? `Review the full branch diff on branch ${BRANCH} (base to HEAD).`
       : `DELTA REVIEW: review only the fix commits from ${reviewBaseSha} to HEAD on branch ${BRANCH}. Verify those fixes are sound; do not re-review unchanged code.`;
 

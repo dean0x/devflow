@@ -82,7 +82,7 @@ For each cycle:
 
 **Step 1 — Spawn reviewers in parallel (one agent() per focus)**
 
-**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3).
+**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3). When the pre-fix SHA from the prior cycle is missing or was not recorded, the review scope falls back to the wider full-branch base rather than a narrower delta — scope never regresses to a narrower window.
 
 Core reviewers (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
