@@ -263,11 +263,11 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    // After Phase 2 redesign: reviewer.md reads focus skill files via the Read tool using
-    // install paths (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder
-    // is not matched by extractInstallPaths, so no false capture occurs.
-    // Coder.md invokes domain skills (typescript, go, etc.) via Skill tool — those are not
-    // install-path references. Frontmatter-listed skills are pre-activated and must never
+    // reviewer.md reads focus skill files directly via the Read tool using the install path
+    // (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder is not matched
+    // by extractInstallPaths, so no false capture occurs.
+    // coder.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
+    // not install-path references. Frontmatter-listed skills are pre-activated and must never
     // be re-invoked via the Skill tool (enforced by the structural test below).
     for (const file of agentFiles) {
       const content = readFileSync(path.join(agentsDir, file), 'utf-8');

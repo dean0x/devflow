@@ -176,7 +176,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluator" }),
     ]);
     evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
-      // C4: fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
+      // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
       // after the review loop is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluator panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
@@ -193,7 +193,7 @@ For any test/build command that may run silent >120s, use the background-Bash + 
 Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Tester" });
     testerVerdict = testerResult.verdict;
     if (testerVerdict === "FAIL") {
-      // C4: fix-and-continue — no re-test, no inline Gate 1.
+      // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testerResult.failures}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Coder" });
@@ -209,7 +209,7 @@ const reviewResult = await phase("review-loop", async () => {
   const changedFiles = implResult.filesChanged || [];
   const maxCycles = changedFiles.length <= 20 ? 2 : 3;  // judgment heuristic, budget-scaled
 
-  // C1: track reviewBaseSha for delta-scoped review cycles
+  // Track reviewBaseSha for delta-scoped review cycles
   let reviewBaseSha = gitSetup?.baseSha || null;
   let cyclesRun = 0;
   let survivingFindings = [];
@@ -222,12 +222,12 @@ const reviewResult = await phase("review-loop", async () => {
   for (let cycle = 1; cycle <= maxCycles; cycle++) {
     cyclesRun = cycle;
 
-    // C1: cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only
+    // Cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only
     const reviewScope = cycle === 1
       ? `Review the full branch diff on branch ${BRANCH} (base to HEAD).`
       : `DELTA REVIEW: review only the fix commits from ${reviewBaseSha} to HEAD on branch ${BRANCH}. Verify those fixes are sound; do not re-review unchanged code.`;
 
-    // C2: spawn reviewers in staggered chunks of 5 to avoid 429 batch death
+    // Spawn reviewers in staggered chunks of 5 to avoid 429 batch death
     const chunkSize = 5;
     const reviewerThunks = reviewFocuses.map(focus =>
       () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
@@ -240,7 +240,7 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
       rawReviewers = rawReviewers.concat(chunk);
     }
 
-    // C2: dead-reviewer detection — retry once; record coverageGaps
+    // Dead-reviewer detection — retry once; record coverageGaps
     const coverageGaps = [];
     const liveReviewers = [];
     for (let i = 0; i < rawReviewers.length; i++) {
@@ -262,7 +262,7 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
     allCoverageGaps = allCoverageGaps.concat(coverageGaps);
 
     const allFindings = liveReviewers.flatMap(r => r.findings || []);
-    // C2: early exit requires BOTH no findings AND no coverage gaps
+    // Early exit requires BOTH no findings AND no coverage gaps
     if (allFindings.length === 0 && coverageGaps.length === 0) break;
 
     // Adversarial verification — bounded 2-3 agent panel, majority-survives
@@ -291,11 +291,11 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
 
     if (confirmedFindings.length === 0 && coverageGaps.length === 0) break;  // early exit — clean review
 
-    // C1: record preFixSha before fixes (defines next cycle's DELTA REVIEW scope)
+    // Record preFixSha before fixes (defines next cycle's DELTA REVIEW scope)
     const preFixAgent = await agent(`Run git rev-parse HEAD on branch ${BRANCH} and return the SHA.`, { agentType: "Git" });
     const preFixSha = preFixAgent?.sha || reviewBaseSha;
 
-    // C3: batched fix Coders — group by file; max 5 findings per batch; independent batches in parallel.
+    // Batched fix Coders — group by file; max 5 findings per batch; independent batches in parallel.
     // Never hand one Coder an unbounded findings list (a 40-finding dump is how fixes fall through the cracks).
     const MAX_BATCH = 5;  // max 5 findings per batch
     const fileGroups = {};
@@ -322,10 +322,10 @@ ${batch.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message and report commit SHAs.`, { agentType: "Coder" })
     ));
 
-    // C1: update reviewBaseSha for next cycle's DELTA REVIEW
+    // Update reviewBaseSha for next cycle's DELTA REVIEW
     reviewBaseSha = preFixSha;
 
-    // C3: track findings disposition — FIXED vs SURVIVING
+    // Track findings disposition — FIXED vs SURVIVING
     const fixedThisCycle = [];
     const notAddressed = [];
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
@@ -376,7 +376,7 @@ Self-verify your fix compiles. Commit fixes with conventional-commit message.`, 
   return { verdict: "PASS" };
 });
 
-// C4: PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
+// PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
 const coverageGaps = reviewResult.coverageGaps || [];
 const overallVerdict = reviewResult.survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";
 

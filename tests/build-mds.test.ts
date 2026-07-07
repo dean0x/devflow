@@ -610,7 +610,7 @@ describe('compiled knowledge commands — no stale call-site references', () => 
 describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
   let compiled: string;
 
-  // §10's beforeAll already compiled the file; we just read it here.
+  // Earlier describe blocks have already compiled the file; we just read it here.
   beforeAll(async () => {
     compiled = await fs.readFile(
       path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands', 'dynamic-build.md'),
