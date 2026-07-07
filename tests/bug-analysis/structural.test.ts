@@ -292,22 +292,29 @@ describe('bug-analyzer.md — output format section headers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 8: bug-analyzer.md — frontmatter skill declarations
+// Group 8: bug-analyzer.md — skill loading (invoke-only architecture)
 // ---------------------------------------------------------------------------
 
-describe('bug-analyzer.md — frontmatter skill declarations', () => {
+describe('bug-analyzer.md — skill loading via Skill tool (invoke-only architecture)', () => {
+  // Under the invoke-only architecture, bug-analyzer declares no skills: frontmatter block.
+  // The agent loads the focus-matching pattern skill at runtime via the Skill tool.
+  // This structurally prevents PF-002 (skill re-entrancy guard-string bail).
   const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
 
-  it('frontmatter declares devflow:regression skill', () => {
-    expect(frontmatter).toContain('devflow:regression');
+  it('frontmatter has no skills: block (invoke-only architecture)', () => {
+    expect(frontmatter).not.toContain('skills:');
   });
 
-  it('frontmatter declares devflow:consistency skill', () => {
-    expect(frontmatter).toContain('devflow:consistency');
+  it('body instructs loading the focus-matching pattern skill via Skill tool', () => {
+    expect(agentContent).toContain('Skill(skill="devflow:{FOCUS}")');
   });
 
-  it('frontmatter declares devflow:complexity skill', () => {
-    expect(frontmatter).toContain('devflow:complexity');
+  it('body references devflow:regression, devflow:consistency, devflow:complexity as loadable skills', () => {
+    // These are the focus-matching skills for the functional, integration, usability analysis types.
+    // They appear in the load instruction: devflow:{FOCUS} where FOCUS maps to these skills.
+    expect(agentContent).toContain('devflow:regression');
+    expect(agentContent).toContain('devflow:consistency');
+    expect(agentContent).toContain('devflow:complexity');
   });
 });
 

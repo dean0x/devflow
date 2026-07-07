@@ -225,7 +225,7 @@ Per-project runtime files live under `.devflow/`:
 ### Agents
 
 - Target: 50-150 lines depending on type (Utility 50-80, Worker 80-120)
-- Reference skills via frontmatter, don't duplicate skill content
+- Instruct skill loading via the Skill tool at the point of need, don't duplicate skill content
 - Use `tools` frontmatter to platform-restrict agent tool access (prefer over prompt-level prohibitions)
 - Define clear input/output contracts and escalation boundaries
 - Shared agents live in `shared/agents/` — add to plugin `plugin.json` `agents` array

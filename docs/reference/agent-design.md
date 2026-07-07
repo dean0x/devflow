@@ -68,13 +68,12 @@ When an agent only needs a subset of tools, prefer platform-enforced restriction
 
 ## Anti-Patterns to Avoid
 
-1. **Duplicating skill content** - Don't re-document what skills provide. Reference skills via frontmatter.
+1. **Duplicating skill content** - Don't re-document what skills provide. Instruct skill loading via the Skill tool at the point of need.
 2. **Embedding bash scripts** - Agents know how to code. Don't over-specify implementation details.
 3. **Re-doing orchestrator work** - If orchestrator creates feature branch, agent shouldn't document branch creation.
 4. **Verbose phase documentation** - A worker agent implements; it doesn't need exploration and planning phases.
 5. **Progress tracking templates** - Trust the agent to log appropriately without detailed echo scripts.
-6. **Listing auto-activating skills** - Skills auto-activate based on context; no need to enumerate triggers.
-7. **Skill-invoking a frontmatter-preloaded skill** - Any skill in the agent's `skills:` frontmatter is already active. A body instruction to invoke that same skill via `Skill(skill="devflow:<name>")` hits the re-entrancy guard and returns `devflow:<name> already running`. The agent treats this guard string as a terminal instruction and returns with zero tool uses while the workflow reports success — a silent complete-failure. Symptom: agent finishes in under 5 seconds with no tool calls. Fix: remove the `Skill(...)` call for any skill already in the frontmatter. (See `skills-architecture.md` § "Frontmatter preload and Skill-tool invocation are mutually exclusive".)
+6. **Declaring a `skills:` frontmatter block** - Agents must NOT preload skills via frontmatter. All skill loading is done at runtime via the Skill tool at the point of need (invoke-only architecture). Frontmatter preloading causes PF-002: a subsequent Skill() call for the same skill returns a guard string, the agent treats it as terminal, and returns with zero tool uses while the orchestrator reports success — a silent complete-failure. No `skills:` block in any agent frontmatter.
 
 ## Quality Checklist
 
@@ -87,7 +86,7 @@ Before committing a new or modified agent:
 - [ ] Boundaries section present (escalate vs handle)
 - [ ] No duplicated skill content
 - [ ] No bash script templates
-- [ ] Skills referenced in frontmatter, not re-documented in body
+- [ ] No `skills:` frontmatter block — skills loaded via Skill tool at point of need
 
 ## Adding New Agents
 
