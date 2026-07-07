@@ -82,7 +82,7 @@ For each cycle:
 
 **Step 1 — Spawn reviewers in parallel (one agent() per focus)**
 
-**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3). When the pre-fix SHA from the prior cycle is missing or was not recorded, the review scope falls back to the wider full-branch base rather than a narrower delta — scope never regresses to a narrower window.
+**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3). When the pre-fix SHA from the prior cycle is missing or was not recorded, the review scope falls back to the wider prior base (the un-advanced scope from the previous cycle) rather than a narrower delta — scope never regresses to a narrower window.
 
 Core reviewers (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
@@ -100,7 +100,7 @@ Conditional by file type detected in the diff (add these when relevant):
 
 **Spawn pacing:** launch reviewers in staggered chunks of 4–6 (sequential groups of parallel spawns) — the full roster is preserved, paced to avoid 429 batch death.
 
-**Reviewer result contract:** every reviewer MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD reviewer is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A cycle with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
+**Reviewer result contract:** every reviewer MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. Each item in `findings` must carry: `file` (path of the primary file the finding relates to, or `null` if scope is unknown), `description` (one-sentence issue statement), and `severity` (`critical | high | medium | low`). A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD reviewer is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A cycle with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
 
 Each Reviewer gets `agentType: "Reviewer"` with its focus baked into the prompt. Total: 8–19 reviewers per cycle.
 
@@ -117,7 +117,7 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 If no surviving findings and `coverageGaps` is empty: break (early exit — do not run unnecessary cycles).
 
-If survivors remain: before the fix phase, record `preFixSha` (`git rev-parse HEAD` via a haiku Git agent) — this SHA defines the next cycle's delta-review scope. Then batch the confirmed findings for fixing: group by relationship — same file → same batch; related → sequential; independent → parallel; max 5 findings per batch. Never hand one Coder an unbounded findings list (a 40-finding dump is how fixes fall through the cracks). One Coder per batch; independent batches spawned via `parallel()`, dependent batches sequentially. After fixes: update `reviewBaseSha = preFixSha`. Findings addressed by the fix Coders are reported FIXED (with `fixedInCycle` + commit SHAs), trusted by design; note that cycles 2+ DELTA REVIEW re-checks earlier fixes for free. `survivingFindings` = only findings NOT addressed (fix Coder dead/failed or deferred). The fixing Coder **self-verifies its own fix builds** (build/typecheck per the Coder's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validator, no Simplifier, no Scrutinizer, no Evaluator, no Tester between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: before the fix phase, record `preFixSha` (run `git rev-parse HEAD` via a haiku Git agent — pin the return to `\{"sha": "<40-hex>"\}` and validate the shape before using it; fall back to the wider prior base if the SHA is absent or malformed, never narrow) — this SHA defines the next cycle's delta-review scope. Then batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Coders editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` (different code areas — safe per concurrency doctrine). Each Coder's prompt pins a return contract: `\{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]\}` — check `result.status === "fixed"` to decide disposition, never an absent `failed` flag. After fixes: update `reviewBaseSha = preFixSha`. Findings addressed by the fix Coders are reported FIXED (with `fixedInCycle` + commit SHAs), trusted by design; note that cycles 2+ DELTA REVIEW re-checks earlier fixes for free. `survivingFindings` = only findings NOT addressed (fix Coder dead/failed/blocked or deferred). The fixing Coder **self-verifies its own fix builds** (build/typecheck per the Coder's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validator, no Simplifier, no Scrutinizer, no Evaluator, no Tester between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -189,7 +189,8 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
   "survivingFindings": [
     {
       "focus": "string — reviewer focus area",
-      "finding": "string — description",
+      "file": "string — primary file the finding relates to, or null if scope unknown",
+      "description": "string — one-sentence issue statement",
       "severity": "critical | high | medium | low",
       "status": "surviving"
     }
@@ -197,7 +198,8 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
   "fixedFindings": [
     {
       "focus": "string — reviewer focus area",
-      "finding": "string — description",
+      "file": "string — primary file the finding relates to, or null if scope unknown",
+      "description": "string — one-sentence issue statement",
       "severity": "critical | high | medium | low",
       "status": "fixed",
       "fixedInCycle": "number — cycle when fixed",

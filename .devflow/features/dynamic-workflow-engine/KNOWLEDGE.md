@@ -103,7 +103,7 @@ Each cycle:
 3. **Dead-reviewer handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. A cycle with any coverage gap can never early-exit clean, and the run verdict can never be PASS.
 4. **Adversarial verification**: 3-lens panel (reproduces?, real vs false positive?, rule actually applies here?) majority-survives (>50% confirm = surviving finding). Unconfirmed findings are stripped.
 5. **preFixSha**: record `git rev-parse HEAD` via haiku Git agent before each fix phase. This SHA defines the next cycle's delta-review scope. Missing preFixSha → fall back to wider full-branch scope, never narrower.
-6. **Fix batching**: group confirmed findings by file, max 5 per Coder batch, independent batches in parallel. Never hand one Coder an unbounded list.
+6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Coders editing the same file concurrently). Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine). A finding with no `file` field is a singleton batch. Never hand one Coder an unbounded list.
 7. `survivingFindings` **accumulates** across cycles (never overwritten). Findings addressed by fix Coders are FIXED and trusted; a delta review in cycle N+1 re-checks earlier fixes for free.
 8. **Scope**: Cycle 1 = full branch diff. Cycles 2+ = DELTA REVIEW (`reviewBaseSha..HEAD`) — only the fix commits are re-reviewed.
 
