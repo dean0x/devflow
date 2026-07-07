@@ -17,6 +17,8 @@ tools:
 
 # Knowledge Agent
 
+The skills listed in your frontmatter are already active — never invoke the Skill tool for any of them; if a Skill call returns a guard string like 'already running', ignore it and proceed with your work.
+
 ## Input Context
 
 - **FEATURE_SLUG** (required): Kebab-case identifier for the feature area (e.g., `cli-commands`)

@@ -94,6 +94,12 @@ Skills with `user-invocable: false` also appear in Claude Code's skill catalog w
 
 The `activation: file-patterns` frontmatter is metadata for documentation purposes. Claude Code does not currently use glob patterns to trigger skills.
 
+### Frontmatter preload and Skill-tool invocation are mutually exclusive
+
+A skill loaded via `skills:` frontmatter is already active when the agent starts. Invoking that same skill again via the Skill tool hits a re-entrancy guard that returns a string like `devflow:<skill-name> already running`. An agent that mistakes this guard string for a terminal instruction will do zero real work while the orchestrating Workflow reports success — the failure is invisible. **Every agent file must contain no `Skill(skill="devflow:<name>")` call where `<name>` appears in that agent's own frontmatter `skills:` list.**
+
+The `devflow:<skill-name> already running` guard string is the failure signature of this class of bug. If you observe an agent completing in under 5 seconds with no tool calls, re-entrancy is the most likely cause.
+
 ### Example: Agent Frontmatter
 
 ```yaml

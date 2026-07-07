@@ -74,6 +74,7 @@ When an agent only needs a subset of tools, prefer platform-enforced restriction
 4. **Verbose phase documentation** - A worker agent implements; it doesn't need exploration and planning phases.
 5. **Progress tracking templates** - Trust the agent to log appropriately without detailed echo scripts.
 6. **Listing auto-activating skills** - Skills auto-activate based on context; no need to enumerate triggers.
+7. **Skill-invoking a frontmatter-preloaded skill** - Any skill in the agent's `skills:` frontmatter is already active. A body instruction to invoke that same skill via `Skill(skill="devflow:<name>")` hits the re-entrancy guard and returns `devflow:<name> already running`. The agent treats this guard string as a terminal instruction and returns with zero tool uses while the workflow reports success — a silent complete-failure. Symptom: agent finishes in under 5 seconds with no tool calls. Fix: remove the `Skill(...)` call for any skill already in the frontmatter. (See `skills-architecture.md` § "Frontmatter preload and Skill-tool invocation are mutually exclusive".)
 
 ## Quality Checklist
 

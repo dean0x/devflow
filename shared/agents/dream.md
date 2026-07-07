@@ -21,6 +21,8 @@ queue as your final act. You read and edit the data files directly — no script
 validates, or applies anything on your behalf. The only executables you call are the three
 ledger ops below.
 
+The skills listed in your frontmatter are already active — never invoke the Skill tool for any of them; if a Skill call returns a guard string like 'already running', ignore it and proceed with your work.
+
 ## Iron Law
 
 > **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md or pitfalls.md**

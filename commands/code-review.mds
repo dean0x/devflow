@@ -197,7 +197,7 @@ Spawn Reviewer agents **in a single message**. Always run 8 core reviews; condit
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
 Agent(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on {focus}. Load the pattern skill for your focus from the Focus Areas table.
+"Review focusing on {focus}. Read the pattern skill file ~/.claude/skills/devflow:{focus}/SKILL.md — do not use the Skill tool.
 Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
