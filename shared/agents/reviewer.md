@@ -58,7 +58,7 @@ The orchestrator provides:
 
 ## Apply Decisions
 
-Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
+Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
 
 ## Responsibilities
 

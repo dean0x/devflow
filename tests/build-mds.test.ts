@@ -600,3 +600,112 @@ describe('compiled knowledge commands — no stale call-site references', () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 12. dynamic-build.md streamlining doctrine (C1–C9)
+// Pins the exact prose authored in Phase 1. Each assertion corresponds to a
+// named forensic change (C1–C9) in the streamlining PR.
+// ---------------------------------------------------------------------------
+
+describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
+  let compiled: string;
+
+  beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    compiled = await fs.readFile(
+      path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands', 'dynamic-build.md'),
+      'utf-8',
+    );
+  });
+
+  it('C1: delta-review scope — DELTA REVIEW prose and reviewBaseSha tracking', () => {
+    expect(compiled).toContain('DELTA REVIEW');
+    expect(compiled).toContain('reviewBaseSha');
+  });
+
+  it('C2: reviewer result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
+    expect(compiled).toContain('reviewed: true');
+    expect(compiled).toContain('review coverage incomplete');
+    expect(compiled).toContain('coverageGaps.length === 0');
+    // Chunk/stagger: reviewers dispatched in bounded parallel batches
+    expect(compiled).toContain('const chunk = await parallel(reviewerThunks.slice(i, i + chunkSize));');
+  });
+
+  it('C3: findings disposition replaces old survivingFindings raw dump', () => {
+    expect(compiled).toContain('Findings disposition');
+    expect(compiled).toContain('max 5 findings');
+    // Old line removed — single-quoted so ${} is treated as a literal string, not a template
+    expect(compiled).not.toContain('Surviving findings: ${JSON.stringify(reviewResult.survivingFindings)}');
+  });
+
+  it('C4: FAIL-FIXED verdict label for fix-and-continue paths', () => {
+    expect(compiled).toContain('FAIL-FIXED');
+  });
+
+  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Designer reader', () => {
+    expect(compiled).toContain('ALWAYS ready');
+    expect(compiled).toContain('cascade');
+    expect(compiled).toContain('never kills the wave');
+    expect(compiled).toContain('agentType: "Designer"');
+  });
+
+  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, NEVER wrapped, bounded re-arm', () => {
+    expect(compiled).toContain('Cheapest-sufficient validation');
+    expect(compiled).toContain('One build gate per phase');
+    expect(compiled).toContain('NEVER wrapped in');
+    expect(compiled).toContain('re-arm');
+  });
+
+  it('C8: scratch path is run-unique — old fixed filename /tmp/df-wf-check.js is gone', () => {
+    // Absence guard: old fixed name must be gone.
+    expect(compiled).not.toContain('/tmp/df-wf-check.js');
+    // Positive guards: new run-unique prefix and doctrine phrase must be present so that
+    // removing or renaming the scratch-path mechanism causes this test to fail.
+    expect(compiled).toContain('df-wf-check-');
+    expect(compiled).toContain('run-unique scratch file');
+  });
+
+  it('C9: no unauthorized GitHub side-effects doctrine', () => {
+    expect(compiled).toContain('No unauthorized GitHub side-effects');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 13. --dry-run removal (C7)
+// dynamic-build, plan, tickets, wave must NOT contain --dry-run.
+// dynamic-profile must still contain it (untouched per plan).
+// ---------------------------------------------------------------------------
+
+describe('compiled dynamic commands: --dry-run removal (C7)', () => {
+  const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets', 'dynamic-wave'] as const;
+  const DYNAMIC_DIR = path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands');
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('dynamic-build, plan, tickets, wave do NOT contain --dry-run', async () => {
+    for (const basename of DRY_RUN_ABSENT) {
+      const content = await fs.readFile(path.join(DYNAMIC_DIR, `${basename}.md`), 'utf-8');
+      expect(
+        content,
+        `${basename}.md must not contain --dry-run after C7 removal`,
+      ).not.toContain('--dry-run');
+    }
+  });
+
+  it('compiled dynamic-profile.md still contains --dry-run (untouched by plan)', async () => {
+    const content = await fs.readFile(path.join(DYNAMIC_DIR, 'dynamic-profile.md'), 'utf-8');
+    expect(content).toContain('--dry-run');
+  });
+});
