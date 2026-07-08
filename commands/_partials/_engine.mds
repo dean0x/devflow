@@ -229,7 +229,7 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
 @define engine_invariants():
 ### Engine invariants (non-negotiable)
 
-1. **Code is written ONLY by Coders.** No other agent type writes code — not Reviewer, not Evaluator, not Scrutinizer.
+1. **Code is written ONLY by Coders.** No other agent type writes code — not Reviewer, not Evaluator.
 2. **Findings are verified before any fix is written.** The adversarial verification step is not optional; unverified findings are not passed to the Coder.
 3. **All written code passes Gate 1.** No code merge, commit, or handoff before Validator + Simplifier + Scrutinizer (in that order).
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
