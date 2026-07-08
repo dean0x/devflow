@@ -108,8 +108,9 @@ If `PRIOR_RESOLUTIONS` is provided (not `(none)`):
 1. Parse the False Positives table — for each match (same file, similar issue): check whether
    new code re-introduces the problem. If not: drop the finding.
 2. Parse the Fixed Issues table — do not re-raise issues already fixed unless the fix was reverted.
-3. Always verify against current code — do NOT blindly trust PRIOR_RESOLUTIONS.
-4. If PRIOR_RESOLUTIONS cannot be parsed: proceed without cross-cycle awareness, note in report.
+3. Parse the By Design table — do not re-raise intentional code unless the diff touched it.
+4. Always verify against current code — do NOT blindly trust PRIOR_RESOLUTIONS.
+5. If PRIOR_RESOLUTIONS cannot be parsed: proceed without cross-cycle awareness, note in report.
 
 ## Issue Categories (from devflow:review-methodology)
 

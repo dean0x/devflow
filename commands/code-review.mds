@@ -109,6 +109,7 @@ MAX_REVIEW_CYCLES = 10
    Continue with review.
 2. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
+   - `deferred_count` = the Deferred row value (= FIX_SEPARATE + TECH_DEBT); By Design and Escalated are excluded from the fp_ratio denominator
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    - If denominator = 0: fp_ratio = 0, skip warning
    - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."

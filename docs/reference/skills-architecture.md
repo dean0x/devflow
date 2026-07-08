@@ -12,12 +12,12 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Evaluator |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Evaluator |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `quality-gates` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesizer |
-| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
-| `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
+| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git |
+| `patterns` | CRUD, API endpoints, events, config, logging | Coder |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills

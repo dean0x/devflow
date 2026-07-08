@@ -125,7 +125,7 @@ npx devflow-kit init --plugin=typescript,react
 
 ## How it works
 
-Devflow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, coder, resolver, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
+Devflow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, triager, coder, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
 
 For deep dives: [Working Memory](docs/working-memory.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
 

@@ -164,7 +164,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 ### Shared vs Plugin-Specific Agents
 
-- **Shared** (16): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `dream`
+- **Shared** (16): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `triager`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `dream`
 - **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override
