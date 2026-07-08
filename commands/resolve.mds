@@ -236,12 +236,7 @@ Simplify and refine the fixes for clarity and consistency"
 
 If no fixes were made (CODER_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
 
-Otherwise, push all commits to remote (Coders ran with PUSH: false):
-```bash
-git -C {worktree} push
-```
-
-Then spawn Validator agent:
+Otherwise, spawn Validator agent:
 
 ```
 Agent(subagent_type="Validator", model="haiku"):
@@ -267,13 +262,18 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    CREATE_PR: false
    WORKTREE_PATH: \{worktree_path\}  (omit if cwd)"
    ```
-   - Push fix commits, loop back to re-validate
+   - Loop back to re-validate
 4. If `validation_retry_count > 2`: record as FAILED in the `## Verification` section of resolution-summary.md with a blocking callout — never a silent pass. Proceed to display results.
 
 **If PASS:** continue to Phase 8.
 
 Record `## Verification` outcome in resolution-summary.md (update Tracked section):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
+
+Push all commits to remote once (Coders and validation-fix Coders ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before CI or debt management):
+```bash
+git -C {worktree} push
+```
 
 ### Phase 8: CI Status Gate (Conditional)
 
