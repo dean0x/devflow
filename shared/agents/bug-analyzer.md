@@ -112,7 +112,7 @@ Assign to each verified finding:
 
 **Category mapping** (for `/resolve` compatibility — severity-based approximation):
 
-> **Trade-off**: The Reviewer uses location-based categories (lines you added / lines you touched / unchanged lines). BugAnalyzer focuses on diff-changed code and lacks per-line location context, so it approximates using severity as a proxy. This means a LOW-severity bug in newly-added code is placed in Pre-existing — not because it predates the change, but to signal lower urgency. Resolvers should treat Pre-existing findings from BugAnalyzer as low-urgency, not as assertions about code origin.
+> **Trade-off**: The Reviewer uses location-based categories (lines you added / lines you touched / unchanged lines). BugAnalyzer focuses on diff-changed code and lacks per-line location context, so it approximates using severity as a proxy. This means a LOW-severity bug in newly-added code is placed in Pre-existing — not because it predates the change, but to signal lower urgency. The resolve pipeline should treat Pre-existing findings from BugAnalyzer as low-urgency, not as assertions about code origin.
 
 - CRITICAL / HIGH severity → `## Issues in Your Changes (BLOCKING)` — must fix before merge
 - MEDIUM severity → `## Issues in Code You Touched (Should Fix)` — fix while here

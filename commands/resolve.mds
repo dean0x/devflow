@@ -502,3 +502,5 @@ Final gate: PASS | FAILED after {n} attempts
 |-------|-----------|---------|
 | {description} | {file}:{line} | {why} |
 ```
+
+**Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `/code-review` convergence parser reads the `Deferred`, `Fixed`, and `False Positive` Statistics rows plus the `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable.

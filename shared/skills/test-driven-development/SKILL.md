@@ -193,5 +193,5 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 - **IMPLEMENT** → TDD enforced. Write the failing test before production code. Skill loaded via Coder agent frontmatter.
 - **DEBUG** → TDD applies to the fix: write a test that reproduces the bug first, then fix.
 - **PLAN** → TDD shapes the plan: test strategy section, test-first file ordering, RED-GREEN-REFACTOR cycle awareness.
-- **RESOLVE** → TDD enforced via Resolver agent. Every fix needs a regression test first.
+- **RESOLVE** → TDD enforced via the Coder agent (issue-fix mode). Every fix needs a failing-then-passing regression test first.
 - **PIPELINE** → TDD inherited transitively through `/implement` → Coder.
