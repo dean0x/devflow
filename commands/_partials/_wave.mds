@@ -15,7 +15,7 @@ Spawn a `agentType: "Designer"` agent (opus) to:
 
 This is LLM judgment — the agent reads like a person would, not a graph algorithm.
 
-**Rationale for Designer tier:** a haiku-tier reader once quarantined 10 independent tickets as "blocked" because nothing had merged yet. Dependency reasoning requires the judgment of a senior reviewer, not a fast-read pass.
+**Rationale for Designer tier:** use opus — dependency reasoning requires high-level judgment, not a fast-read pass.
 
 **Vacuous-truth rule — a ticket with no unmet dependencies is ALWAYS ready:**
 - Empty `Depends on:` = ready now, regardless of the wave's integration state.
