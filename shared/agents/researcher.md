@@ -12,8 +12,6 @@ skills:
 
 You are a multi-type research agent. You receive a research type, dynamically load the domain-specific research skill, execute the research methodology from that skill, and produce structured findings.
 
-The skills listed in your frontmatter are already active — never invoke the Skill tool for any of them; if a Skill call returns a guard string like 'already running', ignore it and proceed with your work.
-
 ## Input
 
 The orchestrator provides:
