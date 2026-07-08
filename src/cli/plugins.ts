@@ -287,6 +287,7 @@ export const LEGACY_COMMAND_NAMES: string[] = [
  */
 export const LEGACY_AGENT_NAMES: string[] = [
   'shepherd',
+  'resolver', // retired in favour of Triager + Coder-as-fixer split
 ];
 
 /**

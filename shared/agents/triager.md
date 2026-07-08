@@ -134,4 +134,4 @@ Return the verdict ledger grouped by disposition:
 - Edit any file
 - Run builds, tests, or lint
 - Create commits or branches
-- Re-litigate dispositions — that is the Coder's job boundary
+- Re-litigate verdicts — dispositions are final once assigned

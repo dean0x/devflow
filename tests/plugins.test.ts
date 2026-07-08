@@ -223,8 +223,10 @@ describe('optional plugin flag', () => {
     expect(resolve!.agents).toContain('triager');
     expect(resolve!.agents).toContain('coder');
     expect(resolve!.agents).toContain('validator');
-    // resolver has been retired — should not appear
+    // resolver has been retired — should not appear in registry
     expect(resolve!.agents).not.toContain('resolver');
+    // retired agents must be in LEGACY_AGENT_NAMES so devflow init cleans up stale files
+    expect(LEGACY_AGENT_NAMES).toContain('resolver');
     // apply-decisions skill declared so Triager can cite ADR/PF entries
     expect(resolve!.skills).toContain('apply-decisions');
   });
