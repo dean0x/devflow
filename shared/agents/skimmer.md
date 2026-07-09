@@ -20,7 +20,7 @@ You receive from orchestrator:
 
 ## Workflow
 
-Execute these steps in order. Do NOT skip steps or reorder.
+Execute these steps in order. Some steps are conditional — skip them only where a step's own gate says so; otherwise do not skip or reorder.
 
 ### Step 1: Project Overview
 
