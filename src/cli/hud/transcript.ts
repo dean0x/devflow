@@ -39,9 +39,9 @@ export async function parseTranscript(
       try {
         const entry = JSON.parse(line) as Record<string, unknown>;
 
-        // Turn boundary: clear tools and agents on each human message
+        // Turn boundary: clear tools and agents on each user turn
         // so only the current turn's activity shows in the HUD
-        if (entry.type === 'human') {
+        if (entry.type === 'user') {
           tools.clear();
           agents.clear();
           continue;
