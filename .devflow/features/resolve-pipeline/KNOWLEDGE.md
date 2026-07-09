@@ -26,7 +26,7 @@ Agents in the pipeline:
 |-------|-------|------|
 | Git | haiku | validate-branch (produces DIFF_FILES), manage-debt, check-ci-status |
 | Triager | **opus** | blast-radius judgment — never edits code |
-| Coder | sonnet | issue-fix, validation-fix, ci-fix modes |
+| Coder | sonnet | issue-fix, validation-fix, alignment-fix, qa-fix modes |
 | Simplifier | sonnet | refine changed code after fixes |
 | Validator | **haiku** | build/typecheck/lint/test gate |
 
@@ -83,14 +83,15 @@ Git agent's `validate-branch` operation emits a `### Diff Scope` block containin
 
 ## Coder Operating Modes
 
-Coder has four modes selected by the `OPERATION` input:
+Coder has five modes selected by the `OPERATION` input:
 
 | Mode | Who triggers | Key constraints |
 |------|-------------|-----------------|
 | `implement` (default) | /implement orchestrator | Full implementation with plan |
 | `issue-fix` | /resolve orchestrator | Pre-classified issues only; PUSH: false; no re-litigating |
-| `validation-fix` | Phase 7 Validator gate | Fix validation failures only, no other changes; PUSH: false |
-| `ci-fix` | Phase 8 CI gate | Fix CI failures only; max 2 attempts |
+| `validation-fix` | /resolve Phase 7 gate and /implement Phase 3 | Fix validation failures only, no other changes; PUSH: false |
+| `alignment-fix` | /implement Phase 7 Evaluator | Fix misalignments only, no other changes |
+| `qa-fix` | /implement Phase 8 Tester | Fix QA failures only, no other changes |
 
 **issue-fix mode rules:**
 - Receives pre-classified FIX_NOW issues — never re-litigates Triager dispositions
@@ -193,7 +194,7 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 - `commands/resolve.mds` — MDS source for /resolve orchestration command (10-phase pipeline); compiled to `plugins/devflow-resolve/commands/`
 - `shared/agents/triager.md` — Triager agent (opus): blast-radius disposition matrix, evidence rules, verdict ledger format
-- `shared/agents/coder.md` — Coder agent: `issue-fix`, `validation-fix`, `ci-fix` modes documented in Mode sections
+- `shared/agents/coder.md` — Coder agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
 - `plugins/devflow-resolve/.claude-plugin/plugin.json` — Plugin manifest: agents registry `[git, triager, coder, simplifier, validator]`
 - `src/cli/plugins.ts` — `LEGACY_AGENT_NAMES` includes `resolver` → removed from installs on `devflow init`
 - `commands/code-review.mds` — Contains convergence parser that reads `resolution-summary.md` Statistics rows and section headings

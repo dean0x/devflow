@@ -164,7 +164,7 @@ Valid agentType values and their tiers:
 | Knowledge | sonnet | Codebase exploration / KB creation |
 | Designer | opus | Architecture, design, dependency reasoning |
 
-Resolver is deliberately NOT used for writing fixes — a Coder writes every fix.
+A Coder writes every fix — no other agent type ever writes code.
 
 ### Workflow runtime contract
 

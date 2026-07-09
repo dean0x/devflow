@@ -69,8 +69,8 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 
 1. **Triage** — A single Triager (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED
 2. **Fix** — Parallel Coder agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
-3. **Verify** — A Validator (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles
-4. **CI Gate** — Push commits and check PR CI status
+3. **Verify** — A Validator (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
+4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
 6. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
 
