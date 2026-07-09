@@ -160,6 +160,12 @@ Wait for Triager to complete before proceeding. Parse verdict ledger from Triage
 
 Collect all decisions citations (ADR-NNN / PF-NNN) from Triager Reasoning columns.
 
+**Triager completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
+1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets.
+2. If the Triager output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triager failure**:
+   - Retry the Triager once with the same inputs.
+   - If the retry also fails the completeness check: abort with a clear error message listing the missing issue IDs and failure reason — never proceed with dropped issues.
+
 **If ESCALATED issues exist:** surface them in a `## Escalations` section with a prominent display callout — never route escalations to manage-debt.
 
 ### Phase 3: Batch FIX_NOW Issues
@@ -263,17 +269,19 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    WORKTREE_PATH: \{worktree_path\}  (omit if cwd)"
    ```
    - Loop back to re-validate
-4. If `validation_retry_count > 2`: record as FAILED in the `## Verification` section of resolution-summary.md with a blocking callout — never a silent pass. Proceed to display results.
+4. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
 
-**If PASS:** continue to Phase 8.
+**If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.
 
-Record `## Verification` outcome in resolution-summary.md (update Tracked section):
+Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
 
-Push all commits to remote once (Coders and validation-fix Coders ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before CI or debt management):
+Push all commits to remote once (Coders and validation-fix Coders ran with PUSH: false — runs unconditionally whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
 ```bash
 git -C {worktree} push
 ```
+
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt) then Phase 10 (report).
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -413,7 +421,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | Empty FIX_NOW list | Skip Phases 3-4/6-8; still write full summary + run manage-debt if FIX_SEPARATE/TECH_DEBT exist |
 | ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
-| Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to display |
+| Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
 
 ## Principles
@@ -457,6 +465,8 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 | Deferred | {n} |
 | Blocked | {n} |
 | Escalated | {n} |
+
+_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser.)_
 
 ## Verification
 | Command | Result |
