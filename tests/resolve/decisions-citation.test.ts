@@ -156,7 +156,7 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: shared/agents/triager.md (replaced resolver.md)
+// Structural tests: shared/agents/triager.md
 // ---------------------------------------------------------------------------
 
 describe('triager.md — Input Context and Apply Decisions section', () => {
@@ -172,8 +172,11 @@ describe('triager.md — Input Context and Apply Decisions section', () => {
   });
 
   it('Apply Decisions usage describes citing inline in Reasoning column', () => {
-    // Triager output has Reasoning column in FIX_NOW table and cites ADR/PF there
-    expect(content).toMatch(/[Rr]easoning/);
+    // Extract only the Apply Decisions bullet from Responsibilities — triager.md has
+    // "Reasoning" columns in three unrelated output tables, so asserting against the
+    // whole file is self-ratifying. This scopes the assertion to the actual coupling.
+    const applyDecisionsStep = extractSection(content, '**Apply Decisions**', '\n3. **Assign disposition**');
+    expect(applyDecisionsStep).toContain('Reasoning column');
   });
 
   it('DECISIONS_CONTEXT is marked optional in Input Context', () => {
@@ -188,7 +191,12 @@ describe('triager.md — Input Context and Apply Decisions section', () => {
   });
 
   it('security gate rule is present and overrides other dispositions', () => {
-    expect(content).toMatch(/SECURITY GATE.*overrides all|security.*FIX_NOW.*ESCALATED/is);
+    // Scope to the matrix section so wording drift elsewhere cannot satisfy this test.
+    // Pins clause-0 identity, the "overrides all" declaration (first-match ordering), and
+    // the specific outcome constraint — matching loose word co-occurrence is not enough.
+    const matrixSection = extractSection(content, '## Blast-Radius Disposition Matrix', '## Risk Tier Definitions');
+    expect(matrixSection).toMatch(/\*\*0\. SECURITY GATE \(overrides all\)/);
+    expect(matrixSection).toContain('FIX_NOW or ESCALATED only');
   });
 });
 
