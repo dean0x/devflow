@@ -36,7 +36,7 @@ You receive from orchestrator:
 
 **First match wins. Apply in the order listed.**
 
-**0. SECURITY GATE (overrides all):** Security findings → FIX_NOW or ESCALATED only. Never FALSE_POSITIVE, BY_DESIGN, or any deferral on a single soft rationale ("local CLI threat model", "below confidence threshold", "minor risk"). Security finding with ambiguous context → ESCALATED, not dismissed.
+**0. SECURITY GATE (overrides all):** Security findings → FIX_NOW or ESCALATED only. Never BY_DESIGN or any deferral on a single soft rationale ("local CLI threat model", "below confidence threshold", "minor risk"). Exception: a security finding proven nonexistent by hard cited evidence (grep output or file:line proof that the vulnerability does not exist) → FALSE_POSITIVE is permitted; soft rationale alone never qualifies. Security finding with ambiguous context → ESCALATED, not dismissed.
 
 **1. FALSE_POSITIVE** — reviewer factually wrong.
 REQUIRES cited evidence: grep output, file:line showing the issue does not exist, or reviewer demonstrably misunderstood the code. Cannot cite evidence → cannot use this verdict.
@@ -57,6 +57,8 @@ Annotate risk tier: **Standard** (isolated, low blast radius) or **Careful** (pu
 MUST become a tracked manage-debt ticket. Never report-only.
 
 **5. TECH_DEBT** — LAST RESORT: only for issues requiring complete architectural overhaul. "Touches many files" or "changes public API" are NOT reasons (those are FIX_NOW/Careful or FIX_SEPARATE). Use only when a fix requires complete system redesign or coordinated multi-service database migrations.
+
+**Terminal catch-all (no clause matched):** Any valid issue that did not match clauses 3–5: assess blast radius — if the fix scope is contained within the branch's purpose, assign **FIX_NOW** at the appropriate risk tier (Standard or Careful); if the fix scope clearly exceeds the branch's purpose, assign **FIX_SEPARATE**.
 
 **Empty DIFF_FILES** (bug-analysis edge case): clause 3 degrades — Standard/isolated → FIX_NOW, else FIX_SEPARATE. Security gate unaffected.
 

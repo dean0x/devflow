@@ -28,7 +28,7 @@ You receive from orchestrator:
 - **EXECUTION_PLAN**: Synthesized plan with steps, files, tests
 - **PATTERNS**: Codebase patterns to follow
 - **CREATE_PR**: Whether to create PR when done (true/false)
-- **OPERATION** (optional): `implement` (default) | `issue-fix` | `validation-fix` | `ci-fix` — selects operating mode (see below)
+- **OPERATION** (optional): `implement` (default) | `issue-fix` | `validation-fix` | `alignment-fix` | `qa-fix` — selects operating mode (see below)
 - **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triager with disposition FIX_NOW; do not re-litigate
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triager
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
@@ -124,12 +124,43 @@ When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_N
    - **Careful scope**: systematic protocol — understand (50+ lines context, callers/consumers) → plan → write failing regression test → implement → verify tests pass → commit
 3. **Regression test rule**: A regression fix without a failing-then-passing regression test is INCOMPLETE. Report BLOCKED rather than commit an unverified fix.
 4. Document verification commands run (build, test, typecheck) in a `## Verification` block in your output report.
+5. **Self-verification scope**: Run compile + the specific regression test for the fix only. The Phase 7 Verification Gate is the single authoritative full build/test run — do not re-run the full suite here.
 
 **Return report includes:**
 - Status: COMPLETE | PARTIAL | BLOCKED
 - Issues fixed with commit SHAs
 - `## Verification` block: commands run and results
 - Unresolved issues with blocker description
+
+## Mode: validation-fix
+
+When `OPERATION: validation-fix`, you are fixing failures reported by the Validator gate. Fix only the listed failures — no other changes.
+
+**Inputs:** `VALIDATION_FAILURES` (structured failures from Validator), `SCOPE: Fix only the listed failures, no other changes`, `PUSH: false`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `VALIDATION_FAILURES` — no additional cleanup or refactoring
+2. Commit fixes; orchestrator re-runs Validator after each attempt (max 2 attempts total)
+
+## Mode: alignment-fix
+
+When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identified by the Evaluator. Fix only the listed misalignments — no other changes.
+
+**Inputs:** `MISALIGNMENTS` (structured misalignments from Evaluator), `SCOPE: Fix only the listed misalignments, no other changes`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion
+2. Commit and push; orchestrator re-runs Validator then Evaluator after each attempt (max 2 attempts total)
+
+## Mode: qa-fix
+
+When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures identified by the Tester. Fix only the listed failures — no other changes.
+
+**Inputs:** `QA_FAILURES` (structured failures from Tester), `SCOPE: Fix only the listed failures, no other changes`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `QA_FAILURES` — no scope expansion
+2. Commit and push; orchestrator re-runs Validator then Tester after each attempt (max 2 attempts total)
 
 ## Principles
 

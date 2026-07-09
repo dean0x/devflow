@@ -83,8 +83,11 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
 5. Check if reviews exist at `{WORKTREE_PATH}/.devflow/docs/reviews/{branch-slug}/` (or `.devflow/docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
-6. If PR# context provided, fetch PR details
-7. Compute diff scope: `git -C {worktree} diff {base_branch}...HEAD --name-only` → newline-separated file list
+6. Determine base branch and fetch PR details if available:
+   - If PR# context is provided: fetch PR details via `gh pr view {number} --json baseRefName`; use `baseRefName` as `base_branch`
+   - If no PR exists: resolve the default remote branch via `git -C {worktree} rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|origin/||'`; if that fails, probe common defaults (`main`, then `master`) via `git -C {worktree} rev-parse --verify {default} 2>/dev/null`
+   - If `base_branch` still cannot be determined: emit an intentional empty `### Diff Scope` block (so `DIFF_FILES=""` is a deliberate conservative degrade, not a silent error); skip step 7
+7. Compute diff scope (only if `base_branch` was resolved): `git -C {worktree} diff {base_branch}...HEAD --name-only` → newline-separated file list
 
 **Output:**
 ```markdown
