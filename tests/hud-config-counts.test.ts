@@ -1,7 +1,8 @@
 // tests/hud-config-counts.test.ts
 // Tests for gatherConfigCounts — the function that reads .claude/rules directories
 // and produces the data fed to the configCounts HUD component.
-// Validates recursive rule discovery, cross-dir aggregation, and graceful fallback.
+// Validates recursive rule discovery, cross-dir aggregation, graceful fallback,
+// and file-exact counting (subdirectories with .md/.mdc names must not be counted).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
@@ -55,5 +56,18 @@ describe('gatherConfigCounts', () => {
 
     const result = gatherConfigCounts(tmpCwd);
     expect(result.rules).toBe(0);
+  });
+
+  it('does not count a subdirectory whose name ends in .md or .mdc', () => {
+    // A directory literally named "weird.md" must not be counted as a rule file.
+    // This was a bug with the old encoding:'utf-8' approach (which returned path
+    // strings for all entries including dirs). The fixed withFileTypes:true
+    // approach uses d.isFile() to exclude directories.
+    fs.mkdirSync(path.join(tmpCwd, '.claude', 'rules', 'weird.md'), { recursive: true });
+    fs.writeFileSync(path.join(tmpCwd, '.claude', 'rules', 'real-rule.md'), '# Real Rule');
+
+    const result = gatherConfigCounts(tmpCwd);
+    // Only the real file should count — the directory named 'weird.md' must not
+    expect(result.rules).toBe(1);
   });
 });
