@@ -21,7 +21,7 @@ The following agentType values are valid. Model tiers are shown for reference �
 @define agent_caveats():
 ### Agent caveats
 
-- **Resolver is deliberately NOT used for writing fixes.** A Coder writes every fix. Finding-verification uses adversarial Reviewer-style passes (§6.3 of design doc). Resolver's risk-assessment / tech-debt logic is folded into the Coder + post-code pipeline + escalation doctrine.
+- **A Coder writes every fix** — no other agent type writes code. Finding-verification uses adversarial Reviewer-style passes (§6.3 of design doc). Risk-assessment and tech-debt routing live in the post-code pipeline + escalation doctrine.
 - **Always omit `opts.model` with `agentType`.** Each agent honors its own frontmatter model tier; overriding it defeats the per-agent specialization.
 - **Reviewers are focus-parameterized.** Each focus is a SEPARATE `agent()` call with `agentType: "Reviewer"` and the focus baked into the prompt. Do NOT batch multiple focuses into one Reviewer call — that defeats parallel specialization.
 - **Do not depend on agents enumerating their own skills.** Skills are loaded (spike F5 confirmed) but self-reporting is imperfect. Write agent prompts that give the agent full context directly.

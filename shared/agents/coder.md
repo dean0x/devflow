@@ -28,6 +28,10 @@ You receive from orchestrator:
 - **EXECUTION_PLAN**: Synthesized plan with steps, files, tests
 - **PATTERNS**: Codebase patterns to follow
 - **CREATE_PR**: Whether to create PR when done (true/false)
+- **OPERATION** (optional): `implement` (default) | `issue-fix` | `validation-fix` | `alignment-fix` | `qa-fix` — selects operating mode (see below)
+- **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triager with disposition FIX_NOW; do not re-litigate
+- **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triager
+- **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
@@ -73,7 +77,7 @@ When you apply a decision from `.devflow/decisions/decisions.md` or avoid a pitf
 
 5. **Run tests**: Execute the test suite. Fix any failures. All tests must pass before proceeding.
 
-6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote.
+6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
 
 7. **Create PR** (if CREATE_PR=true): Create pull request against BASE_BRANCH. If `PR_DESCRIPTION_GUIDANCE` is provided (not `(none)`), use it to compose the PR body using this mapping:
 
@@ -106,6 +110,57 @@ You run builds and tests to verify your own work — including **self-verifying 
 **One build gate per phase:** batch related fixes, validate once. Run ONE light check over your whole fix batch — never several invocations per small fix. Do NOT validate after every individual mutation.
 
 For a foreground command that exceeds the 120s default but stays under 180s, pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer package-scoped commands (`cargo build -p <crate>`) during the engine; the full-workspace regression is the human's job after the wave.
+
+## Mode: issue-fix
+
+When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_NOW by the Triager. Do not re-litigate dispositions.
+
+**Inputs:** `ISSUES` (list of pre-classified FIX_NOW issues), `SCOPE` (Standard | Careful per issue), `PUSH: false` (always for issue-fix; orchestrator pushes after Verification Gate)
+
+**Protocol:**
+1. Same-file issues → one commit (never two Coders editing the same file concurrently)
+2. For each issue:
+   - **Standard scope**: Fix directly following existing patterns
+   - **Careful scope**: systematic protocol — understand (50+ lines context, callers/consumers) → plan → write failing regression test → implement → verify tests pass → commit
+3. **Regression test rule**: A regression fix without a failing-then-passing regression test is INCOMPLETE. Report BLOCKED rather than commit an unverified fix.
+4. Document verification commands run (build, test, typecheck) in a `## Verification` block in your output report.
+5. **Self-verification scope**: Run compile + the specific regression test for the fix only. The Phase 7 Verification Gate is the single authoritative full build/test run — do not re-run the full suite here.
+
+**Return report includes:**
+- Status: COMPLETE | PARTIAL | BLOCKED
+- Issues fixed with commit SHAs
+- `## Verification` block: commands run and results
+- Unresolved issues with blocker description
+
+## Mode: validation-fix
+
+When `OPERATION: validation-fix`, you are fixing failures reported by the Validator gate. Fix only the listed failures — no other changes.
+
+**Inputs:** `VALIDATION_FAILURES` (structured failures from Validator), `SCOPE: Fix only the listed failures, no other changes`, `PUSH: false`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `VALIDATION_FAILURES` — no additional cleanup or refactoring
+2. Commit fixes; orchestrator re-runs Validator after each attempt (max 2 attempts total)
+
+## Mode: alignment-fix
+
+When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identified by the Evaluator. Fix only the listed misalignments — no other changes.
+
+**Inputs:** `MISALIGNMENTS` (structured misalignments from Evaluator), `SCOPE: Fix only the listed misalignments, no other changes`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion
+2. Commit and push; orchestrator re-runs Validator then Evaluator after each attempt (max 2 attempts total)
+
+## Mode: qa-fix
+
+When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures identified by the Tester. Fix only the listed failures — no other changes.
+
+**Inputs:** `QA_FAILURES` (structured failures from Tester), `SCOPE: Fix only the listed failures, no other changes`, `CREATE_PR: false`
+
+**Protocol:**
+1. Fix only what is listed in `QA_FAILURES` — no scope expansion
+2. Commit and push; orchestrator re-runs Validator then Tester after each attempt (max 2 attempts total)
 
 ## Principles
 

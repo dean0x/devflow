@@ -12,7 +12,7 @@
 //       never sees them — filterDecisionsContext has been removed)
 //   2. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
 //      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   3. Structural tests: resolver.md — Input Context + Apply Decisions
+//   3. Structural tests: triager.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
 //   4. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 
@@ -111,7 +111,7 @@ describe('resolve.md — base command', () => {
     expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
   });
 
-  it('Step 0d instructs passing DECISIONS_CONTEXT to Phase 4 Resolvers', () => {
+  it('Step 0d instructs passing DECISIONS_CONTEXT to Triager and Coders', () => {
     const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('DECISIONS_CONTEXT');
   });
@@ -121,7 +121,7 @@ describe('resolve.md — base command', () => {
     expect(step0dSection).toContain('(none)');
   });
 
-  it('Phase 4 Resolver spawn block includes DECISIONS_CONTEXT variable', () => {
+  it('Phase 4 Coder spawn block includes DECISIONS_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
@@ -137,30 +137,46 @@ describe('resolve.md — base command', () => {
     expect(step0dIdx).toBeGreaterThan(phase0Start);
     expect(step0dIdx).toBeLessThan(phase1Start);
   });
+
+  it('compiled resolve.md output artifact includes ## Verification section', () => {
+    expect(content).toContain('## Verification');
+  });
+
+  it('compiled resolve.md output artifact includes ## By Design section', () => {
+    expect(content).toContain('## By Design');
+  });
+
+  it('compiled resolve.md output artifact includes ## Fix Separately section', () => {
+    expect(content).toContain('## Fix Separately');
+  });
+
+  it('compiled resolve.md output artifact includes ## Escalations section', () => {
+    expect(content).toContain('## Escalations');
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: shared/agents/resolver.md
+// Structural tests: shared/agents/triager.md
 // ---------------------------------------------------------------------------
 
-describe('resolver.md — Input Context and Apply Decisions section', () => {
-  const content = loadFile('shared/agents/resolver.md');
+describe('triager.md — Input Context and Apply Decisions section', () => {
+  const content = loadFile('shared/agents/triager.md');
 
   it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
     expect(inputContextSection).toContain('DECISIONS_CONTEXT');
   });
 
-  it('contains Apply Decisions section', () => {
-    expect(content).toMatch(/## Apply Decisions|### Apply Decisions/);
+  it('contains Apply Decisions section in Responsibilities', () => {
+    expect(content).toMatch(/Apply Decisions/);
   });
 
-  it('Apply Decisions section describes citing inline in Reasoning column', () => {
-    const applyStart = content.search(/## Apply Decisions|### Apply Decisions/);
-    if (applyStart === -1) throw new Error('Apply Decisions section not found in resolver.md');
-    const applyAnchor = content.slice(applyStart, applyStart + 30);
-    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
-    expect(applySection).toMatch(/[Rr]easoning/);
+  it('Apply Decisions usage describes citing inline in Reasoning column', () => {
+    // Extract only the Apply Decisions bullet from Responsibilities — triager.md has
+    // "Reasoning" columns in three unrelated output tables, so asserting against the
+    // whole file is self-ratifying. This scopes the assertion to the actual coupling.
+    const applyDecisionsStep = extractSection(content, '**Apply Decisions**', '\n3. **Assign disposition**');
+    expect(applyDecisionsStep).toContain('Reasoning column');
   });
 
   it('DECISIONS_CONTEXT is marked optional in Input Context', () => {
@@ -172,6 +188,15 @@ describe('resolver.md — Input Context and Apply Decisions section', () => {
       Math.min(inputContextSection.length, decisionsIdx + 120)
     );
     expect(surroundingText).toMatch(/optional|if provided|when provided|non-empty/i);
+  });
+
+  it('security gate rule is present and overrides other dispositions', () => {
+    // Scope to the matrix section so wording drift elsewhere cannot satisfy this test.
+    // Pins clause-0 identity, the "overrides all" declaration (first-match ordering), and
+    // the specific outcome constraint — matching loose word co-occurrence is not enough.
+    const matrixSection = extractSection(content, '## Blast-Radius Disposition Matrix', '## Risk Tier Definitions');
+    expect(matrixSection).toMatch(/\*\*0\. SECURITY GATE \(overrides all\)/);
+    expect(matrixSection).toContain('FIX_NOW or ESCALATED only');
   });
 });
 
@@ -185,8 +210,14 @@ describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolver.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('shared/agents/resolver.md');
+  it('triager.md contains DECISIONS_CONTEXT', () => {
+    const content = loadFile('shared/agents/triager.md');
     expect(content).toContain('DECISIONS_CONTEXT');
+  });
+
+  it('resolve.md Phase 2 passes DECISIONS_CONTEXT to Triager', () => {
+    const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
+    const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
+    expect(phase2).toContain('DECISIONS_CONTEXT');
   });
 });

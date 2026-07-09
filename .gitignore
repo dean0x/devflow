@@ -39,7 +39,7 @@ plugins/*/agents/skimmer.md
 plugins/*/agents/simplifier.md
 plugins/*/agents/coder.md
 plugins/*/agents/reviewer.md
-plugins/*/agents/resolver.md
+plugins/*/agents/triager.md
 plugins/*/agents/evaluator.md
 plugins/*/agents/tester.md
 plugins/*/agents/scrutinizer.md

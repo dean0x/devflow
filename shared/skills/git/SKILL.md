@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Git & GitHub Patterns
 
-Unified skill for safe git operations, atomic commits, honest PR descriptions, and GitHub API interactions. Used by Coder, Git, and Resolver agents.
+Unified skill for safe git operations, atomic commits, honest PR descriptions, and GitHub API interactions. Used by Coder and Git agents.
 
 ## Iron Law
 

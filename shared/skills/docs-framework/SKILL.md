@@ -136,7 +136,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 |-------|-----------------|----------|
 | Reviewer | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
 | Synthesizer (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
-| Resolver | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
+| Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
 | Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 | Decisions | `.devflow/decisions/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |

@@ -83,7 +83,11 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
 5. Check if reviews exist at `{WORKTREE_PATH}/.devflow/docs/reviews/{branch-slug}/` (or `.devflow/docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
-6. If PR# context provided, fetch PR details
+6. Determine base branch and fetch PR details if available:
+   - If PR# context is provided: fetch PR details via `gh pr view {number} --json baseRefName`; use `baseRefName` as `base_branch`
+   - If no PR exists: resolve the default remote branch via `git -C {worktree} rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|origin/||'`; if that fails, probe common defaults (`main`, then `master`) via `git -C {worktree} rev-parse --verify {default} 2>/dev/null`
+   - If `base_branch` still cannot be determined: emit an intentional empty `### Diff Scope` block (so `DIFF_FILES=""` is a deliberate conservative degrade, not a silent error); skip step 7
+7. Compute diff scope (only if `base_branch` was resolved): `git -C {worktree} diff {base_branch}...HEAD --name-only` → newline-separated file list
 
 **Output:**
 ```markdown
@@ -99,6 +103,9 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 - Feature branch: {PASS/FAIL}
 - Clean working directory: {PASS/FAIL}
 - Reviews exist: {PASS/FAIL} ({n} reports found)
+
+### Diff Scope
+{newline-separated list of files changed in this branch, from git diff {base}...HEAD --name-only}
 
 ### Status: READY | BLOCKED
 {BLOCKED reason if applicable}
@@ -250,17 +257,21 @@ Create inline PR comments for blocking and should-fix issues from code review.
 
 ## Operation: manage-debt
 
-Update tech debt backlog with pre-existing issues from code review.
+Update tech debt backlog with deferred issues from resolution and pre-existing issues from code review.
 
 **Input:** `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional)
 
 **Process:**
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
 2. Check issue body size; archive if > 60000 chars (per devflow:git)
-3. Extract pre-existing issues (Category 3) from review reports
+3. Extract items to add:
+   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triager)
+   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triager)
+   - Pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)
 6. Update issue body with changes
+7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
 
 **Output:**
 ```markdown

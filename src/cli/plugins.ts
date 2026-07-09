@@ -78,10 +78,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-resolve',
-    description: 'Process and fix code review issues with risk assessment',
+    description: 'Process and fix code review issues with blast-radius triage, Coder fixes, and Validator verification',
     commands: ['/resolve'],
-    agents: ['git', 'resolver', 'simplifier'],
-    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    agents: ['git', 'triager', 'coder', 'simplifier', 'validator'],
+    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     rules: [],
   },
   {
@@ -145,7 +145,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'triager', 'designer', 'knowledge', 'researcher', 'dream'],
     skills: [
       'review-methodology',
       'security',
@@ -287,6 +287,7 @@ export const LEGACY_COMMAND_NAMES: string[] = [
  */
 export const LEGACY_AGENT_NAMES: string[] = [
   'shepherd',
+  'resolver', // retired in favour of Triager + Coder-as-fixer split
 ];
 
 /**

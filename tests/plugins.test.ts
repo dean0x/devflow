@@ -213,7 +213,22 @@ describe('optional plugin flag', () => {
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');
     expect(ambient!.agents).toContain('synthesizer');
-    expect(ambient!.agents).toContain('resolver');
+    expect(ambient!.agents).toContain('triager');
+  });
+
+  it('devflow-resolve declares triager, coder, and validator agents (no resolver)', () => {
+    const resolve = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-resolve');
+    expect(resolve).toBeDefined();
+    // Triager validates issues; coder fixes them; validator runs the verification gate
+    expect(resolve!.agents).toContain('triager');
+    expect(resolve!.agents).toContain('coder');
+    expect(resolve!.agents).toContain('validator');
+    // resolver has been retired — should not appear in registry
+    expect(resolve!.agents).not.toContain('resolver');
+    // retired agents must be in LEGACY_AGENT_NAMES so devflow init cleans up stale files
+    expect(LEGACY_AGENT_NAMES).toContain('resolver');
+    // apply-decisions skill declared so Triager can cite ADR/PF entries
+    expect(resolve!.skills).toContain('apply-decisions');
   });
 
   it('devflow-implement declares evaluator and tester agents and qa skill', () => {

@@ -1,6 +1,6 @@
 {
   "name": "devflow-resolve",
-  "description": "Process and fix code review issues with risk assessment - decides FIX vs TECH_DEBT based on impact",
+  "description": "Process and fix code review issues — blast-radius triage (Triager), Coder fixes, Validator verification gate",
   "author": {
     "name": "Dean0x"
   },
@@ -17,14 +17,17 @@
   ],
   "agents": [
     "git",
-    "resolver",
-    "simplifier"
+    "triager",
+    "coder",
+    "simplifier",
+    "validator"
   ],
   "skills": [
     "patterns",
     "security",
     "worktree-support",
     "feature-knowledge",
-    "apply-feature-knowledge"
+    "apply-feature-knowledge",
+    "apply-decisions"
   ]
 }

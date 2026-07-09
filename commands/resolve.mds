@@ -1,12 +1,12 @@
 ---
-description: Process review issues - validate, assess risk, fix low-risk issues, defer high-risk to tech debt
+description: Process review issues - validate with Triager, fix with Coder, verify with Validator
 output-dir: plugins/devflow-resolve/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Resolve Command
 
-Process issues from code review reports: validate them (false positive check), assess risk for FIX vs TECH_DEBT decision, and implement fixes for low-risk issues. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Coder agents, verify fixes with a Validator gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
 
 ## Usage
 
@@ -36,7 +36,7 @@ Process issues from code review reports: validate them (false positive check), a
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
-**Produces:** BRANCH_INFO, PR_DESCRIPTION
+**Produces:** BRANCH_INFO, PR_DESCRIPTION, DIFF_FILES
 **Requires:** WORKTREES
 
 For each resolvable worktree, spawn Git agent:
@@ -46,20 +46,22 @@ Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: validate-branch
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Check feature branch, clean working directory, reviews exist.
-Return: branch, branch-slug, PR#, review count"
+Return: branch, branch-slug, PR#, review count, DIFF_FILES"
 ```
 
 In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
 
 **If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` per worktree.
+**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
 PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
+
+**DIFF_FILES** is extracted from the `### Diff Scope` block in the Git agent validate-branch output. Set to empty string `""` if the block is absent (bug-analysis mode edge case).
 
 #### Step 0c: Target Review Directory
 
@@ -94,11 +96,11 @@ For each worktree, run:
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
+This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to the Triager agent in Phase 2 and to Coder agents in Phase 4.
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` to every Resolver agent in Phase 4.
+Pass `FEATURE_KNOWLEDGE` to the Triager agent in Phase 2.
 
 ### Phase 1: Parse Issues
 
@@ -126,75 +128,102 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 - `type`: Issue type from review
 - `description`: Problem statement
 - `suggested_fix`: From review report
+- `reviewer_confidence`: Confidence percentage if present in the report (e.g., "85%"), else omit
 
-### Phase 2: Analyze Dependencies
+### Phase 2: Global Triage
 
-**Produces:** DEPENDENCY_GRAPH
-**Requires:** ISSUES
+**Produces:** TRIAGE_RESULTS
+**Requires:** ISSUES, DIFF_FILES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_INFO
 
-Group issues by relationship:
-
-1. **Same file** - Issues in same file go in same batch
-2. **Same function** - Issues affecting same function go together
-3. **Independent** - No relationship, can run in parallel
-
-Build dependency graph to determine execution order.
-
-### Phase 3: Plan Batches
-
-**Produces:** BATCHES
-**Requires:** DEPENDENCY_GRAPH
-
-Create execution plan:
-- **Independent batches** - Mark for PARALLEL execution
-- **Dependent batches** - Mark for SEQUENTIAL execution
-- **Max 5 issues per batch** - Keep batches manageable
-
-### Phase 4: Resolve (Parallel where possible)
-
-**Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_INFO
-
-Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
+Spawn a single global Triager agent for ALL issues:
 
 ```
-Agent(subagent_type="Resolver"):
-"ISSUES: [{issue1}, {issue2}, ...]
-BRANCH: {branch-slug}
-BATCH_ID: batch-{n}
+Agent(subagent_type="Triager"):
+"ISSUES: {all_issues}
+DIFF_FILES: {diff_files}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
-Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
+Triage every issue using the blast-radius disposition matrix. Assign exactly one verdict per issue.
+Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
+Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
-> Resolvers follow a 3-tier risk approach:
-> - **Standard fixes** (null checks, validation, docs, logging, isolated security): applied directly
-> - **Careful fixes** (public API, shared state, >3 files, core logic): systematic refactoring — understand broader context, plan changes, test at all call sites, implement, verify, commit
-> - **Architectural overhaul** (complete system redesign, multi-service DB migrations): defer to tech debt — LAST RESORT, avoided at almost all costs
+Wait for Triager to complete before proceeding. Parse verdict ledger from Triager output:
+- **ESCALATED**: Security issues requiring human escalation
+- **FIX_NOW**: Valid issues assigned to Coders (with risk tier: Standard | Careful)
+- **FALSE_POSITIVE**: Issues reviewer got wrong (with cited evidence)
+- **BY_DESIGN**: Intentional code (with ADR or code doc citation)
+- **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
+- **TECH_DEBT**: Architectural overhaul only — LAST RESORT
 
-For dependent batches, spawn sequentially and wait for completion before spawning dependents.
+Collect all decisions citations (ADR-NNN / PF-NNN) from Triager Reasoning columns.
 
-### Phase 5: Collect Results
+**Triager completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
+1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets.
+2. If the Triager output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triager failure**:
+   - Retry the Triager once with the same inputs.
+   - If the retry also fails the completeness check: abort with a clear error message listing the missing issue IDs and failure reason — never proceed with dropped issues.
 
-**Produces:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS
-**Requires:** RESOLUTION_RESULTS
+**If ESCALATED issues exist:** surface them in a `## Escalations` section with a prominent display callout — never route escalations to manage-debt.
 
-Aggregate from all Resolvers:
-- **Fixed**: Issues resolved with commits
-- **False positives**: Issues that don't exist or were misunderstood
-- **Deferred**: High-risk issues marked for tech debt
-- **Blocked**: Issues that couldn't be fixed
+### Phase 3: Batch FIX_NOW Issues
 
-Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches.
+**Produces:** BATCHES
+**Requires:** TRIAGE_RESULTS
 
-**Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while the aggregated results are fresh in context. Use the template from the Output Artifact section below. This ensures the resolution record is persisted even if later phases (Simplify, Tech Debt) trigger context compaction.
+If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, display results (Phase 10).
+
+Otherwise, batch FIX_NOW issues for Coder execution:
+- **Same-file issues** → one batch (one Coder per file, sequential for same-file pairs)
+- **Distinct-file issues** → parallel Coders
+- **Max 5 issues per batch** — chunk large sets
+
+### Phase 4: Fix (Coder × N)
+
+**Produces:** CODER_RESULTS
+**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_INFO
+
+For each batch, spawn Coder agent with `OPERATION: issue-fix` and `PUSH: false`:
+
+```
+Agent(subagent_type="Coder"):
+"TASK_ID: resolve-{batch-id}
+OPERATION: issue-fix
+ISSUES: {fix_now_issues_in_batch}
+SCOPE: {risk_tier_per_issue}
+PUSH: false
+CREATE_PR: false
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+DECISIONS_CONTEXT: {decisions_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+Fix only the listed pre-classified FIX_NOW issues. Do not re-litigate dispositions.
+Same-file issues → one commit. Include ## Verification block in report.
+Regression fix without failing-then-passing regression test → BLOCKED."
+```
+
+Spawn distinct-file batch Coders **in a single message** (parallel). Sequential Coders for same-file batches must wait for the prior Coder to complete before spawning.
+
+Collect from each Coder:
+- `\{status, commitShas, unresolved\}` per batch
+- `## Verification` block (commands run + results)
+
+### Phase 5: Write resolution-summary.md
+
+**Produces:** RESOLUTION_FILE (early write for compaction safety)
+**Requires:** TRIAGE_RESULTS, CODER_RESULTS
+
+**Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
+
+Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt.
+
+Use the template from the Output Artifact section below.
 
 ### Phase 6: Simplify
 
 **Produces:** SIMPLIFICATION_RESULT
-**Requires:** RESOLUTION_RESULTS
+**Requires:** CODER_RESULTS
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
@@ -202,16 +231,66 @@ If any fixes were made, spawn Simplifier agent to refine the changed code:
 Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-FILES_CHANGED: {list of files modified by Resolvers}
+FILES_CHANGED: {list of files modified by Coders}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 7: CI Status Gate (Conditional)
+### Phase 7: Verification Gate
+
+**Produces:** VERIFICATION_STATUS
+**Requires:** CODER_RESULTS
+
+If no fixes were made (CODER_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
+
+Otherwise, spawn Validator agent:
+
+```
+Agent(subagent_type="Validator", model="haiku"):
+"FILES_CHANGED: {list of files from Coder output}
+VALIDATION_SCOPE: full
+Run build, typecheck, lint, test. Report pass/fail with failure details."
+```
+
+`validation_retry_count = 0`
+
+**If FAIL:**
+1. Extract failure details from Validator output
+2. Increment `validation_retry_count`
+3. If `validation_retry_count <= 2`:
+   - Spawn Coder with fix context:
+   ```
+   Agent(subagent_type="Coder"):
+   "TASK_ID: resolve-\{batch-id\}-valfix-\{count\}
+   OPERATION: validation-fix
+   VALIDATION_FAILURES: \{parsed failures from Validator\}
+   SCOPE: Fix only the listed failures, no other changes
+   PUSH: false
+   CREATE_PR: false
+   WORKTREE_PATH: \{worktree_path\}  (omit if cwd)"
+   ```
+   - Loop back to re-validate
+4. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
+
+**If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.
+
+Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
+- Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
+
+Push all commits to remote once (Coders and validation-fix Coders ran with PUSH: false — runs unconditionally whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
+```bash
+git -C {worktree} push
+```
+
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt) then Phase 10 (report).
+
+### Phase 8: CI Status Gate (Conditional)
 
 **Produces:** CI_STATUS
-**Requires:** RESOLUTION_RESULTS
+**Requires:** CODER_RESULTS, VERIFICATION_STATUS
 
-If no issues were fixed (RESOLUTION_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+If no issues were fixed (CODER_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+
+If Verification Gate FAILED → skip CI gate (validation failures already reported).
 
 Otherwise, for each worktree with fixes:
 
@@ -224,14 +303,14 @@ Otherwise, for each worktree with fixes:
 6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
-### Phase 8: Manage Tech Debt (Sequential)
+### Phase 9: Manage Debt (Sequential)
 
 **Produces:** DEBT_RESULT
-**Requires:** RESOLUTION_RESULTS, TARGET_DIR
+**Requires:** TRIAGE_RESULTS, TARGET_DIR
 
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
-If any issues were deferred, spawn Git agent:
+If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent:
 
 ```
 Agent(subagent_type="Git"):
@@ -239,14 +318,17 @@ Agent(subagent_type="Git"):
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_DIR: {TARGET_DIR}
 TIMESTAMP: {timestamp}
-Note: Deferred issues from resolution are already in resolution-summary.md"
+Note: Deferred issues (FIX_SEPARATE and TECH_DEBT) from triage are in resolution-summary.md
+under ## Fix Separately and ## Deferred to Tech Debt."
 ```
 
-### Phase 9: Report
+After manage-debt completes, backfill `Tracked = #\{backlog_issue_number\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item.
+
+### Phase 10: Report
 
 **Requires:** TARGET_DIR
 
-The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5. Display results to the user:
+The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7 and Phase 9). Display results to the user:
 
 ```
 ## Resolution Summary
@@ -260,11 +342,20 @@ The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary
 |---------|-------|
 | Fixed | {n} |
 | False Positive | {n} |
-| Tech Debt | {n} |
+| By Design | {n} |
+| Deferred | {n} |
 | Blocked | {n} |
+| Escalated | {n} |
+
+### Verification
+Final gate: {PASS | FAILED after N attempts}
 
 ### Commits Created
 - {sha} {message}
+
+### Escalations (if any)
+> ⚠️ Security escalations require human review before merge:
+> {list of escalated issues}
 
 ### Tech Debt Added
 - {n} items added to backlog
@@ -284,37 +375,34 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter resolvable
-│  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
+│  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
 │  ├─ Step 0c: Target latest review directory per worktree
 │  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT
 │
-├─ Phase 1: Parse issues from TARGET_DIR
-│  └─ Extract ALL issues (including Suggestions, exclude summaries)
+├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
 │
-├─ Phase 2: Analyze dependencies
-│  └─ Build dependency graph
+├─ Phase 2: Global Triage [Triager, opus, single agent]
+│  └─ ALL issues → verdict ledger by disposition
 │
-├─ Phase 3: Plan batches
-│  └─ Group issues, determine parallel vs sequential
+├─ Phase 3: Batch FIX_NOW issues (skip if empty)
+│  └─ same-file sequential, distinct-file parallel, max 5/batch
 │
-├─ Phase 4: Resolve (PARALLEL where independent)
-│  ├─ Resolver: Batch 1 (file-a issues)
-│  ├─ Resolver: Batch 2 (file-b issues)
-│  └─ Resolver: Batch 3 (waits if depends on 1 or 2)
+├─ Phase 4: Fix [Coder × N, OPERATION: issue-fix, PUSH: false]
+│  └─ Returns Verification block per batch
 │
-├─ Phase 5: Collect results
-│  └─ Aggregate fixed, false positives, deferred
+├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)")
 │
-├─ Phase 6: Simplify
-│  └─ Simplifier agent (refine fixes)
+├─ Phase 6: Simplify [Simplifier]
 │
-├─ Phase 7: CI Status Gate (conditional — skipped if no fixes)
+├─ Phase 7: Verification Gate [Validator, haiku] + push + Coder validation-fix loop ≤2
+│
+├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
 │  └─ Git agent (check-ci-status) → poll/fix loop
 │
-├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
-│  └─ Add deferred items to Tech Debt Backlog
+├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=#
+│  SEQUENTIAL across worktrees
 │
-└─ Phase 9: Display results (resolution-summary.md written in Phase 5)
+└─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
 
 ## Edge Cases
@@ -331,17 +419,22 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
 | `--review \{timestamp\}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
+| Empty FIX_NOW list | Skip Phases 3-4/6-8; still write full summary + run manage-debt if FIX_SEPARATE/TECH_DEBT exist |
+| ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
+| Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
+| gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
 
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
-2. **Git agent for git work** - All git operations go through Git agent
-3. **Parallel execution** - Run independent batches in parallel
-4. **Conservative risk** - When Resolvers are unsure, defer to tech debt
-5. **Honest reporting** - Display agent outputs directly
-6. **Complete tracking** - Every issue gets a decision recorded
-7. **Latest review by default** - Only process the most recent complete review
-8. **Auto-discover worktrees** - One command handles all resolvable branches
+2. **No agent grades its own homework** - Triager validates, Coders fix, Validator verifies
+3. **Global triage first** - Single Triager sees all issues for cross-issue consistency; no issue may vanish
+4. **Git agent for git work** - All git operations go through Git agent
+5. **Parallel execution** - Distinct-file Coder batches run in parallel; same-file batches sequential
+6. **Honest reporting** - Verification failure is recorded and displayed, never silenced
+7. **Complete tracking** - Every issue gets exactly one verdict in the ledger
+8. **Latest review by default** - Only process the most recent complete review
+9. **Auto-discover worktrees** - One command handles all resolvable branches
 
 ## Output Artifact
 
@@ -368,8 +461,21 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 | Total Issues | {n} |
 | Fixed | {n} |
 | False Positive | {n} |
+| By Design | {n} |
 | Deferred | {n} |
 | Blocked | {n} |
+| Escalated | {n} |
+
+_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser.)_
+
+## Verification
+| Command | Result |
+|---------|--------|
+| {build/typecheck/lint/test} | PASS \| FAIL |
+
+Regression tests added: {n}
+
+Final gate: PASS | FAILED after {n} attempts
 
 ## Fixed Issues
 | Issue | File:Line | Commit |
@@ -381,13 +487,30 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 |-------|-----------|-----------|
 | {description} | {file}:{line} | {why} |
 
+## By Design
+| Issue | File:Line | Rationale (ADR/doc) |
+|-------|-----------|---------------------|
+| {description} | {file}:{line} | {applies ADR-NNN or code comment} |
+
+## Fix Separately
+| Issue | File:Line | Reason | Tracked |
+|-------|-----------|--------|---------|
+| {description} | {file}:{line} | {why out of scope} | #{backlog} |
+
 ## Deferred to Tech Debt
 | Issue | File:Line | Risk Factor |
 |-------|-----------|-------------|
-| {description} | {file}:{line} | {criteria} |
+| {description} | {file}:{line} | {architectural concern} |
+
+## Escalations
+| Issue | File:Line | Security Concern |
+|-------|-----------|-----------------|
+| {description} | {file}:{line} | {why escalated} |
 
 ## Blocked
 | Issue | File:Line | Blocker |
 |-------|-----------|---------|
 | {description} | {file}:{line} | {why} |
 ```
+
+**Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `/code-review` convergence parser reads the `Deferred`, `Fixed`, and `False Positive` Statistics rows plus the `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable.

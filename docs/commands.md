@@ -65,17 +65,14 @@ Supports multi-worktree auto-discovery — one command reviews all active branch
 
 ## /resolve
 
-Processes all issues from `/code-review` reports:
+Processes all issues from `/code-review` reports through a validation/fix split:
 
-1. **Parse** — Extract all issues from the latest unresolved review
-2. **Batch** — Group by file/function for efficient resolution
-3. **Resolve** — Parallel resolver agents validate each issue, then:
-   - **Fix** standard issues directly
-   - **Fix carefully** (public API, shared state, core logic) with systematic test-first refactoring
-   - **Won't Fix** impractical issues (e.g., micro-optimizing startup code)
-   - **Defer** only genuine architectural overhauls to tech debt
-4. **Simplify** — Clean up all modified files
-5. **Report** — Write resolution summary with full decision audit trail
+1. **Triage** — A single Triager (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED
+2. **Fix** — Parallel Coder agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
+3. **Verify** — A Validator (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
+4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
+5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
+6. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)
