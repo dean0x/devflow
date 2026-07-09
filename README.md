@@ -14,15 +14,13 @@
 
 Claude Code is powerful. But every session starts from scratch. Context evaporates between conversations. Code reviews are single-pass and shallow. Quality depends entirely on what you remember to ask for.
 
-Devflow fixes this. Install once, forget about it. Your code gets better automatically.
-
-A charter injected at session start turns the main session into a pure orchestrator — no per-prompt workflow detection, no classification overhead. Plan-mode handoffs auto-run `devflow:implement`. Complex tasks get a full TDD harness with quality gates at every step.
+Devflow fixes this. Install once, forget about it.
 
 ## See it work
 
 ```
 you: add rate limiting to the /api/upload endpoint
-     (or use /implement for the full agent pipeline)
+     (or use /devflow:implement for the full agent pipeline)
 
          → Created branch feat/42-rate-limit-upload
          → Exploring codebase... Planning... Coding...
@@ -34,30 +32,27 @@ you: add rate limiting to the /api/upload endpoint
 ```
 
 ```
-/code-review     → 18 reviewers examine your changes in parallel
-/resolve         → all issues validated and fixed automatically
-/bug-analysis    → proactive bug finding before review
+/devflow:code-review     → 18 reviewers examine your changes in parallel
+/devflow:resolve         → all issues validated and fixed automatically
+/devflow:bug-analysis    → proactive bug finding before review
 ```
 
 ## What you get
 
-**Ambient intelligence.** A charter injected at session start turns the main session into a pure orchestrator. Normal prompts get a 2-line delegation reminder; plan-mode handoffs (`Implement the following plan:`) auto-run `devflow:implement`; slash commands pass through unchanged. No keyword detection, no classification overhead. Init and forget.
+**Ambient intelligence.** A charter injected at session start turns the main session into a pure orchestrator. Normal prompts get a 2-line delegation reminder; plan-mode handoffs auto-run `devflow:implement`; slash commands pass through unchanged. Init and forget.
 
-**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
+**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
 
-**Decisions accumulate automatically.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
-**18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
-
-**40 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), 200+ sources total.
+**Self learning.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
 **Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
 
-**Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
+**Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplifier + Scrutinizer quality passes.
 
-**Everything is composable.** 22 plugins (12 core + 9 language/ecosystem + 1 optional workflow). Install only what you need.
+**Everything is composable.** 22 plugins (12 core + 9 language/ecosystem + 1 optional workflow recipes). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
@@ -66,6 +61,10 @@ you: add rate limiting to the /api/upload endpoint
 Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m) · 7d ████████ 70% (3d 12h)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
+
+**18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
+
+**40 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), 200+ sources total.
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
 
@@ -102,16 +101,16 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 
 | Command | What it does |
 |---------|-------------|
+| `/explore` | Codebase exploration with optional knowledge base creation |
+| `/research` | Multi-type research with trust-aware synthesis |
 | `/plan` | Full design pipeline: explore → gap analysis → design → PR-ready plan document |
 | `/implement` | Execute plan: accepts plan documents from `/plan`, issues, or task descriptions → PR |
+| `/self-review` | Simplifier + Scrutinizer quality pass |
 | `/code-review` | Multi-perspective parallel code review |
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |
-| `/self-review` | Simplifier + Scrutinizer quality pass |
-| `/explore` | Codebase exploration with optional knowledge base creation |
-| `/research` | Multi-type research with trust-aware synthesis |
-| `/release` | Adaptive release with learned configuration |
 | `/bug-analysis` | Proactive bug finding with static and semantic analysis |
+| `/release` | Adaptive release with learned configuration |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 
