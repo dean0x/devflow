@@ -672,6 +672,15 @@ describe('configCounts component', () => {
     expect(result).not.toBeNull();
     expect(result!.raw).not.toContain('skills');
   });
+
+  it('displays rules count when non-zero', async () => {
+    const ctx = makeCtx({
+      configCounts: { claudeMdFiles: 0, rules: 2, mcpServers: 0, hooks: 0 },
+    });
+    const result = await configCounts(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('2 rules');
+  });
 });
 
 describe('stripAnsi', () => {

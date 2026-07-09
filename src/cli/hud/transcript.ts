@@ -39,9 +39,9 @@ export async function parseTranscript(
       try {
         const entry = JSON.parse(line) as Record<string, unknown>;
 
-        // Turn boundary: clear tools and agents on each human message
+        // Turn boundary: clear tools and agents on each user turn
         // so only the current turn's activity shows in the HUD
-        if (entry.type === 'human') {
+        if (entry.type === 'user') {
           tools.clear();
           agents.clear();
           continue;
@@ -128,10 +128,9 @@ function processEntry(
       } else {
         // Regular tool — extract file target for Read/Edit/Write
         const input = block.input as Record<string, unknown> | undefined;
-        let target: string | undefined;
-        if (input?.file_path && typeof input.file_path === 'string') {
-          target = path.basename(input.file_path);
-        }
+        const target = input?.file_path && typeof input.file_path === 'string'
+          ? path.basename(input.file_path)
+          : undefined;
         // Extract description: prefer input.description, fallback to first 4 words of command (Bash)
         let description: string | undefined;
         if (typeof input?.description === 'string') {

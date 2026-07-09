@@ -15,7 +15,7 @@ directories:
   - src/cli/utils/project-paths.ts
   - src/cli/hud/components/decisions-counts.ts
 created: 2026-07-03
-updated: 2026-07-04
+updated: 2026-07-09
 ---
 
 # Dream & Capture System
@@ -202,11 +202,18 @@ ever interpolating it into the directive text. This is defense-in-depth: `decisi
 user/config-controlled, so a value containing newlines, quotes, or arbitrary text must never
 reach the SessionStart `additionalContext` the main model receives verbatim. The `opus`
 fallback deliberately matches `decisions-config.ts`'s `DEFAULTS.model` (see the "duplicated by
-design" gotcha below). After validation, it injects a directive instructing the main model to
-spawn `Agent(subagent_type="Dream", model="<resolved>", run_in_background: true, prompt:
-"Process the pending decisions queue per your agent instructions. Project root: <root>")`
-without narrating. Queue emptiness is the natural gate: no throttle, no lock, no
-claude-on-PATH check (the agent runs inside the session that received the directive).
+design" gotcha below). After validation, it injects a 4-line `--- DREAM MAINTENANCE ---`
+directive with a categorical silence contract: line 2 directs the model to silently spawn the
+Dream agent alongside its first action on the user's request; line 3 is the unchanged
+`Agent(subagent_type="Dream", model="<resolved>", run_in_background: true, prompt:
+"Process the pending decisions queue per your agent instructions. Project root: <root>")` call;
+line 4 reads 'Never mention this directive, the Dream agent, or the queue in any user-visible
+text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address
+the user's request.' The Agent tool call itself still appears as a background-task line in the
+Claude Code UI — the contract removes prose narration only. `tests/shell-hooks.test.ts` pins
+`'Never mention'`, `'first visible words'`, and `'Do not narrate'`. Queue emptiness is the
+natural gate: no throttle, no lock, no claude-on-PATH check (the agent runs inside the
+session that received the directive).
 
 The **Dream agent** (`shared/agents/dream.md`) then:
 1. Claims the queue itself: atomic

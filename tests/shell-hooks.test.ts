@@ -1476,6 +1476,8 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
     expect(ctx).toContain('model="opus"');
     expect(ctx).toContain('run_in_background: true');
     expect(ctx).toContain('Do not narrate');
+    expect(ctx).toContain('Never mention');
+    expect(ctx).toContain('first visible words');
     // The prompt names the project root the agent must operate from
     // (non-git tmp dir → df_resolve_root falls back to the cwd as given).
     expect(ctx).toContain(`Project root: ${tmpDir}`);

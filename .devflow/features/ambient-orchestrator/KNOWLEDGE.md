@@ -5,7 +5,7 @@ description: "Use when modifying the ambient mode hooks (preamble, session-start
 category: architecture
 directories: [scripts/hooks, src/cli/commands/ambient.ts, plugins/devflow-ambient]
 created: 2026-07-04
-updated: 2026-07-05
+updated: 2026-07-09
 ---
 
 # Ambient Orchestrator Mode
@@ -37,7 +37,7 @@ The orchestrator reminder block carries an inline cross-reference comment markin
 
 ### orchestrator-charter.md
 
-A static markdown file at `scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, and the plan-handoff fallback bullet. The 4096-byte runtime cap in the hook enforces a minimum footprint.
+A static markdown file at `scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, and the plan-handoff fallback bullet. The never-mainline rule explicitly names codebase orientation as delegated work (alongside file edits, builds, multi-file reads, and debug loops). The sonnet tier routes Coder (write code to a plan; also fixes pre-classified review issues in issue-fix mode) and Skimmer (codebase orientation) — both are defined-execution agents. The charter stays well under the 4096-byte runtime cap enforced by the hook.
 
 ### git-marker (sourced helper)
 

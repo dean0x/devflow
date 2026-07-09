@@ -41,8 +41,8 @@ describe('skimmer agent', () => {
     }
   });
 
-  it('contains sequential workflow markers (Step 1-6)', () => {
-    for (let i = 1; i <= 6; i++) {
+  it('contains sequential workflow markers (Step 1-7)', () => {
+    for (let i = 1; i <= 7; i++) {
       expect(content).toContain(`### Step ${i}`);
     }
   });

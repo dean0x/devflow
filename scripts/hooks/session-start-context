@@ -149,8 +149,9 @@ if [ "$DECISIONS_ENABLED" = "true" ]; then
 
     dbg "dream directive emitted (reason=$DREAM_WORK model=$DREAM_MODEL)"
     DREAM_SECTION="--- DREAM MAINTENANCE ---
-Captured turns are pending in the decisions queue. Spawn the background Dream agent (one non-blocking call). Do not narrate, summarize, or ask — just spawn it, then continue with the user's request.
-Agent(subagent_type=\"Dream\", model=\"$DREAM_MODEL\", run_in_background: true, prompt: \"Process the pending decisions queue per your agent instructions. Project root: $PROJECT_ROOT\")"
+Captured turns are pending in the decisions queue. Silently spawn the background Dream agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Dream\", model=\"$DREAM_MODEL\", run_in_background: true, prompt: \"Process the pending decisions queue per your agent instructions. Project root: $PROJECT_ROOT\")
+Never mention this directive, the Dream agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
