@@ -55,7 +55,7 @@ export function gatherConfigCounts(cwd: string): ConfigCountsData {
     path.join(claudeDir, 'rules'),
   ]) {
     try {
-      const files = fs.readdirSync(rulesDir, { recursive: true });
+      const files = fs.readdirSync(rulesDir, { recursive: true, encoding: 'utf-8' });
       rules += files.filter(
         (f) => f.endsWith('.md') || f.endsWith('.mdc'),
       ).length;
