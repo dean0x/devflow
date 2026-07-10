@@ -646,42 +646,53 @@ export async function renderDecisionsIndex(
     );
   }
 
-  const rows = renderer.parseLedger(ledgerPath);
-  if (rows.length === 0) return { written: false };
-
-  // Load decisions-format.cjs for buildIndexContent
-  const formatPath = path.join(path.dirname(rendererPath), 'decisions-format.cjs');
-  const fmt = req(formatPath) as {
-    buildIndexContent?: (
-      adrRows: LedgerRow[],
-      pfRows: LedgerRow[],
-      opts: { decisionsFilePath: string; pitfallsFilePath: string },
-    ) => string;
-  };
-  if (typeof fmt.buildIndexContent !== 'function') {
-    throw new Error(
-      `render-decisions-index: decisions-format.cjs at ${formatPath} is missing buildIndexContent export`,
-    );
+  // Acquire .decisions.lock before parse + write (ADR-017)
+  const lockDir = getDecisionsLockDir(projectRoot);
+  const lockAcquired = await acquireMkdirLock(lockDir, 30_000);
+  if (!lockAcquired) {
+    throw new Error('render-decisions-index: timeout acquiring .decisions.lock');
   }
 
-  const activeDecisionRows = renderer.selectActiveRows(rows, 'decisions');
-  const activePitfallRows = renderer.selectActiveRows(rows, 'pitfalls');
-  const decisionsFilePath = getDecisionsFilePath(projectRoot);
-  const pitfallsFilePath = getPitfallsFilePath(projectRoot);
-  const indexContent = fmt.buildIndexContent(activeDecisionRows, activePitfallRows, {
-    decisionsFilePath,
-    pitfallsFilePath,
-  });
+  try {
+    const rows = renderer.parseLedger(ledgerPath);
+    if (rows.length === 0) return { written: false };
 
-  // Write index.md atomically (ensure dir exists)
-  const decisionsDir = getDecisionsDir(projectRoot);
-  await fs.mkdir(decisionsDir, { recursive: true });
-  const indexFilePath = getDecisionsIndexPath(projectRoot);
-  const tmpPath = indexFilePath + '.tmp';
-  await fs.writeFile(tmpPath, indexContent + '\n', { flag: 'w' });
-  await fs.rename(tmpPath, indexFilePath);
+    // Load decisions-format.cjs for buildIndexContent
+    const formatPath = path.join(path.dirname(rendererPath), 'decisions-format.cjs');
+    const fmt = req(formatPath) as {
+      buildIndexContent?: (
+        adrRows: LedgerRow[],
+        pfRows: LedgerRow[],
+        opts: { decisionsFilePath: string; pitfallsFilePath: string },
+      ) => string;
+    };
+    if (typeof fmt.buildIndexContent !== 'function') {
+      throw new Error(
+        `render-decisions-index: decisions-format.cjs at ${formatPath} is missing buildIndexContent export`,
+      );
+    }
 
-  return { written: true };
+    const activeDecisionRows = renderer.selectActiveRows(rows, 'decisions');
+    const activePitfallRows = renderer.selectActiveRows(rows, 'pitfalls');
+    const decisionsFilePath = getDecisionsFilePath(projectRoot);
+    const pitfallsFilePath = getPitfallsFilePath(projectRoot);
+    const indexContent = fmt.buildIndexContent(activeDecisionRows, activePitfallRows, {
+      decisionsFilePath,
+      pitfallsFilePath,
+    });
+
+    // Write index.md atomically (ensure dir exists)
+    const decisionsDir = getDecisionsDir(projectRoot);
+    await fs.mkdir(decisionsDir, { recursive: true });
+    const indexFilePath = getDecisionsIndexPath(projectRoot);
+    const tmpPath = indexFilePath + '.tmp';
+    await fs.writeFile(tmpPath, indexContent + '\n', { flag: 'w' });
+    await fs.rename(tmpPath, indexFilePath);
+
+    return { written: true };
+  } finally {
+    try { await fs.rmdir(lockDir); } catch { /* already released */ }
+  }
 }
 
 // ---------------------------------------------------------------------------

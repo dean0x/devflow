@@ -85,7 +85,7 @@ describe('dream agent', () => {
   describe('ledger op contract', () => {
     it('keeps the Iron Law (assign-anchor owns numbering, render owns the .md)', () => {
       expect(content).toContain('assign-anchor OWNS NUMBERING');
-      expect(content).toContain('NEVER HAND-EDIT decisions.md or pitfalls.md');
+      expect(content).toContain('NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md');
     });
 
     it('calls assign-anchor, retire-anchor, and rotate-observations via json-helper', () => {

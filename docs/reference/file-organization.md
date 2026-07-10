@@ -210,6 +210,7 @@ Knowledge files in `.devflow/decisions/` capture decisions and pitfalls that age
 |------|--------|--------|---------|
 | `decisions.md` | ADR-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
 | `pitfalls.md` | PF-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
+| `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
 
 Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
 

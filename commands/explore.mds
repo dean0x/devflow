@@ -3,6 +3,7 @@ description: Explore codebase with structured analysis and optional feature know
 output-dir: plugins/devflow-explore/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Explore Command
 
@@ -29,7 +30,7 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 **Produces:** DECISIONS_CONTEXT
 
-Before exploring, read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 

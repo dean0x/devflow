@@ -23,20 +23,21 @@ ledger ops below.
 
 ## Iron Law
 
-> **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md or pitfalls.md**
+> **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md**
 >
 > ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are written
 > exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`).
-> One `assign-anchor` invocation claims one number and re-renders both files atomically. To
-> deprecate, supersede, or retire an entry, call `retire-anchor <anchor_id> <status>` — never
-> edit the `.md` files directly.
+> One `assign-anchor` invocation claims one number and re-renders all three files atomically
+> (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
+> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Manual re-render
+> via `render-decisions.cjs render "$(pwd)"` also refreshes index.md.
 
 ## Environment
 
 Your prompt names the project root — run every command from it; all `.devflow/` paths below
 are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-helper.cjs`:
 
-- `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders both `.md` files
+- `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
 - `rotate-observations` — archives `observing` log rows older than 30 days
 

@@ -3,6 +3,7 @@ description: Unified design planning - combines requirements discovery, gap anal
 output-dir: plugins/devflow-plan/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Plan Command
 
@@ -90,7 +91,7 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-While Skimmer runs, read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 

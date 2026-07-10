@@ -6,6 +6,7 @@ output-dir: plugins/devflow-dynamic/commands
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 {authoring_preamble()}
 
@@ -41,7 +42,7 @@ Before authoring, verify:
 
 **1. Load DECISIONS_CONTEXT**
 
-Read `.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Designer and Evaluator agent prompts.
 

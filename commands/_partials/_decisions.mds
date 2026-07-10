@@ -12,7 +12,7 @@ Attempt to read `\{worktree\}/.devflow/decisions/index.md`.
 
 **No subprocess, no `.cjs` script.** This is a single direct file read — the index is written at render time by `render-decisions.cjs` alongside `decisions.md`/`pitfalls.md`.
 
-**Step 2 — Apply decisions using devflow:apply-decisions:**
+**Step 2 — Apply decisions using `devflow:apply-decisions`:**
 
 When `DECISIONS_CONTEXT` is not `(none)`, follow `devflow:apply-decisions` to scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in downstream agent prompts and reasoning.
 @end

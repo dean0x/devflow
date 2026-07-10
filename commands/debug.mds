@@ -3,6 +3,7 @@ description: Debug issues using competing hypothesis investigation with parallel
 output-dir: plugins/devflow-debug/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Debug Command
 
@@ -31,7 +32,7 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`. If a skill fails to load, continue without it.
 
-Before hypothesizing, read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 

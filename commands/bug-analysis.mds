@@ -3,6 +3,7 @@ description: Proactive bug finding with static and semantic analysis — hunts r
 output-dir: plugins/devflow-bug-analysis/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Bug Analysis Command
 
@@ -154,7 +155,7 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
 #### Decisions Index
 
-Read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 #### Feature Knowledge
 

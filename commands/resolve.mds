@@ -3,6 +3,7 @@ description: Process review issues - validate with Triager, fix with Coder, veri
 output-dir: plugins/devflow-resolve/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Resolve Command
 
@@ -90,7 +91,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-For each worktree, read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{decisions_load()}
 
 This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triager agent in Phase 2 and to Coder agents in Phase 4.
 
