@@ -10,6 +10,7 @@ import {
   getPitfallsFilePath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
+  getDecisionsIndexPath,
 } from './project-paths.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import {
@@ -594,6 +595,93 @@ async function writeAndRender(
     await writeFileAtomicExclusive(ledgerPath, ledgerContent);
     renderer.renderAndWriteAll(projectRoot, newLedgerRows);
   }
+}
+
+// ---------------------------------------------------------------------------
+// renderDecisionsIndex — write-time index bootstrap (per-project migration helper)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the existing decisions-ledger.jsonl and write only index.md (not the body
+ * files). Called by the render-decisions-index-v1 migration so that existing
+ * projects get index.md without rewriting decisions.md / pitfalls.md.
+ *
+ * No-op (infos: []) when the ledger is absent or empty — the index will be
+ * written on the next assign-anchor run.
+ *
+ * @param projectRoot  Absolute path to the project root.
+ * @param opts.rendererPath  Override path to render-decisions.cjs (for tests).
+ */
+export async function renderDecisionsIndex(
+  projectRoot: string,
+  opts: { rendererPath?: string } = {},
+): Promise<{ written: boolean }> {
+  const ledgerPath = getDecisionsLedgerPath(projectRoot);
+
+  // Read existing ledger (empty corpus → no-op)
+  let raw: string;
+  try {
+    raw = await fs.readFile(ledgerPath, 'utf-8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { written: false }; // no ledger yet
+    throw err;
+  }
+
+  if (!raw.trim()) return { written: false };
+
+  // Load render-decisions.cjs via createRequire (ESM/CJS bridge)
+  const rendererPath = opts.rendererPath ?? resolveRendererPath(import.meta.url);
+  const req = createRequire(import.meta.url);
+  const mod: unknown = req(rendererPath);
+
+  // Validate required exports
+  const renderer = mod as {
+    parseLedger?: (p: string) => LedgerRow[];
+    selectActiveRows?: (rows: LedgerRow[], kind: string) => LedgerRow[];
+  };
+  if (typeof renderer.parseLedger !== 'function' || typeof renderer.selectActiveRows !== 'function') {
+    throw new Error(
+      `render-decisions-index: renderer at ${rendererPath} is missing parseLedger/selectActiveRows exports`,
+    );
+  }
+
+  const rows = renderer.parseLedger(ledgerPath);
+  if (rows.length === 0) return { written: false };
+
+  // Load decisions-format.cjs for buildIndexContent
+  const formatPath = path.join(path.dirname(rendererPath), 'decisions-format.cjs');
+  const fmt = req(formatPath) as {
+    buildIndexContent?: (
+      adrRows: LedgerRow[],
+      pfRows: LedgerRow[],
+      opts: { decisionsFilePath: string; pitfallsFilePath: string },
+    ) => string;
+  };
+  if (typeof fmt.buildIndexContent !== 'function') {
+    throw new Error(
+      `render-decisions-index: decisions-format.cjs at ${formatPath} is missing buildIndexContent export`,
+    );
+  }
+
+  const activeDecisionRows = renderer.selectActiveRows(rows, 'decisions');
+  const activePitfallRows = renderer.selectActiveRows(rows, 'pitfalls');
+  const decisionsFilePath = getDecisionsFilePath(projectRoot);
+  const pitfallsFilePath = getPitfallsFilePath(projectRoot);
+  const indexContent = fmt.buildIndexContent(activeDecisionRows, activePitfallRows, {
+    decisionsFilePath,
+    pitfallsFilePath,
+  });
+
+  // Write index.md atomically (ensure dir exists)
+  const decisionsDir = getDecisionsDir(projectRoot);
+  await fs.mkdir(decisionsDir, { recursive: true });
+  const indexFilePath = getDecisionsIndexPath(projectRoot);
+  const tmpPath = indexFilePath + '.tmp';
+  await fs.writeFile(tmpPath, indexContent + '\n', { flag: 'w' });
+  await fs.rename(tmpPath, indexFilePath);
+
+  return { written: true };
 }
 
 // ---------------------------------------------------------------------------

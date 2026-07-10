@@ -1046,6 +1046,61 @@ const MIGRATION_PURGE_DREAM_WORKER_STATE: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Per-project: write `.devflow/decisions/index.md` from the existing ledger
+ * (if any). This is a write-time artifact produced by render-decisions.cjs
+ * alongside decisions.md / pitfalls.md since Phase 1 of the decisions-index
+ * refactor. Projects that already had a ledger need this one-time bootstrap
+ * to materialise the index without rewriting the body files.
+ *
+ * - If no ledger exists: no-op (index will be written on the next Dream run).
+ * - Writes only index.md — never rewrites decisions.md / pitfalls.md.
+ * - ENOENT-safe and idempotent: a second run overwrites the same content.
+ */
+const MIGRATION_RENDER_DECISIONS_INDEX: Migration<'per-project'> = {
+  id: 'render-decisions-index-v1',
+  description: 'Bootstrap .devflow/decisions/index.md from existing decisions-ledger.jsonl',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const { renderDecisionsIndex } = await import('./decisions-ledger-migration.js');
+    const result = await renderDecisionsIndex(ctx.projectRoot);
+    return {
+      infos: result.written ? ['render-decisions-index-v1: wrote index.md'] : [],
+      warnings: [],
+    };
+  },
+};
+
+/**
+ * Global: remove the orphaned `~/.devflow/scripts/hooks/lib/decisions-index.cjs`
+ * script that was superseded by the write-time index.md artifact (Phase 1 of
+ * the decisions-index refactor). The installer copies scripts additively — it
+ * never deletes — so the stale file would otherwise linger.
+ *
+ * ENOENT-idempotent: absent on fresh installs or after a previous run.
+ */
+const MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX: Migration<'global'> = {
+  id: 'purge-orphaned-decisions-index-v1',
+  description: 'Remove orphaned ~/.devflow/scripts/hooks/lib/decisions-index.cjs',
+  scope: 'global',
+  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const scriptPath = path.join(
+      ctx.devflowDir, 'scripts', 'hooks', 'lib', 'decisions-index.cjs',
+    );
+    try {
+      await fs.unlink(scriptPath);
+      return {
+        infos: ['Removed orphaned ~/.devflow/scripts/hooks/lib/decisions-index.cjs'],
+        warnings: [],
+      };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return { infos: [], warnings: [] }; // already absent
+      throw err;
+    }
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -1065,6 +1120,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
   MIGRATION_PURGE_DREAM_MARKER_PIPELINE,
   MIGRATION_PURGE_DREAM_WORKER_STATE,
+  MIGRATION_RENDER_DECISIONS_INDEX,
+  MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
