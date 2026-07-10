@@ -1,0 +1,20 @@
+@define decisions_load():
+### Load DECISIONS_CONTEXT
+
+Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `\{worktree\}`.
+
+**Step 1 — Read the pre-rendered index:**
+
+Attempt to read `\{worktree\}/.devflow/decisions/index.md`.
+
+- If the file exists and contains non-empty content: use that content as `DECISIONS_CONTEXT`.
+- If the file is absent or empty: set `DECISIONS_CONTEXT` to `(none)`.
+
+**No subprocess, no `.cjs` script.** This is a single direct file read — the index is written at render time by `render-decisions.cjs` alongside `decisions.md`/`pitfalls.md`.
+
+**Step 2 — Apply decisions using devflow:apply-decisions:**
+
+When `DECISIONS_CONTEXT` is not `(none)`, follow `devflow:apply-decisions` to scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in downstream agent prompts and reasoning.
+@end
+
+@export decisions_load

@@ -154,9 +154,7 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
 #### Decisions Index
 
-```bash
-DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
-```
+Read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 #### Feature Knowledge
 
@@ -283,7 +281,7 @@ Run `/resolve` to process and fix these findings.
 │              Write static-findings.md
 │
 ├─ Phase 3: Context Loading
-│  ├─ decisions-index.cjs → DECISIONS_CONTEXT
+│  ├─ index.md (pre-rendered) → DECISIONS_CONTEXT
 │  ├─ Feature knowledge load → FEATURE_KNOWLEDGE
 │  └─ .devflow/docs/design/*.md → PLAN_CONTEXT + ACCEPTANCE_RULES
 │

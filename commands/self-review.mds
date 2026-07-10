@@ -25,11 +25,7 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Load decisions index:
-
-```bash
-DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
-```
+5. Read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
    Pass `DECISIONS_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume decisions — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 
@@ -126,7 +122,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-│  └─ Load decisions index (decisions-index.cjs index)
+│  └─ Read index.md → DECISIONS_CONTEXT
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

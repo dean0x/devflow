@@ -90,13 +90,9 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-For each worktree, run:
+For each worktree, read `\{worktree\}/.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-```bash
-DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
-```
-
-This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to the Triager agent in Phase 2 and to Coder agents in Phase 4.
+This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triager agent in Phase 2 and to Coder agents in Phase 4.
 
 {knowledge_load()}
 

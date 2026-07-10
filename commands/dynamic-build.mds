@@ -45,10 +45,7 @@ Before you write the workflow script:
 
 **1. Load DECISIONS_CONTEXT**
 
-Run:
-```bash
-node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "$(pwd)"
-```
+Read `.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
 

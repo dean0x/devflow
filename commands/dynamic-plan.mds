@@ -41,9 +41,7 @@ Before authoring, verify:
 
 **1. Load DECISIONS_CONTEXT**
 
-```bash
-node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "$(pwd)"
-```
+Read `.devflow/decisions/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Designer and Evaluator agent prompts.
 
