@@ -41,6 +41,7 @@ const {
   getDecisionsLockDir,
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
+const { safePath } = require('./safe-path.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -284,6 +285,20 @@ if (require.main === module) {
       '  render-decisions.cjs render <worktree>          Write both .md files\n' +
       '  render-decisions.cjs --check <worktree>         Diff without writing; exit 1 on drift\n'
     );
+    process.exit(1);
+  }
+
+  // Validate path at trust boundary before any file operations.
+  // safePath resolves and returns the absolute path; rejects null bytes and
+  // traversal sequences that would escape the resolved location.
+  try {
+    worktreePath = safePath(worktreePath);
+  } catch (err) {
+    process.stderr.write(`render-decisions: invalid worktree path: ${err.message}\n`);
+    process.exit(1);
+  }
+  if (worktreePath.includes('\0')) {
+    process.stderr.write('render-decisions: path contains null byte\n');
     process.exit(1);
   }
 

@@ -30,12 +30,6 @@ const {
   anchorNumeric: (anchorId: string) => number;
 };
 
-const { loadDecisionsIndex } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
-) as {
-  loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
-};
-
 const RENDERER = path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs');
 
 afterAll(() => cleanupTmpWorktrees());
@@ -405,76 +399,6 @@ describe('selectActiveRows', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Round-trip: render → decisions-index parse (transitional; removed in Phase 4)
-// ---------------------------------------------------------------------------
-
-const { buildIndexContent: buildIdx } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
-) as {
-  buildIndexContent: (
-    adrRows: Record<string, unknown>[],
-    pfRows: Record<string, unknown>[],
-    opts: { decisionsFilePath: string; pitfallsFilePath: string }
-  ) => string;
-};
-
-describe('renderDecisionsFile — round-trip with decisions-index', () => {
-  it('rendered decisions.md is parseable by decisions-index', () => {
-    const rows = [
-      makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeDecisionRow({ anchor_id: 'ADR-003', id: 'obs_003', pattern: 'Inject dependencies everywhere', decisions_status: 'Active' }),
-    ];
-    const decisionsContent = renderDecisionsFile(rows, 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
-    const tmpDir = makeTmpWorktree(decisionsContent, pitfallsContent);
-    const index = loadDecisionsIndex(tmpDir);
-    expect(index).toContain('ADR-001');
-    expect(index).toContain('ADR-003');
-  });
-
-  it('rendered pitfalls.md is parseable by decisions-index', () => {
-    const rows = [
-      makePitfallRow({ anchor_id: 'PF-002', decisions_status: 'Active' }),
-      makePitfallRow({ anchor_id: 'PF-007', id: 'obs_pf007', pattern: 'Another pitfall', decisions_status: 'Active' }),
-    ];
-    const decisionsContent = renderDecisionsFile([], 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
-    const tmpDir = makeTmpWorktree(decisionsContent, pitfallsContent);
-    const index = loadDecisionsIndex(tmpDir);
-    expect(index).toContain('PF-002');
-    expect(index).toContain('PF-007');
-  });
-
-  it('TRANSITIONAL GOLDEN: buildIndexContent matches loadDecisionsIndex output for same corpus', () => {
-    // This test verifies byte-compat between the old subprocess-based index loader
-    // and the new write-time builder. Both must produce identical output.
-    // Removed in Phase 4 when decisions-index.cjs is deleted.
-    const rows = [
-      makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeDecisionRow({ anchor_id: 'ADR-003', id: 'obs_003', pattern: 'Inject dependencies everywhere', decisions_status: 'Active' }),
-      makePitfallRow({ anchor_id: 'PF-002', decisions_status: 'Active' }),
-    ];
-    const decisionsContent = renderDecisionsFile(rows, 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
-    const tmpDir = makeTmpWorktree(decisionsContent, pitfallsContent);
-    const decisionsFilePath = path.join(tmpDir, '.devflow', 'decisions', 'decisions.md');
-    const pitfallsFilePath  = path.join(tmpDir, '.devflow', 'decisions', 'pitfalls.md');
-
-    // Old approach: shell subprocess
-    const oldIndex = loadDecisionsIndex(tmpDir, { decisionsFile: decisionsFilePath, pitfallsFile: pitfallsFilePath });
-
-    // New approach: in-memory builder from ledger rows
-    const activeDecisionRows = selectActiveRows(rows, 'decisions');
-    const activePitfallRows  = selectActiveRows(rows, 'pitfalls');
-    const newIndex = buildIdx(activeDecisionRows, activePitfallRows, { decisionsFilePath, pitfallsFilePath });
-
-    expect(newIndex).toBe(oldIndex);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // CLI: render subcommand writes both .md files

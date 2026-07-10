@@ -74,7 +74,6 @@ devflow/
 │       ├── assets/                  # Static prose assets shipped with hooks
 │       │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │       └── lib/                     # Node.js helper modules
-│           ├── decisions-index.cjs    # Decisions index builder
 │           ├── project-paths.cjs      # Project slug + path resolution
 │           └── safe-path.cjs          # Path safety validation
 └── src/
