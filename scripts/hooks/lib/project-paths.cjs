@@ -119,6 +119,11 @@ function getDecisionsUsageLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
 }
 
+/** .devflow/decisions/index.md — pre-rendered compact index written by render-decisions.cjs */
+function getDecisionsIndexPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'decisions', 'index.md');
+}
+
 /** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
 function getObservationsLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
@@ -229,6 +234,7 @@ module.exports = {
   getDecisionsUsageLockDir,
   getDecisionsNotificationsPath,
   getDecisionsBatchIdsPath,
+  getDecisionsIndexPath,
   // Memory files
   getWorkingMemoryPath,
   getBackupPath,
