@@ -289,16 +289,11 @@ if (require.main === module) {
   }
 
   // Validate path at trust boundary before any file operations.
-  // safePath resolves and returns the absolute path; rejects null bytes and
-  // traversal sequences that would escape the resolved location.
+  // safePath resolves the absolute path; called here as the canonical sanitization point.
   try {
     worktreePath = safePath(worktreePath);
   } catch (err) {
     process.stderr.write(`render-decisions: invalid worktree path: ${err.message}\n`);
-    process.exit(1);
-  }
-  if (worktreePath.includes('\0')) {
-    process.stderr.write('render-decisions: path contains null byte\n');
     process.exit(1);
   }
 
@@ -315,20 +310,18 @@ if (require.main === module) {
   // Read ledger (empty corpus if absent)
   const rows = parseLedger(ledgerPath);
 
-  // Render both body files in memory
-  const decisionsContent = renderDecisionsFile(rows, 'decisions');
-  const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
-  // Build index in memory
-  const activeDecisionRows = selectActiveRows(rows, 'decisions');
-  const activePitfallRows = selectActiveRows(rows, 'pitfalls');
-  const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
-    decisionsFilePath,
-    pitfallsFilePath,
-  }) + '\n';
-
   if (mode === 'check') {
-    // Compare in-memory render against on-disk content. Exit non-zero on drift.
+    // Render all three files in memory and compare against on-disk content.
+    // Exit non-zero on drift.
+    const decisionsContent = renderDecisionsFile(rows, 'decisions');
+    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
+    const activeDecisionRows = selectActiveRows(rows, 'decisions');
+    const activePitfallRows = selectActiveRows(rows, 'pitfalls');
+    const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
+      decisionsFilePath,
+      pitfallsFilePath,
+    }) + '\n';
+
     let drift = false;
     let existingDecisions = '';
     let existingPitfalls = '';
@@ -353,10 +346,7 @@ if (require.main === module) {
       }
     }
 
-    if (drift) {
-      process.exit(1);
-    }
-    process.exit(0);
+    process.exit(drift ? 1 : 0);
   }
 
   // mode === 'render': write atomically under lock

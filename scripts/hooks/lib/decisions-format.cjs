@@ -168,14 +168,14 @@ function buildTldrLine(kind, rows) {
 }
 
 // ---------------------------------------------------------------------------
-// Index content builder (write-time replacement for decisions-index.cjs)
+// Index content builder
 // ---------------------------------------------------------------------------
 
 /**
  * Statuses recognised by the index formatter — everything else renders as
- * [unknown]. Post-render the .md files only ever contain active entries
- * (Accepted for decisions, Active for pitfalls), so this list no longer needs
- * Deprecated/Superseded — they are hidden by the renderer before writing.
+ * [unknown]. Only Active (pitfalls) and Accepted (decisions) appear in
+ * rendered .md files; the renderer excludes Deprecated/Superseded/Retired
+ * before writing.
  */
 const INDEX_KNOWN_STATUSES = ['Active', 'Accepted'];
 
@@ -207,12 +207,11 @@ function formatIndexEntryLine(entry) {
 
 /**
  * Build the compact index content from in-memory active ledger rows.
- * Produces output byte-identical to loadDecisionsIndex() from decisions-index.cjs.
  * Empty corpus (both arrays empty) → '(none)'.
  * No trailing newline (caller adds '\n' before writing).
  *
  * Strategy: for each row, obtain its rendered block (raw_body ?? format*Body(row)),
- * then extract heading/Status/Area with the same regexes decisions-index.cjs uses.
+ * then extract heading/Status/Area with the same regexes.
  * This preserves byte-compat for migrated rows that carry Area/Status only in raw_body.
  *
  * @param {object[]} activeDecisionRows - Active decision rows (type='decision', sorted by anchor)
@@ -274,7 +273,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
     blocks.push(lines.join('\n'));
   }
 
-  // Footer: explain how to read full bodies (byte-identical to decisions-index.cjs)
+  // Footer: explain how to read full bodies
   const footerLines = [];
   if (adrEntries.length > 0) {
     footerLines.push(`ADR-NNN entries live in ${decisionsFilePath}`);
