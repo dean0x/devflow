@@ -289,7 +289,7 @@ if (require.main === module) {
   }
 
   // Validate path at trust boundary before any file operations.
-  // safePath resolves the absolute path; called here as the canonical sanitization point.
+  // safePath resolves to an absolute path; null-byte and other invalid paths are rejected by the fs calls downstream.
   try {
     worktreePath = safePath(worktreePath);
   } catch (err) {
