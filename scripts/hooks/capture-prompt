@@ -51,11 +51,6 @@ if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
-# Truncate to 2000 chars (AC-F1)
-if [ ${#PROMPT} -gt 2000 ]; then
-  PROMPT="${PROMPT:0:2000}... [truncated]"
-fi
-
 source "$SCRIPT_DIR/queue-append" || { echo "capture-prompt: failed to source queue-append" >&2; exit 1; }
 
 # --- AC-P1: exactly ONE config-read fork, fetching both memory + decisions fields ---
