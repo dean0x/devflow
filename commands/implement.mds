@@ -3,6 +3,7 @@ description: Execute a single task through implementation, quality gates, and PR
 output-dir: plugins/devflow-implement/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
 
 # Implement Command
 
@@ -79,10 +80,8 @@ Return the branch setup summary."
 
 If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
 
-**Load Decisions Context:**
-```bash
-DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
-```
+{decisions_load()}
+
 Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 
 {knowledge_load()}

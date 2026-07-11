@@ -62,13 +62,9 @@ The `budget` global governs depth. Scale reviewer roster, review cycle count, an
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
-Before you author the workflow script, run the decisions-index tool to load the DECISIONS_CONTEXT for the current worktree:
+Before you author the workflow script, read `.devflow/decisions/index.md` for the current worktree. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-```bash
-node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "<current-worktree-path>"
-```
-
-The script body cannot run this — you (the main model) run it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need DECISIONS_CONTEXT injected; lightweight agents (Validator, Simplifier) do not.
+The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need DECISIONS_CONTEXT injected; lightweight agents (Validator, Simplifier) do not.
 
 ### Handoff convention for sequential Coders within a ticket
 

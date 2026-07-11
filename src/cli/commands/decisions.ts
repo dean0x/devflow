@@ -210,7 +210,12 @@ async function handleReset(): Promise<void> {
 
   const lockDir = getDecisionsLockDir(gitRoot);
 
+  // Ensure the parent directory exists so a second reset (after .devflow/decisions/
+  // was already removed) does not fail with ENOENT and emit a false contention error.
+  await fs.mkdir(path.dirname(lockDir), { recursive: true });
+
   // Acquire lock to prevent conflict with a concurrent `devflow decisions` invocation.
+  // Non-recursive: EEXIST still means genuine contention.
   try {
     await fs.mkdir(lockDir);
   } catch {
@@ -240,11 +245,9 @@ async function handleReset(): Promise<void> {
       }
     }
 
-    let removed = 0;
     for (const filePath of stateFilePaths) {
       try {
         await fs.unlink(filePath);
-        removed++;
       } catch { /* may not exist */ }
     }
 
@@ -261,7 +264,7 @@ async function handleReset(): Promise<void> {
       await sweepLegacyDreamMarkers(getDreamDir(gitRoot));
     } catch { /* best effort */ }
 
-    p.log.success(`Reset complete — removed ${removed} file(s).`);
+    p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');
   } finally {
     try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
   }

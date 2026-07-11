@@ -43,14 +43,9 @@ Before authoring, verify:
 
 Before you write the workflow script:
 
-**1. Load DECISIONS_CONTEXT**
+**1. Apply decisions context**
 
-Run:
-```bash
-node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "$(pwd)"
-```
-
-Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
 
 **2. Read budget**
 

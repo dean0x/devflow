@@ -9,12 +9,14 @@
 // AC-F3  decisions.md/pitfalls.md byte-reproducible from the ledger
 //        (verify migrated render is byte-identical except TL;DR Key).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
-import { migrateDecisionsLedger } from '../../src/cli/utils/decisions-ledger-migration.js';
+import { migrateDecisionsLedger, renderDecisionsIndex } from '../../src/cli/utils/decisions-ledger-migration.js';
+import * as ledgerMigration from '../../src/cli/utils/decisions-ledger-migration.js';
+import { MIGRATIONS } from '../../src/cli/utils/migrations.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -852,6 +854,204 @@ describe('migrateDecisionsLedger — edge cases', () => {
     } finally {
       // Clean up the pre-held lock so the afterEach rm can remove the directory.
       try { await fs.rmdir(lockDir); } catch { /* already gone */ }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderDecisionsIndex — bootstrap migration helper
+// ---------------------------------------------------------------------------
+
+describe('renderDecisionsIndex', () => {
+  let tmpDir: string;
+  let decisionsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'render-index-test-'));
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns { written: false } when ledger is absent', async () => {
+    const result = await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    expect(result.written).toBe(false);
+    // index.md must not exist
+    await expect(fs.access(path.join(decisionsDir, 'index.md'))).rejects.toThrow();
+  });
+
+  it('returns { written: false } when ledger is empty', async () => {
+    await fs.writeFile(path.join(decisionsDir, 'decisions-ledger.jsonl'), '', 'utf-8');
+    const result = await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    expect(result.written).toBe(false);
+    await expect(fs.access(path.join(decisionsDir, 'index.md'))).rejects.toThrow();
+  });
+
+  it('writes index.md from an active ledger row', async () => {
+    const row = {
+      id: 'obs_adr1',
+      type: 'decision',
+      anchor_id: 'ADR-001',
+      pattern: 'Use Result types everywhere',
+      decisions_status: 'Accepted',
+      date: '2026-01-01',
+      details: 'context: TypeScript; decision: return Result; rationale: safety',
+    };
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf-8',
+    );
+
+    const result = await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    expect(result.written).toBe(true);
+
+    const indexContent = await fs.readFile(path.join(decisionsDir, 'index.md'), 'utf-8');
+    expect(indexContent).toContain('ADR-001');
+    expect(indexContent).toContain('Use Result types everywhere');
+    // Trailing newline
+    expect(indexContent).toMatch(/\n$/);
+  });
+
+  it('does NOT write decisions.md or pitfalls.md', async () => {
+    const row = {
+      id: 'obs_adr1',
+      type: 'decision',
+      anchor_id: 'ADR-001',
+      pattern: 'Some decision',
+      decisions_status: 'Accepted',
+      date: '2026-01-01',
+      details: '',
+    };
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf-8',
+    );
+
+    await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+
+    // Body files must NOT be created by this bootstrap helper
+    await expect(fs.access(path.join(decisionsDir, 'decisions.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(decisionsDir, 'pitfalls.md'))).rejects.toThrow();
+  });
+
+  it('is idempotent — second run overwrites index.md with same content', async () => {
+    const row = {
+      id: 'obs_adr1',
+      type: 'decision',
+      anchor_id: 'ADR-001',
+      pattern: 'Idempotency check',
+      decisions_status: 'Accepted',
+      date: '2026-01-01',
+      details: '',
+    };
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf-8',
+    );
+
+    await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    const first = await fs.readFile(path.join(decisionsDir, 'index.md'), 'utf-8');
+    await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    const second = await fs.readFile(path.join(decisionsDir, 'index.md'), 'utf-8');
+
+    expect(first).toBe(second);
+  });
+
+  it('returns (none) for inactive-only corpus', async () => {
+    const row = {
+      id: 'obs_dep',
+      type: 'decision',
+      anchor_id: 'ADR-001',
+      pattern: 'Deprecated decision',
+      decisions_status: 'Deprecated',
+      date: '2026-01-01',
+      details: '',
+    };
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf-8',
+    );
+
+    const result = await renderDecisionsIndex(tmpDir, { rendererPath: RENDERER_PATH });
+    expect(result.written).toBe(true);
+
+    const indexContent = await fs.readFile(path.join(decisionsDir, 'index.md'), 'utf-8');
+    expect(indexContent.trim()).toBe('(none)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ISSUE-7: render-decisions-index-v1 migration — registration + entry-point
+// ---------------------------------------------------------------------------
+
+describe('render-decisions-index-v1 migration — registration and entry-point', () => {
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('run delegates to renderDecisionsIndex and reports the write when it returns written: true', async () => {
+    // The migration's run() calls renderDecisionsIndex(ctx.projectRoot) via a dynamic import.
+    // In the test environment the default renderer path resolution is wrong (source tree vs
+    // dist tree), so we spy on the live module binding instead of running through the real CJS
+    // renderer. This is the correct behaviour-focused approach: assert the delegation, not the
+    // renderer internals (those are covered by the renderDecisionsIndex describe blocks above).
+    const spy = vi
+      .spyOn(ledgerMigration, 'renderDecisionsIndex')
+      .mockResolvedValueOnce({ written: true });
+
+    const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+    if (!m) throw new Error('render-decisions-index-v1 migration not found');
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'render-decisions-index-migration-test-'));
+    try {
+      const ctx: import('../../src/cli/utils/migrations.js').PerProjectMigrationContext = {
+        scope: 'per-project',
+        devflowDir: path.join(tmp, '.devflow'),
+        memoryDir: path.join(tmp, '.devflow', 'memory'),
+        projectRoot: tmp,
+      };
+
+      const result = await (m.run as (ctx: typeof ctx) => Promise<import('../../src/cli/utils/migrations.js').MigrationRunResult>)(ctx);
+
+      // The migration must have delegated to renderDecisionsIndex with the project root
+      expect(spy).toHaveBeenCalledWith(tmp);
+      // And it must have surfaced the write info message
+      expect(result?.infos ?? []).toContain('render-decisions-index-v1: wrote index.md');
+    } finally {
+      spy.mockRestore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('run is a no-op (no error) when no ledger exists', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'render-decisions-index-noop-test-'));
+    try {
+      const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+      if (!m) throw new Error('render-decisions-index-v1 migration not found');
+
+      const ctx: import('../../src/cli/utils/migrations.js').PerProjectMigrationContext = {
+        scope: 'per-project',
+        devflowDir: path.join(tmp, '.devflow'),
+        memoryDir: path.join(tmp, '.devflow', 'memory'),
+        projectRoot: tmp,
+      };
+
+      await expect(
+        (m.run as (ctx: typeof ctx) => Promise<import('../../src/cli/utils/migrations.js').MigrationRunResult>)(ctx),
+      ).resolves.not.toThrow();
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 });

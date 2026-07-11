@@ -1,6 +1,4 @@
 // Shared test fixtures for decisions-index module tests.
-// Both index-generator.test.ts and decisions-citation.test.ts import from here
-// to avoid drift between fixture definitions.
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs'
 import * as path from 'path'

@@ -31,7 +31,7 @@
 //   - session-start-context (line 57): reads TL;DR comment via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
 //   - decisions-usage-scan: scans /(ADR|PF)-\d{3}/ anchors
-//   - decisions-index.cjs: parses ## heading, - **Status**:, - **Area**: lines
+//   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered blocks
 
 'use strict';
 
@@ -167,10 +167,135 @@ function buildTldrLine(kind, rows) {
   return `<!-- TL;DR: ${count} ${kind}. Key: ${keyStr} -->`;
 }
 
+// ---------------------------------------------------------------------------
+// Index content builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Statuses recognised by the index formatter — everything else renders as
+ * [unknown]. Only Active (pitfalls) and Accepted (decisions) appear in
+ * rendered .md files; the renderer excludes Deprecated/Superseded/Retired
+ * before writing.
+ */
+const INDEX_KNOWN_STATUSES = ['Active', 'Accepted'];
+
+/**
+ * Truncate a string to maxLen characters, appending '…' if truncated.
+ *
+ * @param {string} str
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen) + '…';
+}
+
+/**
+ * Format a single index line for an ADR or PF entry.
+ * ADR entries have area: null, so the area suffix is naturally omitted.
+ *
+ * @param {{ id: string, title: string, status: string|null, area: string|null }} entry
+ * @returns {string}
+ */
+function formatIndexEntryLine(entry) {
+  const title = truncate(entry.title, 60);
+  const tag = entry.status && INDEX_KNOWN_STATUSES.includes(entry.status) ? `[${entry.status}]` : '[unknown]';
+  const areaSuffix = entry.area ? `  —  ${truncate(entry.area, 80)}` : '';
+  return `  ${entry.id}  ${title}  ${tag}${areaSuffix}`;
+}
+
+/**
+ * Build the compact index content from in-memory active ledger rows.
+ * Empty corpus (both arrays empty) → '(none)'.
+ * No trailing newline (caller adds '\n' before writing).
+ *
+ * Strategy: for each row, obtain its rendered block (truthy raw_body || format*Body(row)),
+ * then extract heading/Status/Area with the same regexes.
+ * This preserves byte-compat for migrated rows that carry Area/Status only in raw_body.
+ * Note: raw_body === "" is treated as absent (falsy); both predicates align with the
+ * truthy check in renderDecisionsFile so index and body files never drift on this edge.
+ *
+ * @param {object[]} activeDecisionRows - Active decision rows (type='decision', sorted by anchor)
+ * @param {object[]} activePitfallRows - Active pitfall rows (type='pitfall', sorted by anchor)
+ * @param {{ decisionsFilePath: string, pitfallsFilePath: string }} opts - absolute file paths for footer
+ * @returns {string} compact index string, or '(none)'
+ */
+function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFilePath, pitfallsFilePath }) {
+  /**
+   * Extract an index entry from a rendered block string.
+   * @param {string} block
+   * @returns {{ id: string, title: string, status: string|null, area: string|null }|null}
+   */
+  function extractEntryFromBlock(block) {
+    const headingMatch = block.match(/^## ((?:ADR|PF)-\d+): (.+)/m);
+    if (!headingMatch) return null;
+    const id = headingMatch[1];
+    const rawTitle = headingMatch[2].trim();
+    const statusMatch = block.match(/- \*\*Status\*\*: (.+)/);
+    const status = statusMatch ? statusMatch[1].trim() : null;
+    const areaMatch = block.match(/- \*\*Area\*\*: (.+)/);
+    const area = areaMatch ? areaMatch[1].trim() : null;
+    return { id, title: rawTitle, status, area };
+  }
+
+  /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
+  const adrEntries = [];
+  for (const row of activeDecisionRows) {
+    const block = row.raw_body ? row.raw_body : formatDecisionBody(row);
+    const entry = extractEntryFromBlock(block);
+    if (entry) adrEntries.push(entry);
+  }
+
+  /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
+  const pfEntries = [];
+  for (const row of activePitfallRows) {
+    const block = row.raw_body ? row.raw_body : formatPitfallBody(row);
+    const entry = extractEntryFromBlock(block);
+    if (entry) pfEntries.push(entry);
+  }
+
+  if (adrEntries.length === 0 && pfEntries.length === 0) return '(none)';
+
+  const blocks = [];
+
+  if (adrEntries.length > 0) {
+    const lines = [`Decisions (${adrEntries.length}):`];
+    for (const entry of adrEntries) {
+      lines.push(formatIndexEntryLine(entry));
+    }
+    blocks.push(lines.join('\n'));
+  }
+
+  if (pfEntries.length > 0) {
+    const lines = [`Pitfalls (${pfEntries.length}):`];
+    for (const entry of pfEntries) {
+      lines.push(formatIndexEntryLine(entry));
+    }
+    blocks.push(lines.join('\n'));
+  }
+
+  // Footer: explain how to read full bodies
+  const footerLines = [];
+  if (adrEntries.length > 0) {
+    footerLines.push(`ADR-NNN entries live in ${decisionsFilePath}`);
+  }
+  if (pfEntries.length > 0) {
+    footerLines.push(`PF-NNN  entries live in ${pitfallsFilePath}`);
+  }
+  footerLines.push(
+    'Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.'
+  );
+  blocks.push(footerLines.join('\n'));
+
+  return blocks.join('\n\n');
+}
+
 module.exports = {
   initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
   toLedgerRow,
+  buildIndexContent,
 };

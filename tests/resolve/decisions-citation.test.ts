@@ -1,17 +1,17 @@
 // tests/resolve/decisions-citation.test.ts
 // Tests for Fix 1: /resolve reads and cites project decisions.
 //
-// Strategy: The loader logic lives in the production module
-// scripts/hooks/lib/decisions-index.cjs; these tests import it directly
-// for real coverage. The markdown structural tests verify that the instruction
-// to invoke the module (or follow its algorithm) is present on every surface.
+// Strategy: The index pipeline (selectActiveRows → buildIndexContent) is the
+// production path; these tests import it directly for real coverage. The
+// markdown structural tests verify that the instruction to read index.md is
+// present on every surface.
 //
 // Test groups:
-//   1. Active-only contract — decisions-index.cjs parses active-only .md input correctly
-//      (Deprecated/Superseded/Retired are hidden by the renderer before writing; the index
-//       never sees them — filterDecisionsContext has been removed)
+//   1. Active-only contract — buildIndexContent pipeline with active-only row input
+//      (Deprecated/Superseded/Retired rows are excluded by selectActiveRows;
+//       filterDecisionsContext has been removed)
 //   2. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
-//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
+//      (index.md direct-read invocation covered by tests/decisions/command-adoption.test.ts)
 //   3. Structural tests: triager.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
 //   4. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
@@ -19,83 +19,136 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { createRequire } from 'module';
-import {
-  ACTIVE_ADR, ACTIVE_PF,
-} from '../decisions/fixtures';
 import { loadFile, extractSection } from '../decisions/helpers';
-import { makeTmpWorktree, cleanupTmpWorktrees } from '../decisions/fixtures';
-import { afterAll } from 'vitest';
-
-afterAll(() => cleanupTmpWorktrees());
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
-// Import the production module — this is the real implementation, not a test copy.
-const { loadDecisionsIndex } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
+const { selectActiveRows } = require(
+  path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')
 ) as {
-  loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
+  selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
 };
 
+const { buildIndexContent } = require(
+  path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
+) as {
+  buildIndexContent: (
+    activeDecisionRows: Record<string, unknown>[],
+    activePitfallRows: Record<string, unknown>[],
+    opts: { decisionsFilePath: string; pitfallsFilePath: string }
+  ) => string;
+};
+
+const OPTS = {
+  decisionsFilePath: '/project/.devflow/decisions/decisions.md',
+  pitfallsFilePath: '/project/.devflow/decisions/pitfalls.md',
+};
+
+const NOW = '2026-01-01T00:00:00Z';
+
+function makeAdrRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'obs_adr001',
+    type: 'decision',
+    anchor_id: 'ADR-001',
+    pattern: 'Use Result types everywhere',
+    date: '2026-01-01',
+    decisions_status: 'Accepted',
+    confidence: 0.9,
+    observations: 1,
+    first_seen: NOW,
+    last_seen: NOW,
+    status: 'created',
+    evidence: [],
+    details: 'context: TypeScript project; decision: return Result<T,E>; rationale: functional error handling',
+    quality_ok: true,
+    ...overrides,
+  };
+}
+
+function makePfRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'obs_pf004',
+    type: 'pitfall',
+    anchor_id: 'PF-004',
+    pattern: 'Background hook scripts grow into god scripts over time',
+    decisions_status: undefined,
+    confidence: 0.95,
+    observations: 2,
+    first_seen: NOW,
+    last_seen: NOW,
+    status: 'created',
+    evidence: [],
+    details: 'area: scripts/hooks/foo.cjs, scripts/hooks/background-learning; issue: god scripts; impact: hard to test; resolution: split concerns',
+    quality_ok: true,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Active-only contract: decisions-index.cjs parses active-only .md input
+// Active-only contract: buildIndexContent pipeline with active-only row input
 //
 // The renderer guarantees .md files only contain active entries.
+// selectActiveRows performs the active-only filter before buildIndexContent.
 // filterDecisionsContext has been removed — these tests validate the
 // active-only parse path that the index will always receive in practice.
 // ---------------------------------------------------------------------------
 
-describe('decisions-index active-only contract (post-render .md input)', () => {
-  it('parses Active ADR sections correctly', () => {
-    const tmpDir = makeTmpWorktree(ACTIVE_ADR);
-    const result = loadDecisionsIndex(tmpDir);
+describe('decisions pipeline active-only contract (post-render row input)', () => {
+  it('includes Active ADR in index output', () => {
+    const rows = [makeAdrRow()];
+    const adrRows = selectActiveRows(rows, 'decisions');
+    const pfRows = selectActiveRows(rows, 'pitfalls');
+    const result = buildIndexContent(adrRows, pfRows, OPTS);
     expect(result).toContain('ADR-001');
     expect(result).toContain('Use Result types everywhere');
   });
 
-  it('parses Active PF sections correctly', () => {
-    const tmpDir = makeTmpWorktree(undefined, ACTIVE_PF);
-    const result = loadDecisionsIndex(tmpDir);
+  it('includes Active PF in index output', () => {
+    const rows = [makePfRow()];
+    const adrRows = selectActiveRows(rows, 'decisions');
+    const pfRows = selectActiveRows(rows, 'pitfalls');
+    const result = buildIndexContent(adrRows, pfRows, OPTS);
     expect(result).toContain('PF-004');
     expect(result).toContain('Background hook scripts');
   });
 
-  it('returns "(none)" when both files are empty (no active entries)', () => {
-    const tmpDir = makeTmpWorktree('', '');
-    expect(loadDecisionsIndex(tmpDir)).toBe('(none)');
-  });
-
-  it('returns "(none)" when both files are absent', () => {
-    const tmpDir = makeTmpWorktree();
-    expect(loadDecisionsIndex(tmpDir)).toBe('(none)');
+  it('returns "(none)" when corpus is empty', () => {
+    const adrRows = selectActiveRows([], 'decisions');
+    const pfRows = selectActiveRows([], 'pitfalls');
+    expect(buildIndexContent(adrRows, pfRows, OPTS)).toBe('(none)');
   });
 
   it('tags Accepted decisions with [Accepted] (renderer default for decisions)', () => {
-    const adr = `## ADR-010: Use ledger for decisions\n\n- **Status**: Accepted\n- **Decision**: Always use the ledger\n`;
-    const tmpDir = makeTmpWorktree(adr);
-    const result = loadDecisionsIndex(tmpDir);
+    const rows = [makeAdrRow({ anchor_id: 'ADR-010', pattern: 'Use ledger for decisions', decisions_status: 'Accepted' })];
+    const adrRows = selectActiveRows(rows, 'decisions');
+    const pfRows = selectActiveRows(rows, 'pitfalls');
+    const result = buildIndexContent(adrRows, pfRows, OPTS);
     expect(result).toContain('[Accepted]');
     expect(result).toContain('ADR-010');
   });
 
   it('tags Active pitfalls with [Active] (renderer default for pitfalls)', () => {
-    const pf = `## PF-010: Watch for lock contention\n\n- **Status**: Active\n- **Area**: scripts/hooks/\n- **Description**: Lock ordering matters\n`;
-    const tmpDir = makeTmpWorktree(undefined, pf);
-    const result = loadDecisionsIndex(tmpDir);
+    const rows = [makePfRow({ anchor_id: 'PF-010', pattern: 'Watch for lock contention' })];
+    const adrRows = selectActiveRows(rows, 'decisions');
+    const pfRows = selectActiveRows(rows, 'pitfalls');
+    const result = buildIndexContent(adrRows, pfRows, OPTS);
     expect(result).toContain('[Active]');
     expect(result).toContain('PF-010');
   });
 
   it('shows both Decisions and Pitfalls blocks with correct counts', () => {
-    const tmpDir = makeTmpWorktree(ACTIVE_ADR, ACTIVE_PF);
-    const result = loadDecisionsIndex(tmpDir);
+    const rows = [makeAdrRow(), makePfRow()];
+    const adrRows = selectActiveRows(rows, 'decisions');
+    const pfRows = selectActiveRows(rows, 'pitfalls');
+    const result = buildIndexContent(adrRows, pfRows, OPTS);
     expect(result).toContain('Decisions (1):');
     expect(result).toContain('Pitfalls (1):');
   });
 
-  it('filterDecisionsContext is NOT exported (removed in Phase 8 cleanup)', () => {
-    const mod = require(path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')) as Record<string, unknown>;
+  it('filterDecisionsContext is NOT a function on decisions-format (removed in Phase 8 cleanup)', () => {
+    const mod = require(path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')) as Record<string, unknown>;
     expect(mod.filterDecisionsContext).toBeUndefined();
   });
 });

@@ -23,20 +23,21 @@ ledger ops below.
 
 ## Iron Law
 
-> **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md or pitfalls.md**
+> **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md**
 >
 > ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are written
 > exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`).
-> One `assign-anchor` invocation claims one number and re-renders both files atomically. To
-> deprecate, supersede, or retire an entry, call `retire-anchor <anchor_id> <status>` — never
-> edit the `.md` files directly.
+> One `assign-anchor` invocation claims one number and re-renders all three files atomically
+> (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
+> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Manual re-render
+> via `render-decisions.cjs render "$(pwd)"` also refreshes index.md.
 
 ## Environment
 
 Your prompt names the project root — run every command from it; all `.devflow/` paths below
 are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-helper.cjs`:
 
-- `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders both `.md` files
+- `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
 - `rotate-observations` — archives `observing` log rows older than 30 days
 
@@ -51,7 +52,7 @@ Queue: `.devflow/dream/.pending-turns.jsonl`. Claim file: `.devflow/dream/.pendi
    - **Fresh (younger than 900s)** — another Dream agent is live. Exit silently; change nothing.
    - **Stale (900s or older)** — a previous run crashed. Re-claim it: `touch` the claim file
      (your heartbeat), then fold in any new queue:
-     `cat .devflow/dream/.pending-turns.jsonl >> .devflow/dream/.pending-turns.processing && rm -f .devflow/dream/.pending-turns.jsonl`
+     `cat .devflow/dream/.pending-turns.jsonl >> .devflow/dream/.pending-turns.processing && unlink .devflow/dream/.pending-turns.jsonl`
      (skip the fold-in if there is no queue file).
 2. Otherwise claim atomically — one winner even across concurrent sessions:
    `mv .devflow/dream/.pending-turns.jsonl .devflow/dream/.pending-turns.processing`
@@ -190,8 +191,11 @@ instead — edit those ledger rows directly (one line at a time), then re-render
 
 1. Run `rotate-observations` if you have not already this run (Part 2 covers it — never run
    it twice).
-2. Delete the claim file as your FINAL act, strictly after every other write:
-   `rm -f .devflow/dream/.pending-turns.processing`
+2. Delete the claim file as your FINAL act, strictly after every other write (bare `rm` is
+   blocked by devflow's recommended deny-list — PF-003):
+   `unlink .devflow/dream/.pending-turns.processing`
+   If deletion is denied, finish normally and note the leftover claim file in your summary —
+   the next run's stale-merge recovery folds it in.
    Crashing before this line leaves the claim file for the next run's stale-merge recovery —
    the correct outcome for a partial run.
 3. End with a 1–3 line summary: what you created, reinforced, promoted, retired, or merged —

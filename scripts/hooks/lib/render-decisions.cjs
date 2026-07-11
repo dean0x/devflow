@@ -31,14 +31,17 @@ const {
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
+  buildIndexContent,
 } = require('./decisions-format.cjs');
 
 const {
   getDecisionsFilePath,
   getPitfallsFilePath,
+  getDecisionsIndexPath,
   getDecisionsLockDir,
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
+const { safePath } = require('./safe-path.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -112,6 +115,62 @@ function anchorNumeric(anchorId) {
 }
 
 /**
+ * Select active rows of a given kind from the ledger, sorted by numeric anchor.
+ * Exported so callers (renderAndWriteAll, migrations) can build the index without
+ * going through renderDecisionsFile.
+ *
+ * @param {object[]} rows - all rows from the ledger (unfiltered)
+ * @param {'decisions'|'pitfalls'} kind
+ * @returns {object[]} filtered + sorted active rows
+ */
+function selectActiveRows(rows, kind) {
+  const type = kind === 'decisions' ? 'decision' : 'pitfall';
+  return rows
+    .filter(r => r.type === type && r.anchor_id && isActive(r))
+    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
+}
+
+/**
+ * Build the full file content from already-filtered + sorted active rows.
+ * Internal helper — callers that have already run selectActiveRows can pass
+ * the result here directly to avoid re-filtering the ledger.
+ *
+ * Per-row content:
+ *   - If row.raw_body is truthy → emit verbatim (migrated entries)
+ *   - Otherwise → formatDecisionBody / formatPitfallBody from details
+ *
+ * @param {object[]} activeRows - already-filtered + sorted active rows
+ * @param {'decisions'|'pitfalls'} kind
+ * @returns {string} complete file content
+ */
+function renderBodyFromActive(activeRows, kind) {
+  // Build per-row blocks
+  const blocks = activeRows.map(row => {
+    if (row.raw_body) {
+      // Migrated entry: emit verbatim. raw_body must start with \n## so
+      // it fits seamlessly after the header preamble.
+      return row.raw_body;
+    }
+    return kind === 'decisions'
+      ? formatDecisionBody(row)
+      : formatPitfallBody(row);
+  });
+
+  // Build TL;DR line (uses active + sorted rows so last-5 are stable)
+  const tldr = buildTldrLine(kind, activeRows);
+
+  // Build header: replace placeholder TL;DR in the init content with the real one.
+  // initDecisionsContent returns "<!-- TL;DR: 0 {kind}. Key: -->\n..." so we
+  // replace the TL;DR line at position 0.
+  const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
+  const headerWithPlaceholder = initDecisionsContent(initKind);
+  // Replace only the first line (the TL;DR comment)
+  const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
+
+  return header + blocks.join('');
+}
+
+/**
  * Pure render function. Produces the full content of a decisions.md or
  * pitfalls.md file from the given ledger rows.
  *
@@ -119,10 +178,6 @@ function anchorNumeric(anchorId) {
  *   - row.type must match kind ('decision' → decisions.md, 'pitfall' → pitfalls.md)
  *   - row.anchor_id must be set
  *   - row must be active (decisions_status not in INACTIVE_STATUSES)
- *
- * Per-row content:
- *   - If row.raw_body is present → emit verbatim (migrated entries)
- *   - Otherwise → formatDecisionBody / formatPitfallBody from details
  *
  * Output structure:
  *   TL;DR line (line 1)
@@ -137,37 +192,7 @@ function anchorNumeric(anchorId) {
  * @returns {string} complete file content
  */
 function renderDecisionsFile(rows, kind) {
-  const type = kind === 'decisions' ? 'decision' : 'pitfall';
-
-  // Filter and sort
-  const active = rows
-    .filter(r => r.type === type && r.anchor_id && isActive(r))
-    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
-
-  // Build per-row blocks
-  const blocks = active.map(row => {
-    if (row.raw_body) {
-      // Migrated entry: emit verbatim. raw_body must start with \n## so
-      // it fits seamlessly after the header preamble.
-      return row.raw_body;
-    }
-    return kind === 'decisions'
-      ? formatDecisionBody(row)
-      : formatPitfallBody(row);
-  });
-
-  // Build TL;DR line (uses active + sorted rows so last-5 are stable)
-  const tldr = buildTldrLine(kind, active);
-
-  // Build header: replace placeholder TL;DR in the init content with the real one.
-  // initDecisionsContent returns "<!-- TL;DR: 0 {kind}. Key: -->\n..." so we
-  // replace the TL;DR line at position 0.
-  const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
-  const headerWithPlaceholder = initDecisionsContent(initKind);
-  // Replace only the first line (the TL;DR comment)
-  const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
-
-  return header + blocks.join('');
+  return renderBodyFromActive(selectActiveRows(rows, kind), kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,15 +239,34 @@ function renderAndWriteAll(worktreePath, rows) {
 
   const decisionsFilePath = getDecisionsFilePath(worktreePath);
   const pitfallsFilePath = getPitfallsFilePath(worktreePath);
+  const indexFilePath = getDecisionsIndexPath(worktreePath);
 
-  const decisionsContent = renderDecisionsFile(rows, 'decisions');
-  const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
+  // Hoist active-row selection: computed once per kind, reused for both the
+  // body render and the index build — avoids two redundant selectActiveRows passes.
+  const activeDecisionRows = selectActiveRows(rows, 'decisions');
+  const activePitfallRows = selectActiveRows(rows, 'pitfalls');
 
+  const decisionsContent = renderBodyFromActive(activeDecisionRows, 'decisions');
+  const pitfallsContent = renderBodyFromActive(activePitfallRows, 'pitfalls');
+
+  // Write body files first; index last. On a crash between body writes and the
+  // index write: on the FIRST render the index is absent (reader falls back to
+  // (none)); on a RE-render the index is stale — one generation behind the new
+  // body files — never corrupt. Both cases are benign and self-heal on the next
+  // successful render.
   writeAtomic(decisionsFilePath, decisionsContent);
   writeAtomic(pitfallsFilePath, pitfallsContent);
 
+  // Build and write compact index (write-time artifact; consumed via plain Read)
+  // Reuses the pre-computed active rows — no additional selectActiveRows pass.
+  const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
+    decisionsFilePath,
+    pitfallsFilePath,
+  });
+  writeAtomic(indexFilePath, indexContent + '\n');
+
   process.stderr.write(
-    `[render-decisions] wrote decisions.md (${decisionsContent.length}B) + pitfalls.md (${pitfallsContent.length}B)\n`
+    `[render-decisions] wrote decisions.md (${decisionsContent.length}B) + pitfalls.md (${pitfallsContent.length}B) + index.md (${indexContent.length}B)\n`
   );
 }
 
@@ -261,10 +305,20 @@ if (require.main === module) {
     process.exit(1);
   }
 
+  // Validate path at trust boundary before any file operations.
+  // safePath rejects null bytes, which path.resolve preserves silently.
+  try {
+    worktreePath = safePath(worktreePath);
+  } catch (err) {
+    process.stderr.write(`render-decisions: invalid worktree path: ${err.message}\n`);
+    process.exit(1);
+  }
+
   const decisionsDir = path.join(worktreePath, '.devflow', 'decisions');
   const ledgerPath = path.join(decisionsDir, LEDGER_FILENAME);
   const decisionsFilePath = getDecisionsFilePath(worktreePath);
   const pitfallsFilePath = getPitfallsFilePath(worktreePath);
+  const indexFilePath = getDecisionsIndexPath(worktreePath);
   const lockDir = getDecisionsLockDir(worktreePath);
 
   // Ensure decisionsDir exists (needed before lock acquisition and file reads)
@@ -273,17 +327,28 @@ if (require.main === module) {
   // Read ledger (empty corpus if absent)
   const rows = parseLedger(ledgerPath);
 
-  // Render both files in memory
-  const decisionsContent = renderDecisionsFile(rows, 'decisions');
-  const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
   if (mode === 'check') {
-    // Compare in-memory render against on-disk content. Exit non-zero on drift.
+    // Render all three files in memory and compare against on-disk content.
+    // Exit non-zero on drift.
+    // Hoist active-row selection (mirrors renderAndWriteAll): computed once per kind,
+    // reused for both body render and index build.
+    const activeDecisionRows = selectActiveRows(rows, 'decisions');
+    const activePitfallRows = selectActiveRows(rows, 'pitfalls');
+    const decisionsContent = renderBodyFromActive(activeDecisionRows, 'decisions');
+    const pitfallsContent = renderBodyFromActive(activePitfallRows, 'pitfalls');
+    const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
+      decisionsFilePath,
+      pitfallsFilePath,
+    }) + '\n';
+
     let drift = false;
     let existingDecisions = '';
     let existingPitfalls = '';
+    let existingIndex = '';
     try { existingDecisions = fs.readFileSync(decisionsFilePath, 'utf8'); } catch { drift = true; }
     try { existingPitfalls = fs.readFileSync(pitfallsFilePath, 'utf8'); } catch { drift = true; }
+    // index.md missing is a drift condition (it should always be present after a render)
+    try { existingIndex = fs.readFileSync(indexFilePath, 'utf8'); } catch { drift = true; }
 
     if (!drift) {
       if (existingDecisions !== decisionsContent) {
@@ -294,12 +359,13 @@ if (require.main === module) {
         process.stderr.write(`[render-decisions] DRIFT: ${pitfallsFilePath}\n`);
         drift = true;
       }
+      if (existingIndex !== indexContent) {
+        process.stderr.write(`[render-decisions] DRIFT: ${indexFilePath}\n`);
+        drift = true;
+      }
     }
 
-    if (drift) {
-      process.exit(1);
-    }
-    process.exit(0);
+    process.exit(drift ? 1 : 0);
   }
 
   // mode === 'render': write atomically under lock
@@ -325,6 +391,7 @@ if (require.main === module) {
 module.exports = {
   renderDecisionsFile,
   renderAndWriteAll,
+  selectActiveRows,
   parseLedger,
   isActive,
   anchorNumeric,

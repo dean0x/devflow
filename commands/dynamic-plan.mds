@@ -39,13 +39,9 @@ Before authoring, verify:
 
 ### Pre-authoring setup
 
-**1. Load DECISIONS_CONTEXT**
+**1. Apply decisions context**
 
-```bash
-node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "$(pwd)"
-```
-
-Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Designer and Evaluator agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Designer and Evaluator agent prompts.
 
 **2. Read the preference profile**
 

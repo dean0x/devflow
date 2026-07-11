@@ -92,10 +92,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 8 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 9 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(8);
+    expect(partialFiles).toHaveLength(9);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -244,6 +244,54 @@ describe('partial expansion in compiled knowledge outputs', () => {
         content,
         `${destRelDir}/${basename}.md must not contain unexpanded @import lines`,
       ).not.toMatch(/^@import /m);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3b. decisions_load host adoption — all knowledge hosts compile the index.md read
+// ---------------------------------------------------------------------------
+
+describe('decisions_load adoption in compiled knowledge command outputs', () => {
+  beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('all 9 knowledge command outputs contain the .devflow/decisions/index.md read (decisions_load expansion)', async () => {
+    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        // file missing — covered by the command-set guard above; skip here
+        continue;
+      }
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain .devflow/decisions/index.md (decisions_load expansion)`,
+      ).toContain('.devflow/decisions/index.md');
+    }
+  });
+
+  it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
+    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must not reference decisions-index.cjs`,
+      ).not.toContain('decisions-index.cjs');
     }
   });
 });

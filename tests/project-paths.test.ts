@@ -36,6 +36,7 @@ import {
   getObservationsLockDir,
   getDecisionsNotificationsPath,
   getDecisionsBatchIdsPath,
+  getDecisionsIndexPath,
   getWorkingMemoryPath,
   getBackupPath,
   getPendingTurnsPath,
@@ -133,6 +134,10 @@ describe('project-paths TypeScript module', () => {
 
     it('getDecisionsBatchIdsPath returns .devflow/decisions/.decisions-batch-ids', () => {
       expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-batch-ids');
+    });
+
+    it('getDecisionsIndexPath returns .devflow/decisions/index.md', () => {
+      expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/decisions/index.md');
     });
   });
 
@@ -246,6 +251,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
+    { name: 'getDecisionsIndexPath', ts: getDecisionsIndexPath, cjs: cjsPaths.getDecisionsIndexPath },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },
     { name: 'getPendingTurnsPath', ts: getPendingTurnsPath, cjs: cjsPaths.getPendingTurnsPath },

@@ -19,11 +19,17 @@ const {
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
+  buildIndexContent,
 } = require(path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')) as {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
   formatPitfallBody: (row: Record<string, unknown>) => string;
   buildTldrLine: (kind: 'decisions' | 'pitfalls', rows: Record<string, unknown>[]) => string;
+  buildIndexContent: (
+    activeDecisionRows: Record<string, unknown>[],
+    activePitfallRows: Record<string, unknown>[],
+    opts: { decisionsFilePath: string; pitfallsFilePath: string }
+  ) => string;
 };
 
 // ---------------------------------------------------------------------------
@@ -238,6 +244,171 @@ describe('buildTldrLine', () => {
     const rows = [{ anchor_id: 'ADR-001' }, { anchor_id: 'ADR-002' }];
     const result = buildTldrLine('decisions', rows);
     expect(result).toContain('ADR-001, ADR-002');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildIndexContent — compact index generation
+// ---------------------------------------------------------------------------
+
+const OPTS = {
+  decisionsFilePath: '/project/.devflow/decisions/decisions.md',
+  pitfallsFilePath:  '/project/.devflow/decisions/pitfalls.md',
+};
+
+function makeAdrRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'obs_adr1',
+    type: 'decision',
+    anchor_id: 'ADR-001',
+    pattern: 'Use Result types everywhere',
+    date: '2026-01-01',
+    details: 'context: TypeScript; decision: return Result<T,E>; rationale: safety',
+    ...overrides,
+  };
+}
+
+function makePfRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'obs_pf1',
+    type: 'pitfall',
+    anchor_id: 'PF-002',
+    pattern: 'Editing installed scripts directly',
+    details: 'area: scripts/hooks/; issue: overwritten on reinstall; impact: lost; resolution: rebuild',
+    ...overrides,
+  };
+}
+
+describe('buildIndexContent', () => {
+  it('returns "(none)" for empty corpus', () => {
+    expect(buildIndexContent([], [], OPTS)).toBe('(none)');
+  });
+
+  it('decisions-only block has correct header and entry line', () => {
+    const result = buildIndexContent([makeAdrRow()], [], OPTS);
+    expect(result).toMatch(/^Decisions \(1\):/m);
+    expect(result).toContain('ADR-001');
+    expect(result).toContain('Use Result types everywhere');
+    expect(result).toContain('[Accepted]');
+    // No pitfalls block
+    expect(result).not.toMatch(/^Pitfalls/m);
+  });
+
+  it('pitfalls-only block has correct header and entry line with area suffix', () => {
+    const result = buildIndexContent([], [makePfRow()], OPTS);
+    expect(result).toMatch(/^Pitfalls \(1\):/m);
+    expect(result).toContain('PF-002');
+    expect(result).toContain('Editing installed scripts directly');
+    expect(result).toContain('[Active]');
+    expect(result).toContain('scripts/hooks/');
+    // No decisions block
+    expect(result).not.toMatch(/^Decisions/m);
+  });
+
+  it('mixed corpus produces Decisions block then Pitfalls block', () => {
+    const result = buildIndexContent([makeAdrRow()], [makePfRow()], OPTS);
+    expect(result).toMatch(/^Decisions \(1\):/m);
+    expect(result).toMatch(/^Pitfalls \(1\):/m);
+    // Decisions must appear before Pitfalls
+    expect(result.indexOf('Decisions (')).toBeLessThan(result.indexOf('Pitfalls ('));
+  });
+
+  it('footer contains absolute paths and Read instruction', () => {
+    const result = buildIndexContent([makeAdrRow()], [makePfRow()], OPTS);
+    expect(result).toContain(OPTS.decisionsFilePath);
+    expect(result).toContain(OPTS.pitfallsFilePath);
+    expect(result).toContain('Read the relevant file');
+  });
+
+  it('no trailing newline in returned string (caller adds \\n before writing)', () => {
+    const result = buildIndexContent([makeAdrRow()], [makePfRow()], OPTS);
+    expect(result).not.toMatch(/\n$/);
+  });
+
+  it('uses raw_body when present (migrated entry byte-compat)', () => {
+    const rawBody = '\n## ADR-005: Migrated decision\n\n- **Status**: Active\n- **Source**: self-learning:obs_m\n';
+    const row = makeAdrRow({ anchor_id: 'ADR-005', raw_body: rawBody });
+    const result = buildIndexContent([row], [], OPTS);
+    expect(result).toContain('ADR-005');
+    expect(result).toContain('Migrated decision');
+    expect(result).toContain('[Active]');
+  });
+
+  it('truncates long title to 60 chars + ellipsis', () => {
+    const longTitle = 'A'.repeat(70);
+    const row = makeAdrRow({ pattern: longTitle });
+    const result = buildIndexContent([row], [], OPTS);
+    // Title in entry line is truncated
+    expect(result).toContain('A'.repeat(60) + '…');
+    expect(result).not.toContain('A'.repeat(61));
+  });
+
+  it('entry line with no area has no " — " area suffix (decisions have no Area field)', () => {
+    const result = buildIndexContent([makeAdrRow()], [], OPTS);
+    // The ADR entry line should not contain an area suffix
+    const lines = result.split('\n');
+    const entryLine = lines.find(l => l.includes('ADR-001'));
+    expect(entryLine).toBeDefined();
+    expect(entryLine).not.toContain(' — ');
+  });
+
+  it('multiple decisions are counted correctly in block header', () => {
+    const rows = [
+      makeAdrRow({ anchor_id: 'ADR-001', id: 'obs_a1' }),
+      makeAdrRow({ anchor_id: 'ADR-002', id: 'obs_a2', pattern: 'Second decision' }),
+    ];
+    const result = buildIndexContent(rows, [], OPTS);
+    expect(result).toMatch(/^Decisions \(2\):/m);
+  });
+
+  it('footer omits ADR-NNN line when no decisions, omits PF-NNN line when no pitfalls', () => {
+    const decisionsOnly = buildIndexContent([makeAdrRow()], [], OPTS);
+    expect(decisionsOnly).toContain('ADR-NNN entries live in');
+    expect(decisionsOnly).not.toContain('PF-NNN  entries live in');
+
+    const pitfallsOnly = buildIndexContent([], [makePfRow()], OPTS);
+    expect(pitfallsOnly).not.toContain('ADR-NNN entries live in');
+    expect(pitfallsOnly).toContain('PF-NNN  entries live in');
+  });
+
+  it('row with raw_body === "" falls through to formatDecisionBody and appears in index (not dropped)', () => {
+    // ISSUE-1: raw_body === "" is falsy — buildIndexContent must NOT treat it as a
+    // present block (which yields no heading match and silently drops the row from
+    // the index). It must fall through to formatDecisionBody so the row appears.
+    const rowWithEmptyRawBody = makeAdrRow({ raw_body: '' });
+    const result = buildIndexContent([rowWithEmptyRawBody], [], OPTS);
+    expect(result).toContain('ADR-001');
+    expect(result).toContain('Use Result types everywhere');
+    expect(result).toContain('[Accepted]');
+  });
+
+  it('pitfall row with raw_body === "" falls through to formatPitfallBody and appears in index (not dropped)', () => {
+    // Symmetric ISSUE-1 check for pitfall rows.
+    const rowWithEmptyRawBody = makePfRow({ raw_body: '' });
+    const result = buildIndexContent([], [rowWithEmptyRawBody], OPTS);
+    expect(result).toContain('PF-002');
+    expect(result).toContain('Editing installed scripts directly');
+    expect(result).toContain('[Active]');
+  });
+
+  it('area suffix in entry line is truncated to 80 chars + ellipsis when area exceeds 80 chars', () => {
+    // ISSUE-6: pins the area-suffix 80-char truncation behaviour for pitfall rows.
+    const longArea = 'A'.repeat(90);
+    const row = makePfRow({ details: `area: ${longArea}; issue: something` });
+    const result = buildIndexContent([], [row], OPTS);
+    // Truncated area must appear followed by ellipsis; the 81st char must NOT appear.
+    expect(result).toContain('A'.repeat(80) + '…');
+    expect(result).not.toContain('A'.repeat(81));
+  });
+
+  it('row with a raw_body missing the Status line renders with [unknown] tag', () => {
+    // ISSUE-16: [unknown]-status branch in formatIndexEntryLine is a defensive
+    // guard for malformed raw_body rows (no Status: field). Restore minimal coverage.
+    const rawBodyNoStatus = '\n## ADR-099: Entry without status line\n\n- **Context**: something\n- **Source**: self-learning:obs_x\n';
+    const row = makeAdrRow({ anchor_id: 'ADR-099', raw_body: rawBodyNoStatus });
+    const result = buildIndexContent([row], [], OPTS);
+    expect(result).toContain('ADR-099');
+    expect(result).toContain('[unknown]');
   });
 });
 

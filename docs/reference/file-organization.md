@@ -74,7 +74,6 @@ devflow/
 │       ├── assets/                  # Static prose assets shipped with hooks
 │       │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │       └── lib/                     # Node.js helper modules
-│           ├── decisions-index.cjs    # Decisions index builder
 │           ├── project-paths.cjs      # Project slug + path resolution
 │           └── safe-path.cjs          # Path safety validation
 └── src/
@@ -211,8 +210,9 @@ Knowledge files in `.devflow/decisions/` capture decisions and pitfalls that age
 |------|--------|--------|---------|
 | `decisions.md` | ADR-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
 | `pitfalls.md` | PF-NNN (sequential) | Dream agent via `assign-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
+| `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
 
-Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
+`decisions.md` and `pitfalls.md` each have a `<!-- TL;DR: ... -->` comment on line 1; SessionStart injects these TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file. `index.md` has no TL;DR line and is not injected at SessionStart — it is the write-time artifact consumed via plain Read by workflow commands at invocation time (applies ADR-007).
 
 ## HUD (Heads-Up Display)
 

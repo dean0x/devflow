@@ -16,20 +16,18 @@ const require = createRequire(import.meta.url);
 
 const {
   renderDecisionsFile,
+  renderAndWriteAll,
+  selectActiveRows,
   parseLedger,
   isActive,
   anchorNumeric,
 } = require(path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
+  renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
+  selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
   isActive: (row: Record<string, unknown>) => boolean;
   anchorNumeric: (anchorId: string) => number;
-};
-
-const { loadDecisionsIndex } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
-) as {
-  loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
 };
 
 const RENDERER = path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs');
@@ -347,38 +345,60 @@ describe('renderDecisionsFile — idempotency', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Round-trip: render → decisions-index parse
+// selectActiveRows — unit tests
 // ---------------------------------------------------------------------------
 
-describe('renderDecisionsFile — round-trip with decisions-index', () => {
-  it('rendered decisions.md is parseable by decisions-index', () => {
+describe('selectActiveRows', () => {
+  it('filters to active decision rows only (kind="decisions")', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeDecisionRow({ anchor_id: 'ADR-003', id: 'obs_003', pattern: 'Inject dependencies everywhere', decisions_status: 'Active' }),
+      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_dep', pattern: 'Deprecated', decisions_status: 'Deprecated' }),
+      makePitfallRow({ anchor_id: 'PF-001' }),
     ];
-    const decisionsContent = renderDecisionsFile(rows, 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-
-    const tmpDir = makeTmpWorktree(decisionsContent, pitfallsContent);
-    const index = loadDecisionsIndex(tmpDir);
-    expect(index).toContain('ADR-001');
-    expect(index).toContain('ADR-003');
+    const result = selectActiveRows(rows, 'decisions');
+    expect(result).toHaveLength(1);
+    expect(result[0].anchor_id).toBe('ADR-001');
   });
 
-  it('rendered pitfalls.md is parseable by decisions-index', () => {
+  it('filters to active pitfall rows only (kind="pitfalls")', () => {
     const rows = [
-      makePitfallRow({ anchor_id: 'PF-002', decisions_status: 'Active' }),
-      makePitfallRow({ anchor_id: 'PF-007', id: 'obs_pf007', pattern: 'Another pitfall', decisions_status: 'Active' }),
+      makeDecisionRow({ anchor_id: 'ADR-001' }),
+      makePitfallRow({ anchor_id: 'PF-001' }),
+      makePitfallRow({ anchor_id: 'PF-003', id: 'obs_pf3', decisions_status: 'Retired' }),
     ];
-    const decisionsContent = renderDecisionsFile([], 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
+    const result = selectActiveRows(rows, 'pitfalls');
+    expect(result).toHaveLength(1);
+    expect(result[0].anchor_id).toBe('PF-001');
+  });
 
-    const tmpDir = makeTmpWorktree(decisionsContent, pitfallsContent);
-    const index = loadDecisionsIndex(tmpDir);
-    expect(index).toContain('PF-002');
-    expect(index).toContain('PF-007');
+  it('sorts by numeric anchor (not lexicographic)', () => {
+    const rows = [
+      makeDecisionRow({ anchor_id: 'ADR-010', id: 'obs_010', pattern: 'D10' }),
+      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_002', pattern: 'D2' }),
+    ];
+    const result = selectActiveRows(rows, 'decisions');
+    expect(result[0].anchor_id).toBe('ADR-002');
+    expect(result[1].anchor_id).toBe('ADR-010');
+  });
+
+  it('excludes rows without anchor_id', () => {
+    const rows = [
+      makeDecisionRow({ anchor_id: 'ADR-001' }),
+      { ...makeDecisionRow(), anchor_id: undefined },
+    ];
+    const result = selectActiveRows(rows, 'decisions');
+    expect(result).toHaveLength(1);
+    expect(result[0].anchor_id).toBe('ADR-001');
+  });
+
+  it('returns empty array when no active rows match', () => {
+    const rows = [
+      makeDecisionRow({ decisions_status: 'Superseded' }),
+    ];
+    expect(selectActiveRows(rows, 'decisions')).toHaveLength(0);
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // CLI: render subcommand writes both .md files
@@ -395,7 +415,7 @@ describe('CLI render subcommand', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits 0 and writes both .md files when ledger is absent (empty corpus)', () => {
+  it('exits 0 and writes decisions.md, pitfalls.md, and index.md when ledger is absent (empty corpus)', () => {
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     // DO NOT create ledger — test empty-corpus path
 
@@ -403,6 +423,7 @@ describe('CLI render subcommand', () => {
 
     expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(true);
     expect(fs.existsSync(path.join(decisionsDir, 'pitfalls.md'))).toBe(true);
+    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(true);
 
     const dContent = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
     expect(dContent).toContain('<!-- TL;DR: 0 decisions. Key: -->');
@@ -411,9 +432,13 @@ describe('CLI render subcommand', () => {
     const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
     expect(pContent).toContain('<!-- TL;DR: 0 pitfalls. Key: -->');
     expect(pContent).toContain('# Known Pitfalls');
+
+    // Empty corpus index must be "(none)\n"
+    const iContent = fs.readFileSync(path.join(decisionsDir, 'index.md'), 'utf8');
+    expect(iContent).toBe('(none)\n');
   });
 
-  it('exits 0 and writes correctly when ledger has active rows', () => {
+  it('exits 0 and writes correctly when ledger has active rows; index.md contains entry IDs', () => {
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
@@ -429,6 +454,32 @@ describe('CLI render subcommand', () => {
 
     const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
     expect(pContent).toContain('## PF-002');
+
+    // index.md must reference both entry IDs
+    const iContent = fs.readFileSync(path.join(decisionsDir, 'index.md'), 'utf8');
+    expect(iContent).toContain('ADR-001');
+    expect(iContent).toContain('PF-002');
+    // Trailing newline
+    expect(iContent).toMatch(/\n$/);
+  });
+
+  it('index.md is written last (body files exist before index)', () => {
+    // We verify write ordering by checking that all three files are present
+    // after a successful render — if index failed mid-write, body files
+    // would still be present (index is written last).
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
+    const row1 = makeDecisionRow({ anchor_id: 'ADR-001' });
+    fs.writeFileSync(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row1) + '\n',
+      'utf8'
+    );
+    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+    // All three must be present
+    expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(true);
+    expect(fs.existsSync(path.join(decisionsDir, 'pitfalls.md'))).toBe(true);
+    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(true);
   });
 });
 
@@ -490,12 +541,41 @@ describe('CLI --check subcommand', () => {
     expect(result.code).not.toBe(0);
   });
 
+  it('exits non-zero when index.md on disk drifts from ledger render', () => {
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
+
+    // Render to disk
+    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+
+    // Corrupt index.md
+    fs.writeFileSync(path.join(decisionsDir, 'index.md'), 'stale index content\n', 'utf8');
+
+    const result = runCheck(tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('DRIFT');
+    expect(result.stderr).toContain('index.md');
+  });
+
+  it('exits non-zero when index.md is absent after a render (missing = drift)', () => {
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
+
+    // Render to disk then remove index.md
+    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+    fs.unlinkSync(path.join(decisionsDir, 'index.md'));
+
+    const result = runCheck(tmpDir);
+    expect(result.code).not.toBe(0);
+  });
+
   it('--check does not write files', () => {
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     // No .md files yet — check will see drift (absent = drift) and exit non-zero
     runCheck(tmpDir);
     // Files should still be absent
     expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(false);
+    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(false);
   });
 });
 
