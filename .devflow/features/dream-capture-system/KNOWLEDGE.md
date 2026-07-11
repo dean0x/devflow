@@ -170,12 +170,12 @@ When emitting, it resolves the model via project `decisions/decisions.json` → 
 opus|sonnet|haiku)` allowlist before ever interpolating into the directive text.
 
 The **Dream agent** (`shared/agents/dream.md`) then:
-1. Claims the queue: atomic `mv .pending-turns.jsonl .pending-turns.processing`. Lost `mv` = exit silently. Stale `.processing` is re-claimed (`touch` heartbeat) and any new queue is folded in.
+1. Claims the queue: atomic `mv .pending-turns.jsonl .pending-turns.processing`. Lost `mv` = exit silently. Stale `.processing` is re-claimed (`touch` heartbeat), any new queue is folded in, and the stale-merge fold-in tail removes the now-redundant file via `unlink` (not `rm` — see Gotchas).
 2. Reads everything directly with its Read tool: the claimed batch, `decisions-log.jsonl`, `decisions.md`/`pitfalls.md`/`index.md` (active entries), `.decisions-usage.json`.
 3. Writes observations directly — appends one JSONL row via heredoc, or Edit-replaces a single existing row to reinforce it. Never rewrites the whole file.
 4. Calls only the three ledger ops via Bash: `assign-anchor` (numbering + render), `retire-anchor` (status flip + render), `rotate-observations` (30-day archival). Each self-locks internally.
 5. Heartbeats (`touch`) the claim file once at the detection→curation boundary.
-6. Deletes `.pending-turns.processing` as its **final act** (consume-then-delete).
+6. Deletes `.pending-turns.processing` as its **final act** (consume-then-delete) via `unlink` (POSIX single-file delete; `rm` is deny-listed on Recommended installs — see Gotchas and avoids PF-003). Denial-tolerance fallback: if the deletion is denied, the agent finishes normally and notes the leftover claim file — the next run's 900s stale-merge recovery folds it in.
 7. Ends with a 1–3 line summary.
 
 ### 4. Dream agent instructions (shared/agents/dream.md)
@@ -192,7 +192,15 @@ that row (single-line Edit) rather than creating a duplicate. Promote via `assig
 when `quality_ok=true`. Curation (Part 2): run `rotate-observations` first, then retire ≤5
 candidates via `retire-anchor <id> <status>`.
 
-Contract tests: `tests/dream-agent.test.ts` (frontmatter, claim protocol, negatives) and
+**Deny-list-safe deletions**: every single-file deletion in `dream.md`'s instructions uses
+`unlink`, never bare `rm`. The devflow Recommended-init deny-list (`src/templates/managed-settings.json`)
+blocks `rm` in agent-authored shell; `unlink` matches no deny-list pattern. This applies at both
+the stale-merge fold-in tail and the Finishing step final act. Contract-pinned by
+`tests/dream-agent.test.ts`: positive pin on `unlink` in the FINAL act AND a negative guard
+`expect(content).not.toMatch(/\brm -/)`. When editing `dream.md`, use `unlink` for any new
+single-file delete instruction.
+
+Contract tests: `tests/dream-agent.test.ts` (frontmatter, claim protocol, deny-list guards) and
 `tests/decisions/dream-curation.test.ts` + `decisions-format.test.ts`.
 
 ### 5. DECISIONS_CONTEXT loading (workflow commands)
@@ -272,6 +280,16 @@ removed by a single-feature disable because they are shared plumbing across feat
 full path resolution and I/O. The four state-mutating handlers share a `requireGitRoot(actionSuffix)`
 guard.
 
+**`handleReset` idempotency**: `devflow decisions --reset` deletes `.devflow/decisions/` entirely
+and drains the dream queue. The reset lock dir `.devflow/decisions/.decisions.lock` lives **inside**
+the directory being deleted; a second consecutive reset would find the parent gone, causing the
+non-recursive lock `mkdir` to fail with ENOENT and misreport "Decisions system is currently running".
+Fixed by ensuring the parent dir exists with `fs.mkdir(dirname, {recursive:true})` before the
+NON-recursive lock `mkdir` (EEXIST must keep meaning genuine contention). The success message is
+the count-free, test-pinned string `Reset complete — removed .devflow/decisions/ and dream queue state.`
+(a per-file counter was misleading — it never counted the recursive directory removal). Idempotency
+is behavior-tested in `tests/decisions/cli-subcommands.test.ts` with tmpdir harnesses.
+
 **`dream-cleanup.ts` centralizes the two dream-side cleanup predicates**: `sweepLegacyDreamMarkers
 (dreamDir)` is shared by `devflow decisions --reset` and `purge-dream-marker-pipeline-v1`.
 `drainDreamQueue(gitRoot)` is shared by `--clear`/`--disable`.
@@ -289,6 +307,7 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 
 ## Anti-Patterns
 
+- **Using bare `rm` in agent instructions**: `rm` is deny-listed by devflow's Recommended-init settings. Any single-file deletion an agent author writes into instruction files must use `unlink` instead. `rm -rf` is a separate escalation to a shell-based approach — also deny-listed. This applies to `dream.md` and any future agent instruction file with a Bash-based cleanup step (avoids PF-003).
 - **Wrapping `assign-anchor`/`retire-anchor`/`rotate-observations` in your own lock**: all three self-lock internally; an external lock nests and times out.
 - **Whole-file rewrites of `decisions-log.jsonl`**: races the capture-side scanner and any concurrent op's log update.
 - **Hand-editing any renderer-owned file (`decisions.md`, `pitfalls.md`, or `index.md`)**: deterministically rendered by `render-decisions.cjs`; a manual edit is silently overwritten on the next `assign-anchor`/`retire-anchor` call.
@@ -300,6 +319,8 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 
 ## Gotchas
 
+- **`rm` vs `unlink` in agent instruction files (deny-list)**: devflow's Recommended-init deny-list blocks bare `rm` (matched as a shell command pattern) in agent-authored Bash. `unlink` — the POSIX single-file delete syscall wrapper — is not deny-listed. Any future edit to `dream.md` or another agent instruction file that adds a file-deletion step must use `unlink`, not `rm`. The contract is enforced by `tests/dream-agent.test.ts`'s negative guard `expect(content).not.toMatch(/\brm -/)`.
+- **Reset lock dir lives inside the directory being reset**: `.devflow/decisions/.decisions.lock` is a child of `.devflow/decisions/`. After `fs.rm(decisionsDir, {recursive:true})`, the parent is gone; a second `devflow decisions --reset` call would fail the non-recursive lock `mkdir` with ENOENT — surfacing as a false "system currently running" error. The fix (`fs.mkdir(dirname, {recursive:true})` before the lock mkdir) must stay or idempotency breaks again.
 - **Two distinct lock mechanisms, not one**: the generic `dream-lock` helper (`dream_lock_acquire`, 30s stale-break) is used only by `queue-append`'s overflow-truncation path. The memory worker defines its OWN inline lock (300s stale-break). Don't assume the 30s generic threshold applies to `.working-memory.lock`. The dream side has no lock at all — `.processing` plays that role.
 - **`dream/config.json` is shared, multi-feature state**: `memory`, `decisions`, and `knowledge` all live in the same file. Any code that writes it must read-modify-write, preserving keys it doesn't own.
 - **Hooks snapshot at session start**: registering a hook for the FIRST time only takes effect for a NEW Claude Code session. Toggling an ALREADY-REGISTERED hook's feature takes effect on the very next invocation (every hook re-reads `dream/config.json` fresh).
@@ -321,7 +342,7 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 - `scripts/hooks/memory-worker` — Stop-hook 120s throttle + touch-before-spawn + spawn
 - `scripts/hooks/background-memory-update` — detached memory-refresh worker (haiku, skip-permissions, 300s/90s lock, 120s watchdog)
 - `scripts/hooks/session-start-context` — SessionStart injection: TL;DR (Section 1) + Dream directive with `opus|sonnet|haiku` allowlist (Section 2)
-- `shared/agents/dream.md` — Dream agent: claim protocol, detection bar, curation bounds, consume-then-delete finishing; Iron Law covers `decisions.md`/`pitfalls.md`/`index.md`
+- `shared/agents/dream.md` — Dream agent: claim protocol, detection bar, curation bounds, `unlink`-only deletions, denial-tolerance fallback, consume-then-delete finishing; Iron Law covers `decisions.md`/`pitfalls.md`/`index.md`
 - `scripts/hooks/session-start-memory` — 3-state memory header + D56c cold path
 - `scripts/hooks/dream-lock` — generic mkdir-based lock (30s stale-break); used only by `queue-append`
 - `scripts/hooks/lib/render-decisions.cjs` — exports `renderAndWriteAll` (writes all three files: body files first, `index.md` last), `selectActiveRows`, `isActive`; `--check` mode treats missing/stale `index.md` as drift
@@ -333,6 +354,8 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 - `src/cli/utils/dream-cleanup.ts` — `sweepLegacyDreamMarkers` and `drainDreamQueue` (shared cleanup predicates)
 - `src/cli/utils/decisions-config.ts` — TS `DecisionsConfig` loader (`model`, `debug` only)
 - `src/cli/hud/components/decisions-counts.ts` — HUD counts; active-row semantics contract-tested against `render-decisions.cjs`'s `isActive()`
+- `tests/dream-agent.test.ts` — pins frontmatter, claim protocol, `unlink` in FINAL act, negative guard `not.toMatch(/\brm -/)`
+- `tests/decisions/cli-subcommands.test.ts` — behavior tests for `handleReset` idempotency and success-message contract; uses tmpdir harnesses
 - `tests/config-disable-guards.test.ts` — guards on the config-only disable contract across memory/decisions
 - `tests/hud-decisions-counts.test.ts` — pins HUD/CJS `isActive()` agreement across the full `decisions_status` matrix
 
@@ -342,4 +365,5 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 - ADR-001 — the config-only gate (no sentinel files) and `purge-dream-worker-state-v1` follow the clean-break precedent ADR-001 established.
 - ADR-002 — contrast: unlike `.devflow/features/`, none of `.devflow/memory/`, `.devflow/dream/`, or `.devflow/decisions/` are git-tracked; every file here stays local and gitignored.
 - ADR-003 — this knowledge base documents the current end state only, per ADR-003.
+- PF-003 — deny-listed bare `rm` in agent instructions; resolved by switching `dream.md`'s deletion steps to `unlink`; the `tests/dream-agent.test.ts` negative guard contracts this fix permanently.
 - `docs/working-memory.md`, `docs/reference/file-organization.md` — user-facing docs for the same architecture.
