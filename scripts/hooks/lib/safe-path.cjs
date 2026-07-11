@@ -11,6 +11,11 @@ const path = require('path');
  * @returns {string}
  */
 function safePath(filePath, allowedRoot) {
+  // D-SEC-001: Validate at boundary — reject null bytes before path.resolve, which
+  // preserves them silently. A null byte in a path is always hostile input.
+  if (filePath.includes('\0')) {
+    throw new Error(`Invalid path: contains null byte`);
+  }
   const resolved = path.resolve(filePath);
   if (typeof allowedRoot === 'string') {
     const root = path.resolve(allowedRoot);
