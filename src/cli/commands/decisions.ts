@@ -210,7 +210,12 @@ async function handleReset(): Promise<void> {
 
   const lockDir = getDecisionsLockDir(gitRoot);
 
+  // Ensure the parent directory exists so a second reset (after .devflow/decisions/
+  // was already removed) does not fail with ENOENT and emit a false contention error.
+  await fs.mkdir(path.dirname(lockDir), { recursive: true });
+
   // Acquire lock to prevent conflict with a concurrent `devflow decisions` invocation.
+  // Non-recursive: EEXIST still means genuine contention.
   try {
     await fs.mkdir(lockDir);
   } catch {

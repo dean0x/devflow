@@ -546,3 +546,59 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
     expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// --reset idempotency: second run after .devflow/decisions/ is already gone
+// must complete truthfully, never emit the "currently running" contention msg.
+// Root cause: lock dir is inside the decisions dir; once decisions/ is removed,
+// fs.mkdir(lockDir) fails with ENOENT, which the old code treated as contention.
+// ---------------------------------------------------------------------------
+
+describe('decisions --reset is idempotent when decisions dir is already gone', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    vi.mocked(p.log.error).mockClear();
+    vi.mocked(p.log.success).mockClear();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('does not emit the contention message on a second reset when .devflow/decisions/ is already absent', async () => {
+    // First reset: create decisions/ so the first run has something to remove.
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+
+    // Prepare for second run.
+    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    vi.mocked(p.log.error).mockClear();
+    vi.mocked(p.log.success).mockClear();
+
+    // Second reset — .devflow/decisions/ is already gone.
+    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+
+    expect(p.log.error).not.toHaveBeenCalledWith(
+      'Decisions system is currently running. Try again in a moment.',
+    );
+    expect(p.log.success).toHaveBeenCalledWith(
+      'Reset complete — removed .devflow/decisions/ and dream queue state.',
+    );
+  });
+
+  it('completes truthfully even when called on a project with no decisions state at all', async () => {
+    // No .devflow/decisions/ ever created — simulates a fresh project.
+    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+
+    expect(p.log.error).not.toHaveBeenCalledWith(
+      'Decisions system is currently running. Try again in a moment.',
+    );
+    expect(p.log.success).toHaveBeenCalledWith(
+      'Reset complete — removed .devflow/decisions/ and dream queue state.',
+    );
+  });
+});
