@@ -84,7 +84,7 @@ hook-registration toggle):
 | `decisions/decisions.json` / `~/.devflow/decisions.json` | `devflow decisions --configure` | Dream agent tuning: `model`, `debug` only |
 | `memory/WORKING-MEMORY.md` | `background-memory-update` | rendered working memory |
 | `decisions/decisions.md` / `pitfalls.md` | `render-decisions.cjs` (via `assign-anchor`/`retire-anchor`) | rendered ledger body files — written before `index.md`; crash leaves body files without a stale index |
-| `decisions/index.md` | `render-decisions.cjs` `renderAndWriteAll` (written **last**, crash-safe) | compact write-time ADR/PF index — consumed by workflow commands via `decisions_load()` plain Read; `(none)` sentinel when ledger is empty |
+| `decisions/index.md` | `render-decisions.cjs` `renderAndWriteAll` (written **last**, after body files via atomic tmp+rename) | compact write-time ADR/PF index — consumed by workflow commands via `decisions_load()` plain Read; `(none)` sentinel when ledger is empty; absent on first-render crash (benign — `(none)` fallback), stale on re-render crash (benign — one generation behind; self-heals next render; `--check` flags it) |
 | `memory/.last-refresh-ok` | memory worker, on success | memory success stamp (the dream side has no stamp — the deleted `.processing` IS success) |
 
 ## Component Interactions
@@ -214,8 +214,10 @@ subprocess:
 3. If absent or empty: set `DECISIONS_CONTEXT` to `(none)`.
 
 `index.md` is written by `renderAndWriteAll` in `render-decisions.cjs` **last** (after body
-files), so a crash leaves body files intact with `index.md` missing — the `(none)` fallback
-handles this gracefully. `devflow:apply-decisions` then resolves full body content on demand via
+files written via atomic tmp+rename), so a crash during a first render leaves `index.md` absent
+— `decisions_load()` falls back to `(none)`. A crash during a re-render leaves `index.md`
+stale (the previous version) — one generation behind but never corrupt; self-heals on the next
+successful render; `--check` mode flags it as drift. `devflow:apply-decisions` then resolves full body content on demand via
 explicit Read of `decisions.md`/`pitfalls.md`. The `_decisions.mds` partial is compiled into
 all 12 command host files at build time via `npm run build:mds`; see the feature-knowledge-system
 KB for MDS build mechanics.
@@ -326,7 +328,7 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 - **Hooks snapshot at session start**: registering a hook for the FIRST time only takes effect for a NEW Claude Code session. Toggling an ALREADY-REGISTERED hook's feature takes effect on the very next invocation (every hook re-reads `dream/config.json` fresh).
 - **Directive spawn depends on model compliance**: the hook only *asks* the main model to spawn the Dream agent. A model that skips the spawn delays processing to the next session — nothing is lost, but nothing is processed.
 - **`claude -p` sessions receive the directive too**: SessionStart hooks fire in non-interactive sessions (except the memory worker's own, excluded by `DEVFLOW_BG_UPDATER`). An unrelated `claude -p` run may receive — and may or may not act on — the directive.
-- **`index.md` absent = `(none)` — not an error**: a crash during `renderAndWriteAll` (which writes body files first, index last) leaves `index.md` missing while body files are intact. `decisions_load()` handles this with the `(none)` fallback. The index will be re-written on the next successful render.
+- **`index.md` absent or stale — both benign**: body files are written first via atomic tmp+rename; `index.md` is written last. A crash on a **first render** leaves `index.md` absent — `decisions_load()` falls back to `(none)`. A crash on a **re-render** leaves `index.md` stale (the prior version) — one generation behind, never corrupt. Both cases self-heal on the next successful render; `--check` mode flags a missing or stale `index.md` as drift.
 - **Accepted append-vs-claim race**: `queue_append_row`'s overflow truncation is read-then-replace, not a lock-held write — a lock-free concurrent append can be silently dropped. The guarantee that holds is "the file is never corrupted", not "no data is ever lost."
 - **AskUserQuestion fixtures are empirically pinned, not invented**: `capture-question`'s parser was built against real payload samples (`tests/capture-hooks.test.ts`). Any non-object `tool_response`, and any cancelled/absent shape, degrades to "zero rows, exit 0".
 - **Memory/dream file isolation is a hard invariant**: `devflow memory --clear` and `devflow decisions --clear`/`--reset` never cross into the sibling feature's files.
