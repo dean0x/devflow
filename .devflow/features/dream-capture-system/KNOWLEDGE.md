@@ -92,7 +92,7 @@ hook-registration toggle):
 ### 1. Dual-append (capture-prompt / capture-turn / capture-question)
 
 All three capture hooks share one shape: resolve `PROJECT_ROOT` (via `resolve-project-root`,
-falling back to `CWD`), truncate content, then call exactly two `queue-append` functions:
+falling back to `CWD`), then call exactly two `queue-append` functions:
 
 - `queue_read_gates "$DREAM_DIR/config.json"` — **one config-read subprocess fork** returning
   both `_QG_MEMORY` and `_QG_DECISIONS` (AC-P1). The gate is config-only (mirrors memory's
@@ -101,11 +101,10 @@ falling back to `CWD`), truncate content, then call exactly two `queue-append` f
   <content> <ts>` — appends the SAME row to whichever queue(s) are enabled, independently.
 
 Row schema is always `{role, content, ts}`: `role` ∈ `user` (capture-prompt) | `assistant`
-(capture-turn) | `qa` (capture-question, one row per answered question). Truncation:
-prompts/assistant messages cap at 2000 chars; a `qa` row's question and answer are each capped
-at 1000 chars **independently**. Every queue file is created with mode `0600` (`umask 077`) on
-first write. After each append, `queue_append_row` checks line count and — only when it exceeds
-200 — truncates to the newest 100 lines under `dream_lock_acquire "<file>.lock" 2`.
+(capture-turn) | `qa` (capture-question, one row per answered question). Every queue file is
+created with mode `0600` (`umask 077`) on first write. After each append, `queue_append_row`
+checks line count and — only when it exceeds 200 — truncates to the newest 100 lines under
+`dream_lock_acquire "<file>.lock" 2`.
 
 `capture-turn` also runs the decisions-usage scanner (`decisions-usage-scan.cjs`) directly,
 gated only by a grep for `ADR-[0-9]+|PF-[0-9]+` in the assistant message AND
@@ -337,7 +336,7 @@ ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
 
 ## Key Files
 
-- `scripts/hooks/capture-prompt`, `capture-turn`, `capture-question` — three always-on capture hooks; share the truncate → `queue_read_gates` → `queue_append_both` shape.
+- `scripts/hooks/capture-prompt`, `capture-turn`, `capture-question` — three always-on capture hooks; share the `queue_read_gates` → `queue_append_both` shape.
 - `scripts/hooks/json-parse` — sources `_HAS_JQ`/`_JSON_AVAILABLE` and every `json_*` helper, including `json_extract_cwd_field` (single home of the SOH delimiter)
 - `scripts/hooks/json-helper.cjs` — node fallback for every `json_*` op, including `extract-cwd-field`
 - `scripts/hooks/queue-append` — shared helper: `queue_append_row`, `queue_append_both`, `queue_read_gates`
