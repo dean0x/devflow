@@ -58,11 +58,6 @@ if [ -z "$ASSISTANT_MSG" ]; then
   exit 0
 fi
 
-# Truncate to 2000 chars
-if [ ${#ASSISTANT_MSG} -gt 2000 ]; then
-  ASSISTANT_MSG="${ASSISTANT_MSG:0:2000}... [truncated]"
-fi
-
 source "$SCRIPT_DIR/queue-append" || { echo "capture-turn: failed to source queue-append" >&2; exit 1; }
 
 # --- AC-P1: exactly ONE config-read fork, fetching both memory + decisions fields ---

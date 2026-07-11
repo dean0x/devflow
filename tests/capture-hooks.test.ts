@@ -118,11 +118,11 @@ describe('capture-prompt', () => {
     expect(dream).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
   });
 
-  it('AC-F1: content truncated at 2000 chars', () => {
+  it('AC-F1: long prompt passes through whole (no truncation)', () => {
     const longPrompt = 'x'.repeat(2500);
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: longPrompt }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    expect((mem[0].content as string).length).toBe(2000 + '... [truncated]'.length);
+    expect((mem[0].content as string)).toBe(longPrompt);
   });
 
   it('empty prompt -> zero appends, no .devflow scaffolding', () => {
@@ -251,11 +251,11 @@ describe('capture-turn', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
-  it('content truncated at 2000 chars', () => {
+  it('long message passes through whole (no truncation)', () => {
     const longMessage = 'b'.repeat(5000);
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: longMessage }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    expect((mem[0].content as string).length).toBe(2000 + '... [truncated]'.length);
+    expect((mem[0].content as string)).toBe(longMessage);
   });
 
   it('ignores legacy response_text field — only last_assistant_message gates capture', () => {
@@ -390,7 +390,7 @@ describe('capture-question', () => {
     expect(mem[0].content).toBe('Q: Pick colors\nA: Red; Blue');
   });
 
-  it('truncation: Q and A are capped at 1000 chars INDEPENDENTLY', () => {
+  it('long Q and A pass through whole (no truncation)', () => {
     const longQ = 'Q'.repeat(1500);
     const longA = 'A'.repeat(1500);
     runHook(
@@ -406,8 +406,8 @@ describe('capture-question', () => {
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
     const content = mem[0].content as string;
     const [qPart, aPart] = content.split('\nA: ');
-    expect(qPart.replace('Q: ', '')).toHaveLength(1000 + '... [truncated]'.length);
-    expect(aPart).toHaveLength(1000 + '... [truncated]'.length);
+    expect(qPart.replace('Q: ', '')).toBe(longQ);
+    expect(aPart).toBe(longA);
   });
 
   it('hostile answer content is safely escaped (quotes, $(...), newlines collapsed)', () => {

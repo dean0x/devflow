@@ -136,11 +136,6 @@ _QUESTION_COUNT=0
 while IFS=$'\t' read -r Q A; do
   [ -z "$Q" ] && continue
 
-  # Q and A truncated INDEPENDENTLY at 1000 chars each so a long question can't
-  # swallow the answer.
-  if [ ${#Q} -gt 1000 ]; then Q="${Q:0:1000}... [truncated]"; fi
-  if [ ${#A} -gt 1000 ]; then A="${A:0:1000}... [truncated]"; fi
-
   CONTENT="Q: ${Q}
 A: ${A}"
   TS=$(date +%s)
