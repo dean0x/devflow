@@ -1,7 +1,7 @@
 ---
 feature: dream-capture-system
 name: Dream & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update detached worker, the Dream agent (shared/agents/dream.md), the session-start-context dream directive, or the dream/decisions config toggles. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, background-memory-update, Dream agent, dream directive, DREAM MAINTENANCE, DEVFLOW_BG_UPDATER, dream config, dream-lock, json_extract_cwd_field, dream-cleanup, DREAM_MODEL allowlist, decisions index, index.md."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update detached worker, the Dream agent (shared/agents/dream.md), the session-start-context dream directive, the dream/decisions config toggles, or the decisions index.md write-time artifact and its consumption via decisions_load(). Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, background-memory-update, Dream agent, dream directive, DREAM MAINTENANCE, DEVFLOW_BG_UPDATER, dream config, dream-lock, json_extract_cwd_field, dream-cleanup, DREAM_MODEL allowlist, decisions index, index.md."
 category: architecture
 directories:
   - scripts/hooks
@@ -17,7 +17,7 @@ directories:
   - src/cli/hud/components/decisions-counts.ts
   - commands/_partials
 created: 2026-07-03
-updated: 2026-07-11
+updated: 2026-07-12
 ---
 
 # Dream & Capture System

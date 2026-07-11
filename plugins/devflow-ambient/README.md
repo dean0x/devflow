@@ -1,6 +1,6 @@
 # devflow-ambient
 
-Ambient mode — orchestrator charter + plan handoff. Two presence-gated hooks make every git-repo session an orchestrator session: a `~200-token` charter injected at session start and a per-prompt reminder that steers the main model to delegate work to agents and devflow workflows. Plan-mode handoffs (`Implement the following plan:`) auto-run `devflow:implement`.
+Ambient mode — orchestrator charter + plan handoff. Two presence-gated hooks make every git-repo session an orchestrator session: a `~535-token` charter injected at session start and a per-prompt reminder that steers the main model to delegate work to agents and devflow workflows. Plan-mode handoffs (`Implement the following plan:`) auto-run `devflow:implement`.
 
 ## Activation
 
