@@ -636,9 +636,11 @@ export async function renderDecisionsIndex(
   const mod: unknown = req(rendererPath);
 
   // Validate required exports
+  // D309: parseLedger return is unknown — the CJS bridge can't guarantee LedgerRow shape.
+  // selectActiveRows kind is narrowed to the actual domain union.
   const renderer = mod as {
-    parseLedger?: (p: string) => LedgerRow[];
-    selectActiveRows?: (rows: LedgerRow[], kind: string) => LedgerRow[];
+    parseLedger?: (p: string) => unknown;
+    selectActiveRows?: (rows: LedgerRow[], kind: 'decisions' | 'pitfalls') => LedgerRow[];
   };
   if (typeof renderer.parseLedger !== 'function' || typeof renderer.selectActiveRows !== 'function') {
     throw new Error(
@@ -654,8 +656,9 @@ export async function renderDecisionsIndex(
   }
 
   try {
-    const rows = renderer.parseLedger(ledgerPath);
-    if (rows.length === 0) return { written: false };
+    const rawRows = renderer.parseLedger(ledgerPath);
+    if (!Array.isArray(rawRows) || rawRows.length === 0) return { written: false };
+    const rows = rawRows as LedgerRow[];
 
     // Load decisions-format.cjs for buildIndexContent
     const formatPath = path.join(path.dirname(rendererPath), 'decisions-format.cjs');
@@ -681,13 +684,11 @@ export async function renderDecisionsIndex(
       pitfallsFilePath,
     });
 
-    // Write index.md atomically (ensure dir exists)
+    // Write index.md atomically via the same writeFileAtomicExclusive used by
+    // all other writers in this file — ensures O_EXCL/TOCTOU symlink protection.
     const decisionsDir = getDecisionsDir(projectRoot);
     await fs.mkdir(decisionsDir, { recursive: true });
-    const indexFilePath = getDecisionsIndexPath(projectRoot);
-    const tmpPath = indexFilePath + '.tmp';
-    await fs.writeFile(tmpPath, indexContent + '\n', { flag: 'w' });
-    await fs.rename(tmpPath, indexFilePath);
+    await writeFileAtomicExclusive(getDecisionsIndexPath(projectRoot), indexContent + '\n');
 
     return { written: true };
   } finally {
