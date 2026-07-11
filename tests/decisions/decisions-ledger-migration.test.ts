@@ -9,12 +9,14 @@
 // AC-F3  decisions.md/pitfalls.md byte-reproducible from the ledger
 //        (verify migrated render is byte-identical except TL;DR Key).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { migrateDecisionsLedger, renderDecisionsIndex } from '../../src/cli/utils/decisions-ledger-migration.js';
+import * as ledgerMigration from '../../src/cli/utils/decisions-ledger-migration.js';
+import { MIGRATIONS } from '../../src/cli/utils/migrations.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -982,5 +984,74 @@ describe('renderDecisionsIndex', () => {
 
     const indexContent = await fs.readFile(path.join(decisionsDir, 'index.md'), 'utf-8');
     expect(indexContent.trim()).toBe('(none)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ISSUE-7: render-decisions-index-v1 migration — registration + entry-point
+// ---------------------------------------------------------------------------
+
+describe('render-decisions-index-v1 migration — registration and entry-point', () => {
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('run delegates to renderDecisionsIndex and reports the write when it returns written: true', async () => {
+    // The migration's run() calls renderDecisionsIndex(ctx.projectRoot) via a dynamic import.
+    // In the test environment the default renderer path resolution is wrong (source tree vs
+    // dist tree), so we spy on the live module binding instead of running through the real CJS
+    // renderer. This is the correct behaviour-focused approach: assert the delegation, not the
+    // renderer internals (those are covered by the renderDecisionsIndex describe blocks above).
+    const spy = vi
+      .spyOn(ledgerMigration, 'renderDecisionsIndex')
+      .mockResolvedValueOnce({ written: true });
+
+    const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+    if (!m) throw new Error('render-decisions-index-v1 migration not found');
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'render-decisions-index-migration-test-'));
+    try {
+      const ctx: import('../../src/cli/utils/migrations.js').PerProjectMigrationContext = {
+        scope: 'per-project',
+        devflowDir: path.join(tmp, '.devflow'),
+        memoryDir: path.join(tmp, '.devflow', 'memory'),
+        projectRoot: tmp,
+      };
+
+      const result = await (m.run as (ctx: typeof ctx) => Promise<import('../../src/cli/utils/migrations.js').MigrationRunResult>)(ctx);
+
+      // The migration must have delegated to renderDecisionsIndex with the project root
+      expect(spy).toHaveBeenCalledWith(tmp);
+      // And it must have surfaced the write info message
+      expect(result?.infos ?? []).toContain('render-decisions-index-v1: wrote index.md');
+    } finally {
+      spy.mockRestore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('run is a no-op (no error) when no ledger exists', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'render-decisions-index-noop-test-'));
+    try {
+      const m = MIGRATIONS.find(m => m.id === 'render-decisions-index-v1');
+      if (!m) throw new Error('render-decisions-index-v1 migration not found');
+
+      const ctx: import('../../src/cli/utils/migrations.js').PerProjectMigrationContext = {
+        scope: 'per-project',
+        devflowDir: path.join(tmp, '.devflow'),
+        memoryDir: path.join(tmp, '.devflow', 'memory'),
+        projectRoot: tmp,
+      };
+
+      await expect(
+        (m.run as (ctx: typeof ctx) => Promise<import('../../src/cli/utils/migrations.js').MigrationRunResult>)(ctx),
+      ).resolves.not.toThrow();
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });

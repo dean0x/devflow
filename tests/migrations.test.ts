@@ -1498,6 +1498,62 @@ describe('purge-orphaned-dream-commit-hook-v1 migration', () => {
   });
 });
 
+// purge-orphaned-decisions-index-v1 (global)
+// ---------------------------------------------------------------------------
+
+describe('purge-orphaned-decisions-index-v1 migration', () => {
+  let tmpDir: string;
+  let fakeHome: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-decisions-index-test-'));
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(path.join(fakeHome, 'scripts', 'hooks', 'lib'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const scriptPath = (): string =>
+    path.join(fakeHome, 'scripts', 'hooks', 'lib', 'decisions-index.cjs');
+
+  function getMigration(): Migration<'global'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-orphaned-decisions-index-v1');
+    if (!m) throw new Error('purge-orphaned-decisions-index-v1 migration not found');
+    return m as Migration<'global'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').GlobalMigrationContext {
+    return { scope: 'global', devflowDir: fakeHome };
+  }
+
+  it('is registered in MIGRATIONS with global scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-orphaned-decisions-index-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('global');
+  });
+
+  it('removes the orphaned decisions-index.cjs file when present', async () => {
+    await fs.writeFile(scriptPath(), '// orphaned cjs\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(scriptPath())).rejects.toThrow();
+  });
+
+  it('is ENOENT-idempotent — a second run (file already gone) does not throw', async () => {
+    await fs.writeFile(scriptPath(), '// orphaned cjs\n', 'utf-8');
+    await getMigration().run(makeCtx());
+    // File is now gone; second run must be a no-op
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is a no-op when the file does not exist (fresh install)', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+});
+
 // purge-stale-memory-markers-v1 (per-project)
 // ---------------------------------------------------------------------------
 

@@ -12,6 +12,9 @@ describe('Command surfaces — index.md direct read', () => {
     ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
     ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
     ['debug.md', 'plugins/devflow-debug/commands/debug.md'],
+    ['implement.md', 'plugins/devflow-implement/commands/implement.md'],
+    ['research.md', 'plugins/devflow-research/commands/research.md'],
+    ['bug-analysis.md', 'plugins/devflow-bug-analysis/commands/bug-analysis.md'],
   ]
 
   for (const [label, relPath] of surfaces) {
@@ -19,8 +22,8 @@ describe('Command surfaces — index.md direct read', () => {
       const content = loadFile(relPath)
       // Must reference the pre-rendered index.md artifact
       expect(content).toContain('.devflow/decisions/index.md')
-      // Must NOT invoke the old subprocess-based loader
-      expect(content).not.toContain('decisions-index.cjs index')
+      // Must NOT reference decisions-index.cjs in any form (ADR-007: retired)
+      expect(content).not.toContain('decisions-index.cjs')
     })
   }
 })
