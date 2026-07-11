@@ -306,7 +306,7 @@ if (require.main === module) {
   }
 
   // Validate path at trust boundary before any file operations.
-  // safePath resolves to an absolute path; null-byte and other invalid paths are rejected by the fs calls downstream.
+  // safePath rejects null bytes, which path.resolve preserves silently.
   try {
     worktreePath = safePath(worktreePath);
   } catch (err) {
@@ -330,10 +330,12 @@ if (require.main === module) {
   if (mode === 'check') {
     // Render all three files in memory and compare against on-disk content.
     // Exit non-zero on drift.
-    const decisionsContent = renderDecisionsFile(rows, 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
+    // Hoist active-row selection (mirrors renderAndWriteAll): computed once per kind,
+    // reused for both body render and index build.
     const activeDecisionRows = selectActiveRows(rows, 'decisions');
     const activePitfallRows = selectActiveRows(rows, 'pitfalls');
+    const decisionsContent = renderBodyFromActive(activeDecisionRows, 'decisions');
+    const pitfallsContent = renderBodyFromActive(activePitfallRows, 'pitfalls');
     const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
       decisionsFilePath,
       pitfallsFilePath,
