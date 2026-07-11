@@ -32,8 +32,13 @@ export async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, stal
       try {
         const stat = await fs.stat(lockDir);
         if (Date.now() - stat.mtimeMs > staleMs) {
-          try { await fs.rmdir(lockDir); } catch { /* race condition OK */ }
-          continue;
+          // D57: Track whether rmdir succeeded. Only retry immediately on success.
+          // If the lock dir is un-removable (e.g. ENOTEMPTY, permission error) we must
+          // fall through to the timeout guard + backoff below — never spin unconditionally.
+          let removed = true;
+          try { await fs.rmdir(lockDir); } catch { removed = false; /* race condition OK */ }
+          if (removed) continue; // stale lock cleared → retry mkdir immediately
+          // else: un-removable stale lock → fall through to timeout guard + backoff
         }
       } catch { /* lock vanished between EEXIST and stat */ }
       if (Date.now() - start >= timeoutMs) return false;
