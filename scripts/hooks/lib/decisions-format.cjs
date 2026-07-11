@@ -210,9 +210,11 @@ function formatIndexEntryLine(entry) {
  * Empty corpus (both arrays empty) → '(none)'.
  * No trailing newline (caller adds '\n' before writing).
  *
- * Strategy: for each row, obtain its rendered block (raw_body ?? format*Body(row)),
+ * Strategy: for each row, obtain its rendered block (truthy raw_body || format*Body(row)),
  * then extract heading/Status/Area with the same regexes.
  * This preserves byte-compat for migrated rows that carry Area/Status only in raw_body.
+ * Note: raw_body === "" is treated as absent (falsy); both predicates align with the
+ * truthy check in renderDecisionsFile so index and body files never drift on this edge.
  *
  * @param {object[]} activeDecisionRows - Active decision rows (type='decision', sorted by anchor)
  * @param {object[]} activePitfallRows - Active pitfall rows (type='pitfall', sorted by anchor)
@@ -240,7 +242,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
   /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
   const adrEntries = [];
   for (const row of activeDecisionRows) {
-    const block = row.raw_body != null ? row.raw_body : formatDecisionBody(row);
+    const block = row.raw_body ? row.raw_body : formatDecisionBody(row);
     const entry = extractEntryFromBlock(block);
     if (entry) adrEntries.push(entry);
   }
@@ -248,7 +250,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
   /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
   const pfEntries = [];
   for (const row of activePitfallRows) {
-    const block = row.raw_body != null ? row.raw_body : formatPitfallBody(row);
+    const block = row.raw_body ? row.raw_body : formatPitfallBody(row);
     const entry = extractEntryFromBlock(block);
     if (entry) pfEntries.push(entry);
   }

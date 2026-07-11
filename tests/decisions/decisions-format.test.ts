@@ -370,6 +370,46 @@ describe('buildIndexContent', () => {
     expect(pitfallsOnly).not.toContain('ADR-NNN entries live in');
     expect(pitfallsOnly).toContain('PF-NNN  entries live in');
   });
+
+  it('row with raw_body === "" falls through to formatDecisionBody and appears in index (not dropped)', () => {
+    // ISSUE-1: raw_body === "" is falsy — buildIndexContent must NOT treat it as a
+    // present block (which yields no heading match and silently drops the row from
+    // the index). It must fall through to formatDecisionBody so the row appears.
+    const rowWithEmptyRawBody = makeAdrRow({ raw_body: '' });
+    const result = buildIndexContent([rowWithEmptyRawBody], [], OPTS);
+    expect(result).toContain('ADR-001');
+    expect(result).toContain('Use Result types everywhere');
+    expect(result).toContain('[Accepted]');
+  });
+
+  it('pitfall row with raw_body === "" falls through to formatPitfallBody and appears in index (not dropped)', () => {
+    // Symmetric ISSUE-1 check for pitfall rows.
+    const rowWithEmptyRawBody = makePfRow({ raw_body: '' });
+    const result = buildIndexContent([], [rowWithEmptyRawBody], OPTS);
+    expect(result).toContain('PF-002');
+    expect(result).toContain('Editing installed scripts directly');
+    expect(result).toContain('[Active]');
+  });
+
+  it('area suffix in entry line is truncated to 80 chars + ellipsis when area exceeds 80 chars', () => {
+    // ISSUE-6: pins the area-suffix 80-char truncation behaviour for pitfall rows.
+    const longArea = 'A'.repeat(90);
+    const row = makePfRow({ details: `area: ${longArea}; issue: something` });
+    const result = buildIndexContent([], [row], OPTS);
+    // Truncated area must appear followed by ellipsis; the 81st char must NOT appear.
+    expect(result).toContain('A'.repeat(80) + '…');
+    expect(result).not.toContain('A'.repeat(81));
+  });
+
+  it('row with a raw_body missing the Status line renders with [unknown] tag', () => {
+    // ISSUE-16: [unknown]-status branch in formatIndexEntryLine is a defensive
+    // guard for malformed raw_body rows (no Status: field). Restore minimal coverage.
+    const rawBodyNoStatus = '\n## ADR-099: Entry without status line\n\n- **Context**: something\n- **Source**: self-learning:obs_x\n';
+    const row = makeAdrRow({ anchor_id: 'ADR-099', raw_body: rawBodyNoStatus });
+    const result = buildIndexContent([row], [], OPTS);
+    expect(result).toContain('ADR-099');
+    expect(result).toContain('[unknown]');
+  });
 });
 
 // ---------------------------------------------------------------------------
