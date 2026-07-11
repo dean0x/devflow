@@ -7,7 +7,6 @@ output-dir: plugins/devflow-dynamic/commands
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { ticket_body_template } from "./_partials/_ticket_template.mds"
 @import { factory_shape } from "./_partials/_factory.mds"
-@import { decisions_load } from "./_partials/_decisions.mds"
 
 {authoring_preamble()}
 
@@ -43,11 +42,9 @@ Before authoring, verify:
 
 Before you write the workflow script:
 
-**1. Load DECISIONS_CONTEXT**
+**1. Apply decisions context**
 
-{decisions_load()}
-
-Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Designer and Reviewer agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Designer and Reviewer agent prompts.
 
 **2. Read and distill the initiative**
 

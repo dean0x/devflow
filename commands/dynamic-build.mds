@@ -8,7 +8,6 @@ output-dir: plugins/devflow-dynamic/commands
 @import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
-@import { decisions_load } from "./_partials/_decisions.mds"
 
 {authoring_preamble()}
 
@@ -44,11 +43,9 @@ Before authoring, verify:
 
 Before you write the workflow script:
 
-**1. Load DECISIONS_CONTEXT**
+**1. Apply decisions context**
 
-{decisions_load()}
-
-Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
 
 **2. Read budget**
 
