@@ -240,11 +240,9 @@ async function handleReset(): Promise<void> {
       }
     }
 
-    let removed = 0;
     for (const filePath of stateFilePaths) {
       try {
         await fs.unlink(filePath);
-        removed++;
       } catch { /* may not exist */ }
     }
 
@@ -261,7 +259,7 @@ async function handleReset(): Promise<void> {
       await sweepLegacyDreamMarkers(getDreamDir(gitRoot));
     } catch { /* best effort */ }
 
-    p.log.success(`Reset complete — removed ${removed} file(s).`);
+    p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');
   } finally {
     try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
   }

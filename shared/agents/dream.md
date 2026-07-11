@@ -52,7 +52,7 @@ Queue: `.devflow/dream/.pending-turns.jsonl`. Claim file: `.devflow/dream/.pendi
    - **Fresh (younger than 900s)** — another Dream agent is live. Exit silently; change nothing.
    - **Stale (900s or older)** — a previous run crashed. Re-claim it: `touch` the claim file
      (your heartbeat), then fold in any new queue:
-     `cat .devflow/dream/.pending-turns.jsonl >> .devflow/dream/.pending-turns.processing && rm -f .devflow/dream/.pending-turns.jsonl`
+     `cat .devflow/dream/.pending-turns.jsonl >> .devflow/dream/.pending-turns.processing && unlink .devflow/dream/.pending-turns.jsonl`
      (skip the fold-in if there is no queue file).
 2. Otherwise claim atomically — one winner even across concurrent sessions:
    `mv .devflow/dream/.pending-turns.jsonl .devflow/dream/.pending-turns.processing`
@@ -191,8 +191,11 @@ instead — edit those ledger rows directly (one line at a time), then re-render
 
 1. Run `rotate-observations` if you have not already this run (Part 2 covers it — never run
    it twice).
-2. Delete the claim file as your FINAL act, strictly after every other write:
-   `rm -f .devflow/dream/.pending-turns.processing`
+2. Delete the claim file as your FINAL act, strictly after every other write (bare `rm` is
+   blocked by devflow's recommended deny-list — PF-003):
+   `unlink .devflow/dream/.pending-turns.processing`
+   If deletion is denied, finish normally and note the leftover claim file in your summary —
+   the next run's stale-merge recovery folds it in.
    Crashing before this line leaves the claim file for the next run's stale-merge recovery —
    the correct outcome for a partial run.
 3. End with a 1–3 line summary: what you created, reinforced, promoted, retired, or merged —

@@ -382,6 +382,27 @@ describe('decisions --reset dream state cleanup', () => {
 });
 
 // ---------------------------------------------------------------------------
+// --reset success message: truthful, no file count
+// ---------------------------------------------------------------------------
+
+describe('decisions --reset success message', () => {
+  const decisionsTs = fs.readFileSync(
+    new URL('../../src/cli/commands/decisions.ts', import.meta.url).pathname,
+    'utf-8',
+  );
+
+  it('pins the truthful success string (no file count)', () => {
+    expect(decisionsTs).toContain(
+      "p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');",
+    );
+  });
+
+  it('does not interpolate a removed-file count into the success message', () => {
+    expect(decisionsTs).not.toMatch(/removed \$\{[^}]+\} file\(s\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // --disable drains the dream (decisions-detection) pending-turns queue —
 // mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
 // Unconditional: a mid-run Dream agent whose claimed batch vanishes aborts

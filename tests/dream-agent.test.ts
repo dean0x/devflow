@@ -74,7 +74,11 @@ describe('dream agent', () => {
     });
 
     it('deletes the claim file as the final act (consume-then-delete)', () => {
-      expect(content).toMatch(/FINAL act.*rm -f \.devflow\/dream\/\.pending-turns\.processing/s);
+      expect(content).toMatch(/FINAL act.*unlink \.devflow\/dream\/\.pending-turns\.processing/s);
+    });
+
+    it('does not use bare rm - (blocked by devflow deny-list, PF-003)', () => {
+      expect(content).not.toMatch(/\brm -/);
     });
 
     it('aborts without writes when inputs vanish mid-run', () => {
