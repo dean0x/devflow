@@ -20,7 +20,6 @@ interface RulesOptions {
 
 /**
  * Check whether a rule has a user shadow file at ~/.devflow/rules/{name}.md.
- * Replaces the private `isShadowed` helper; now exported for Step 4 consumers.
  */
 export async function hasRuleShadow(ruleName: string, devflowDir?: string): Promise<boolean> {
   const dir = devflowDir ?? getDevFlowDirectory();
@@ -53,12 +52,11 @@ async function formatRuleRow(
   name: string,
   devflowDir: string,
   ownerMap: Map<string, string>,
-  suffix: string,
 ): Promise<string> {
   const owner = ownerMap.get(name) ?? 'unknown';
   const shortOwner = owner.replace('devflow-', '');
   const shadowTag = await hasRuleShadow(name, devflowDir) ? color.yellow(' [shadowed]') : '';
-  return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${suffix}${shadowTag}`;
+  return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${shadowTag}`;
 }
 
 /**
@@ -258,7 +256,7 @@ export const rulesCommand = new Command('rules')
 
       const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
       const lines = await Promise.all(
-        installedFiles.map(file => formatRuleRow(path.basename(file, '.md'), devflowDir, ownerMap, '')),
+        installedFiles.map(file => formatRuleRow(path.basename(file, '.md'), devflowDir, ownerMap)),
       );
       p.note(lines.join('\n'), `Installed rules (${installedFiles.length})`);
 

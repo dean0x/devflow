@@ -7,7 +7,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { installViaFileCopy, copyDirectory } from '../utils/installer.js';
+import { installViaFileCopy, copyDirectory, type InstallReport } from '../utils/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -997,7 +997,7 @@ export const initCommand = new Command('init')
     }
 
     // Install via file copy
-    let installReport: Awaited<ReturnType<typeof installViaFileCopy>>;
+    let installReport: InstallReport;
     try {
       installReport = await installViaFileCopy({
         plugins: pluginsToInstall,
