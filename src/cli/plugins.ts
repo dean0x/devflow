@@ -564,7 +564,6 @@ export const LEGACY_SKILL_NAMES: string[] = [
   ...LEGACY_SKILLS_V2X,
 ];
 
-
 /**
  * Derive unique skill names from all plugins.
  */
