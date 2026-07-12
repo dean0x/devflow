@@ -51,9 +51,6 @@ export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
 export { removeDreamHook, hasDreamHook } from './dream.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
-// Re-export migrateShadowOverrides under its original name for backward compatibility
-export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
-
 import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
 
 export type { MigrationLogger };

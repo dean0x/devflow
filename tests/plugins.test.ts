@@ -8,7 +8,6 @@ import {
   partitionSelectablePlugins,
   prefixSkillName,
   WORKFLOW_ORDER,
-  SHADOW_RENAMES,
   LEGACY_SKILL_NAMES,
   LEGACY_AGENT_NAMES,
   type PluginDefinition,
@@ -281,31 +280,6 @@ describe('optional plugin flag', () => {
     expect(bugAnalysis!.commands).toContain('/bug-analysis');
     // Not optional — ships as a core plugin
     expect(bugAnalysis!.optional).toBeFalsy();
-  });
-});
-
-describe('SHADOW_RENAMES consistency', () => {
-  it('every old name in SHADOW_RENAMES appears in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)', () => {
-    for (const [oldName] of SHADOW_RENAMES) {
-      const inLegacy =
-        LEGACY_SKILL_NAMES.includes(oldName) ||
-        LEGACY_SKILL_NAMES.includes(`devflow-${oldName}`) ||
-        LEGACY_SKILL_NAMES.includes(`devflow:${oldName}`);
-      expect(
-        inLegacy,
-        `SHADOW_RENAMES old name '${oldName}' must appear in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)`,
-      ).toBe(true);
-    }
-  });
-
-  it('every new name in SHADOW_RENAMES is a known skill in getAllSkillNames()', () => {
-    const allSkills = getAllSkillNames();
-    for (const [, newName] of SHADOW_RENAMES) {
-      expect(
-        allSkills,
-        `SHADOW_RENAMES new name '${newName}' must appear in getAllSkillNames()`,
-      ).toContain(newName);
-    }
   });
 });
 

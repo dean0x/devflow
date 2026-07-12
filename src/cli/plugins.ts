@@ -564,34 +564,6 @@ export const LEGACY_SKILL_NAMES: string[] = [
   ...LEGACY_SKILLS_V2X,
 ];
 
-/**
- * Shadow directory renames for V2 skill overhaul.
- * When users had `devflow skills shadow core-patterns`, the override lives at
- * `~/.devflow/skills/core-patterns/`. After V2, init looks for the new name.
- * This map drives migration of old shadow dirs to new names.
- */
-export const SHADOW_RENAMES: [string, string][] = [
-  ['git-safety', 'git'],
-  ['git-workflow', 'git'],
-  ['github-patterns', 'git'],
-  ['core-patterns', 'software-design'],
-  ['test-patterns', 'testing'],
-  ['security-patterns', 'security'],
-  ['architecture-patterns', 'architecture'],
-  ['performance-patterns', 'performance'],
-  ['input-validation', 'boundary-validation'],
-  ['frontend-design', 'ui-design'],
-  ['complexity-patterns', 'complexity'],
-  ['consistency-patterns', 'consistency'],
-  ['regression-patterns', 'regression'],
-  ['database-patterns', 'database'],
-  ['dependencies-patterns', 'dependencies'],
-  ['documentation-patterns', 'documentation'],
-  ['self-review', 'quality-gates'],
-  ['implementation-patterns', 'patterns'],
-  ['search-first', 'dependency-research'],
-  ['research', 'dependency-research'],
-];
 
 /**
  * Derive unique skill names from all plugins.

@@ -112,12 +112,6 @@ describe('MIGRATIONS', () => {
     }
   });
 
-  it('contains shadow-overrides-v2-names with global scope', () => {
-    const m = MIGRATIONS.find(m => m.id === 'shadow-overrides-v2-names');
-    expect(m).toBeDefined();
-    expect(m?.scope).toBe('global');
-  });
-
   it('contains purge-legacy-knowledge-v2 with per-project scope', () => {
     const m = MIGRATIONS.find(m => m.id === 'purge-legacy-knowledge-v2');
     expect(m).toBeDefined();
@@ -221,8 +215,7 @@ describe('runMigrations', () => {
     // Don't pre-apply anything — but we need the migrations to be safe no-ops.
     // With no discovered projects, per-project migrations run against 0 projects
     // and succeed (empty allSettled array = allSucceeded). Global migrations
-    // (shadow-overrides-v2-names) will try to read a non-existent skills dir,
-    // which is a no-op.
+    // short-circuit when the data they target doesn't exist.
     const projectRoot = path.join(tmpDir, 'project1');
     await fs.mkdir(path.join(projectRoot, '.devflow', 'decisions'), { recursive: true });
 
@@ -430,23 +423,19 @@ describe('runMigrations', () => {
     const perProjectIds = MIGRATIONS.filter(m => m.scope === 'per-project').map(m => m.id);
     await writeAppliedMigrations(fakeHome, perProjectIds);
 
-    // Create a shadow skill at old name to verify global migration ran
-    const shadowsDir = path.join(fakeHome, 'skills');
-    const oldShadow = path.join(shadowsDir, 'core-patterns');
-    await fs.mkdir(oldShadow, { recursive: true });
-    await fs.writeFile(path.join(oldShadow, 'SKILL.md'), '# Custom', 'utf-8');
+    // Seed the orphaned decisions-index.cjs to verify the global migration ran
+    const orphanedScript = path.join(fakeHome, 'scripts', 'hooks', 'lib', 'decisions-index.cjs');
+    await fs.mkdir(path.dirname(orphanedScript), { recursive: true });
+    await fs.writeFile(orphanedScript, '// stale', 'utf-8');
 
     const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
     const result = await runMigrations(ctx, []);
 
     expect(result.failures).toEqual([]);
-    expect(result.newlyApplied).toContain('shadow-overrides-v2-names');
+    expect(result.newlyApplied).toContain('purge-orphaned-decisions-index-v1');
 
-    // Old shadow should be renamed to new name
-    await expect(fs.access(oldShadow)).rejects.toThrow();
-    await expect(
-      fs.access(path.join(shadowsDir, 'software-design')),
-    ).resolves.toBeUndefined();
+    // Orphaned file should be deleted
+    await expect(fs.access(orphanedScript)).rejects.toThrow();
   });
 });
 
