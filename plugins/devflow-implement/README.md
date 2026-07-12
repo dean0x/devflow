@@ -5,11 +5,7 @@ Complete task implementation workflow for Claude Code. Accepts plan documents, i
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=implement
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-implement
 ```
 
 ## Usage

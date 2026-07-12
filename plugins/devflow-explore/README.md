@@ -5,11 +5,7 @@ Codebase exploration plugin for Claude Code. Explores code areas with parallel a
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=explore
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-explore
 ```
 
 ## Usage

@@ -5,11 +5,7 @@ Review issue resolution plugin for Claude Code. Processes review findings throug
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=resolve
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-resolve
 ```
 
 ## Usage

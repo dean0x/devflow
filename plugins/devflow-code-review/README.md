@@ -5,11 +5,7 @@ Comprehensive code review plugin for Claude Code. Runs parallel specialized revi
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=code-review
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-code-review
 ```
 
 ## Usage

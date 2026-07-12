@@ -104,7 +104,10 @@ npx devflow-kit knowledge --status          # Show current status
 npx devflow-kit rules --enable       # Install rules from manifest plugins
 npx devflow-kit rules --disable      # Remove all installed rules
 npx devflow-kit rules --status       # Show installed rules with source plugin
-npx devflow-kit rules --list         # Show all available rules with install status
+npx devflow-kit rules --list         # Show all available rules with install status and shadow state
+npx devflow-kit rules shadow <name>  # Create rule override (seeds from installed or source)
+npx devflow-kit rules unshadow <name># Remove rule override
+npx devflow-kit rules list           # List all rules with install status and shadow state
 ```
 
 ## HUD (Status Line)
@@ -141,8 +144,19 @@ Override any Devflow skill with your own version. Shadowed skills survive `devfl
 ```bash
 npx devflow-kit skills shadow software-design    # Create override (copies current as reference)
 vim ~/.devflow/skills/software-design/SKILL.md   # Edit your override
-npx devflow-kit skills list-shadowed             # List all overrides
+npx devflow-kit skills list                      # List all skills with shadow state
 npx devflow-kit skills unshadow software-design  # Remove override
+```
+
+## Rule Shadowing
+
+Override any Devflow rule with your own version. Shadowed rules survive `devflow init` — your version is installed instead of Devflow's.
+
+```bash
+npx devflow-kit rules shadow security            # Create rule override (seeds from installed or source)
+vim ~/.devflow/rules/security.md                 # Edit your override
+npx devflow-kit rules list                       # List all rules with install status and shadow state
+npx devflow-kit rules unshadow security          # Remove override
 ```
 
 ## Feature Flags

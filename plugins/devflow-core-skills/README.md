@@ -5,11 +5,7 @@ Auto-activating quality enforcement skills for Claude Code. These skills activat
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=core-skills
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-core-skills
 ```
 
 ## Skills Included

@@ -5,11 +5,7 @@ Debugging workflow plugin for Claude Code. Investigates bugs using competing hyp
 ## Installation
 
 ```bash
-# Via Devflow CLI
 npx devflow-kit init --plugin=debug
-
-# Via Claude Code (when available)
-/plugin install dean0x/devflow-debug
 ```
 
 ## Usage
