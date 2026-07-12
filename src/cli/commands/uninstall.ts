@@ -244,6 +244,11 @@ export const uninstallCommand = new Command('uninstall')
       return;
     }
 
+    // Belt-and-braces: capture shadow state BEFORE any removal so warnings
+    // are correct even if removal scope changes.
+    const shadowedSkillsBefore = !isSelectiveUninstall ? await listShadowed() : [];
+    const shadowedRulesBefore = !isSelectiveUninstall ? await listShadowedRules() : [];
+
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
       let claudeDir: string;
@@ -252,7 +257,7 @@ export const uninstallCommand = new Command('uninstall')
       try {
         const paths = await getInstallationPaths(scope);
         claudeDir = paths.claudeDir;
-        devflowScriptsDir = paths.devflowDir;
+        devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
 
         if (scope === 'user') {
           p.log.step('Uninstalling user scope (~/.claude/)');
@@ -511,19 +516,17 @@ export const uninstallCommand = new Command('uninstall')
       }
     }
 
-    // Warn about personal skill overrides
+    // Warn about personal skill/rule overrides (captured before removal).
     if (!isSelectiveUninstall) {
-      const shadowed = await listShadowed();
-      if (shadowed.length > 0) {
+      if (shadowedSkillsBefore.length > 0) {
         const shadowPath = path.join(getDevFlowDirectory(), 'skills');
-        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowed.join(', ')}`);
+        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowedSkillsBefore.join(', ')}`);
         p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
       }
 
-      const shadowedRules = await listShadowedRules();
-      if (shadowedRules.length > 0) {
+      if (shadowedRulesBefore.length > 0) {
         const ruleShadowPath = path.join(getDevFlowDirectory(), 'rules');
-        p.log.warn(`Personal rule overrides remain in ${ruleShadowPath}: ${shadowedRules.join(', ')}`);
+        p.log.warn(`Personal rule overrides remain in ${ruleShadowPath}: ${shadowedRulesBefore.join(', ')}`);
         p.log.info(color.dim(`Remove manually or run: rm -rf ${ruleShadowPath}`));
       }
     }
