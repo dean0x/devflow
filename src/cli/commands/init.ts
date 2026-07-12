@@ -64,8 +64,10 @@ export type { MigrationLogger };
  *   3. Run with no per-project targets when both are absent (global-only; per-project
  *      migrations are vacuously applied per D37 semantics).
  *
- * Must run BEFORE installViaFileCopy (D7/PF-007) so V1→V2 shadow renames are
- * complete before the installer looks for V2-named directories.
+ * Migrations are a one-time cleanup pass over ~/.devflow runtime data
+ * (decisions, memory, dream, knowledge). They never touch the installer's
+ * copy targets (skills, agents, rules, commands, scripts), so ordering
+ * relative to installViaFileCopy carries no data dependency.
  *
  * The `runner` parameter accepts the runMigrations function — injected to make
  * this helper testable without real filesystem migration state.
@@ -978,11 +980,11 @@ export const initCommand = new Command('init')
     const rulesMap = rulesEnabled ? buildRulesMap(pluginsToInstall) : new Map<string, string>();
 
     // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
-    // Runs BEFORE installViaFileCopy so V1→V2 shadow renames are complete before the
-    // installer looks for V2-named directories. Migrations are always-run-unapplied:
-    // helpers short-circuit when the target data is absent, so fresh installs are safe
-    // no-ops. State lives at the home-dir ~/.devflow location regardless of install
-    // scope (D30).
+    // Migrations clean up ~/.devflow runtime data and never touch the installer's copy
+    // targets, so their position relative to installViaFileCopy carries no dependency.
+    // Migrations are always-run-unapplied: helpers short-circuit when the target data is
+    // absent, so fresh installs are safe no-ops. State lives at the home-dir ~/.devflow
+    // location regardless of install scope (D30).
     {
       const { runMigrations } = await import('../utils/migrations.js');
       const userDevflowDir = path.join(os.homedir(), '.devflow');
