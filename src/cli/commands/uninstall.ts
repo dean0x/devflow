@@ -2,12 +2,10 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -119,19 +117,6 @@ export function resolveSecurityRemovalDecision(opts: {
   if (!opts.anySecurityPresent || opts.keepDocs) return 'skip';
   if (!opts.isTTY) return 'preserve';
   return 'prompt';
-}
-
-/**
- * Uninstall plugin using Claude CLI
- */
-function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
-  try {
-    const cliScope = scope === 'local' ? 'project' : 'user';
-    execFileSync('claude', ['plugin', 'uninstall', 'devflow', '--scope', cliScope], { stdio: 'inherit' });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -258,8 +243,6 @@ export const uninstallCommand = new Command('uninstall')
       return;
     }
 
-    const cliAvailable = isClaudeCliAvailable();
-
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
       let claudeDir: string;
@@ -280,47 +263,31 @@ export const uninstallCommand = new Command('uninstall')
         continue;
       }
 
-      // Try to uninstall plugin via Claude CLI first (only for full uninstall)
-      let usedCli = false;
+      if (isSelectiveUninstall) {
+        await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
 
-      if (cliAvailable && !isSelectiveUninstall) {
-        if (verbose) {
-          p.log.info('Uninstalling plugin via Claude CLI...');
-        }
-        usedCli = uninstallPluginViaCli(scope);
-        if (!usedCli && verbose) {
-          p.log.warn('Claude CLI uninstall failed, falling back to manual removal');
-        }
-      }
-
-      // If CLI uninstall failed or unavailable, do manual removal
-      if (!usedCli) {
-        if (isSelectiveUninstall) {
-          await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
-
-          // Clean up ambient hook if ambient plugin is being removed
-          if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
-            const settingsPath = path.join(claudeDir, 'settings.json');
-            try {
-              const settings = await fs.readFile(settingsPath, 'utf-8');
-              const updated = await removeAmbientHook(settings);
-              if (updated !== settings) {
-                await fs.writeFile(settingsPath, updated, 'utf-8');
-                if (verbose) {
-                  p.log.success('Ambient mode hooks removed from settings.json');
-                }
+        // Clean up ambient hook if ambient plugin is being removed
+        if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
+          const settingsPath = path.join(claudeDir, 'settings.json');
+          try {
+            const settings = await fs.readFile(settingsPath, 'utf-8');
+            const updated = await removeAmbientHook(settings);
+            if (updated !== settings) {
+              await fs.writeFile(settingsPath, updated, 'utf-8');
+              if (verbose) {
+                p.log.success('Ambient mode hooks removed from settings.json');
               }
-            } catch { /* settings.json may not exist */ }
-          }
-        } else {
-          await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
+            }
+          } catch { /* settings.json may not exist */ }
         }
+      } else {
+        await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
       }
 
       const pluginLabel = isSelectiveUninstall
         ? ` (${selectedPluginNames.join(', ')})`
         : '';
-      p.log.success(`Plugin removed${usedCli ? ' (via Claude CLI)' : ''}${pluginLabel}`);
+      p.log.success(`Plugin removed${pluginLabel}`);
     }
 
     // === CLEANUP EXTRAS (only for full uninstall) ===

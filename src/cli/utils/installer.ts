@@ -1,6 +1,5 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
 import type { PluginDefinition } from '../plugins.js';
 import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
 
@@ -75,56 +74,6 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
   }
 }
 
-/**
- * Add Devflow marketplace to Claude CLI.
- * Idempotent — safe to call multiple times.
- */
-function addMarketplaceViaCli(): boolean {
-  try {
-    execSync('claude plugin marketplace add dean0x/devflow', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install a single plugin via Claude CLI.
- */
-function installPluginViaCli(pluginName: string, scope: 'user' | 'local'): boolean {
-  try {
-    const cliScope = scope === 'local' ? 'project' : 'user';
-    execSync(`claude plugin install ${pluginName}@dean0x-devflow --scope ${cliScope}`, {
-      stdio: 'pipe',
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install plugins via Claude CLI native plugin system.
- * Returns true if all plugins installed successfully.
- */
-export function installViaCli(
-  plugins: PluginDefinition[],
-  scope: 'user' | 'local',
-  spinner: Spinner,
-): boolean {
-  spinner.message('Adding Devflow marketplace...');
-  const marketplaceAdded = addMarketplaceViaCli();
-
-  if (!marketplaceAdded) return false;
-
-  spinner.message('Installing plugins via Claude CLI...');
-  for (const plugin of plugins) {
-    if (!installPluginViaCli(plugin.name, scope)) return false;
-  }
-
-  spinner.stop('Plugins installed via Claude CLI');
-  return true;
-}
 
 export interface FileCopyOptions {
   plugins: PluginDefinition[];

@@ -7,8 +7,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { isClaudeCliAvailable } from '../utils/cli.js';
-import { installViaCli, installViaFileCopy, copyDirectory } from '../utils/installer.js';
+import { installViaFileCopy, copyDirectory } from '../utils/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -1000,33 +999,25 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Install: try native CLI first, fall back to file copy
-    const cliAvailable = isClaudeCliAvailable();
-    const usedNativeCli = cliAvailable && installViaCli(pluginsToInstall, scope, s);
-
-    if (!usedNativeCli) {
-      if (cliAvailable && verbose) {
-        p.log.warn('Claude CLI installation failed, falling back to manual copy');
-      }
-
-      try {
-        await installViaFileCopy({
-          plugins: pluginsToInstall,
-          claudeDir,
-          pluginsDir,
-          rootDir,
-          devflowDir,
-          skillsMap,
-          agentsMap,
-          rulesMap,
-          isPartialInstall: !!options.plugin,
-          spinner: s,
-        });
-      } catch (error) {
-        s.stop('Installation failed');
-        p.log.error(`${error}`);
-        process.exit(1);
-      }
+    // Install via file copy
+    let installReport: Awaited<ReturnType<typeof installViaFileCopy>>;
+    try {
+      installReport = await installViaFileCopy({
+        plugins: pluginsToInstall,
+        claudeDir,
+        pluginsDir,
+        rootDir,
+        devflowDir,
+        skillsMap,
+        agentsMap,
+        rulesMap,
+        isPartialInstall: !!options.plugin,
+        spinner: s,
+      });
+    } catch (error) {
+      s.stop('Installation failed');
+      p.log.error(`${error}`);
+      process.exit(1);
     }
 
     // Clean up stale skills from previous installations
@@ -1361,12 +1352,6 @@ export const initCommand = new Command('init')
     }
 
     // === Summary ===
-
-    if (usedNativeCli) {
-      p.log.success('Installed via Claude plugin system');
-    } else if (!cliAvailable) {
-      p.log.info('Installed via file copy (Claude CLI not available)');
-    }
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));

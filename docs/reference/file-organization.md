@@ -176,7 +176,6 @@ Included settings:
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
-- `extraKnownMarketplaces` - Devflow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
 
 ## Capture + Dream Hooks

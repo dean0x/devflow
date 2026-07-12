@@ -79,14 +79,6 @@
       }
     ]
   },
-  "extraKnownMarketplaces": {
-    "devflow": {
-      "source": {
-        "source": "github",
-        "repo": "dean0x/devflow"
-      }
-    }
-  },
   "attribution": {
     "commit": "",
     "pr": ""
