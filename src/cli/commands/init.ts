@@ -531,7 +531,7 @@ export const initCommand = new Command('init')
       } else {
         p.note(
           'Puts every session (git repos only) in orchestrator posture:\n' +
-          'a ~200-token charter at session start plus a per-prompt reminder\n' +
+          'a ~535-token charter at session start plus a per-prompt reminder\n' +
           'steer the main model to delegate work to agents and devflow workflows\n' +
           'instead of doing it mainline. Plan-mode handoffs auto-run devflow:implement.',
           'Ambient Mode',
