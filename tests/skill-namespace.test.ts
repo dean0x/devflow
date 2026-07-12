@@ -9,7 +9,7 @@ import {
   getAllSkillNames,
   LEGACY_SKILL_NAMES,
 } from '../src/cli/plugins.js';
-import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
+import { installViaFileCopy, type InstallReport, type Spinner } from '../src/cli/utils/installer.js';
 import { hasShadow } from '../src/cli/commands/skills.js';
 
 /** No-op spinner for tests */
@@ -131,7 +131,7 @@ describe('installViaFileCopy skill lifecycle', () => {
   }
 
   /** Run installViaFileCopy with a single test skill */
-  async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<void> {
+  async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<InstallReport> {
     const pluginDef = {
       name: 'devflow-test-plugin',
       description: 'test',
@@ -139,7 +139,7 @@ describe('installViaFileCopy skill lifecycle', () => {
       agents: [],
       skills: [testSkillName],
     };
-    await installViaFileCopy({
+    return installViaFileCopy({
       plugins: [pluginDef],
       claudeDir,
       pluginsDir,
@@ -228,11 +228,71 @@ describe('installViaFileCopy skill lifecycle', () => {
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
 
-    await runInstall();
+    const report = await runInstall();
 
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
     const content = await fs.readFile(installed, 'utf-8');
     expect(content).toBe('source content');
+    // empty shadow dir → missing-skill-md skip reported
+    expect(report.shadowedSkills).not.toContain(testSkillName);
+    expect(report.skippedShadows).toHaveLength(1);
+    expect(report.skippedShadows[0]).toMatchObject({ kind: 'skill', name: testSkillName, reason: 'missing-skill-md' });
+  });
+
+  it('shadow dir with only notes.md (no SKILL.md) → source installed + skip reported', async () => {
+    await seedPlugin(testSkillName, 'source content');
+
+    const shadowDir = path.join(devflowDir, 'skills', testSkillName);
+    await fs.mkdir(shadowDir, { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'notes.md'), 'my notes');
+
+    const report = await runInstall();
+
+    const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
+    const content = await fs.readFile(installed, 'utf-8');
+    expect(content).toBe('source content');
+    expect(report.skippedShadows).toHaveLength(1);
+    expect(report.skippedShadows[0]).toMatchObject({ kind: 'skill', name: testSkillName, reason: 'missing-skill-md' });
+  });
+
+  it('shadow dir with subdirectory: shadow content copied fully to prefixed path', async () => {
+    await seedPlugin(testSkillName, 'source content');
+
+    const shadowDir = path.join(devflowDir, 'skills', testSkillName);
+    await fs.mkdir(path.join(shadowDir, 'references'), { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'shadow override');
+    await fs.writeFile(path.join(shadowDir, 'references', 'extra.md'), 'extra');
+
+    const report = await runInstall();
+
+    const skillTarget = path.join(claudeDir, 'skills', `devflow:${testSkillName}`);
+    expect(await fs.readFile(path.join(skillTarget, 'SKILL.md'), 'utf-8')).toBe('shadow override');
+    expect(await fs.readFile(path.join(skillTarget, 'references', 'extra.md'), 'utf-8')).toBe('extra');
+    expect(report.shadowedSkills).toContain(testSkillName);
+    expect(report.skippedShadows).toHaveLength(0);
+  });
+
+  it('valid shadow → name reported in shadowedSkills', async () => {
+    await seedPlugin(testSkillName, 'source content');
+
+    const shadowDir = path.join(devflowDir, 'skills', testSkillName);
+    await fs.mkdir(shadowDir, { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'shadow content');
+
+    const report = await runInstall();
+
+    expect(report.shadowedSkills).toContain(testSkillName);
+    expect(report.skippedShadows).toHaveLength(0);
+  });
+
+  it('no shadow → empty report fields', async () => {
+    await seedPlugin(testSkillName, 'source content');
+
+    const report = await runInstall();
+
+    expect(report.shadowedSkills).toHaveLength(0);
+    expect(report.shadowedRules).toHaveLength(0);
+    expect(report.skippedShadows).toHaveLength(0);
   });
 
   it('partial install still cleans skill dirs (skills are universal)', async () => {

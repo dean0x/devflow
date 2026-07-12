@@ -1350,6 +1350,24 @@ export const initCommand = new Command('init')
 
     // === Summary ===
 
+    // Shadow override reporting
+    const totalShadowed = installReport.shadowedSkills.length + installReport.shadowedRules.length;
+    if (totalShadowed > 0) {
+      const parts: string[] = [
+        ...installReport.shadowedSkills.map(s => `skill:${s}`),
+        ...installReport.shadowedRules.map(r => `rule:${r}`),
+      ];
+      p.log.info(`Applied ${totalShadowed} shadow override(s): ${parts.join(', ')}`);
+    }
+    for (const skip of installReport.skippedShadows) {
+      const reasonMsg = skip.reason === 'missing-skill-md'
+        ? 'shadow directory has no valid SKILL.md'
+        : skip.reason === 'empty-shadow-file'
+          ? 'shadow file is empty'
+          : 'shadow path is not a file';
+      p.log.warn(`Shadow for ${skip.kind}:${skip.name} skipped (${reasonMsg}) — Devflow's version was installed`);
+    }
+
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
     if (orderedCommands.length > 0) {
