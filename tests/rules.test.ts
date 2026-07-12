@@ -10,6 +10,7 @@ import {
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 import { installRuleFile, installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
+import { listShadowedRules, hasRuleShadow } from '../src/cli/commands/rules.js';
 
 // ---------------------------------------------------------------------------
 // isValidRuleName
@@ -277,6 +278,65 @@ describe('installRuleFile', () => {
       expect(report.shadowedRules).toContain('security');
       expect(report.shadowedSkills).toHaveLength(0);
       expect(report.skippedShadows).toHaveLength(0);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listShadowedRules
+// ---------------------------------------------------------------------------
+
+describe('listShadowedRules', () => {
+  it('returns empty array when rules directory does not exist', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-rules-'));
+    try {
+      const result = await listShadowedRules(tmpDir);
+      expect(result).toEqual([]);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns only .md basenames from rules directory', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-rules-'));
+    try {
+      const rulesDir = path.join(tmpDir, 'rules');
+      await fs.mkdir(rulesDir, { recursive: true });
+      await fs.writeFile(path.join(rulesDir, 'security.md'), '# security');
+      await fs.writeFile(path.join(rulesDir, 'engineering.md'), '# engineering');
+      await fs.writeFile(path.join(rulesDir, 'not-a-rule.txt'), 'txt');
+
+      const result = await listShadowedRules(tmpDir);
+      expect(result.sort()).toEqual(['engineering', 'security']);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('hasRuleShadow', () => {
+  it('returns true when shadow file exists', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-has-rule-'));
+    try {
+      const rulesDir = path.join(tmpDir, 'rules');
+      await fs.mkdir(rulesDir, { recursive: true });
+      await fs.writeFile(path.join(rulesDir, 'security.md'), '# shadow');
+      expect(await hasRuleShadow('security', tmpDir)).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false when shadow file does not exist', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-has-rule-'));
+    try {
+      expect(await hasRuleShadow('security', tmpDir)).toBe(false);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }

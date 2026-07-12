@@ -14,6 +14,7 @@ import { removeDreamHook } from './dream.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
+import { listShadowedRules } from './rules.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
@@ -517,6 +518,13 @@ export const uninstallCommand = new Command('uninstall')
         const shadowPath = path.join(getDevFlowDirectory(), 'skills');
         p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowed.join(', ')}`);
         p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
+      }
+
+      const shadowedRules = await listShadowedRules();
+      if (shadowedRules.length > 0) {
+        const ruleShadowPath = path.join(getDevFlowDirectory(), 'rules');
+        p.log.warn(`Personal rule overrides remain in ${ruleShadowPath}: ${shadowedRules.join(', ')}`);
+        p.log.info(color.dim(`Remove manually or run: rm -rf ${ruleShadowPath}`));
       }
     }
 
