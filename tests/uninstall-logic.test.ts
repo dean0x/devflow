@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -269,5 +269,155 @@ describe('resolveSecurityRemovalDecision', () => {
     expect(skip).toBe('skip');
     expect(preserve).toBe('preserve');
     expect(prompt).toBe('prompt');
+  });
+});
+
+describe('computeShadowLeftoverWarnings', () => {
+  const devflowDir = '/home/user/.devflow';
+
+  // === selective-uninstall gate ===
+
+  it('returns empty array for selective uninstall regardless of shadow lists', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['my-skill'],
+      shadowedRules: ['my-rule'],
+      isSelectiveUninstall: true,
+      devflowDir,
+    });
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array for selective uninstall with empty shadow lists', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: [],
+      shadowedRules: [],
+      isSelectiveUninstall: true,
+      devflowDir,
+    });
+    expect(result).toEqual([]);
+  });
+
+  // === full-uninstall, empty shadow lists ===
+
+  it('returns empty array when both shadow lists are empty (full uninstall)', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: [],
+      shadowedRules: [],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result).toEqual([]);
+  });
+
+  // === full-uninstall, populated skill list ===
+
+  it('includes shadowed skill names in the warning message', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['my-custom-skill', 'another-skill'],
+      shadowedRules: [],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result.some(m => m.message.includes('my-custom-skill'))).toBe(true);
+    expect(result.some(m => m.message.includes('another-skill'))).toBe(true);
+  });
+
+  it('uses canonical warning text for skill overrides', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['foo'],
+      shadowedRules: [],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
+  });
+
+  it('includes the skills shadow path in the warning', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['foo'],
+      shadowedRules: [],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    // Path should be devflowDir/skills
+    const expectedPath = `${devflowDir}/skills`;
+    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
+  });
+
+  // === full-uninstall, populated rule list ===
+
+  it('includes shadowed rule names in the warning message', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: [],
+      shadowedRules: ['my-custom-rule'],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result.some(m => m.message.includes('my-custom-rule'))).toBe(true);
+  });
+
+  it('uses canonical warning text for rule overrides', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: [],
+      shadowedRules: ['bar'],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
+  });
+
+  it('includes the rules shadow path in the warning', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: [],
+      shadowedRules: ['bar'],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    const expectedPath = `${devflowDir}/rules`;
+    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
+  });
+
+  // === both lists populated ===
+
+  it('includes warnings for both skills and rules when both lists are populated', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['skill-a'],
+      shadowedRules: ['rule-b'],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result.some(m => m.message.includes('skill-a'))).toBe(true);
+    expect(result.some(m => m.message.includes('rule-b'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
+  });
+
+  // === message pairing — warn + hint ===
+
+  it('returns a warn message followed by a cleanup hint for each shadowed list', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['s1'],
+      shadowedRules: [],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    // Expect exactly 2 entries: the warning + the rm -rf hint
+    expect(result).toHaveLength(2);
+    expect(result[0].level).toBe('warn');
+    expect(result[0].message).toContain('Personal skill overrides remain in');
+    expect(result[1].level).toBe('info');
+    expect(result[1].message).toContain('rm -rf');
+  });
+
+  it('returns four entries when both skill and rule lists are populated', () => {
+    const result = computeShadowLeftoverWarnings({
+      shadowedSkills: ['s1'],
+      shadowedRules: ['r1'],
+      isSelectiveUninstall: false,
+      devflowDir,
+    });
+    expect(result).toHaveLength(4);
   });
 });

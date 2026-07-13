@@ -9,7 +9,8 @@ import {
   DEVFLOW_PLUGINS,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
-import { installRuleFile } from '../src/cli/utils/installer.js';
+import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/cli/utils/installer.js';
+import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
 
 // ---------------------------------------------------------------------------
 // isValidRuleName
@@ -135,6 +136,47 @@ describe('getAllRuleNames', () => {
 });
 
 // ---------------------------------------------------------------------------
+// validateRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('validateRuleShadow', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rule-shadow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('symlink → regular file: returns "valid"', async () => {
+    const realFile = path.join(tmpDir, 'real.md');
+    await fs.writeFile(realFile, '# Content', 'utf-8');
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(realFile, link);
+    // fs.stat follows the link → sees a non-empty regular file → 'valid'
+    expect(await validateRuleShadow(link)).toBe('valid');
+  });
+
+  it('symlink → directory: returns "not-a-file"', async () => {
+    const realDir = path.join(tmpDir, 'real-dir');
+    await fs.mkdir(realDir, { recursive: true });
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(realDir, link);
+    // fs.stat follows the link → sees a directory → isFile() = false → 'not-a-file'
+    expect(await validateRuleShadow(link)).toBe('not-a-file');
+  });
+
+  it('dangling symlink (target absent): returns "none"', async () => {
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(path.join(tmpDir, 'nonexistent.md'), link);
+    // fs.stat follows the link → ENOENT on missing target → caught → 'none'
+    expect(await validateRuleShadow(link)).toBe('none');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // installRuleFile
 // ---------------------------------------------------------------------------
 
@@ -162,10 +204,11 @@ describe('installRuleFile', () => {
     await fs.mkdir(sourceDir, { recursive: true });
     await fs.writeFile(path.join(sourceDir, 'security.md'), '# Security Rule', 'utf-8');
 
-    await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+    const outcome = await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
 
     const content = await fs.readFile(path.join(rulesTarget, 'security.md'), 'utf-8');
     expect(content).toBe('# Security Rule');
+    expect(outcome).toBe('source');
   });
 
   it('copies shadow file when shadow exists, ignoring plugin source', async () => {
@@ -177,18 +220,18 @@ describe('installRuleFile', () => {
     await fs.mkdir(shadowDir, { recursive: true });
     await fs.writeFile(path.join(shadowDir, 'security.md'), '# Shadow Rule', 'utf-8');
 
-    await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+    const outcome = await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
 
     const content = await fs.readFile(path.join(rulesTarget, 'security.md'), 'utf-8');
     expect(content).toBe('# Shadow Rule');
+    expect(outcome).toBe('shadow');
   });
 
   it('skips silently when plugin source file is missing', async () => {
     // No source file created — installRuleFile should not throw
-    await expect(
-      installRuleFile('missing', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget),
-    ).resolves.toBeUndefined();
+    const outcome = await installRuleFile('missing', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
 
+    expect(outcome).toBe('skipped');
     // Target file should not exist
     await expect(fs.access(path.join(rulesTarget, 'missing.md'))).rejects.toThrow();
   });
@@ -198,10 +241,464 @@ describe('installRuleFile', () => {
     await fs.mkdir(sourceDir, { recursive: true });
     await fs.writeFile(path.join(sourceDir, 'quality.md'), '# Quality', 'utf-8');
 
-    await installRuleFile('quality', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+    const outcome = await installRuleFile('quality', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
 
     // Verify the exact target path — flat file, not a directory
     const stat = await fs.stat(path.join(rulesTarget, 'quality.md'));
     expect(stat.isFile()).toBe(true);
+    expect(outcome).toBe('source');
+  });
+
+  it('0-byte shadow file → installs source content and returns source-invalid-shadow:empty-shadow-file', async () => {
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    // Create empty shadow file (0 bytes)
+    const shadowDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(shadowDir, { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'security.md'), '', 'utf-8');
+
+    const outcome = await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+
+    expect(outcome).toBe('source-invalid-shadow:empty-shadow-file');
+    const content = await fs.readFile(path.join(rulesTarget, 'security.md'), 'utf-8');
+    expect(content).toBe('# Source Rule');
+  });
+
+  it('directory at shadow path → installs source and returns source-invalid-shadow:not-a-file (no throw)', async () => {
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    // Put a directory where the shadow file should be
+    const shadowDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(path.join(shadowDir, 'security.md'), { recursive: true });
+
+    const outcome = await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+
+    expect(outcome).toBe('source-invalid-shadow:not-a-file');
+    const content = await fs.readFile(path.join(rulesTarget, 'security.md'), 'utf-8');
+    expect(content).toBe('# Source Rule');
+  });
+
+  it('valid shadow but copyFile fails → falls through to source install, returns "source" without throwing', async () => {
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    // Create a valid shadow file then remove its read permission so copyFile throws EACCES
+    const shadowDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(shadowDir, { recursive: true });
+    const shadowFile = path.join(shadowDir, 'security.md');
+    await fs.writeFile(shadowFile, '# Shadow Rule', 'utf-8');
+    await fs.chmod(shadowFile, 0o000);
+
+    try {
+      // Before fix: copyFile(shadowFile, targetFile) throws EACCES → whole call throws
+      // After fix: try/catch around copy; falls through to source install
+      const outcome = await installRuleFile('security', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+      expect(outcome).toBe('source');
+      const content = await fs.readFile(path.join(rulesTarget, 'security.md'), 'utf-8');
+      expect(content).toBe('# Source Rule');
+    } finally {
+      await fs.chmod(shadowFile, 0o644);
+    }
+  });
+
+  it('empty shadow file with missing plugin source → returns "skipped"', async () => {
+    // Shadow exists but is invalid (empty); source does not exist.
+    // The compound-variant outcome ('source-invalid-shadow:empty-shadow-file') is unreachable
+    // when the source is also absent: installRuleFile falls to the source catch-block and
+    // returns 'skipped'. This pins the edge case — any behavior change is a separate decision.
+    const shadowDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(shadowDir, { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'orphan-rule.md'), '', 'utf-8');
+
+    const outcome = await installRuleFile('orphan-rule', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+
+    expect(outcome).toBe('skipped');
+    // No target file should be created
+    await expect(fs.access(path.join(rulesTarget, 'orphan-rule.md'))).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// installViaFileCopy rules report
+// ---------------------------------------------------------------------------
+
+describe('installViaFileCopy rules report', () => {
+  it('valid shadow recorded in shadowedRules', async () => {
+    const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-report-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
+
+    try {
+      // Seed plugin source rule
+      const sourceRulesDir = path.join(localPluginsDir, 'devflow-core-skills', 'rules');
+      await fs.mkdir(sourceRulesDir, { recursive: true });
+      await fs.writeFile(path.join(sourceRulesDir, 'security.md'), '# Source', 'utf-8');
+
+      // Create valid shadow
+      const shadowRulesDir = path.join(localDevflowDir, 'rules');
+      await fs.mkdir(shadowRulesDir, { recursive: true });
+      await fs.writeFile(path.join(shadowRulesDir, 'security.md'), '# Shadow', 'utf-8');
+
+      await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
+
+      const report = await installViaFileCopy({
+        plugins: [],
+        claudeDir: localClaudeDir,
+        pluginsDir: localPluginsDir,
+        rootDir: localRootDir,
+        devflowDir: localDevflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap: new Map([['security', 'devflow-core-skills']]),
+        isPartialInstall: true,
+        spinner: noopSpinner,
+      });
+
+      expect(report.shadowedRules).toContain('security');
+      expect(report.shadowedSkills).toHaveLength(0);
+      expect(report.skippedShadows).toHaveLength(0);
+    } finally {
+      await fs.rm(localTmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('0-byte shadow → skippedShadows includes {kind:"rule", reason:"empty-shadow-file"} and rule is not in shadowedRules', async () => {
+    const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-empty-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
+
+    try {
+      // Seed plugin source rule
+      const sourceRulesDir = path.join(localPluginsDir, 'devflow-core-skills', 'rules');
+      await fs.mkdir(sourceRulesDir, { recursive: true });
+      await fs.writeFile(path.join(sourceRulesDir, 'security.md'), '# Source', 'utf-8');
+
+      // Create 0-byte shadow file (invalid — triggers skippedShadows)
+      const shadowRulesDir = path.join(localDevflowDir, 'rules');
+      await fs.mkdir(shadowRulesDir, { recursive: true });
+      await fs.writeFile(path.join(shadowRulesDir, 'security.md'), '', 'utf-8');
+
+      await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
+
+      const report = await installViaFileCopy({
+        plugins: [],
+        claudeDir: localClaudeDir,
+        pluginsDir: localPluginsDir,
+        rootDir: localRootDir,
+        devflowDir: localDevflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap: new Map([['security', 'devflow-core-skills']]),
+        isPartialInstall: true,
+        spinner: noopSpinner,
+      });
+
+      expect(report.skippedShadows).toContainEqual({ kind: 'rule', name: 'security', reason: 'empty-shadow-file' });
+      expect(report.shadowedRules).not.toContain('security');
+    } finally {
+      await fs.rm(localTmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('directory at shadow path → skippedShadows includes {kind:"rule", reason:"not-a-file"} and rule is not in shadowedRules', async () => {
+    const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-dir-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
+
+    try {
+      // Seed plugin source rule
+      const sourceRulesDir = path.join(localPluginsDir, 'devflow-core-skills', 'rules');
+      await fs.mkdir(sourceRulesDir, { recursive: true });
+      await fs.writeFile(path.join(sourceRulesDir, 'security.md'), '# Source', 'utf-8');
+
+      // Put a directory where the shadow file should be (invalid — triggers skippedShadows)
+      const shadowRulesDir = path.join(localDevflowDir, 'rules');
+      await fs.mkdir(path.join(shadowRulesDir, 'security.md'), { recursive: true });
+
+      await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
+
+      const report = await installViaFileCopy({
+        plugins: [],
+        claudeDir: localClaudeDir,
+        pluginsDir: localPluginsDir,
+        rootDir: localRootDir,
+        devflowDir: localDevflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap: new Map([['security', 'devflow-core-skills']]),
+        isPartialInstall: true,
+        spinner: noopSpinner,
+      });
+
+      expect(report.skippedShadows).toContainEqual({ kind: 'rule', name: 'security', reason: 'not-a-file' });
+      expect(report.shadowedRules).not.toContain('security');
+    } finally {
+      await fs.rm(localTmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('empty shadow with no plugin source → skippedShadows has no entry (outcome is "skipped", not "source-invalid-shadow")', async () => {
+    const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-missing-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
+
+    try {
+      // No plugin source for 'orphan-rule' — only an empty (invalid) shadow exists.
+      // installRuleFile can't reach the invalid-shadow reporting branch when source is
+      // missing: the source access() throws, returning 'skipped'. installViaFileCopy
+      // only pushes to skippedShadows for 'source-invalid-shadow:*' outcomes, so
+      // skippedShadows has no entry for this rule.
+      const shadowRulesDir = path.join(localDevflowDir, 'rules');
+      await fs.mkdir(shadowRulesDir, { recursive: true });
+      await fs.writeFile(path.join(shadowRulesDir, 'orphan-rule.md'), '', 'utf-8');
+
+      await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
+
+      const report = await installViaFileCopy({
+        plugins: [],
+        claudeDir: localClaudeDir,
+        pluginsDir: localPluginsDir,
+        rootDir: localRootDir,
+        devflowDir: localDevflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
+        isPartialInstall: true,
+        spinner: noopSpinner,
+      });
+
+      expect(report.skippedShadows).not.toContainEqual(expect.objectContaining({ name: 'orphan-rule' }));
+      expect(report.shadowedRules).not.toContain('orphan-rule');
+    } finally {
+      await fs.rm(localTmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// installAllRules
+// ---------------------------------------------------------------------------
+
+describe('installAllRules', () => {
+  let tmpDir: string;
+  let pluginsDir: string;
+  let devflowDir: string;
+  let rulesTarget: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-all-rules-'));
+    pluginsDir = path.join(tmpDir, 'plugins');
+    devflowDir = path.join(tmpDir, 'devflow');
+    rulesTarget = path.join(tmpDir, 'rules', 'devflow');
+    await fs.mkdir(rulesTarget, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty array for empty rulesMap', async () => {
+    const outcomes = await installAllRules(new Map(), pluginsDir, devflowDir, rulesTarget);
+    expect(outcomes).toEqual([]);
+  });
+
+  it('returns one outcome per rule with correct outcome for source install', async () => {
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Security', 'utf-8');
+    await fs.writeFile(path.join(sourceDir, 'quality.md'), '# Quality', 'utf-8');
+
+    const rulesMap = new Map([
+      ['security', 'devflow-core-skills'],
+      ['quality', 'devflow-core-skills'],
+    ]);
+
+    const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
+
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes.find(o => o.ruleName === 'security')?.outcome).toBe('source');
+    expect(outcomes.find(o => o.ruleName === 'quality')?.outcome).toBe('source');
+  });
+
+  it('returns shadow outcome for rule with valid shadow', async () => {
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source', 'utf-8');
+
+    const shadowRulesDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(shadowRulesDir, { recursive: true });
+    await fs.writeFile(path.join(shadowRulesDir, 'security.md'), '# Shadow', 'utf-8');
+
+    const outcomes = await installAllRules(
+      new Map([['security', 'devflow-core-skills']]),
+      pluginsDir,
+      devflowDir,
+      rulesTarget,
+    );
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].outcome).toBe('shadow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listShadowedRules
+// ---------------------------------------------------------------------------
+
+describe('listShadowedRules', () => {
+  it('returns empty array when rules directory does not exist', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-rules-'));
+    try {
+      const result = await listShadowedRules(tmpDir);
+      expect(result).toEqual([]);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns only .md basenames from rules directory', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-rules-'));
+    try {
+      const rulesDir = path.join(tmpDir, 'rules');
+      await fs.mkdir(rulesDir, { recursive: true });
+      await fs.writeFile(path.join(rulesDir, 'security.md'), '# security');
+      await fs.writeFile(path.join(rulesDir, 'engineering.md'), '# engineering');
+      await fs.writeFile(path.join(rulesDir, 'not-a-rule.txt'), 'txt');
+
+      const result = await listShadowedRules(tmpDir);
+      expect(result.sort()).toEqual(['engineering', 'security']);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('hasRuleShadow', () => {
+  it('returns true when shadow file exists', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-has-rule-'));
+    try {
+      const rulesDir = path.join(tmpDir, 'rules');
+      await fs.mkdir(rulesDir, { recursive: true });
+      await fs.writeFile(path.join(rulesDir, 'security.md'), '# shadow');
+      expect(await hasRuleShadow('security', tmpDir)).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false when shadow file does not exist', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-has-rule-'));
+    try {
+      expect(await hasRuleShadow('security', tmpDir)).toBe(false);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// seedRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('seedRuleShadow', () => {
+  let tmpDir: string;
+  let devflowDir: string;
+  let rulesTarget: string;
+  let pluginsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-seed-shadow-'));
+    devflowDir = path.join(tmpDir, 'devflow');
+    rulesTarget = path.join(tmpDir, 'rules', 'devflow');
+    pluginsDir = path.join(tmpDir, 'plugins');
+    await fs.mkdir(rulesTarget, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns 'installed' and copies the installed rule when it exists", async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('installed');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Installed Rule');
+  });
+
+  it("returns 'source' and copies from plugin source when installed rule is absent", async () => {
+    // No installed rule — only plugin source
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('source');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Source Rule');
+  });
+
+  it("'installed' tier takes precedence over 'source' when both exist", async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('installed');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Installed Rule');
+  });
+
+  it("returns 'none' and does not create shadow file when neither installed nor source exists", async () => {
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('none');
+    await expect(fs.access(shadowFile)).rejects.toThrow();
+  });
+
+  it('creates the shadow directory before copying', async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    // Confirm devflowDir/rules does not exist yet
+    await expect(fs.access(path.join(devflowDir, 'rules'))).rejects.toThrow();
+
+    await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    const stat = await fs.stat(path.join(devflowDir, 'rules'));
+    expect(stat.isDirectory()).toBe(true);
   });
 });

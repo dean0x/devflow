@@ -1,13 +1,109 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
 import type { PluginDefinition } from '../plugins.js';
 import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
+
+// ---------------------------------------------------------------------------
+// Shadow override reporting types
+// ---------------------------------------------------------------------------
+
+export type ShadowSkipReason = 'missing-skill-md' | 'empty-shadow-file' | 'not-a-file';
+
+export interface ShadowSkip {
+  kind: 'skill' | 'rule';
+  name: string;
+  reason: ShadowSkipReason;
+}
+
+export interface InstallReport {
+  shadowedSkills: string[];
+  shadowedRules: string[];
+  skippedShadows: ShadowSkip[];
+}
+
+/** Discriminated outcome for a single rule installation. */
+export type RuleInstallOutcome =
+  | 'shadow'
+  | 'source'
+  | 'source-invalid-shadow:empty-shadow-file'
+  | 'source-invalid-shadow:not-a-file'
+  | 'skipped';
+
+// ---------------------------------------------------------------------------
+// Shadow state named types (Issue 4)
+// ---------------------------------------------------------------------------
+
+/** Return states for validateSkillShadow. */
+export type SkillShadowState = 'valid' | 'missing-skill-md' | 'none';
+
+/** Return states for validateRuleShadow. */
+export type RuleShadowState = 'valid' | 'empty-shadow-file' | 'not-a-file' | 'none';
+
+// ---------------------------------------------------------------------------
+// Shadow validation helpers (exported — reused by Step 4 list commands)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a skill shadow directory at `~/.devflow/skills/{name}/`.
+ *
+ * Returns:
+ *   'none'            — shadow dir is absent (no override configured)
+ *   'valid'           — dir exists and contains a non-empty SKILL.md file
+ *   'missing-skill-md'— dir exists but SKILL.md is absent, empty, or not a file
+ */
+export async function validateSkillShadow(shadowDir: string): Promise<SkillShadowState> {
+  try {
+    const dirStat = await fs.stat(shadowDir);
+    if (!dirStat.isDirectory()) return 'missing-skill-md';
+  } catch {
+    return 'none';
+  }
+
+  try {
+    const skillMd = path.join(shadowDir, 'SKILL.md');
+    const stat = await fs.stat(skillMd);
+    if (stat.isFile() && stat.size > 0) return 'valid';
+    return 'missing-skill-md';
+  } catch {
+    return 'missing-skill-md';
+  }
+}
+
+/**
+ * Validate a rule shadow file at `~/.devflow/rules/{name}.md`.
+ *
+ * Returns:
+ *   'none'               — shadow file is absent
+ *   'valid'              — shadow file exists, is a regular file, and is non-empty
+ *   'empty-shadow-file'  — shadow file exists and is a file but has size 0
+ *   'not-a-file'         — path exists but is not a file (e.g. a directory)
+ *
+ * D: The isFile() guard is load-bearing. Without it, a directory at the shadow
+ * path passes the size > 0 check but copyFile throws EISDIR inside the rules
+ * Promise.all (installer.ts rules block — no per-call catch), aborting init.
+ * fs.stat follows symlinks: symlink → regular file = valid; symlink → dir = not-a-file.
+ */
+export async function validateRuleShadow(shadowFile: string): Promise<RuleShadowState> {
+  try {
+    const stat = await fs.stat(shadowFile);
+    if (!stat.isFile()) return 'not-a-file';
+    if (stat.size === 0) return 'empty-shadow-file';
+    return 'valid';
+  } catch {
+    return 'none';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule installer
+// ---------------------------------------------------------------------------
 
 /**
  * Install a single rule file, respecting the shadow override at
  * ~/.devflow/rules/{name}.md over the built plugin source.
- * Skips silently if the source file does not exist (missing build artifact).
+ *
+ * Returns the installation outcome so callers can aggregate reporting.
+ * Skips silently (returns 'skipped') if the source file does not exist.
  */
 export async function installRuleFile(
   ruleName: string,
@@ -15,22 +111,68 @@ export async function installRuleFile(
   pluginsDir: string,
   devflowDir: string,
   rulesTarget: string,
-): Promise<void> {
+): Promise<RuleInstallOutcome> {
   const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
   const targetFile = path.join(rulesTarget, `${ruleName}.md`);
-
-  try {
-    await fs.access(shadowFile);
-    await fs.copyFile(shadowFile, targetFile);
-    return;
-  } catch { /* no shadow — fall through to plugin source */ }
-
   const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+
+  const shadowState = await validateRuleShadow(shadowFile);
+
+  if (shadowState === 'valid') {
+    try {
+      await fs.copyFile(shadowFile, targetFile);
+      return 'shadow';
+    } catch {
+      // Shadow is valid but the copy failed (e.g. EACCES, EISDIR on target).
+      // Fall through to install the Devflow source so init never hard-fails.
+    }
+  }
+
+  // Shadow is invalid (empty or not-a-file), or valid-shadow copy failed.
+  // Install the Devflow source and report the specific invalid-shadow reason.
+  let invalidShadowOutcome: RuleInstallOutcome | null = null;
+  if (shadowState === 'not-a-file') {
+    invalidShadowOutcome = 'source-invalid-shadow:not-a-file';
+  } else if (shadowState === 'empty-shadow-file') {
+    invalidShadowOutcome = 'source-invalid-shadow:empty-shadow-file';
+  }
+
   try {
     await fs.access(ruleSource);
     await fs.copyFile(ruleSource, targetFile);
-  } catch { /* source missing — skip */ }
+    return invalidShadowOutcome ?? 'source';
+  } catch {
+    return 'skipped'; /* source missing — skip silently */
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Shared rule-install loop (Issue 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Install all rules in rulesMap, returning one outcome per rule.
+ * Called by installViaFileCopy (rolls up into InstallReport) and
+ * `rules --enable` (renders per-rule log lines). One place computes;
+ * callers present.
+ */
+export async function installAllRules(
+  rulesMap: Map<string, string>,
+  pluginsDir: string,
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
+  return Promise.all(
+    [...rulesMap.entries()].map(async ([ruleName, ownerPlugin]) => {
+      const outcome = await installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget);
+      return { ruleName, outcome };
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spinner interface
+// ---------------------------------------------------------------------------
 
 /**
  * Minimal spinner interface matching @clack/prompts spinner().
@@ -40,6 +182,10 @@ export interface Spinner {
   stop(msg?: string, code?: number): void;
   message(msg?: string): void;
 }
+
+// ---------------------------------------------------------------------------
+// Directory utilities
+// ---------------------------------------------------------------------------
 
 /**
  * Recursively copy a directory tree.
@@ -75,56 +221,9 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
   }
 }
 
-/**
- * Add Devflow marketplace to Claude CLI.
- * Idempotent — safe to call multiple times.
- */
-function addMarketplaceViaCli(): boolean {
-  try {
-    execSync('claude plugin marketplace add dean0x/devflow', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install a single plugin via Claude CLI.
- */
-function installPluginViaCli(pluginName: string, scope: 'user' | 'local'): boolean {
-  try {
-    const cliScope = scope === 'local' ? 'project' : 'user';
-    execSync(`claude plugin install ${pluginName}@dean0x-devflow --scope ${cliScope}`, {
-      stdio: 'pipe',
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install plugins via Claude CLI native plugin system.
- * Returns true if all plugins installed successfully.
- */
-export function installViaCli(
-  plugins: PluginDefinition[],
-  scope: 'user' | 'local',
-  spinner: Spinner,
-): boolean {
-  spinner.message('Adding Devflow marketplace...');
-  const marketplaceAdded = addMarketplaceViaCli();
-
-  if (!marketplaceAdded) return false;
-
-  spinner.message('Installing plugins via Claude CLI...');
-  for (const plugin of plugins) {
-    if (!installPluginViaCli(plugin.name, scope)) return false;
-  }
-
-  spinner.stop('Plugins installed via Claude CLI');
-  return true;
-}
+// ---------------------------------------------------------------------------
+// File copy installer
+// ---------------------------------------------------------------------------
 
 export interface FileCopyOptions {
   plugins: PluginDefinition[];
@@ -144,8 +243,10 @@ export interface FileCopyOptions {
  * Install plugins via manual file copy.
  * Handles cleanup of old monolithic structure, deduplication of shared assets,
  * and script installation with executable permissions.
+ *
+ * Returns an InstallReport describing which shadows were applied and which were skipped.
  */
-export async function installViaFileCopy(options: FileCopyOptions): Promise<void> {
+export async function installViaFileCopy(options: FileCopyOptions): Promise<InstallReport> {
   const {
     plugins,
     claudeDir,
@@ -158,6 +259,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     isPartialInstall,
     spinner,
   } = options;
+
+  const report: InstallReport = {
+    shadowedSkills: [],
+    shadowedRules: [],
+    skippedShadows: [],
+  };
 
   // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
@@ -255,24 +362,21 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       if (!stat.isDirectory()) continue;
     } catch { continue; /* skill dir doesn't exist in built plugin */ }
 
-    // Shadow check: ~/.devflow/skills/{unprefixed-name}/
-    // If shadowed with actual content, copy user's version instead of Devflow source
     const shadowDir = path.join(devflowDir, 'skills', skillName);
     const prefixedName = prefixSkillName(skillName);
     const skillTarget = path.join(claudeDir, 'skills', prefixedName);
 
-    let isShadowed = false;
-    try {
-      const stat = await fs.stat(shadowDir);
-      if (stat.isDirectory()) {
-        const entries = await fs.readdir(shadowDir);
-        isShadowed = entries.length > 0;
-      }
-    } catch { /* no shadow */ }
+    const shadowState = await validateSkillShadow(shadowDir);
 
-    if (isShadowed) {
+    if (shadowState === 'valid') {
       await copyDirectory(shadowDir, skillTarget);
+      report.shadowedSkills.push(skillName);
+    } else if (shadowState === 'missing-skill-md') {
+      // Shadow dir exists but is invalid — warn + install Devflow source
+      report.skippedShadows.push({ kind: 'skill', name: skillName, reason: 'missing-skill-md' });
+      await copyDirectory(skillSource, skillTarget);
     } else {
+      // 'none' — no shadow, install source silently
       await copyDirectory(skillSource, skillTarget);
     }
   }
@@ -284,11 +388,16 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
   if (rulesMap.size > 0) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    await Promise.all(
-      [...rulesMap.entries()].map(([ruleName, ownerPlugin]) =>
-        installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget),
-      ),
-    );
+    const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
+    for (const { ruleName, outcome } of outcomes) {
+      if (outcome === 'shadow') {
+        report.shadowedRules.push(ruleName);
+      } else if (outcome === 'source-invalid-shadow:empty-shadow-file') {
+        report.skippedShadows.push({ kind: 'rule', name: ruleName, reason: 'empty-shadow-file' });
+      } else if (outcome === 'source-invalid-shadow:not-a-file') {
+        report.skippedShadows.push({ kind: 'rule', name: ruleName, reason: 'not-a-file' });
+      }
+    }
   }
 
   // Install scripts (always from root scripts/ directory)
@@ -304,4 +413,5 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   } catch { /* scripts may not exist */ }
 
   spinner.stop('Components installed via file copy');
+  return report;
 }

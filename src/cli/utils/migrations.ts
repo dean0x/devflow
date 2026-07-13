@@ -194,28 +194,6 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  * needed) from per-project (sweeps every discovered Claude-enabled project root).
  */
 
-/**
- * D36: The `shadow-overrides-v2-names` entry retrofits the inline
- * `migrateShadowOverrides` call that previously lived directly in init.ts (~line 822).
- * Retrofitting into the registry eliminates the one-off migration pattern and
- * establishes the registry as the single entry point for all one-time changes.
- * The semantics are identical — the function is imported from its new home in
- * shadow-overrides-migration.ts.
- */
-const MIGRATION_SHADOW_OVERRIDES: Migration<'global'> = {
-  id: 'shadow-overrides-v2-names',
-  description: 'Rename shadow-override skill directories to V2 names',
-  scope: 'global',
-  run: async (ctx: GlobalMigrationContext): Promise<MigrationRunResult> => {
-    const { migrateShadowOverridesRegistry } = await import('./shadow-overrides-migration.js');
-    const result = await migrateShadowOverridesRegistry(ctx.devflowDir);
-    const infos = result.migrated > 0
-      ? [`Migrated ${result.migrated} shadow override(s)`]
-      : [];
-    return { infos, warnings: result.warnings };
-  },
-};
-
 const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   id: 'purge-legacy-knowledge-v2',
   description: 'Remove pre-v2 low-signal decisions entries (ADR-002, PF-001, PF-003, PF-005)',
@@ -556,8 +534,8 @@ const MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE: Migration<'per-project'> 
  *
  * - `-vN-{tag}`  A named variant within a revision. The tag distinguishes
  *                migrations that operate on the same version epoch but target
- *                different data (e.g. `shadow-overrides-v2-names` vs a
- *                hypothetical `shadow-overrides-v2-config`).
+ *                different data (e.g. `purge-legacy-knowledge-v2` for decisions
+ *                vs a hypothetical `purge-legacy-knowledge-v2-config`).
  *
  * All IDs are append-only — never rename an existing ID or already-applied
  * machines will re-run the migration.
@@ -1101,8 +1079,30 @@ const MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX: Migration<'global'> = {
   },
 };
 
+/**
+ * Global: remove the Devflow-written `devflow` entry from `extraKnownMarketplaces`
+ * in ~/.claude/settings.json.
+ *
+ * Applies ADR-010 (completes the native-path removal by cleaning up the marketplace
+ * entry that was written alongside it) and ADR-003 (clean end-state: remove only the
+ * devflow key; preserve other marketplaces; remove the parent key if it becomes empty).
+ *
+ * ENOENT-idempotent (avoids PF-004): missing file, missing key, and malformed JSON
+ * are all silent no-ops that never crash init.
+ */
+const MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES: Migration<'global'> = {
+  id: 'purge-stale-extra-known-marketplaces-v1',
+  description: 'Remove Devflow-written devflow entry from extraKnownMarketplaces in ~/.claude/settings.json',
+  scope: 'global',
+  async run(_ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const { stripDevflowMarketplace } = await import('./marketplace-cleanup.js');
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    await stripDevflowMarketplace(settingsPath);
+    return { infos: [], warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
-  MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
   MIGRATION_RENAME_KB_TO_KNOWLEDGE,
@@ -1122,6 +1122,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_DREAM_WORKER_STATE,
   MIGRATION_RENDER_DECISIONS_INDEX,
   MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX,
+  MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
@@ -1373,7 +1374,7 @@ async function runPerProjectMigration(
  * Fresh installs with no decisions files are effectively no-ops — each migration
  * helper short-circuits when the data it targets doesn't exist (e.g.,
  * purgeLegacyDecisionsEntries returns immediately when `.memory/decisions/` is
- * absent; migrateShadowOverridesRegistry skips when no old-name directories exist).
+ * absent).
  * Adding a fresh-vs-upgrade branch would require detecting "is this a fresh
  * install" reliably, which is harder than it appears (partial installs, reinstalls,
  * migrations from local to user scope). The always-run path is simpler and correct.

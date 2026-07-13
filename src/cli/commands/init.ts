@@ -7,8 +7,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { isClaudeCliAvailable } from '../utils/cli.js';
-import { installViaCli, installViaFileCopy, copyDirectory } from '../utils/installer.js';
+import { installViaFileCopy, copyDirectory, type InstallReport } from '../utils/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -52,9 +51,6 @@ export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
 export { removeDreamHook, hasDreamHook } from './dream.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
-// Re-export migrateShadowOverrides under its original name for backward compatibility
-export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
-
 import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
 
 export type { MigrationLogger };
@@ -68,8 +64,10 @@ export type { MigrationLogger };
  *   3. Run with no per-project targets when both are absent (global-only; per-project
  *      migrations are vacuously applied per D37 semantics).
  *
- * Must run BEFORE installViaFileCopy (D7/PF-007) so V1→V2 shadow renames are
- * complete before the installer looks for V2-named directories.
+ * Migrations are a one-time cleanup pass over ~/.devflow runtime data
+ * (decisions, memory, dream, knowledge). They never touch the installer's
+ * copy targets (skills, agents, rules, commands, scripts), so ordering
+ * relative to installViaFileCopy carries no data dependency.
  *
  * The `runner` parameter accepts the runMigrations function — injected to make
  * this helper testable without real filesystem migration state.
@@ -982,11 +980,11 @@ export const initCommand = new Command('init')
     const rulesMap = rulesEnabled ? buildRulesMap(pluginsToInstall) : new Map<string, string>();
 
     // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
-    // Runs BEFORE installViaFileCopy so V1→V2 shadow renames are complete before the
-    // installer looks for V2-named directories. Migrations are always-run-unapplied:
-    // helpers short-circuit when the target data is absent, so fresh installs are safe
-    // no-ops. State lives at the home-dir ~/.devflow location regardless of install
-    // scope (D30).
+    // Migrations clean up ~/.devflow runtime data and never touch the installer's copy
+    // targets, so their position relative to installViaFileCopy carries no dependency.
+    // Migrations are always-run-unapplied: helpers short-circuit when the target data is
+    // absent, so fresh installs are safe no-ops. State lives at the home-dir ~/.devflow
+    // location regardless of install scope (D30).
     {
       const { runMigrations } = await import('../utils/migrations.js');
       const userDevflowDir = path.join(os.homedir(), '.devflow');
@@ -1000,33 +998,25 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Install: try native CLI first, fall back to file copy
-    const cliAvailable = isClaudeCliAvailable();
-    const usedNativeCli = cliAvailable && installViaCli(pluginsToInstall, scope, s);
-
-    if (!usedNativeCli) {
-      if (cliAvailable && verbose) {
-        p.log.warn('Claude CLI installation failed, falling back to manual copy');
-      }
-
-      try {
-        await installViaFileCopy({
-          plugins: pluginsToInstall,
-          claudeDir,
-          pluginsDir,
-          rootDir,
-          devflowDir,
-          skillsMap,
-          agentsMap,
-          rulesMap,
-          isPartialInstall: !!options.plugin,
-          spinner: s,
-        });
-      } catch (error) {
-        s.stop('Installation failed');
-        p.log.error(`${error}`);
-        process.exit(1);
-      }
+    // Install via file copy
+    let installReport: InstallReport;
+    try {
+      installReport = await installViaFileCopy({
+        plugins: pluginsToInstall,
+        claudeDir,
+        pluginsDir,
+        rootDir,
+        devflowDir,
+        skillsMap,
+        agentsMap,
+        rulesMap,
+        isPartialInstall: !!options.plugin,
+        spinner: s,
+      });
+    } catch (error) {
+      s.stop('Installation failed');
+      p.log.error(`${error}`);
+      process.exit(1);
     }
 
     // Clean up stale skills from previous installations
@@ -1362,10 +1352,35 @@ export const initCommand = new Command('init')
 
     // === Summary ===
 
-    if (usedNativeCli) {
-      p.log.success('Installed via Claude plugin system');
-    } else if (!cliAvailable) {
-      p.log.info('Installed via file copy (Claude CLI not available)');
+    // Shadow override reporting
+    const totalShadowed = installReport.shadowedSkills.length + installReport.shadowedRules.length;
+    if (totalShadowed > 0) {
+      const parts: string[] = [
+        ...installReport.shadowedSkills.map(s => `skill:${s}`),
+        ...installReport.shadowedRules.map(r => `rule:${r}`),
+      ];
+      p.log.info(`Applied ${totalShadowed} shadow override(s): ${parts.join(', ')}`);
+    }
+    for (const skip of installReport.skippedShadows) {
+      let reasonMsg: string;
+      switch (skip.reason) {
+        case 'missing-skill-md':
+          reasonMsg = 'shadow directory has no valid SKILL.md';
+          break;
+        case 'empty-shadow-file':
+          reasonMsg = 'shadow file is empty';
+          break;
+        case 'not-a-file':
+          reasonMsg = 'shadow path is not a file';
+          break;
+        default: {
+          const _exhaustive: never = skip.reason;
+          void _exhaustive;
+          reasonMsg = 'unknown skip reason';
+          break;
+        }
+      }
+      p.log.warn(`Shadow for ${skip.kind}:${skip.name} skipped (${reasonMsg}) — Devflow's version was installed`);
     }
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));

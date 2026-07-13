@@ -2,12 +2,10 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -16,6 +14,7 @@ import { removeDreamHook } from './dream.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
+import { listShadowedRules } from './rules.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
@@ -121,17 +120,46 @@ export function resolveSecurityRemovalDecision(opts: {
   return 'prompt';
 }
 
+export interface ShadowWarning {
+  level: 'warn' | 'info';
+  message: string;
+}
+
 /**
- * Uninstall plugin using Claude CLI
+ * Compute shadow-leftover warnings to emit after a full uninstall.
+ * Pure function — no I/O, fully testable.
+ *
+ * Returns [] when isSelectiveUninstall is true (shadow warnings only apply
+ * to full uninstall). Each non-empty shadow list produces a warn entry
+ * (the leftover notice) followed by an info entry (the cleanup hint).
+ *
+ * @D3 Shadow state MUST be captured before the removal block. This function
+ * operates on pre-captured lists — see KNOWLEDGE.md §Anti-Patterns
+ * ("staging shadow state after removal").
  */
-function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
-  try {
-    const cliScope = scope === 'local' ? 'project' : 'user';
-    execFileSync('claude', ['plugin', 'uninstall', 'devflow', '--scope', cliScope], { stdio: 'inherit' });
-    return true;
-  } catch {
-    return false;
+export function computeShadowLeftoverWarnings(opts: {
+  shadowedSkills: string[];
+  shadowedRules: string[];
+  isSelectiveUninstall: boolean;
+  devflowDir: string;
+}): ShadowWarning[] {
+  if (opts.isSelectiveUninstall) return [];
+
+  const warnings: ShadowWarning[] = [];
+
+  if (opts.shadowedSkills.length > 0) {
+    const shadowPath = path.join(opts.devflowDir, 'skills');
+    warnings.push({ level: 'warn', message: `Personal skill overrides remain in ${shadowPath}: ${opts.shadowedSkills.join(', ')}` });
+    warnings.push({ level: 'info', message: `Remove manually or run: rm -rf ${shadowPath}` });
   }
+
+  if (opts.shadowedRules.length > 0) {
+    const ruleShadowPath = path.join(opts.devflowDir, 'rules');
+    warnings.push({ level: 'warn', message: `Personal rule overrides remain in ${ruleShadowPath}: ${opts.shadowedRules.join(', ')}` });
+    warnings.push({ level: 'info', message: `Remove manually or run: rm -rf ${ruleShadowPath}` });
+  }
+
+  return warnings;
 }
 
 /**
@@ -258,7 +286,10 @@ export const uninstallCommand = new Command('uninstall')
       return;
     }
 
-    const cliAvailable = isClaudeCliAvailable();
+    // Belt-and-braces: capture shadow state BEFORE any removal so warnings
+    // are correct even if removal scope changes.
+    const shadowedSkillsBefore = !isSelectiveUninstall ? await listShadowed() : [];
+    const shadowedRulesBefore = !isSelectiveUninstall ? await listShadowedRules() : [];
 
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
@@ -268,7 +299,7 @@ export const uninstallCommand = new Command('uninstall')
       try {
         const paths = await getInstallationPaths(scope);
         claudeDir = paths.claudeDir;
-        devflowScriptsDir = paths.devflowDir;
+        devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
 
         if (scope === 'user') {
           p.log.step('Uninstalling user scope (~/.claude/)');
@@ -280,47 +311,31 @@ export const uninstallCommand = new Command('uninstall')
         continue;
       }
 
-      // Try to uninstall plugin via Claude CLI first (only for full uninstall)
-      let usedCli = false;
+      if (isSelectiveUninstall) {
+        await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
 
-      if (cliAvailable && !isSelectiveUninstall) {
-        if (verbose) {
-          p.log.info('Uninstalling plugin via Claude CLI...');
-        }
-        usedCli = uninstallPluginViaCli(scope);
-        if (!usedCli && verbose) {
-          p.log.warn('Claude CLI uninstall failed, falling back to manual removal');
-        }
-      }
-
-      // If CLI uninstall failed or unavailable, do manual removal
-      if (!usedCli) {
-        if (isSelectiveUninstall) {
-          await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
-
-          // Clean up ambient hook if ambient plugin is being removed
-          if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
-            const settingsPath = path.join(claudeDir, 'settings.json');
-            try {
-              const settings = await fs.readFile(settingsPath, 'utf-8');
-              const updated = await removeAmbientHook(settings);
-              if (updated !== settings) {
-                await fs.writeFile(settingsPath, updated, 'utf-8');
-                if (verbose) {
-                  p.log.success('Ambient mode hooks removed from settings.json');
-                }
+        // Clean up ambient hook if ambient plugin is being removed
+        if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
+          const settingsPath = path.join(claudeDir, 'settings.json');
+          try {
+            const settings = await fs.readFile(settingsPath, 'utf-8');
+            const updated = await removeAmbientHook(settings);
+            if (updated !== settings) {
+              await fs.writeFile(settingsPath, updated, 'utf-8');
+              if (verbose) {
+                p.log.success('Ambient mode hooks removed from settings.json');
               }
-            } catch { /* settings.json may not exist */ }
-          }
-        } else {
-          await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
+            }
+          } catch { /* settings.json may not exist */ }
         }
+      } else {
+        await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
       }
 
       const pluginLabel = isSelectiveUninstall
         ? ` (${selectedPluginNames.join(', ')})`
         : '';
-      p.log.success(`Plugin removed${usedCli ? ' (via Claude CLI)' : ''}${pluginLabel}`);
+      p.log.success(`Plugin removed${pluginLabel}`);
     }
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
@@ -543,13 +558,18 @@ export const uninstallCommand = new Command('uninstall')
       }
     }
 
-    // Warn about personal skill overrides
-    if (!isSelectiveUninstall) {
-      const shadowed = await listShadowed();
-      if (shadowed.length > 0) {
-        const shadowPath = path.join(getDevFlowDirectory(), 'skills');
-        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowed.join(', ')}`);
-        p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
+    // Warn about personal skill/rule overrides (captured before removal).
+    const leftoverWarnings = computeShadowLeftoverWarnings({
+      shadowedSkills: shadowedSkillsBefore,
+      shadowedRules: shadowedRulesBefore,
+      isSelectiveUninstall,
+      devflowDir: getDevFlowDirectory(),
+    });
+    for (const { level, message } of leftoverWarnings) {
+      if (level === 'warn') {
+        p.log.warn(message);
+      } else {
+        p.log.info(color.dim(message));
       }
     }
 

@@ -755,7 +755,6 @@ describe('Test infrastructure skill references', () => {
     // Also allow test assertion lines like `expect(...).toContain('old-name')` in shadow migration tests.
     const ALLOWLIST_PATTERNS = [
       /LEGACY_SKILL_NAMES/,
-      /SHADOW_RENAMES/,
       /old.?name/i,
       /legacy/i,
       /shadow/i,
@@ -767,7 +766,6 @@ describe('Test infrastructure skill references', () => {
     // Files whose tests intentionally use old skill names as test data
     const ALLOWLIST_FILES = new Set([
       'init-logic.test.ts',
-      'shadow-overrides-migration.test.ts',
     ]);
 
     for (const relFile of testFiles) {

@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../plugins.js';
-import { copyDirectory } from '../utils/installer.js';
+import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../utils/installer.js';
 
 /**
  * Check if a directory exists.
@@ -35,7 +35,8 @@ export async function hasShadow(skillName: string, devflowDir?: string): Promise
 }
 
 /**
- * List all shadowed skill names.
+ * List all shadowed skill names (directory names under ~/.devflow/skills/).
+ * Used by the uninstall warning.
  */
 export async function listShadowed(devflowDir?: string): Promise<string[]> {
   const dir = devflowDir ?? getDevFlowDirectory();
@@ -49,9 +50,26 @@ export async function listShadowed(devflowDir?: string): Promise<string[]> {
   }
 }
 
+/** Render the shadow-state display tag for a skill. Exhaustive switch catches new states at compile time. */
+function buildSkillShadowTag(shadowState: SkillShadowState): string {
+  switch (shadowState) {
+    case 'valid':
+      return color.green('shadowed');
+    case 'missing-skill-md':
+      return color.yellow('shadowed — invalid: no SKILL.md');
+    case 'none':
+      return color.dim('—');
+    default: {
+      const _exhaustive: never = shadowState;
+      void _exhaustive;
+      return color.dim('—');
+    }
+  }
+}
+
 export const skillsCommand = new Command('skills')
   .description('Manage skill overrides (shadow/unshadow/list)')
-  .argument('<action>', 'Action: shadow, unshadow, or list-shadowed')
+  .argument('<action>', 'Action: shadow, unshadow, or list')
   .argument('[name]', 'Skill name (required for shadow/unshadow)')
   .action(async (action: string, name: string | undefined) => {
     const devflowDir = getDevFlowDirectory();
@@ -111,23 +129,44 @@ export const skillsCommand = new Command('skills')
 
       p.log.success(`Unshadowed ${color.cyan(bareName)}`);
       p.log.info('Run devflow init to restore Devflow\'s version.');
-    } else if (action === 'list-shadowed') {
-      const shadowed = await listShadowed(devflowDir);
+    } else if (action === 'list') {
+      const shadowsRoot = path.join(devflowDir, 'skills');
 
-      if (shadowed.length === 0) {
-        p.log.info('No shadowed skills');
-        return;
+      // Collect shadow dirs that exist
+      let shadowDirNames: string[] = [];
+      try {
+        const entries = await fs.readdir(shadowsRoot, { withFileTypes: true });
+        shadowDirNames = entries.filter(e => e.isDirectory()).map(e => e.name);
+      } catch { /* skills dir absent — no shadows */ }
+      const shadowDirSet = new Set(shadowDirNames);
+      const knownSkillSet = new Set(allSkills);
+
+      // Build rows in parallel; short-circuit validateSkillShadow for skills with no shadow dir
+      const knownResults = await Promise.all(
+        allSkills.map(async (skill) => {
+          const shadowState: SkillShadowState = shadowDirSet.has(skill)
+            ? await validateSkillShadow(path.join(shadowsRoot, skill))
+            : 'none';
+          return { skill, shadowState };
+        }),
+      );
+
+      const rows: string[] = knownResults.map(({ skill, shadowState }) =>
+        `  ${color.cyan(skill.padEnd(28))} ${buildSkillShadowTag(shadowState)}`,
+      );
+
+      // Orphan shadows: in ~/.devflow/skills/ but not a known skill
+      for (const dirName of shadowDirNames) {
+        if (!knownSkillSet.has(dirName)) {
+          rows.push(`  ${color.yellow(dirName.padEnd(28))} ${color.yellow('unknown skill')}`);
+        }
       }
 
-      p.log.info(`Shadowed skills (${shadowed.length}):`);
-      for (const skill of shadowed) {
-        const isKnown = allSkills.includes(skill);
-        const status = isKnown ? color.green('active') : color.yellow('unknown skill');
-        p.log.info(`  ${color.cyan(skill)} — ${status}`);
-      }
+      const shadowedCount = knownResults.filter(r => r.shadowState !== 'none').length;
+      p.note(rows.join('\n'), `Skills (${allSkills.length} known, ${shadowedCount} shadowed)`);
     } else {
       p.log.error(`Unknown action: ${action}`);
-      p.log.info('Usage: devflow skills <shadow|unshadow|list-shadowed> [name]');
+      p.log.info('Usage: devflow skills <shadow|unshadow|list> [name]');
       process.exit(1);
     }
   });

@@ -48,7 +48,7 @@ you: add rate limiting to the /api/upload endpoint
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
+**Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
 
 **Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplifier + Scrutinizer quality passes.
 
