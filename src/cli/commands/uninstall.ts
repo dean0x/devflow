@@ -121,6 +121,45 @@ export function resolveSecurityRemovalDecision(opts: {
 }
 
 /**
+ * Compute shadow-leftover warning messages to emit after a full uninstall.
+ * Pure function — no I/O, fully testable.
+ *
+ * Returns [] when isSelectiveUninstall is true (shadow warnings only apply
+ * to full uninstall). For each non-empty shadow list, two strings are returned:
+ * a main warning (intended for `p.log.warn`) immediately followed by a cleanup
+ * hint (intended for `p.log.info`). Callers use even/odd index position to
+ * determine log level: index 0, 2, … → warn; index 1, 3, … → info hint.
+ *
+ * @D3 Shadow state MUST be captured before the removal block. This function
+ * operates on pre-captured lists — see KNOWLEDGE.md §Anti-Patterns
+ * ("staging shadow state after removal").
+ */
+export function computeShadowLeftoverWarnings(opts: {
+  shadowedSkills: string[];
+  shadowedRules: string[];
+  isSelectiveUninstall: boolean;
+  devflowDir: string;
+}): string[] {
+  if (opts.isSelectiveUninstall) return [];
+
+  const messages: string[] = [];
+
+  if (opts.shadowedSkills.length > 0) {
+    const shadowPath = path.join(opts.devflowDir, 'skills');
+    messages.push(`Personal skill overrides remain in ${shadowPath}: ${opts.shadowedSkills.join(', ')}`);
+    messages.push(`Remove manually or run: rm -rf ${shadowPath}`);
+  }
+
+  if (opts.shadowedRules.length > 0) {
+    const ruleShadowPath = path.join(opts.devflowDir, 'rules');
+    messages.push(`Personal rule overrides remain in ${ruleShadowPath}: ${opts.shadowedRules.join(', ')}`);
+    messages.push(`Remove manually or run: rm -rf ${ruleShadowPath}`);
+  }
+
+  return messages;
+}
+
+/**
  * Check if Devflow is installed at the given paths
  */
 async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
@@ -517,17 +556,19 @@ export const uninstallCommand = new Command('uninstall')
     }
 
     // Warn about personal skill/rule overrides (captured before removal).
-    if (!isSelectiveUninstall) {
-      if (shadowedSkillsBefore.length > 0) {
-        const shadowPath = path.join(getDevFlowDirectory(), 'skills');
-        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowedSkillsBefore.join(', ')}`);
-        p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
-      }
-
-      if (shadowedRulesBefore.length > 0) {
-        const ruleShadowPath = path.join(getDevFlowDirectory(), 'rules');
-        p.log.warn(`Personal rule overrides remain in ${ruleShadowPath}: ${shadowedRulesBefore.join(', ')}`);
-        p.log.info(color.dim(`Remove manually or run: rm -rf ${ruleShadowPath}`));
+    // Messages come in warn/hint pairs: even indices (0, 2, …) → p.log.warn,
+    // odd indices (1, 3, …) → p.log.info hint.
+    const leftoverWarnings = computeShadowLeftoverWarnings({
+      shadowedSkills: shadowedSkillsBefore,
+      shadowedRules: shadowedRulesBefore,
+      isSelectiveUninstall,
+      devflowDir: getDevFlowDirectory(),
+    });
+    for (let i = 0; i < leftoverWarnings.length; i++) {
+      if (i % 2 === 0) {
+        p.log.warn(leftoverWarnings[i]);
+      } else {
+        p.log.info(color.dim(leftoverWarnings[i]));
       }
     }
 
