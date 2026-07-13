@@ -10,7 +10,7 @@ import {
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 import { installRuleFile, installAllRules, installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
-import { listShadowedRules, hasRuleShadow } from '../src/cli/commands/rules.js';
+import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
 
 // ---------------------------------------------------------------------------
 // isValidRuleName
@@ -511,5 +511,91 @@ describe('hasRuleShadow', () => {
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// seedRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('seedRuleShadow', () => {
+  let tmpDir: string;
+  let devflowDir: string;
+  let rulesTarget: string;
+  let pluginsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-seed-shadow-'));
+    devflowDir = path.join(tmpDir, 'devflow');
+    rulesTarget = path.join(tmpDir, 'rules', 'devflow');
+    pluginsDir = path.join(tmpDir, 'plugins');
+    await fs.mkdir(rulesTarget, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns 'installed' and copies the installed rule when it exists", async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('installed');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Installed Rule');
+  });
+
+  it("returns 'source' and copies from plugin source when installed rule is absent", async () => {
+    // No installed rule — only plugin source
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('source');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Source Rule');
+  });
+
+  it("'installed' tier takes precedence over 'source' when both exist", async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const sourceDir = path.join(pluginsDir, 'devflow-core-skills', 'rules');
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'security.md'), '# Source Rule', 'utf-8');
+
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('installed');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toBe('# Installed Rule');
+  });
+
+  it("returns 'none' and does not create shadow file when neither installed nor source exists", async () => {
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    const tier = await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    expect(tier).toBe('none');
+    await expect(fs.access(shadowFile)).rejects.toThrow();
+  });
+
+  it('creates the shadow directory before copying', async () => {
+    await fs.writeFile(path.join(rulesTarget, 'security.md'), '# Installed Rule', 'utf-8');
+    const shadowFile = path.join(devflowDir, 'rules', 'security.md');
+
+    // Confirm devflowDir/rules does not exist yet
+    await expect(fs.access(path.join(devflowDir, 'rules'))).rejects.toThrow();
+
+    await seedRuleShadow('security', shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+    const stat = await fs.stat(path.join(devflowDir, 'rules'));
+    expect(stat.isDirectory()).toBe(true);
   });
 });

@@ -7,7 +7,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../plugins.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
-import { installAllRules, validateRuleShadow } from '../utils/installer.js';
+import { installAllRules, validateRuleShadow, type RuleShadowState } from '../utils/installer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,15 +48,29 @@ export async function listShadowedRules(devflowDir?: string): Promise<string[]> 
   }
 }
 
-async function formatRuleRow(
+/** Render the shadow-state tag for a rule — shared by formatRuleRow and printRulesList. */
+function buildRuleShadowTag(shadowState: RuleShadowState): string {
+  if (shadowState === 'valid') {
+    return ' ' + color.green('shadowed');
+  } else if (shadowState === 'empty-shadow-file') {
+    return ' ' + color.yellow('shadowed — invalid: empty file');
+  } else if (shadowState === 'not-a-file') {
+    return ' ' + color.yellow('shadowed — invalid: not a file');
+  }
+  return '';
+}
+
+/**
+ * Format a single rule row for display.
+ * Shared by --status (no installed tag) and printRulesList (with installed tag).
+ */
+function formatRuleRow(
   name: string,
-  devflowDir: string,
-  ownerMap: Map<string, string>,
-): Promise<string> {
-  const owner = ownerMap.get(name) ?? 'unknown';
-  const shortOwner = owner.replace('devflow-', '');
-  const shadowTag = await hasRuleShadow(name, devflowDir) ? color.yellow(' [shadowed]') : '';
-  return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${shadowTag}`;
+  shortOwner: string,
+  shadowState: RuleShadowState,
+  installedTag: string = '',
+): string {
+  return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${installedTag}${buildRuleShadowTag(shadowState)}`;
 }
 
 /**
@@ -71,30 +85,136 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
     installedNames = entries.filter(f => f.endsWith('.md')).map(f => path.basename(f, '.md'));
   } catch { /* dir doesn't exist */ }
   const installedSet = new Set(installedNames);
+  const knownRuleSet = new Set(allRules);
 
   const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
-  const lines = await Promise.all(
+
+  // Known rules rows — collect shadow state for the header count
+  const knownResults = await Promise.all(
     allRules.map(async (name) => {
       const installedTag = installedSet.has(name) ? color.green(' ✓') : color.dim(' ✗');
-
-      // Shadow state annotation
       const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
       const shadowState = await validateRuleShadow(shadowFile);
-      let shadowTag = '';
-      if (shadowState === 'valid') {
-        shadowTag = color.yellow(' [shadowed]');
-      } else if (shadowState === 'empty-shadow-file') {
-        shadowTag = color.yellow(' [shadowed — invalid: empty file]');
-      } else if (shadowState === 'not-a-file') {
-        shadowTag = color.yellow(' [shadowed — invalid: not a file]');
-      }
-
       const owner = ownerMap.get(name) ?? 'unknown';
       const shortOwner = owner.replace('devflow-', '');
-      return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${installedTag}${shadowTag}`;
+      return { row: formatRuleRow(name, shortOwner, shadowState, installedTag), shadowState };
     }),
   );
-  p.note(lines.join('\n'), `Available rules (${allRules.length})`);
+
+  const rows = knownResults.map(r => r.row);
+  const shadowedCount = knownResults.filter(r => r.shadowState !== 'none').length;
+
+  // Orphan shadows: in ~/.devflow/rules/ but not a known rule — mirroring skills list behavior
+  const allShadowedNames = await listShadowedRules(devflowDir);
+  for (const name of allShadowedNames) {
+    if (!knownRuleSet.has(name)) {
+      rows.push(`  ${color.yellow(name.padEnd(16))} ${color.yellow('unknown rule')}`);
+    }
+  }
+
+  p.note(rows.join('\n'), `Rules (${allRules.length} known, ${shadowedCount} shadowed)`);
+}
+
+/**
+ * Seed a rule shadow file from the installed rule or the built plugin source.
+ * Returns which tier seeded: 'installed' | 'source' | 'none'.
+ * Creates the shadow directory before copying.
+ *
+ * D35 — seedRuleShadow tiers (applies ADR-010):
+ *   Tier 1 — installed rule at rulesTarget/{name}.md (fastest path when rules are enabled)
+ *   Tier 2 — built plugin source at pluginsDir/{owner}/rules/{name}.md (fallback when rules are disabled)
+ *   Tier 3 — 'none': caller emits a manual-create instruction
+ */
+export async function seedRuleShadow(
+  name: string,
+  shadowFile: string,
+  rulesTarget: string,
+  devflowDir: string,
+  pluginsDir: string,
+): Promise<'installed' | 'source' | 'none'> {
+  await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
+
+  // Tier 1: seed from installed rule
+  try {
+    await fs.copyFile(path.join(rulesTarget, `${name}.md`), shadowFile);
+    return 'installed';
+  } catch { /* not present — try plugin source */ }
+
+  // Tier 2: seed from built plugin source
+  const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
+  const ownerPlugin = ownerMap.get(name);
+  if (ownerPlugin) {
+    try {
+      await fs.copyFile(path.join(pluginsDir, ownerPlugin, 'rules', `${name}.md`), shadowFile);
+      return 'source';
+    } catch { /* source not found */ }
+  }
+
+  return 'none';
+}
+
+async function handleRuleShadow(
+  name: string | undefined,
+  allRules: string[],
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<void> {
+  if (!name) {
+    p.log.error('Rule name required. Usage: devflow rules shadow <name>');
+    p.log.info(`Available rules: ${allRules.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (!allRules.includes(name)) {
+    p.log.error(`Unknown rule: ${name}`);
+    p.log.info(`Available rules: ${allRules.join(', ')}`);
+    process.exit(1);
+  }
+
+  const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
+  if (await hasRuleShadow(name, devflowDir)) {
+    p.log.info(`${name} is already shadowed at ${color.dim(shadowFile)}`);
+    return;
+  }
+
+  const pluginsDir = path.join(path.resolve(__dirname, '../..'), 'plugins');
+  const tier = await seedRuleShadow(name, shadowFile, rulesTarget, devflowDir, pluginsDir);
+
+  if (tier !== 'none') {
+    p.log.success(`Shadowed ${color.cyan(name)}`);
+    p.log.info(`Edit ${color.dim(shadowFile)} then run devflow rules --enable or devflow init to apply.`);
+  } else {
+    p.log.warn(`Could not seed shadow for ${name} (no installed or source file found)`);
+    p.log.info(`Create ${color.dim(shadowFile)} manually then run devflow rules --enable to apply.`);
+  }
+}
+
+async function handleRuleUnshadow(
+  name: string | undefined,
+  allRules: string[],
+  devflowDir: string,
+): Promise<void> {
+  if (!name) {
+    p.log.error('Rule name required. Usage: devflow rules unshadow <name>');
+    process.exit(1);
+  }
+
+  // Mirror the shadow guard: reject unknown names before building the shadow path
+  if (!allRules.includes(name)) {
+    p.log.error(`Unknown rule: ${name}`);
+    p.log.info(`Available rules: ${allRules.join(', ')}`);
+    process.exit(1);
+  }
+
+  const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
+  if (!await hasRuleShadow(name, devflowDir)) {
+    p.log.info(`${name} is not shadowed`);
+    return;
+  }
+
+  await fs.rm(shadowFile, { force: true });
+  p.log.success(`Unshadowed ${color.cyan(name)}`);
+  p.log.info('Run devflow rules --enable or devflow init to restore Devflow\'s version.');
 }
 
 export const rulesCommand = new Command('rules')
@@ -115,74 +235,11 @@ export const rulesCommand = new Command('rules')
       const allRules = getAllRuleNames();
 
       if (action === 'shadow') {
-        if (!name) {
-          p.log.error('Rule name required. Usage: devflow rules shadow <name>');
-          p.log.info(`Available rules: ${allRules.join(', ')}`);
-          process.exit(1);
-        }
-
-        if (!allRules.includes(name)) {
-          p.log.error(`Unknown rule: ${name}`);
-          p.log.info(`Available rules: ${allRules.join(', ')}`);
-          process.exit(1);
-        }
-
-        const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
-        if (await hasRuleShadow(name, devflowDir)) {
-          p.log.info(`${name} is already shadowed at ${color.dim(shadowFile)}`);
-          return;
-        }
-
-        // Seed shadow from installed rule, or from built plugin source if rules are disabled
-        await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
-
-        const installedRule = path.join(rulesTarget, `${name}.md`);
-        let seeded = false;
-        try {
-          await fs.copyFile(installedRule, shadowFile);
-          seeded = true;
-        } catch { /* installed rule not present — try plugin source */ }
-
-        if (!seeded) {
-          const pluginsDir = path.join(path.resolve(__dirname, '../..'), 'plugins');
-          const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
-          const ownerPlugin = ownerMap.get(name);
-          if (ownerPlugin) {
-            const sourceFile = path.join(pluginsDir, ownerPlugin, 'rules', `${name}.md`);
-            try {
-              await fs.copyFile(sourceFile, shadowFile);
-              seeded = true;
-            } catch { /* source not found */ }
-          }
-        }
-
-        if (seeded) {
-          p.log.success(`Shadowed ${color.cyan(name)}`);
-          p.log.info(`Edit ${color.dim(shadowFile)} then run devflow rules --enable or devflow init to apply.`);
-        } else {
-          p.log.warn(`Could not seed shadow for ${name} (no installed or source file found)`);
-          p.log.info(`Create ${color.dim(shadowFile)} manually then run devflow rules --enable to apply.`);
-        }
-
+        await handleRuleShadow(name, allRules, devflowDir, rulesTarget);
       } else if (action === 'unshadow') {
-        if (!name) {
-          p.log.error('Rule name required. Usage: devflow rules unshadow <name>');
-          process.exit(1);
-        }
-
-        const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
-        if (!await hasRuleShadow(name, devflowDir)) {
-          p.log.info(`${name} is not shadowed`);
-          return;
-        }
-
-        await fs.rm(shadowFile, { force: true });
-        p.log.success(`Unshadowed ${color.cyan(name)}`);
-        p.log.info('Run devflow rules --enable or devflow init to restore Devflow\'s version.');
-
+        await handleRuleUnshadow(name, allRules, devflowDir);
       } else if (action === 'list') {
         await printRulesList(claudeDir, devflowDir);
-
       } else {
         p.log.error(`Unknown action: ${action}`);
         p.log.info('Usage: devflow rules <shadow|unshadow|list> [name]');
@@ -254,7 +311,13 @@ export const rulesCommand = new Command('rules')
 
       const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
       const lines = await Promise.all(
-        installedFiles.map(file => formatRuleRow(path.basename(file, '.md'), devflowDir, ownerMap)),
+        installedFiles.map(async file => {
+          const n = path.basename(file, '.md');
+          const shortOwner = (ownerMap.get(n) ?? 'unknown').replace('devflow-', '');
+          const shadowFile = path.join(devflowDir, 'rules', `${n}.md`);
+          const shadowState = await validateRuleShadow(shadowFile);
+          return formatRuleRow(n, shortOwner, shadowState);
+        }),
       );
       p.note(lines.join('\n'), `Installed rules (${installedFiles.length})`);
 
