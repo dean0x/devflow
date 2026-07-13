@@ -1362,11 +1362,24 @@ export const initCommand = new Command('init')
       p.log.info(`Applied ${totalShadowed} shadow override(s): ${parts.join(', ')}`);
     }
     for (const skip of installReport.skippedShadows) {
-      const reasonMsg = skip.reason === 'missing-skill-md'
-        ? 'shadow directory has no valid SKILL.md'
-        : skip.reason === 'empty-shadow-file'
-          ? 'shadow file is empty'
-          : 'shadow path is not a file';
+      let reasonMsg: string;
+      switch (skip.reason) {
+        case 'missing-skill-md':
+          reasonMsg = 'shadow directory has no valid SKILL.md';
+          break;
+        case 'empty-shadow-file':
+          reasonMsg = 'shadow file is empty';
+          break;
+        case 'not-a-file':
+          reasonMsg = 'shadow path is not a file';
+          break;
+        default: {
+          const _exhaustive: never = skip.reason;
+          void _exhaustive;
+          reasonMsg = 'unknown skip reason';
+          break;
+        }
+      }
       p.log.warn(`Shadow for ${skip.kind}:${skip.name} skipped (${reasonMsg}) — Devflow's version was installed`);
     }
 
