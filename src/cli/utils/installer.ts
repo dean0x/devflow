@@ -21,7 +21,23 @@ export interface InstallReport {
   skippedShadows: ShadowSkip[];
 }
 
-export type RuleInstallOutcome = 'shadow' | 'source' | 'source-invalid-shadow' | 'skipped';
+/** Discriminated outcome for a single rule installation. */
+export type RuleInstallOutcome =
+  | 'shadow'
+  | 'source'
+  | 'source-invalid-shadow:empty-shadow-file'
+  | 'source-invalid-shadow:not-a-file'
+  | 'skipped';
+
+// ---------------------------------------------------------------------------
+// Shadow state named types (Issue 4)
+// ---------------------------------------------------------------------------
+
+/** Return states for validateSkillShadow. */
+export type SkillShadowState = 'valid' | 'missing-skill-md' | 'none';
+
+/** Return states for validateRuleShadow. */
+export type RuleShadowState = 'valid' | 'empty-shadow-file' | 'not-a-file' | 'none';
 
 // ---------------------------------------------------------------------------
 // Shadow validation helpers (exported — reused by Step 4 list commands)
@@ -35,9 +51,7 @@ export type RuleInstallOutcome = 'shadow' | 'source' | 'source-invalid-shadow' |
  *   'valid'           — dir exists and contains a non-empty SKILL.md file
  *   'missing-skill-md'— dir exists but SKILL.md is absent, empty, or not a file
  */
-export async function validateSkillShadow(
-  shadowDir: string,
-): Promise<'valid' | 'missing-skill-md' | 'none'> {
+export async function validateSkillShadow(shadowDir: string): Promise<SkillShadowState> {
   try {
     const dirStat = await fs.stat(shadowDir);
     if (!dirStat.isDirectory()) return 'missing-skill-md';
@@ -69,9 +83,7 @@ export async function validateSkillShadow(
  * Promise.all (installer.ts rules block — no per-call catch), aborting init.
  * fs.stat follows symlinks: symlink → regular file = valid; symlink → dir = not-a-file.
  */
-export async function validateRuleShadow(
-  shadowFile: string,
-): Promise<'valid' | 'empty-shadow-file' | 'not-a-file' | 'none'> {
+export async function validateRuleShadow(shadowFile: string): Promise<RuleShadowState> {
   try {
     const stat = await fs.stat(shadowFile);
     if (!stat.isFile()) return 'not-a-file';
@@ -107,20 +119,55 @@ export async function installRuleFile(
   const shadowState = await validateRuleShadow(shadowFile);
 
   if (shadowState === 'valid') {
-    await fs.copyFile(shadowFile, targetFile);
-    return 'shadow';
+    try {
+      await fs.copyFile(shadowFile, targetFile);
+      return 'shadow';
+    } catch {
+      // Shadow is valid but the copy failed (e.g. EACCES, EISDIR on target).
+      // Fall through to install the Devflow source so init never hard-fails.
+    }
   }
 
-  // Shadow exists but is invalid — fall through to source, report the issue
-  const isInvalidShadow = shadowState === 'empty-shadow-file' || shadowState === 'not-a-file';
+  // Shadow is invalid (empty or not-a-file), or valid-shadow copy failed.
+  // Install the Devflow source and report the specific invalid-shadow reason.
+  const invalidShadowOutcome: RuleInstallOutcome | null =
+    shadowState === 'not-a-file'
+      ? 'source-invalid-shadow:not-a-file'
+      : shadowState === 'empty-shadow-file'
+        ? 'source-invalid-shadow:empty-shadow-file'
+        : null;
 
   try {
     await fs.access(ruleSource);
     await fs.copyFile(ruleSource, targetFile);
-    return isInvalidShadow ? 'source-invalid-shadow' : 'source';
+    return invalidShadowOutcome ?? 'source';
   } catch {
     return 'skipped'; /* source missing — skip silently */
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared rule-install loop (Issue 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Install all rules in rulesMap, returning one outcome per rule.
+ * Called by installViaFileCopy (rolls up into InstallReport) and
+ * `rules --enable` (renders per-rule log lines). One place computes;
+ * callers present.
+ */
+export async function installAllRules(
+  rulesMap: Map<string, string>,
+  pluginsDir: string,
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
+  return Promise.all(
+    [...rulesMap.entries()].map(async ([ruleName, ownerPlugin]) => {
+      const outcome = await installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget);
+      return { ruleName, outcome };
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -341,21 +388,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
   if (rulesMap.size > 0) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    const outcomes = await Promise.all(
-      [...rulesMap.entries()].map(async ([ruleName, ownerPlugin]) => {
-        const outcome = await installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget);
-        return { ruleName, outcome };
-      }),
-    );
+    const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
     for (const { ruleName, outcome } of outcomes) {
       if (outcome === 'shadow') {
         report.shadowedRules.push(ruleName);
-      } else if (outcome === 'source-invalid-shadow') {
-        // Carry the specific reason from validateRuleShadow for the skip entry
-        const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
-        const shadowState = await validateRuleShadow(shadowFile);
-        const reason = shadowState === 'not-a-file' ? 'not-a-file' : 'empty-shadow-file';
-        report.skippedShadows.push({ kind: 'rule', name: ruleName, reason });
+      } else if (outcome === 'source-invalid-shadow:empty-shadow-file') {
+        report.skippedShadows.push({ kind: 'rule', name: ruleName, reason: 'empty-shadow-file' });
+      } else if (outcome === 'source-invalid-shadow:not-a-file') {
+        report.skippedShadows.push({ kind: 'rule', name: ruleName, reason: 'not-a-file' });
       }
     }
   }

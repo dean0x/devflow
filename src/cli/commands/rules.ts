@@ -7,7 +7,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../plugins.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
-import { installRuleFile, validateRuleShadow, type RuleInstallOutcome } from '../utils/installer.js';
+import { installAllRules, validateRuleShadow } from '../utils/installer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -210,18 +210,16 @@ export const rulesCommand = new Command('rules')
       await fs.rm(rulesTarget, { recursive: true, force: true });
       await fs.mkdir(rulesTarget, { recursive: true });
 
-      const outcomes: { ruleName: string; outcome: RuleInstallOutcome }[] = await Promise.all(
-        [...rulesMap.entries()].map(async ([ruleName, ownerPlugin]) => ({
-          ruleName,
-          outcome: await installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget),
-        })),
-      );
+      const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
 
       const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
       const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';
 
       for (const { ruleName, outcome } of outcomes) {
-        if (outcome === 'source-invalid-shadow') {
+        if (
+          outcome === 'source-invalid-shadow:empty-shadow-file' ||
+          outcome === 'source-invalid-shadow:not-a-file'
+        ) {
           p.log.warn(`Shadow for rule:${ruleName} is invalid — Devflow's version was installed`);
         }
       }
