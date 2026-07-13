@@ -130,12 +130,12 @@ export async function installRuleFile(
 
   // Shadow is invalid (empty or not-a-file), or valid-shadow copy failed.
   // Install the Devflow source and report the specific invalid-shadow reason.
-  const invalidShadowOutcome: RuleInstallOutcome | null =
-    shadowState === 'not-a-file'
-      ? 'source-invalid-shadow:not-a-file'
-      : shadowState === 'empty-shadow-file'
-        ? 'source-invalid-shadow:empty-shadow-file'
-        : null;
+  let invalidShadowOutcome: RuleInstallOutcome | null = null;
+  if (shadowState === 'not-a-file') {
+    invalidShadowOutcome = 'source-invalid-shadow:not-a-file';
+  } else if (shadowState === 'empty-shadow-file') {
+    invalidShadowOutcome = 'source-invalid-shadow:empty-shadow-file';
+  }
 
   try {
     await fs.access(ruleSource);

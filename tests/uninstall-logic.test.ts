@@ -318,8 +318,8 @@ describe('computeShadowLeftoverWarnings', () => {
       isSelectiveUninstall: false,
       devflowDir,
     });
-    expect(result.some(m => m.includes('my-custom-skill'))).toBe(true);
-    expect(result.some(m => m.includes('another-skill'))).toBe(true);
+    expect(result.some(m => m.message.includes('my-custom-skill'))).toBe(true);
+    expect(result.some(m => m.message.includes('another-skill'))).toBe(true);
   });
 
   it('uses canonical warning text for skill overrides', () => {
@@ -329,8 +329,8 @@ describe('computeShadowLeftoverWarnings', () => {
       isSelectiveUninstall: false,
       devflowDir,
     });
-    expect(result.some(m => m.includes('Personal skill overrides remain in'))).toBe(true);
-    expect(result.some(m => m.includes('rm -rf'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
   });
 
   it('includes the skills shadow path in the warning', () => {
@@ -342,7 +342,7 @@ describe('computeShadowLeftoverWarnings', () => {
     });
     // Path should be devflowDir/skills
     const expectedPath = `${devflowDir}/skills`;
-    expect(result.some(m => m.includes(expectedPath))).toBe(true);
+    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
   });
 
   // === full-uninstall, populated rule list ===
@@ -354,7 +354,7 @@ describe('computeShadowLeftoverWarnings', () => {
       isSelectiveUninstall: false,
       devflowDir,
     });
-    expect(result.some(m => m.includes('my-custom-rule'))).toBe(true);
+    expect(result.some(m => m.message.includes('my-custom-rule'))).toBe(true);
   });
 
   it('uses canonical warning text for rule overrides', () => {
@@ -364,8 +364,8 @@ describe('computeShadowLeftoverWarnings', () => {
       isSelectiveUninstall: false,
       devflowDir,
     });
-    expect(result.some(m => m.includes('Personal rule overrides remain in'))).toBe(true);
-    expect(result.some(m => m.includes('rm -rf'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
   });
 
   it('includes the rules shadow path in the warning', () => {
@@ -376,7 +376,7 @@ describe('computeShadowLeftoverWarnings', () => {
       devflowDir,
     });
     const expectedPath = `${devflowDir}/rules`;
-    expect(result.some(m => m.includes(expectedPath))).toBe(true);
+    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
   });
 
   // === both lists populated ===
@@ -388,10 +388,10 @@ describe('computeShadowLeftoverWarnings', () => {
       isSelectiveUninstall: false,
       devflowDir,
     });
-    expect(result.some(m => m.includes('skill-a'))).toBe(true);
-    expect(result.some(m => m.includes('rule-b'))).toBe(true);
-    expect(result.some(m => m.includes('Personal skill overrides remain in'))).toBe(true);
-    expect(result.some(m => m.includes('Personal rule overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('skill-a'))).toBe(true);
+    expect(result.some(m => m.message.includes('rule-b'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
+    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
   });
 
   // === message pairing — warn + hint ===
@@ -405,8 +405,10 @@ describe('computeShadowLeftoverWarnings', () => {
     });
     // Expect exactly 2 entries: the warning + the rm -rf hint
     expect(result).toHaveLength(2);
-    expect(result[0]).toContain('Personal skill overrides remain in');
-    expect(result[1]).toContain('rm -rf');
+    expect(result[0].level).toBe('warn');
+    expect(result[0].message).toContain('Personal skill overrides remain in');
+    expect(result[1].level).toBe('info');
+    expect(result[1].message).toContain('rm -rf');
   });
 
   it('returns four entries when both skill and rule lists are populated', () => {
