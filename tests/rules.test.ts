@@ -9,7 +9,7 @@ import {
   DEVFLOW_PLUGINS,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
-import { installRuleFile, installAllRules, installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
+import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/cli/utils/installer.js';
 import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
 
 // ---------------------------------------------------------------------------
@@ -132,6 +132,47 @@ describe('getAllRuleNames', () => {
     expect(names).toContain('typescript');
     expect(names).toContain('react');
     expect(names).toContain('go');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateRuleShadow
+// ---------------------------------------------------------------------------
+
+describe('validateRuleShadow', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rule-shadow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('symlink → regular file: returns "valid"', async () => {
+    const realFile = path.join(tmpDir, 'real.md');
+    await fs.writeFile(realFile, '# Content', 'utf-8');
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(realFile, link);
+    // fs.stat follows the link → sees a non-empty regular file → 'valid'
+    expect(await validateRuleShadow(link)).toBe('valid');
+  });
+
+  it('symlink → directory: returns "not-a-file"', async () => {
+    const realDir = path.join(tmpDir, 'real-dir');
+    await fs.mkdir(realDir, { recursive: true });
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(realDir, link);
+    // fs.stat follows the link → sees a directory → isFile() = false → 'not-a-file'
+    expect(await validateRuleShadow(link)).toBe('not-a-file');
+  });
+
+  it('dangling symlink (target absent): returns "none"', async () => {
+    const link = path.join(tmpDir, 'security.md');
+    await fs.symlink(path.join(tmpDir, 'nonexistent.md'), link);
+    // fs.stat follows the link → ENOENT on missing target → caught → 'none'
+    expect(await validateRuleShadow(link)).toBe('none');
   });
 });
 
@@ -265,13 +306,35 @@ describe('installRuleFile', () => {
     }
   });
 
-  it('installViaFileCopy rules report: valid shadow recorded in shadowedRules', async () => {
+  it('empty shadow file with missing plugin source → returns "skipped"', async () => {
+    // Shadow exists but is invalid (empty); source does not exist.
+    // The compound-variant outcome ('source-invalid-shadow:empty-shadow-file') is unreachable
+    // when the source is also absent: installRuleFile falls to the source catch-block and
+    // returns 'skipped'. This pins the edge case — any behavior change is a separate decision.
+    const shadowDir = path.join(devflowDir, 'rules');
+    await fs.mkdir(shadowDir, { recursive: true });
+    await fs.writeFile(path.join(shadowDir, 'orphan-rule.md'), '', 'utf-8');
+
+    const outcome = await installRuleFile('orphan-rule', 'devflow-core-skills', pluginsDir, devflowDir, rulesTarget);
+
+    expect(outcome).toBe('skipped');
+    // No target file should be created
+    await expect(fs.access(path.join(rulesTarget, 'orphan-rule.md'))).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// installViaFileCopy rules report
+// ---------------------------------------------------------------------------
+
+describe('installViaFileCopy rules report', () => {
+  it('valid shadow recorded in shadowedRules', async () => {
     const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-report-'));
-    const localPluginsDir = path.join(tmpDir, 'plugins');
-    const localDevflowDir = path.join(tmpDir, 'devflow');
-    const localClaudeDir = path.join(tmpDir, 'claude');
-    const rootDir = tmpDir;
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-report-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
 
     try {
       // Seed plugin source rule
@@ -290,7 +353,7 @@ describe('installRuleFile', () => {
         plugins: [],
         claudeDir: localClaudeDir,
         pluginsDir: localPluginsDir,
-        rootDir,
+        rootDir: localRootDir,
         devflowDir: localDevflowDir,
         skillsMap: new Map(),
         agentsMap: new Map(),
@@ -303,11 +366,11 @@ describe('installRuleFile', () => {
       expect(report.shadowedSkills).toHaveLength(0);
       expect(report.skippedShadows).toHaveLength(0);
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(localTmpDir, { recursive: true, force: true });
     }
   });
 
-  it('installViaFileCopy rules report: 0-byte shadow → skippedShadows includes {kind:"rule", reason:"empty-shadow-file"} and rule is not in shadowedRules', async () => {
+  it('0-byte shadow → skippedShadows includes {kind:"rule", reason:"empty-shadow-file"} and rule is not in shadowedRules', async () => {
     const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
     const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-empty-'));
     const localPluginsDir = path.join(localTmpDir, 'plugins');
@@ -348,7 +411,7 @@ describe('installRuleFile', () => {
     }
   });
 
-  it('installViaFileCopy rules report: directory at shadow path → skippedShadows includes {kind:"rule", reason:"not-a-file"} and rule is not in shadowedRules', async () => {
+  it('directory at shadow path → skippedShadows includes {kind:"rule", reason:"not-a-file"} and rule is not in shadowedRules', async () => {
     const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
     const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-dir-'));
     const localPluginsDir = path.join(localTmpDir, 'plugins');
@@ -383,6 +446,46 @@ describe('installRuleFile', () => {
 
       expect(report.skippedShadows).toContainEqual({ kind: 'rule', name: 'security', reason: 'not-a-file' });
       expect(report.shadowedRules).not.toContain('security');
+    } finally {
+      await fs.rm(localTmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('empty shadow with no plugin source → skippedShadows has no entry (outcome is "skipped", not "source-invalid-shadow")', async () => {
+    const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+    const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-missing-'));
+    const localPluginsDir = path.join(localTmpDir, 'plugins');
+    const localDevflowDir = path.join(localTmpDir, 'devflow');
+    const localClaudeDir = path.join(localTmpDir, 'claude');
+    const localRootDir = localTmpDir;
+
+    try {
+      // No plugin source for 'orphan-rule' — only an empty (invalid) shadow exists.
+      // installRuleFile can't reach the invalid-shadow reporting branch when source is
+      // missing: the source access() throws, returning 'skipped'. installViaFileCopy
+      // only pushes to skippedShadows for 'source-invalid-shadow:*' outcomes, so
+      // skippedShadows has no entry for this rule.
+      const shadowRulesDir = path.join(localDevflowDir, 'rules');
+      await fs.mkdir(shadowRulesDir, { recursive: true });
+      await fs.writeFile(path.join(shadowRulesDir, 'orphan-rule.md'), '', 'utf-8');
+
+      await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
+
+      const report = await installViaFileCopy({
+        plugins: [],
+        claudeDir: localClaudeDir,
+        pluginsDir: localPluginsDir,
+        rootDir: localRootDir,
+        devflowDir: localDevflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
+        isPartialInstall: true,
+        spinner: noopSpinner,
+      });
+
+      expect(report.skippedShadows).not.toContainEqual(expect.objectContaining({ name: 'orphan-rule' }));
+      expect(report.shadowedRules).not.toContain('orphan-rule');
     } finally {
       await fs.rm(localTmpDir, { recursive: true, force: true });
     }
