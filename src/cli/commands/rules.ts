@@ -48,16 +48,23 @@ export async function listShadowedRules(devflowDir?: string): Promise<string[]> 
   }
 }
 
-/** Render the shadow-state tag for a rule — shared by formatRuleRow and printRulesList. */
+/** Render the shadow-state tag for a rule — shared by formatRuleRow and printRulesList. Exhaustive switch catches new states at compile time. */
 function buildRuleShadowTag(shadowState: RuleShadowState): string {
-  if (shadowState === 'valid') {
-    return ' ' + color.green('shadowed');
-  } else if (shadowState === 'empty-shadow-file') {
-    return ' ' + color.yellow('shadowed — invalid: empty file');
-  } else if (shadowState === 'not-a-file') {
-    return ' ' + color.yellow('shadowed — invalid: not a file');
+  switch (shadowState) {
+    case 'valid':
+      return ' ' + color.green('shadowed');
+    case 'empty-shadow-file':
+      return ' ' + color.yellow('shadowed — invalid: empty file');
+    case 'not-a-file':
+      return ' ' + color.yellow('shadowed — invalid: not a file');
+    case 'none':
+      return '';
+    default: {
+      const _exhaustive: never = shadowState;
+      void _exhaustive;
+      return '';
+    }
   }
-  return '';
 }
 
 /**

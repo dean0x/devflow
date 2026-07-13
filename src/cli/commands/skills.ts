@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../plugins.js';
-import { copyDirectory, validateSkillShadow } from '../utils/installer.js';
+import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../utils/installer.js';
 
 /**
  * Check if a directory exists.
@@ -47,6 +47,23 @@ export async function listShadowed(devflowDir?: string): Promise<string[]> {
     return entries.filter(e => e.isDirectory()).map(e => e.name);
   } catch {
     return [];
+  }
+}
+
+/** Render the shadow-state display tag for a skill. Exhaustive switch catches new states at compile time. */
+function buildSkillShadowTag(shadowState: SkillShadowState): string {
+  switch (shadowState) {
+    case 'valid':
+      return color.green('shadowed');
+    case 'missing-skill-md':
+      return color.yellow('shadowed — invalid: no SKILL.md');
+    case 'none':
+      return color.dim('—');
+    default: {
+      const _exhaustive: never = shadowState;
+      void _exhaustive;
+      return color.dim('—');
+    }
   }
 }
 
@@ -124,23 +141,19 @@ export const skillsCommand = new Command('skills')
       const shadowDirSet = new Set(shadowDirNames);
       const knownSkillSet = new Set(allSkills);
 
-      // Build rows: all known skills + orphan shadow dirs
-      const rows: string[] = [];
+      // Build rows in parallel; short-circuit validateSkillShadow for skills with no shadow dir
+      const knownResults = await Promise.all(
+        allSkills.map(async (skill) => {
+          const shadowState: SkillShadowState = shadowDirSet.has(skill)
+            ? await validateSkillShadow(path.join(shadowsRoot, skill))
+            : 'none';
+          return { skill, shadowState };
+        }),
+      );
 
-      for (const skill of allSkills) {
-        const shadowDir = path.join(shadowsRoot, skill);
-        const shadowState = await validateSkillShadow(shadowDir);
-
-        let statusTag: string;
-        if (shadowState === 'valid') {
-          statusTag = color.green('shadowed');
-        } else if (shadowState === 'missing-skill-md') {
-          statusTag = color.yellow('shadowed — invalid: no SKILL.md');
-        } else {
-          statusTag = color.dim('—');
-        }
-        rows.push(`  ${color.cyan(skill.padEnd(28))} ${statusTag}`);
-      }
+      const rows: string[] = knownResults.map(({ skill, shadowState }) =>
+        `  ${color.cyan(skill.padEnd(28))} ${buildSkillShadowTag(shadowState)}`,
+      );
 
       // Orphan shadows: in ~/.devflow/skills/ but not a known skill
       for (const dirName of shadowDirNames) {
@@ -149,7 +162,7 @@ export const skillsCommand = new Command('skills')
         }
       }
 
-      const shadowedCount = shadowDirNames.filter(n => knownSkillSet.has(n)).length;
+      const shadowedCount = knownResults.filter(r => r.shadowState !== 'none').length;
       p.note(rows.join('\n'), `Skills (${allSkills.length} known, ${shadowedCount} shadowed)`);
     } else {
       p.log.error(`Unknown action: ${action}`);
