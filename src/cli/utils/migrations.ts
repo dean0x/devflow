@@ -1079,6 +1079,29 @@ const MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX: Migration<'global'> = {
   },
 };
 
+/**
+ * Global: remove the Devflow-written `devflow` entry from `extraKnownMarketplaces`
+ * in ~/.claude/settings.json.
+ *
+ * Applies ADR-010 (completes the native-path removal by cleaning up the marketplace
+ * entry that was written alongside it) and ADR-003 (clean end-state: remove only the
+ * devflow key; preserve other marketplaces; remove the parent key if it becomes empty).
+ *
+ * ENOENT-idempotent (avoids PF-004): missing file, missing key, and malformed JSON
+ * are all silent no-ops that never crash init.
+ */
+const MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES: Migration<'global'> = {
+  id: 'purge-stale-extra-known-marketplaces-v1',
+  description: 'Remove Devflow-written devflow entry from extraKnownMarketplaces in ~/.claude/settings.json',
+  scope: 'global',
+  async run(_ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const { stripDevflowMarketplace } = await import('./marketplace-cleanup.js');
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    await stripDevflowMarketplace(settingsPath);
+    return { infos: [], warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
@@ -1099,6 +1122,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_DREAM_WORKER_STATE,
   MIGRATION_RENDER_DECISIONS_INDEX,
   MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX,
+  MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

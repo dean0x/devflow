@@ -2257,3 +2257,166 @@ describe('purge-dream-worker-state-v1 migration', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// purge-stale-extra-known-marketplaces-v1 (global)
+// applies ADR-010 (completes native-path removal — extraKnownMarketplaces
+//   was written alongside the install path that was removed)
+// applies ADR-003 (clean end-state — remove devflow key, preserve others,
+//   remove parent key when empty)
+// avoids PF-004 (ENOENT / malformed JSON are idempotent no-ops)
+// ---------------------------------------------------------------------------
+
+describe('purge-stale-extra-known-marketplaces-v1 migration', () => {
+  let tmpDir: string;
+  let fakeHome: string;
+  let settingsPath: string;
+  let originalHome: string | undefined;
+
+  const getMigration = (): Migration<'global'> => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-stale-extra-known-marketplaces-v1');
+    if (!m) throw new Error('purge-stale-extra-known-marketplaces-v1 migration not found');
+    return m as Migration<'global'>;
+  };
+
+  const makeCtx = (): import('../src/cli/utils/migrations.js').GlobalMigrationContext => ({
+    scope: 'global',
+    devflowDir: fakeHome,
+  });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-marketplace-test-'));
+    // Redirect os.homedir() so the migration reads/writes our isolated fake home
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'fake-home');
+    fakeHome = path.join(tmpDir, 'fake-home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+    settingsPath = path.join(tmpDir, 'fake-home', '.claude', 'settings.json');
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('is registered in MIGRATIONS with global scope', () => {
+    const m = getMigration();
+    expect(m).toBeDefined();
+    expect(m.scope).toBe('global');
+  });
+
+  it('description references extraKnownMarketplaces', () => {
+    expect(getMigration().description).toContain('extraKnownMarketplaces');
+  });
+
+  it('appears after purge-orphaned-decisions-index-v1 in MIGRATIONS array', () => {
+    const decIdx = MIGRATIONS.findIndex(m => m.id === 'purge-orphaned-decisions-index-v1');
+    const mktIdx = MIGRATIONS.findIndex(m => m.id === 'purge-stale-extra-known-marketplaces-v1');
+    expect(decIdx).toBeGreaterThanOrEqual(0);
+    expect(mktIdx).toBeGreaterThan(decIdx);
+  });
+
+  it('removes the devflow entry and extraKnownMarketplaces key when it was the only entry', async () => {
+    const settings = {
+      hooks: {},
+      extraKnownMarketplaces: {
+        devflow: { source: { source: 'github', repo: 'dean0x/devflow' } },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    // extraKnownMarketplaces removed entirely (devflow was the only entry)
+    expect(result.extraKnownMarketplaces).toBeUndefined();
+    // Unrelated settings preserved
+    expect(result.hooks).toEqual({});
+  });
+
+  it('preserves other marketplace entries when removing devflow key', async () => {
+    const settings = {
+      extraKnownMarketplaces: {
+        devflow: { source: { source: 'github', repo: 'dean0x/devflow' } },
+        'other-plugin': { source: { source: 'github', repo: 'other/plugin' } },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    // devflow removed
+    expect(result.extraKnownMarketplaces?.devflow).toBeUndefined();
+    // Other marketplace preserved, parent key remains
+    expect(result.extraKnownMarketplaces?.['other-plugin']).toBeDefined();
+  });
+
+  it('is a no-op when extraKnownMarketplaces key is absent', async () => {
+    const settings = { hooks: { Stop: [] } };
+    const original = JSON.stringify(settings, null, 2) + '\n';
+    await fs.writeFile(settingsPath, original, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(settingsPath, 'utf-8');
+    expect(content).toBe(original);
+  });
+
+  it('is a no-op when devflow key is absent from extraKnownMarketplaces', async () => {
+    const settings = {
+      extraKnownMarketplaces: {
+        'other-plugin': { source: { source: 'github', repo: 'other/plugin' } },
+      },
+    };
+    const original = JSON.stringify(settings, null, 2) + '\n';
+    await fs.writeFile(settingsPath, original, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(settingsPath, 'utf-8');
+    expect(content).toBe(original);
+  });
+
+  it('is ENOENT-idempotent — no-op when settings file does not exist', async () => {
+    // Settings file was never created in this test
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is a no-op for malformed JSON (tolerant — avoids PF-004 crash-on-init)', async () => {
+    await fs.writeFile(settingsPath, 'not valid json {{{', 'utf-8');
+
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    // File left unchanged
+    const content = await fs.readFile(settingsPath, 'utf-8');
+    expect(content).toBe('not valid json {{{');
+  });
+
+  it('is idempotent — running twice produces no errors and correct end-state', async () => {
+    const settings = {
+      extraKnownMarketplaces: {
+        devflow: { source: { source: 'github', repo: 'dean0x/devflow' } },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+    // Second run: devflow key already gone — should be a no-op, not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.extraKnownMarketplaces).toBeUndefined();
+  });
+
+  it('returns empty infos and warnings', async () => {
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+});
