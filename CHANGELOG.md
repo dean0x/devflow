@@ -14,11 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Coder `issue-fix` mode** for `/resolve`: Coder receives pre-classified FIX_NOW issues from the Triager and applies fixes without re-litigating dispositions (`OPERATION: issue-fix`, `PUSH: false`). A `validation-fix` mode handles Validator gate failures; a `ci-fix` mode handles CI failures.
 - **Verification Gate** in `/resolve` Phase 7: Validator (haiku) runs build/typecheck/lint/test against changed files; up to 2 Coder validation-fix retries on FAIL; single `git push` fires at the end of this gate (pass or fail) — never before.
 - **New `resolution-summary.md` sections**: `## By Design`, `## Fix Separately`, `## Escalations`, `## Verification` — all strictly additive over the existing convergence-parser contract (`## Fixed Issues`, `## False Positives` headings and Statistics table rows unchanged).
+- **Rules shadow CLI** (`rules shadow <name>` / `rules unshadow <name>` / `rules list`): shadow a rule with your own version (seeded from the installed rule or built plugin source as fallback), remove a shadow override, and list all known rules with install status and shadow state.
+- **Install-report shadow warnings on `devflow init`**: invalid shadows (missing `SKILL.md`, empty rule file, or a directory at the shadow path) are surfaced in the post-install summary without failing init.
 
 ### Changed
+- **`devflow skills list-shadowed` renamed to `devflow skills list`** (BREAKING): `skills list` now shows all known skills with install and shadow state via `validateSkillShadow`. The `list-shadowed` subcommand is removed.
 - **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triager + Coder pair. The Triager (opus) runs a blast-radius disposition pass; the Coder (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triager, coder, simplifier, validator]`.
 
 ### Removed
+- **Native `claude plugin install` path** (BREAKING): the `claude plugin install` code path is removed; `installViaFileCopy` (file copy) is the sole install mechanism for all Devflow assets.
+- **`extraKnownMarketplaces` registration from settings template**: the Devflow marketplace entry is no longer written to `~/.claude/settings.json` on install.
+- **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
 - **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
 - **Resolver agent**: retired in favor of the Triager + Coder split. The `resolver` agent name is tracked in `LEGACY_AGENT_NAMES` and removed from installs on `devflow init`.
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically

@@ -12,7 +12,7 @@ updated: 2026-07-13
 
 ## Overview
 
-Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/cli/utils/installer.ts`. The native `claude plugin install` path was removed; file copy is the only install mechanism. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
+Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/cli/utils/installer.ts`. File copy is the sole install mechanism. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
 
 The shadow override system lets users place personal versions of skills or rules at well-known paths under `~/.devflow/`. On every `devflow init` or `devflow rules --enable`, Devflow detects a valid shadow and installs the user's copy instead of the Devflow source — without failing init. This knowledge covers the entire install-to-uninstall lifecycle and the CLI surface for managing overrides.
 
@@ -95,7 +95,7 @@ devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
 // removeAllDevFlow receives devflowScriptsDir, NOT paths.devflowDir
 ```
 
-The whole-tree removal of `~/.devflow/` (user shadows/config) was a pre-existing bug fixed on this branch; the `devflowDataDir` prompt applies only to the project's `.devflow/` directory (cwd-relative), not `~/.devflow/`.
+Uninstall removes only `~/.devflow/scripts/` because the rest of `~/.devflow/` (shadows, config) is user-owned; the `devflowDataDir` prompt applies only to the project's cwd-relative `.devflow/`, never `~/.devflow/`.
 
 Shadow leftover warnings are computed **before** removal:
 

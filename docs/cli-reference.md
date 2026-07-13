@@ -105,8 +105,6 @@ npx devflow-kit rules --enable       # Install rules from manifest plugins
 npx devflow-kit rules --disable      # Remove all installed rules
 npx devflow-kit rules --status       # Show installed rules with source plugin
 npx devflow-kit rules --list         # Show all available rules with install status and shadow state
-npx devflow-kit rules shadow <name>  # Create rule override (seeds from installed or source)
-npx devflow-kit rules unshadow <name># Remove rule override
 npx devflow-kit rules list           # List all rules with install status and shadow state
 ```
 
