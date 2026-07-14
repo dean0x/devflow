@@ -44,7 +44,7 @@ you: add rate limiting to the /api/upload endpoint
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
 
 
-**Self learning.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
+**Self learning.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/learning/decisions.md` and `.devflow/learning/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
@@ -74,11 +74,11 @@ Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 npx devflow-kit init
 ```
 
-That's it. The interactive wizard handles plugin selection, feature configuration, and security settings. Ambient mode, working memory, and decisions tracking are on by default.
+That's it. The interactive wizard handles plugin selection, feature configuration, and security settings. Ambient mode, working memory, and learning are on by default.
 
 ## Privacy & Sharing
 
-Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, dream state, and transient locks. That directory is **gitignored wholesale by default**, so this per-developer runtime state stays on your machine and never lands in a commit. Devflow adds the `.devflow/` line to your project's root `.gitignore` automatically on first use.
+Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, and transient locks. That directory is **gitignored wholesale by default**, so this per-developer runtime state stays on your machine and never lands in a commit. Devflow adds the `.devflow/` line to your project's root `.gitignore` automatically on first use.
 
 Sharing is opt-in. To share **everything** with your team, remove the `.devflow/` line from `.gitignore`. To share only curated knowledge (and keep memory, queues, and locks local), replace the `.devflow/` line with a pattern that ignores everything except the files you want tracked:
 
@@ -86,16 +86,16 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 # Ignore all Devflow runtime data…
 .devflow/**
 # …except the team knowledge you want to share
-!.devflow/decisions/
-!.devflow/decisions/decisions.md
-!.devflow/decisions/pitfalls.md
+!.devflow/learning/
+!.devflow/learning/decisions.md
+!.devflow/learning/pitfalls.md
 !.devflow/features/
 !.devflow/features/index.md
 !.devflow/features/*/
 !.devflow/features/*/KNOWLEDGE.md
 ```
 
-(The directory re-includes — `!.devflow/decisions/` — are required: git won't descend into an excluded directory to reach a re-included file.)
+(The directory re-includes — `!.devflow/learning/` — are required: git won't descend into an excluded directory to reach a re-included file.)
 
 ## Commands
 
@@ -135,7 +135,7 @@ npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
-npx devflow-kit decisions --enable      # Toggle decision/pitfall tracking
+npx devflow-kit learning --enable       # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit security --status       # Show / manage the security deny list
 npx devflow-kit safe-delete --enable    # Install rm -> trash safe-delete
@@ -149,7 +149,7 @@ See [docs/cli-reference.md](docs/cli-reference.md) for all options.
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
-| **Devflow** | Quality Orchestration | Parallel reviewers, working memory, decisions tracking, composable plugins |
+| **Devflow** | Quality Orchestration | Parallel reviewers, working memory, learning, composable plugins |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Karpathy optimization loops, multi-agent pipelines, DAG dependencies |
 
 ## Building from Source

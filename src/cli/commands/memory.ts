@@ -23,7 +23,7 @@ import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
  * UserPromptSubmit and SessionEnd are not memory.ts's concern: prompt/turn capture
  * lives in capture.ts (capture-prompt, capture-turn — always-on, not feature-gated
  * at the hook-registration level), and decisions detection is a SessionStart-spawned
- * detached worker rather than a SessionEnd hook (see dream.ts).
+ * detached worker rather than a SessionEnd hook (see legacy-hooks.ts).
  *
  * Stop-array ordering contract: memory-worker MUST be registered AFTER capture-turn
  * in the Stop hook array (append-before-spawn — memory-worker's throttle/spawn
@@ -333,7 +333,7 @@ export const memoryCommand = new Command('memory')
       settingsContent = '{}';
     }
 
-    // Resolve current project root for dream config
+    // Resolve current project root for feature config
     const gitRoot = await getGitRoot();
 
     if (options.status) {
@@ -343,7 +343,7 @@ export const memoryCommand = new Command('memory')
       }
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
-      // Also check dream config: hooks may be registered but feature toggled off
+      // Also check feature config: hooks may be registered but feature toggled off
       const featureEnabled = await isFeatureEnabled(gitRoot, 'memory');
       if (count === total && featureEnabled) {
         p.log.info(`Working memory: ${color.green('enabled')} (${total}/${total} hooks)`);
@@ -358,8 +358,8 @@ export const memoryCommand = new Command('memory')
     const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
-      // D: --enable both installs hooks AND writes dream config, while --disable only
-      // writes dream config. This asymmetry is intentional: dream hooks are shared
+      // D: --enable both installs hooks AND writes feature config, while --disable only
+      // writes feature config. This asymmetry is intentional: capture hooks are shared
       // across features (memory, learning, decisions) and must never be removed by a
       // single-feature disable. --enable must still install them on first use.
       const alreadyHasHooks = hasMemoryHooks(settingsContent);

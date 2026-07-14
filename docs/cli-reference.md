@@ -20,7 +20,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--scope <user\|local>` | Installation scope (default: user) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--decisions` / `--no-decisions` | Enable/disable decisions agent (default: on) |
+| `--learning` / `--no-learning` | Enable/disable learning agent (default: on) |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
@@ -75,18 +75,16 @@ npx devflow-kit ambient --disable    # Disable ambient mode
 npx devflow-kit ambient --status     # Show current status (partial state detected and reported)
 ```
 
-## Decisions
+## Learning
 
 ```bash
-npx devflow-kit decisions --enable     # Enable decisions detection
-npx devflow-kit decisions --disable    # Disable decisions detection (drains the pending dream queue)
-npx devflow-kit decisions --status     # Show status and entry counts
-npx devflow-kit decisions list         # List all decisions and pitfalls
-npx devflow-kit decisions --configure  # Interactive config (model, debug, scope)
-npx devflow-kit decisions --review     # Review observations or capacity
-npx devflow-kit decisions --purge      # Remove invalid entries
-npx devflow-kit decisions --clear      # Reset all observations
-npx devflow-kit decisions --reset      # Remove all artifacts + log
+npx devflow-kit learning --enable     # Enable learning (decision + pitfall detection)
+npx devflow-kit learning --disable    # Disable learning (drains the learning queue)
+npx devflow-kit learning --status     # Show status and entry counts
+npx devflow-kit learning --list       # List all decisions and pitfalls
+npx devflow-kit learning --configure  # Interactive config (model, debug, scope)
+npx devflow-kit learning --clear      # Reset all observations
+npx devflow-kit learning --reset      # Remove all learning state files
 ```
 
 ## Feature Knowledge
