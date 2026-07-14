@@ -50,7 +50,7 @@ const { safePath } = require('./safe-path.cjs');
 /** Statuses that indicate an anchored entry should be HIDDEN from the render. */
 const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
 
-/** Ledger filename relative to .devflow/decisions/ */
+/** Ledger filename relative to .devflow/learning/ */
 const LEDGER_FILENAME = 'decisions-ledger.jsonl';
 
 // ---------------------------------------------------------------------------

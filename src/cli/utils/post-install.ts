@@ -41,7 +41,7 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 
 /**
  * The shared .devflow/ gitignore block. Everything under .devflow/ is local
- * (memory, dream, docs, decisions, locks) EXCEPT feature knowledge bases:
+ * (memory, learning, docs, locks) EXCEPT feature knowledge bases:
  * index.md and every {slug}/KNOWLEDGE.md are tracked + committed (the Knowledge
  * agent commits them at workflow end). Re-including files under an ignored tree
  * needs a `dir/*` + `!dir/keep` pair at each level — a bare `.devflow/` excludes
@@ -51,7 +51,7 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
  * so the init-time path and the always-on hook path produce the same file.
  */
 export const DEVFLOW_GITIGNORE_BLOCK = [
-  '# Devflow runtime data — local by default (memory, dream, docs, decisions, locks).',
+  '# Devflow runtime data — local by default (memory, learning, docs, locks).',
   '# Exception: feature knowledge bases under .devflow/features/ are shared via git —',
   '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else',
   '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`',
