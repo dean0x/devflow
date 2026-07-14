@@ -55,9 +55,9 @@ import { getGitRoot } from '../../src/cli/utils/git.js';
 import { decisionsCommand } from '../../src/cli/commands/decisions.js';
 import * as p from '@clack/prompts';
 import {
-  getDreamPendingTurnsPath,
-  getDreamPendingTurnsProcessingPath,
-  getDreamConfigPath,
+  getLearningPendingTurnsPath,
+  getLearningPendingTurnsProcessingPath,
+  getFeatureConfigPath,
   getPendingTurnsPath,
   getDecisionsLogPath,
 } from '../../src/cli/utils/project-paths.js';
@@ -427,9 +427,9 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
   });
 
   function writeDreamQueueFiles(root: string): void {
-    fs.mkdirSync(path.join(root, '.devflow', 'dream'), { recursive: true });
-    fs.writeFileSync(getDreamPendingTurnsPath(root), '{"role":"user"}\n');
-    fs.writeFileSync(getDreamPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
+    fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
   }
 
   it('deletes queue + processing files and flips config (memory queue untouched)', async () => {
@@ -439,10 +439,10 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
 
-    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
-    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
     expect(config.decisions).toBe(false);
 
     // The sibling memory queue is never touched by decisions --disable
@@ -463,10 +463,10 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
 
-    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
-    const config = JSON.parse(fs.readFileSync(getDreamConfigPath(tmpDir), 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
     expect(config.decisions).toBe(false);
   });
 
@@ -475,8 +475,8 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     await decisionsCommand.parseAsync(['--enable'], { from: 'user' });
 
-    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(true);
-    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(true);
   });
 
   it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {
@@ -489,8 +489,8 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
 
     await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
 
-    expect(fs.existsSync(getDreamPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getDreamPendingTurnsProcessingPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
   });
 });
 

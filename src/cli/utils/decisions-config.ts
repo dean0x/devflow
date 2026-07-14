@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDevFlowDirectory } from './paths.js';
-import { getDecisionsConfigPath } from './project-paths.js';
+import { getLearningTuningConfigPath } from './project-paths.js';
 
 /**
  * Merged decisions agent configuration from global and project-level config files.
@@ -77,7 +77,7 @@ function readConfigFile(filePath: string): string | null {
  */
 export function loadDecisionsConfig(cwd: string): DecisionsConfig {
   const globalConfigPath = path.join(getDevFlowDirectory(), 'decisions.json');
-  const projectConfigPath = getDecisionsConfigPath(cwd);
+  const projectConfigPath = getLearningTuningConfigPath(cwd);
 
   let config: DecisionsConfig = { ...DEFAULTS };
 

@@ -5,16 +5,15 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   getMemoryDir,
-  getDreamDir,
-  getDecisionsDir,
-  getDecisionsConfigPath,
+  getLearningDir,
+  getLearningTuningConfigPath,
   getDecisionsLogPath,
   getDecisionsManifestPath,
   getDecisionsLockDir,
   getDecisionsNotificationsPath,
   getDecisionsBatchIdsPath,
-  getDreamPendingTurnsPath,
-  getDreamPendingTurnsProcessingPath,
+  getLearningPendingTurnsPath,
+  getLearningPendingTurnsProcessingPath,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
@@ -196,7 +195,7 @@ async function handleConfigure(): Promise<void> {
   } else {
     const memoryDir = getMemoryDir(process.cwd());
     await fs.mkdir(memoryDir, { recursive: true });
-    const projectConfigPath = getDecisionsConfigPath(process.cwd());
+    const projectConfigPath = getLearningTuningConfigPath(process.cwd());
     await fs.writeFile(projectConfigPath, configJson, 'utf-8');
     p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
   }
@@ -229,9 +228,9 @@ async function handleReset(): Promise<void> {
       getDecisionsManifestPath(gitRoot),
       getDecisionsNotificationsPath(gitRoot),
       getDecisionsBatchIdsPath(gitRoot),
-      getDecisionsConfigPath(gitRoot),
-      getDreamPendingTurnsPath(gitRoot),
-      getDreamPendingTurnsProcessingPath(gitRoot),
+      getLearningTuningConfigPath(gitRoot),
+      getLearningPendingTurnsPath(gitRoot),
+      getLearningPendingTurnsProcessingPath(gitRoot),
     ];
 
     if (process.stdin.isTTY) {
@@ -253,7 +252,7 @@ async function handleReset(): Promise<void> {
 
     // Remove the decisions directory if present (rendered files, ledger, config).
     try {
-      await fs.rm(getDecisionsDir(gitRoot), { recursive: true, force: true });
+      await fs.rm(getLearningDir(gitRoot), { recursive: true, force: true });
     } catch { /* best effort */ }
 
     // Clean legacy dream marker-pipeline stamps from old installs
@@ -261,7 +260,7 @@ async function handleReset(): Promise<void> {
     // Best-effort: reset must still finish (and release its lock) even if the
     // dream directory is inaccessible.
     try {
-      await sweepLegacyDreamMarkers(getDreamDir(gitRoot));
+      await sweepLegacyDreamMarkers(getLearningDir(gitRoot));
     } catch { /* best effort */ }
 
     p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');

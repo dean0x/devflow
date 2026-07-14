@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { getDreamConfigPath, getDreamDir } from './project-paths.js';
+import { getFeatureConfigPath, getLearningDir } from './project-paths.js';
 
 export interface DreamConfig {
   memory: boolean;
@@ -14,7 +14,7 @@ const DEFAULT_CONFIG: DreamConfig = {
 };
 
 export function getConfigPath(projectRoot: string): string {
-  return getDreamConfigPath(projectRoot);
+  return getFeatureConfigPath(projectRoot);
 }
 
 /**
@@ -53,7 +53,7 @@ function coerceConfig(parsed: unknown): DreamConfig | null {
  * Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
  */
 export async function readConfig(projectRoot: string): Promise<DreamConfig> {
-  const configPath = getDreamConfigPath(projectRoot);
+  const configPath = getFeatureConfigPath(projectRoot);
   try {
     const config = coerceConfig(JSON.parse(await fs.readFile(configPath, 'utf-8')));
     if (config !== null) return config;
@@ -69,8 +69,8 @@ export async function readConfig(projectRoot: string): Promise<DreamConfig> {
  * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
  */
 export async function writeConfig(projectRoot: string, config: DreamConfig): Promise<void> {
-  const configPath = getDreamConfigPath(projectRoot);
-  await fs.mkdir(getDreamDir(projectRoot), { recursive: true });
+  const configPath = getFeatureConfigPath(projectRoot);
+  await fs.mkdir(getLearningDir(projectRoot), { recursive: true });
   const tmpPath = configPath + '.tmp.' + process.pid;
   await fs.writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
   await fs.rename(tmpPath, configPath);

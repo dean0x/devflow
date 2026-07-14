@@ -11,8 +11,8 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
-  getDreamPendingTurnsPath,
-  getDreamPendingTurnsProcessingPath,
+  getLearningPendingTurnsPath,
+  getLearningPendingTurnsProcessingPath,
 } from './project-paths.js';
 
 // ---------------------------------------------------------------------------
@@ -89,10 +89,10 @@ export async function sweepLegacyDreamMarkers(dreamDir: string): Promise<number>
  */
 export async function drainDreamQueue(gitRoot: string): Promise<void> {
   await Promise.all([
-    fs.unlink(getDreamPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
+    fs.unlink(getLearningPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
       if (e.code !== 'ENOENT') throw e;
     }),
-    fs.unlink(getDreamPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
+    fs.unlink(getLearningPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
       if (e.code !== 'ENOENT') throw e;
     }),
   ]);

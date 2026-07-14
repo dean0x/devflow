@@ -16,16 +16,15 @@ import { fileURLToPath } from 'url';
 // Import TypeScript module (ESM)
 import {
   getMemoryDir,
-  getDreamDir,
-  getDecisionsDir,
+  getLearningDir,
   getFeaturesDir,
   getDocsDir,
-  getDreamConfigPath,
-  getDreamPendingTurnsPath,
-  getDreamPendingTurnsProcessingPath,
+  getFeatureConfigPath,
+  getLearningPendingTurnsPath,
+  getLearningPendingTurnsProcessingPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getDecisionsConfigPath,
+  getLearningTuningConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -64,12 +63,8 @@ describe('project-paths TypeScript module', () => {
       expect(getMemoryDir(ROOT)).toBe('/some/project/.devflow/memory');
     });
 
-    it('getDreamDir returns .devflow/dream/', () => {
-      expect(getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
-    });
-
-    it('getDecisionsDir returns .devflow/decisions/', () => {
-      expect(getDecisionsDir(ROOT)).toBe('/some/project/.devflow/decisions');
+    it('getLearningDir returns .devflow/learning/', () => {
+      expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
     });
 
     it('getFeaturesDir returns .devflow/features/', () => {
@@ -81,63 +76,69 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('dream files', () => {
-    it('getDreamConfigPath returns .devflow/dream/config.json', () => {
-      expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
-    });
-
-    it('getDreamPendingTurnsPath returns .devflow/dream/.pending-turns.jsonl', () => {
-      expect(getDreamPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.jsonl');
-    });
-
-    it('getDreamPendingTurnsProcessingPath returns .devflow/dream/.pending-turns.processing', () => {
-      expect(getDreamPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/dream/.pending-turns.processing');
+  describe('feature config', () => {
+    it('getFeatureConfigPath returns .devflow/config.json', () => {
+      expect(getFeatureConfigPath(ROOT)).toBe('/some/project/.devflow/config.json');
     });
   });
 
-  describe('decisions files', () => {
-    it('getDecisionsFilePath returns .devflow/decisions/decisions.md', () => {
-      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/decisions.md');
+  describe('learning queue files', () => {
+    it('getLearningPendingTurnsPath returns .devflow/learning/.pending-turns.jsonl', () => {
+      expect(getLearningPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.jsonl');
     });
 
-    it('getPitfallsFilePath returns .devflow/decisions/pitfalls.md', () => {
-      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/pitfalls.md');
+    it('getLearningPendingTurnsProcessingPath returns .devflow/learning/.pending-turns.processing', () => {
+      expect(getLearningPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.processing');
+    });
+  });
+
+  describe('learning content files', () => {
+    it('getDecisionsFilePath returns .devflow/learning/decisions.md', () => {
+      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/learning/decisions.md');
     });
 
-    it('getDecisionsConfigPath returns .devflow/decisions/decisions.json', () => {
-      expect(getDecisionsConfigPath(ROOT)).toBe('/some/project/.devflow/decisions/decisions.json');
+    it('getPitfallsFilePath returns .devflow/learning/pitfalls.md', () => {
+      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/learning/pitfalls.md');
     });
 
-    it('getDecisionsLogPath returns .devflow/decisions/decisions-log.jsonl', () => {
-      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/decisions/decisions-log.jsonl');
+    it('getLearningTuningConfigPath returns .devflow/learning/learning.json', () => {
+      expect(getLearningTuningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
     });
 
-    it('getDecisionsManifestPath returns .devflow/decisions/.decisions-manifest.json', () => {
-      expect(getDecisionsManifestPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-manifest.json');
+    it('getDecisionsLogPath returns .devflow/learning/decisions-log.jsonl', () => {
+      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-log.jsonl');
     });
 
-    it('getDecisionsLockDir returns .devflow/decisions/.decisions.lock', () => {
-      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/decisions/.decisions.lock');
+    it('getDecisionsManifestPath returns .devflow/learning/.decisions-manifest.json', () => {
+      expect(getDecisionsManifestPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-manifest.json');
     });
 
-    it('getDecisionsUsagePath returns .devflow/decisions/.decisions-usage.json', () => {
-      expect(getDecisionsUsagePath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-usage.json');
+    it('getDecisionsLockDir returns .devflow/learning/.decisions.lock', () => {
+      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/learning/.decisions.lock');
     });
 
-    it('getDecisionsUsageLockDir returns .devflow/decisions/.decisions-usage.lock', () => {
-      expect(getDecisionsUsageLockDir(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-usage.lock');
+    it('getDecisionsUsagePath returns .devflow/learning/.decisions-usage.json', () => {
+      expect(getDecisionsUsagePath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-usage.json');
     });
 
-    it('getDecisionsNotificationsPath returns .devflow/decisions/.decisions-notifications.json', () => {
-      expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-notifications.json');
+    it('getDecisionsUsageLockDir returns .devflow/learning/.decisions-usage.lock', () => {
+      expect(getDecisionsUsageLockDir(ROOT)).toBe('/some/project/.devflow/learning/.decisions-usage.lock');
     });
 
-    it('getDecisionsBatchIdsPath returns .devflow/decisions/.decisions-batch-ids', () => {
-      expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-batch-ids');
+    it('getDecisionsNotificationsPath returns .devflow/learning/.decisions-notifications.json', () => {
+      expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-notifications.json');
     });
 
-    it('getDecisionsIndexPath returns .devflow/decisions/index.md', () => {
-      expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/decisions/index.md');
+    it('getDecisionsBatchIdsPath returns .devflow/learning/.decisions-batch-ids', () => {
+      expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-batch-ids');
+    });
+
+    it('getDecisionsIndexPath returns .devflow/learning/index.md', () => {
+      expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/learning/index.md');
+    });
+
+    it('getObservationsLockDir returns .devflow/learning/.observations.lock', () => {
+      expect(getObservationsLockDir(ROOT)).toBe('/some/project/.devflow/learning/.observations.lock');
     });
   });
 
@@ -231,16 +232,15 @@ describe('CJS project-paths parity', () => {
     cjs: (root: string) => string;
   }> = [
     { name: 'getMemoryDir', ts: getMemoryDir, cjs: cjsPaths.getMemoryDir },
-    { name: 'getDreamDir', ts: getDreamDir, cjs: cjsPaths.getDreamDir },
-    { name: 'getDecisionsDir', ts: getDecisionsDir, cjs: cjsPaths.getDecisionsDir },
+    { name: 'getLearningDir', ts: getLearningDir, cjs: cjsPaths.getLearningDir },
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
-    { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
-    { name: 'getDreamPendingTurnsPath', ts: getDreamPendingTurnsPath, cjs: cjsPaths.getDreamPendingTurnsPath },
-    { name: 'getDreamPendingTurnsProcessingPath', ts: getDreamPendingTurnsProcessingPath, cjs: cjsPaths.getDreamPendingTurnsProcessingPath },
+    { name: 'getFeatureConfigPath', ts: getFeatureConfigPath, cjs: cjsPaths.getFeatureConfigPath },
+    { name: 'getLearningPendingTurnsPath', ts: getLearningPendingTurnsPath, cjs: cjsPaths.getLearningPendingTurnsPath },
+    { name: 'getLearningPendingTurnsProcessingPath', ts: getLearningPendingTurnsProcessingPath, cjs: cjsPaths.getLearningPendingTurnsProcessingPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
-    { name: 'getDecisionsConfigPath', ts: getDecisionsConfigPath, cjs: cjsPaths.getDecisionsConfigPath },
+    { name: 'getLearningTuningConfigPath', ts: getLearningTuningConfigPath, cjs: cjsPaths.getLearningTuningConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
@@ -276,15 +276,15 @@ describe('CJS project-paths parity', () => {
     expect(cjsPaths.getGitignoreEntries()).toEqual(getGitignoreEntries());
   });
 
-  // TS/CJS parity: getDreamDir and getDreamConfigPath return .devflow/dream/
-  it('getDreamDir returns .devflow/dream/ in both TS and CJS', () => {
-    expect(getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
-    expect(cjsPaths.getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
+  // TS/CJS parity: getLearningDir and getFeatureConfigPath return the correct paths
+  it('getLearningDir returns .devflow/learning/ in both TS and CJS', () => {
+    expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
+    expect(cjsPaths.getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
   });
 
-  it('getDreamConfigPath returns .devflow/dream/config.json in both TS and CJS', () => {
-    expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
-    expect(cjsPaths.getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
+  it('getFeatureConfigPath returns .devflow/config.json in both TS and CJS', () => {
+    expect(getFeatureConfigPath(ROOT)).toBe('/some/project/.devflow/config.json');
+    expect(cjsPaths.getFeatureConfigPath(ROOT)).toBe('/some/project/.devflow/config.json');
   });
 
   // Structural full-export parity: guards against silent drift where a function
