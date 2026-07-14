@@ -107,7 +107,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
 
 describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const CANONICAL_DESCRIPTION =
-    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/decisions/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
+    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
     ['triager.md', 'shared/agents/triager.md'],

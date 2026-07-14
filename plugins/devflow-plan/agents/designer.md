@@ -23,7 +23,7 @@ The orchestrator provides:
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
-- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/decisions/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for pattern-aware gap analysis. Incorporate feature area patterns and architecture into gap analysis — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
 
 ## Apply Decisions

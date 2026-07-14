@@ -68,7 +68,7 @@ Coder(agentType:"Coder", prompt: full task + plan + DECISIONS_CONTEXT + handoff 
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review loop, not after
 ```
 
-The Coder prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (from `.devflow/decisions/index.md`), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+The Coder prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (from `.devflow/learning/index.md`), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
 
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
 @end
