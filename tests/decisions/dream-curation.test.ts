@@ -84,7 +84,7 @@ function makeObsRow(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
-  const ledgerPath = path.join(dir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return ledgerPath;
@@ -109,7 +109,7 @@ function runHelper(args: string, cwd: string): { stdout: string; code: number; s
 }
 
 function readDecisionsMd(dir: string): string {
-  return fs.readFileSync(path.join(dir, '.devflow', 'decisions', 'decisions.md'), 'utf8');
+  return fs.readFileSync(path.join(dir, '.devflow', 'learning', 'decisions.md'), 'utf8');
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-retire-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -281,7 +281,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
 
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
 
-    const rows = parseLedger(path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl'));
+    const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     expect(rows).toHaveLength(2);
     const retiredRow = rows.find(r => r.anchor_id === 'ADR-002');
     expect(retiredRow).toBeDefined();
@@ -297,7 +297,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
 
     // Write a new observation and promote it — should get ADR-003, not ADR-002
-    const logPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-log.jsonl');
+    const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify(makeObsRow({ id: 'obs_new', type: 'decision', status: 'ready' })) + '\n', 'utf8');
     const result = runHelper('assign-anchor decision obs_new', tmpDir);
     expect(result.code).toBe(0);
@@ -316,7 +316,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     expect(md).toContain('ADR-001');
     expect(md).not.toContain('ADR-002');
 
-    const rows = parseLedger(path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl'));
+    const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     const dep = rows.find(r => r.anchor_id === 'ADR-002');
     expect(dep!.decisions_status).toBe('Deprecated');
   });
@@ -346,7 +346,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-recover-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -373,7 +373,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     expect(mdAfterRetire).not.toContain('ADR-002');
 
     // Re-activate: flip decisions_status back to Accepted in the ledger
-    const ledgerPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
     const rows = parseLedger(ledgerPath);
     const updated = rows.map(r =>
       r.anchor_id === 'ADR-002' ? { ...r, decisions_status: 'Accepted' } : r
@@ -406,7 +406,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     expect(mdRetired).not.toContain('ADR-003');
 
     // Re-activate + render
-    const ledgerPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
     const rows = parseLedger(ledgerPath);
     const updated = rows.map(r =>
       r.anchor_id === 'ADR-003' ? { ...r, decisions_status: 'Accepted' } : r

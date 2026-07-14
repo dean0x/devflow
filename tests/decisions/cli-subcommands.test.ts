@@ -443,7 +443,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
     const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
-    expect(config.decisions).toBe(false);
+    expect(config.learning).toBe(false);
 
     // The sibling memory queue is never touched by decisions --disable
     expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
@@ -467,7 +467,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
     const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
-    expect(config.decisions).toBe(false);
+    expect(config.learning).toBe(false);
   });
 
   it('does not delete anything on --enable', async () => {

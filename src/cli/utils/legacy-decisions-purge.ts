@@ -88,7 +88,7 @@ function resolveDecisionsPaths(options: { memoryDir: string; projectRoot?: strin
   filePrefixPairs: readonly DecisionsFilePair[];
 } {
   const { memoryDir, projectRoot } = options;
-  const decisionsDir = projectRoot ? getLearningDir(projectRoot) : path.join(memoryDir, 'learning');
+  const decisionsDir = projectRoot ? getLearningDir(projectRoot) : path.join(memoryDir, 'decisions');
   const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
   return {
     decisionsDir,

@@ -430,7 +430,7 @@ const JSON_HELPER = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
   it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
     const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
@@ -449,7 +449,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Seed the observation directly (one JSONL row, as the Dream agent
+      // Seed the observation directly (one JSONL row, as the Learning agent
       // appends it), then promote via assign-anchor
       fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
@@ -473,7 +473,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 
   it('pitfall entry written via assign-anchor matches formatPitfallBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-pf-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
     const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
@@ -492,7 +492,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Seed the observation directly (one JSONL row, as the Dream agent
+      // Seed the observation directly (one JSONL row, as the Learning agent
       // appends it), then promote via assign-anchor
       fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(

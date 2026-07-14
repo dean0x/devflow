@@ -99,7 +99,7 @@ describe('loadDecisionsConfig', () => {
   beforeEach(() => {
     devflowDir = makeTmpDir();
     projectCwd = makeTmpDir();
-    ensureDir(path.join(projectCwd, '.devflow', 'decisions'));
+    ensureDir(path.join(projectCwd, '.devflow', 'learning'));
 
     // Override the DEVFLOW_DIR env var so loadDecisionsConfig reads from our
     // temp directory instead of ~/.devflow.
@@ -126,18 +126,18 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('global config overrides defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
+    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
     const config = loadDecisionsConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect(config.debug).toBe(false); // default preserved
   });
 
   it('project config overrides global config', () => {
-    writeJson(devflowDir, 'decisions.json', {
+    writeJson(devflowDir, 'learning.json', {
       model: 'haiku',
       debug: true,
     });
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
     const config = loadDecisionsConfig(projectCwd);
@@ -146,7 +146,7 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('project config alone overrides defaults', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
     const config = loadDecisionsConfig(projectCwd);
@@ -156,7 +156,7 @@ describe('loadDecisionsConfig', () => {
 
   it('invalid JSON in global config returns defaults without crashing', () => {
     fs.writeFileSync(
-      path.join(devflowDir, 'decisions.json'),
+      path.join(devflowDir, 'learning.json'),
       'not json',
       'utf-8',
     );
@@ -165,9 +165,9 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
+    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
     fs.writeFileSync(
-      path.join(projectCwd, '.devflow', 'decisions', 'decisions.json'),
+      path.join(projectCwd, '.devflow', 'learning', 'learning.json'),
       'bad json',
       'utf-8',
     );
@@ -176,10 +176,10 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('partial project override preserves global fields', () => {
-    writeJson(devflowDir, 'decisions.json', {
+    writeJson(devflowDir, 'learning.json', {
       model: 'haiku',
     });
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       debug: true,
     });
     const config = loadDecisionsConfig(projectCwd);
@@ -193,7 +193,7 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       max_daily_runs: 3,
       throttle_minutes: 5,
       model: 'haiku',

@@ -241,7 +241,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow(), makePitfallRow()]
     renderAndWriteAll(tmpDir, rows)
-    const indexPath = path.join(tmpDir, '.devflow', 'decisions', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
     expect(fs.existsSync(indexPath)).toBe(true)
     const content = fs.readFileSync(indexPath, 'utf8')
     expect(content).toContain('ADR-001')
@@ -251,7 +251,7 @@ describe('renderAndWriteAll — index.md integration', () => {
   it('writes index.md with "(none)\\n" for empty corpus', () => {
     const tmpDir = makeTmp()
     renderAndWriteAll(tmpDir, [])
-    const indexPath = path.join(tmpDir, '.devflow', 'decisions', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
     expect(fs.existsSync(indexPath)).toBe(true)
     const content = fs.readFileSync(indexPath, 'utf8')
     expect(content).toBe('(none)\n')
@@ -265,7 +265,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     ]
     renderAndWriteAll(tmpDir, rows)
     const content = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'decisions', 'index.md'), 'utf8'
+      path.join(tmpDir, '.devflow', 'learning', 'index.md'), 'utf8'
     )
     expect(content).toContain('ADR-001')
     expect(content).not.toContain('ADR-002')
@@ -275,7 +275,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow()]
     renderAndWriteAll(tmpDir, rows)
-    const dir = path.join(tmpDir, '.devflow', 'decisions')
+    const dir = path.join(tmpDir, '.devflow', 'learning')
     expect(fs.existsSync(path.join(dir, 'decisions.md'))).toBe(true)
     expect(fs.existsSync(path.join(dir, 'pitfalls.md'))).toBe(true)
     expect(fs.existsSync(path.join(dir, 'index.md'))).toBe(true)
@@ -285,7 +285,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow(), makePitfallRow()]
     renderAndWriteAll(tmpDir, rows)
-    const indexPath = path.join(tmpDir, '.devflow', 'decisions', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
     const first = fs.readFileSync(indexPath, 'utf8')
     renderAndWriteAll(tmpDir, rows)
     const second = fs.readFileSync(indexPath, 'utf8')

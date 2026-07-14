@@ -70,13 +70,13 @@ function readConfigFile(filePath: string): string | null {
  *
  * Priority (highest wins): project config → global config → defaults.
  *
- * - Global:  `~/.devflow/decisions.json`
- * - Project: `<cwd>/.devflow/decisions/decisions.json`
+ * - Global:  `~/.devflow/learning.json`
+ * - Project: `<cwd>/.devflow/learning/learning.json`
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
 export function loadDecisionsConfig(cwd: string): DecisionsConfig {
-  const globalConfigPath = path.join(getDevFlowDirectory(), 'decisions.json');
+  const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
   const projectConfigPath = getLearningTuningConfigPath(cwd);
 
   let config: DecisionsConfig = { ...DEFAULTS };

@@ -53,11 +53,9 @@ describe('config guard: pre-compact-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits cleanly when dream config has memory: false', () => {
+  it('exits cleanly when feature config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -84,11 +82,9 @@ describe('config guard: session-start-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('outputs nothing when dream config has memory: false (even with WORKING-MEMORY.md present)', () => {
+  it('outputs nothing when feature config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
@@ -119,7 +115,7 @@ describe('decisions-usage-scan.cjs', () => {
   it('processes citations (gating lives in the caller, not the scanner)', () => {
     mkMemoryDir(tmpDir);
     // Create usage file with a known entry
-    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -138,14 +134,14 @@ describe('config guard: capture-turn decisions scanner gating', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('does NOT run scanner when dream config has decisions: false', () => {
+  it('does NOT run scanner when feature config has learning: false', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
-      JSON.stringify({ decisions: false }),
+      path.join(tmpDir, '.devflow', 'config.json'),
+      JSON.stringify({ learning: false }),
     );
     // Create usage file to detect if scanner would have run
-    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -157,10 +153,10 @@ describe('config guard: capture-turn decisions scanner gating', () => {
     expect(updated.entries['ADR-001'].cites).toBe(0);
   });
 
-  it('runs scanner when decisions enabled (config absent defaults true)', () => {
+  it('runs scanner when learning enabled (config absent defaults true)', () => {
     mkMemoryDir(tmpDir);
     // Create usage file to detect scanner run
-    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -201,9 +197,9 @@ describe('config guard: session-start-context', () => {
     expect(output).toBe('');
   });
 
-  it('outputs decisions TL;DR when decisions enabled and decisions.md exists', () => {
+  it('outputs decisions TL;DR when learning enabled and decisions.md exists', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
@@ -212,13 +208,13 @@ describe('config guard: session-start-context', () => {
     expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
-  it('skips decisions TL;DR when dream config has decisions: false', () => {
+  it('skips decisions TL;DR when feature config has learning: false', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
-      JSON.stringify({ decisions: false }),
+      path.join(tmpDir, '.devflow', 'config.json'),
+      JSON.stringify({ learning: false }),
     );
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
@@ -251,7 +247,7 @@ describe('config guard: session-start-context', () => {
   it('session-start-memory no longer outputs decisions TL;DR', () => {
     const SESSION_START_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);

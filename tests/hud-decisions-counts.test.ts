@@ -55,8 +55,8 @@ describe('gatherDecisionsCounts', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-decisions-counts-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
-    ledgerPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
   });
 
   afterEach(() => {
@@ -179,8 +179,8 @@ describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-decisions-mirror-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
-    ledgerPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
   });
 
   afterEach(() => {
