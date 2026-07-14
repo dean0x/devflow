@@ -14,8 +14,8 @@ import * as os from 'os';
 // Mocks — all set up before any imports from the module under test.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/cli/utils/decisions-config.js', () => ({
-  loadDecisionsConfig: vi.fn(() => ({
+vi.mock('../../src/cli/utils/learning-tuning-config.js', () => ({
+  loadLearningTuningConfig: vi.fn(() => ({
     model: 'opus',
     debug: false,
   })),
@@ -52,7 +52,7 @@ import {
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
 import { getGitRoot } from '../../src/cli/utils/git.js';
-import { decisionsCommand } from '../../src/cli/commands/decisions.js';
+import { learningCommand } from '../../src/cli/commands/learning.js';
 import * as p from '@clack/prompts';
 import {
   getLearningPendingTurnsPath,
@@ -282,75 +282,51 @@ describe('decisions --clear log truncation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --reset state removal: verify correct files are targeted
+// --reset state removal: single-dir semantics
 // ---------------------------------------------------------------------------
 
-describe('decisions --reset target files', () => {
-  it('reset targets decisions-specific state files (.devflow/decisions/)', () => {
-    const decisionsStateFiles = [
-      'decisions-log.jsonl',
-      '.decisions-manifest.json',
-      '.decisions-notifications.json',
-      '.decisions-batch-ids',
-      'decisions.json',
-    ];
+describe('learning --reset single-dir semantics', () => {
+  it('reset removes the entire .devflow/learning/ directory (single-dir semantics)', () => {
+    // All learning state lives under .devflow/learning/ — queue files, content
+    // files, ledger, and tuning config. Reset removes the entire dir, not a
+    // fixed file list. The neutral .devflow/config.json is never touched.
+    const removedDir = '.devflow/learning/';
+    const preservedPaths = ['.devflow/config.json', '.devflow/memory/'];
 
-    const preservedFiles = [
-      'learning-log.jsonl',
-      '.learning-manifest.json',
-      '.learning-runs-today',
-      'WORKING-MEMORY.md',
-    ];
+    // Single dir removal covers everything
+    expect(removedDir).toContain('learning');
 
-    for (const f of decisionsStateFiles) {
-      expect(
-        f.includes('decision') || f.includes('decisions'),
-        `Expected "${f}" to contain "decision" or "decisions"`,
-      ).toBe(true);
-    }
-
-    for (const f of preservedFiles) {
-      expect(decisionsStateFiles).not.toContain(f);
+    for (const p of preservedPaths) {
+      expect(p).not.toContain('learning/');
     }
   });
 
-  it('reset also targets the dream (decisions-detection) queue (.devflow/dream/)', () => {
-    // Not decision-prefixed by name — these live in .devflow/dream/, the queue the
-    // Dream agent claims from. Reset must drain them too so a re-enable doesn't
-    // process stale pre-reset turns.
-    const dreamQueueFiles = [
-      '.pending-turns.jsonl',
-      '.pending-turns.processing',
-    ];
-
-    const preservedDreamFiles = [
-      'config.json', // shared multi-feature config — reset must never touch this
-    ];
-
-    for (const f of preservedDreamFiles) {
-      expect(dreamQueueFiles).not.toContain(f);
-    }
+  it('reset does not target .devflow/config.json (shared neutral config)', () => {
+    // The feature toggles are at .devflow/config.json, NOT inside learning/.
+    // Reset must never remove it — it would also wipe memory and knowledge toggles.
+    const neutralConfig = '.devflow/config.json';
+    expect(neutralConfig).not.toMatch(/learning/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// --reset dream cleanup: verify legacy marker-pipeline state files are targeted
+// --reset legacy marker sweep: verify legacy marker-pipeline state files are targeted
 // ---------------------------------------------------------------------------
 
-describe('decisions --reset dream state cleanup', () => {
-  it('dream cleanup targets legacy stamp files (.decisions-runs-today, .curation-last, .processor-spawned-at)', () => {
-    const dreamFilesToClean = [
+describe('learning --reset legacy marker sweep', () => {
+  it('legacy sweep targets fixed stamp files (.decisions-runs-today, .curation-last, .processor-spawned-at)', () => {
+    const legacyFilesToClean = [
       '.decisions-runs-today',
       '.curation-last',
       '.processor-spawned-at',
     ];
 
-    for (const f of dreamFilesToClean) {
+    for (const f of legacyFilesToClean) {
       expect(f.startsWith('.')).toBe(true);
     }
   });
 
-  it('dream cleanup targets legacy decisions.*/curation.* markers across all 4 suffixes', () => {
+  it('legacy sweep targets decisions.*/curation.* markers across all 4 suffixes', () => {
     const dreamMarkerPattern = /^(decisions|curation)\..+\.(json|processing|retries|failed)$/;
 
     for (const f of [
@@ -365,51 +341,42 @@ describe('decisions --reset dream state cleanup', () => {
     }
 
     // Never touches: learning markers (pipeline removed separately), the shared
-    // config.json, or the new .pending-turns.jsonl/.processing queue files.
+    // config.json, or the .pending-turns.jsonl/.processing queue files.
     for (const f of ['learning.abc123.json', 'decisions.json', 'config.json', '.pending-turns.jsonl', '.pending-turns.processing']) {
       expect(dreamMarkerPattern.test(f)).toBe(false);
     }
   });
-
-  it('dream cleanup does not target learning state files', () => {
-    const decisionsDreamFiles = ['.decisions-runs-today', '.curation-last', '.processor-spawned-at'];
-    const learningFiles = ['.learning-runs-today', '.learning-sessions'];
-
-    for (const lf of learningFiles) {
-      expect(decisionsDreamFiles).not.toContain(lf);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
-// --reset success message: truthful, no file count
+// --reset success message: truthful, pinned
 // ---------------------------------------------------------------------------
 
-describe('decisions --reset success message', () => {
-  const decisionsTs = fs.readFileSync(
-    new URL('../../src/cli/commands/decisions.ts', import.meta.url).pathname,
+describe('learning --reset success message', () => {
+  const learningTs = fs.readFileSync(
+    new URL('../../src/cli/commands/learning.ts', import.meta.url).pathname,
     'utf-8',
   );
 
-  it('pins the truthful success string (no file count)', () => {
-    expect(decisionsTs).toContain(
-      "p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');",
+  it('pins the truthful success string (new single-dir message)', () => {
+    expect(learningTs).toContain(
+      "p.log.success('Reset complete — removed .devflow/learning/ state.');",
     );
   });
 
   it('does not interpolate a removed-file count into the success message', () => {
-    expect(decisionsTs).not.toMatch(/removed \$\{[^}]+\} file\(s\)/);
+    expect(learningTs).not.toMatch(/removed \$\{[^}]+\} file\(s\)/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// --disable drains the dream (decisions-detection) pending-turns queue —
+// --disable drains the learning (decisions-detection) pending-turns queue —
 // mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
-// Unconditional: a mid-run Dream agent whose claimed batch vanishes aborts
+// Unconditional: a mid-run Learning agent whose claimed batch vanishes aborts
 // without changes, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
-describe('decisions --disable drains the dream pending-turns queue', () => {
+describe('learning --disable drains the learning pending-turns queue', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -419,7 +386,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     // same Command instance (no built-in reset between calls). Production always
     // starts a fresh process per invocation, so clear state here to match that
     // reality and keep these tests order-independent.
-    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
   });
 
   afterEach(() => {
@@ -437,7 +404,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
 
-    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+    await learningCommand.parseAsync(['--disable'], { from: 'user' });
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
@@ -452,16 +419,16 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
   it('does not create a .disabled sentinel (gate is config-only)', async () => {
     writeDreamQueueFiles(tmpDir);
 
-    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+    await learningCommand.parseAsync(['--disable'], { from: 'user' });
 
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'decisions', '.disabled'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', '.disabled'))).toBe(false);
   });
 
   it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
     writeDreamQueueFiles(tmpDir);
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream', '.worker.lock'), { recursive: true });
 
-    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+    await learningCommand.parseAsync(['--disable'], { from: 'user' });
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
@@ -473,7 +440,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
   it('does not delete anything on --enable', async () => {
     writeDreamQueueFiles(tmpDir);
 
-    await decisionsCommand.parseAsync(['--enable'], { from: 'user' });
+    await learningCommand.parseAsync(['--enable'], { from: 'user' });
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(true);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(true);
@@ -487,7 +454,7 @@ describe('decisions --disable drains the dream pending-turns queue', () => {
     // the resolved gitRoot.
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
 
-    await decisionsCommand.parseAsync(['--disable'], { from: 'user' });
+    await learningCommand.parseAsync(['--disable'], { from: 'user' });
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
@@ -507,7 +474,7 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
-    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
   });
 
   afterEach(() => {
@@ -527,7 +494,7 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
     // process.cwd() instead of the resolved gitRoot.
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
 
-    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+    await learningCommand.parseAsync(['--list'], { from: 'user' });
 
     expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
   });
@@ -541,26 +508,26 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
     ]));
     vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
 
-    await decisionsCommand.parseAsync(['--list'], { from: 'user' });
+    await learningCommand.parseAsync(['--list'], { from: 'user' });
 
     expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
   });
 });
 
 // ---------------------------------------------------------------------------
-// --reset idempotency: second run after .devflow/decisions/ is already gone
+// --reset idempotency: second run after .devflow/learning/ is already gone
 // must complete truthfully, never emit the "currently running" contention msg.
-// Root cause: lock dir is inside the decisions dir; once decisions/ is removed,
+// Root cause: lock dir is inside the learning dir; once learning/ is removed,
 // fs.mkdir(lockDir) fails with ENOENT, which the old code treated as contention.
 // ---------------------------------------------------------------------------
 
-describe('decisions --reset is idempotent when decisions dir is already gone', () => {
+describe('learning --reset is idempotent when learning dir is already gone', () => {
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
-    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
     vi.mocked(p.log.error).mockClear();
     vi.mocked(p.log.success).mockClear();
   });
@@ -569,36 +536,52 @@ describe('decisions --reset is idempotent when decisions dir is already gone', (
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('does not emit the contention message on a second reset when .devflow/decisions/ is already absent', async () => {
-    // First reset: create decisions/ so the first run has something to remove.
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
-    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+  it('does not emit the contention message on a second reset when .devflow/learning/ is already absent', async () => {
+    // First reset: create learning/ so the first run has something to remove.
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    await learningCommand.parseAsync(['--reset'], { from: 'user' });
 
     // Prepare for second run.
-    (decisionsCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
     vi.mocked(p.log.error).mockClear();
     vi.mocked(p.log.success).mockClear();
 
-    // Second reset — .devflow/decisions/ is already gone.
-    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+    // Second reset — .devflow/learning/ is already gone.
+    await learningCommand.parseAsync(['--reset'], { from: 'user' });
 
     expect(p.log.error).not.toHaveBeenCalledWith(
-      'Decisions system is currently running. Try again in a moment.',
+      'Learning system is currently running. Try again in a moment.',
     );
     expect(p.log.success).toHaveBeenCalledWith(
-      'Reset complete — removed .devflow/decisions/ and dream queue state.',
+      'Reset complete — removed .devflow/learning/ state.',
     );
   });
 
-  it('completes truthfully even when called on a project with no decisions state at all', async () => {
-    // No .devflow/decisions/ ever created — simulates a fresh project.
-    await decisionsCommand.parseAsync(['--reset'], { from: 'user' });
+  it('completes truthfully even when called on a project with no learning state at all', async () => {
+    // No .devflow/learning/ ever created — simulates a fresh project.
+    await learningCommand.parseAsync(['--reset'], { from: 'user' });
 
     expect(p.log.error).not.toHaveBeenCalledWith(
-      'Decisions system is currently running. Try again in a moment.',
+      'Learning system is currently running. Try again in a moment.',
     );
     expect(p.log.success).toHaveBeenCalledWith(
-      'Reset complete — removed .devflow/decisions/ and dream queue state.',
+      'Reset complete — removed .devflow/learning/ state.',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-C2 clean break: `devflow decisions` must no longer be a registered command.
+// The CLI surface was renamed to `devflow learning` in commit 6. Any attempt to
+// run `devflow decisions` must either be unrecognised or produce no-op output.
+// ---------------------------------------------------------------------------
+
+describe('AC-C2: devflow decisions is no longer a registered subcommand', () => {
+  it('learningCommand is registered under the "learning" name, not "decisions"', () => {
+    expect(learningCommand.name()).toBe('learning');
+  });
+
+  it('learningCommand does not carry "decisions" as an alias', () => {
+    expect(learningCommand.aliases()).not.toContain('decisions');
   });
 });

@@ -3,7 +3,7 @@ import type { Settings, HookMatcher } from '../utils/hooks.js';
 // ─── Dream worker hook cleanup ──────────────────────────────────────────────
 //
 // The spawn-dream-worker SessionStart hook belonged to the retired detached
-// dream worker. Decisions processing runs as the directive-spawned Dream agent
+// dream worker. Decisions processing runs as the directive-spawned Learning agent
 // (session-start-context Section 2), which needs no hook registration of its
 // own. remove/has exist for upgrade cleanup: init and uninstall strip any
 // stale entry left in settings.json by a prior install.

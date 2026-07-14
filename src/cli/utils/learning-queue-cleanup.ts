@@ -1,9 +1,9 @@
 /**
- * @file dream-cleanup.ts
+ * @file learning-queue-cleanup.ts
  *
- * Shared cleanup helpers for `.devflow/dream/` — used by both the
- * `purge-dream-marker-pipeline-v1` migration and `devflow decisions --reset`
- * (legacy marker sweep), and by `devflow decisions --clear`/`--disable`
+ * Shared cleanup helpers for `.devflow/learning/` — used by both the
+ * `purge-dream-marker-pipeline-v1` migration and `devflow learning --reset`
+ * (legacy marker sweep), and by `devflow learning --clear`/`--disable`
  * (live queue drain). Centralizing these predicates keeps the two call
  * sites of each behavior byte-identical instead of hand-copied.
  */
@@ -31,12 +31,12 @@ function isLegacyPerSessionMarker(name: string): boolean {
 }
 
 /**
- * Sweep legacy marker-pipeline files from a `.devflow/dream/` directory:
+ * Sweep legacy marker-pipeline files from a `.devflow/learning/` directory:
  * the fixed-name stamps above, plus per-session `decisions.*`/`curation.*`
- * markers. Never touches `config.json` or the live
+ * markers. Never touches `learning.json` or the live
  * `.pending-turns.jsonl`/`.pending-turns.processing` queue files.
  *
- * ENOENT-idempotent (missing dream dir or already-removed files are not
+ * ENOENT-idempotent (missing learning dir or already-removed files are not
  * errors). Non-ENOENT errors are rethrown — callers that need best-effort
  * semantics (e.g. `--reset`, which must still finish releasing its lock)
  * should wrap the call in their own try/catch.
@@ -82,12 +82,12 @@ export async function sweepLegacyDreamMarkers(dreamDir: string): Promise<number>
 // ---------------------------------------------------------------------------
 
 /**
- * Drain the dream (decisions-detection) pending-turns queue so stale turns
+ * Drain the learning (decisions-detection) pending-turns queue so stale turns
  * don't process later — used by both `--clear` and `--disable`. A mid-run
- * Dream agent whose claimed batch vanishes aborts without changes, which is
+ * Learning agent whose claimed batch vanishes aborts without changes, which is
  * the desired outcome in both cases. ENOENT-tolerant; other errors propagate.
  */
-export async function drainDreamQueue(gitRoot: string): Promise<void> {
+export async function drainLearningQueue(gitRoot: string): Promise<void> {
   await Promise.all([
     fs.unlink(getLearningPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
       if (e.code !== 'ENOENT') throw e;

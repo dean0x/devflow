@@ -394,7 +394,8 @@ describe('re-entrancy guard: session-start-context DEVFLOW_BG_UPDATER', () => {
 
   it('outputs nothing when DEVFLOW_BG_UPDATER=1, even with a decisions TL;DR present', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(decisionsDir, { recursive: true });
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     const input = sessionInput(tmpDir);
     const output = execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();

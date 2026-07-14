@@ -51,7 +51,7 @@ export function formatFeatures(
     features.ambient ? 'ambient' : null,
     features.memory ? 'memory' : null,
     features.knowledge ? 'knowledge' : null,
-    features.decisions ? 'decisions' : null,
+    features.learning ? 'learning' : null,
     features.hud ? 'hud' : null,
     features.rules ? 'rules' : null,
     features.flags?.length ? `flags: ${features.flags.length}` : null,

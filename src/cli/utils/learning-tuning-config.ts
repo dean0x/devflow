@@ -4,36 +4,36 @@ import { getDevFlowDirectory } from './paths.js';
 import { getLearningTuningConfigPath } from './project-paths.js';
 
 /**
- * Merged decisions agent configuration from global and project-level config files.
+ * Merged learning agent tuning configuration from global and project-level config files.
  *
- * The Dream agent has no daily-run cap or throttle: session-start-context emits
- * its spawn directive only when the dream queue is non-empty (or a stale
+ * The Learning agent has no daily-run cap or throttle: session-start-context emits
+ * its spawn directive only when the learning queue is non-empty (or a stale
  * .processing batch exists), so queue emptiness is the natural gate.
  * session-start-context reads these config files directly (same project →
  * global → default precedence) when resolving the model for the directive.
  */
-export interface DecisionsConfig {
-  /** Model alias for the Dream agent. Default: 'opus' */
+export interface LearningTuningConfig {
+  /** Model alias for the Learning agent. Default: 'opus' */
   model: string;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
 
-const DEFAULTS: DecisionsConfig = {
+const DEFAULTS: LearningTuningConfig = {
   model: 'opus',
   debug: false,
 };
 
 /**
- * Apply a single JSON config layer onto a DecisionsConfig, returning a new object.
+ * Apply a single JSON config layer onto a LearningTuningConfig, returning a new object.
  * Skips fields with wrong types. Swallows parse errors — callers see defaults.
  * Unknown fields (e.g. an old config still on disk with extra knobs) are
  * silently ignored, not an error.
  */
-export function applyDecisionsConfigLayer(
-  config: DecisionsConfig,
+export function applyLearningTuningConfigLayer(
+  config: LearningTuningConfig,
   json: string,
-): DecisionsConfig {
+): LearningTuningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
     return {
@@ -58,7 +58,7 @@ function readConfigFile(filePath: string): string | null {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       // Warn but don't crash — callers fall back to defaults.
       console.warn(
-        `[decisions-config] warning: could not read ${filePath}: ${(err as Error).message}`,
+        `[learning-tuning-config] warning: could not read ${filePath}: ${(err as Error).message}`,
       );
     }
     return null;
@@ -66,7 +66,7 @@ function readConfigFile(filePath: string): string | null {
 }
 
 /**
- * Load and merge decisions agent configuration.
+ * Load and merge learning agent tuning configuration.
  *
  * Priority (highest wins): project config → global config → defaults.
  *
@@ -75,20 +75,20 @@ function readConfigFile(filePath: string): string | null {
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
-export function loadDecisionsConfig(cwd: string): DecisionsConfig {
+export function loadLearningTuningConfig(cwd: string): LearningTuningConfig {
   const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
   const projectConfigPath = getLearningTuningConfigPath(cwd);
 
-  let config: DecisionsConfig = { ...DEFAULTS };
+  let config: LearningTuningConfig = { ...DEFAULTS };
 
   const globalJson = readConfigFile(globalConfigPath);
   if (globalJson !== null) {
-    config = applyDecisionsConfigLayer(config, globalJson);
+    config = applyLearningTuningConfigLayer(config, globalJson);
   }
 
   const projectJson = readConfigFile(projectConfigPath);
   if (projectJson !== null) {
-    config = applyDecisionsConfigLayer(config, projectJson);
+    config = applyLearningTuningConfigLayer(config, projectJson);
   }
 
   return config;

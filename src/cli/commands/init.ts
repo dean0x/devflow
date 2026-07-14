@@ -32,7 +32,7 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
-import { removeDreamHook } from './dream.js';
+import { removeDreamHook } from './legacy-hooks.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
@@ -49,7 +49,7 @@ export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, disc
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
-export { removeDreamHook, hasDreamHook } from './dream.js';
+export { removeDreamHook, hasDreamHook } from './legacy-hooks.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
 
@@ -168,7 +168,7 @@ interface InitOptions {
   memory?: boolean;
   hud?: boolean;
   knowledge?: boolean;
-  decisions?: boolean;
+  learning?: boolean;
   rules?: boolean;
   security?: SecurityMode;
   hudOnly?: boolean;
@@ -189,8 +189,8 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
-  .option('--decisions', 'Enable decision/pitfall tracking')
-  .option('--no-decisions', 'Disable decision/pitfall tracking')
+  .option('--learning', 'Enable learning (decision/pitfall tracking)')
+  .option('--no-learning', 'Disable learning (decision/pitfall tracking)')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
@@ -288,7 +288,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, decisions: false, rules: false, flags: [] },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -437,12 +437,12 @@ export const initCommand = new Command('init')
     // Early git detection (needed by both paths)
     const earlyGitRoot = await getGitRoot();
 
-    // Feature decisions — defaults for recommended, prompts for advanced
+    // Feature toggles — defaults for recommended, prompts for advanced
     let ambientEnabled = true;
     let memoryEnabled = true;
     let hudEnabled = true;
     let knowledgeEnabled = true;
-    let decisionsEnabled = true;
+    let learningEnabled = true;
     let rulesEnabled = true;
     let enabledFlags = getDefaultFlags();
     let viewMode: ViewMode = 'default';
@@ -470,7 +470,7 @@ export const initCommand = new Command('init')
       if (options.memory !== undefined) memoryEnabled = options.memory;
       if (options.hud !== undefined) hudEnabled = options.hud;
       if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
-      if (options.decisions !== undefined) decisionsEnabled = options.decisions;
+      if (options.learning !== undefined) learningEnabled = options.learning;
       if (options.rules !== undefined) rulesEnabled = options.rules;
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -502,7 +502,7 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Decisions:       ${decisionsEnabled ? 'enabled' : 'disabled'}`,
+        `Learning:        ${learningEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
@@ -609,24 +609,24 @@ export const initCommand = new Command('init')
         knowledgeEnabled = knowledgeChoice;
       }
 
-      if (options.decisions !== undefined) {
-        decisionsEnabled = options.decisions;
+      if (options.learning !== undefined) {
+        learningEnabled = options.learning;
       } else {
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
           'additional tokens.',
-          'Decision/Pitfall Tracking',
+          'Learning (Decision/Pitfall Tracking)',
         );
-        const decisionsChoice = await p.confirm({
-          message: 'Enable decision/pitfall tracking? (Recommended)',
+        const learningChoice = await p.confirm({
+          message: 'Enable learning? (Recommended)',
           initialValue: true,
         });
-        if (p.isCancel(decisionsChoice)) {
+        if (p.isCancel(learningChoice)) {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        decisionsEnabled = decisionsChoice;
+        learningEnabled = learningChoice;
       }
 
       if (options.rules !== undefined) {
@@ -1117,6 +1117,7 @@ export const initCommand = new Command('init')
       'background-dream-update',
       'dream-procedure.md',
       'lib/staleness.cjs',
+      'dream-lock',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1207,7 +1208,7 @@ export const initCommand = new Command('init')
     if (gitRoot) {
       await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
-        learning: decisionsEnabled,
+        learning: learningEnabled,
         knowledge: knowledgeEnabled,
       });
 
@@ -1442,7 +1443,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
+      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, learning: learningEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

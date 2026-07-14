@@ -4,22 +4,16 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
-  getMemoryDir,
   getLearningDir,
   getLearningTuningConfigPath,
   getDecisionsLogPath,
-  getDecisionsManifestPath,
   getDecisionsLockDir,
-  getDecisionsNotificationsPath,
-  getDecisionsBatchIdsPath,
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
 import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { sweepLegacyDreamMarkers, drainDreamQueue } from '../utils/dream-cleanup.js';
+import { sweepLegacyDreamMarkers, drainLearningQueue } from '../utils/learning-queue-cleanup.js';
 import {
   type DecisionsEntryStatus,
 } from '../utils/observations.js';
@@ -30,7 +24,7 @@ import {
 
 /**
  * DecisionsEntryStatus is defined in observations.ts (pure data module) and
- * re-exported here for consumers that import from the decisions command module.
+ * re-exported here for consumers that import from the learning command module.
  */
 export type { DecisionsEntryStatus };
 
@@ -39,15 +33,15 @@ export type { DecisionsEntryStatus };
 // ---------------------------------------------------------------------------
 
 function printUsage(): void {
-  p.intro(color.bgCyan(color.black(' Decisions Learning ')));
+  p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow decisions --enable')}      Enable decisions detection\n` +
-    `${color.cyan('devflow decisions --disable')}     Disable decisions detection (drains queue)\n` +
-    `${color.cyan('devflow decisions --status')}      Show decisions status\n` +
-    `${color.cyan('devflow decisions --list')}        Show all observations\n` +
-    `${color.cyan('devflow decisions --configure')}   Configuration wizard\n` +
-    `${color.cyan('devflow decisions --clear')}       Truncate decisions log\n` +
-    `${color.cyan('devflow decisions --reset')}       Remove all state files`,
+    `${color.cyan('devflow learning --enable')}      Enable learning (decision + pitfall detection)\n` +
+    `${color.cyan('devflow learning --disable')}     Disable learning (drains queue)\n` +
+    `${color.cyan('devflow learning --status')}      Show learning status\n` +
+    `${color.cyan('devflow learning --list')}        Show all observations\n` +
+    `${color.cyan('devflow learning --configure')}   Configuration wizard\n` +
+    `${color.cyan('devflow learning --clear')}       Truncate decisions log\n` +
+    `${color.cyan('devflow learning --reset')}       Remove all learning state files`,
     'Usage',
   );
   p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
@@ -69,7 +63,7 @@ async function requireGitRoot(actionSuffix: string): Promise<string | null> {
 async function handleStatus(): Promise<void> {
   const gitRoot = await getGitRoot();
   if (!gitRoot) {
-    p.log.info('Decisions learning: disabled (not in a git project)');
+    p.log.info('Learning: disabled (not in a git project)');
     return;
   }
   const logPath = getDecisionsLogPath(gitRoot);
@@ -84,7 +78,7 @@ async function handleStatus(): Promise<void> {
   const observing = decisionObs.filter(o => o.status === 'observing');
   const deprecated = decisionObs.filter(o => o.status === 'deprecated');
 
-  const lines: string[] = [`Decisions learning: ${enabled ? 'enabled' : 'disabled'}`];
+  const lines: string[] = [`Learning: ${enabled ? 'enabled' : 'disabled'}`];
   if (decisionObs.length === 0) {
     lines.push('Observations: none');
   } else {
@@ -127,7 +121,7 @@ async function handleList(): Promise<void> {
   // Sort by confidence descending
   filtered.sort((a, b) => b.confidence - a.confidence);
 
-  p.intro(color.bgCyan(color.black(' Decisions Observations ')));
+  p.intro(color.bgCyan(color.black(' Learning Observations ')));
   for (const obs of filtered) {
     const typeIcon = obs.type === 'decision' ? 'D' : 'F';
     const statusIcon = obs.status === 'created' ? color.green('created')
@@ -144,7 +138,7 @@ async function handleList(): Promise<void> {
 }
 
 async function handleConfigure(): Promise<void> {
-  p.intro(color.bgCyan(color.black(' Decisions Configuration ')));
+  p.intro(color.bgCyan(color.black(' Learning Configuration ')));
 
   const model = await p.select({
     message: 'Model for decision detection',
@@ -171,8 +165,8 @@ async function handleConfigure(): Promise<void> {
   const scope = await p.select({
     message: 'Configuration scope',
     options: [
-      { value: 'project', label: 'Project', hint: 'This project only (.devflow/decisions/decisions.json)' },
-      { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/decisions.json)' },
+      { value: 'project', label: 'Project', hint: 'This project only (.devflow/learning/learning.json)' },
+      { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/learning.json)' },
     ],
   });
   if (p.isCancel(scope)) {
@@ -190,11 +184,12 @@ async function handleConfigure(): Promise<void> {
   if (scope === 'global') {
     const globalDir = path.join(process.env.HOME || '~', '.devflow');
     await fs.mkdir(globalDir, { recursive: true });
-    await fs.writeFile(path.join(globalDir, 'decisions.json'), configJson, 'utf-8');
-    p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'decisions.json'))}`);
+    await fs.writeFile(path.join(globalDir, 'learning.json'), configJson, 'utf-8');
+    p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
   } else {
-    const memoryDir = getMemoryDir(process.cwd());
-    await fs.mkdir(memoryDir, { recursive: true });
+    // FIX: mkdir the learning dir (parent of learning.json), not the memory dir
+    const learningDir = getLearningDir(process.cwd());
+    await fs.mkdir(learningDir, { recursive: true });
     const projectConfigPath = getLearningTuningConfigPath(process.cwd());
     await fs.writeFile(projectConfigPath, configJson, 'utf-8');
     p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
@@ -209,33 +204,23 @@ async function handleReset(): Promise<void> {
 
   const lockDir = getDecisionsLockDir(gitRoot);
 
-  // Ensure the parent directory exists so a second reset (after .devflow/decisions/
+  // Ensure the parent directory exists so a second reset (after .devflow/learning/
   // was already removed) does not fail with ENOENT and emit a false contention error.
   await fs.mkdir(path.dirname(lockDir), { recursive: true });
 
-  // Acquire lock to prevent conflict with a concurrent `devflow decisions` invocation.
+  // Acquire lock to prevent conflict with a concurrent `devflow learning` invocation.
   // Non-recursive: EEXIST still means genuine contention.
   try {
     await fs.mkdir(lockDir);
   } catch {
-    p.log.error('Decisions system is currently running. Try again in a moment.');
+    p.log.error('Learning system is currently running. Try again in a moment.');
     return;
   }
 
   try {
-    const stateFilePaths = [
-      getDecisionsLogPath(gitRoot),
-      getDecisionsManifestPath(gitRoot),
-      getDecisionsNotificationsPath(gitRoot),
-      getDecisionsBatchIdsPath(gitRoot),
-      getLearningTuningConfigPath(gitRoot),
-      getLearningPendingTurnsPath(gitRoot),
-      getLearningPendingTurnsProcessingPath(gitRoot),
-    ];
-
     if (process.stdin.isTTY) {
       const confirm = await p.confirm({
-        message: 'Remove all decisions-specific state files? This cannot be undone.',
+        message: 'Remove all learning state files? This cannot be undone.',
         initialValue: false,
       });
       if (p.isCancel(confirm) || !confirm) {
@@ -244,26 +229,19 @@ async function handleReset(): Promise<void> {
       }
     }
 
-    for (const filePath of stateFilePaths) {
-      try {
-        await fs.unlink(filePath);
-      } catch { /* may not exist */ }
-    }
-
-    // Remove the decisions directory if present (rendered files, ledger, config).
+    // Remove the entire learning directory (contains queue files, content files,
+    // ledger, and tuning config). Single-dir semantics: all learning state lives here.
     try {
       await fs.rm(getLearningDir(gitRoot), { recursive: true, force: true });
     } catch { /* best effort */ }
 
-    // Clean legacy dream marker-pipeline stamps from old installs
-    // (config.json and the queue files are handled above/never touched here).
-    // Best-effort: reset must still finish (and release its lock) even if the
-    // dream directory is inaccessible.
+    // Clean legacy dream marker-pipeline stamps from old installs.
+    // Best-effort: sweeps the now-absent dir silently (ENOENT-tolerant).
     try {
       await sweepLegacyDreamMarkers(getLearningDir(gitRoot));
     } catch { /* best effort */ }
 
-    p.log.success('Reset complete — removed .devflow/decisions/ and dream queue state.');
+    p.log.success('Reset complete — removed .devflow/learning/ state.');
   } finally {
     try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
   }
@@ -294,11 +272,11 @@ async function handleClear(): Promise<void> {
 
   await fs.writeFile(decisionsLogPath, '', 'utf-8');
 
-  // Drain the dream (decisions-detection) queue so stale turns don't process
+  // Drain the learning (decisions-detection) queue so stale turns don't process
   // on the next session — mirrors memory.ts's drain-on-disable behavior for
-  // the sibling memory queue. A mid-run Dream agent whose claimed batch
+  // the sibling memory queue. A mid-run Learning agent whose claimed batch
   // vanishes aborts without changes — the desired outcome of clearing.
-  await drainDreamQueue(gitRoot);
+  await drainLearningQueue(gitRoot);
 
   p.log.success('Decisions log cleared.');
 }
@@ -308,8 +286,8 @@ async function handleEnable(): Promise<void> {
   if (!gitRoot) return;
 
   await updateFeature(gitRoot, 'learning', true);
-  await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
-  p.log.success('Decisions learning enabled — configuration updated');
+  await syncManifestFeature(getDevFlowDirectory(), 'learning', true);
+  p.log.success('Learning enabled — configuration updated');
   p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
 }
 
@@ -323,17 +301,17 @@ async function handleDisable(): Promise<void> {
   // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
   // sibling memory queue. Unconditional: a mid-run Learning agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
-  await drainDreamQueue(gitRoot);
+  await drainLearningQueue(gitRoot);
 
-  await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
-  p.log.success('Decisions learning disabled — configuration updated');
+  await syncManifestFeature(getDevFlowDirectory(), 'learning', false);
+  p.log.success('Learning disabled — configuration updated');
 }
 
 // ---------------------------------------------------------------------------
 // Command
 // ---------------------------------------------------------------------------
 
-interface DecisionsOptions {
+interface LearningOptions {
   enable?: boolean;
   disable?: boolean;
   status?: boolean;
@@ -343,17 +321,17 @@ interface DecisionsOptions {
   reset?: boolean;
 }
 
-export const decisionsCommand = new Command('decisions')
-  .description('Enable or disable decisions/pitfall learning (decision detection + knowledge base)')
-  .option('--enable', 'Enable decisions learning')
-  .option('--disable', 'Disable decisions learning')
-  .option('--status', 'Show decisions status and observation counts')
+export const learningCommand = new Command('learning')
+  .description('Enable or disable learning (decision/pitfall detection + knowledge base)')
+  .option('--enable', 'Enable learning')
+  .option('--disable', 'Disable learning')
+  .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')
-  .option('--configure', 'Interactive configuration wizard for decisions.json')
+  .option('--configure', 'Interactive configuration wizard for learning.json')
   .option('--clear', 'Truncate decisions log (removes all observations)')
-  .option('--reset', 'Remove all decisions-specific state files and artifacts')
-  .action(async (options: DecisionsOptions) => {
-    const knownFlags: (keyof DecisionsOptions)[] = [
+  .option('--reset', 'Remove all learning state files and artifacts')
+  .action(async (options: LearningOptions) => {
+    const knownFlags: (keyof LearningOptions)[] = [
       'enable', 'disable', 'status', 'list', 'configure',
       'clear', 'reset',
     ];
@@ -395,3 +373,4 @@ export const decisionsCommand = new Command('decisions')
       return;
     }
   });
+

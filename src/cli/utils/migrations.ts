@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir, getFeaturesDir, getLearningDir } from './project-paths.js';
-import { sweepLegacyDreamMarkers } from './dream-cleanup.js';
+import { sweepLegacyDreamMarkers } from './learning-queue-cleanup.js';
 import { writeConfig } from './feature-config.js';
 
 // ---------------------------------------------------------------------------
