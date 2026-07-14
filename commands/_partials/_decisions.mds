@@ -5,7 +5,7 @@ Resolve the worktree root using the `devflow:worktree-support` algorithm (use WO
 
 **Step 1 — Read the pre-rendered index:**
 
-Attempt to read `\{worktree\}/.devflow/decisions/index.md`.
+Attempt to read `\{worktree\}/.devflow/learning/index.md`.
 
 - If the file exists and contains non-empty content: use that content as `DECISIONS_CONTEXT`.
 - If the file is absent or empty: set `DECISIONS_CONTEXT` to `(none)`.

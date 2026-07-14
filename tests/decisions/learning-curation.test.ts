@@ -1,4 +1,4 @@
-// tests/decisions/dream-curation.test.ts
+// tests/decisions/learning-curation.test.ts
 //
 // Phase 6 tests for the curation skill rewrite and retire-by-status model.
 //
@@ -113,16 +113,16 @@ function readDecisionsMd(dir: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Dream agent content-presence assertions (AC-C3)
+// Learning agent content-presence assertions (AC-C3)
 //
-// The Dream agent (shared/agents/dream.md) is the sole decisions processor:
+// The Learning agent (shared/agents/learning.md) is the sole decisions processor:
 // it claims the queue, reads the data files directly, and writes through the
 // three ledger ops. These describe pins hold the curation contract strings in
 // place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
-describe('Dream agent curation contract (AC-C3)', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+describe('Learning agent curation contract (AC-C3)', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
   let agentContent: string;
 
   beforeAll(() => {
@@ -152,7 +152,7 @@ describe('Dream agent curation contract (AC-C3)', () => {
   });
 
   it('deletes the claim file as the final act (consume-then-delete)', () => {
-    expect(agentContent).toContain('.devflow/dream/.pending-turns.processing');
+    expect(agentContent).toContain('.devflow/learning/.pending-turns.processing');
     expect(agentContent).toContain('FINAL act');
   });
 
@@ -420,13 +420,13 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
 });
 
 // ---------------------------------------------------------------------------
-// AC-F9: rotation step — Dream agent contract
+// AC-F9: rotation step — Learning agent contract
 // Already tested at the op level in ledger-ops.test.ts; here we verify
 // the agent instructions wire it correctly (contract-level check).
 // ---------------------------------------------------------------------------
 
 describe('AC-F9: rotation step wired into curation (contract check)', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
   let agentContent: string;
 
   beforeAll(() => {

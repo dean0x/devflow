@@ -149,9 +149,9 @@ function buildPlugin(
 
   // Handle agents
   const requiredAgents = manifest.agents ?? [];
+  // Ensure agents directory exists (don't clean - plugin-specific agents are committed)
+  const agentsDir = path.join(pluginDir, "agents");
   if (requiredAgents.length > 0) {
-    // Ensure agents directory exists (don't clean - plugin-specific agents are committed)
-    const agentsDir = path.join(pluginDir, "agents");
     fs.mkdirSync(agentsDir, { recursive: true });
 
     // Copy each required agent from shared/agents/
@@ -169,6 +169,27 @@ function buildPlugin(
         result.agentsCopied.push(agent);
       } catch (e) {
         result.errors.push(`Failed to copy agent "${agent}": ${e}`);
+      }
+    }
+  }
+
+  // Prune stale shared-agent copies: any .md in agents/ whose name is in
+  // shared/agents/ but is no longer declared in the manifest must be removed.
+  // Plugin-specific agents (not in shared/agents/) are never touched.
+  if (fs.existsSync(agentsDir)) {
+    const requiredSet = new Set(requiredAgents);
+    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const agentName = entry.name.replace(".md", "");
+      // Only prune if it exists in shared/agents/ (i.e., it is a shared-agent copy)
+      // and is not declared in this plugin's manifest.
+      if (availableAgents.has(agentName) && !requiredSet.has(agentName)) {
+        try {
+          fs.unlinkSync(path.join(agentsDir, entry.name));
+          result.agentsCopied.push(`(pruned stale: ${agentName})`);
+        } catch (e) {
+          result.errors.push(`Failed to prune stale agent "${agentName}": ${e}`);
+        }
       }
     }
   }
