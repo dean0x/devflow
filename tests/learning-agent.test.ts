@@ -186,13 +186,11 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
     path.join(ROOT, 'commands'),
   ];
 
-  it('no .md or .mds file in shared/ or scripts/hooks/ or commands/ references .devflow/dream/ (except dream.md pending deletion by Coder C)', () => {
+  it('no .md or .mds file in shared/ or scripts/hooks/ or commands/ references .devflow/dream/', () => {
     const files = SHIPPED_DIRS.flatMap(dir => findFiles(dir, ['.md', '.mds']));
 
     const violations: string[] = [];
     for (const f of files) {
-      // dream.md is the legacy agent file scheduled for deletion in commit 9 (Coder C)
-      if (path.basename(f) === 'dream.md' && f.includes(path.join('shared', 'agents'))) continue;
       const content = fsSync.readFileSync(f, 'utf-8');
       if (content.includes('.devflow/dream/')) {
         violations.push(path.relative(ROOT, f));

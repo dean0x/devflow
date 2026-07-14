@@ -415,7 +415,7 @@ describe('buildIndexContent', () => {
 // ---------------------------------------------------------------------------
 // json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by seeding an observation row directly (as the Dream agent
+// We verify this by seeding an observation row directly (as the Learning agent
 // appends it), promoting via assign-anchor, and checking the output matches
 // what formatDecisionBody/formatPitfallBody would produce. This ensures the
 // write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
@@ -528,16 +528,16 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dream agent content-presence assertions (AC-F1, AC-F2)
+// Learning agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the Dream agent instructions
-// (shared/agents/dream.md) contain the required creation-bar elements. They do
+// These lightweight checks verify that the Learning agent instructions
+// (shared/agents/learning.md) contain the required creation-bar elements. They do
 // not test LLM judgment — that is validated by the Tester agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 
-describe('Dream agent creation-bar contract', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+describe('Learning agent creation-bar contract', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
 
   let agentContent: string;
   beforeAll(() => {

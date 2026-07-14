@@ -111,16 +111,11 @@ describe('no orphaned declarations', () => {
   });
 
   it('all agents in shared/agents/ are referenced by at least one plugin', async () => {
-    // dream.md is the legacy agent retained pending deletion in commit 9 (Coder C).
-    // It is no longer declared in any plugin manifest — the prune logic ensures it is
-    // not distributed to plugin agents/ dirs; here we skip the orphan guard for it.
-    const LEGACY_AGENTS = new Set(['dream']);
     const agentFiles = await fs.readdir(path.join(ROOT, 'shared', 'agents'));
     const referencedAgents = new Set(getAllAgentNames());
 
     for (const file of agentFiles) {
       const name = path.basename(file, '.md');
-      if (LEGACY_AGENTS.has(name)) continue; // pending deletion
       expect(referencedAgents.has(name), `shared/agents/${file} is not referenced by any plugin`).toBe(true);
     }
   });
