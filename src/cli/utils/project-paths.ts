@@ -8,11 +8,6 @@
  * All construction uses `path.join()` — no string concatenation.
  *
  * ARCHITECTURE: This module is the single source of truth for path layout.
- * PR 5b flipped these return values from the old .memory/.features/.docs layout
- * to the new consolidated .devflow/ layout.
- * The dream→learning rename consolidated .devflow/dream/ + .devflow/decisions/
- * into a single .devflow/learning/ directory; feature toggles moved to a neutral
- * .devflow/config.json at the .devflow root.
  *
  * CJS COUNTERPART: scripts/hooks/lib/project-paths.cjs must mirror this file
  * exactly. Keep them in sync when adding or changing functions.
@@ -29,17 +24,17 @@ export function getMemoryDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/learning/ — learning state directory (dream queue + decisions content consolidated) */
+/** .devflow/learning/ — learning state root */
 export function getLearningDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning');
 }
 
-/** .devflow/features/ — per-feature knowledge bases (promoted from .features/) */
+/** .devflow/features/ — per-feature knowledge bases */
 export function getFeaturesDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'features');
 }
 
-/** .devflow/docs/ — generated documentation artifacts (promoted from .docs/) */
+/** .devflow/docs/ — generated documentation artifacts */
 export function getDocsDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'docs');
 }
@@ -54,7 +49,7 @@ export function getFeatureConfigPath(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Learning queue files (formerly under dream/)
+// Learning queue files
 // ---------------------------------------------------------------------------
 
 /** .devflow/learning/.pending-turns.jsonl — decisions detection queue */
@@ -68,8 +63,7 @@ export function getLearningPendingTurnsProcessingPath(projectRoot: string): stri
 }
 
 // ---------------------------------------------------------------------------
-// Learning content files (formerly under decisions/)
-// Accessor names follow the file they point to — only the dir segment changed.
+// Learning content files
 // ---------------------------------------------------------------------------
 
 /** .devflow/learning/decisions.md */
