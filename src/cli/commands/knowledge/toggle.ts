@@ -10,7 +10,7 @@ import color from 'picocolors';
 import { getGitRoot } from '../../utils/git.js';
 import { getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
-import { updateFeature, isFeatureEnabled } from '../../utils/dream-config.js';
+import { updateFeature, isFeatureEnabled } from '../../utils/feature-config.js';
 import { getFeaturesDir } from '../../utils/project-paths.js';
 
 async function getWorktreePath(): Promise<string> {

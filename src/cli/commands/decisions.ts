@@ -15,7 +15,7 @@ import {
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
 } from '../utils/project-paths.js';
-import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
 import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
@@ -73,7 +73,7 @@ async function handleStatus(): Promise<void> {
     return;
   }
   const logPath = getDecisionsLogPath(gitRoot);
-  const enabled = await isFeatureEnabled(gitRoot, 'decisions');
+  const enabled = await isFeatureEnabled(gitRoot, 'learning');
   const { observations, invalidCount } = await readObservations(logPath);
 
   const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -307,7 +307,7 @@ async function handleEnable(): Promise<void> {
   const gitRoot = await requireGitRoot('configuration not updated');
   if (!gitRoot) return;
 
-  await updateFeature(gitRoot, 'decisions', true);
+  await updateFeature(gitRoot, 'learning', true);
   await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
   p.log.success('Decisions learning enabled — configuration updated');
   p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
@@ -317,11 +317,11 @@ async function handleDisable(): Promise<void> {
   const gitRoot = await requireGitRoot('configuration not updated');
   if (!gitRoot) return;
 
-  await updateFeature(gitRoot, 'decisions', false);
+  await updateFeature(gitRoot, 'learning', false);
 
-  // Drain the dream (decisions-detection) queue so stale turns don't process
+  // Drain the learning (decisions-detection) queue so stale turns don't process
   // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
-  // sibling memory queue. Unconditional: a mid-run Dream agent whose claimed
+  // sibling memory queue. Unconditional: a mid-run Learning agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
   await drainDreamQueue(gitRoot);
 

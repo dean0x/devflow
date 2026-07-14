@@ -40,7 +40,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
+import { writeConfig as writeDreamConfig } from '../utils/feature-config.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
@@ -1207,7 +1207,7 @@ export const initCommand = new Command('init')
     if (gitRoot) {
       await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
-        decisions: decisionsEnabled,
+        learning: decisionsEnabled,
         knowledge: knowledgeEnabled,
       });
 

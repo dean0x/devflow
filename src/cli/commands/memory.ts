@@ -14,7 +14,7 @@ import {
   getPendingTurnsProcessingPath,
 } from '../utils/project-paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.
