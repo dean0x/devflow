@@ -383,18 +383,22 @@ describe('runMigrations', () => {
   it('v3 migration runs independently even when v2 is already applied', async () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
 
-    // Mark v2 (and global migrations) as already applied — v3 has NOT been applied yet
+    // Mark v2, global migrations, and the consolidation migration as already applied.
+    // purge-legacy-knowledge-v3 reads from .devflow/learning/decisions.md (post-Commit 2 path
+    // accessor repoint); the consolidation migration must be pre-applied so we can seed
+    // learning/ directly without it being overwritten by the migration.
     const appliedBefore = [
       ...MIGRATIONS.filter(m => m.scope === 'global').map(m => m.id),
       'purge-legacy-knowledge-v2',
+      'consolidate-dream-decisions-to-learning-v1',
     ];
     await writeAppliedMigrations(fakeHome, appliedBefore);
 
-    // Create a project with a seeded entry (no self-learning: source)
+    // Create a project with a seeded entry in learning/ (the new path after consolidation)
     const projectRoot = path.join(tmpDir, 'project-v3-independent');
-    const decisionsDir = path.join(projectRoot, '.devflow', 'decisions');
-    await fs.mkdir(decisionsDir, { recursive: true });
-    const decisionsPath = path.join(decisionsDir, 'decisions.md');
+    const learningDir = path.join(projectRoot, '.devflow', 'learning');
+    await fs.mkdir(learningDir, { recursive: true });
+    const decisionsPath = path.join(learningDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-003: Seeded entry lacking self-learning marker
@@ -2137,5 +2141,428 @@ describe('purge-stale-extra-known-marketplaces-v1 migration', () => {
     const result = await getMigration().run(makeCtx());
     expect(result?.infos ?? []).toEqual([]);
     expect(result?.warnings ?? []).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// consolidate-dream-decisions-to-learning-v1 (per-project)
+// ---------------------------------------------------------------------------
+
+describe('consolidate-dream-decisions-to-learning-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-consolidate-learning-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'consolidate-dream-decisions-to-learning-v1');
+    if (!m) throw new Error('consolidate-dream-decisions-to-learning-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  // CL-1: fresh project — neither source dir exists → no-op
+  it('CL-1: fresh project (no dream/ or decisions/) → returns empty infos and warnings', async () => {
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+    // No learning/ directory created on no-op
+    await expect(fs.access(path.join(devflowDir, 'learning'))).rejects.toThrow();
+  });
+
+  // CL-2: dream-only — dream/ exists, decisions/ absent
+  it('CL-2: dream/ only — moves queue files to learning/, skips decisions/ gracefully', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dreamDir, '.pending-turns.jsonl'),
+      '{"role":"user","content":"hello"}\n',
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, decisions: false, knowledge: true }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, '.pending-turns.jsonl'), 'utf-8'))
+      .toContain('hello');
+    const cfg = JSON.parse(await fs.readFile(path.join(devflowDir, 'config.json'), 'utf-8'));
+    expect(cfg.learning).toBe(false);
+    expect(cfg.memory).toBe(true);
+    expect(cfg.knowledge).toBe(true);
+  });
+
+  // CL-3: decisions-only — decisions/ exists, dream/ absent
+  // Note: we avoid seeding decisions-ledger.jsonl here to prevent renderDecisionsIndex
+  // from loading the CJS renderer (not available in the test environment). Content-move
+  // correctness is verified via decisions-log.jsonl and decisions.md instead.
+  it('CL-3: decisions/ only — moves content to learning/, default config.json written', async () => {
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-log.jsonl'),
+      '{"type":"observation","text":"keep simple"}\n',
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions.json'),
+      JSON.stringify({ model: 'sonnet', debug: false }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, 'decisions-log.jsonl'), 'utf-8'))
+      .toContain('keep simple');
+    const tuning = JSON.parse(await fs.readFile(path.join(learningDir, 'learning.json'), 'utf-8'));
+    expect(tuning.model).toBe('sonnet');
+    const cfg = JSON.parse(await fs.readFile(path.join(devflowDir, 'config.json'), 'utf-8'));
+    expect(cfg.learning).toBe(true); // default
+  });
+
+  // CL-4: both dirs present — full consolidation
+  // Note: decisions-log.jsonl used instead of decisions-ledger.jsonl to prevent
+  // renderDecisionsIndex from loading the CJS renderer (not available in tests).
+  it('CL-4: both dream/ and decisions/ present — full consolidation into learning/', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.mkdir(decisionsDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, decisions: false, knowledge: true }),
+    );
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.jsonl'), 'pending\n');
+    await fs.writeFile(path.join(decisionsDir, 'decisions-log.jsonl'), 'log\n');
+    await fs.writeFile(path.join(decisionsDir, 'decisions.md'), '# Decisions\n');
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions.json'),
+      JSON.stringify({ model: 'haiku' }),
+    );
+
+    const result = await getMigration().run(makeCtx());
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, '.pending-turns.jsonl'), 'utf-8'))
+      .toContain('pending');
+    expect(await fs.readFile(path.join(learningDir, 'decisions-log.jsonl'), 'utf-8'))
+      .toContain('log');
+    expect(await fs.readFile(path.join(learningDir, 'decisions.md'), 'utf-8'))
+      .toContain('# Decisions');
+    const tuning = JSON.parse(await fs.readFile(path.join(learningDir, 'learning.json'), 'utf-8'));
+    expect(tuning.model).toBe('haiku');
+    const cfg = JSON.parse(await fs.readFile(path.join(devflowDir, 'config.json'), 'utf-8'));
+    expect(cfg.learning).toBe(false);
+    expect(result?.infos?.length).toBeGreaterThan(0);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  // CL-5: stale learning key in dream/config.json is ignored (old self-learning pipeline)
+  it('CL-5: coalescing — stale learning key from old pipeline is ignored, decisions wins', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, decisions: false, learning: true, knowledge: true }),
+    );
+
+    await getMigration().run(makeCtx());
+
+    const cfg = JSON.parse(await fs.readFile(path.join(devflowDir, 'config.json'), 'utf-8'));
+    expect(cfg.learning).toBe(false); // decisions:false wins; old learning:true ignored
+    expect(cfg.memory).toBe(true);
+    expect(cfg.knowledge).toBe(true);
+  });
+
+  // CL-6: transient lock dirs and telemetry in decisions/ are dropped
+  it('CL-6: transient lock dirs and telemetry in decisions/ are dropped (not moved)', async () => {
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, 'decisions.md'), '# Decisions\n');
+    await fs.mkdir(path.join(decisionsDir, '.decisions.lock'), { recursive: true });
+    await fs.mkdir(path.join(decisionsDir, '.observations.lock'), { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, '.decisions-usage.json'), '{}');
+    await fs.writeFile(path.join(decisionsDir, '.decisions-manifest.json'), '{}');
+
+    await getMigration().run(makeCtx());
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, 'decisions.md'), 'utf-8')).toContain('# Decisions');
+    await expect(fs.access(path.join(learningDir, '.decisions.lock'))).rejects.toThrow();
+    await expect(fs.access(path.join(learningDir, '.observations.lock'))).rejects.toThrow();
+    await expect(fs.access(path.join(learningDir, '.decisions-usage.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(learningDir, '.decisions-manifest.json'))).rejects.toThrow();
+  });
+
+  // CL-7: live .pending-turns.processing moved intact
+  it('CL-7: live .pending-turns.processing is moved from dream/ to learning/ intact', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    const processingContent = 'batch-content-line-1\nbatch-content-line-2\n';
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.processing'), processingContent);
+
+    await getMigration().run(makeCtx());
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, '.pending-turns.processing'), 'utf-8'))
+      .toBe(processingContent);
+    await expect(
+      fs.access(path.join(dreamDir, '.pending-turns.processing')),
+    ).rejects.toThrow();
+  });
+
+  // CL-8: idempotent — second run when sources absent returns empty infos/warnings
+  it('CL-8: idempotent — second run (sources absent) returns empty infos and warnings', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, decisions: true, knowledge: true }),
+    );
+    await getMigration().run(makeCtx());
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  // CL-9: existing .devflow/config.json is NOT overwritten on re-run
+  it('CL-9: existing .devflow/config.json preserved — not overwritten by re-run', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, decisions: false, knowledge: true }),
+    );
+    await fs.writeFile(
+      path.join(devflowDir, 'config.json'),
+      JSON.stringify({ memory: false, learning: true, knowledge: false }),
+    );
+
+    await getMigration().run(makeCtx());
+
+    const cfg = JSON.parse(await fs.readFile(path.join(devflowDir, 'config.json'), 'utf-8'));
+    expect(cfg.memory).toBe(false);
+    expect(cfg.learning).toBe(true);
+    expect(cfg.knowledge).toBe(false);
+  });
+
+  // CL-10: symlink at source file is skipped safely
+  it('CL-10: symlink at source file in decisions/ is skipped safely', async () => {
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, 'real-file.md'), 'real content');
+    const externalTarget = path.join(tmpDir, 'external.txt');
+    await fs.writeFile(externalTarget, 'external content');
+    await fs.symlink(externalTarget, path.join(decisionsDir, 'symlink-file.md'));
+
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, 'real-file.md'), 'utf-8')).toBe('real content');
+    await expect(fs.access(path.join(learningDir, 'symlink-file.md'))).rejects.toThrow();
+  });
+
+  // CL-11: EXDEV cross-device fallback (via vi.spyOn)
+  it('CL-11: EXDEV cross-device rename falls back to copy+delete for queue file', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.jsonl'), 'queue-content\n');
+
+    const originalRename = fs.rename.bind(fs);
+    let triggered = false;
+    const spy = vi.spyOn(fs, 'rename').mockImplementation(
+      async (src: fs.PathLike, dest: fs.PathLike) => {
+        if (!triggered && src.toString().includes('.pending-turns.jsonl')) {
+          triggered = true;
+          throw Object.assign(
+            new Error('EXDEV: cross-device link not permitted'),
+            { code: 'EXDEV' },
+          );
+        }
+        return originalRename(
+          src as Parameters<typeof originalRename>[0],
+          dest as Parameters<typeof originalRename>[1],
+        );
+      },
+    );
+
+    try {
+      await getMigration().run(makeCtx());
+    } finally {
+      spy.mockRestore();
+    }
+
+    const learningDir = path.join(devflowDir, 'learning');
+    expect(await fs.readFile(path.join(learningDir, '.pending-turns.jsonl'), 'utf-8'))
+      .toContain('queue-content');
+  });
+
+  // CL-12: non-ENOENT errors rethrow
+  it('CL-12: non-ENOENT error from queue rename is rethrown (avoids PF-004 silent-swallow)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, '.pending-turns.jsonl'), 'data\n');
+
+    let triggered = false;
+    const spy = vi.spyOn(fs, 'rename').mockImplementation(async (src: fs.PathLike) => {
+      if (!triggered && src.toString().includes('.pending-turns.jsonl')) {
+        triggered = true;
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      }
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // CL-13: ordering assert
+  it('CL-13: appears after purge-stale-extra-known-marketplaces-v1 in MIGRATIONS array', () => {
+    const priorIdx = MIGRATIONS.findIndex(m => m.id === 'purge-stale-extra-known-marketplaces-v1');
+    const thisIdx = MIGRATIONS.findIndex(m => m.id === 'consolidate-dream-decisions-to-learning-v1');
+    expect(priorIdx).toBeGreaterThanOrEqual(0);
+    expect(thisIdx).toBeGreaterThan(priorIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rename-global-decisions-config-v1 (global)
+// ---------------------------------------------------------------------------
+
+describe('rename-global-decisions-config-v1 migration', () => {
+  let tmpDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-global-decisions-rename-test-'));
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'global'> {
+    const m = MIGRATIONS.find(m => m.id === 'rename-global-decisions-config-v1');
+    if (!m) throw new Error('rename-global-decisions-config-v1 migration not found');
+    return m as Migration<'global'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').GlobalMigrationContext {
+    return { scope: 'global', devflowDir: fakeHome };
+  }
+
+  // GR-1: fresh install — no source file → no-op
+  it('GR-1: fresh install (no decisions.json) → no-op, returns empty infos', async () => {
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+    await expect(fs.access(path.join(fakeHome, 'learning.json'))).rejects.toThrow();
+  });
+
+  // GR-2: plain rename — decisions.json → learning.json
+  it('GR-2: decisions.json present → renamed to learning.json, source removed', async () => {
+    await fs.writeFile(
+      path.join(fakeHome, 'decisions.json'),
+      JSON.stringify({ model: 'sonnet', debug: true }),
+    );
+
+    const result = await getMigration().run(makeCtx());
+
+    const content = JSON.parse(await fs.readFile(path.join(fakeHome, 'learning.json'), 'utf-8'));
+    expect(content.model).toBe('sonnet');
+    expect(content.debug).toBe(true);
+    await expect(fs.access(path.join(fakeHome, 'decisions.json'))).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  // GR-3: stale target is overwritten — source wins
+  it('GR-3: pre-existing learning.json is overwritten — source decisions.json wins', async () => {
+    await fs.writeFile(
+      path.join(fakeHome, 'decisions.json'),
+      JSON.stringify({ model: 'sonnet' }),
+    );
+    await fs.writeFile(
+      path.join(fakeHome, 'learning.json'),
+      JSON.stringify({ model: 'haiku', staleKey: true }),
+    );
+
+    await getMigration().run(makeCtx());
+
+    const content = JSON.parse(await fs.readFile(path.join(fakeHome, 'learning.json'), 'utf-8'));
+    expect(content.model).toBe('sonnet');
+    expect(content.staleKey).toBeUndefined();
+  });
+
+  // GR-4: idempotent — second run returns empty infos
+  it('GR-4: idempotent — second run returns empty infos when source already absent', async () => {
+    await fs.writeFile(
+      path.join(fakeHome, 'decisions.json'),
+      JSON.stringify({ model: 'opus' }),
+    );
+    await getMigration().run(makeCtx());
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+  });
+
+  // GR-5: scope is global
+  it('GR-5: scope is global', () => {
+    const m = MIGRATIONS.find(m => m.id === 'rename-global-decisions-config-v1');
+    expect(m?.scope).toBe('global');
+  });
+
+  // GR-6: ordering — appears after consolidate-dream-decisions-to-learning-v1
+  it('GR-6: appears after consolidate-dream-decisions-to-learning-v1 in MIGRATIONS array', () => {
+    const consolidateIdx = MIGRATIONS.findIndex(m => m.id === 'consolidate-dream-decisions-to-learning-v1');
+    const renameIdx = MIGRATIONS.findIndex(m => m.id === 'rename-global-decisions-config-v1');
+    expect(consolidateIdx).toBeGreaterThanOrEqual(0);
+    expect(renameIdx).toBeGreaterThan(consolidateIdx);
   });
 });
