@@ -361,7 +361,6 @@ async function migrateMemoryDir(
  *   .devflow/memory/    — working memory files
  *   .devflow/sidecar/   — promoted from .memory/.sidecar/
  *   .devflow/decisions/ — promoted from .memory/decisions/
- *   .devflow/learning/  — promoted from .memory/ learning-* files
  *   .devflow/features/  — promoted from .features/
  *   .devflow/docs/      — promoted from .docs/
  */
@@ -382,7 +381,6 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true }),
-      fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true }),
     ]);
@@ -406,16 +404,6 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       ['.decisions-notifications.json', path.join(devflowDir, 'decisions', '.decisions-notifications.json')],
       ['.decisions-runs-today',         path.join(devflowDir, 'decisions', '.decisions-runs-today')],
       ['.decisions-batch-ids',          path.join(devflowDir, 'decisions', '.decisions-batch-ids')],
-      // learning files
-      ['learning-log.jsonl',            path.join(devflowDir, 'learning',  'learning-log.jsonl')],
-      ['learning.json',                 path.join(devflowDir, 'learning',  'learning.json')],
-      ['.learning-manifest.json',       path.join(devflowDir, 'learning',  '.learning-manifest.json')],
-      ['.learning-notified-at',         path.join(devflowDir, 'learning',  '.learning-notified-at')],
-      ['.learning-notifications.json',  path.join(devflowDir, 'learning',  '.learning-notifications.json')],
-      ['.learning-runs-today',          path.join(devflowDir, 'learning',  '.learning-runs-today')],
-      ['.learning-session-count',       path.join(devflowDir, 'learning',  '.learning-session-count')],
-      ['.learning-batch-ids',           path.join(devflowDir, 'learning',  '.learning-batch-ids')],
-      ['debug',                         path.join(devflowDir, 'learning',  'debug')],
       ['working',                       path.join(devflowDir, 'memory',    'working')],
     ];
     const memWarnings = await migrateMemoryDir(memSrc, devflowDir, memMap);
@@ -487,7 +475,6 @@ const MIGRATION_CLEANUP_STALE_WORKING_MEMORY: Migration<'per-project'> = {
  * left by the removed deterministic capacity/manifest/reconcile features.
  *
  * Files removed (applies ADR-002: clean house, no skip-list stranding):
- *   - .devflow/learning/.learning-manifest.json  — no longer written
  *   - .devflow/decisions/.decisions-manifest.json — no longer written
  *   - .devflow/decisions/.decisions-notifications.json — no longer written
  *
@@ -500,7 +487,6 @@ const MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE: Migration<'per-project'> 
   scope: 'per-project',
   async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
     const toRemove = [
-      path.join(ctx.projectRoot, '.devflow', 'learning', '.learning-manifest.json'),
       path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-manifest.json'),
       path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-notifications.json'),
     ];
@@ -588,139 +574,6 @@ const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
     try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
 
     return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: moveWarnings };
-  },
-};
-
-/**
- * Per-project: remove learning pipeline runtime artifacts.
- *
- * Removes:
- *   - .devflow/learning/ directory (all contents)
- *   - .devflow/dream/learning.*.json markers
- *   - .devflow/dream/learning.*.processing markers
- *   - drops `learning` key from .devflow/dream/config.json (if present)
- *   - drops `learning` key from .devflow/sidecar/config.json (legacy fallback — R8)
- *   - .claude/commands/self-learning/ directory (auto-generated artifacts)
- *   - auto-generated skills (detected via AUTO_GENERATED_MARKER)
- *
- * Applies ADR-002 (clean house), PF-004 (idempotent — ENOENT is a no-op).
- * CRITICAL: Do NOT import anything from learn.ts (being deleted this phase).
- */
-const MIGRATION_PURGE_LEARNING_PIPELINE: Migration<'per-project'> = {
-  id: 'purge-learning-pipeline-v1',
-  description: 'Remove learning pipeline runtime artifacts (learning dir, dream markers, config key, auto-generated artifacts)',
-  scope: 'per-project',
-  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
-    const infos: string[] = [];
-    const devflowDir = path.join(ctx.projectRoot, '.devflow');
-
-    // 1. Remove .devflow/learning/ directory
-    const learningDir = path.join(devflowDir, 'learning');
-    try {
-      await fs.rm(learningDir, { recursive: true, force: true });
-      infos.push('Removed .devflow/learning/');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 2. Remove .devflow/dream/learning.*.json and *.processing markers
-    const dreamDir = path.join(devflowDir, 'dream');
-    try {
-      const dreamEntries = await fs.readdir(dreamDir);
-      for (const entry of dreamEntries) {
-        if (entry.startsWith('learning.') && (entry.endsWith('.json') || entry.endsWith('.processing'))) {
-          try {
-            await fs.unlink(path.join(dreamDir, entry));
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code !== 'ENOENT') throw err;
-          }
-        }
-      }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 3. Drop `learning` key from dream/config.json (non-destructive read-modify-write)
-    const dreamConfigPath = path.join(dreamDir, 'config.json');
-    await _dropLearningKeyFromConfig(dreamConfigPath);
-
-    // 4. Drop `learning` key from legacy sidecar/config.json (R8 — do NOT delete the file)
-    const sidecarConfigPath = path.join(devflowDir, 'sidecar', 'config.json');
-    await _dropLearningKeyFromConfig(sidecarConfigPath);
-
-    // 5. Remove .claude/commands/self-learning/ directory
-    // Inline cleanSelfLearningArtifacts logic — cannot import learn.ts (being deleted)
-    const claudeDir = path.join(ctx.projectRoot, '.claude');
-    const selfLearningCommandsDir = path.join(claudeDir, 'commands', 'self-learning');
-    try {
-      await fs.rm(selfLearningCommandsDir, { recursive: true, force: true });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 6. Remove auto-generated skills (detected via AUTO_GENERATED_MARKER from learning-cleanup.ts)
-    const { cleanSelfLearningArtifacts } = await import('./learning-cleanup.js');
-    await cleanSelfLearningArtifacts(claudeDir);
-
-    return { infos, warnings: [] };
-  },
-};
-
-/**
- * Helper: read config.json, drop the `learning` key if present, write back atomically.
- * Tolerates missing file (ENOENT = no-op). Never deletes the file.
- */
-async function _dropLearningKeyFromConfig(configPath: string): Promise<void> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(configPath, 'utf-8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return; // file absent — no-op
-    throw err;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return; // malformed JSON — leave untouched
-  }
-
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
-  const config = parsed as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(config, 'learning')) return; // key absent — no-op
-
-  delete config['learning'];
-
-  // D34: use writeFileAtomicExclusive (O_EXCL temp+rename) — TOCTOU-safe.
-  // Other per-project migrations use the same helper for crash-safe writes.
-  await writeFileAtomicExclusive(configPath, JSON.stringify(config, null, 2) + '\n');
-}
-
-/**
- * Global: remove ~/.devflow/learning.json (global learning config).
- *
- * Applies PF-004 (idempotent — ENOENT is a no-op).
- */
-const MIGRATION_PURGE_LEARNING_GLOBAL: Migration<'global'> = {
-  id: 'purge-learning-global-v1',
-  description: 'Remove global ~/.devflow/learning.json config file',
-  scope: 'global',
-  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
-    const learningJsonPath = path.join(ctx.devflowDir, 'learning.json');
-    try {
-      await fs.unlink(learningJsonPath);
-      return { infos: ['Removed ~/.devflow/learning.json'], warnings: [] };
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return { infos: [], warnings: [] }; // already absent
-      throw err;
-    }
   },
 };
 
@@ -1110,8 +963,6 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
   MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
-  MIGRATION_PURGE_LEARNING_PIPELINE,
-  MIGRATION_PURGE_LEARNING_GLOBAL,
   MIGRATION_PURGE_ORPHANED_DREAM_COMMIT_HOOK,
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
   MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,

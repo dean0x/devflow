@@ -21,7 +21,6 @@ import decisionsCounts from './components/decisions-counts.js';
 import sessionCost from './components/session-cost.js';
 import releaseInfo from './components/release-info.js';
 import worktreeCount from './components/worktree-count.js';
-import notifications from './components/notifications.js';
 
 const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   directory,
@@ -39,7 +38,6 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   sessionCost,
   releaseInfo,
   worktreeCount,
-  notifications,
 };
 
 /**
@@ -51,7 +49,6 @@ const LINE_GROUPS: ComponentId[][] = [
   ['contextUsage', 'usageQuota', 'todoProgress'],
   ['model', 'configCounts', 'sessionCost'],
   ['decisionsCounts'],
-  ['notifications'],
   ['versionBadge'],
 ];
 

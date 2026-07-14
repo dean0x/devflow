@@ -23,7 +23,6 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
   'todoProgress',
   'configCounts',
   'decisionsCounts',
-  'notifications',
 ];
 
 export function getConfigPath(): string {

@@ -8,7 +8,6 @@ import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
 import { gatherDecisionsCounts } from './components/decisions-counts.js';
-import { getActiveNotification } from './notifications.js';
 import { render } from './render.js';
 import type { GatherContext, StdinData, UsageData } from './types.js';
 
@@ -88,7 +87,6 @@ async function run(): Promise<string> {
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
   const needsDecisionsCounts = components.has('decisionsCounts');
-  const needsNotifications = components.has('notifications');
   const needsSessionCost = components.has('sessionCost');
 
   // Parallel data gathering — only fetch what's needed
@@ -121,11 +119,6 @@ async function run(): Promise<string> {
     ? gatherDecisionsCounts(cwd)
     : null;
 
-  // D24: Notification data (fast, synchronous filesystem read)
-  const notificationsData = needsNotifications
-    ? getActiveNotification(cwd)
-    : null;
-
   // Cost tracking: persist current session cost, aggregate for weekly/monthly
   const sessionId = stdin.session_id;
   const costUsd = stdin.cost?.total_cost_usd ?? 0;
@@ -148,7 +141,6 @@ async function run(): Promise<string> {
     usage,
     configCounts: configCountsData,
     decisionsCounts: decisionsCountsData,
-    notifications: notificationsData,
     costHistory,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,

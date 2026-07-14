@@ -18,7 +18,7 @@ import {
   isLearningObservation,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
-import { runHelper } from './helpers.js';
+import { runHelper } from './learning-helpers.js';
 
 // Helper: serialize an array of observations to JSONL
 function serializeLog(observations: LearningObservation[]): string {
