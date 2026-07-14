@@ -77,7 +77,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'verbose' },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose' },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -135,7 +135,7 @@ describe('readManifest', () => {
     expect(result).not.toBeNull();
     expect(result!.features.hud).toBe(false);
     expect(result!.features.knowledge).toBe(false);
-    expect(result!.features.decisions).toBe(false);
+    expect(result!.features.learning).toBe(false);
     expect(result!.features.rules).toBe(true);
     expect(result!.features.flags).toEqual([]);
     // learn field no longer exists in manifest
@@ -154,7 +154,8 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.features.decisions).toBe(false);
+    // 'decisions' was renamed to 'learning' — both absent and old-name fallback to false
+    expect(result!.features.learning).toBe(false);
   });
 
   it('normalizes old manifest without kb to default false', async () => {
