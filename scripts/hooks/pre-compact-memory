@@ -44,17 +44,16 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-DREAM_DIR="$DEVFLOW_DIR/dream"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "pre-compact-memory"
 
-# Check dream config — single source of truth for memory enabled/disabled (ADR-001).
-DREAM_CONFIG="$DREAM_DIR/config.json"
-if [ -f "$DREAM_CONFIG" ]; then
-  MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
+# Check feature config — single source of truth for memory enabled/disabled (ADR-001).
+FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
+if [ -f "$FEATURE_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$FEATURE_CONFIG" "memory" "true")
   if [ "$MEMORY_ENABLED" = "false" ]; then
-    dbg "EXIT: memory disabled in dream config"
+    dbg "EXIT: memory disabled in feature config"
     exit 0
   fi
 fi

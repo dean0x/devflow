@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Dream System: capture-question (PostToolUse Hook, matcher: AskUserQuestion)
+# Learning System: capture-question (PostToolUse Hook, matcher: AskUserQuestion)
 # Captures each answered question as a {role:"qa"} row into BOTH the memory and
-# dream queues -- high decision-signal content that free-running Stop-hook
+# learning queues -- high decision-signal content that free-running Stop-hook
 # turns miss (the model's own paraphrase of an answer is lossy; the raw Q&A
 # pair is not).
 #
@@ -63,7 +63,7 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-DREAM_DIR="$DEVFLOW_DIR/dream"
+LEARNING_DIR="$DEVFLOW_DIR/learning"
 
 # --- Parse questions + answers into "question<TAB>answer" rows (one subprocess) ---
 # Defensive against: tool_response absent or a plain string (error case), missing
@@ -115,12 +115,12 @@ fi
 
 source "$SCRIPT_DIR/queue-append" || { echo "capture-question: failed to source queue-append" >&2; exit 1; }
 
-# --- AC-P1-style: ONE config fork reads both memory + decisions fields ---
-queue_read_gates "$DREAM_DIR/config.json"
+# --- AC-P1-style: ONE config fork reads both memory + learning fields ---
+queue_read_gates "$DEVFLOW_DIR/config.json"
 MEMORY_ENABLED="$_QG_MEMORY"
-DECISIONS_ENABLED="$_QG_DECISIONS"
+LEARNING_ENABLED="$_QG_LEARNING"
 
-if [ "$MEMORY_ENABLED" != "true" ] && [ "$DECISIONS_ENABLED" != "true" ]; then
+if [ "$MEMORY_ENABLED" != "true" ] && [ "$LEARNING_ENABLED" != "true" ]; then
   dbg "EXIT: both features disabled"
   exit 0
 fi
@@ -128,9 +128,9 @@ fi
 source "$SCRIPT_DIR/hook-log-init" "capture-question"
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 source "$SCRIPT_DIR/get-mtime" || { echo "capture-question: failed to source get-mtime" >&2; exit 1; }
-source "$SCRIPT_DIR/dream-lock" || { echo "capture-question: failed to source dream-lock" >&2; exit 1; }
+source "$SCRIPT_DIR/learning-lock" || { echo "capture-question: failed to source learning-lock" >&2; exit 1; }
 
-mkdir -p "$MEMORY_DIR" "$DREAM_DIR" 2>/dev/null || true
+mkdir -p "$MEMORY_DIR" "$LEARNING_DIR" 2>/dev/null || true
 
 _QUESTION_COUNT=0
 while IFS=$'\t' read -r Q A; do
@@ -140,8 +140,8 @@ while IFS=$'\t' read -r Q A; do
 A: ${A}"
   TS=$(date +%s)
   queue_append_both \
-    "$MEMORY_DIR/.pending-turns.jsonl" "$DREAM_DIR/.pending-turns.jsonl" \
-    "$MEMORY_ENABLED" "$DECISIONS_ENABLED" \
+    "$MEMORY_DIR/.pending-turns.jsonl" "$LEARNING_DIR/.pending-turns.jsonl" \
+    "$MEMORY_ENABLED" "$LEARNING_ENABLED" \
     "qa" "$CONTENT" "$TS"
   _QUESTION_COUNT=$(( _QUESTION_COUNT + 1 ))
 done <<EOF

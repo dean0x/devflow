@@ -62,20 +62,19 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-DREAM_DIR="$DEVFLOW_DIR/dream"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
-DREAM_CONFIG="$DREAM_DIR/config.json"
+FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
 
 # --- Re-check memory:false at runtime (defense-in-depth: feature may be disabled since spawn) ---
-if [ -f "$DREAM_CONFIG" ]; then
-  _MEM_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
+if [ -f "$FEATURE_CONFIG" ]; then
+  _MEM_ENABLED=$(json_field_file "$FEATURE_CONFIG" "memory" "true")
   if [ "$_MEM_ENABLED" = "false" ]; then
-    log "ABORT: memory disabled in dream config (disabled after spawn)"
+    log "ABORT: memory disabled in feature config (disabled after spawn)"
     exit 0
   fi
 fi

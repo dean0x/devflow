@@ -6,29 +6,29 @@
 # under a lock. Used by capture-prompt, capture-turn, and capture-question so the
 # per-feature dual-queue-append logic exists in exactly one place.
 #
-# Source-order requirement: source json-parse (for _HAS_JQ) and dream-lock (for
-# dream_lock_acquire/dream_lock_release, which itself requires get-mtime) BEFORE
+# Source-order requirement: source json-parse (for _HAS_JQ) and learning-lock (for
+# learning_lock_acquire/learning_lock_release, which itself requires get-mtime) BEFORE
 # calling queue_append_row or queue_append_both. Sourcing this file itself only
 # defines functions -- no side effects until they are called.
 #
 # queue_append_row <queue_file> <role> <content> <ts>
 #   Appends one JSONL row {role, content, ts} to <queue_file>. Creates the file
 #   with mode 0600 (umask 077) if absent. After appending, truncates from 200 to
-#   the newest 100 lines under a lock (dream_lock_acquire on "<queue_file>.lock",
+#   the newest 100 lines under a lock (learning_lock_acquire on "<queue_file>.lock",
 #   2s timeout). The append itself is intentionally lock-free (accepted-class
 #   race shared with the pre-existing memory design -- see the design doc's
 #   "Append-vs-claim race" note).
 #
-# queue_append_both <memory_queue> <dream_queue> <memory_enabled> <dream_enabled> <role> <content> <ts>
+# queue_append_both <memory_queue> <learning_queue> <memory_enabled> <learning_enabled> <role> <content> <ts>
 #   Calls queue_append_row for each queue whose *_enabled flag is "true". Each
-#   queue is gated independently -- callers compute memory_enabled/dream_enabled
-#   from dream config themselves (see queue_read_gates below for the one-fork
+#   queue is gated independently -- callers compute memory_enabled/learning_enabled
+#   from feature config themselves (see queue_read_gates below for the one-fork
 #   combined read that keeps this to a single config subprocess per hook).
 #
-# queue_read_gates <dream_config_path>
-#   Reads BOTH the "memory" and "decisions" fields from dream config.json in a
+# queue_read_gates <feature_config_path>
+#   Reads BOTH the "memory" and "learning" fields from .devflow/config.json in a
 #   SINGLE subprocess fork (AC-P1 -- exactly one config-read fork per capture
-#   hook, not two). Sets _QG_MEMORY and _QG_DECISIONS ("true"/"false") in the
+#   hook, not two). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false") in the
 #   caller's scope. Missing config file -> both default "true". The two values
 #   are newline-separated rather than using a control-character delimiter:
 #   they are always the literal strings "true"/"false", never arbitrary
@@ -56,7 +56,7 @@ queue_append_row() {
     _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
     if [ "$_qar_lines" -gt 200 ]; then
       local _qar_lock="${_qar_file}.lock"
-      if dream_lock_acquire "$_qar_lock" 2; then
+      if learning_lock_acquire "$_qar_lock" 2; then
         _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
         if [ "$_qar_lines" -gt 200 ]; then
           local _qar_tmp="${_qar_file}.tmp.$$"
@@ -64,29 +64,29 @@ queue_append_row() {
           log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
           dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
         fi
-        dream_lock_release "$_qar_lock"
+        learning_lock_release "$_qar_lock"
       fi
     fi
   fi
 }
 
 queue_append_both() {
-  local _qab_memory_queue="$1" _qab_dream_queue="$2"
-  local _qab_memory_enabled="$3" _qab_dream_enabled="$4"
+  local _qab_memory_queue="$1" _qab_learning_queue="$2"
+  local _qab_memory_enabled="$3" _qab_learning_enabled="$4"
   local _qab_role="$5" _qab_content="$6" _qab_ts="$7"
 
   if [ "$_qab_memory_enabled" = "true" ]; then
     queue_append_row "$_qab_memory_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
-  if [ "$_qab_dream_enabled" = "true" ]; then
-    queue_append_row "$_qab_dream_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+  if [ "$_qab_learning_enabled" = "true" ]; then
+    queue_append_row "$_qab_learning_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
 }
 
 queue_read_gates() {
   local _qg_config="$1"
   _QG_MEMORY="true"
-  _QG_DECISIONS="true"
+  _QG_LEARNING="true"
 
   if [ -f "$_qg_config" ]; then
     local _qg_fields
@@ -96,19 +96,19 @@ queue_read_gates() {
       # The comma produces two raw-output lines (newline-separated) in one jq process.
       _qg_fields=$(jq -r '
         (if (.memory | type) == "null" then "true" else (.memory | tostring) end),
-        (if (.decisions | type) == "null" then "true" else (.decisions | tostring) end)
+        (if (.learning | type) == "null" then "true" else (.learning | tostring) end)
       ' "$_qg_config" 2>/dev/null) || _qg_fields=""
     else
       _qg_fields=$(node -e "
         const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
         const m = j.memory === undefined ? 'true' : String(j.memory);
-        const d = j.decisions === undefined ? 'true' : String(j.decisions);
+        const d = j.learning === undefined ? 'true' : String(j.learning);
         process.stdout.write(m + String.fromCharCode(10) + d);
       " -- "$_qg_config" 2>/dev/null) || _qg_fields=""
     fi
     if [ -n "$_qg_fields" ]; then
       _QG_MEMORY="${_qg_fields%%$'\n'*}"
-      _QG_DECISIONS="${_qg_fields#*$'\n'}"
+      _QG_LEARNING="${_qg_fields#*$'\n'}"
     fi
   fi
 

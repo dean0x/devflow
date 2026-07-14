@@ -30,6 +30,7 @@ const HOOK_SCRIPTS = [
   'ensure-root-gitignore',
   'resolve-project-root',
   'queue-append',
+  'learning-lock',
   'capture-prompt',
   'capture-turn',
   'capture-question',
@@ -1424,28 +1425,28 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 });
 
 // =============================================================================
-// session-start-context Section 2: Dream maintenance directive
+// session-start-context Section 2: Learning maintenance directive
 // =============================================================================
 //
-// When the dream queue holds captured turns (or a crashed run left a stale
-// .processing batch), session-start-context emits a "--- DREAM MAINTENANCE ---"
-// directive instructing the main model to spawn the background Dream agent with
-// the resolved model (project decisions.json → global ~/.devflow/decisions.json
+// When the learning queue holds captured turns (or a crashed run left a stale
+// .processing batch), session-start-context emits a "--- LEARNING MAINTENANCE ---"
+// directive instructing the main model to spawn the background Learning agent with
+// the resolved model (project learning.json → global ~/.devflow/learning.json
 // → opus). A FRESH .processing (younger than 900s) means a live agent already
 // owns the batch, so the directive is suppressed. Gate is config-only: the
-// `decisions` field in dream config.
+// `learning` field in feature config (.devflow/config.json).
 
-describe('session-start-context: dream maintenance directive (Section 2)', () => {
+describe('session-start-context: learning maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-dream-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-dream-home-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1453,8 +1454,8 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  const queuePath = (dir: string) => path.join(dir, '.devflow', 'dream', '.pending-turns.jsonl');
-  const processingPath = (dir: string) => path.join(dir, '.devflow', 'dream', '.pending-turns.processing');
+  const queuePath = (dir: string) => path.join(dir, '.devflow', 'learning', '.pending-turns.jsonl');
+  const processingPath = (dir: string) => path.join(dir, '.devflow', 'learning', '.pending-turns.processing');
 
   function seedQueue(dir: string): void {
     fs.writeFileSync(queuePath(dir), '{"role":"user","content":"we chose X over Y","ts":1}\n');
@@ -1464,15 +1465,15 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
     return JSON.parse(stdout).hookSpecificOutput.additionalContext;
   }
 
-  it('emits the directive when the queue is non-empty: Dream agent, background, default opus', () => {
+  it('emits the directive when the queue is non-empty: Learning agent, background, default opus', () => {
     seedQueue(tmpDir);
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
 
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- DREAM MAINTENANCE ---');
-    expect(ctx).toContain('subagent_type="Dream"');
+    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('subagent_type="Learning"');
     expect(ctx).toContain('model="opus"');
     expect(ctx).toContain('run_in_background: true');
     expect(ctx).toContain('Do not narrate');
@@ -1488,26 +1489,24 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
   it('no directive when the queue is empty or absent', () => {
     // Zero-byte queue file (the -s test) + a TL;DR so there is JSON output to inspect.
     fs.writeFileSync(queuePath(tmpDir), '');
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(contextOf(stdout)).not.toContain('DREAM MAINTENANCE');
+    expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
   });
 
-  it('decisions:false in dream config suppresses the directive (and the TL;DR)', () => {
+  it('learning:false in feature config suppresses the directive (and the TL;DR)', () => {
     seedQueue(tmpDir);
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
-      JSON.stringify({ decisions: false }),
+      path.join(tmpDir, '.devflow', 'config.json'),
+      JSON.stringify({ learning: false }),
     );
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 
@@ -1531,7 +1530,7 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(stdout.trim() === '' || !contextOf(stdout).includes('DREAM MAINTENANCE')).toBe(true);
+    expect(stdout.trim() === '' || !contextOf(stdout).includes('LEARNING MAINTENANCE')).toBe(true);
   });
 
   it('stale .processing (older than 900s) emits the directive even with an empty queue', () => {
@@ -1542,27 +1541,26 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- DREAM MAINTENANCE ---');
-    expect(ctx).toContain('subagent_type="Dream"');
+    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('subagent_type="Learning"');
   });
 
-  it('model resolution: project decisions.json wins', () => {
+  it('model resolution: project learning.json wins', () => {
     seedQueue(tmpDir);
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.json'),
+      path.join(tmpDir, '.devflow', 'learning', 'learning.json'),
       JSON.stringify({ model: 'haiku', debug: false }),
     );
     // Global config present too — project must win.
-    fs.writeFileSync(path.join(homeDir, '.devflow', 'decisions.json'), JSON.stringify({ model: 'sonnet' }));
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'learning.json'), JSON.stringify({ model: 'sonnet' }));
 
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(contextOf(stdout)).toContain('model="haiku"');
   });
 
-  it('model resolution: global ~/.devflow/decisions.json used when the project sets none', () => {
+  it('model resolution: global ~/.devflow/learning.json used when the project sets none', () => {
     seedQueue(tmpDir);
-    fs.writeFileSync(path.join(homeDir, '.devflow', 'decisions.json'), JSON.stringify({ model: 'sonnet' }));
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'learning.json'), JSON.stringify({ model: 'sonnet' }));
 
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(contextOf(stdout)).toContain('model="sonnet"');
@@ -1570,9 +1568,8 @@ describe('session-start-context: dream maintenance directive (Section 2)', () =>
 
   it('model resolution: an invalid/unallowlisted model value falls back to opus (defense in depth)', () => {
     seedQueue(tmpDir);
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.json'),
+      path.join(tmpDir, '.devflow', 'learning', 'learning.json'),
       JSON.stringify({ model: 'gpt-5\ninjected", "evil": "payload' }),
     );
 

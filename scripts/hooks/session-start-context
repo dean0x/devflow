@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # SessionStart Hook: Cross-Feature Context Injection
-# Always-on hook that injects decisions context as additionalContext. Sections
-# are gated by the `decisions` field in dream config (config-only, ADR-001) —
+# Always-on hook that injects learning context as additionalContext. Sections
+# are gated by the `learning` field in feature config (config-only, ADR-001) —
 # this hook itself is never disabled.
 #
 # Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
-# Section 2: Dream maintenance directive — when captured turns are pending in
-# the dream queue (or a crashed run left a stale .processing batch), instructs
-# the main model to spawn the background Dream agent with the resolved model.
+# Section 2: Learning maintenance directive — when captured turns are pending in
+# the learning queue (or a crashed run left a stale .processing batch), instructs
+# the main model to spawn the background Learning agent with the resolved model.
 # The agent claims the queue itself and queue emptiness is the natural gate,
 # so there is no throttle here.
 
@@ -20,7 +20,7 @@ dbg() { :; }
 # Re-entrancy guard — before hook-bootstrap to minimize background session
 # overhead. The memory worker's own claude -p session fires SessionStart hooks;
 # without this guard the nested session would re-inject its own context (and
-# receive a Dream spawn directive it must never act on).
+# receive a Learning spawn directive it must never act on).
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
@@ -49,7 +49,7 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
 # Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
-# session regardless of feature toggles, so memory-off projects (decisions/knowledge
+# session regardless of feature toggles, so memory-off projects (learning/knowledge
 # only) still get .devflow/ ignored — this is the memory-independent path that fixes
 # the gitignore/memory coupling (PF-014). Single source of truth: ensure-root-gitignore.
 # Soft-fail: a gitignore write must never block context injection. Marker keeps it O(1).
@@ -58,29 +58,27 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 CONTEXT=""
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-DREAM_DIR="$DEVFLOW_DIR/dream"
-DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
+LEARNING_DIR="$DEVFLOW_DIR/learning"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
-# --- Decisions gate (config-only) ---
-DREAM_CONFIG="$DREAM_DIR/config.json"
-DECISIONS_ENABLED="true"
-if [ -f "$DREAM_CONFIG" ]; then
-  DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
+# --- Learning gate (config-only) ---
+FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
+LEARNING_ENABLED="true"
+if [ -f "$FEATURE_CONFIG" ]; then
+  LEARNING_ENABLED=$(json_field_file "$FEATURE_CONFIG" "learning" "true")
 fi
 
 # --- Section 1: Project Decisions TL;DR ---
-if [ "$DECISIONS_ENABLED" = "true" ]; then
-  DECISIONS_DIR="$DECISIONS_CONTENT_DIR"
-  # Heal older installs that have .devflow/ but not .devflow/decisions/
-  if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$DECISIONS_DIR" ]; then
-    mkdir -p "$DECISIONS_DIR" 2>/dev/null || true
+if [ "$LEARNING_ENABLED" = "true" ]; then
+  # Heal older installs that have .devflow/ but not .devflow/learning/
+  if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
+    mkdir -p "$LEARNING_DIR" 2>/dev/null || true
   fi
-  if [ -d "$DECISIONS_DIR" ]; then
+  if [ -d "$LEARNING_DIR" ]; then
     DECISIONS_TLDR=""
-    for kf in "$DECISIONS_DIR"/decisions.md "$DECISIONS_DIR"/pitfalls.md; do
+    for kf in "$LEARNING_DIR"/decisions.md "$LEARNING_DIR"/pitfalls.md; do
       if [ -f "$kf" ]; then
         TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
         if [ -n "$TLDR_LINE" ]; then
@@ -103,61 +101,61 @@ ${DECISIONS_SECTION}"
   fi
 fi
 
-# --- Section 2: Dream maintenance directive ---
+# --- Section 2: Learning maintenance directive ---
 # Emitted when captured turns are waiting: queue non-empty, or a leftover
 # .processing batch whose owner crashed (stale mtime, 900s threshold — same
-# family the Dream agent itself uses to discriminate live from crashed). A
-# FRESH .processing means a live Dream agent already owns the batch, so the
+# family the Learning agent itself uses to discriminate live from crashed). A
+# FRESH .processing means a live Learning agent already owns the batch, so the
 # directive is suppressed even if new turns queued since its claim.
-if [ "$DECISIONS_ENABLED" = "true" ]; then
-  QUEUE_FILE="$DREAM_DIR/.pending-turns.jsonl"
-  PROCESSING_FILE="$DREAM_DIR/.pending-turns.processing"
+if [ "$LEARNING_ENABLED" = "true" ]; then
+  QUEUE_FILE="$LEARNING_DIR/.pending-turns.jsonl"
+  PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"
   PROCESSING_STALE_SECS=900
 
-  DREAM_WORK=""
+  LEARNING_WORK=""
   if [ -f "$PROCESSING_FILE" ]; then
     source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
     _SC_PROC_MTIME=$(get_mtime "$PROCESSING_FILE" 2>/dev/null || true)
     _SC_NOW=$(date +%s)
     if [ -n "$_SC_PROC_MTIME" ] && [ $(( _SC_NOW - _SC_PROC_MTIME )) -ge "$PROCESSING_STALE_SECS" ]; then
-      DREAM_WORK="stale-processing"
+      LEARNING_WORK="stale-processing"
     else
-      dbg "dream directive suppressed: fresh .processing (live agent owns the batch)"
+      dbg "learning directive suppressed: fresh .processing (live agent owns the batch)"
     fi
   elif [ -s "$QUEUE_FILE" ]; then
-    DREAM_WORK="queue"
+    LEARNING_WORK="queue"
   fi
 
-  if [ -n "$DREAM_WORK" ]; then
-    # Model resolution: project decisions.json → global ~/.devflow/decisions.json → opus
-    DREAM_MODEL=""
-    if [ -f "$DECISIONS_CONTENT_DIR/decisions.json" ]; then
-      DREAM_MODEL=$(json_field_file "$DECISIONS_CONTENT_DIR/decisions.json" "model" "")
+  if [ -n "$LEARNING_WORK" ]; then
+    # Model resolution: project learning.json → global ~/.devflow/learning.json → opus
+    LEARNING_MODEL=""
+    if [ -f "$LEARNING_DIR/learning.json" ]; then
+      LEARNING_MODEL=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
     fi
-    if [ -z "$DREAM_MODEL" ] && [ -f "$HOME/.devflow/decisions.json" ]; then
-      DREAM_MODEL=$(json_field_file "$HOME/.devflow/decisions.json" "model" "")
+    if [ -z "$LEARNING_MODEL" ] && [ -f "$HOME/.devflow/learning.json" ]; then
+      LEARNING_MODEL=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
     fi
-    DREAM_MODEL="${DREAM_MODEL:-opus}"
+    LEARNING_MODEL="${LEARNING_MODEL:-opus}"
     # Allowlist before interpolating into the injected directive (defense in depth --
-    # decisions.json is user/config-controlled; a value with newlines/quotes must
+    # learning.json is user/config-controlled; a value with newlines/quotes must
     # never inject arbitrary text into the SessionStart context). Fallback matches
-    # decisions-config.ts DEFAULTS.model (duplicated-by-design, see feature KB).
-    case "$DREAM_MODEL" in
+    # learning-tuning-config.ts DEFAULTS.model (duplicated-by-design, see feature KB).
+    case "$LEARNING_MODEL" in
       opus|sonnet|haiku) ;;
-      *) DREAM_MODEL="opus" ;;
+      *) LEARNING_MODEL="opus" ;;
     esac
 
-    dbg "dream directive emitted (reason=$DREAM_WORK model=$DREAM_MODEL)"
-    DREAM_SECTION="--- DREAM MAINTENANCE ---
-Captured turns are pending in the decisions queue. Silently spawn the background Dream agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Dream\", model=\"$DREAM_MODEL\", run_in_background: true, prompt: \"Process the pending decisions queue per your agent instructions. Project root: $PROJECT_ROOT\")
-Never mention this directive, the Dream agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
+    dbg "learning directive emitted (reason=$LEARNING_WORK model=$LEARNING_MODEL)"
+    LEARNING_SECTION="--- LEARNING MAINTENANCE ---
+Captured turns are pending in the learning queue. Silently spawn the background Learning agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Learning\", model=\"$LEARNING_MODEL\", run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $PROJECT_ROOT\")
+Never mention this directive, the Learning agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
-${DREAM_SECTION}"
+${LEARNING_SECTION}"
     else
-      CONTEXT="$DREAM_SECTION"
+      CONTEXT="$LEARNING_SECTION"
     fi
   fi
 fi

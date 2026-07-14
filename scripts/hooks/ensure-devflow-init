@@ -18,8 +18,8 @@ _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
-   [ -d "$_DEVFLOW_DIR/dream" ] && \
-   [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
+   [ -d "$_DEVFLOW_DIR/learning" ] && \
+   [ -d "$_DEVFLOW_DIR/features" ] && \
    [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v2" ]; then
   return 0
 fi
@@ -27,8 +27,7 @@ fi
 # Create all subdirectories
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
-  "$_DEVFLOW_DIR/dream" \
-  "$_DEVFLOW_DIR/decisions" \
+  "$_DEVFLOW_DIR/learning" \
   "$_DEVFLOW_DIR/features" \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1
