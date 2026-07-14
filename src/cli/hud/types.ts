@@ -33,7 +33,7 @@ export type ComponentId =
   | 'usageQuota'
   | 'todoProgress'
   | 'configCounts'
-  | 'decisionsCounts'
+  | 'learningCounts'
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount';
@@ -115,9 +115,9 @@ export interface ConfigCountsData {
 }
 
 /**
- * Decisions/pitfalls counts data for the decisionsCounts component.
+ * Decisions/pitfalls counts data for the learningCounts component.
  */
-export interface DecisionsCountsData {
+export interface LearningCountsData {
   decisions: number;
   pitfalls: number;
 }
@@ -131,7 +131,7 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
-  decisionsCounts: DecisionsCountsData | null;
+  learningCounts: LearningCountsData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;

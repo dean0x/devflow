@@ -37,7 +37,7 @@ function makeCtx(
     transcript: null,
     usage: null,
     configCounts: null,
-    decisionsCounts: null,
+    learningCounts: null,
     costHistory: null,
     config: {
       enabled: true,
@@ -152,7 +152,7 @@ describe('render', () => {
         todos: { completed: 1, total: 3 },
         skills: [],
       },
-      decisionsCounts: { decisions: 3, pitfalls: 1 },
+      learningCounts: { decisions: 3, pitfalls: 1 },
     });
     const output = await render(ctx);
     const lines = output.split('\n');

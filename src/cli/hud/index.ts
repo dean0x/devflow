@@ -7,7 +7,7 @@ import { gatherGitStatus } from './git.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
-import { gatherDecisionsCounts } from './components/decisions-counts.js';
+import { gatherLearningCounts } from './components/learning-counts.js';
 import { render } from './render.js';
 import type { GatherContext, StdinData, UsageData } from './types.js';
 
@@ -86,7 +86,7 @@ async function run(): Promise<string> {
     components.has('todoProgress') ||
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
-  const needsDecisionsCounts = components.has('decisionsCounts');
+  const needsLearningCounts = components.has('learningCounts');
   const needsSessionCost = components.has('sessionCost');
 
   // Parallel data gathering — only fetch what's needed
@@ -115,8 +115,8 @@ async function run(): Promise<string> {
     : null;
 
   // Decisions/pitfalls counts (fast, synchronous filesystem read)
-  const decisionsCountsData = needsDecisionsCounts
-    ? gatherDecisionsCounts(cwd)
+  const learningCountsData = needsLearningCounts
+    ? gatherLearningCounts(cwd)
     : null;
 
   // Cost tracking: persist current session cost, aggregate for weekly/monthly
@@ -140,7 +140,7 @@ async function run(): Promise<string> {
     transcript,
     usage,
     configCounts: configCountsData,
-    decisionsCounts: decisionsCountsData,
+    learningCounts: learningCountsData,
     costHistory,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,
