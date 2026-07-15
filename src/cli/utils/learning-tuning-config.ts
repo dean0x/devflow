@@ -4,6 +4,18 @@ import { getDevFlowDirectory } from './paths.js';
 import { getLearningTuningConfigPath } from './project-paths.js';
 
 /**
+ * Closed set of valid model aliases for the Learning agent.
+ * Any on-disk value outside this set is silently ignored — parse-don't-validate.
+ */
+export type LearningModelAlias = 'opus' | 'sonnet' | 'haiku';
+
+const VALID_MODELS = new Set<string>(['opus', 'sonnet', 'haiku']);
+
+function isValidModel(value: unknown): value is LearningModelAlias {
+  return typeof value === 'string' && VALID_MODELS.has(value);
+}
+
+/**
  * Merged learning agent tuning configuration from global and project-level config files.
  *
  * The Learning agent has no daily-run cap or throttle: session-start-context emits
@@ -13,8 +25,8 @@ import { getLearningTuningConfigPath } from './project-paths.js';
  * global → default precedence) when resolving the model for the directive.
  */
 export interface LearningTuningConfig {
-  /** Model alias for the Learning agent. Default: 'opus' */
-  model: string;
+  /** Model alias for the Learning agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: 'opus' */
+  model: LearningModelAlias;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
@@ -35,12 +47,17 @@ export function applyLearningTuningConfigLayer(
   json: string,
 ): LearningTuningConfig {
   try {
-    const raw = JSON.parse(json) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(json);
+    // Object-shape guard mirrors coerceConfig in feature-config.ts: a JSON
+    // array, null, or primitive can't be treated as a config record.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { ...config };
+    }
+    const raw = parsed as Record<string, unknown>;
     return {
-      model:
-        typeof raw.model === 'string' ? raw.model : config.model,
-      debug:
-        typeof raw.debug === 'boolean' ? raw.debug : config.debug,
+      // Only accept a model value that belongs to the closed LearningModelAlias domain.
+      model: isValidModel(raw.model) ? raw.model : config.model,
+      debug: typeof raw.debug === 'boolean' ? raw.debug : config.debug,
     };
   } catch {
     return { ...config };

@@ -85,6 +85,42 @@ describe('applyLearningTuningConfigLayer', () => {
     expect((result as Record<string, unknown>).max_daily_runs).toBeUndefined();
     expect((result as Record<string, unknown>).throttle_minutes).toBeUndefined();
   });
+
+  // ISS-11: out-of-domain string model values are rejected — falls back to config.model
+  it('ISS-11: rejects out-of-domain model string (falls back to config.model)', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 'gpt-4' }));
+    expect(result.model).toBe('opus'); // config.model preserved
+  });
+
+  it('ISS-11: rejects empty string model (falls back to config.model)', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: '' }));
+    expect(result.model).toBe('opus');
+  });
+
+  // ISS-12: non-object JSON values must fall back to config copy (object-shape guard)
+  it('ISS-12: returns config copy when JSON is an array', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify([{ model: 'haiku' }]));
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is null', () => {
+    const result = applyLearningTuningConfigLayer(base, 'null');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is a number', () => {
+    const result = applyLearningTuningConfigLayer(base, '42');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is a boolean', () => {
+    const result = applyLearningTuningConfigLayer(base, 'true');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
 });
 
 // ---------------------------------------------------------------------------
