@@ -19,7 +19,7 @@ directories:
   - plugins/devflow-dynamic/commands
   - tests/build-mds.test.ts
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-15
 ---
 
 # Dynamic Workflow Engine
@@ -142,7 +142,7 @@ The preference profile (`~/.devflow/preference-profile.md`) auto-resolves decisi
 
 ### DECISIONS_CONTEXT loading
 
-The main model reads `.devflow/decisions/index.md` (the pre-rendered write-time artifact) **before authoring the workflow script** — the script body has no filesystem access. The returned index is injected into agent prompts using the `devflow:apply-decisions` algorithm. Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need it injected; Validator and Simplifier do not.
+The main model reads `.devflow/learning/index.md` (the pre-rendered write-time artifact) **before authoring the workflow script** — the script body has no filesystem access. The returned index is injected into agent prompts using the `devflow:apply-decisions` algorithm. Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need it injected; Validator and Simplifier do not.
 
 ### Agent agentType usage
 

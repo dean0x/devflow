@@ -11,7 +11,7 @@ directories:
   - commands/_partials
   - scripts/build-mds.ts
 created: 2026-06-21
-updated: 2026-07-01
+updated: 2026-07-15
 ---
 
 # Feature Knowledge Base System
@@ -21,7 +21,7 @@ updated: 2026-07-01
 The Feature Knowledge Base System uses a **write-through** model. Knowledge is authored
 in-command (at workflow end) by a simplified Knowledge agent that writes directly to
 `.devflow/features/{slug}/KNOWLEDGE.md` and updates the `index.md` cache line. There is
-no background refresh pipeline, no SessionEnd hook, no Dream task, and no deterministic
+no background refresh pipeline, no SessionEnd hook, no Learning task, and no deterministic
 CJS engine.
 
 **Source of truth = `KNOWLEDGE.md` frontmatter.** The `index.md` is a regenerable cache:
@@ -40,7 +40,7 @@ team opts back out by re-adding `.devflow/features/` to their own `.gitignore`.
 requiring them to explore from scratch each session.
 
 **Role in larger system**: One of two persistence layers under `.devflow/` (alongside the
-Decisions pipeline). Knowledge is NOT a Dream task — it is written in-command. Working
+Decisions pipeline). Knowledge is NOT a Learning task — it is written in-command. Working
 memory is handled by the background-memory-update worker.
 
 **External dependencies**: MDS compiler (`@mdscript/mds`) at build time to compile the
@@ -48,7 +48,7 @@ knowledge partials; `claude` agent at runtime (the Knowledge agent, model=sonnet
 KNOWLEDGE.md.
 
 **Toggle**: `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
-Feature state lives in `.devflow/dream/config.json` (field `knowledge`, default `true`).
+Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/cli/utils/feature-config.ts`).
 Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 
 ## Component Architecture
@@ -63,7 +63,7 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 | Author skill | `shared/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `shared/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
 | CLI list | `src/cli/commands/knowledge/list.ts` | Reads index.md / falls back to frontmatter glob; no external scripts |
-| CLI toggle | `src/cli/commands/knowledge/toggle.ts` | Flips `knowledge` key in dream config; no sentinel creation |
+| CLI toggle | `src/cli/commands/knowledge/toggle.ts` | Flips `knowledge` key in `.devflow/config.json` via `feature-config.ts`; no sentinel creation |
 
 ## Component Interactions
 
@@ -87,7 +87,7 @@ Invoked at the start of applicable workflows via `knowledge_load()` MDS call sit
 
 Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call site.
 
-1. **Gate** — if dream config `knowledge` is `false`, skip entirely
+1. **Gate** — if `.devflow/config.json` `knowledge` is `false`, skip entirely
 2. **Check scope** — if this workflow changed a documented area OR found durable cross-cutting knowledge, proceed
 3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS
 4. **Agent writes KNOWLEDGE.md** — directly to `.devflow/features/{slug}/KNOWLEDGE.md`
@@ -132,7 +132,7 @@ of `knowledge_writeback` for the research workflow.
 
 - **500-line cap**: KNOWLEDGE.md exceeding 500 lines must be split into focused sub-knowledge bases.
 - **index.md line format**: `- **{slug}** — {areas} — {Use-when description}` — frontmatter is authoritative if the line format changes.
-- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `dream/config.json` is the sole toggle.
+- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `.devflow/config.json` is the sole toggle.
 - **No concurrent lock**: `index.md` write-through may clobber concurrent writes, but the frontmatter fallback self-heals. `index.md` is git-tracked (shared), so it can also merge-conflict when two branches add different slugs — resolve by keeping both lines.
 
 ## Anti-Patterns
@@ -167,7 +167,7 @@ path. If it is stale or absent, frontmatter glob is the authoritative fallback. 
 treat a missing `index.md` as a problem — write-through creates it lazily.
 
 **The knowledge config key is the sole gate**: ADR-001 requires config-only gates. The
-`knowledge` key in `dream/config.json` gates write-back. The old sentinel
+`knowledge` key in `.devflow/config.json` gates write-back. The old sentinel
 (`.devflow/features/.disabled`) is gone via the clean break — no migration removes it
 because it was never deployed on this branch.
 
@@ -190,10 +190,10 @@ compiled output.
 - `shared/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `shared/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
 - `src/cli/commands/knowledge/list.ts` — reads index.md directly or falls back to frontmatter glob; no external scripts
-- `src/cli/commands/knowledge/toggle.ts` — flips `knowledge` in dream config; no sentinel creation/deletion
+- `src/cli/commands/knowledge/toggle.ts` — flips `knowledge` in `.devflow/config.json` (`feature-config.ts`); no sentinel creation/deletion
 
 ## Related
 
 - Working Memory (`.devflow/memory/WORKING-MEMORY.md`, `background-memory-update` worker) — sibling persistence layer; independent toggle.
-- Decisions pipeline (`.devflow/decisions/`, `decisions-ledger.jsonl`) — sibling persistence layer; shares Dream marker protocol, independent toggle.
+- Decisions pipeline (`.devflow/learning/`, `decisions-ledger.jsonl`) — sibling persistence layer; independent toggle.
 - ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.
