@@ -216,10 +216,10 @@ HUD coupling to markdown format (D309). Label: `Learning: N decisions, M pitfall
 
 ### Migrations
 
-Two per-project migrations consolidate older installs:
-- `consolidate-dream-decisions-to-learning-v1`: moves `.devflow/dream/` + `.devflow/decisions/`
+Two migrations consolidate older installs:
+- `consolidate-dream-decisions-to-learning-v1` (per-project): moves `.devflow/dream/` + `.devflow/decisions/`
   → `.devflow/learning/`; writes `.devflow/config.json`; maps `decisions` key → `learning`
-- `rename-global-decisions-config-v1`: renames `~/.devflow/decisions.json` →
+- `rename-global-decisions-config-v1` (global): renames `~/.devflow/decisions.json` →
   `~/.devflow/learning.json`
 
 ## Naming Boundary (Critical Convention)
