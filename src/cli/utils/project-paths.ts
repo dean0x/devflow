@@ -96,11 +96,6 @@ export function getDecisionsArchivePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
-/** .devflow/learning/.decisions-manifest.json */
-export function getDecisionsManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-manifest.json');
-}
-
 /** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
@@ -124,16 +119,6 @@ export function getDecisionsIndexPath(projectRoot: string): string {
 /** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
 export function getObservationsLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
-}
-
-/** .devflow/learning/.decisions-notifications.json */
-export function getDecisionsNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-notifications.json');
-}
-
-/** .devflow/learning/.decisions-batch-ids */
-export function getDecisionsBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-batch-ids');
 }
 
 // ---------------------------------------------------------------------------

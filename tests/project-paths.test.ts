@@ -28,13 +28,10 @@ import {
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
-  getDecisionsManifestPath,
   getDecisionsLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
   getObservationsLockDir,
-  getDecisionsNotificationsPath,
-  getDecisionsBatchIdsPath,
   getDecisionsIndexPath,
   getWorkingMemoryPath,
   getBackupPath,
@@ -109,10 +106,6 @@ describe('project-paths TypeScript module', () => {
       expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-log.jsonl');
     });
 
-    it('getDecisionsManifestPath returns .devflow/learning/.decisions-manifest.json', () => {
-      expect(getDecisionsManifestPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-manifest.json');
-    });
-
     it('getDecisionsLockDir returns .devflow/learning/.decisions.lock', () => {
       expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/learning/.decisions.lock');
     });
@@ -123,14 +116,6 @@ describe('project-paths TypeScript module', () => {
 
     it('getDecisionsUsageLockDir returns .devflow/learning/.decisions-usage.lock', () => {
       expect(getDecisionsUsageLockDir(ROOT)).toBe('/some/project/.devflow/learning/.decisions-usage.lock');
-    });
-
-    it('getDecisionsNotificationsPath returns .devflow/learning/.decisions-notifications.json', () => {
-      expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-notifications.json');
-    });
-
-    it('getDecisionsBatchIdsPath returns .devflow/learning/.decisions-batch-ids', () => {
-      expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.devflow/learning/.decisions-batch-ids');
     });
 
     it('getDecisionsIndexPath returns .devflow/learning/index.md', () => {
@@ -244,13 +229,10 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
-    { name: 'getDecisionsManifestPath', ts: getDecisionsManifestPath, cjs: cjsPaths.getDecisionsManifestPath },
     { name: 'getDecisionsLockDir', ts: getDecisionsLockDir, cjs: cjsPaths.getDecisionsLockDir },
     { name: 'getDecisionsUsagePath', ts: getDecisionsUsagePath, cjs: cjsPaths.getDecisionsUsagePath },
     { name: 'getDecisionsUsageLockDir', ts: getDecisionsUsageLockDir, cjs: cjsPaths.getDecisionsUsageLockDir },
     { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
-    { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
-    { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
     { name: 'getDecisionsIndexPath', ts: getDecisionsIndexPath, cjs: cjsPaths.getDecisionsIndexPath },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },
