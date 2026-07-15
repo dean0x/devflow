@@ -182,7 +182,7 @@ async function handleConfigure(): Promise<void> {
   const configJson = JSON.stringify(config, null, 2) + '\n';
 
   if (scope === 'global') {
-    const globalDir = path.join(process.env.HOME || '~', '.devflow');
+    const globalDir = getDevFlowDirectory();
     await fs.mkdir(globalDir, { recursive: true });
     await fs.writeFile(path.join(globalDir, 'learning.json'), configJson, 'utf-8');
     p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
