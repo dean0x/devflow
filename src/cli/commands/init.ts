@@ -40,7 +40,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { writeConfig as writeDreamConfig } from '../utils/feature-config.js';
+import { writeConfig } from '../utils/feature-config.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
@@ -1143,7 +1143,7 @@ export const initCommand = new Command('init')
 
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
-      // each script gates its own per-queue write internally via dream config, so there
+      // each script gates its own per-queue write internally via feature config, so there
       // is no CLI-level enable/disable toggle here. MUST run before addMemoryHooks below
       // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
       // append-before-spawn).
@@ -1152,8 +1152,8 @@ export const initCommand = new Command('init')
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook).
       // Three hooks: Stop (memory-worker), SessionStart (session-start-memory), PreCompact.
-      // Decisions detection/curation no longer live here — see the dream hook below.
-      // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
+      // Learning agent (spawned via session-start-context directive) handles decision/pitfall
+      // detection. Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
@@ -1166,9 +1166,9 @@ export const initCommand = new Command('init')
       const cleanedForContext = removeContextHook(content);
       content = addContextHook(cleanedForContext, devflowDir);
 
-      // Dream hook upgrade cleanup — the spawn-dream-worker SessionStart hook is
-      // retired (the session-start-context directive spawns the Dream agent);
-      // strip any stale entry left in settings.json by a prior install.
+      // Legacy dream-worker hook cleanup — strip any stale spawn-dream-worker entry
+      // left in settings.json by a prior install (session-start-context now spawns
+      // the Learning agent via directive).
       content = removeDreamHook(content);
 
       // Claude Code flags — strip all managed keys, then re-apply selected flags
@@ -1200,13 +1200,13 @@ export const initCommand = new Command('init')
       }
     } catch { /* settings.json may not exist yet */ }
 
-    // Write dream config.json to manage per-feature enable/disable at runtime.
+    // Write .devflow/config.json to manage per-feature enable/disable at runtime.
     // Uses writeConfig (full atomic write) rather than three updateFeature calls because
     // init always sets all three features at once and is never concurrent with toggle
-    // commands — it is a one-time setup action. See D1 in dream-config.ts for the
+    // commands — it is a one-time setup action. See D1 in feature-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
-      await writeDreamConfig(gitRoot, {
+      await writeConfig(gitRoot, {
         memory: memoryEnabled,
         learning: learningEnabled,
         knowledge: knowledgeEnabled,
