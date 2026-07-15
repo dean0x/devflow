@@ -8,7 +8,7 @@ export interface FeatureConfig {
   knowledge: boolean;
 }
 
-const DEFAULT_CONFIG: FeatureConfig = {
+export const DEFAULT_CONFIG: FeatureConfig = {
   memory: true,
   learning: true,
   knowledge: true,
@@ -23,7 +23,10 @@ export function getConfigPath(projectRoot: string): string {
  * DEFAULT_CONFIG. Pure function — no I/O, no side effects.
  *
  * Coalesces legacy `decisions` key into `learning` when both are present:
- * `decisions` wins (mirrors the manifest kb→knowledge self-heal in manifest.ts).
+ * `decisions` wins (legacy-decisions-wins semantics; intentionally opposite to
+ * manifest.ts's new-key-wins self-heal — migration-compat requires the old key
+ * to take precedence so old configs with `decisions: false` are not silently
+ * re-enabled by a newer `learning: true` key).
  * Silently ignores `autoCommit` — old configs may still contain it.
  *
  * Returns null when `parsed` is not a plain object (caller falls through to

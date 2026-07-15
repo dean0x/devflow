@@ -18,7 +18,7 @@ const { execSync } = require('child_process');
 
 // D001: Hoist SharedArrayBuffer/Int32Array allocation to module scope so the
 // Atomics.wait path never allocates per retry iteration. In environments where
-// SharedArrayBuffer is unavailable (Dream worker contexts) we fall back to
+// SharedArrayBuffer is unavailable (restricted worker contexts) we fall back to
 // execSync('sleep 0.05') which is truly idle — no busy-wait.
 /** @type {Int32Array | null} */
 const _atomicsBuf = (() => {
@@ -28,7 +28,7 @@ const _atomicsBuf = (() => {
 /**
  * Sleep for ~50 ms in a truly-idle, CPU-friendly way.
  * Prefers Atomics.wait (zero-overhead blocking) when SharedArrayBuffer is available.
- * Falls back to execSync('sleep 0.05') in restricted contexts (Dream hook workers).
+ * Falls back to execSync('sleep 0.05') in restricted contexts (e.g. background hook workers).
  * Never busy-waits.
  *
  * @returns {void}

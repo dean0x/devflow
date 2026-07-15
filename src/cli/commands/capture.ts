@@ -6,8 +6,8 @@ import type { Settings, HookMatcher } from '../utils/hooks.js';
 // The capture bundle (capture-prompt, capture-turn, capture-question) is
 // always-on, like session-start-context (context.ts) — registered
 // unconditionally by init, removed by uninstall. There is no per-feature
-// toggle: capture hooks only append to the memory/dream queues, gated
-// per-queue internally by each script's own dream-config read (see
+// toggle: capture hooks only append to the memory/learning queues, gated
+// per-queue internally by each script's own feature-config read (see
 // queue-append's queue_read_gates). Follows the context.ts add/remove/has
 // pattern rather than memory.ts's toggle pattern.
 //

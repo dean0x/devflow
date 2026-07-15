@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Dream System: memory-worker (Stop Hook)
+# Memory pipeline: memory-worker (Stop Hook)
 # Owns the 120s-throttle + nohup-spawn logic for background-memory-update.
 # Registered AFTER capture-turn in the Stop hook array so append-before-spawn
 # ordering is preserved by array position. This hook does NOT append to any
