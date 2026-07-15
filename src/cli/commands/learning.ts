@@ -187,7 +187,6 @@ async function handleConfigure(): Promise<void> {
     await fs.writeFile(path.join(globalDir, 'learning.json'), configJson, 'utf-8');
     p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
   } else {
-    // FIX: mkdir the learning dir (parent of learning.json), not the memory dir
     const learningDir = getLearningDir(process.cwd());
     await fs.mkdir(learningDir, { recursive: true });
     const projectConfigPath = getLearningTuningConfigPath(process.cwd());

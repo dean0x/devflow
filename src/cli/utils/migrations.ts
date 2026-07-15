@@ -970,14 +970,14 @@ const MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES: Migration<'global'> = {
  * Exported for testing.
  */
 export function seedFeatureConfigFromDream(parsed: unknown): FeatureConfig {
-  const config: FeatureConfig = { ...DEFAULT_CONFIG };
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return config;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ...DEFAULT_CONFIG };
   const p = parsed as Record<string, unknown>;
-  if (typeof p.memory === 'boolean') config.memory = p.memory;
-  if (typeof p.decisions === 'boolean') config.learning = p.decisions; // decisions → learning
-  if (typeof p.knowledge === 'boolean') config.knowledge = p.knowledge;
   // p.learning intentionally ignored: old self-learning pipeline key (ADR-001 clean break)
-  return config;
+  return {
+    memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
+    learning: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.learning, // decisions → learning
+    knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
+  };
 }
 
 /**
