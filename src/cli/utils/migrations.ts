@@ -4,7 +4,7 @@ import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir, getFeaturesDir, getLearningDir } from './project-paths.js';
 import { sweepLegacyDreamMarkers } from './learning-queue-cleanup.js';
-import { writeConfig } from './feature-config.js';
+import { DEFAULT_CONFIG, writeConfig, type FeatureConfig } from './feature-config.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -159,6 +159,8 @@ export type PerProjectMigrationContext = {
   devflowDir: string;
   memoryDir: string;
   projectRoot: string;
+  /** Override path to render-decisions.cjs for tests. When absent the real bundled renderer is used. */
+  rendererPath?: string;
 };
 
 export type MigrationContext = GlobalMigrationContext | PerProjectMigrationContext;
@@ -826,7 +828,7 @@ const MIGRATION_PURGE_DREAM_MARKER_PIPELINE: Migration<'per-project'> = {
 /**
  * Per-project: remove inert state files left by the retired detached dream
  * worker (background-dream-update). Decisions processing now runs as the
- * directive-spawned Dream agent, whose only state is the queue itself:
+ * directive-spawned Learning agent, whose only state is the queue itself:
  *   - .devflow/decisions/.disabled   — runtime sentinel (gate is config-only now)
  *   - .devflow/dream/.last-dream-ok  — worker success stamp
  *   - .devflow/dream/last-run-summary — inject-once summary file
@@ -885,7 +887,7 @@ const MIGRATION_PURGE_DREAM_WORKER_STATE: Migration<'per-project'> = {
  * refactor. Projects that already had a ledger need this one-time bootstrap
  * to materialise the index without rewriting the body files.
  *
- * - If no ledger exists: no-op (index will be written on the next Dream run).
+ * - If no ledger exists: no-op (index will be written on the next Learning-agent render).
  * - Writes only index.md — never rewrites decisions.md / pitfalls.md.
  * - ENOENT-safe and idempotent: a second run overwrites the same content.
  */
@@ -957,22 +959,45 @@ const MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES: Migration<'global'> = {
 };
 
 /**
+ * Extract a FeatureConfig from a legacy dream/config.json value.
+ *
+ * Reads ONLY `decisions` (maps to `learning`), `memory`, and `knowledge`.
+ * Ignores any pre-existing `learning` key — that key was written by the old
+ * self-learning pipeline and must not override the `decisions`-derived value
+ * (ADR-001 clean break; applies ISS-07: migration-compat requires decisions-wins).
+ *
+ * Starts from DEFAULT_CONFIG so newly-added fields default correctly for old installs.
+ * Exported for testing.
+ */
+export function seedFeatureConfigFromDream(parsed: unknown): FeatureConfig {
+  const config: FeatureConfig = { ...DEFAULT_CONFIG };
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return config;
+  const p = parsed as Record<string, unknown>;
+  if (typeof p.memory === 'boolean') config.memory = p.memory;
+  if (typeof p.decisions === 'boolean') config.learning = p.decisions; // decisions → learning
+  if (typeof p.knowledge === 'boolean') config.knowledge = p.knowledge;
+  // p.learning intentionally ignored: old self-learning pipeline key (ADR-001 clean break)
+  return config;
+}
+
+/**
  * Per-project: consolidate .devflow/dream/ and .devflow/decisions/ into the new
  * flat .devflow/learning/ directory and write .devflow/config.json.
  *
  * Order of operations follows the sidecar-to-dream template (migrations.ts:541-578):
- * (1) Config FIRST — read dream/config.json, coerce to FeatureConfig (ignore stale
- *     `learning` key from old self-learning pipeline; map `decisions`→`learning`),
- *     atomic-write to .devflow/config.json ONLY when absent (idempotent: forced re-run
- *     must not clobber user-edited toggles), then unlink source (ENOENT-tolerant —
- *     lets the final rmdir dream/ succeed).
+ * (1) Config FIRST — read dream/config.json, coerce via seedFeatureConfigFromDream
+ *     (ignores stale `learning` key; maps `decisions`→`learning`), atomic-write to
+ *     .devflow/config.json ONLY when absent (idempotent: forced re-run must not clobber
+ *     user-edited toggles), then unlink source (ENOENT-tolerant — lets final rmdir succeed).
  * (2) Dream queue files (.pending-turns.jsonl, .pending-turns.processing) → learning/.
  * (3) Explicit move: decisions/decisions.json → learning/learning.json.
- * (4) Remaining decisions/ contents → learning/ via moveDirContents; skip-set drops
- *     transient lock dirs and orphaned telemetry files (see inline comment).
- * (5) Best-effort rmdir both sources (non-empty if live lock dirs remain — acceptable).
- * (6) Re-render index.md: footer paths still reference decisions/ until next Dream run;
- *     renderDecisionsIndex() updates them immediately (no-op when ledger absent).
+ * (4) Unlink orphaned file-type entries from decisions/ (applies ADR-003 clean end-state).
+ * (5) Remaining decisions/ contents → learning/ via moveDirContents; skip-set provides
+ *     defence-in-depth for already-unlinked entries and drops transient lock dirs.
+ * (6) Re-render index.md so footer paths reference learning/ not decisions/. Wrapped in
+ *     try/catch: render failure is non-fatal — the next Learning-agent render self-heals
+ *     the index. Runs BEFORE step-7 rmdirs so paths are resolved on content already moved.
+ * (7) Best-effort rmdir both sources (non-empty if live lock dirs remain — acceptable).
  *
  * Applies ADR-001 (config-only gate), PF-002 (config first), PF-004 (ENOENT-tolerant).
  */
@@ -999,23 +1024,17 @@ const MIGRATION_CONSOLIDATE_DREAM_DECISIONS_TO_LEARNING: Migration<'per-project'
     await fs.mkdir(learningDir, { recursive: true });
 
     // 1. Config FIRST — per PF-002 and sidecar-to-dream template ordering.
-    //    Read dream/config.json; ignore stale `learning` key (old self-learning pipeline),
-    //    map `decisions` → `learning`. Write .devflow/config.json only when absent.
+    //    Read dream/config.json via seedFeatureConfigFromDream (which ignores the stale
+    //    `learning` key and maps `decisions` → `learning`).
+    //    Write .devflow/config.json only when absent (idempotent: don't clobber user-edited toggles).
     const oldConfigPath = path.join(dreamDir, 'config.json');
     const featureConfigPath = path.join(devflowDir, 'config.json');
     let configWritten = false;
 
-    const newConfig = { memory: true, learning: true, knowledge: true };
+    let newConfig: FeatureConfig = { ...DEFAULT_CONFIG };
     try {
       const raw = await fs.readFile(oldConfigPath, 'utf-8');
-      const parsed = JSON.parse(raw) as unknown;
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        const p = parsed as Record<string, unknown>;
-        if (typeof p.memory === 'boolean') newConfig.memory = p.memory;
-        if (typeof p.decisions === 'boolean') newConfig.learning = p.decisions;
-        if (typeof p.knowledge === 'boolean') newConfig.knowledge = p.knowledge;
-        // p.learning intentionally ignored: old self-learning pipeline key (ADR-001 clean break)
-      }
+      newConfig = seedFeatureConfigFromDream(JSON.parse(raw) as unknown);
     } catch { /* ENOENT or malformed — keep DEFAULT_CONFIG */ }
 
     try {
@@ -1046,32 +1065,61 @@ const MIGRATION_CONSOLIDATE_DREAM_DECISIONS_TO_LEARNING: Migration<'per-project'
       path.join(learningDir, 'learning.json'),
     );
 
-    // 4. Rest of decisions/ → learning/ via moveDirContents.
-    //    Skip transient lock dirs and orphaned telemetry — see spec note in design doc.
+    // 4a. Unlink orphaned file-type entries from decisions/ before moveDirContents
+    //     so they cannot block the best-effort rmdir (applies ADR-003 clean end-state).
+    //     ENOENT-tolerant; rethrow non-ENOENT (avoids PF-003 bare-rm anti-pattern).
+    for (const orphan of [
+      '.decisions-usage.json',         // write-only telemetry; orphaned keys
+      '.decisions-manifest.json',      // orphaned sidecar judgment state
+      '.decisions-notifications.json', // orphaned
+      '.decisions-batch-ids',          // orphaned
+    ]) {
+      try {
+        await fs.unlink(path.join(decisionsDir, orphan));
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+    }
+
+    // 4b. Rest of decisions/ → learning/ via moveDirContents.
+    //     Skip-set provides defence-in-depth for already-unlinked entries above and
+    //     drops transient lock dirs (which are directories; unlink does not apply).
     const decisionsSkip = new Set([
       'decisions.json',                // already moved above as learning.json
       '.decisions.lock',               // transient lock dir — drop
       '.decisions-usage.lock',         // transient lock dir — drop
       '.pending-turns.jsonl.lock',     // transient queue-overflow lock dir (under dream/) — drop
       '.observations.lock',            // may be LIVE — never move (PF lock-under-parent)
-      '.decisions-usage.json',         // write-only telemetry; orphaned keys — drop
-      '.decisions-manifest.json',      // orphaned sidecar judgment state — drop
-      '.decisions-notifications.json', // orphaned — drop
-      '.decisions-batch-ids',          // orphaned — drop
+      '.decisions-usage.json',         // unlinked above — skip is defence-in-depth
+      '.decisions-manifest.json',      // unlinked above — skip is defence-in-depth
+      '.decisions-notifications.json', // unlinked above — skip is defence-in-depth
+      '.decisions-batch-ids',          // unlinked above — skip is defence-in-depth
     ]);
     const moveWarnings = await moveDirContents(decisionsDir, learningDir, decisionsSkip);
     warnings.push(...moveWarnings);
 
-    // 5. Best-effort rmdir both sources (may be non-empty if live lock dirs remain —
+    // 6. Re-render index.md so footer paths reference learning/ not decisions/.
+    //    Runs BEFORE step-7 rmdirs so the ledger is already in learning/ when the
+    //    renderer reads it. Wrapped in try/catch: render failure is non-fatal —
+    //    the next Learning-agent render self-heals the index (applies ISS-02:
+    //    unguarded render could strand the migration on a 30s render-lock timeout,
+    //    after which the fast-path guard makes retry a no-op).
+    const { renderDecisionsIndex } = await import('./decisions-ledger-migration.js');
+    try {
+      await renderDecisionsIndex(
+        ctx.projectRoot,
+        ctx.rendererPath !== undefined ? { rendererPath: ctx.rendererPath } : {},
+      );
+    } catch (renderErr) {
+      const msg = renderErr instanceof Error ? renderErr.message : String(renderErr);
+      warnings.push(`render-decisions-index: ${msg} (non-fatal — next Learning-agent render will self-heal)`);
+    }
+
+    // 7. Best-effort rmdir both sources (may be non-empty if live lock dirs remain —
     //    acceptable; same pattern as sidecar-to-dream migration)
     try { await fs.rmdir(dreamDir); } catch { /* non-empty or already gone */ }
     try { await fs.rmdir(decisionsDir); } catch { /* non-empty or already gone */ }
-
-    // 6. Re-render index.md so footer paths reference learning/ not decisions/.
-    //    Without this, workflow commands hand sub-agents dead paths until the next
-    //    Learning-agent render. No-op when ledger is absent.
-    const { renderDecisionsIndex } = await import('./decisions-ledger-migration.js');
-    await renderDecisionsIndex(ctx.projectRoot);
 
     const infos: string[] = [];
     if (configWritten) infos.push('Wrote .devflow/config.json from dream/config.json');
