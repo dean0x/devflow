@@ -162,15 +162,11 @@ describe('lockstep: Learning agent 900s staleness matches directive', () => {
   const SESSION_START_CONTEXT = path.resolve(ROOT, 'scripts/hooks/session-start-context');
 
   it('session-start-context directive also uses 900s as the freshness threshold', async () => {
-    let hookContent: string;
-    try {
-      hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
-    } catch {
-      // If hook file not found, skip gracefully
-      return;
-    }
-    // Both the agent and the directive must agree on 900s for stale-crash detection
-    expect(hookContent).toMatch(/900/);
+    // Let readFile throw if the hook is missing — a missing hook is a real failure, not a skip
+    const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
+    // Both the agent and the directive must agree on the exact constant (avoids PF-008 —
+    // matching any substring containing "900" is not proof the threshold is the same)
+    expect(hookContent).toContain('PROCESSING_STALE_SECS=900');
   });
 
   it('learning agent uses 900s freshness threshold (not an older value)', async () => {
@@ -191,7 +187,16 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
     const violations: string[] = [];
     for (const f of files) {
-      const content = fsSync.readFileSync(f, 'utf-8');
+      // Guard against TOCTOU: a parallel test (build-mds.test.ts) may plant and unlink
+      // transient _test-*.mds fixtures in commands/ between our readdir and this read.
+      // A vanished file cannot be a shipping violation — skip it. Rethrow all other errors.
+      let content: string;
+      try {
+        content = fsSync.readFileSync(f, 'utf-8');
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw err;
+      }
       if (content.includes('.devflow/dream/')) {
         violations.push(path.relative(ROOT, f));
       }
@@ -205,7 +210,14 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
     const violations: string[] = [];
     for (const f of files) {
-      const content = fsSync.readFileSync(f, 'utf-8');
+      // Defensive ENOENT guard (consistent with the sibling test above).
+      let content: string;
+      try {
+        content = fsSync.readFileSync(f, 'utf-8');
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw err;
+      }
       if (content.includes('subagent_type="Dream"') || content.includes("subagent_type='Dream'")) {
         violations.push(path.relative(ROOT, f));
       }
