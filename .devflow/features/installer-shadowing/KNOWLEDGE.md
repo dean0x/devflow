@@ -217,8 +217,9 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow`, `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
 - `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`, `listShadowed`
 - `src/cli/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_SKILL_NAMES`, `LEGACY_AGENT_NAMES`
+
 ## Related
 
 - ADR-010: Productionalize skill/rule shadowing — governs the decision to make `installViaFileCopy` the sole install path and to surface invalid shadows as warn-and-install-source (not hard-fail) (applies ADR-010)
-- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup (no tombstone comments, no `*_old` names; `LEGACY_SKILL_NAMES` tracks accumulated deprecated names; `extraKnownMarketplaces` key removal in `marketplace-cleanup.ts`) (applies ADR-003)
+- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup (no tombstone comments, no `*_old` names; `LEGACY_SKILL_NAMES` tracks accumulated deprecated names) (applies ADR-003)
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (`ensureDevflowGitignore` in `post-install.ts`)

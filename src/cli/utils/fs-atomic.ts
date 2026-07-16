@@ -5,7 +5,8 @@ import { promises as fs } from 'fs';
  *
  * D34: Canonical atomic-write helper for the TypeScript CLI surface.
  *
- * Call sites: migrations.ts (writeAppliedMigrations) and learning-tuning-config.ts.
+ * Call sites: used by the CLI's exclusive-write call sites (migrations, init, post-install,
+ * uninstall, security, ambient, memory, HUD, observation I/O).
  * The CJS counterpart (`writeExclusive` in `scripts/hooks/json-helper.cjs` and
  * `scripts/hooks/decisions-usage-scan.cjs`) intentionally remains a separate
  * implementation — same semantics, different module system. Any change to the
