@@ -86,7 +86,7 @@ if [ -z "$CLAUDE_BIN" ]; then
   exit 0
 fi
 
-# --- Worker-level lock (300s stale-break — much longer than dream-lock's 30s) ---
+# --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
 #

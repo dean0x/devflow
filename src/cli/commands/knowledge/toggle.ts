@@ -1,7 +1,7 @@
 /**
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
  *
- * The sole opt-out mechanism is the dream config `knowledge` field (config-only gate per ADR-001).
+ * The sole opt-out mechanism is the feature config `knowledge` field (config-only gate per ADR-001).
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -45,7 +45,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   if (options.enable) {
     p.intro(color.cyan('Enable Feature Knowledge Bases'));
 
-    // Update dream config (the sole gate — config-only per ADR-001)
+    // Update feature config (the sole gate — config-only per ADR-001)
     await updateFeature(worktreePath, 'knowledge', true);
 
     // Update manifest
@@ -63,7 +63,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   } else if (options.disable) {
     p.intro(color.cyan('Disable Feature Knowledge Bases'));
 
-    // Update dream config (the sole gate — config-only per ADR-001)
+    // Update feature config (the sole gate — config-only per ADR-001)
     await updateFeature(worktreePath, 'knowledge', false);
 
     // Update manifest

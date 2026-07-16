@@ -43,12 +43,12 @@ function isLegacyPerSessionMarker(name: string): boolean {
  *
  * @returns number of files removed
  */
-export async function sweepLegacyDreamMarkers(dreamDir: string): Promise<number> {
+export async function sweepLegacyDreamMarkers(learningDir: string): Promise<number> {
   let removed = 0;
 
   for (const name of LEGACY_FIXED_STAMPS) {
     try {
-      await fs.unlink(path.join(dreamDir, name));
+      await fs.unlink(path.join(learningDir, name));
       removed++;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -57,11 +57,11 @@ export async function sweepLegacyDreamMarkers(dreamDir: string): Promise<number>
   }
 
   try {
-    const entries = await fs.readdir(dreamDir);
+    const entries = await fs.readdir(learningDir);
     for (const entry of entries) {
       if (isLegacyPerSessionMarker(entry)) {
         try {
-          await fs.unlink(path.join(dreamDir, entry));
+          await fs.unlink(path.join(learningDir, entry));
           removed++;
         } catch (err) {
           const code = (err as NodeJS.ErrnoException).code;

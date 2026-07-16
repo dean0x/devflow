@@ -48,7 +48,7 @@ plugins/*/agents/designer.md
 plugins/*/agents/knowledge.md
 plugins/*/agents/researcher.md
 plugins/*/agents/bug-analyzer.md
-plugins/*/agents/dream.md
+plugins/*/agents/learning.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -84,7 +84,7 @@ install.log
 # Devflow local scope installation (use --scope local)
 .claude/
 
-# Devflow runtime data — local by default (memory, dream, docs, decisions, locks).
+# Devflow runtime data — local by default (memory, learning, docs, locks).
 # Exception: feature knowledge bases under .devflow/features/ are shared via git —
 # index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else
 # under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`

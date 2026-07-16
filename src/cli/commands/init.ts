@@ -65,7 +65,7 @@ export type { MigrationLogger };
  *      migrations are vacuously applied per D37 semantics).
  *
  * Migrations are a one-time cleanup pass over ~/.devflow runtime data
- * (decisions, memory, dream, knowledge). They never touch the installer's
+ * (memory, learning, knowledge). They never touch the installer's
  * copy targets (skills, agents, rules, commands, scripts), so ordering
  * relative to installViaFileCopy carries no data dependency.
  *
