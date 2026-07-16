@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triager + Coder pair. The Triager (opus) runs a blast-radius disposition pass; the Coder (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triager, coder, simplifier, validator]`.
 
 ### Removed
+- **1.x migration registry and helper modules** (BREAKING): all 20 run-once 1.x upgrade migrations removed from `MIGRATIONS`; helper modules `legacy-decisions-purge.ts`, `decisions-ledger-migration.ts`, `marketplace-cleanup.ts`, and `mkdir-lock.ts` deleted. The migration framework stays for future 2.x entries. No 1.x → 2.0 upgrade path.
 - **Native `claude plugin install` path** (BREAKING): the `claude plugin install` code path is removed; `installViaFileCopy` (file copy) is the sole install mechanism for all Devflow assets.
 - **`extraKnownMarketplaces` registration from settings template**: the Devflow marketplace entry is no longer written to `~/.claude/settings.json` on install.
 - **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
