@@ -4,7 +4,7 @@
 //
 // writeExclusive uses O_EXCL (wx flag) so the kernel rejects the open if a file or
 // symlink already exists at the .tmp path. On EEXIST it unlinks and retries once.
-// These tests mirror the pattern in legacy-decisions-purge.test.ts:218-244.
+// Tests verify O_EXCL semantics: EEXIST path unlinks and retries once.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';

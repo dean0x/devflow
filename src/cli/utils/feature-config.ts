@@ -62,7 +62,7 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
  * (1) DEFAULT_CONFIG is the safe-to-enable state, (2) re-running `devflow init`
  * is the documented recovery path for fresh clones, and (3) re-adding a sidecar
  * fallback would reintroduce compat code that ADR-001 removed.
- * Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
+ * Recovery: run `devflow init` again after opening a Claude session in the project.
  */
 export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
   const configPath = getFeatureConfigPath(projectRoot);

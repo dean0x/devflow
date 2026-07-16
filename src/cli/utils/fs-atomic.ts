@@ -5,13 +5,11 @@ import { promises as fs } from 'fs';
  *
  * D34: Canonical atomic-write helper for the TypeScript CLI surface.
  *
- * All three TS call sites (learn.ts, legacy-decisions-purge.ts, migrations.ts)
- * previously inlined their own copies of this logic. This module is the single
- * source of truth for the TS side; the CJS counterpart (`writeExclusive` in
- * `scripts/hooks/json-helper.cjs` and `scripts/hooks/decisions-usage-scan.cjs`)
- * intentionally remains a separate implementation — same semantics, different
- * module system. Any change to the retry logic here MUST be mirrored in both
- * CJS files.
+ * Call sites: migrations.ts (writeAppliedMigrations) and learning-tuning-config.ts.
+ * The CJS counterpart (`writeExclusive` in `scripts/hooks/json-helper.cjs` and
+ * `scripts/hooks/decisions-usage-scan.cjs`) intentionally remains a separate
+ * implementation — same semantics, different module system. Any change to the
+ * retry logic here MUST be mirrored in both CJS files.
  */
 
 /**

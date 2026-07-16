@@ -84,8 +84,8 @@ export interface LearningObservation {
  *   - `[key: string]: unknown` index signature preserves round-trip JSON safety for
  *     fields added by future ops (the renderer and migration always spread-merge rows)
  *
- * Home: observations.ts (pure data module, no I/O) so decisions-ledger-migration.ts
- * and any future ledger consumers can import without circular deps.
+ * Home: observations.ts (pure data module, no I/O) so any future ledger consumers
+ * can import without circular deps.
  */
 export interface LedgerRow {
   /** Observation ID (may be synthetic: `obs_migrated_{anchor}` for no-Source entries). */

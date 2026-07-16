@@ -96,8 +96,7 @@ describe('readConfig', () => {
   });
 
   // AC-9 (clean break): old dream/config.json alone (no .devflow/config.json) → DEFAULT_CONFIG
-  // The consolidate-dream-decisions-to-learning-v1 migration writes .devflow/config.json at init time;
-  // readConfig no longer falls back (ADR-001 clean break).
+  // readConfig reads only .devflow/config.json; no fallback to dream/config.json (ADR-001 clean break).
   it('AC-9: only dream/config.json present (no .devflow/config.json) → returns DEFAULT_CONFIG', async () => {
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     fs.mkdirSync(dreamDir, { recursive: true });
