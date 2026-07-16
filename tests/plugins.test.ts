@@ -293,6 +293,19 @@ describe('LEGACY_AGENT_NAMES consistency', () => {
       ).not.toContain(legacyName);
     }
   });
+
+  it("dream is in LEGACY_AGENT_NAMES (renamed to learning in commit 8)", () => {
+    expect(LEGACY_AGENT_NAMES).toContain('dream');
+  });
+
+  it("learning is in devflow-core-skills and devflow-ambient agents (not dream)", () => {
+    const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+    const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
+    expect(coreSkills?.agents).toContain('learning');
+    expect(coreSkills?.agents).not.toContain('dream');
+    expect(ambient?.agents).toContain('learning');
+    expect(ambient?.agents).not.toContain('dream');
+  });
 });
 
 describe('LEGACY_SKILL_NAMES consistency', () => {

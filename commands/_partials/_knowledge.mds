@@ -48,9 +48,9 @@ Resolve the worktree root using the `devflow:worktree-support` algorithm (use WO
 
 **Step 1 — Check the opt-out gate:**
 
-Read `\{worktree\}/.devflow/dream/config.json`. If the `knowledge` field is `false`, skip write-back entirely — the user has disabled it.
+Read `\{worktree\}/.devflow/config.json`. If the `knowledge` field is `false`, skip write-back entirely — the user has disabled it.
 
-If `.devflow/dream/config.json` does not exist, proceed (default is enabled).
+If `.devflow/config.json` does not exist, proceed (default is enabled).
 
 **Step 2 — Evaluate whether write-back is warranted:**
 

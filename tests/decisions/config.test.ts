@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  loadDecisionsConfig,
-  applyDecisionsConfigLayer,
-  type DecisionsConfig,
-} from '../../src/cli/utils/decisions-config.js';
+  loadLearningTuningConfig,
+  applyLearningTuningConfigLayer,
+  type LearningTuningConfig,
+} from '../../src/cli/utils/learning-tuning-config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -26,58 +26,58 @@ function ensureDir(dir: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// applyDecisionsConfigLayer
+// applyLearningTuningConfigLayer
 // ---------------------------------------------------------------------------
 
-describe('applyDecisionsConfigLayer', () => {
-  const base: DecisionsConfig = {
+describe('applyLearningTuningConfigLayer', () => {
+  const base: LearningTuningConfig = {
     model: 'opus',
     debug: false,
   };
 
   it('overrides model string field', () => {
-    const result = applyDecisionsConfigLayer(base, JSON.stringify({ model: 'haiku' }));
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 'haiku' }));
     expect(result.model).toBe('haiku');
   });
 
   it('overrides debug boolean field', () => {
-    const result = applyDecisionsConfigLayer(base, JSON.stringify({ debug: true }));
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ debug: true }));
     expect(result.debug).toBe(true);
   });
 
   it('ignores non-boolean debug', () => {
-    const result = applyDecisionsConfigLayer(base, JSON.stringify({ debug: 'yes' }));
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ debug: 'yes' }));
     expect(result.debug).toBe(false);
   });
 
   it('ignores non-string model', () => {
-    const result = applyDecisionsConfigLayer(base, JSON.stringify({ model: 42 }));
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 42 }));
     expect(result.model).toBe('opus');
   });
 
   it('returns a new object — does not mutate input', () => {
-    const input: DecisionsConfig = { ...base };
-    const result = applyDecisionsConfigLayer(input, JSON.stringify({ model: 'sonnet' }));
+    const input: LearningTuningConfig = { ...base };
+    const result = applyLearningTuningConfigLayer(input, JSON.stringify({ model: 'sonnet' }));
     expect(result.model).toBe('sonnet');
     expect(input.model).toBe('opus'); // not mutated
     expect(result).not.toBe(input);
   });
 
   it('returns a copy on invalid JSON without throwing', () => {
-    const result = applyDecisionsConfigLayer(base, 'not valid json');
+    const result = applyLearningTuningConfigLayer(base, 'not valid json');
     expect(result).toEqual(base);
     expect(result).not.toBe(base); // different reference
   });
 
   it('handles empty JSON object — preserves all defaults', () => {
-    const result = applyDecisionsConfigLayer(base, '{}');
+    const result = applyLearningTuningConfigLayer(base, '{}');
     expect(result).toEqual(base);
   });
 
   it('ignores dropped legacy fields (max_daily_runs/throttle_minutes) without error', () => {
     // On-disk configs from before the dream-system simplification may still carry
     // these fields — they must load without error and be silently ignored.
-    const result = applyDecisionsConfigLayer(
+    const result = applyLearningTuningConfigLayer(
       base,
       JSON.stringify({ max_daily_runs: 7, throttle_minutes: 15, model: 'haiku' }),
     );
@@ -85,13 +85,49 @@ describe('applyDecisionsConfigLayer', () => {
     expect((result as Record<string, unknown>).max_daily_runs).toBeUndefined();
     expect((result as Record<string, unknown>).throttle_minutes).toBeUndefined();
   });
+
+  // ISS-11: out-of-domain string model values are rejected — falls back to config.model
+  it('ISS-11: rejects out-of-domain model string (falls back to config.model)', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 'gpt-4' }));
+    expect(result.model).toBe('opus'); // config.model preserved
+  });
+
+  it('ISS-11: rejects empty string model (falls back to config.model)', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: '' }));
+    expect(result.model).toBe('opus');
+  });
+
+  // ISS-12: non-object JSON values must fall back to config copy (object-shape guard)
+  it('ISS-12: returns config copy when JSON is an array', () => {
+    const result = applyLearningTuningConfigLayer(base, JSON.stringify([{ model: 'haiku' }]));
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is null', () => {
+    const result = applyLearningTuningConfigLayer(base, 'null');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is a number', () => {
+    const result = applyLearningTuningConfigLayer(base, '42');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
+
+  it('ISS-12: returns config copy when JSON is a boolean', () => {
+    const result = applyLearningTuningConfigLayer(base, 'true');
+    expect(result).toEqual(base);
+    expect(result).not.toBe(base);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// loadDecisionsConfig — file-system tests
+// loadLearningTuningConfig — file-system tests
 // ---------------------------------------------------------------------------
 
-describe('loadDecisionsConfig', () => {
+describe('loadLearningTuningConfig', () => {
   let devflowDir: string;
   let projectCwd: string;
   let originalDevflowDir: string | undefined;
@@ -99,9 +135,9 @@ describe('loadDecisionsConfig', () => {
   beforeEach(() => {
     devflowDir = makeTmpDir();
     projectCwd = makeTmpDir();
-    ensureDir(path.join(projectCwd, '.devflow', 'decisions'));
+    ensureDir(path.join(projectCwd, '.devflow', 'learning'));
 
-    // Override the DEVFLOW_DIR env var so loadDecisionsConfig reads from our
+    // Override the DEVFLOW_DIR env var so loadLearningTuningConfig reads from our
     // temp directory instead of ~/.devflow.
     originalDevflowDir = process.env.DEVFLOW_DIR;
     process.env.DEVFLOW_DIR = devflowDir;
@@ -120,85 +156,85 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('returns all defaults when no config files exist', () => {
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('opus');
     expect(config.debug).toBe(false);
   });
 
   it('global config overrides defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
-    const config = loadDecisionsConfig(projectCwd);
+    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect(config.debug).toBe(false); // default preserved
   });
 
   it('project config overrides global config', () => {
-    writeJson(devflowDir, 'decisions.json', {
+    writeJson(devflowDir, 'learning.json', {
       model: 'haiku',
       debug: true,
     });
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('sonnet'); // project wins
     expect(config.debug).toBe(true); // global preserved when project doesn't set
   });
 
   it('project config alone overrides defaults', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('sonnet');
     expect(config.debug).toBe(false); // default
   });
 
   it('invalid JSON in global config returns defaults without crashing', () => {
     fs.writeFileSync(
-      path.join(devflowDir, 'decisions.json'),
+      path.join(devflowDir, 'learning.json'),
       'not json',
       'utf-8',
     );
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('opus');
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
-    writeJson(devflowDir, 'decisions.json', { model: 'haiku' });
+    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
     fs.writeFileSync(
-      path.join(projectCwd, '.devflow', 'decisions', 'decisions.json'),
+      path.join(projectCwd, '.devflow', 'learning', 'learning.json'),
       'bad json',
       'utf-8',
     );
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('haiku'); // global applied
   });
 
   it('partial project override preserves global fields', () => {
-    writeJson(devflowDir, 'decisions.json', {
+    writeJson(devflowDir, 'learning.json', {
       model: 'haiku',
     });
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       debug: true,
     });
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('haiku'); // from global
     expect(config.debug).toBe(true); // from project
   });
 
   it('AC-C5: model defaults to opus (not sonnet) when nothing configures it', () => {
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('opus');
   });
 
   it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       max_daily_runs: 3,
       throttle_minutes: 5,
       model: 'haiku',
     });
-    const config = loadDecisionsConfig(projectCwd);
+    const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect((config as Record<string, unknown>).max_daily_runs).toBeUndefined();
     expect((config as Record<string, unknown>).throttle_minutes).toBeUndefined();

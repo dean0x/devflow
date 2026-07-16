@@ -6,7 +6,7 @@
 // The .md files are now a pure render of the decisions ledger. Status changes
 // must go through `retire-anchor` (json-helper.cjs), which flips decisions_status
 // on the ledger row and re-renders both .md files atomically. Tests that directly
-// tested updateDecisionsStatus have been removed; see tests/decisions/dream-curation.test.ts
+// tested updateDecisionsStatus have been removed; see tests/decisions/learning-curation.test.ts
 // for the retire-anchor/render-based status-change tests.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -18,7 +18,7 @@ import {
   isLearningObservation,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
-import { runHelper } from './helpers.js';
+import { runHelper } from './learning-helpers.js';
 
 // Helper: serialize an array of observations to JSONL
 function serializeLog(observations: LearningObservation[]): string {
@@ -101,7 +101,7 @@ describe('isLearningObservation v2', () => {
 // updateDecisionsStatus was removed in Phase 6 of the decisions-ledger-render refactor.
 // The .md files are now a pure render of the decisions ledger. Status changes must go
 // through `retire-anchor` (json-helper.cjs). Tests covering retire-anchor + render-based
-// status changes live in tests/decisions/dream-curation.test.ts.
+// status changes live in tests/decisions/learning-curation.test.ts.
 describe('updateDecisionsStatus (removed in Phase 6)', () => {
   it('observation-io module does not export updateDecisionsStatus', async () => {
     const mod = await import('../../src/cli/utils/observation-io.js');

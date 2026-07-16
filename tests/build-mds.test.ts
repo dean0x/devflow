@@ -262,7 +262,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
     if (result.error) throw result.error;
   });
 
-  it('all 9 knowledge command outputs contain the .devflow/decisions/index.md read (decisions_load expansion)', async () => {
+  it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -274,8 +274,8 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       }
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain .devflow/decisions/index.md (decisions_load expansion)`,
-      ).toContain('.devflow/decisions/index.md');
+        `${destRelDir}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
+      ).toContain('.devflow/learning/index.md');
     }
   });
 

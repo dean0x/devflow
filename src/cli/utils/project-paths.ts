@@ -8,9 +8,6 @@
  * All construction uses `path.join()` — no string concatenation.
  *
  * ARCHITECTURE: This module is the single source of truth for path layout.
- * PR 5b flipped these return values from the old .memory/.features/.docs layout
- * to the new consolidated .devflow/ layout. Every consumer automatically picks
- * up the new paths without further changes.
  *
  * CJS COUNTERPART: scripts/hooks/lib/project-paths.cjs must mirror this file
  * exactly. Keep them in sync when adding or changing functions.
@@ -27,117 +24,101 @@ export function getMemoryDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/dream/ — dream state directory */
-export function getDreamDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream');
+/** .devflow/learning/ — learning state root */
+export function getLearningDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning');
 }
 
-/** .devflow/decisions/ — decisions and pitfalls subdirectory (promoted from .memory/decisions/) */
-export function getDecisionsDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions');
-}
-
-/** .devflow/features/ — per-feature knowledge bases (promoted from .features/) */
+/** .devflow/features/ — per-feature knowledge bases */
 export function getFeaturesDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'features');
 }
 
-/** .devflow/docs/ — generated documentation artifacts (promoted from .docs/) */
+/** .devflow/docs/ — generated documentation artifacts */
 export function getDocsDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'docs');
 }
 
 // ---------------------------------------------------------------------------
-// Dream files
+// Feature config (neutral .devflow root — not inside learning/)
 // ---------------------------------------------------------------------------
 
-/** .devflow/dream/config.json — dream feature config */
-export function getDreamConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', 'config.json');
-}
-
-/** .devflow/dream/.pending-turns.jsonl — decisions detection queue (dual-write with memory queue) */
-export function getDreamPendingTurnsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.jsonl');
-}
-
-/** .devflow/dream/.pending-turns.processing — atomic claim held by the Dream agent while processing */
-export function getDreamPendingTurnsProcessingPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', '.pending-turns.processing');
+/** .devflow/config.json — feature toggles {memory, learning, knowledge} */
+export function getFeatureConfigPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'config.json');
 }
 
 // ---------------------------------------------------------------------------
-// Decisions files
+// Learning queue files
 // ---------------------------------------------------------------------------
 
-/** .devflow/decisions/decisions.md */
+/** .devflow/learning/.pending-turns.jsonl — decisions detection queue */
+export function getLearningPendingTurnsPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
+}
+
+/** .devflow/learning/.pending-turns.processing — atomic claim held by the Learning agent while processing */
+export function getLearningPendingTurnsProcessingPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
+}
+
+// ---------------------------------------------------------------------------
+// Learning content files
+// ---------------------------------------------------------------------------
+
+/** .devflow/learning/decisions.md */
 export function getDecisionsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'decisions.md');
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions.md');
 }
 
-/** .devflow/decisions/pitfalls.md */
+/** .devflow/learning/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'pitfalls.md');
+  return path.join(projectRoot, '.devflow', 'learning', 'pitfalls.md');
 }
 
-/** .devflow/decisions/decisions.json — project-level decisions config */
-export function getDecisionsConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
+/** .devflow/learning/learning.json — project-level learning agent tuning config */
+export function getLearningTuningConfigPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
 }
 
-/** .devflow/decisions/decisions-ledger.jsonl — committed anchored rows (single source of truth for rendering) */
+/** .devflow/learning/decisions-ledger.jsonl — anchored ledger rows (single source of truth for rendering) */
 export function getDecisionsLedgerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-ledger.jsonl');
 }
 
-/** .devflow/decisions/decisions-log.jsonl */
+/** .devflow/learning/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.jsonl');
 }
 
-/** .devflow/decisions/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+/** .devflow/learning/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
 export function getDecisionsArchivePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
-/** .devflow/decisions/.decisions-manifest.json */
-export function getDecisionsManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-manifest.json');
-}
-
-/** .devflow/decisions/.decisions.lock — mkdir-based lock directory */
+/** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions.lock');
+  return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
 }
 
-/** .devflow/decisions/.decisions-usage.json */
+/** .devflow/learning/.decisions-usage.json */
 export function getDecisionsUsagePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.json');
+  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.json');
 }
 
-/** .devflow/decisions/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
+/** .devflow/learning/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
 export function getDecisionsUsageLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
+  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.lock');
 }
 
-/** .devflow/decisions/index.md — pre-rendered compact index written by render-decisions.cjs */
+/** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
 export function getDecisionsIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', 'index.md');
+  return path.join(projectRoot, '.devflow', 'learning', 'index.md');
 }
 
-/** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
+/** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
 export function getObservationsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
-}
-
-/** .devflow/decisions/.decisions-notifications.json */
-export function getDecisionsNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');
-}
-
-/** .devflow/decisions/.decisions-batch-ids */
-export function getDecisionsBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-batch-ids');
+  return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
 }
 
 // ---------------------------------------------------------------------------

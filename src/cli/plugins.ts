@@ -48,7 +48,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    agents: ['dream'],
+    agents: ['learning'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
@@ -145,7 +145,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'triager', 'designer', 'knowledge', 'researcher', 'dream'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'triager', 'designer', 'knowledge', 'researcher', 'learning'],
     skills: [
       'review-methodology',
       'security',
@@ -288,6 +288,7 @@ export const LEGACY_COMMAND_NAMES: string[] = [
 export const LEGACY_AGENT_NAMES: string[] = [
   'shepherd',
   'resolver', // retired in favour of Triager + Coder-as-fixer split
+  'dream',    // renamed to 'learning' in commit 8 of rename-dream-to-learning
 ];
 
 /**

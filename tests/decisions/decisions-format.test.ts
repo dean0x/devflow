@@ -415,7 +415,7 @@ describe('buildIndexContent', () => {
 // ---------------------------------------------------------------------------
 // json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by seeding an observation row directly (as the Dream agent
+// We verify this by seeding an observation row directly (as the Learning agent
 // appends it), promoting via assign-anchor, and checking the output matches
 // what formatDecisionBody/formatPitfallBody would produce. This ensures the
 // write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
@@ -430,7 +430,7 @@ const JSON_HELPER = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
   it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
     const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
@@ -449,7 +449,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Seed the observation directly (one JSONL row, as the Dream agent
+      // Seed the observation directly (one JSONL row, as the Learning agent
       // appends it), then promote via assign-anchor
       fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
@@ -473,7 +473,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 
   it('pitfall entry written via assign-anchor matches formatPitfallBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-pf-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
     const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
@@ -492,7 +492,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
     });
 
     try {
-      // Seed the observation directly (one JSONL row, as the Dream agent
+      // Seed the observation directly (one JSONL row, as the Learning agent
       // appends it), then promote via assign-anchor
       fs.writeFileSync(logFile, obs + '\n', 'utf8');
       execSync(
@@ -528,16 +528,16 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dream agent content-presence assertions (AC-F1, AC-F2)
+// Learning agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the Dream agent instructions
-// (shared/agents/dream.md) contain the required creation-bar elements. They do
+// These lightweight checks verify that the Learning agent instructions
+// (shared/agents/learning.md) contain the required creation-bar elements. They do
 // not test LLM judgment — that is validated by the Tester agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 
-describe('Dream agent creation-bar contract', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/dream.md');
+describe('Learning agent creation-bar contract', () => {
+  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
 
   let agentContent: string;
   beforeAll(() => {

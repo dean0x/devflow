@@ -32,7 +32,7 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
-import { removeDreamHook } from './dream.js';
+import { removeDreamHook } from './legacy-hooks.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
@@ -40,7 +40,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
+import { writeConfig } from '../utils/feature-config.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
@@ -49,7 +49,7 @@ export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, disc
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
-export { removeDreamHook, hasDreamHook } from './dream.js';
+export { removeDreamHook, hasDreamHook } from './legacy-hooks.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
 
@@ -65,7 +65,7 @@ export type { MigrationLogger };
  *      migrations are vacuously applied per D37 semantics).
  *
  * Migrations are a one-time cleanup pass over ~/.devflow runtime data
- * (decisions, memory, dream, knowledge). They never touch the installer's
+ * (memory, learning, knowledge). They never touch the installer's
  * copy targets (skills, agents, rules, commands, scripts), so ordering
  * relative to installViaFileCopy carries no data dependency.
  *
@@ -168,7 +168,7 @@ interface InitOptions {
   memory?: boolean;
   hud?: boolean;
   knowledge?: boolean;
-  decisions?: boolean;
+  learning?: boolean;
   rules?: boolean;
   security?: SecurityMode;
   hudOnly?: boolean;
@@ -189,8 +189,8 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
-  .option('--decisions', 'Enable decision/pitfall tracking')
-  .option('--no-decisions', 'Disable decision/pitfall tracking')
+  .option('--learning', 'Enable learning (decision/pitfall tracking)')
+  .option('--no-learning', 'Disable learning (decision/pitfall tracking)')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
@@ -288,7 +288,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, decisions: false, rules: false, flags: [] },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -437,12 +437,12 @@ export const initCommand = new Command('init')
     // Early git detection (needed by both paths)
     const earlyGitRoot = await getGitRoot();
 
-    // Feature decisions — defaults for recommended, prompts for advanced
+    // Feature toggles — defaults for recommended, prompts for advanced
     let ambientEnabled = true;
     let memoryEnabled = true;
     let hudEnabled = true;
     let knowledgeEnabled = true;
-    let decisionsEnabled = true;
+    let learningEnabled = true;
     let rulesEnabled = true;
     let enabledFlags = getDefaultFlags();
     let viewMode: ViewMode = 'default';
@@ -470,7 +470,7 @@ export const initCommand = new Command('init')
       if (options.memory !== undefined) memoryEnabled = options.memory;
       if (options.hud !== undefined) hudEnabled = options.hud;
       if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
-      if (options.decisions !== undefined) decisionsEnabled = options.decisions;
+      if (options.learning !== undefined) learningEnabled = options.learning;
       if (options.rules !== undefined) rulesEnabled = options.rules;
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -502,7 +502,7 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Decisions:       ${decisionsEnabled ? 'enabled' : 'disabled'}`,
+        `Learning:        ${learningEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
@@ -609,24 +609,24 @@ export const initCommand = new Command('init')
         knowledgeEnabled = knowledgeChoice;
       }
 
-      if (options.decisions !== undefined) {
-        decisionsEnabled = options.decisions;
+      if (options.learning !== undefined) {
+        learningEnabled = options.learning;
       } else {
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
           'additional tokens.',
-          'Decision/Pitfall Tracking',
+          'Learning (Decision/Pitfall Tracking)',
         );
-        const decisionsChoice = await p.confirm({
-          message: 'Enable decision/pitfall tracking? (Recommended)',
+        const learningChoice = await p.confirm({
+          message: 'Enable learning? (Recommended)',
           initialValue: true,
         });
-        if (p.isCancel(decisionsChoice)) {
+        if (p.isCancel(learningChoice)) {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        decisionsEnabled = decisionsChoice;
+        learningEnabled = learningChoice;
       }
 
       if (options.rules !== undefined) {
@@ -1117,6 +1117,7 @@ export const initCommand = new Command('init')
       'background-dream-update',
       'dream-procedure.md',
       'lib/staleness.cjs',
+      'dream-lock',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1142,7 +1143,7 @@ export const initCommand = new Command('init')
 
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
-      // each script gates its own per-queue write internally via dream config, so there
+      // each script gates its own per-queue write internally via feature config, so there
       // is no CLI-level enable/disable toggle here. MUST run before addMemoryHooks below
       // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
       // append-before-spawn).
@@ -1151,8 +1152,8 @@ export const initCommand = new Command('init')
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook).
       // Three hooks: Stop (memory-worker), SessionStart (session-start-memory), PreCompact.
-      // Decisions detection/curation no longer live here — see the dream hook below.
-      // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
+      // Learning agent (spawned via session-start-context directive) handles decision/pitfall
+      // detection. Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
@@ -1165,9 +1166,9 @@ export const initCommand = new Command('init')
       const cleanedForContext = removeContextHook(content);
       content = addContextHook(cleanedForContext, devflowDir);
 
-      // Dream hook upgrade cleanup — the spawn-dream-worker SessionStart hook is
-      // retired (the session-start-context directive spawns the Dream agent);
-      // strip any stale entry left in settings.json by a prior install.
+      // Legacy dream-worker hook cleanup — strip any stale spawn-dream-worker entry
+      // left in settings.json by a prior install (session-start-context now spawns
+      // the Learning agent via directive).
       content = removeDreamHook(content);
 
       // Claude Code flags — strip all managed keys, then re-apply selected flags
@@ -1199,15 +1200,15 @@ export const initCommand = new Command('init')
       }
     } catch { /* settings.json may not exist yet */ }
 
-    // Write dream config.json to manage per-feature enable/disable at runtime.
+    // Write .devflow/config.json to manage per-feature enable/disable at runtime.
     // Uses writeConfig (full atomic write) rather than three updateFeature calls because
     // init always sets all three features at once and is never concurrent with toggle
-    // commands — it is a one-time setup action. See D1 in dream-config.ts for the
+    // commands — it is a one-time setup action. See D1 in feature-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
-      await writeDreamConfig(gitRoot, {
+      await writeConfig(gitRoot, {
         memory: memoryEnabled,
-        decisions: decisionsEnabled,
+        learning: learningEnabled,
         knowledge: knowledgeEnabled,
       });
 
@@ -1442,7 +1443,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
+      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, learning: learningEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

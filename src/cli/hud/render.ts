@@ -17,11 +17,10 @@ import sessionDuration from './components/session-duration.js';
 import usageQuota from './components/usage-quota.js';
 import todoProgress from './components/todo-progress.js';
 import configCounts from './components/config-counts.js';
-import decisionsCounts from './components/decisions-counts.js';
+import learningCounts from './components/learning-counts.js';
 import sessionCost from './components/session-cost.js';
 import releaseInfo from './components/release-info.js';
 import worktreeCount from './components/worktree-count.js';
-import notifications from './components/notifications.js';
 
 const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   directory,
@@ -35,11 +34,10 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   usageQuota,
   todoProgress,
   configCounts,
-  decisionsCounts,
+  learningCounts,
   sessionCost,
   releaseInfo,
   worktreeCount,
-  notifications,
 };
 
 /**
@@ -50,8 +48,7 @@ const LINE_GROUPS: ComponentId[][] = [
   ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
   ['contextUsage', 'usageQuota', 'todoProgress'],
   ['model', 'configCounts', 'sessionCost'],
-  ['decisionsCounts'],
-  ['notifications'],
+  ['learningCounts'],
   ['versionBadge'],
 ];
 

@@ -25,7 +25,8 @@ export interface ManifestData {
     memory: boolean;
     hud: boolean;
     knowledge: boolean;
-    decisions: boolean;
+    /** Renamed from decisions — self-healed from features.decisions on read */
+    learning: boolean;
     rules: boolean;
     flags: string[];
     viewMode?: ViewMode;
@@ -66,7 +67,12 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : false;
-    const needsHeal = features.kb !== undefined;
+    // Self-heal: rename features.decisions → features.learning on disk
+    // Coalesce: features.learning wins; fall back to features.decisions; default false.
+    const learning = typeof features.learning === 'boolean' ? features.learning
+      : typeof features.decisions === 'boolean' ? features.decisions as boolean
+      : false;
+    const needsHeal = features.kb !== undefined || features.decisions !== undefined;
 
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
@@ -79,7 +85,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         knowledge,
-        decisions: typeof features.decisions === 'boolean' ? features.decisions : false,
+        learning,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
         viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)

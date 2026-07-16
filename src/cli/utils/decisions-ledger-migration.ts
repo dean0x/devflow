@@ -4,7 +4,7 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { acquireMkdirLock } from './mkdir-lock.js';
 import {
-  getDecisionsDir,
+  getLearningDir,
   getDecisionsLockDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
@@ -686,7 +686,7 @@ export async function renderDecisionsIndex(
 
     // Write index.md atomically via the same writeFileAtomicExclusive used by
     // all other writers in this file — ensures O_EXCL/TOCTOU symlink protection.
-    const decisionsDir = getDecisionsDir(projectRoot);
+    const decisionsDir = getLearningDir(projectRoot);
     await fs.mkdir(decisionsDir, { recursive: true });
     await writeFileAtomicExclusive(getDecisionsIndexPath(projectRoot), indexContent + '\n');
 
@@ -732,7 +732,7 @@ export async function migrateDecisionsLedger(
     timeoutMs?: number;
   } = {},
 ): Promise<MigrateDecisionsLedgerResult> {
-  const decisionsDir = getDecisionsDir(projectRoot);
+  const decisionsDir = getLearningDir(projectRoot);
   const lockDir = getDecisionsLockDir(projectRoot);
   const ledgerPath = getDecisionsLedgerPath(projectRoot);
 

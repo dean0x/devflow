@@ -20,8 +20,8 @@ describe('Command surfaces — index.md direct read', () => {
   for (const [label, relPath] of surfaces) {
     it(`${label} reads index.md (no decisions-index.cjs subprocess)`, () => {
       const content = loadFile(relPath)
-      // Must reference the pre-rendered index.md artifact
-      expect(content).toContain('.devflow/decisions/index.md')
+      // Must reference the pre-rendered index.md artifact (now under learning/)
+      expect(content).toContain('.devflow/learning/index.md')
       // Must NOT reference decisions-index.cjs in any form (ADR-007: retired)
       expect(content).not.toContain('decisions-index.cjs')
     })
@@ -107,7 +107,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
 
 describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const CANONICAL_DESCRIPTION =
-    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/decisions/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
+    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
     ['triager.md', 'shared/agents/triager.md'],

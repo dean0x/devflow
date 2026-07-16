@@ -27,7 +27,7 @@ describe('decisions-usage-scan', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-scan-'));
     // Scanner checks getMemoryDir(cwd) = .devflow/memory for existence
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
@@ -111,7 +111,7 @@ describe('decisions-usage-scan security hardening', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-scan-sec-'));
     // Scanner checks getMemoryDir(cwd) = .devflow/memory for existence
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
   });
 

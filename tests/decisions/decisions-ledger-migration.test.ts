@@ -137,7 +137,7 @@ let decisionsDir: string;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ledger-migration-test-'));
   projectRoot = path.join(tmpDir, 'project');
-  decisionsDir = path.join(projectRoot, '.devflow', 'decisions');
+  decisionsDir = path.join(projectRoot, '.devflow', 'learning');
   await fs.mkdir(decisionsDir, { recursive: true });
 });
 
@@ -868,7 +868,7 @@ describe('renderDecisionsIndex', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'render-index-test-'));
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     await fs.mkdir(decisionsDir, { recursive: true });
   });
 

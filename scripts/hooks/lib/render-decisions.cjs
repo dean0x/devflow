@@ -15,7 +15,7 @@
 //     'Deprecated'|'Superseded'|'Retired' → excluded
 //
 // Row shape: see LearningObservation in src/cli/utils/observations.ts.
-// Ledger file: .devflow/decisions/decisions-ledger.jsonl (COMMITTED, anchored rows only).
+// Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
 // If absent, treat as empty corpus.
 //
 // Byte-compat: formatDecisionBody / formatPitfallBody / buildTldrLine /
@@ -50,7 +50,7 @@ const { safePath } = require('./safe-path.cjs');
 /** Statuses that indicate an anchored entry should be HIDDEN from the render. */
 const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
 
-/** Ledger filename relative to .devflow/decisions/ */
+/** Ledger filename relative to .devflow/learning/ */
 const LEDGER_FILENAME = 'decisions-ledger.jsonl';
 
 // ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ function writeAtomic(filePath, content) {
  * @param {object[]} rows - All rows from the ledger (unfiltered).
  */
 function renderAndWriteAll(worktreePath, rows) {
-  const decisionsDir = path.join(worktreePath, '.devflow', 'decisions');
+  const decisionsDir = path.join(worktreePath, '.devflow', 'learning');
   fs.mkdirSync(decisionsDir, { recursive: true });
 
   const decisionsFilePath = getDecisionsFilePath(worktreePath);
@@ -314,7 +314,7 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  const decisionsDir = path.join(worktreePath, '.devflow', 'decisions');
+  const decisionsDir = path.join(worktreePath, '.devflow', 'learning');
   const ledgerPath = path.join(decisionsDir, LEDGER_FILENAME);
   const decisionsFilePath = getDecisionsFilePath(worktreePath);
   const pitfallsFilePath = getPitfallsFilePath(worktreePath);

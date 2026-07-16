@@ -82,8 +82,8 @@ function readJsonl(file: string): Record<string, unknown>[] {
   return fs.readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-function writeDreamConfig(projectDir: string, fields: Record<string, unknown>): void {
-  const dir = path.join(projectDir, '.devflow', 'dream');
+function writeFeatureConfig(projectDir: string, fields: Record<string, unknown>): void {
+  const dir = path.join(projectDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(fields));
 }
@@ -113,9 +113,9 @@ describe('capture-prompt', () => {
   it('AC-F1: both features enabled (no config) -> one {role:"user"} row to BOTH queues', () => {
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'hello world' }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    const dream = readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'));
+    const learning = readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'));
     expect(mem).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
-    expect(dream).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
+    expect(learning).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
   });
 
   it('AC-F1: long prompt passes through whole (no truncation)', () => {
@@ -130,25 +130,25 @@ describe('capture-prompt', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
-  it('AC-F4: memory:false -> no memory-queue append (dream append unaffected)', () => {
-    writeDreamConfig(projectDir, { memory: false });
+  it('AC-F4: memory:false -> no memory-queue append (learning append unaffected)', () => {
+    writeFeatureConfig(projectDir, { memory: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toHaveLength(1);
+    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
-  it('AC-F4: decisions disabled via config field -> no dream-queue append (memory unaffected)', () => {
-    writeDreamConfig(projectDir, { decisions: false });
+  it('AC-F4: learning disabled via config field -> no learning-queue append (memory unaffected)', () => {
+    writeFeatureConfig(projectDir, { learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('both disabled -> zero appends, no scaffolding', () => {
-    writeDreamConfig(projectDir, { memory: false, decisions: false });
+    writeFeatureConfig(projectDir, { memory: false, learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
@@ -180,7 +180,7 @@ describe('capture-turn', () => {
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toEqual([
       { role: 'assistant', content: 'response text', ts: expect.any(Number) },
     ]);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toEqual([
+    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toEqual([
       { role: 'assistant', content: 'response text', ts: expect.any(Number) },
     ]);
   });
@@ -219,21 +219,21 @@ describe('capture-turn', () => {
     expect(fs.existsSync(logFile)).toBe(false);
   });
 
-  it('AC-F4: gating independent per queue (memory:false, decisions enabled)', () => {
-    writeDreamConfig(projectDir, { memory: false });
+  it('AC-F4: gating independent per queue (memory:false, learning enabled)', () => {
+    writeFeatureConfig(projectDir, { memory: false });
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'x' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toHaveLength(1);
+    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
   it('decisions usage scanner still runs when memory is disabled', () => {
-    writeDreamConfig(projectDir, { memory: false });
+    writeFeatureConfig(projectDir, { memory: false });
     // decisions-usage-scan.cjs itself no-ops when .devflow/memory/ is absent
     // (its own guard) — pre-create it, matching config-disable-guards.test.ts's
     // mkMemoryDir convention.
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
-    const usagePath = path.join(projectDir, '.devflow', 'decisions', '.decisions-usage.json');
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
+    const usagePath = path.join(projectDir, '.devflow', 'learning', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } }));
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
@@ -337,9 +337,9 @@ describe('capture-question', () => {
   it('AC-F3: one {role:"qa"} row PER QUESTION, to both queues', () => {
     runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    const dream = readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'));
+    const learning = readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'));
     expect(mem).toHaveLength(2);
-    expect(dream).toHaveLength(2);
+    expect(learning).toHaveLength(2);
     expect(mem[0]).toMatchObject({
       role: 'qa',
       content: 'Q: How should I handle the Phase 5 Scrutinizer review?\nA: Re-run, inert probes only',
@@ -426,11 +426,11 @@ describe('capture-question', () => {
     expect(mem[0].content).toBe(`Q: proceed?\nA: ${hostileAnswer}`);
   });
 
-  it('AC-F4: gating independent per queue (decisions disabled, memory enabled)', () => {
-    writeDreamConfig(projectDir, { decisions: false });
+  it('AC-F4: gating independent per queue (learning disabled, memory enabled)', () => {
+    writeFeatureConfig(projectDir, { learning: false });
     runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(2);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero writes', () => {
@@ -453,7 +453,7 @@ describe('memory-worker', () => {
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-home-'));
     shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-shim-'));
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -521,7 +521,7 @@ describe('memory-worker', () => {
   });
 
   it('memory:false -> no spawn attempted, no trigger touch', () => {
-    writeDreamConfig(projectDir, { memory: false });
+    writeFeatureConfig(projectDir, { memory: false });
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
     fs.writeFileSync(triggerFile, '');
     backdateMtime(triggerFile, 600);
@@ -554,7 +554,7 @@ describe('capture-prompt + capture-turn integration', () => {
     runHook(CAPTURE_PROMPT, { cwd: projectDir, session_id: 'integ', prompt: 'implement feature X' }, homeDir);
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 'integ', last_assistant_message: 'done' }, homeDir);
 
-    for (const queue of ['memory', 'dream'] as const) {
+    for (const queue of ['memory', 'learning'] as const) {
       const rows = readJsonl(path.join(projectDir, '.devflow', queue, '.pending-turns.jsonl'));
       expect(rows).toEqual([
         { role: 'user', content: 'implement feature X', ts: expect.any(Number) },

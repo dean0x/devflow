@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import type { ComponentResult, GatherContext, DecisionsCountsData } from '../types.js';
+import type { ComponentResult, GatherContext, LearningCountsData } from '../types.js';
 import { dim } from '../colors.js';
 import { getDecisionsLedgerPath } from '../../utils/project-paths.js';
 
@@ -34,11 +34,11 @@ function isActive(row: LedgerCountRow): boolean {
 }
 
 /**
- * Read .devflow/decisions/decisions-ledger.jsonl and count active anchored
+ * Read .devflow/learning/decisions-ledger.jsonl and count active anchored
  * rows by type. Returns null if the ledger is missing or holds no valid rows
  * (graceful fallback). Exported for use by the main HUD entry point.
  */
-export function gatherDecisionsCounts(cwd: string): DecisionsCountsData | null {
+export function gatherLearningCounts(cwd: string): LearningCountsData | null {
   let content: string;
   try {
     content = fs.readFileSync(getDecisionsLedgerPath(cwd), 'utf-8');
@@ -46,7 +46,7 @@ export function gatherDecisionsCounts(cwd: string): DecisionsCountsData | null {
     return null;
   }
 
-  const counts: DecisionsCountsData = { decisions: 0, pitfalls: 0 };
+  const counts: LearningCountsData = { decisions: 0, pitfalls: 0 };
   let parsedAny = false;
 
   for (const rawLine of content.split('\n')) {
@@ -77,10 +77,10 @@ export function gatherDecisionsCounts(cwd: string): DecisionsCountsData | null {
  * Shows how many active ADR/PF entries the project has accumulated.
  * Returns null when no ledger exists or every entry is retired.
  */
-export default async function decisionsCounts(
+export default async function learningCounts(
   ctx: GatherContext,
 ): Promise<ComponentResult | null> {
-  const data = ctx.decisionsCounts;
+  const data = ctx.learningCounts;
   if (!data) return null;
 
   const { decisions, pitfalls } = data;

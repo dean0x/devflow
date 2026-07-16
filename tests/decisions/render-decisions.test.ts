@@ -416,7 +416,7 @@ describe('CLI render subcommand', () => {
   });
 
   it('exits 0 and writes decisions.md, pitfalls.md, and index.md when ledger is absent (empty corpus)', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     // DO NOT create ledger — test empty-corpus path
 
     execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
@@ -439,7 +439,7 @@ describe('CLI render subcommand', () => {
   });
 
   it('exits 0 and writes correctly when ledger has active rows; index.md contains entry IDs', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
     const row1 = makeDecisionRow({ anchor_id: 'ADR-001' });
@@ -467,7 +467,7 @@ describe('CLI render subcommand', () => {
     // We verify write ordering by checking that all three files are present
     // after a successful render — if index failed mid-write, body files
     // would still be present (index is written last).
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
     const row1 = makeDecisionRow({ anchor_id: 'ADR-001' });
     fs.writeFileSync(
@@ -512,7 +512,7 @@ describe('CLI --check subcommand', () => {
   }
 
   it('exits 0 when on-disk .md files match the render from ledger', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
     // Render to disk first
@@ -524,7 +524,7 @@ describe('CLI --check subcommand', () => {
   });
 
   it('exits non-zero when decisions.md on disk drifts from ledger render', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
     // Render to disk
@@ -542,7 +542,7 @@ describe('CLI --check subcommand', () => {
   });
 
   it('exits non-zero when index.md on disk drifts from ledger render', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
     // Render to disk
@@ -558,7 +558,7 @@ describe('CLI --check subcommand', () => {
   });
 
   it('exits non-zero when index.md is absent after a render (missing = drift)', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.mkdirSync(decisionsDir, { recursive: true });
 
     // Render to disk then remove index.md
@@ -570,7 +570,7 @@ describe('CLI --check subcommand', () => {
   });
 
   it('--check does not write files', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     // No .md files yet — check will see drift (absent = drift) and exit non-zero
     runCheck(tmpDir);
     // Files should still be absent

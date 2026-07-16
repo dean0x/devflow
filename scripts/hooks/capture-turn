@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Dream System: capture-turn (Stop Hook)
+# Learning System: capture-turn (Stop Hook)
 # Dual-append: writes the assistant turn to BOTH the memory queue and the
-# dream queue, each independently gated by its own feature flag (AC-F4). Runs
+# learning queue, each independently gated by its own feature flag (AC-F4). Runs
 # the decisions usage scanner (D29 grep-first) regardless of which queue is
 # gated on/off -- memory-disabled projects still run the usage scanner. The
 # 120s-throttle/nohup-spawn block lives in memory-worker, registered
@@ -50,7 +50,7 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-DREAM_DIR="$DEVFLOW_DIR/dream"
+LEARNING_DIR="$DEVFLOW_DIR/learning"
 
 # Skip if empty response
 if [ -z "$ASSISTANT_MSG" ]; then
@@ -60,24 +60,24 @@ fi
 
 source "$SCRIPT_DIR/queue-append" || { echo "capture-turn: failed to source queue-append" >&2; exit 1; }
 
-# --- AC-P1: exactly ONE config-read fork, fetching both memory + decisions fields ---
-queue_read_gates "$DREAM_DIR/config.json"
+# --- AC-P1: exactly ONE config-read fork, fetching both memory + learning fields ---
+queue_read_gates "$DEVFLOW_DIR/config.json"
 MEMORY_ENABLED="$_QG_MEMORY"
-DECISIONS_ENABLED="$_QG_DECISIONS"
+LEARNING_ENABLED="$_QG_LEARNING"
 
-dbg "MEMORY_ENABLED=$MEMORY_ENABLED DECISIONS_ENABLED=$DECISIONS_ENABLED"
+dbg "MEMORY_ENABLED=$MEMORY_ENABLED LEARNING_ENABLED=$LEARNING_ENABLED"
 
-# --- Decisions usage scanner (independent of the memory/dream queue gates below) ---
+# --- Decisions usage scanner (independent of the memory/learning queue gates below) ---
 # D29: Grep-first reorder -- cheap in-process citation check gates the scanner call.
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ] && printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
-  if [ "$DECISIONS_ENABLED" = "true" ]; then
+  if [ "$LEARNING_ENABLED" = "true" ]; then
     dbg "Running decisions usage scanner"
     printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$PROJECT_ROOT" 2>/dev/null || true
   fi
 fi
 
-if [ "$MEMORY_ENABLED" != "true" ] && [ "$DECISIONS_ENABLED" != "true" ]; then
+if [ "$MEMORY_ENABLED" != "true" ] && [ "$LEARNING_ENABLED" != "true" ]; then
   dbg "EXIT: both features disabled"
   exit 0
 fi
@@ -90,14 +90,14 @@ source "$SCRIPT_DIR/hook-log-init" "capture-turn"
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
 source "$SCRIPT_DIR/get-mtime" || { echo "capture-turn: failed to source get-mtime" >&2; exit 1; }
-source "$SCRIPT_DIR/dream-lock" || { echo "capture-turn: failed to source dream-lock" >&2; exit 1; }
+source "$SCRIPT_DIR/learning-lock" || { echo "capture-turn: failed to source learning-lock" >&2; exit 1; }
 
-mkdir -p "$MEMORY_DIR" "$DREAM_DIR" 2>/dev/null || true
+mkdir -p "$MEMORY_DIR" "$LEARNING_DIR" 2>/dev/null || true
 
 TS=$(date +%s)
 queue_append_both \
-  "$MEMORY_DIR/.pending-turns.jsonl" "$DREAM_DIR/.pending-turns.jsonl" \
-  "$MEMORY_ENABLED" "$DECISIONS_ENABLED" \
+  "$MEMORY_DIR/.pending-turns.jsonl" "$LEARNING_DIR/.pending-turns.jsonl" \
+  "$MEMORY_ENABLED" "$LEARNING_ENABLED" \
   "assistant" "$ASSISTANT_MSG" "$TS"
 
 log "Captured assistant turn (${#ASSISTANT_MSG} chars)"

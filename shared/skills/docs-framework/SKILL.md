@@ -66,7 +66,7 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
 └── backup.json                         # Pre-compact git state snapshot
 
-.devflow/decisions/
+.devflow/learning/
 ├── decisions.md                        # Architectural decisions (ADR-NNN format)
 └── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```
@@ -139,8 +139,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
 | Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.devflow/decisions/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
-| Pitfalls | `.devflow/decisions/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
+| Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
+| Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
 | Designer (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 | Researcher | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
 | Synthesizer (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
@@ -176,7 +176,7 @@ This framework is used by:
 - **Review agents**: Creates review reports
 - **Bug analysis agents**: Creates bug analysis reports
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
-- **Dream agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
+- **Learning agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

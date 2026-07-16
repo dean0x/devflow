@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Dream System: memory-worker (Stop Hook)
+# Memory pipeline: memory-worker (Stop Hook)
 # Owns the 120s-throttle + nohup-spawn logic for background-memory-update.
 # Registered AFTER capture-turn in the Stop hook array so append-before-spawn
 # ordering is preserved by array position. This hook does NOT append to any
@@ -34,13 +34,12 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-DREAM_DIR="$DEVFLOW_DIR/dream"
 
-# Read dream config -- memory:false gates this hook entirely.
-DREAM_CONFIG="$DREAM_DIR/config.json"
+# Read feature config -- memory:false gates this hook entirely (ADR-001).
+FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
 MEMORY_ENABLED="true"
-if [ -f "$DREAM_CONFIG" ]; then
-  MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
+if [ -f "$FEATURE_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$FEATURE_CONFIG" "memory" "true")
 fi
 
 dbg "MEMORY_ENABLED=$MEMORY_ENABLED"

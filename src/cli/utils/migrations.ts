@@ -2,8 +2,9 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { getMemoryDir, getFeaturesDir } from './project-paths.js';
-import { sweepLegacyDreamMarkers } from './dream-cleanup.js';
+import { getMemoryDir, getFeaturesDir, getLearningDir } from './project-paths.js';
+import { sweepLegacyDreamMarkers } from './learning-queue-cleanup.js';
+import { DEFAULT_CONFIG, writeConfig, type FeatureConfig } from './feature-config.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -158,6 +159,8 @@ export type PerProjectMigrationContext = {
   devflowDir: string;
   memoryDir: string;
   projectRoot: string;
+  /** Override path to render-decisions.cjs for tests. When absent the real bundled renderer is used. */
+  rendererPath?: string;
 };
 
 export type MigrationContext = GlobalMigrationContext | PerProjectMigrationContext;
@@ -361,7 +364,6 @@ async function migrateMemoryDir(
  *   .devflow/memory/    — working memory files
  *   .devflow/sidecar/   — promoted from .memory/.sidecar/
  *   .devflow/decisions/ — promoted from .memory/decisions/
- *   .devflow/learning/  — promoted from .memory/ learning-* files
  *   .devflow/features/  — promoted from .features/
  *   .devflow/docs/      — promoted from .docs/
  */
@@ -382,7 +384,6 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true }),
-      fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true }),
       fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true }),
     ]);
@@ -406,16 +407,6 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       ['.decisions-notifications.json', path.join(devflowDir, 'decisions', '.decisions-notifications.json')],
       ['.decisions-runs-today',         path.join(devflowDir, 'decisions', '.decisions-runs-today')],
       ['.decisions-batch-ids',          path.join(devflowDir, 'decisions', '.decisions-batch-ids')],
-      // learning files
-      ['learning-log.jsonl',            path.join(devflowDir, 'learning',  'learning-log.jsonl')],
-      ['learning.json',                 path.join(devflowDir, 'learning',  'learning.json')],
-      ['.learning-manifest.json',       path.join(devflowDir, 'learning',  '.learning-manifest.json')],
-      ['.learning-notified-at',         path.join(devflowDir, 'learning',  '.learning-notified-at')],
-      ['.learning-notifications.json',  path.join(devflowDir, 'learning',  '.learning-notifications.json')],
-      ['.learning-runs-today',          path.join(devflowDir, 'learning',  '.learning-runs-today')],
-      ['.learning-session-count',       path.join(devflowDir, 'learning',  '.learning-session-count')],
-      ['.learning-batch-ids',           path.join(devflowDir, 'learning',  '.learning-batch-ids')],
-      ['debug',                         path.join(devflowDir, 'learning',  'debug')],
       ['working',                       path.join(devflowDir, 'memory',    'working')],
     ];
     const memWarnings = await migrateMemoryDir(memSrc, devflowDir, memMap);
@@ -487,7 +478,6 @@ const MIGRATION_CLEANUP_STALE_WORKING_MEMORY: Migration<'per-project'> = {
  * left by the removed deterministic capacity/manifest/reconcile features.
  *
  * Files removed (applies ADR-002: clean house, no skip-list stranding):
- *   - .devflow/learning/.learning-manifest.json  — no longer written
  *   - .devflow/decisions/.decisions-manifest.json — no longer written
  *   - .devflow/decisions/.decisions-notifications.json — no longer written
  *
@@ -500,7 +490,6 @@ const MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE: Migration<'per-project'> 
   scope: 'per-project',
   async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
     const toRemove = [
-      path.join(ctx.projectRoot, '.devflow', 'learning', '.learning-manifest.json'),
       path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-manifest.json'),
       path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-notifications.json'),
     ];
@@ -588,139 +577,6 @@ const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
     try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
 
     return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: moveWarnings };
-  },
-};
-
-/**
- * Per-project: remove learning pipeline runtime artifacts.
- *
- * Removes:
- *   - .devflow/learning/ directory (all contents)
- *   - .devflow/dream/learning.*.json markers
- *   - .devflow/dream/learning.*.processing markers
- *   - drops `learning` key from .devflow/dream/config.json (if present)
- *   - drops `learning` key from .devflow/sidecar/config.json (legacy fallback — R8)
- *   - .claude/commands/self-learning/ directory (auto-generated artifacts)
- *   - auto-generated skills (detected via AUTO_GENERATED_MARKER)
- *
- * Applies ADR-002 (clean house), PF-004 (idempotent — ENOENT is a no-op).
- * CRITICAL: Do NOT import anything from learn.ts (being deleted this phase).
- */
-const MIGRATION_PURGE_LEARNING_PIPELINE: Migration<'per-project'> = {
-  id: 'purge-learning-pipeline-v1',
-  description: 'Remove learning pipeline runtime artifacts (learning dir, dream markers, config key, auto-generated artifacts)',
-  scope: 'per-project',
-  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
-    const infos: string[] = [];
-    const devflowDir = path.join(ctx.projectRoot, '.devflow');
-
-    // 1. Remove .devflow/learning/ directory
-    const learningDir = path.join(devflowDir, 'learning');
-    try {
-      await fs.rm(learningDir, { recursive: true, force: true });
-      infos.push('Removed .devflow/learning/');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 2. Remove .devflow/dream/learning.*.json and *.processing markers
-    const dreamDir = path.join(devflowDir, 'dream');
-    try {
-      const dreamEntries = await fs.readdir(dreamDir);
-      for (const entry of dreamEntries) {
-        if (entry.startsWith('learning.') && (entry.endsWith('.json') || entry.endsWith('.processing'))) {
-          try {
-            await fs.unlink(path.join(dreamDir, entry));
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code !== 'ENOENT') throw err;
-          }
-        }
-      }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 3. Drop `learning` key from dream/config.json (non-destructive read-modify-write)
-    const dreamConfigPath = path.join(dreamDir, 'config.json');
-    await _dropLearningKeyFromConfig(dreamConfigPath);
-
-    // 4. Drop `learning` key from legacy sidecar/config.json (R8 — do NOT delete the file)
-    const sidecarConfigPath = path.join(devflowDir, 'sidecar', 'config.json');
-    await _dropLearningKeyFromConfig(sidecarConfigPath);
-
-    // 5. Remove .claude/commands/self-learning/ directory
-    // Inline cleanSelfLearningArtifacts logic — cannot import learn.ts (being deleted)
-    const claudeDir = path.join(ctx.projectRoot, '.claude');
-    const selfLearningCommandsDir = path.join(claudeDir, 'commands', 'self-learning');
-    try {
-      await fs.rm(selfLearningCommandsDir, { recursive: true, force: true });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-    }
-
-    // 6. Remove auto-generated skills (detected via AUTO_GENERATED_MARKER from learning-cleanup.ts)
-    const { cleanSelfLearningArtifacts } = await import('./learning-cleanup.js');
-    await cleanSelfLearningArtifacts(claudeDir);
-
-    return { infos, warnings: [] };
-  },
-};
-
-/**
- * Helper: read config.json, drop the `learning` key if present, write back atomically.
- * Tolerates missing file (ENOENT = no-op). Never deletes the file.
- */
-async function _dropLearningKeyFromConfig(configPath: string): Promise<void> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(configPath, 'utf-8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return; // file absent — no-op
-    throw err;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return; // malformed JSON — leave untouched
-  }
-
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
-  const config = parsed as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(config, 'learning')) return; // key absent — no-op
-
-  delete config['learning'];
-
-  // D34: use writeFileAtomicExclusive (O_EXCL temp+rename) — TOCTOU-safe.
-  // Other per-project migrations use the same helper for crash-safe writes.
-  await writeFileAtomicExclusive(configPath, JSON.stringify(config, null, 2) + '\n');
-}
-
-/**
- * Global: remove ~/.devflow/learning.json (global learning config).
- *
- * Applies PF-004 (idempotent — ENOENT is a no-op).
- */
-const MIGRATION_PURGE_LEARNING_GLOBAL: Migration<'global'> = {
-  id: 'purge-learning-global-v1',
-  description: 'Remove global ~/.devflow/learning.json config file',
-  scope: 'global',
-  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
-    const learningJsonPath = path.join(ctx.devflowDir, 'learning.json');
-    try {
-      await fs.unlink(learningJsonPath);
-      return { infos: ['Removed ~/.devflow/learning.json'], warnings: [] };
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return { infos: [], warnings: [] }; // already absent
-      throw err;
-    }
   },
 };
 
@@ -972,7 +828,7 @@ const MIGRATION_PURGE_DREAM_MARKER_PIPELINE: Migration<'per-project'> = {
 /**
  * Per-project: remove inert state files left by the retired detached dream
  * worker (background-dream-update). Decisions processing now runs as the
- * directive-spawned Dream agent, whose only state is the queue itself:
+ * directive-spawned Learning agent, whose only state is the queue itself:
  *   - .devflow/decisions/.disabled   — runtime sentinel (gate is config-only now)
  *   - .devflow/dream/.last-dream-ok  — worker success stamp
  *   - .devflow/dream/last-run-summary — inject-once summary file
@@ -1031,7 +887,7 @@ const MIGRATION_PURGE_DREAM_WORKER_STATE: Migration<'per-project'> = {
  * refactor. Projects that already had a ledger need this one-time bootstrap
  * to materialise the index without rewriting the body files.
  *
- * - If no ledger exists: no-op (index will be written on the next Dream run).
+ * - If no ledger exists: no-op (index will be written on the next Learning-agent render).
  * - Writes only index.md — never rewrites decisions.md / pitfalls.md.
  * - ENOENT-safe and idempotent: a second run overwrites the same content.
  */
@@ -1102,6 +958,203 @@ const MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES: Migration<'global'> = {
   },
 };
 
+/**
+ * Extract a FeatureConfig from a legacy dream/config.json value.
+ *
+ * Reads ONLY `decisions` (maps to `learning`), `memory`, and `knowledge`.
+ * Ignores any pre-existing `learning` key — that key was written by the old
+ * self-learning pipeline and must not override the `decisions`-derived value
+ * (ADR-001 clean break; applies ISS-07: migration-compat requires decisions-wins).
+ *
+ * Starts from DEFAULT_CONFIG so newly-added fields default correctly for old installs.
+ * Exported for testing.
+ */
+export function seedFeatureConfigFromDream(parsed: unknown): FeatureConfig {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ...DEFAULT_CONFIG };
+  const p = parsed as Record<string, unknown>;
+  // p.learning intentionally ignored: old self-learning pipeline key (ADR-001 clean break)
+  return {
+    memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
+    learning: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.learning, // decisions → learning
+    knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
+  };
+}
+
+/**
+ * Per-project: consolidate .devflow/dream/ and .devflow/decisions/ into the new
+ * flat .devflow/learning/ directory and write .devflow/config.json.
+ *
+ * Order of operations follows the sidecar-to-dream template (migrations.ts:541-578):
+ * (1) Config FIRST — read dream/config.json, coerce via seedFeatureConfigFromDream
+ *     (ignores stale `learning` key; maps `decisions`→`learning`), atomic-write to
+ *     .devflow/config.json ONLY when absent (idempotent: forced re-run must not clobber
+ *     user-edited toggles), then unlink source (ENOENT-tolerant — lets final rmdir succeed).
+ * (2) Dream queue files (.pending-turns.jsonl, .pending-turns.processing) → learning/.
+ * (3) Explicit move: decisions/decisions.json → learning/learning.json.
+ * (4) Unlink orphaned file-type entries from decisions/ (applies ADR-003 clean end-state).
+ * (5) Remaining decisions/ contents → learning/ via moveDirContents; skip-set provides
+ *     defence-in-depth for already-unlinked entries and drops transient lock dirs.
+ * (6) Re-render index.md so footer paths reference learning/ not decisions/. Wrapped in
+ *     try/catch: render failure is non-fatal — the next Learning-agent render self-heals
+ *     the index. Runs BEFORE step-7 rmdirs so paths are resolved on content already moved.
+ * (7) Best-effort rmdir both sources (non-empty if live lock dirs remain — acceptable).
+ *
+ * Applies ADR-001 (config-only gate), PF-002 (config first), PF-004 (ENOENT-tolerant).
+ */
+const MIGRATION_CONSOLIDATE_DREAM_DECISIONS_TO_LEARNING: Migration<'per-project'> = {
+  id: 'consolidate-dream-decisions-to-learning-v1',
+  description: 'Consolidate .devflow/dream/ + .devflow/decisions/ into .devflow/learning/ and write .devflow/config.json',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    const dreamDir = path.join(devflowDir, 'dream');
+    const decisionsDir = path.join(devflowDir, 'decisions');
+    const learningDir = getLearningDir(ctx.projectRoot);
+
+    const warnings: string[] = [];
+
+    // Fast-path: nothing to migrate on fresh projects
+    let hasDream = false;
+    let hasDecisions = false;
+    try { await fs.access(dreamDir); hasDream = true; } catch { /* absent */ }
+    try { await fs.access(decisionsDir); hasDecisions = true; } catch { /* absent */ }
+    if (!hasDream && !hasDecisions) return { infos: [], warnings: [] };
+
+    // Ensure destination exists
+    await fs.mkdir(learningDir, { recursive: true });
+
+    // 1. Config FIRST — per PF-002 and sidecar-to-dream template ordering.
+    //    Read dream/config.json via seedFeatureConfigFromDream (which ignores the stale
+    //    `learning` key and maps `decisions` → `learning`).
+    //    Write .devflow/config.json only when absent (idempotent: don't clobber user-edited toggles).
+    const oldConfigPath = path.join(dreamDir, 'config.json');
+    const featureConfigPath = path.join(devflowDir, 'config.json');
+    let configWritten = false;
+
+    let newConfig: FeatureConfig = { ...DEFAULT_CONFIG };
+    try {
+      const raw = await fs.readFile(oldConfigPath, 'utf-8');
+      newConfig = seedFeatureConfigFromDream(JSON.parse(raw) as unknown);
+    } catch { /* ENOENT or malformed — keep DEFAULT_CONFIG */ }
+
+    try {
+      await fs.access(featureConfigPath);
+      // Already present — skip write (idempotent: don't clobber user-edited toggles)
+    } catch {
+      await writeConfig(ctx.projectRoot, newConfig);
+      configWritten = true;
+    }
+
+    // Unlink source regardless (ENOENT-tolerant — lets final rmdir dream/ succeed)
+    try { await fs.unlink(oldConfigPath); } catch { /* ENOENT is success */ }
+
+    // 2. Move dream queue files to learning/
+    await moveFile(
+      path.join(dreamDir, '.pending-turns.jsonl'),
+      path.join(learningDir, '.pending-turns.jsonl'),
+    );
+    await moveFile(
+      path.join(dreamDir, '.pending-turns.processing'),
+      path.join(learningDir, '.pending-turns.processing'),
+    );
+
+    // 3. Tuning config: decisions/decisions.json → learning/learning.json (explicit,
+    //    so moveDirContents can skip it cleanly)
+    await moveFile(
+      path.join(decisionsDir, 'decisions.json'),
+      path.join(learningDir, 'learning.json'),
+    );
+
+    // 4a. Unlink orphaned file-type entries from decisions/ before moveDirContents
+    //     so they cannot block the best-effort rmdir (applies ADR-003 clean end-state).
+    //     ENOENT-tolerant; rethrow non-ENOENT (avoids PF-003 bare-rm anti-pattern).
+    for (const orphan of [
+      '.decisions-usage.json',         // write-only telemetry; orphaned keys
+      '.decisions-manifest.json',      // orphaned sidecar judgment state
+      '.decisions-notifications.json', // orphaned
+      '.decisions-batch-ids',          // orphaned
+    ]) {
+      try {
+        await fs.unlink(path.join(decisionsDir, orphan));
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+    }
+
+    // 4b. Rest of decisions/ → learning/ via moveDirContents.
+    //     Skip-set provides defence-in-depth for already-unlinked entries above and
+    //     drops transient lock dirs (which are directories; unlink does not apply).
+    const decisionsSkip = new Set([
+      'decisions.json',                // already moved above as learning.json
+      '.decisions.lock',               // transient lock dir — drop
+      '.decisions-usage.lock',         // transient lock dir — drop
+      '.pending-turns.jsonl.lock',     // transient queue-overflow lock dir (under dream/) — drop
+      '.observations.lock',            // may be LIVE — never move (PF lock-under-parent)
+      '.decisions-usage.json',         // unlinked above — skip is defence-in-depth
+      '.decisions-manifest.json',      // unlinked above — skip is defence-in-depth
+      '.decisions-notifications.json', // unlinked above — skip is defence-in-depth
+      '.decisions-batch-ids',          // unlinked above — skip is defence-in-depth
+    ]);
+    const moveWarnings = await moveDirContents(decisionsDir, learningDir, decisionsSkip);
+    warnings.push(...moveWarnings);
+
+    // 6. Re-render index.md so footer paths reference learning/ not decisions/.
+    //    Runs BEFORE step-7 rmdirs so the ledger is already in learning/ when the
+    //    renderer reads it. Wrapped in try/catch: render failure is non-fatal —
+    //    the next Learning-agent render self-heals the index (applies ISS-02:
+    //    unguarded render could strand the migration on a 30s render-lock timeout,
+    //    after which the fast-path guard makes retry a no-op).
+    const { renderDecisionsIndex } = await import('./decisions-ledger-migration.js');
+    try {
+      await renderDecisionsIndex(
+        ctx.projectRoot,
+        ctx.rendererPath !== undefined ? { rendererPath: ctx.rendererPath } : {},
+      );
+    } catch (renderErr) {
+      const msg = renderErr instanceof Error ? renderErr.message : String(renderErr);
+      warnings.push(`render-decisions-index: ${msg} (non-fatal — next Learning-agent render will self-heal)`);
+    }
+
+    // 7. Best-effort rmdir both sources (may be non-empty if live lock dirs remain —
+    //    acceptable; same pattern as sidecar-to-dream migration)
+    try { await fs.rmdir(dreamDir); } catch { /* non-empty or already gone */ }
+    try { await fs.rmdir(decisionsDir); } catch { /* non-empty or already gone */ }
+
+    const infos: string[] = [];
+    if (configWritten) infos.push('Wrote .devflow/config.json from dream/config.json');
+    infos.push('Consolidated .devflow/dream/ + .devflow/decisions/ → .devflow/learning/');
+
+    return { infos, warnings };
+  },
+};
+
+/**
+ * Global: rename ~/.devflow/decisions.json → ~/.devflow/learning.json.
+ *
+ * The decisions.json file holds project-level model/debug tuning for the Learning
+ * (formerly Decisions) agent. After this migration, decisions-config.ts (renamed to
+ * learning-tuning-config.ts in commit 6) reads ~/.devflow/learning.json.
+ *
+ * overwrite: true — a pre-existing target can only be a stale old-pipeline schema;
+ * the source decisions.json is the truth. Idempotent: absent source is a no-op.
+ */
+const MIGRATION_RENAME_GLOBAL_DECISIONS_CONFIG: Migration<'global'> = {
+  id: 'rename-global-decisions-config-v1',
+  description: 'Rename ~/.devflow/decisions.json → ~/.devflow/learning.json (global tuning config rename)',
+  scope: 'global',
+  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const src = path.join(ctx.devflowDir, 'decisions.json');
+    const dest = path.join(ctx.devflowDir, 'learning.json');
+    // moveFile is ENOENT-tolerant and returns void; check existence before to detect no-op
+    let srcExists = false;
+    try { await fs.access(src); srcExists = true; } catch { /* absent — fresh install */ }
+    if (!srcExists) return { infos: [], warnings: [] };
+    await moveFile(src, dest, { overwrite: true });
+    return { infos: ['Renamed ~/.devflow/decisions.json → ~/.devflow/learning.json'], warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
@@ -1110,8 +1163,6 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
   MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
-  MIGRATION_PURGE_LEARNING_PIPELINE,
-  MIGRATION_PURGE_LEARNING_GLOBAL,
   MIGRATION_PURGE_ORPHANED_DREAM_COMMIT_HOOK,
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
   MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,
@@ -1123,6 +1174,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_RENDER_DECISIONS_INDEX,
   MIGRATION_PURGE_ORPHANED_DECISIONS_INDEX,
   MIGRATION_PURGE_STALE_EXTRA_KNOWN_MARKETPLACES,
+  MIGRATION_CONSOLIDATE_DREAM_DECISIONS_TO_LEARNING,
+  MIGRATION_RENAME_GLOBAL_DECISIONS_CONFIG,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

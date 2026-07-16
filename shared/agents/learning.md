@@ -1,6 +1,6 @@
 ---
-name: Dream
-description: Background decisions maintenance agent — claims the pending dream queue, detects architectural decisions and pitfalls from captured turns, and curates the decisions ledger. Spawned as a background agent by the session-start directive when the queue is non-empty.
+name: Learning
+description: Background decisions maintenance agent — claims the pending learning queue, detects architectural decisions and pitfalls from captured turns, and curates the decisions ledger. Spawned as a background agent by the session-start directive when the queue is non-empty.
 model: opus
 tools:
   - Read
@@ -13,7 +13,7 @@ skills:
   - devflow:apply-decisions
 ---
 
-# Dream Agent
+# Learning Agent
 
 You process the pending decisions queue for one project: claim it atomically, detect
 decision/pitfall patterns worth keeping, curate the existing ledger, and delete the claimed
@@ -46,31 +46,31 @@ never hold anything across calls.
 
 ## Step 0 — Claim the queue
 
-Queue: `.devflow/dream/.pending-turns.jsonl`. Claim file: `.devflow/dream/.pending-turns.processing`.
+Queue: `.devflow/learning/.pending-turns.jsonl`. Claim file: `.devflow/learning/.pending-turns.processing`.
 
 1. If the claim file exists, check its age (now minus mtime):
-   - **Fresh (younger than 900s)** — another Dream agent is live. Exit silently; change nothing.
+   - **Fresh (younger than 900s)** — another Learning agent is live. Exit silently; change nothing.
    - **Stale (900s or older)** — a previous run crashed. Re-claim it: `touch` the claim file
      (your heartbeat), then fold in any new queue:
-     `cat .devflow/dream/.pending-turns.jsonl >> .devflow/dream/.pending-turns.processing && unlink .devflow/dream/.pending-turns.jsonl`
+     `cat .devflow/learning/.pending-turns.jsonl >> .devflow/learning/.pending-turns.processing && unlink .devflow/learning/.pending-turns.jsonl`
      (skip the fold-in if there is no queue file).
 2. Otherwise claim atomically — one winner even across concurrent sessions:
-   `mv .devflow/dream/.pending-turns.jsonl .devflow/dream/.pending-turns.processing`
+   `mv .devflow/learning/.pending-turns.jsonl .devflow/learning/.pending-turns.processing`
    If the `mv` fails, another agent claimed first — exit silently.
 3. No queue and no claim file: report "no pending decisions work" and finish.
 
 **Heartbeat**: `touch` the claim file once more at the Part 1 → Part 2 boundary so a long run
 is never mistaken for a crashed one.
 
-**Vanished inputs**: if the claim file or `.devflow/decisions/` disappears mid-run (the user
+**Vanished inputs**: if the claim file or `.devflow/learning/` disappears mid-run (the user
 disabled or cleared the feature), stop without further writes. Never recreate them.
 
 ## Inputs (read directly with your Read tool)
 
-- `.devflow/dream/.pending-turns.processing` — the claimed turns (`user`/`assistant`/`qa` rows)
-- `.devflow/decisions/decisions-log.jsonl` — full observation history (for dedup and recurrence)
-- `.devflow/decisions/decisions.md` and `pitfalls.md` — the rendered, currently-active entries
-- `.devflow/decisions/.decisions-usage.json` — citation counts keyed by anchor ID (`ADR-NNN`/`PF-NNN`)
+- `.devflow/learning/.pending-turns.processing` — the claimed turns (`user`/`assistant`/`qa` rows)
+- `.devflow/learning/decisions-log.jsonl` — full observation history (for dedup and recurrence)
+- `.devflow/learning/decisions.md` and `pitfalls.md` — the rendered, currently-active entries
+- `.devflow/learning/.decisions-usage.json` — citation counts keyed by anchor ID (`ADR-NNN`/`PF-NNN`)
 
 ## Part 1 — Decision & pitfall detection
 
@@ -107,14 +107,14 @@ rewrite the whole file:
 - **New observation** — append exactly one JSONL line (heredoc keeps quoting safe):
 
   ```bash
-  mkdir -p .devflow/decisions
-  cat >> .devflow/decisions/decisions-log.jsonl <<'EOF'
+  mkdir -p .devflow/learning
+  cat >> .devflow/learning/decisions-log.jsonl <<'EOF'
   {"id":"obs_<short_slug>","type":"decision","pattern":"...","confidence":0.8,"observations":1,"first_seen":"<UTC ISO>","last_seen":"<UTC ISO>","status":"observing","evidence":["..."],"details":"context: X; decision: Y; rationale: Z","quality_ok":true}
   EOF
   ```
 
   Keep every field — downstream readers (`assign-anchor`, `rotate-observations`,
-  `devflow decisions --list/--status`) depend on this shape. `type` is `decision` or
+  `devflow learning --list/--status`) depend on this shape. `type` is `decision` or
   `pitfall`; pitfall `details` read `"area: X; issue: Y; impact: Z; resolution: W"`;
   timestamps are UTC ISO (`date -u +%Y-%m-%dT%H:%M:%SZ`). Estimate `confidence` honestly —
   it is curation metadata only, NOT a gate; do not inflate it.
@@ -138,7 +138,7 @@ yourself — `assign-anchor` is the only source of numbering.
 
 Periodic housekeeping of the ledger and rendered `.md` files. Bounds: **≤5 curation changes
 per run**. **7-day protection window** — never touch any entry whose `date` field in the
-ledger (`.devflow/decisions/decisions-ledger.jsonl`) is within the past 7 days. The window key
+ledger (`.devflow/learning/decisions-ledger.jsonl`) is within the past 7 days. The window key
 is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file.
 
 Ground yourself first, all by direct reads:
@@ -193,7 +193,7 @@ instead — edit those ledger rows directly (one line at a time), then re-render
    it twice).
 2. Delete the claim file as your FINAL act, strictly after every other write (bare `rm` is
    blocked by devflow's recommended deny-list — PF-003):
-   `unlink .devflow/dream/.pending-turns.processing`
+   `unlink .devflow/learning/.pending-turns.processing`
    If deletion is denied, finish normally and note the leftover claim file in your summary —
    the next run's stale-merge recovery folds it in.
    Crashing before this line leaves the claim file for the next run's stale-merge recovery —

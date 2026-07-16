@@ -5,7 +5,7 @@ description: "Use when modifying the ambient mode hooks (preamble, session-start
 category: architecture
 directories: [scripts/hooks, src/cli/commands/ambient.ts, plugins/devflow-ambient]
 created: 2026-07-04
-updated: 2026-07-12
+updated: 2026-07-15
 ---
 
 # Ambient Orchestrator Mode
@@ -173,7 +173,7 @@ The model-tier routing table (haiku/sonnet/opus taxonomy) is a second intentiona
 - ADR-004: Decision to pivot from detection-based to charter-based ambient mode (applies ADR-004)
 - ADR-003: Leave-the-end-state principle; the old keyword/3-marker detection was deleted clean, no tombstones (applies ADR-003)
 - PF-001: Plan-handoff schema undocumented/mutable — match by prefix only; the `tests/fixtures/ambient-templates.ts` constants are full output strings, not detection substrings (avoids PF-001)
-- Feature knowledge: `dream-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too; the `DEVFLOW_BG_UPDATER` re-entrancy guard is the coupling point between that system and this one
+- Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too; the `DEVFLOW_BG_UPDATER` re-entrancy guard is the coupling point between that system and this one
 - Feature knowledge: `feature-knowledge-system` — the charter's feature-knowledge operating rule instructs the orchestrator to load KNOWLEDGE.md entries as FEATURE_KNOWLEDGE and spawn the Knowledge agent after changes; that system's KB covers how those entries are written and consumed
 - `scripts/hooks/json-parse` — shared JSON output helpers (`json_prompt_output`, `json_session_output`, `json_extract_cwd_prompt`)
 - `scripts/hooks/hook-bootstrap` — shared hook initialization: debug logging, per-project log paths

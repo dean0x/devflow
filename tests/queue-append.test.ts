@@ -6,7 +6,7 @@
  *
  * Harness note: queue_append_row/queue_append_both/queue_read_gates are bash
  * functions (sourced, not standalone executables), so each test sources
- * json-parse -> get-mtime -> dream-lock -> queue-append and then calls the
+ * json-parse -> get-mtime -> learning-lock -> queue-append and then calls the
  * function(s) under test via a small inline bash script executed with `bash -c`.
  */
 
@@ -27,7 +27,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'dream-lock')}"
+source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
 ${script}
 `;
@@ -200,7 +200,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'dream-lock')}"
+source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
 queue_append_row "$1" "user" "row-$2" "$2"
 `,
@@ -254,7 +254,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'dream-lock')}"
+source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
 queue_append_row "$1" "user" "race-$2" "$2"
 `,
@@ -303,34 +303,34 @@ describe('queue_append_both', () => {
 
   it('writes to both queues when both flags are true', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const dream = path.join(tmpDir, 'dream.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${dream}" "true" "true" "user" "hi" "1"`);
+    const learning = path.join(tmpDir, 'learning.jsonl');
+    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "true" "true" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
-    expect(readJsonl(dream)).toHaveLength(1);
+    expect(readJsonl(learning)).toHaveLength(1);
   });
 
-  it('writes only to the memory queue when dream_enabled is false', () => {
+  it('writes only to the memory queue when learning_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const dream = path.join(tmpDir, 'dream.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${dream}" "true" "false" "user" "hi" "1"`);
+    const learning = path.join(tmpDir, 'learning.jsonl');
+    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "true" "false" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
-    expect(fs.existsSync(dream)).toBe(false);
+    expect(fs.existsSync(learning)).toBe(false);
   });
 
-  it('writes only to the dream queue when memory_enabled is false', () => {
+  it('writes only to the learning queue when memory_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const dream = path.join(tmpDir, 'dream.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${dream}" "false" "true" "user" "hi" "1"`);
+    const learning = path.join(tmpDir, 'learning.jsonl');
+    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "false" "true" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
-    expect(readJsonl(dream)).toHaveLength(1);
+    expect(readJsonl(learning)).toHaveLength(1);
   });
 
   it('writes to neither queue when both flags are false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const dream = path.join(tmpDir, 'dream.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${dream}" "false" "false" "user" "hi" "1"`);
+    const learning = path.join(tmpDir, 'learning.jsonl');
+    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "false" "false" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
-    expect(fs.existsSync(dream)).toBe(false);
+    expect(fs.existsSync(learning)).toBe(false);
   });
 });
 
@@ -345,33 +345,33 @@ describe('queue_read_gates', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function readGates(config: Record<string, unknown> | null): { memory: string; decisions: string; exitCode: number } {
+  function readGates(config: Record<string, unknown> | null): { memory: string; learning: string; exitCode: number } {
     const configPath = path.join(tmpDir, 'config.json');
     if (config !== null) fs.writeFileSync(configPath, JSON.stringify(config));
 
     const { stdout, exitCode } = runWithQueueAppend(`
       queue_read_gates "${configPath}"
       echo "MEMORY=$_QG_MEMORY"
-      echo "DECISIONS=$_QG_DECISIONS"
+      echo "LEARNING=$_QG_LEARNING"
     `);
     const memMatch = stdout.match(/MEMORY=(\S*)/);
-    const decMatch = stdout.match(/DECISIONS=(\S*)/);
-    return { memory: memMatch?.[1] ?? '', decisions: decMatch?.[1] ?? '', exitCode };
+    const learnMatch = stdout.match(/LEARNING=(\S*)/);
+    return { memory: memMatch?.[1] ?? '', learning: learnMatch?.[1] ?? '', exitCode };
   }
 
   it('both default to true when config is missing', () => {
     const r = readGates(null);
-    expect(r).toMatchObject({ memory: 'true', decisions: 'true', exitCode: 0 });
+    expect(r).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
   });
 
   it('reads both explicit fields in one pass', () => {
-    const r = readGates({ memory: true, decisions: false });
-    expect(r).toMatchObject({ memory: 'true', decisions: 'false' });
+    const r = readGates({ memory: true, learning: false });
+    expect(r).toMatchObject({ memory: 'true', learning: 'false' });
   });
 
-  it('memory:false, decisions field absent -> memory false, decisions defaults true', () => {
+  it('memory:false, learning field absent -> memory false, learning defaults true', () => {
     const r = readGates({ memory: false });
-    expect(r).toMatchObject({ memory: 'false', decisions: 'true' });
+    expect(r).toMatchObject({ memory: 'false', learning: 'true' });
   });
 
   it('never exits non-zero (set -e safety)', () => {

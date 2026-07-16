@@ -56,11 +56,11 @@ You receive from orchestrator:
    - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task
    - Read those relevant files to understand interfaces, types, naming conventions, error handling, and testing patterns established by prior work
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
-   - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` to scan the index and Read full bodies on demand. Otherwise, if `.devflow/decisions/decisions.md` exists, read it directly. Apply prior architectural decisions relevant to this task.
-   - If `DECISIONS_CONTEXT` is `(none)` or absent: if `.devflow/decisions/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
+   - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` to scan the index and Read full bodies on demand. Otherwise, if `.devflow/learning/decisions.md` exists, read it directly. Apply prior architectural decisions relevant to this task.
+   - If `DECISIONS_CONTEXT` is `(none)` or absent: if `.devflow/learning/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
    - If `HANDOFF_FILE` is provided, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-When you apply a decision from `.devflow/decisions/decisions.md` or avoid a pitfall from `.devflow/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfall from `.devflow/learning/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
 
 2. **Load domain skills**: Before any analysis, invoke the Skill tool for the domain skills matching the language and stack of the code being touched:
    - `backend` (TypeScript): `Skill(skill="devflow:typescript")`

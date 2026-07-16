@@ -62,7 +62,7 @@ The `budget` global governs depth. Scale reviewer roster, review cycle count, an
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
-Before you author the workflow script, read `.devflow/decisions/index.md` for the current worktree. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+Before you author the workflow script, read `.devflow/learning/index.md` for the current worktree. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need DECISIONS_CONTEXT injected; lightweight agents (Validator, Simplifier) do not.
 

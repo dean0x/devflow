@@ -155,9 +155,9 @@ exit 0
   fs.chmodSync(bin, 0o755);
 }
 
-/** Write dream config.json */
+/** Write feature config.json */
 function writeDreamConfig(projectDir: string, fields: Record<string, unknown>): void {
-  const dir = path.join(projectDir, '.devflow', 'dream');
+  const dir = path.join(projectDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(fields));
 }

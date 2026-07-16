@@ -510,7 +510,7 @@ describe('session-start-memory hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
-    await fs.mkdir(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -521,7 +521,7 @@ describe('session-start-memory hook integration', () => {
     // Decisions TL;DR injection moved from session-start-memory to session-start-context.
     // session-start-memory only handles working memory (WORKING-MEMORY.md).
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
 
@@ -555,7 +555,7 @@ describe('session-start-context hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
-    await fs.mkdir(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -564,11 +564,11 @@ describe('session-start-context hook integration', () => {
 
   it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'decisions', 'pitfalls.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'),
       '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls',
     );
 
@@ -583,7 +583,7 @@ describe('session-start-context hook integration', () => {
 
   it('produces no leading newlines when only decisions files exist', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 

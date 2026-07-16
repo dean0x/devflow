@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { acquireMkdirLock } from './mkdir-lock.js';
-import { getDecisionsDir, getDecisionsLockDir } from './project-paths.js';
+import { getLearningDir, getDecisionsLockDir } from './project-paths.js';
 
 /**
  * @file legacy-decisions-purge.ts
@@ -88,7 +88,7 @@ function resolveDecisionsPaths(options: { memoryDir: string; projectRoot?: strin
   filePrefixPairs: readonly DecisionsFilePair[];
 } {
   const { memoryDir, projectRoot } = options;
-  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
+  const decisionsDir = projectRoot ? getLearningDir(projectRoot) : path.join(memoryDir, 'decisions');
   const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
   return {
     decisionsDir,

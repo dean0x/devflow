@@ -8,7 +8,7 @@
 # break) rather than crashing on a BSD-only stat flag — safe-by-construction,
 # never a hard failure, but source get-mtime first for accurate staleness.
 
-dream_lock_acquire() {
+learning_lock_acquire() {
   local lock_dir="$1"
   local timeout="${2:-3}"
   local stale_threshold=30
@@ -39,6 +39,6 @@ dream_lock_acquire() {
   return 1
 }
 
-dream_lock_release() {
+learning_lock_release() {
   rmdir "$1" 2>/dev/null || true
 }

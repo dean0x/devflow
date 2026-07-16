@@ -67,7 +67,7 @@ Principle: *skim for structure, Read for content — never both on the same file
 
 ### Step 6: Project Knowledge
 
-If `.devflow/decisions/decisions.md` exists, Read its `<!-- TL;DR: ... -->` first-line comment and include active decision count under "### Active Decisions". Only the TL;DR — intentional for token efficiency.
+If `.devflow/learning/decisions.md` exists, Read its `<!-- TL;DR: ... -->` first-line comment and include active decision count under "### Active Decisions". Only the TL;DR — intentional for token efficiency.
 
 ### Step 7: Generate Summary
 

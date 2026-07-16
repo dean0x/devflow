@@ -37,7 +37,7 @@ function makeCtx(
     transcript: null,
     usage: null,
     configCounts: null,
-    decisionsCounts: null,
+    learningCounts: null,
     costHistory: null,
     config: {
       enabled: true,
@@ -152,7 +152,7 @@ describe('render', () => {
         todos: { completed: 1, total: 3 },
         skills: [],
       },
-      decisionsCounts: { decisions: 3, pitfalls: 1 },
+      learningCounts: { decisions: 3, pitfalls: 1 },
     });
     const output = await render(ctx);
     const lines = output.split('\n');
@@ -191,7 +191,7 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 15 components (sessionDuration retained but omitted from defaults)', () => {
-    expect(HUD_COMPONENTS).toHaveLength(15);
+  it('HUD_COMPONENTS has 14 components (sessionDuration retained but omitted from defaults)', () => {
+    expect(HUD_COMPONENTS).toHaveLength(14);
   });
 });

@@ -88,26 +88,26 @@ function makeLedgerRow(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
-  const ledgerPath = path.join(dir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return ledgerPath;
 }
 
 function writeLog(dir: string, rows: Record<string, unknown>[]): string {
-  const logPath = path.join(dir, '.devflow', 'decisions', 'decisions-log.jsonl');
+  const logPath = path.join(dir, '.devflow', 'learning', 'decisions-log.jsonl');
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   fs.writeFileSync(logPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return logPath;
 }
 
 function readLedger(dir: string): Record<string, unknown>[] {
-  const ledgerPath = path.join(dir, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
   return parseLedger(ledgerPath);
 }
 
 function readLog(dir: string): Record<string, unknown>[] {
-  const logPath = path.join(dir, '.devflow', 'decisions', 'decisions-log.jsonl');
+  const logPath = path.join(dir, '.devflow', 'learning', 'decisions-log.jsonl');
   return parseLedger(logPath);
 }
 
@@ -206,7 +206,7 @@ describe('assign-anchor CLI op', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'assign-anchor-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -299,7 +299,7 @@ describe('assign-anchor CLI op', () => {
   it('registers usage entry', () => {
     writeLog(tmpDir, [makeObsRow({ id: 'obs_usage_01', type: 'decision', status: 'ready' })]);
     runHelper('assign-anchor decision obs_usage_01', tmpDir);
-    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
     expect(fs.existsSync(usagePath)).toBe(true);
     const usage = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
     expect(usage.entries['ADR-001']).toBeDefined();
@@ -309,7 +309,7 @@ describe('assign-anchor CLI op', () => {
   it('re-renders decisions.md with the new entry', () => {
     writeLog(tmpDir, [makeObsRow({ id: 'obs_render_01', type: 'decision', status: 'ready' })]);
     runHelper('assign-anchor decision obs_render_01', tmpDir);
-    const decisionsPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions.md');
+    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
     expect(fs.existsSync(decisionsPath)).toBe(true);
     const content = fs.readFileSync(decisionsPath, 'utf8');
     expect(content).toContain('## ADR-001:');
@@ -337,7 +337,7 @@ describe('retire-anchor CLI op', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retire-anchor-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -403,7 +403,7 @@ describe('retire-anchor CLI op', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', pattern: 'To be retired', decisions_status: 'Accepted' }),
     ]);
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
-    const decisionsPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions.md');
+    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
     const content = fs.readFileSync(decisionsPath, 'utf8');
     expect(content).toContain('ADR-001');
     expect(content).not.toContain('ADR-002');
@@ -445,7 +445,7 @@ describe('AC-F7: number stability — retired number is never reused', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'num-stability-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -682,7 +682,7 @@ describe('rotate-observations CLI op', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-cli-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
   });
 
@@ -698,8 +698,8 @@ describe('rotate-observations CLI op', () => {
   });
 
   it('accepts explicit log and archive paths', () => {
-    const logPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-log.jsonl');
-    const archivePath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
+    const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
+    const archivePath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.archive.jsonl');
     fs.writeFileSync(logPath, '');
     const result = runHelper(`rotate-observations "${logPath}" "${archivePath}"`, tmpDir);
     expect(result.code).toBe(0);
@@ -715,7 +715,7 @@ describe('assign-anchor precondition assertions', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-precond-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -842,9 +842,9 @@ describe('toLedgerRow projector — canonical committed shape', () => {
   it('assign-anchor CLI emits only canonical fields in ledger row', () => {
     // End-to-end: obs has extra lifecycle fields; ledger row must not contain them
     const tmpE2e = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-proj-test-'));
-    fs.mkdirSync(path.join(tmpE2e, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpE2e, '.devflow', 'learning'), { recursive: true });
     try {
-      const logPathE2e = path.join(tmpE2e, '.devflow', 'decisions', 'decisions-log.jsonl');
+      const logPathE2e = path.join(tmpE2e, '.devflow', 'learning', 'decisions-log.jsonl');
       const obsWithLifecycle = makeObsRow({
         id: 'obs_e2e_proj',
         type: 'decision',
@@ -858,7 +858,7 @@ describe('toLedgerRow projector — canonical committed shape', () => {
       const result = runHelper('assign-anchor decision obs_e2e_proj', tmpE2e);
       expect(result.code).toBe(0);
 
-      const ledgerPath = path.join(tmpE2e, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+      const ledgerPath = path.join(tmpE2e, '.devflow', 'learning', 'decisions-ledger.jsonl');
       const rows = parseLedger(ledgerPath);
       expect(rows).toHaveLength(1);
       const r = rows[0];
@@ -1038,7 +1038,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => 
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'assign-anchor-perf-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1066,7 +1066,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => 
     function timeAssignAnchor(n: number): number {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aa-perf-${n}-`));
       try {
-        fs.mkdirSync(path.join(dir, '.devflow', 'decisions'), { recursive: true });
+        fs.mkdirSync(path.join(dir, '.devflow', 'learning'), { recursive: true });
         seedLedger(dir, n);
         seedLog(dir, 'obs_time_target');
         const start = performance.now();
@@ -1117,7 +1117,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1130,7 +1130,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
     expect(result.code).toBe(0);
 
     // Lock dir should be released
-    const lockDir = path.join(tmpDir, '.devflow', 'decisions', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1139,7 +1139,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
     const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
     expect(result.code).toBe(0);
 
-    const lockDir = path.join(tmpDir, '.devflow', 'decisions', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 });

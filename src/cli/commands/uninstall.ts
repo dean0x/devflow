@@ -10,7 +10,7 @@ import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName,
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
 import { removeCaptureHooks } from './capture.js';
-import { removeDreamHook } from './dream.js';
+import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
@@ -342,7 +342,7 @@ export const uninstallCommand = new Command('uninstall')
     if (!isSelectiveUninstall) {
       const gitRoot = await getGitRoot();
 
-      // 1. .devflow/ data directory (contains docs/, memory/, decisions/, features/, etc.)
+      // 1. .devflow/ data directory (contains docs/, memory/, learning/, features/, etc.)
       const devflowDataDir = path.join(process.cwd(), '.devflow');
       let devflowDataExists = false;
       try {
@@ -357,7 +357,7 @@ export const uninstallCommand = new Command('uninstall')
           shouldRemoveDevflow = false;
         } else if (process.stdin.isTTY) {
           const removeDevflow = await p.confirm({
-            message: '.devflow/ directory found. Remove project data (docs, memory, decisions)?',
+            message: '.devflow/ directory found. Remove project data (docs, memory, learning)?',
             initialValue: false,
           });
 

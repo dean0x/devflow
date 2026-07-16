@@ -33,11 +33,10 @@ export type ComponentId =
   | 'usageQuota'
   | 'todoProgress'
   | 'configCounts'
-  | 'decisionsCounts'
+  | 'learningCounts'
   | 'sessionCost'
   | 'releaseInfo'
-  | 'worktreeCount'
-  | 'notifications';
+  | 'worktreeCount';
 
 /**
  * HUD config persisted to ~/.devflow/hud.json.
@@ -116,22 +115,11 @@ export interface ConfigCountsData {
 }
 
 /**
- * Decisions/pitfalls counts data for the decisionsCounts component.
+ * Decisions/pitfalls counts data for the learningCounts component.
  */
-export interface DecisionsCountsData {
+export interface LearningCountsData {
   decisions: number;
   pitfalls: number;
-}
-
-/**
- * D24: Notification data for the HUD notifications component.
- */
-export interface NotificationData {
-  id: string;
-  severity: 'dim' | 'warning' | 'error';
-  text: string;
-  count?: number;
-  ceiling?: number;
 }
 
 /**
@@ -143,8 +131,7 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
-  decisionsCounts: DecisionsCountsData | null;
-  notifications?: NotificationData | null;
+  learningCounts: LearningCountsData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;

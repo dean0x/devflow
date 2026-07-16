@@ -13,9 +13,9 @@
  * duplication. `Retired` is the output of the `retire-anchor` op and MUST be
  * present; `Unknown` was never produced by any operation and has been removed.
  *
- * Defined here (pure data module) so both observation-io.ts and decisions.ts
+ * Defined here (pure data module) so both observation-io.ts and learning.ts
  * can import without creating a utility→command circular dependency.
- * Re-exported through src/cli/commands/decisions.ts for external consumers.
+ * Re-exported through src/cli/commands/learning.ts for external consumers.
  * Consumed by LedgerRow (this file) and LearningObservation.decisions_status (this file).
  */
 export const DECISIONS_ENTRY_STATUSES = [

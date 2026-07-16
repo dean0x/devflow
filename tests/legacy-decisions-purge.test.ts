@@ -279,7 +279,7 @@ describe('purgeLegacyDecisionsEntries with projectRoot', () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-projectroot-test-'));
     projectRoot = path.join(tmpDir, 'project');
     // New layout: .devflow/decisions/ (used when projectRoot is provided)
-    decisionsDir = path.join(projectRoot, '.devflow', 'decisions');
+    decisionsDir = path.join(projectRoot, '.devflow', 'learning');
     // memoryDir is .devflow/memory/ in the new layout
     memoryDir = path.join(projectRoot, '.devflow', 'memory');
     await fs.mkdir(decisionsDir, { recursive: true });
