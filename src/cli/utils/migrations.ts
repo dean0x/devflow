@@ -17,7 +17,7 @@ import { getMemoryDir } from './project-paths.js';
 export type MigrationScope = 'global' | 'per-project';
 
 /**
- * D38: Discriminated union for MigrationContext eliminates ISP violation.
+ * D38: Discriminated union context types eliminate ISP violation.
  *
  * GlobalMigrationContext: only devflowDir — per-project fields (memoryDir,
  * projectRoot) are structurally absent, so migrations that accidentally
@@ -27,6 +27,9 @@ export type MigrationScope = 'global' | 'per-project';
  *
  * PerProjectMigrationContext: adds memoryDir and projectRoot so per-project
  * migrations can access them without receiving '' sentinels.
+ *
+ * Migration.run uses a conditional type directly over these two concrete types;
+ * a union alias is not needed.
  */
 export type GlobalMigrationContext = {
   scope: 'global';
@@ -39,8 +42,6 @@ export type PerProjectMigrationContext = {
   memoryDir: string;
   projectRoot: string;
 };
-
-export type MigrationContext = GlobalMigrationContext | PerProjectMigrationContext;
 
 export interface MigrationRunResult {
   infos: string[];
@@ -254,9 +255,9 @@ async function runGlobalMigration(
  *
  * D35: Per-project migrations run across all discovered projects with a
  * concurrency cap of 16 to avoid EMFILE on machines with 50–200 projects.
- * This matches the pattern used for .claudeignore multi-project install at
- * init.ts:962-974 — each project has its own `.memory/.decisions.lock` so
- * there is no cross-project contention. Promise.allSettled collects all
+ * This matches the pattern used by `installClaudeignore` in init.ts for
+ * multi-project install — each project has its own `.memory/.decisions.lock`
+ * so there is no cross-project contention. Promise.allSettled collects all
  * outcomes without short-circuiting on partial failures.
  *
  * Marking strategy: the migration is considered applied globally only when
@@ -267,8 +268,9 @@ async function runGlobalMigration(
  * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
  * to [] and [].every(...) returns true (vacuous truth), which would mark
  * the migration applied even though no projects were swept. This is the
- * intended behaviour for machines that cloned a repo after the migration
- * ran — there are no legacy entries to purge.
+ * intended behaviour: when MIGRATIONS is empty the applied-set write is
+ * skipped entirely (newlyApplied stays empty), so the vacuous-truth branch
+ * is a constant-time no-op.
  */
 async function runPerProjectMigration(
   migration: Migration<'per-project'>,
