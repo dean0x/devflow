@@ -1,4 +1,4 @@
-// tests/learning/json-helper-write-exclusive.test.ts
+// tests/decisions/json-helper-write-exclusive.test.ts
 //
 // TOCTOU hardening tests for json-helper.cjs writeExclusive (via writeFileAtomic).
 //

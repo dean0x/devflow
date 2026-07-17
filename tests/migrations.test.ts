@@ -98,7 +98,7 @@ describe('writeAppliedMigrations', () => {
 });
 
 describe('MIGRATIONS', () => {
-  it('is empty in 2.0', () => {
+  it('is empty', () => {
     expect(MIGRATIONS).toEqual([]);
   });
 
@@ -119,13 +119,10 @@ describe('MIGRATIONS', () => {
 
 describe('runMigrations', () => {
   let tmpDir: string;
-  let homeDevflowDir: string;
   let originalHome: string | undefined;
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-run-migrations-test-'));
-    homeDevflowDir = path.join(tmpDir, 'home-devflow');
-    await fs.mkdir(homeDevflowDir, { recursive: true });
     // Redirect os.homedir() by overriding HOME so migrations.ts uses our tmpDir
     originalHome = process.env.HOME;
     process.env.HOME = path.join(tmpDir, 'home');
@@ -145,8 +142,8 @@ describe('runMigrations', () => {
   /**
    * registryOverride is the seam for isolated testing — pass a stub registry
    * as the third argument to runMigrations. The live MIGRATIONS export is
-   * always empty in 2.0; tests that need entry behavior supply their own
-   * Migration objects inline.
+   * empty; tests that need entry behavior supply their own Migration objects
+   * inline.
    */
 
   it('skips already-applied migrations', async () => {
@@ -204,7 +201,7 @@ describe('runMigrations', () => {
       run: async () => { successRan = true; },
     };
 
-    const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
+    const ctx = { devflowDir: fakeHome };
     const result = await runMigrations(ctx, [], [failingGlobal, succeedingGlobal]);
 
     // Failing migration recorded in failures
@@ -244,7 +241,7 @@ describe('runMigrations', () => {
       },
     };
 
-    const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
+    const ctx = { devflowDir: fakeHome };
     const result = await runMigrations(ctx, [project1, project2], [failingPerProjectMigration]);
 
     // Should have one failure for project2
@@ -278,7 +275,7 @@ describe('runMigrations', () => {
       run: async () => { ranAnywhere = true; },
     };
 
-    const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
+    const ctx = { devflowDir: fakeHome };
     const result = await runMigrations(ctx, [], [perProjectMigration]);
 
     // D37: vacuous truth — migration marked applied even though it didn't run.

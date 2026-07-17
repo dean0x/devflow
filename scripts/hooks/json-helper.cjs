@@ -580,12 +580,10 @@ try {
         //
         // D002: Crash window — if the process is killed between this write and
         // renderAndWriteAll below, the ledger will be ahead of decisions.md /
-        // pitfalls.md. This is git-recoverable (the ledger is the source of
-        // truth; `render-decisions.cjs render <worktree>` heals the .md files)
-        // and is also auto-healed by the migration idempotency path on the next
-        // `devflow init` run (migrateDecisionsLedger re-renders when the existing
-        // ledger is non-empty and newRowsAdded === 0). The render is kept as the
-        // FINAL write under the lock so the window is as narrow as possible.
+        // pitfalls.md. This is git-recoverable: the ledger is the source of
+        // truth and `render-decisions.cjs render <worktree>` re-renders the
+        // .md files. The render is kept as the FINAL write under the lock so
+        // the window is as narrow as possible.
         const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
         const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
         writeFileAtomic(aaLedgerPath, aaLedgerContent);

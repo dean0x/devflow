@@ -5,8 +5,7 @@
  * per machine (global scope) or once per machine across all discovered projects
  * (per-project scope). State is persisted at ~/.devflow/migrations.json.
  *
- * The registry is empty as of 2.0 — no 1.x upgrade path. To add a 2.x migration,
- * append an entry to MIGRATIONS below.
+ * The registry is empty. To add a migration, append an entry to MIGRATIONS below.
  */
 
 import { promises as fs } from 'fs';
@@ -74,7 +73,7 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  * The `scope` field distinguishes global (one run per machine, no project context
  * needed) from per-project (sweeps every discovered Claude-enabled project root).
  *
- * Registry emptied for 2.0 — no 1.x upgrade path. Append 2.x migrations here.
+ * Append new migrations here.
  */
 export const MIGRATIONS: readonly Migration[] = [];
 
@@ -322,9 +321,8 @@ async function runPerProjectMigration(
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
- * With the empty 2.0 registry, this is always a no-op until 2.x migrations
- * are added — the per-entry loop never executes, migrations.json is never
- * written, and the function returns in constant time.
+ * With an empty registry this is a constant-time no-op — the per-entry loop
+ * never executes and migrations.json is never written.
  *
  * @param ctx - devflowDir (memoryDir and projectRoot filled per-project)
  * @param discoveredProjects - absolute paths to discovered Claude-enabled project roots

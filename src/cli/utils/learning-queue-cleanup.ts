@@ -1,11 +1,10 @@
 /**
  * @file learning-queue-cleanup.ts
  *
- * Shared cleanup helpers for `.devflow/learning/` — used by both the
- * `purge-dream-marker-pipeline-v1` migration and `devflow learning --reset`
- * (legacy marker sweep), and by `devflow learning --clear`/`--disable`
- * (live queue drain). Centralizing these predicates keeps the two call
- * sites of each behavior byte-identical instead of hand-copied.
+ * Shared cleanup helpers for `.devflow/learning/`. Imported solely by
+ * `src/cli/commands/learning.ts`:
+ * - `sweepLegacyDreamMarkers` — used by `devflow learning --reset`
+ * - `drainLearningQueue` — used by `devflow learning --clear` / `--disable`
  */
 
 import { promises as fs } from 'fs';

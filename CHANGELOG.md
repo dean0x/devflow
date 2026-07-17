@@ -42,14 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
 
 ### Fixed
-- **Learning**: reject observations with empty id/type/pattern fields (validation + auto-purge on migration)
+- **Learning**: reject observations with empty id/type/pattern fields
 - **Learning**: Handle string-typed `.message.content` in transcript extraction (was only handling arrays)
 - **Learning**: Eliminate empty-array loop noise when Sonnet returns no observations
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
-- **Self-learning reconciler self-heal**: `reconcile-manifest` now recovers from `render-ready` crash-window states. When a knowledge file contains an ADR/PF anchor absent from the manifest, and exactly one `status: 'ready'` log observation matches by normalized pattern, the observation is upgraded to `status: 'created'` and the manifest entry is reconstructed. Zero matches are treated as user-curated (left alone); multiple matches are silently skipped as ambiguous. Adds `healed` counter to all reconcile-manifest output shapes. Heal is gated by the `- **Source**: self-learning:` marker on the knowledge-file section, preventing false-positive heals against pre-v2 seeded entries.
-- **Legacy knowledge purge v3 migration** (`purge-legacy-knowledge-v3`): sweeps all remaining pre-v2 seeded knowledge entries using the `- **Source**: self-learning:` format discriminator. Any ADR/PF section lacking this marker is removed. Replaces the v2 hardcoded allow-list approach with a format-based approach that catches entries the v2 migration missed. Self-learning-generated entries and user-opted-in entries (entries containing the source marker) survive.
 
 ---
 
