@@ -365,10 +365,7 @@ describe('runMigrations', () => {
     expect(receivedCtx!.devflowDir).toBe(fakeHome);
   });
 
-  it('collects infos and warnings returned by migration run() into the aggregated RunMigrationsResult', async () => {
-    // Covers: normaliseRunResult non-void branch (migrations.ts:213),
-    // infos/warnings aggregation for global (migrations.ts:362-363) and
-    // per-project (migrations.ts:311-313, 371-372).
+  it('aggregates infos and warnings from global and per-project migration run() results', async () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
     const project1 = path.join(tmpDir, 'info-warn-project');
     await fs.mkdir(project1, { recursive: true });
