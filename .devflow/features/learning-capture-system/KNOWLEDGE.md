@@ -12,7 +12,6 @@ directories:
   - src/cli/utils/learning-tuning-config.ts
   - src/cli/utils/learning-queue-cleanup.ts
   - src/cli/utils/project-paths.ts
-  - src/cli/utils/migrations.ts
   - src/cli/hud/components/learning-counts.ts
   - commands/_partials
 created: 2026-07-15
