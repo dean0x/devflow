@@ -364,6 +364,51 @@ describe('runMigrations', () => {
     expect(receivedCtx!.scope).toBe('global');
     expect(receivedCtx!.devflowDir).toBe(fakeHome);
   });
+
+  it('collects infos and warnings returned by migration run() into the aggregated RunMigrationsResult', async () => {
+    // Covers: normaliseRunResult non-void branch (migrations.ts:213),
+    // infos/warnings aggregation for global (migrations.ts:362-363) and
+    // per-project (migrations.ts:311-313, 371-372).
+    const fakeHome = path.join(tmpDir, 'home', '.devflow');
+    const project1 = path.join(tmpDir, 'info-warn-project');
+    await fs.mkdir(project1, { recursive: true });
+
+    const globalMigration: Migration = {
+      id: 'test-global-infos-warnings',
+      description: 'Test: global migration that returns infos and warnings',
+      scope: 'global',
+      run: async () => ({
+        infos: ['global info one', 'global info two'],
+        warnings: ['global warning one'],
+      }),
+    };
+
+    const perProjectMigration: Migration = {
+      id: 'test-per-project-infos-warnings',
+      description: 'Test: per-project migration that returns infos and warnings',
+      scope: 'per-project',
+      run: async () => ({
+        infos: ['project info'],
+        warnings: ['project warning'],
+      }),
+    };
+
+    const ctx = { devflowDir: fakeHome };
+    const result = await runMigrations(ctx, [project1], [globalMigration, perProjectMigration]);
+
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toContain('test-global-infos-warnings');
+    expect(result.newlyApplied).toContain('test-per-project-infos-warnings');
+
+    // Global migration infos and warnings are aggregated into the result
+    expect(result.infos).toContain('global info one');
+    expect(result.infos).toContain('global info two');
+    expect(result.warnings).toContain('global warning one');
+
+    // Per-project migration infos and warnings are aggregated into the result
+    expect(result.infos).toContain('project info');
+    expect(result.warnings).toContain('project warning');
+  });
 });
 
 describe('reportMigrationResult', () => {
