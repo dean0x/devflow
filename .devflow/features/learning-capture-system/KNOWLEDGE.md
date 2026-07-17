@@ -12,7 +12,6 @@ directories:
   - src/cli/utils/learning-tuning-config.ts
   - src/cli/utils/learning-queue-cleanup.ts
   - src/cli/utils/project-paths.ts
-  - src/cli/utils/migrations.ts
   - src/cli/hud/components/learning-counts.ts
   - commands/_partials
 created: 2026-07-15
@@ -214,14 +213,6 @@ HUD coupling to markdown format (D309). Label: `Learning: N decisions, M pitfall
 | `--clear` | Truncates `decisions-log.jsonl` |
 | `--reset` | Removes `.devflow/learning/` state; prints pinned message: `Reset complete — removed .devflow/learning/ state.` |
 
-### Migrations
-
-Two migrations consolidate older installs:
-- `consolidate-dream-decisions-to-learning-v1` (per-project): moves `.devflow/dream/` + `.devflow/decisions/`
-  → `.devflow/learning/`; writes `.devflow/config.json`; maps `decisions` key → `learning`
-- `rename-global-decisions-config-v1` (global): renames `~/.devflow/decisions.json` →
-  `~/.devflow/learning.json`
-
 ## Naming Boundary (Critical Convention)
 
 The Learning agent processes the queue and produces **decisions content**. Content identifiers
@@ -275,7 +266,7 @@ agents must not "fix" the naming mismatch.
 
 - **`decisions` legacy key wins over `learning` in `coerceConfig`**: older configs that have
   `"decisions": false` will override a `"learning": true` in the same file. This is intentional
-  (migration compatibility) but can cause confusion when reading a config with both keys.
+  (backward compatibility) but can cause confusion when reading a config with both keys.
 
 - **HUD reads `decisions-ledger.jsonl`, not the `.md` files**: a row is active only when
   `anchor_id` is set (non-empty string) AND `decisions_status` is absent or not in the
@@ -288,10 +279,6 @@ agents must not "fix" the naming mismatch.
 - **Project-level `learning.json` overrides global** in tuning config — opposite priority from
   feature config where there is no project-vs-global concept (`.devflow/config.json` is
   project-only).
-
-- **D37 edge case on fresh clones**: if a project is cloned after global migration markers are
-  set, `readConfig` falls through to `DEFAULT_CONFIG` (all features enabled). Recovery is
-  `rm ~/.devflow/migrations.json` to force a re-sweep, or re-running `devflow init`.
 
 - **json_extract_cwd_field SOH delimiter**: `capture-turn` splits the combined `cwd+field`
   output using `$'\001'` (bash SOH literal). The jq side emits `""`. If you add a

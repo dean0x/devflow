@@ -74,7 +74,7 @@ export interface LearningObservation {
  * D202: Projected shape of a committed decisions-ledger.jsonl row.
  *
  * This is distinct from LearningObservation — it represents the anchored ledger
- * row written by `assign-anchor` / `retire-anchor` / the migration, NOT the raw
+ * row written by `assign-anchor` / `retire-anchor`, NOT the raw
  * log observation. Key distinctions:
  *   - `id` is required (obs ID, may be synthetic: `obs_migrated_{anchor}`)
  *   - `anchor_id` is required (set once by assign-anchor, never recomputed)
@@ -82,10 +82,10 @@ export interface LearningObservation {
  *   - Observation-lifecycle fields (`confidence`, `observations`, `evidence`, etc.)
  *     are optional — they are present for enriched rows but absent for synthesized rows
  *   - `[key: string]: unknown` index signature preserves round-trip JSON safety for
- *     fields added by future ops (the renderer and migration always spread-merge rows)
+ *     fields added by future ops (the renderer always spread-merges rows)
  *
- * Home: observations.ts (pure data module, no I/O) so decisions-ledger-migration.ts
- * and any future ledger consumers can import without circular deps.
+ * Home: observations.ts (pure data module, no I/O) so any future ledger consumers
+ * can import without circular deps.
  */
 export interface LedgerRow {
   /** Observation ID (may be synthetic: `obs_migrated_{anchor}` for no-Source entries). */

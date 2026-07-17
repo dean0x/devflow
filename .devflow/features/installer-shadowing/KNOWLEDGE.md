@@ -1,9 +1,9 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope or leftover-warning behavior, or extending the CLI skills/rules management commands. Keywords: installViaFileCopy, installAllRules, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, computeShadowLeftoverWarnings, ShadowWarning, marketplace-cleanup."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope or leftover-warning behavior, or extending the CLI skills/rules management commands. Keywords: installViaFileCopy, installAllRules, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, computeShadowLeftoverWarnings, ShadowWarning."
 category: architecture
-directories: [src/cli/utils/installer.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/plugins.ts, src/cli/utils/marketplace-cleanup.ts]
+directories: [src/cli/utils/installer.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/plugins.ts]
 created: 2026-07-13
 updated: 2026-07-13
 ---
@@ -191,10 +191,6 @@ Positional actions dispatch **before** flags. When `action` is present, flag opt
 
 Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)`, `seedRuleShadow(...)` — used by uninstall and tests.
 
-### Marketplace cleanup migration
-
-`marketplace-cleanup.ts` exports `stripDevflowMarketplaceFromJson` (pure string→string) and `stripDevflowMarketplace` (async file I/O wrapper). The global migration `purge-stale-extra-known-marketplaces-v1` calls `stripDevflowMarketplace` to remove the `devflow` key from `extraKnownMarketplaces` in `settings.json`. Per ADR-003, if `extraKnownMarketplaces` becomes empty after removal, the entire key is deleted (clean end-state). Malformed JSON and missing keys are returned unchanged so a corrupt file never causes the migration to record a false success.
-
 ## Anti-Patterns
 
 - **Installing all of `~/.devflow/` on uninstall** — only `~/.devflow/scripts/` is Devflow-owned; `~/.devflow/skills/`, `~/.devflow/rules/`, and config files are user-owned and must survive uninstall.
@@ -221,10 +217,9 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow`, `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
 - `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`, `listShadowed`
 - `src/cli/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_SKILL_NAMES`, `LEGACY_AGENT_NAMES`
-- `src/cli/utils/marketplace-cleanup.ts` — `stripDevflowMarketplaceFromJson` (pure), `stripDevflowMarketplace` (async file wrapper); consumed by `purge-stale-extra-known-marketplaces-v1` migration
 
 ## Related
 
 - ADR-010: Productionalize skill/rule shadowing — governs the decision to make `installViaFileCopy` the sole install path and to surface invalid shadows as warn-and-install-source (not hard-fail) (applies ADR-010)
-- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup (no tombstone comments, no `*_old` names; `LEGACY_SKILL_NAMES` tracks accumulated deprecated names; `extraKnownMarketplaces` key removal in `marketplace-cleanup.ts`) (applies ADR-003)
+- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup (no tombstone comments, no `*_old` names; `LEGACY_SKILL_NAMES` tracks accumulated deprecated names) (applies ADR-003)
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (`ensureDevflowGitignore` in `post-install.ts`)

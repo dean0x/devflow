@@ -50,19 +50,10 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
 
 /**
  * Read the feature config for a project root.
- * Returns defaults when the file is missing or unreadable.
- * Applies ADR-001 clean-break: .devflow/config.json is the sole source of truth;
- * the consolidate-dream-decisions-to-learning-v1 migration writes it at init time.
- *
- * D37 edge case: a project cloned AFTER the global migration marker is set will
- * have no .devflow/config.json (no migration has ever run for it). readConfig
- * falls through to DEFAULT_CONFIG (all features enabled). This is a bounded,
- * non-fatal silent reset: the user re-disables any features they want off on
- * their next `devflow init` run. The tradeoff is acceptable because:
- * (1) DEFAULT_CONFIG is the safe-to-enable state, (2) re-running `devflow init`
- * is the documented recovery path for fresh clones, and (3) re-adding a sidecar
- * fallback would reintroduce compat code that ADR-001 removed.
- * Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
+ * Returns DEFAULT_CONFIG when the file is missing or unreadable.
+ * Applies ADR-001: .devflow/config.json is the sole source of truth;
+ * `devflow init` writes it directly on first install. An absent file falls
+ * through to DEFAULT_CONFIG (all features enabled by default).
  */
 export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
   const configPath = getFeatureConfigPath(projectRoot);

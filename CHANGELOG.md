@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triager + Coder pair. The Triager (opus) runs a blast-radius disposition pass; the Coder (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triager, coder, simplifier, validator]`.
 
 ### Removed
+- **1.x migration registry and helper modules** (BREAKING): all 20 run-once 1.x upgrade migrations removed from `MIGRATIONS`; helper modules `legacy-decisions-purge.ts`, `decisions-ledger-migration.ts`, `marketplace-cleanup.ts`, and `mkdir-lock.ts` deleted. The migration framework stays for future 2.x entries. No 1.x → 2.0 upgrade path.
 - **Native `claude plugin install` path** (BREAKING): the `claude plugin install` code path is removed; `installViaFileCopy` (file copy) is the sole install mechanism for all Devflow assets.
 - **`extraKnownMarketplaces` registration from settings template**: the Devflow marketplace entry is no longer written to `~/.claude/settings.json` on install.
 - **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
@@ -41,14 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
 
 ### Fixed
-- **Learning**: reject observations with empty id/type/pattern fields (validation + auto-purge on migration)
+- **Learning**: reject observations with empty id/type/pattern fields
 - **Learning**: Handle string-typed `.message.content` in transcript extraction (was only handling arrays)
 - **Learning**: Eliminate empty-array loop noise when Sonnet returns no observations
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
-- **Self-learning reconciler self-heal**: `reconcile-manifest` now recovers from `render-ready` crash-window states. When a knowledge file contains an ADR/PF anchor absent from the manifest, and exactly one `status: 'ready'` log observation matches by normalized pattern, the observation is upgraded to `status: 'created'` and the manifest entry is reconstructed. Zero matches are treated as user-curated (left alone); multiple matches are silently skipped as ambiguous. Adds `healed` counter to all reconcile-manifest output shapes. Heal is gated by the `- **Source**: self-learning:` marker on the knowledge-file section, preventing false-positive heals against pre-v2 seeded entries.
-- **Legacy knowledge purge v3 migration** (`purge-legacy-knowledge-v3`): sweeps all remaining pre-v2 seeded knowledge entries using the `- **Source**: self-learning:` format discriminator. Any ADR/PF section lacking this marker is removed. Replaces the v2 hardcoded allow-list approach with a format-based approach that catches entries the v2 migration missed. Self-learning-generated entries and user-opted-in entries (entries containing the source marker) survive.
 
 ---
 
