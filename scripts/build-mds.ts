@@ -15,9 +15,10 @@
  * the final `commands/` leaf is auto-created. This catches `output-dir` typos
  * before they silently write to unexpected locations.
  *
- * Per-file clean: before writing each output, removes only the specific dest file —
- * never wipes a whole directory. A deleted source whose stale compiled output was
- * previously gitignored will be caught by the build.test.ts parity check.
+ * Atomic write: each output is written to a temp file then renamed into place, so
+ * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
+ * A deleted source whose stale compiled output was previously gitignored will be
+ * caught by the build.test.ts parity check.
  *
  * Usage: npm run build:mds
  */
@@ -170,14 +171,15 @@ async function compileHost(host: HostEntry): Promise<CompileOutcome> {
 
   const dest = path.join(outAbs, `${host.basename}.md`);
 
-  // Per-file clean: remove only the specific dest — never wipe the directory.
-  if (fs.existsSync(dest)) {
-    fs.rmSync(dest);
-  }
-
   const result = await compileFile(host.file);
   const cleaned = stripOutputDirKey(result.output);
-  fs.writeFileSync(dest, cleaned, "utf-8");
+
+  // Atomic write: write to a temp file then rename into place so concurrent
+  // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
+  // observe a missing file between the old and new content.
+  const tmp = `${dest}.tmp`;
+  fs.writeFileSync(tmp, cleaned, "utf-8");
+  fs.renameSync(tmp, dest);
 
   return {
     source: path.relative(ROOT, host.file),
