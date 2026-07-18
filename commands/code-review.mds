@@ -151,7 +151,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Docs or significant code | documentation |
 | COMPLIANCE_ENABLED | compliance |
 
-If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree (plugin-gated; resolved once above, reused across all worktrees).
+If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree.
 
 ### Phase 1b: Load Decisions Index
 

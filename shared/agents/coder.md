@@ -72,7 +72,7 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    - `frontend`: `Skill(skill="devflow:react")`, `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:accessibility")`, `Skill(skill="devflow:ui-design")`
    - `fullstack`: Combine backend + frontend skills
 
-   **Compliance skill (conditional):** When `COMPLIANCE: enabled` AND (the project CLAUDE.md declares compliance frameworks in a `## Compliance` section, OR the task touches regulated surface — data models, auth flows, logging/observability, IaC, retention logic), invoke `Skill(skill="devflow:compliance")` and load the relevant `references/{framework}.md` files for the declared frameworks. Absent `COMPLIANCE` field = no-op (avoids PF-002: do NOT also add `devflow:compliance` to the frontmatter `skills:` list — an agent must never both frontmatter-preload a skill and body-instruct Skill-tool invocation of the same skill).
+   **Compliance skill (conditional):** When `COMPLIANCE: enabled` AND (the project CLAUDE.md declares compliance frameworks in a `## Compliance` section, OR the task touches regulated surface — data models, auth flows, logging/observability, IaC, retention logic), invoke `Skill(skill="devflow:compliance")` and load the relevant `references/{framework}.md` files for the declared frameworks.
 
 3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 
