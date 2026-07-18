@@ -8,10 +8,10 @@ PCI DSS prohibits storing these elements after authorization under any circumsta
 
 | Element | Prohibition |
 |---------|------------|
-| Full magnetic-stripe / chip data (track data) | Never stored — Req 3.2.1 |
-| CAV2/CVC2/CVV2/CID (card verification codes) | Never stored — Req 3.2.1 |
-| PINs / PIN blocks | Never stored — Req 3.2.1 |
-| Full PAN unmasked | Render unreadable (tokenize or encrypt) — Req 3.3 |
+| Full magnetic-stripe / chip data (track data) | Never stored — Req 3.3.1.1 |
+| CAV2/CVC2/CVV2/CID (card verification codes) | Never stored — Req 3.3.1.2 |
+| PINs / PIN blocks | Never stored — Req 3.3.1.3 |
+| Full PAN unmasked | Render unreadable (tokenize or encrypt) — Req 3.5.1 |
 
 **Pattern**: grep model/schema files for `cvv|cvc|cvv2|track_data|track1|track2|pin_block`.
 

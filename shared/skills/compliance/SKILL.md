@@ -103,12 +103,12 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 
 | Control | SOC 2 | PCI DSS | GDPR | HIPAA | ISO 27001 | SOX |
 |---------|-------|---------|------|-------|-----------|-----|
-| Data Classification | CC6.1 | Req 3 | Art. 25 | §164.514 | A.8.2 | — |
-| Sensitive Data in Logs | CC6.7 | Req 3.4 | Art. 32 | §164.312(b) | A.12.4 | ITGC |
-| Encryption | CC6.1 | Req 3/4 | Art. 32 | §164.312(a)(2) | A.10.1 | — |
-| Audit Trails | CC7.2 | Req 10.x | Art. 30/32 | §164.312(b) | A.12.4 | ITGC |
-| Retention & Erasure | CC6.5 | Req 3.1 | Art. 17 | §164.530(j) | A.8.3 | SOX §802 |
-| IaC / Env Controls | CC6.6 | Req 1/6.x | Art. 25 | §164.312(a) | A.14.2 | ITGC |
+| Data Classification | CC6.1 | Req 3 | Art. 25 | §164.514 | A.5.12 | — |
+| Sensitive Data in Logs | CC6.7 | Req 3.4 | Art. 32 | §164.312(b) | A.8.15 | ITGC |
+| Encryption | CC6.1 | Req 3/4 | Art. 32 | §164.312(a)(2) | A.8.24 | — |
+| Audit Trails | CC7.2 | Req 10.x | Art. 30/32 | §164.312(b) | A.8.15 | ITGC |
+| Retention & Erasure | CC6.5 | Req 3.1 | Art. 17 | §164.530(j) | A.8.10 | SOX §802 |
+| IaC / Env Controls | CC6.6 | Req 1/6.x | Art. 25 | §164.312(a) | A.8.25/A.8.27 | ITGC |
 
 ## Checklist
 
@@ -129,7 +129,7 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 | `references/hipaa.md` | PHI/18 identifiers, §164.312 safeguards, minimum-necessary, 6-year retention |
 | `references/pci-dss.md` | Scope minimization, no CVV/track data, Req 3/6.x/10, tokenization, 3-year retention |
 | `references/soc2.md` | CC6/CC7/CC8.1 trust-services criteria expressed as code checks |
-| `references/iso-27001.md` | Annex A: A.8 data handling, A.12.4 logging, A.14.2 secure dev |
+| `references/iso-27001.md` | Annex A: A.5.12 classification, A.8.15 logging, A.8.25–A.8.29 secure dev |
 | `references/sox.md` | ITGC change control, segregation of duties, 7-year retention, audit integrity |
 | `references/detection.md` | Grep patterns: PII field names, logging sinks, crypto misuse; IaC globs |
 | `references/sources.md` | NIST SSDF SP 800-218, OWASP ASVS 5.0, GDPR, HIPAA, PCI DSS v4.0, AICPA TSC, ISO/IEC 27001, SOX |
