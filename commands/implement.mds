@@ -121,7 +121,7 @@ CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: \{enabled|(none)\}
+COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
@@ -143,7 +143,7 @@ CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: \{enabled|(none)\}
+COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
@@ -163,7 +163,7 @@ PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: \{enabled|(none)\}
+COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
@@ -188,7 +188,7 @@ CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: \{enabled|(none)\}
+COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
@@ -201,7 +201,7 @@ CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: \{enabled|(none)\}
+COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
