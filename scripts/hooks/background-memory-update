@@ -2,7 +2,7 @@
 
 # background-memory-update — Eager working-memory refresh worker
 # Spawned as a detached background process by memory-worker (Stop hook) after the
-# 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (haiku) →
+# 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (sonnet 4.6) →
 # rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
 #
 # Applies ADR-008 (LLM-vs-plumbing): artifact content (WORKING-MEMORY.md) is
@@ -344,11 +344,14 @@ Instructions:
 - Required sections: ## Now, ## Progress, ## Decisions, ## Context, ## Session Log
 - Synthesize from the queue turns — NEVER fabricate or invent context
 - Integrate new information with existing content; deduplicate overlapping information
-- ## Progress tracks Done (completed), Remaining (next steps), Blockers (if any)
+- ## Progress tracks Done (fully completed — see the strict definition below), Remaining (next steps / in-progress work), Blockers (if any)
+- DEFINITION OF DONE — mark a task \"Done\" ONLY when its work has landed on the main/default branch AND been published/released to production. Writing code, committing, opening a PR, or passing CI is NOT done. Even a merged PR is NOT done until it is on main AND shipped to production.
+- A feature being implemented does NOT make it done — testing, code review, resolving review feedback, release prep, and publishing are still Remaining work. Until a task is truly done, keep it under Remaining with its real current stage (e.g. \"implemented — awaiting review\", \"merged to main — not yet released\").
+- Only record a completed state (PR merged, CI passed, released, task done) when the session turns or git state actually evidence it. Never assume, predict, or upgrade a status; when unsure, describe the last confirmed state rather than an optimistic one.
 - ## Decisions entries: format as - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]
 - If queue is empty, preserve existing content as-is (still write line 1 stamp)"
 
-log "Spawning claude -p (model haiku, ${TURN_COUNT} turns)"
+log "Spawning claude -p (model claude-sonnet-4-6, ${TURN_COUNT} turns)"
 # SECURITY: never log PROMPT — it contains turn content which may include secrets
 
 # --- Watchdog timeout (overridable for tests: DEVFLOW_BG_WATCHDOG_SECS=2) ---
@@ -377,7 +380,7 @@ fi
 # Job-control notifications go to stderr which is redirected to the log — suppress them.
 set -m
 DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
-  --model haiku \
+  --model claude-sonnet-4-6 \
   --dangerously-skip-permissions \
   --allowedTools 'Read,Write' \
   --output-format text \

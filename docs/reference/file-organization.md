@@ -53,7 +53,7 @@ devflow/
 │       ├── capture-question         # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
 │       ├── queue-append             # Shared helper: queue_append_row / queue_append_both / queue_read_gates
 │       ├── memory-worker            # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
-│       ├── background-memory-update # Detached claude -p haiku worker: rewrites WORKING-MEMORY.md (spawned by memory-worker)
+│       ├── background-memory-update # Detached claude -p sonnet 4.6 worker: rewrites WORKING-MEMORY.md (spawned by memory-worker)
 │       ├── learning-lock            # Shared helper: mkdir-based locking
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
 │       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + the Learning agent spawn directive when the queue is pending
@@ -187,8 +187,8 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `capture-prompt` | UserPromptSubmit | Appends the user turn to `.devflow/memory/.pending-turns.jsonl` and `.devflow/learning/.pending-turns.jsonl` (each gated independently); emits no directive |
 | `capture-turn` | Stop | Appends the assistant turn to both queues; runs the decisions usage scanner; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
-| `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model haiku`) |
-| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model haiku` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
+| `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
+| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Learning agent with the resolved model (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus` default) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |

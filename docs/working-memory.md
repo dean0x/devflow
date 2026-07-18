@@ -9,7 +9,7 @@ A capture/spawn split across always-on hooks plus one detached worker run behind
 | Hook / Worker | When | What |
 |---------------|------|------|
 | **Stop** (`capture-turn`) | After each response | Appends the assistant turn to `.pending-turns.jsonl` (and, independently gated, to the sibling learning queue — see the Learning pipeline in the project CLAUDE.md). Never spawns anything. |
-| **Stop** (`memory-worker`, registered immediately after `capture-turn`) | After each response | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), touches `.working-memory-last-trigger` then spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model haiku`). |
+| **Stop** (`memory-worker`, registered immediately after `capture-turn`) | After each response | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), touches `.working-memory-last-trigger` then spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`). |
 | **`background-memory-update`** (detached worker spawned by `memory-worker`) | Triggered by `memory-worker` after throttle expires | Drains `.pending-turns.jsonl` → renames to `.pending-turns.processing` (atomic claim) → calls `claude -p` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing` and touches `.last-refresh-ok`. On failure: leaves `.processing` for `session-start-memory` to recover at next SessionStart. User-only queues (no assistant turn) are truncated without an LLM run. |
 | **SessionStart** (`session-start-memory`) | On startup, `/clear`, resume, compaction | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled header. Uses the `<!-- memory-head: <sha> branch: <name> -->` stamp on line 1 to determine state: **A** in-sync (stamp SHA = HEAD), **B** drifted (stamp SHA is an ancestor of HEAD — shows commits since last write), or **C** refresh-failing banner (queue non-empty AND `.last-refresh-ok` missing or >600s old). Also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path — no external helper dependency). |
 | **SessionStart** (`session-start-context`) | On startup, `/clear`, resume, compaction | Injects the decisions TL;DR and, when the learning queue has pending turns, the Learning maintenance directive (spawns the background Learning agent). |
@@ -32,7 +32,7 @@ devflow memory --status                # Check current state
 ```
 .devflow/
 ├── memory/
-│   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p haiku)
+│   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p sonnet 4.6)
 │   │                                 # Line 1: <!-- memory-head: <sha> branch: <name> -->
 │   ├── backup.json                   # Pre-compact git state snapshot
 │   ├── .pending-turns.jsonl          # Queue of captured user/assistant turns (JSONL, ephemeral)
