@@ -253,3 +253,51 @@ describe('devflow-dynamic declared commands ↔ commands/ source parity', () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// plugin.json ↔ DEVFLOW_PLUGINS skills + rules sync
+//
+// For every plugin, its plugin.json `skills` and `rules` arrays must equal the
+// corresponding arrays in the DEVFLOW_PLUGINS entry in src/cli/plugins.ts.
+// This closes the unguarded manual-sync pair: a developer could add a skill to
+// plugins.ts but forget to add it to plugin.json (or vice-versa), and the build
+// would silently produce an inconsistency. Absent `rules` in plugin.json is
+// treated as an empty array (backward-compatible).
+// ---------------------------------------------------------------------------
+
+describe('plugin.json ↔ DEVFLOW_PLUGINS skills + rules sync', () => {
+  it('every plugin has matching skills between plugin.json and DEVFLOW_PLUGINS', async () => {
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
+      const raw = await fs.readFile(manifestPath, 'utf-8');
+      const manifest = JSON.parse(raw) as { skills?: string[]; rules?: string[] };
+
+      const manifestSkills = (manifest.skills ?? []).slice().sort();
+      const registrySkills = plugin.skills.slice().sort();
+
+      expect(
+        manifestSkills,
+        `Plugin '${plugin.name}': plugin.json skills [${manifestSkills.join(', ')}] ` +
+          `do not match DEVFLOW_PLUGINS skills [${registrySkills.join(', ')}]`,
+      ).toEqual(registrySkills);
+    }
+  });
+
+  it('every plugin has matching rules between plugin.json and DEVFLOW_PLUGINS', async () => {
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
+      const raw = await fs.readFile(manifestPath, 'utf-8');
+      const manifest = JSON.parse(raw) as { skills?: string[]; rules?: string[] };
+
+      // Absent `rules` in plugin.json is treated as empty array
+      const manifestRules = (manifest.rules ?? []).slice().sort();
+      const registryRules = (plugin.rules ?? []).slice().sort();
+
+      expect(
+        manifestRules,
+        `Plugin '${plugin.name}': plugin.json rules [${manifestRules.join(', ')}] ` +
+          `do not match DEVFLOW_PLUGINS rules [${registryRules.join(', ')}]`,
+      ).toEqual(registryRules);
+    }
+  });
+});

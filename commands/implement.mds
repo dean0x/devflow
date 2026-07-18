@@ -4,6 +4,7 @@ output-dir: plugins/devflow-implement/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Implement Command
 
@@ -44,7 +45,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, COMPLIANCE_ENABLED
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
@@ -86,6 +87,8 @@ Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 
 {knowledge_load()}
 
+{compliance_gate()}
+
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
@@ -118,6 +121,7 @@ CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+COMPLIANCE: \{enabled|(none)\}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
@@ -139,6 +143,7 @@ CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+COMPLIANCE: \{enabled|(none)\}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
@@ -158,6 +163,7 @@ PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+COMPLIANCE: \{enabled|(none)\}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
@@ -182,6 +188,7 @@ CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+COMPLIANCE: \{enabled|(none)\}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
@@ -194,6 +201,7 @@ CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+COMPLIANCE: \{enabled|(none)\}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
@@ -229,6 +237,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    OPERATION: validation-fix
    VALIDATION_FAILURES: \{parsed failures from Validator\}
    SCOPE: Fix only the listed failures, no other changes
+   COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
    ```
    - Loop back to Phase 3 (re-validate)
@@ -317,6 +326,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
    MISALIGNMENTS: \{structured misalignments from Evaluator\}
+   COMPLIANCE: \{enabled|(none)\}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false"
    ```
@@ -360,6 +370,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    OPERATION: qa-fix
    QA_FAILURES: \{structured failures from Tester\}
    SCOPE: Fix only the listed failures, no other changes
+   COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
    ```
    - Spawn Validator to verify fix didn't break tests:

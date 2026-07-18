@@ -60,6 +60,8 @@ MUST become a tracked manage-debt ticket. Never report-only.
 
 **Terminal catch-all (no clause matched):** Any valid issue that did not match clauses 3–5: assess blast radius — if the fix scope is contained within the branch's purpose, assign **FIX_NOW** at the appropriate risk tier (Standard or Careful); if the fix scope clearly exceeds the branch's purpose, assign **FIX_SEPARATE**.
 
+**Compliance findings:** Compliance issues are often policy/architecture-level (missing retention policy, absent audit-trail design, IaC control gap) — default to `FIX_SEPARATE` or `TECH_DEBT` unless the finding is directly code-local (a specific log statement, a missing field, an isolated function) and contained within the diff's blast radius.
+
 **Empty DIFF_FILES** (bug-analysis edge case): clause 3 degrades — Standard/isolated → FIX_NOW, else FIX_SEPARATE. Security gate unaffected.
 
 ## Risk Tier Definitions (FIX_NOW only)

@@ -92,10 +92,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 9 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 10 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(9);
+    expect(partialFiles).toHaveLength(10);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {

@@ -32,7 +32,7 @@ you: add rate limiting to the /api/upload endpoint
 ```
 
 ```
-/devflow:code-review     → 18 reviewers examine your changes in parallel
+/devflow:code-review     → up to 20 reviewers examine your changes in parallel
 /devflow:resolve         → all issues validated and fixed automatically
 /devflow:bug-analysis    → proactive bug finding before review
 ```
@@ -48,11 +48,11 @@ you: add rate limiting to the /api/upload endpoint
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
+**Always-on rules.** 13 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust), plus a global compliance rule when the devflow-compliance plugin is installed. Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
 
 **Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplifier + Scrutinizer quality passes.
 
-**Everything is composable.** 22 plugins (12 core + 9 language/ecosystem + 1 optional workflow recipes). Install only what you need.
+**Everything is composable.** 23 plugins (12 core + 10 language/ecosystem + 1 optional workflow recipes). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
@@ -62,9 +62,9 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-**18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
+**Up to 20 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when the devflow-compliance plugin is installed). Every finding gets validated and resolved automatically.
 
-**40 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), 200+ sources total.
+**41 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
 

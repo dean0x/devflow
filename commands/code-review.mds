@@ -4,6 +4,7 @@ output-dir: plugins/devflow-code-review/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Code Review Command
 
@@ -128,10 +129,12 @@ MAX_REVIEW_CYCLES = 10
 
 ### Phase 1: Analyze Changed Files
 
-**Produces:** REVIEWER_LIST
+**Produces:** REVIEWER_LIST, COMPLIANCE_ENABLED
 **Requires:** DIFF_RANGE
 
-Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews:
+{compliance_gate()}
+
+Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews. `COMPLIANCE_ENABLED` (resolved above) is computed once and reused for all worktrees.
 
 | Condition | Adds Review |
 |-----------|-------------|
@@ -146,10 +149,13 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
+| COMPLIANCE_ENABLED | compliance |
+
+If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree (plugin-gated; resolved once above, reused across all worktrees).
 
 ### Phase 1b: Load Decisions Index
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_ENABLED (carried from Phase 1)
 
 **Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
 
@@ -166,7 +172,7 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 **Produces:** REVIEWER_OUTPUTS
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
 
-Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types:
+Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types **or installed optional plugins** (max 20 per worktree):
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
@@ -189,6 +195,9 @@ Spawn Reviewer agents **in a single message**. Always run 8 core reviews; condit
 | database | conditional | devflow:database |
 | dependencies | conditional | devflow:dependencies |
 | documentation | conditional | devflow:documentation |
+| compliance | plugin-gated | devflow:compliance |
+
+Reviewer count: 8 always-active, +1-11 diff-driven conditional, +1 compliance when `COMPLIANCE_ENABLED` (max 20 total per worktree).
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```

@@ -211,7 +211,7 @@ Synthesize outputs from multiple Designer agents (gap analysis across different 
 
 **Process:**
 1. Extract findings from each designer agent
-2. Deduplicate: If multiple designers flag the same issue, boost confidence by 10% per additional agent (cap at 100%)
+2. Deduplicate: If multiple designers flag the same issue, boost confidence by 10% per additional agent (cap at 100%). **Exception — merge, don't boost:** a compliance finding and a security finding at the same location (same file:line or same design element) identify a single gap from two regulatory angles — merge into one finding, do not apply the confidence boost. Multi-agent agreement on a compliance+security overlap is not corroboration; it is one gap seen by two lenses.
 3. Categorize by actionability:
    - **Blocking** (CRITICAL/HIGH): Must be resolved before implementation
    - **Should-Address** (MEDIUM): Recommended improvements
@@ -312,7 +312,7 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 **Process:**
 1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude `review-summary.md` and `resolution-summary.md`)
 2. Extract confidence percentages from each finding
-3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
+3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%). **Exception — merge, don't boost:** a compliance finding and a security finding at the same file:line identify a single issue from two regulatory angles — merge into one finding, do not apply the confidence boost. Multi-reviewer agreement on a compliance+security overlap is not corroboration; it is one issue seen by two lenses.
 4. Maintain ≥80% confidence threshold in final output
 5. If CYCLE_NUMBER > 1 and PRIOR_RESOLUTIONS is not (none): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
 6. Categorize issues into 3 buckets (from devflow:review-methodology)
