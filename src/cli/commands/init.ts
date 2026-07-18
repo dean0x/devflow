@@ -332,6 +332,7 @@ export const initCommand = new Command('init')
         'devflow-java': 'Java patterns',
         'devflow-python': 'Python patterns',
         'devflow-rust': 'Rust patterns',
+        'devflow-compliance': 'GDPR, HIPAA, PCI DSS, SOC 2',
       };
 
       const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
@@ -376,7 +377,7 @@ export const initCommand = new Command('init')
         let languageSelected: string[] = [];
         if (languageChoices.length > 0) {
           const step2 = await p.multiselect({
-            message: 'Step 2 — Language plugins',
+            message: 'Step 2 — Language & ecosystem plugins',
             options: languageChoices,
             required: false,
           });
@@ -634,9 +635,9 @@ export const initCommand = new Command('init')
       } else {
         p.note(
           'Rules are ultra-condensed engineering principles (~10-15 lines each).\n' +
-          'They only load when you edit or generate code in a matching language —\n' +
-          'e.g., TypeScript rules activate for .ts files, Go rules for .go files.\n' +
-          'Not loaded all at once; minimal token cost.',
+          'Language rules only load for matching files (e.g., TypeScript rules\n' +
+          'activate for .ts files) — minimal token cost. The compliance rule is\n' +
+          'global (always-on) when devflow-compliance is selected.',
           'Rules',
         );
         const rulesChoice = await p.confirm({

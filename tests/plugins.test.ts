@@ -175,8 +175,8 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('non-language plugins do not have optional: true (except audit-claude)', () => {
-    const allowedOptional = new Set([...languagePluginNames, 'devflow-audit-claude', 'devflow-dynamic']);
+  it('non-language plugins do not have optional: true (except audit-claude, dynamic, compliance)', () => {
+    const allowedOptional = new Set([...languagePluginNames, 'devflow-audit-claude', 'devflow-dynamic', 'devflow-compliance']);
     for (const plugin of DEVFLOW_PLUGINS) {
       if (!allowedOptional.has(plugin.name)) {
         expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();

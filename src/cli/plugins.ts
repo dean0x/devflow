@@ -260,6 +260,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     optional: true,
     rules: ['rust'],
   },
+  {
+    name: 'devflow-compliance',
+    description: 'Regulatory compliance patterns - GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX code-level controls, audit trails, data retention',
+    commands: [],
+    agents: [],
+    skills: ['compliance'],
+    optional: true,
+    rules: ['compliance'],
+  },
 ];
 
 /**
@@ -541,6 +550,8 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:dream-curation',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
+  // v2.x compliance plugin: bare name for pre-namespace installs
+  'compliance',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',
@@ -725,10 +736,9 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
     if (plugin.commands.length > 0) {
       workflow.push(plugin);
     } else {
-      // "language" bucket: today every command-less selectable plugin is a
-      // language/ecosystem plugin. If a non-language command-less plugin is
-      // added in the future, it will land here — update the bucket name or
-      // add an explicit category field at that point.
+      // "language" bucket: command-less selectable plugins — language/ecosystem
+      // plugins (typescript, go, etc.) and cross-cutting optional rules (compliance).
+      // If a command-less plugin needs a distinct install group, add a category field.
       language.push(plugin);
     }
   }
