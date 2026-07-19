@@ -133,5 +133,3 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 | `references/sox.md` | ITGC change control, segregation of duties, 7-year retention, audit integrity |
 | `references/detection.md` | Grep patterns: PII field names, logging sinks, crypto misuse; IaC globs |
 | `references/sources.md` | NIST SSDF SP 800-218, OWASP ASVS 5.0, GDPR, HIPAA, PCI DSS v4.0.1, AICPA TSC, ISO/IEC 27001, SOX |
-
-> **Note**: This skill supports — and does not replace — your organization's compliance program. Not legal advice.
