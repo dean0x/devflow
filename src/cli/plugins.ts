@@ -550,7 +550,9 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:dream-curation',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
-  // v2.x compliance plugin: bare name for pre-namespace installs
+  // compliance: bare, like all legacy entries — init cleanup rm's ~/.claude/skills/<entry> verbatim (no prefix).
+  // A 'devflow:' prefix here would target the live install dir and delete it on every init
+  // (guarded by plugins.test.ts "no namespaced legacy skill name matches an active skill install path").
   'compliance',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
