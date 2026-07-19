@@ -176,10 +176,16 @@ async function compileHost(host: HostEntry): Promise<CompileOutcome> {
 
   // Atomic write: write to a temp file then rename into place so concurrent
   // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
-  // observe a missing file between the old and new content.
+  // observe a missing file between the old and new content. (avoids PF-011)
+  // Clean up the .tmp on rename failure so no orphan is left behind.
   const tmp = `${dest}.tmp`;
   fs.writeFileSync(tmp, cleaned, "utf-8");
-  fs.renameSync(tmp, dest);
+  try {
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 
   return {
     source: path.relative(ROOT, host.file),
