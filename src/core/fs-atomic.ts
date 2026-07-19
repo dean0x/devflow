@@ -7,8 +7,8 @@ import { promises as fs } from 'fs';
  *
  * Call sites: used by the CLI's exclusive-write call sites (migrations, init, post-install,
  * uninstall, security, ambient, memory, HUD, observation I/O).
- * The CJS counterpart (`writeExclusive` in `scripts/hooks/json-helper.cjs` and
- * `scripts/hooks/decisions-usage-scan.cjs`) intentionally remains a separate
+ * The CJS counterpart (`writeExclusive` in `src/assets/scripts/hooks/json-helper.cjs` and
+ * `src/assets/scripts/hooks/decisions-usage-scan.cjs`) intentionally remains a separate
  * implementation — same semantics, different module system. Any change to the
  * retry logic here MUST be mirrored in both CJS files.
  */

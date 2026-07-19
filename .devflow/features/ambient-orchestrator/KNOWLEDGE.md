@@ -3,7 +3,7 @@ feature: ambient-orchestrator
 name: Ambient Orchestrator Mode
 description: "Use when modifying the ambient mode hooks (preamble, session-start-orchestrator), the orchestrator charter file (including the feature-knowledge operating rule), the git-marker helper, the ambient CLI toggle, or the plan-handoff fast-path. Keywords: ambient, preamble, orchestrator, charter, plan-handoff, session-start-orchestrator, git-marker, DEVFLOW_BG_UPDATER, devflow ambient, UserPromptSubmit, SessionStart, feature-knowledge."
 category: architecture
-directories: [scripts/hooks, src/cli/commands/ambient.ts, plugins/devflow-ambient]
+directories: [src/assets/scripts/hooks, src/cli/commands/ambient.ts, src/core/plugins.ts]
 created: 2026-07-04
 updated: 2026-07-15
 ---
@@ -20,7 +20,7 @@ This design replaced two previous detection-based approaches (first-word keyword
 
 ### Hook 1: session-start-orchestrator (SessionStart, timeout 10)
 
-Reads `scripts/hooks/assets/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and under 4096 bytes; missing or oversized charter exits 0 silently. Sources `hook-log-init` after CWD is resolved and emits `log "Injecting charter (N chars)"` immediately before the JSON output — consistent with the sibling SessionStart hooks (`session-start-memory`, `session-start-context`).
+Reads `src/assets/scripts/hooks/assets/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and under 4096 bytes; missing or oversized charter exits 0 silently. Sources `hook-log-init` after CWD is resolved and emits `log "Injecting charter (N chars)"` immediately before the JSON output — consistent with the sibling SessionStart hooks (`session-start-memory`, `session-start-context`).
 
 ### Hook 2: preamble (UserPromptSubmit, timeout 5)
 
@@ -37,11 +37,11 @@ The orchestrator reminder block carries an inline cross-reference comment markin
 
 ### orchestrator-charter.md
 
-A static markdown file at `scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, the plan-handoff fallback bullet, and a feature-knowledge operating rule. The never-mainline rule explicitly names codebase orientation as delegated work (alongside file edits, builds, multi-file reads, and debug loops). The sonnet tier routes Coder (write code to a plan; also fixes pre-classified review issues in issue-fix mode) and Skimmer (codebase orientation) — both are defined-execution agents. The feature-knowledge rule (direct delegations only — workflow skills handle their own) instructs the orchestrator to: (1) before delegating non-trivial code work, match the task area against `.devflow/features/index.md` and pass matching KNOWLEDGE.md content as `FEATURE_KNOWLEDGE`; (2) after delegated changes to a covered area, spawn Knowledge (sonnet) to refresh that KB. The charter is 2141 bytes (~535 tokens), well under the 4096-byte runtime cap enforced by the hook.
+A static markdown file at `src/assets/scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: model-tier routing table (haiku/sonnet/opus), judgment-work carve-outs, delegation rules, the plan-handoff fallback bullet, and a feature-knowledge operating rule. The never-mainline rule explicitly names codebase orientation as delegated work (alongside file edits, builds, multi-file reads, and debug loops). The sonnet tier routes Coder (write code to a plan; also fixes pre-classified review issues in issue-fix mode) and Skimmer (codebase orientation) — both are defined-execution agents. The feature-knowledge rule (direct delegations only — workflow skills handle their own) instructs the orchestrator to: (1) before delegating non-trivial code work, match the task area against `.devflow/features/index.md` and pass matching KNOWLEDGE.md content as `FEATURE_KNOWLEDGE`; (2) after delegated changes to a covered area, spawn Knowledge (sonnet) to refresh that KB. The charter is 2141 bytes (~535 tokens), well under the 4096-byte runtime cap enforced by the hook.
 
 ### git-marker (sourced helper)
 
-`scripts/hooks/git-marker` exports `df_has_git_marker <dir>`. Pure bash — no subprocess, no `git` binary invocation — making it safe on the UserPromptSubmit hot path. Bounded 64-level upward walk using `-e $dir/.git` (works for both `.git` directories and `.git` files from worktrees/submodules).
+`src/assets/scripts/hooks/git-marker` exports `df_has_git_marker <dir>`. Pure bash — no subprocess, no `git` binary invocation — making it safe on the UserPromptSubmit hot path. Bounded 64-level upward walk using `-e $dir/.git` (works for both `.git` directories and `.git` files from worktrees/submodules).
 
 ### TypeScript management layer (src/cli/commands/ambient.ts)
 
@@ -107,8 +107,8 @@ The repair hint (`partial — run devflow ambient --enable to repair`) is append
 
 The string `Implement the following plan:` appears verbatim in two places:
 
-1. `scripts/hooks/preamble` — the fast-path match condition in the UserPromptSubmit dispatch
-2. `scripts/hooks/assets/orchestrator-charter.md` — the plan-handoff fallback bullet under SessionStart
+1. `src/assets/scripts/hooks/preamble` — the fast-path match condition in the UserPromptSubmit dispatch
+2. `src/assets/scripts/hooks/assets/orchestrator-charter.md` — the plan-handoff fallback bullet under SessionStart
 
 This is intentional. SessionStart provably fires (via `SessionStart:clear`) in plan-handoff sessions even if UserPromptSubmit does not fire for Claude Code's auto-injected handoff prompt. The charter's fallback bullet covers that gap. Both files carry a cross-reference comment flagging the duplication. If Claude Code changes the handoff format, both files must be updated together.
 
@@ -158,10 +158,10 @@ The model-tier routing table (haiku/sonnet/opus taxonomy) is a second intentiona
 
 ## Key Files
 
-- `scripts/hooks/preamble` — UserPromptSubmit hook: dispatch logic, plan-handoff fast-path, orchestrator reminder; cross-reference comment linking to orchestrator-charter.md routing table
-- `scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, hook-log-init injection log, additionalContext output
-- `scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet, authoritative model-tier routing table, and feature-knowledge operating rule live here
-- `scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk; direct behavioral tests + no-subprocess source scan in test suite
+- `src/assets/scripts/hooks/preamble` — UserPromptSubmit hook: dispatch logic, plan-handoff fast-path, orchestrator reminder; cross-reference comment linking to orchestrator-charter.md routing table
+- `src/assets/scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, hook-log-init injection log, additionalContext output
+- `src/assets/scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet, authoritative model-tier routing table, and feature-knowledge operating rule live here
+- `src/assets/scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk; direct behavioral tests + no-subprocess source scan in test suite
 - `src/cli/commands/ambient.ts` — TypeScript management: `ensureHook`, `addAmbientHook`, `removeAmbientHook`, `hasAmbientHook`, `ambientCommand` (parses settings.json once with try/catch)
 - `tests/fixtures/ambient-templates.ts` — Shared constants: `HANDOFF_TEMPLATE` and `REMINDER_TEMPLATE`; imported by shell-hooks.test.ts and integration tests to keep both test layers byte-synchronized
 - `tests/shell-hooks.test.ts` — Shell integration tests (suites 1–4 for preamble, suite for session-start-orchestrator)
@@ -175,6 +175,6 @@ The model-tier routing table (haiku/sonnet/opus taxonomy) is a second intentiona
 - PF-001: Plan-handoff schema undocumented/mutable — match by prefix only; the `tests/fixtures/ambient-templates.ts` constants are full output strings, not detection substrings (avoids PF-001)
 - Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too; the `DEVFLOW_BG_UPDATER` re-entrancy guard is the coupling point between that system and this one
 - Feature knowledge: `feature-knowledge-system` — the charter's feature-knowledge operating rule instructs the orchestrator to load KNOWLEDGE.md entries as FEATURE_KNOWLEDGE and spawn the Knowledge agent after changes; that system's KB covers how those entries are written and consumed
-- `scripts/hooks/json-parse` — shared JSON output helpers (`json_prompt_output`, `json_session_output`, `json_extract_cwd_prompt`)
-- `scripts/hooks/hook-bootstrap` — shared hook initialization: debug logging, per-project log paths
-- `scripts/hooks/hook-log-init` — shared injection log initialization sourced by session-start-orchestrator (and sibling SessionStart hooks)
+- `src/assets/scripts/hooks/json-parse` — shared JSON output helpers (`json_prompt_output`, `json_session_output`, `json_extract_cwd_prompt`)
+- `src/assets/scripts/hooks/hook-bootstrap` — shared hook initialization: debug logging, per-project log paths
+- `src/assets/scripts/hooks/hook-log-init` — shared injection log initialization sourced by session-start-orchestrator (and sibling SessionStart hooks)

@@ -93,18 +93,14 @@ Before committing a new or modified agent:
 
 ### Shared Agents (used by multiple plugins)
 
-1. Create agent in `shared/agents/new-agent.md`
+1. Create agent in `src/assets/agents/new-agent.md`
 2. Follow existing agent patterns (clear specialty, restricted tools, focused scope, specific output)
-3. Add agent name to `agents` array in each plugin's `plugin.json` that needs it
-4. Run `npm run build` to distribute
+3. Add agent name to the `agents` array of each plugin entry in DEVFLOW_PLUGINS (`src/core/plugins.ts`) that needs it
+4. Run `node dist/cli.js init` to install (no build step required for agents)
 5. Test with explicit invocation
-6. Document in relevant plugin README.md files
 
 ### Plugin-Specific Agents (tightly coupled to one workflow)
 
-1. Create agent directly in `plugins/devflow-{plugin}/agents/new-agent.md`
-2. Do NOT add to `plugin.json` agents array (committed agents don't need distribution)
-3. Test with explicit invocation
-4. Document in plugin README.md
+All agents live in `src/assets/agents/` — there is no separate per-plugin agent directory. For an agent used by only one plugin, add it to `src/assets/agents/` and declare it in only that plugin's `agents` array in DEVFLOW_PLUGINS.
 
-**Note:** Shared agents live in `shared/agents/` and are distributed at build time (e.g., `git.md`, `coder.md`, `designer.md`). Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `claude-md-auditor.md`).
+**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `coder.md`, `designer.md`, `claude-md-auditor.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.

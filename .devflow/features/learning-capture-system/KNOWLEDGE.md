@@ -4,16 +4,16 @@ name: Learning & Capture System
 description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (shared/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, render-decisions."
 category: architecture
 directories:
-  - scripts/hooks
-  - shared/agents/learning.md
+  - src/assets/scripts/hooks
+  - src/assets/agents/learning.md
   - src/cli/commands/learning.ts
   - src/cli/commands/memory.ts
-  - src/cli/utils/feature-config.ts
-  - src/cli/utils/learning-tuning-config.ts
-  - src/cli/utils/learning-queue-cleanup.ts
-  - src/cli/utils/project-paths.ts
-  - src/cli/hud/components/learning-counts.ts
-  - commands/_partials
+  - src/core/feature-config.ts
+  - src/core/learning-tuning-config.ts
+  - src/core/learning-queue-cleanup.ts
+  - src/core/project-paths.ts
+  - src/hud/components/learning-counts.ts
+  - src/assets/commands/_partials
 created: 2026-07-15
 updated: 2026-07-15
 ---
@@ -137,7 +137,7 @@ model is instructed never to mention the spawn in user-visible text.
 
 ### Learning Agent
 
-`shared/agents/learning.md` (`name: Learning`, `model: opus`) is self-contained — it claims
+`src/assets/agents/learning.md` (`name: Learning`, `model: opus`) is self-contained — it claims
 its own queue, processes it, and cleans up without any external coordination layer.
 
 **Claim protocol**:
@@ -175,7 +175,7 @@ are **never hand-edited** — they are exclusively owned by `assign-anchor`/`ret
 
 ### decisions_load() and index.md Consumption
 
-The compiled `decisions_load()` partial (from `commands/_partials/_decisions.mds`) instructs
+The compiled `decisions_load()` partial (from `src/assets/commands/_partials/_decisions.mds`) instructs
 the main model to read `.devflow/learning/index.md` directly — no subprocess, no script
 (applies ADR-007). If the file is absent or empty, `DECISIONS_CONTEXT` is set to `(none)`.
 Commands that consume decisions use the `devflow:apply-decisions` skill: scan the index →
@@ -289,22 +289,22 @@ agents must not "fix" the naming mismatch.
 
 | File | Purpose |
 |------|---------|
-| `scripts/hooks/capture-prompt` | UserPromptSubmit: dual-queue user turn append |
-| `scripts/hooks/capture-turn` | Stop: dual-queue assistant turn + usage scanner |
-| `scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
-| `scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + queue_read_gates |
-| `scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
-| `scripts/hooks/session-start-context` | Emits learning directive + TL;DR decisions header |
-| `scripts/hooks/json-parse` | JSON helpers including json_extract_cwd_field (SOH delimiter) |
-| `shared/agents/learning.md` | Learning agent spec (claim, detect, curate, unlink) |
-| `src/cli/utils/feature-config.ts` | `.devflow/config.json` read/write; `decisions`→`learning` coalesce |
-| `src/cli/utils/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) |
-| `src/cli/utils/project-paths.ts` | Path construction — single source of truth for all `.devflow/` paths |
-| `src/cli/utils/learning-queue-cleanup.ts` | Queue drain + legacy sweep helpers |
+| `src/assets/scripts/hooks/capture-prompt` | UserPromptSubmit: dual-queue user turn append |
+| `src/assets/scripts/hooks/capture-turn` | Stop: dual-queue assistant turn + usage scanner |
+| `src/assets/scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
+| `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + queue_read_gates |
+| `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
+| `src/assets/scripts/hooks/session-start-context` | Emits learning directive + TL;DR decisions header |
+| `src/assets/scripts/hooks/json-parse` | JSON helpers including json_extract_cwd_field (SOH delimiter) |
+| `src/assets/agents/learning.md` | Learning agent spec (claim, detect, curate, unlink) |
+| `src/core/feature-config.ts` | `.devflow/config.json` read/write; `decisions`→`learning` coalesce |
+| `src/core/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) |
+| `src/core/project-paths.ts` | Path construction — single source of truth for all `.devflow/` paths |
+| `src/core/learning-queue-cleanup.ts` | Queue drain + legacy sweep helpers |
 | `src/cli/commands/learning.ts` | `devflow learning` CLI |
-| `src/cli/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
-| `commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
-| `scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
+| `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
+| `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
+| `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
 
 ## Related
 

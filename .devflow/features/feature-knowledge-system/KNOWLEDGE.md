@@ -5,10 +5,10 @@ description: "Use when adding a new knowledge base entry, modifying how knowledg
 category: architecture
 directories:
   - src/cli/commands/knowledge
-  - shared/skills/feature-knowledge
-  - shared/skills/apply-feature-knowledge
-  - shared/agents/knowledge.md
-  - commands/_partials
+  - src/assets/skills/feature-knowledge
+  - src/assets/skills/apply-feature-knowledge
+  - src/assets/agents/knowledge.md
+  - src/assets/commands/_partials
   - scripts/build-mds.ts
 created: 2026-06-21
 updated: 2026-07-15
@@ -48,20 +48,20 @@ knowledge partials; `claude` agent at runtime (the Knowledge agent, model=sonnet
 KNOWLEDGE.md.
 
 **Toggle**: `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
-Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/cli/utils/feature-config.ts`).
+Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/core/feature-config.ts`).
 Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 
 ## Component Architecture
 
 | Component | Path | Role |
 |-----------|------|------|
-| MDS partial module | `commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
-| Host command sources (9) | `commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
-| Host command sources (5 dynamic) | `commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
+| MDS partial module | `src/assets/commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
+| Host command sources (9) | `src/assets/commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
+| Host command sources (5 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
 | Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md`; hard-fails on any error |
-| Author agent | `shared/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
-| Author skill | `shared/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
-| Consumption skill | `shared/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
+| Author agent | `src/assets/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
+| Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
+| Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
 | CLI list | `src/cli/commands/knowledge/list.ts` | Reads index.md / falls back to frontmatter glob; no external scripts |
 | CLI toggle | `src/cli/commands/knowledge/toggle.ts` | Flips `knowledge` key in `.devflow/config.json` via `feature-config.ts`; no sentinel creation |
 
@@ -106,8 +106,8 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 5. Writes `{basename}.md` to the declared `output-dir` (per-file clean; no dir wipe)
 6. Hard-fails on any compile error — no stale command ever ships
 
-14 hosts total: 9 knowledge hosts (`commands/{name}.mds`) + 5 dynamic hosts (`commands/dynamic-*.mds`).
-Partials in `commands/_partials/` have no `output-dir:` and are skipped automatically.
+14 hosts total: 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 5 dynamic hosts (`src/assets/commands/dynamic-*.mds`).
+Partials in `src/assets/commands/_partials/` have no `output-dir:` and are skipped automatically.
 
 ## Integration Patterns
 
@@ -183,12 +183,12 @@ compiled output.
 
 ## Key Files
 
-- `commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
-- `commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to plugin commands at build time
+- `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
+- `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
 - `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers all 14 host `.mds` files by `output-dir:` key; validates plugin dirs; hard-fails on any compile error
-- `shared/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
-- `shared/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
-- `shared/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
+- `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
+- `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
+- `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
 - `src/cli/commands/knowledge/list.ts` — reads index.md directly or falls back to frontmatter glob; no external scripts
 - `src/cli/commands/knowledge/toggle.ts` — flips `knowledge` in `.devflow/config.json` (`feature-config.ts`); no sentinel creation/deletion
 

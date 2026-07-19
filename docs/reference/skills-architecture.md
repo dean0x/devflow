@@ -113,7 +113,7 @@ All listed skills are loaded when the Coder agent is spawned.
 
 ## Skill File Template
 
-Create in `shared/skills/skill-name/SKILL.md` (~120-150 lines):
+Create in `src/assets/skills/skill-name/SKILL.md` (~120-150 lines):
 
 ```markdown
 ---
@@ -188,7 +188,7 @@ Skill descriptions appear in Claude Code's skill catalog and influence when Clau
 ## Progressive Disclosure Structure
 
 ```
-skill-name/
+src/assets/skills/skill-name/
 ├── SKILL.md              # Essential content (~120-150 lines)
 └── references/           # Extended material (loaded on demand)
     ├── violations.md     # Extended code violations
@@ -257,33 +257,33 @@ activation:
 
 ## Creating New Skills
 
-All skills live in `shared/skills/` (single source of truth). Copied to plugins at build time.
+All skills live in `src/assets/skills/` (single source of truth). No build step required — edits take effect on the next `node dist/cli.js init`.
 
 ### Foundation Skill (Tier 1)
 
 If multiple agents need the same knowledge:
-1. Create in `shared/skills/{name}/SKILL.md`
+1. Create in `src/assets/skills/{name}/SKILL.md`
 2. Create `references/` subdirectory with extended examples
 3. Document which agents should use it
-4. Add skill name to `skills` array in relevant `plugins/devflow-*/plugin.json` files
-5. Run `npm run build` to distribute
+4. Add skill name to the `skills` array of relevant plugin entries in DEVFLOW_PLUGINS (`src/core/plugins.ts`)
+5. Run `node dist/cli.js init` to install
 
 ### Specialized Skill (Tier 2)
 
 If user-facing with context triggers:
-1. Create in `shared/skills/{name}/SKILL.md`
+1. Create in `src/assets/skills/{name}/SKILL.md`
 2. Create `references/` subdirectory
 3. Focus on clear trigger conditions in description
-4. Add to `plugins/devflow-core-skills/plugin.json` skills array
-5. Run `npm run build` to distribute
+4. Add to the `devflow-core-skills` entry's `skills` array in DEVFLOW_PLUGINS
+5. Run `node dist/cli.js init` to install
 6. Test auto-activation in various contexts
 
 ### Domain-Specific Skill (Tier 3)
 
 For language/framework patterns:
-1. Create in `shared/skills/{language|framework}/SKILL.md`
+1. Create in `src/assets/skills/{language|framework}/SKILL.md`
 2. Create `references/` subdirectory
 3. Focus on idioms, patterns, and best practices
-4. Add to relevant plugin manifests
-5. Run `npm run build` to distribute
+4. Add to relevant plugin entries in DEVFLOW_PLUGINS
+5. Run `node dist/cli.js init` to install
 

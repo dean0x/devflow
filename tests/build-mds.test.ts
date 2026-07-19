@@ -552,7 +552,7 @@ describe('ignored-dir walk (P3)', () => {
       await fs.mkdir(fakeNm, { recursive: true });
       await fs.writeFile(
         path.join(fakeNm, 'stray.mds'),
-        '---\ndescription: stray\noutput-dir: plugins/devflow-nope/commands\n---\n\n# Stray\n',
+        '---\ndescription: stray\noutput-dir: out/nope/commands\n---\n\n# Stray\n',
         'utf-8',
       );
 
@@ -570,7 +570,7 @@ describe('ignored-dir walk (P3)', () => {
 
       // The stray must not have been compiled (no output created in tmpRoot).
       // The script will exit non-zero (no hosts found), but the stray file is what we check.
-      const strayShouldNotExist = path.join(tmpRoot, 'plugins', 'devflow-nope', 'commands', 'stray.md');
+      const strayShouldNotExist = path.join(tmpRoot, 'out', 'nope', 'commands', 'stray.md');
       let exists = false;
       try {
         await fs.access(strayShouldNotExist);

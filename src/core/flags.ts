@@ -181,7 +181,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', value: '1' },
     defaultEnabled: false,
     // Note: the legacy `teammateMode:"auto"` settings key is stripped by
-    // src/cli/utils/teammate-mode-cleanup.ts during uninstall (stripDevflowTeammateModeFromJson).
+    // src/core/teammate-mode-cleanup.ts during uninstall (stripDevflowTeammateModeFromJson).
     // The env var above is the only surface managed by FLAG_REGISTRY for this flag.
   },
 ];

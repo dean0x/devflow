@@ -3,7 +3,7 @@ feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
 description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope or leftover-warning behavior, or extending the CLI skills/rules management commands. Keywords: installViaFileCopy, installAllRules, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, computeShadowLeftoverWarnings, ShadowWarning."
 category: architecture
-directories: [src/cli/utils/installer.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/plugins.ts]
+directories: [src/targets/claude-code/installer.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts]
 created: 2026-07-13
 updated: 2026-07-13
 ---
@@ -12,7 +12,7 @@ updated: 2026-07-13
 
 ## Overview
 
-Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/cli/utils/installer.ts`. File copy is the sole install mechanism. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
+Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/targets/claude-code/installer.ts`. File copy is the sole install mechanism. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
 
 The shadow override system lets users place personal versions of skills or rules at well-known paths under `~/.devflow/`. On every `devflow init` or `devflow rules --enable`, Devflow detects a valid shadow and installs the user's copy instead of the Devflow source — without failing init. This knowledge covers the entire install-to-uninstall lifecycle and the CLI surface for managing overrides.
 
@@ -89,7 +89,7 @@ export async function installAllRules(
 
 ### Skill namespace (`prefixSkillName` / `unprefixSkillName`)
 
-Skills install under `~/.claude/skills/devflow:{name}` (prefixed). The `devflow:` prefix is applied at install time; source directories in `shared/skills/` stay unprefixed. Shadow dirs also stay unprefixed at `~/.devflow/skills/{name}/`.
+Skills install under `~/.claude/skills/devflow:{name}` (prefixed). The `devflow:` prefix is applied at install time; source directories in `src/assets/skills/` stay unprefixed. Shadow dirs also stay unprefixed at `~/.devflow/skills/{name}/`.
 
 `skills.ts` CLI accepts both prefixed and bare input (`unprefixSkillName` normalizes before lookup).
 
@@ -205,18 +205,18 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 - **Skills are cleaned before install on every run.** `installViaFileCopy` removes both the legacy unprefixed and current prefixed skill directories for all known skills before reinstalling. This ensures no stale duplicate `{name}` directory coexists with `devflow:{name}`. Partial installs (via `--plugin`) still clean all skills universally.
 
-- **Shadow seed from plugin source requires built dist.** `seedRuleShadow` tier 2 falls back to `dist/../plugins/...` when the installed rule is absent (e.g. rules are disabled). This path only works from a `dist/` build; running via `ts-node` from `src/` will miss the fallback.
+- **Shadow seed from source requires built dist.** `seedRuleShadow` tier 2 falls back to `src/assets/rules/{name}.md` when the installed rule is absent (e.g. rules are disabled). This path reads from the package root resolved via `getPackageRoot()`, which requires a built `dist/` to locate the package root correctly.
 
 - **`hasRuleShadow` uses `fs.access` (not `validateRuleShadow`).** The `hasRuleShadow` export in `rules.ts` just checks existence — it does not validate file content. The status display calls `validateRuleShadow` directly for the full state. Do not conflate the two.
 
 ## Key Files
 
-- `src/cli/utils/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`
 - `src/cli/commands/init.ts` — consumes `InstallReport`; calls `installViaFileCopy` with `skillsMap`, `agentsMap`, `rulesMap`; exhaustive `ShadowSkipReason` switch with `never` guard in post-install summary
 - `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (scoped to scripts dir), `computeShadowLeftoverWarnings` (pure, returns `ShadowWarning[]`), `computeAssetsToRemove`
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow`, `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
 - `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`, `listShadowed`
-- `src/cli/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_SKILL_NAMES`, `LEGACY_AGENT_NAMES`
+- `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_SKILL_NAMES`, `LEGACY_AGENT_NAMES`
 
 ## Related
 

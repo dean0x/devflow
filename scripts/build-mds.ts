@@ -10,9 +10,9 @@
  * command never ships. Errors are reported with the mds::* code, message, and
  * source span for quick diagnosis.
  *
- * Dest safety: the parent directory of `output-dir` (the plugin directory) must
- * already exist — if it does not, the build exits 1 with a "typo?" message. Only
- * the final `commands/` leaf is auto-created. This catches `output-dir` typos
+ * Dest safety: the parent directory of `output-dir` (e.g. `dist/`) must already
+ * exist — if it does not, the build exits 1 with a "typo?" message. Only the
+ * final `commands/` leaf is auto-created. This catches `output-dir` typos
  * before they silently write to unexpected locations.
  *
  * Atomic write: each output is written to a temp file then renamed into place, so

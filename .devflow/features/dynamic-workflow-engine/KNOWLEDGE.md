@@ -4,19 +4,19 @@ name: Dynamic Workflow Engine
 description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-wave, dynamic-profile), the shared engine/wave/preamble/factory MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-wave, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review loop, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds."
 category: architecture
 directories:
-  - commands/dynamic-build.mds
-  - commands/dynamic-plan.mds
-  - commands/dynamic-tickets.mds
-  - commands/dynamic-wave.mds
-  - commands/dynamic-profile.mds
-  - commands/_partials/_engine.mds
-  - commands/_partials/_wave.mds
-  - commands/_partials/_preamble.mds
-  - commands/_partials/_roster.mds
-  - commands/_partials/_plan_contract.mds
-  - commands/_partials/_factory.mds
-  - commands/_partials/_ticket_template.mds
-  - plugins/devflow-dynamic/commands
+  - src/assets/commands/dynamic-build.mds
+  - src/assets/commands/dynamic-plan.mds
+  - src/assets/commands/dynamic-tickets.mds
+  - src/assets/commands/dynamic-wave.mds
+  - src/assets/commands/dynamic-profile.mds
+  - src/assets/commands/_partials/_engine.mds
+  - src/assets/commands/_partials/_wave.mds
+  - src/assets/commands/_partials/_preamble.mds
+  - src/assets/commands/_partials/_roster.mds
+  - src/assets/commands/_partials/_plan_contract.mds
+  - src/assets/commands/_partials/_factory.mds
+  - src/assets/commands/_partials/_ticket_template.mds
+  - dist/commands
   - tests/build-mds.test.ts
 created: 2026-07-07
 updated: 2026-07-15
@@ -28,7 +28,7 @@ updated: 2026-07-15
 
 The dynamic workflow engine is the `devflow-dynamic` plugin — a pipeline that turns a rough initiative description into fully reviewed, merged code on an integration branch. It operates in three sequential stages, each driven by a Claude Code dynamic Workflow script that the main session authors inline and passes to the `Workflow` tool: **tickets** (decompose an initiative into a wave-structured ticket slate), **plan** (write per-ticket implementation plans with acceptance criteria and a cross-plan conflict audit), and **build** (implement, review, and verify each ticket with a bounded gate structure). The `dynamic-wave` command is a thin driver that sequences these three commands with human-review gates between them; `dynamic-profile` is a standalone agent that mines session history to build a decision-preference profile consumed by `dynamic-plan`.
 
-The commands are **authored as MDS sources** in `commands/` and compiled to `plugins/devflow-dynamic/commands/` at build time. Seven shared MDS partials in `commands/_partials/` define the canonical engine doctrine, wave protocol, workflow runtime contract, agent roster, plan–Gate-2 contract, ticket-factory shape, and ticket body template. Each partial exports named blocks that host commands import and inline-expand at compile time — the compiled `.md` files are the deployed artifacts, and the test suite pins exact doctrine literals in the compiled output.
+The commands are **authored as MDS sources** in `src/assets/commands/` and compiled to `dist/commands/` at build time. Seven shared MDS partials in `src/assets/commands/_partials/` define the canonical engine doctrine, wave protocol, workflow runtime contract, agent roster, plan–Gate-2 contract, ticket-factory shape, and ticket body template. Each partial exports named blocks that host commands import and inline-expand at compile time — the compiled `.md` files are the deployed artifacts, and the test suite pins exact doctrine literals in the compiled output.
 
 ## System Context
 
@@ -47,7 +47,7 @@ The four commands form a delivery pipeline:
 ### MDS partial hierarchy
 
 ```
-commands/
+src/assets/commands/
   dynamic-build.mds         # host: imports all engine + wave partials
   dynamic-plan.mds          # host: imports authoring_preamble + roster + plan_contract
   dynamic-tickets.mds       # host: imports authoring_preamble + roster + factory + ticket_template
@@ -66,11 +66,11 @@ commands/
     _ticket_template.mds    # ticket_body_template (canonical ticket markdown shape)
 ```
 
-Partials declare **no** `output-dir:` frontmatter key. Host files declare it as the LAST frontmatter key. The build fails if the parent plugin directory does not exist.
+Partials declare **no** `output-dir:` frontmatter key. Host files declare it as the LAST frontmatter key. The build fails if the `dist/` parent directory does not exist.
 
 ### Compiled output and test pinning
 
-`scripts/build-mds.ts` compiles all 14 host files (9 knowledge + 5 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `plugins/devflow-dynamic/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
+`scripts/build-mds.ts` compiles all 14 host files (9 knowledge + 5 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
 - `Simplifier` and `Scrutinizer` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
 - `DELTA REVIEW`, `reviewBaseSha`, `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
 - `--dry-run` absent from build/plan/tickets/wave compiled outputs, present only in dynamic-profile
@@ -257,15 +257,15 @@ Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the m
 
 ## Key Files
 
-- `commands/_partials/_engine.mds` — canonical Gate 1, Gate 2, review loop, concurrency, build execution doctrine (source of truth for all engine behavior)
-- `commands/_partials/_wave.mds` — wave loop, branch/merge model, conflict resolution doctrine, escalation model
-- `commands/_partials/_preamble.mds` — workflow runtime contract, pre-flight checklist, IRON RULE (no deterministic feature code), SAFETY BANNER (never merge to main)
-- `commands/_partials/_roster.mds` — valid agentType values, model tiers, agent caveats
-- `commands/_partials/_plan_contract.mds` — acceptance criteria + test plan shape (shared by dynamic-plan and dynamic-build Gate 2)
-- `commands/_partials/_factory.mds` — ticket-factory pipeline stages (draft→review→revise→critic→amend→tracking)
-- `commands/_partials/_ticket_template.mds` — canonical ticket body structure
-- `commands/dynamic-build.mds` — main build command source with inline SINGLE + WAVE workflow scripts
-- `plugins/devflow-dynamic/commands/dynamic-build.md` — compiled artifact pinned by test suite
+- `src/assets/commands/_partials/_engine.mds` — canonical Gate 1, Gate 2, review loop, concurrency, build execution doctrine (source of truth for all engine behavior)
+- `src/assets/commands/_partials/_wave.mds` — wave loop, branch/merge model, conflict resolution doctrine, escalation model
+- `src/assets/commands/_partials/_preamble.mds` — workflow runtime contract, pre-flight checklist, IRON RULE (no deterministic feature code), SAFETY BANNER (never merge to main)
+- `src/assets/commands/_partials/_roster.mds` — valid agentType values, model tiers, agent caveats
+- `src/assets/commands/_partials/_plan_contract.mds` — acceptance criteria + test plan shape (shared by dynamic-plan and dynamic-build Gate 2)
+- `src/assets/commands/_partials/_factory.mds` — ticket-factory pipeline stages (draft→review→revise→critic→amend→tracking)
+- `src/assets/commands/_partials/_ticket_template.mds` — canonical ticket body structure
+- `src/assets/commands/dynamic-build.mds` — main build command source with inline SINGLE + WAVE workflow scripts
+- `dist/commands/dynamic-build.md` — compiled artifact pinned by test suite
 - `tests/build-mds.test.ts` — doctrine-literal pinning tests (sections 10, 12, 13)
 - `scripts/build-mds.ts` — unified MDS compiler (14 hosts → compiled .md files)
 

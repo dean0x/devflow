@@ -6,9 +6,9 @@
 // absolute path string. All construction uses path.join() — no string concatenation.
 //
 // ARCHITECTURE: This module is the single source of truth for path layout in
-// the CJS hook layer. Must match src/cli/utils/project-paths.ts exactly.
+// the CJS hook layer. Must match src/core/project-paths.ts exactly.
 //
-// TS COUNTERPART: src/cli/utils/project-paths.ts must mirror this file exactly.
+// TS COUNTERPART: src/core/project-paths.ts must mirror this file exactly.
 // Keep them in sync when adding or changing functions.
 
 'use strict';

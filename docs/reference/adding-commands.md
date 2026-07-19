@@ -3,7 +3,9 @@
 ## Command Structure
 
 1. Decide which plugin the command belongs to (or create a new plugin)
-2. Create command in `plugins/devflow-{plugin}/commands/new-command.md`
+2. Create the command source in `src/assets/commands/`:
+   - Use `.mds` for commands that import MDS partials (most commands)
+   - Use `.md` for simple static commands with no partials
 3. Follow this template:
 
 ```markdown
@@ -22,19 +24,19 @@ Brief description of what the command does.
 [Description of expected output]
 ```
 
-4. Test locally before committing
-5. Update plugin README.md with user-facing documentation
-6. Update `DEVFLOW_PLUGINS` in `src/cli/plugins.ts` if creating a new plugin
+4. If using `.mds`, run `npm run build:mds` to compile to `dist/commands/`
+5. Add the command name to the plugin entry's `commands` array in DEVFLOW_PLUGINS (`src/core/plugins.ts`)
+6. Run `node dist/cli.js init` to install locally
+7. Test with the slash command
 
 ## Plugin Registration
 
 When creating a new plugin:
 
-1. Create plugin directory: `plugins/devflow-{name}/`
-2. Create `.claude-plugin/plugin.json` manifest
-3. Create `commands/`, `agents/`, and `skills/` directories as needed
-4. Add to `DEVFLOW_PLUGINS` array in `src/cli/plugins.ts`
-5. Run `npm run build` to distribute shared assets
+1. Add a new entry to `DEVFLOW_PLUGINS` in `src/core/plugins.ts` with `name`, `description`, `commands`, `agents`, `skills`, `rules`, and `optional` fields
+2. Create command source files in `src/assets/commands/` as needed
+3. Create agent files in `src/assets/agents/` as needed
+4. Run `npm run build && node dist/cli.js init`
 
 ## Command Design Principles
 
@@ -46,5 +48,5 @@ When creating a new plugin:
 ## Conventions
 
 - Use conventional commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
-- Commands are installed to `~/.claude/commands/devflow/`
-- Plugin-specific agents go in `plugins/devflow-{name}/agents/` (not shared)
+- Commands are installed to `~/.claude/commands/devflow/` from `dist/commands/`
+- All agents (shared and plugin-specific) live in `src/assets/agents/`

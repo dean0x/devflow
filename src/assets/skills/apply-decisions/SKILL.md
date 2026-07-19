@@ -32,7 +32,7 @@ Decisions (N):
 
 Pitfalls (M):
   PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs
-  PF-011  DECISIONS_CONTEXT fan-out    [Active]  —  plugins/devflow-resolve/...
+  PF-011  DECISIONS_CONTEXT fan-out    [Active]  —  src/assets/commands/...
 
 ADR-NNN entries live in {worktree}/.devflow/learning/decisions.md
 PF-NNN  entries live in {worktree}/.devflow/learning/pitfalls.md
@@ -74,10 +74,10 @@ Cite only IDs that appear verbatim in `DECISIONS_CONTEXT`. Do not guess at IDs t
 
 ## Worked Example
 
-**Scenario**: Reviewing `scripts/hooks/background-learning` for issues.
+**Scenario**: Reviewing `src/assets/scripts/hooks/background-learning` for issues.
 
-1. **Scan** — Index shows `PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs`
-2. **Identify** — Area field includes `scripts/hooks/` which overlaps with the file under review
+1. **Scan** — Index shows `PF-004  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs`
+2. **Identify** — Area field includes `src/assets/scripts/hooks/` which overlaps with the file under review
 3. **Read** — Open the pitfalls file at the path given in the DECISIONS_CONTEXT footer (e.g., `<worktree>/.devflow/learning/pitfalls.md`), find `## PF-004:` section, read full body
 4. **Cite** — If the file shows signs of the god-script pattern, note `avoids PF-004` in reasoning
 5. **Verbatim** — ID `PF-004` appeared in the index; citation is valid

@@ -5,7 +5,7 @@
 /**
  * Namespace prefix for Devflow skills installed to ~/.claude/skills/.
  * Skills are installed as `devflow:{skill-name}` to avoid collisions with
- * other plugin ecosystems. Source dirs in shared/skills/ stay unprefixed.
+ * other plugin ecosystems. Source dirs in src/assets/skills/ stay unprefixed.
  */
 export const SKILL_NAMESPACE = 'devflow:';
 

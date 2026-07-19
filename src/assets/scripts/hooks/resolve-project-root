@@ -5,7 +5,7 @@
 # is spawned with a CWD deep inside the project — e.g. inside
 # .devflow/docs/<...>/tickets/ — computing "$CWD/.devflow" there scaffolds a
 # STRAY nested .devflow/. This helper resolves any CWD back to the real project
-# root, mirroring the TS CLI's getGitRoot() (src/cli/utils/git.ts) so the shell
+# root, mirroring the TS CLI's getGitRoot() (src/core/git.ts) so the shell
 # side anchors identically.
 #
 # Sourced by: the memory/learning/session hooks and ensure-devflow-init.
