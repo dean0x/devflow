@@ -28,9 +28,9 @@ Code reviews must check:
 
 ## Retention
 
-HIPAA requires covered entities to retain PHI records for **6 years** from creation or last effective date (§164.530(j)). Code must:
-- Store a `retainUntil` timestamp on every PHI record (created + 6 years)
-- Prevent deletion before retention period unless HIPAA-compliant destruction process is followed
+HIPAA §164.530(j) requires covered entities to retain required documentation (policies, procedures, and records mandated by the rules) for **6 years** from creation or last effective date. HIPAA sets **no federal PHI retention period** — state law governs how long medical records must be kept. Code must:
+- Store a `retainUntil` timestamp on every PHI record (6 years is a conservative default covering required documentation; verify applicable state law for medical records)
+- Prevent deletion before the retention period unless a HIPAA-compliant destruction process is followed
 
 ## Business Associate Agreements (BAA)
 

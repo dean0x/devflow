@@ -1,6 +1,6 @@
 # PCI DSS — Code-Level Checks
 
-**Standard**: PCI DSS v4.0 (Payment Card Industry Data Security Standard)
+**Standard**: PCI DSS v4.0.1 (Payment Card Industry Data Security Standard)
 
 ## Never Store
 
@@ -26,7 +26,7 @@ Limit cardholder data (CHD) to systems that require it:
 
 ### Req 3 — Protect Stored Account Data
 - PAN stored only where necessary; rendered unreadable (AES-256, tokenization, truncation)
-- Retain CHD only as long as business/legal need exists; purge after **3 years** (typical anchor; follow your QSA guidance)
+- Retain CHD only as long as a documented business/legal/regulatory need exists (Req 3.2.1); PCI DSS sets no fixed retention period — define and enforce your own retention policy per QSA guidance
 
 ### Req 6.x — Develop and Maintain Secure Systems
 - No injection flaws (parameterized queries)

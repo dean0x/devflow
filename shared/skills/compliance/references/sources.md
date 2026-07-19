@@ -8,9 +8,9 @@ Authoritative references for the compliance skill. All framework-specific contro
 |--------|---------------|--------|
 | **GDPR** — General Data Protection Regulation | Regulation (EU) 2016/679 | https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0679 |
 | **HIPAA** — Health Insurance Portability and Accountability Act | 45 CFR Parts 160, 162, 164 | https://www.hhs.gov/hipaa/for-professionals/security/laws-regulations/index.html |
-| **PCI DSS** — Payment Card Industry Data Security Standard | v4.0 (March 2022) | https://www.pcisecuritystandards.org/document_library/ |
+| **PCI DSS** — Payment Card Industry Data Security Standard | v4.0.1 (June 2024) | https://www.pcisecuritystandards.org/document_library/ |
 | **SOX** — Sarbanes-Oxley Act | Pub.L. 107-204 (2002) §404, §802 | https://www.congress.gov/107/plaws/publ204/PLAW-107publ204.pdf |
-| **ISO/IEC 27001** | 2022 edition, Annex A | https://www.iso.org/standard/82875.html |
+| **ISO/IEC 27001** | 2022 edition (incl. Amd 1:2024), Annex A | https://www.iso.org/standard/82875.html |
 | **AICPA Trust Services Criteria** | 2017 (updated 2022) | https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria |
 
 ## Engineering Frameworks
