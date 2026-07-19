@@ -79,11 +79,83 @@ describe('unprefixSkillName', () => {
   });
 });
 
-describe('LEGACY_SKILL_NAMES includes all current bare names for migration', () => {
-  it('every current skill name has a legacy entry for cleanup', () => {
+/**
+ * Frozen historical skill set derived from: git ls-tree --name-only dcecda3^ -- shared/skills/
+ *
+ * dcecda3 (2026-03-30) is the commit that introduced the devflow: namespace prefix.
+ * These are the bare directory names that existed immediately BEFORE namespacing, so they
+ * are the only skills that could ever have had a bare ~/.claude/skills/<name> install.
+ *
+ * THIS SET MUST NEVER GROW. Adding a new entry here would assert that a skill born after
+ * namespacing had a pre-namespace install, which is impossible — and would allow a bare
+ * legacy entry to delete a same-named foreign skill directory at init time.
+ */
+const PRE_NAMESPACE_SKILLS: ReadonlySet<string> = new Set([
+  'accessibility',
+  'agent-teams',
+  'ambient-router',
+  'architecture-patterns',
+  'complexity-patterns',
+  'consistency-patterns',
+  'core-patterns',
+  'database-patterns',
+  'debug-orchestration',
+  'dependencies-patterns',
+  'docs-framework',
+  'documentation-patterns',
+  'frontend-design',
+  'git-safety',
+  'git-workflow',
+  'github-patterns',
+  'go',
+  'implementation-orchestration',
+  'implementation-patterns',
+  'input-validation',
+  'java',
+  'knowledge-persistence',
+  'performance-patterns',
+  'pipeline-orchestration',
+  'plan-orchestration',
+  'python',
+  'react',
+  'regression-patterns',
+  'resolve-orchestration',
+  'review-methodology',
+  'review-orchestration',
+  'rust',
+  'search-first',
+  'security-patterns',
+  'self-review',
+  'test-driven-development',
+  'test-patterns',
+  'typescript',
+  'worktree-support',
+]);
+
+describe('LEGACY_SKILL_NAMES invariant: frozen pre-namespace bare-skill coverage', () => {
+  it('every current skill that existed pre-namespace has a bare legacy entry for cleanup', () => {
+    // Assertion A: pre-namespace current skills need a bare entry so init cleans up old installs.
     const currentSkills = getAllSkillNames();
     for (const skill of currentSkills) {
-      expect(LEGACY_SKILL_NAMES, `LEGACY_SKILL_NAMES should include '${skill}' for migration cleanup`).toContain(skill);
+      if (!PRE_NAMESPACE_SKILLS.has(skill)) continue;
+      expect(
+        LEGACY_SKILL_NAMES,
+        `LEGACY_SKILL_NAMES should include '${skill}' — it existed before the devflow: namespace was introduced and may have bare pre-namespace installs to clean up`,
+      ).toContain(skill);
+    }
+  });
+
+  it('no post-namespace skill appears bare in LEGACY_SKILL_NAMES (foreign-dir deletion risk)', () => {
+    // Assertion B (inverse guard): skills born after namespacing never had bare pre-namespace
+    // installs, so a bare entry has no migration value and only adds risk: init's unguarded
+    // fs.rm will delete ~/.claude/skills/<entry>, which could be a foreign plugin's skill dir.
+    const currentSkills = getAllSkillNames();
+    for (const skill of currentSkills) {
+      if (PRE_NAMESPACE_SKILLS.has(skill)) continue;
+      expect(
+        LEGACY_SKILL_NAMES,
+        `LEGACY_SKILL_NAMES must not include '${skill}' as a bare entry — this skill was born after the devflow: namespace was introduced (dcecda3, 2026-03-30) and never had a bare pre-namespace install. A bare entry only adds risk of deleting a foreign skill dir at ~/.claude/skills/${skill}.`,
+      ).not.toContain(skill);
     }
   });
 });
