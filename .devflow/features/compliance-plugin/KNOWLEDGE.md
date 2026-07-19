@@ -28,7 +28,7 @@ The gate (`compliance_gate` partial) is resolved once per run and cached as `COM
 The compliance plugin does three things, each in a distinct layer:
 
 - **Rule** (`shared/rules/compliance.md`): Always-on, global reminder installed for any project that has the plugin. Keeps compliance mindset active during quick edits that don't trigger a full workflow.
-- **Skill** (`shared/skills/compliance/SKILL.md` + `references/`): Loaded on-demand by agents when they detect regulated-data surface. Provides the full control catalog, severity guidance, and framework-specific reference files.
+- **Skill** (`shared/skills/compliance/SKILL.md` + `references/`): Loaded on-demand by agents when they detect regulated-data surface. Provides the full control catalog, severity guidance, framework-specific reference files, and the clean-report contract.
 - **Gate** (`commands/_partials/_compliance.mds`): Orchestrator-only, resolved once per command run. Controls whether the compliance focus/reviewer/designer is activated downstream.
 
 ## Plugin-Presence Gate (`compliance_gate`)
@@ -61,7 +61,7 @@ Neither exists → `COMPLIANCE_ENABLED=false`, stop. Either exists → `COMPLIAN
 
 The `compliance_gate()` call appears near the top of `code-review.mds` (after Phase 0 git context). When `COMPLIANCE_ENABLED=true`, a `compliance` focus is appended to `REVIEWER_LIST` for every worktree. The `compliance` Reviewer loads `devflow:compliance` and applies the clean-report contract, scope boundary rules, and the framework mapping from the declared `## Compliance` section in the project CLAUDE.md.
 
-Reviewer cap: 8 always-active + up to 11 diff-driven conditional + 1 `compliance` when `COMPLIANCE_ENABLED` = **max 20 total per worktree** (verified against `code-review.mds` line 200).
+Reviewer cap: 8 always-active + up to 11 diff-driven conditional + 1 `compliance` when `COMPLIANCE_ENABLED` = **max 20 total per worktree** (verified against `code-review.mds`).
 
 ### `/plan`
 
@@ -73,7 +73,7 @@ The compliance focus maps to gap-analysis SKILL.md §7, which detects regulatory
 
 ### `/implement`
 
-`implement.mds` calls `compliance_gate()` during Phase 1 setup. The `COMPLIANCE_ENABLED` value flows into all **8 Coder spawn templates** as `COMPLIANCE: {enabled|(none)}`:
+`implement.mds` calls `compliance_gate()` during Phase 1 setup. The `COMPLIANCE_ENABLED` value flows into all **8 Coder spawn templates** as `COMPLIANCE: {enabled|(none)}`. All 3 fix templates (validation-fix, alignment-fix, qa-fix) are symmetric: `COMPLIANCE` appears after `SCOPE` in every fix template block.
 
 | Template | Context |
 |----------|---------|
@@ -94,7 +94,7 @@ The compliance focus maps to gap-analysis SKILL.md §7, which detects regulatory
 
 ### Clean-Report Contract
 
-When a diff/design has no regulated-data surface — no PII/PHI/payment fields, no sensitive data in logs, no IaC, no auth/audit/retention changes — the compliance Reviewer/Designer emits **zero findings** with a single-line "no compliance-relevant surface detected" note. Never manufacture compliance findings.
+When a diff/design has no regulated-data surface — no PII/PHI/payment fields, no sensitive data in logs, no IaC, no auth/audit/retention changes — the compliance Reviewer/Designer emits **zero findings** with a single-line "no compliance-relevant surface detected" note. Never manufacture compliance findings. This contract is defined in `shared/skills/compliance/SKILL.md` (not in reviewer.md frontmatter).
 
 ### Scope Boundary vs. Security Lens
 
@@ -145,7 +145,7 @@ The compliance skill and its reference files use specific edition identifiers. A
 
 **Reinstantiating the gate per worktree.** The `compliance_gate()` call is designed for once-per-run invocation. Its result must be carried to every worktree in multi-worktree flows — do not re-resolve it inside per-worktree loops. This is how `code-review.mds` handles it: gate before Phase 1, carry `COMPLIANCE_ENABLED` through Phase 2's per-worktree reviewer construction.
 
-**Frontmatter-preloading the compliance skill in agents.** The compliance skill (~138 lines + 8 reference files) should not be added to agent `skills:` frontmatter. It is intentionally body-instructed so it only loads when there is genuine regulated-data surface. Adding it to frontmatter would bloat every agent invocation regardless of whether compliance is relevant (avoids PF-002).
+**Frontmatter-preloading the compliance skill in agents.** The compliance skill (~138 lines + 8 reference files) should not be added to agent `skills:` frontmatter. It is intentionally body-instructed so it only loads when there is genuine regulated-data surface. Adding it to frontmatter would bloat every agent invocation regardless of whether compliance is relevant (avoids PF-002 — now test-enforced by `tests/build.test.ts`).
 
 **Letting Coder re-verify plugin installation.** The compliance field arriving as `COMPLIANCE: enabled` is the Coder's sole signal. The Coder must not re-read the manifest or check skill files — that check already happened in the orchestrator's gate step. Duplicate verification adds reads without safety benefit.
 
@@ -165,28 +165,35 @@ The compliance skill and its reference files use specific edition identifiers. A
 
 **Test allowedOptional set must be updated.** `tests/plugins.test.ts` has an `allowedOptional` Set that gates which plugins are permitted to have `optional: true`. Adding a new optional plugin requires adding its name to this Set, or the test fails.
 
-**`plugin.json` ↔ `DEVFLOW_PLUGINS` skills+rules must stay in sync.** `tests/build.test.ts` asserts that every plugin's `plugin.json` `skills` and `rules` arrays exactly match the corresponding entry in `DEVFLOW_PLUGINS` in `src/cli/plugins.ts`. When adding a skill or rule to one, add it to the other or the sync test fails.
+**`plugin.json` ↔ `DEVFLOW_PLUGINS` skills+rules must stay in sync.** `tests/build.test.ts` asserts that every plugin's `plugin.json` `skills` and `rules` arrays exactly match the corresponding entry in `DEVFLOW_PLUGINS` in `src/cli/plugins.ts` (via `it.each` — parameterized for `skills` and `rules` fields). When adding a skill or rule to one, add it to the other or the sync test fails.
+
+**COMPLIANCE_ENABLED guard in `build-mds.test.ts`.** `tests/build-mds.test.ts` asserts that all three compiled host commands (code-review, plan, implement) contain the string `COMPLIANCE_ENABLED`. If you rename the gate variable or restructure the `_compliance.mds` partial, this test will fail. Update the guard literal to match.
+
+**Frontmatter skills guard in `build.test.ts` enforces PF-002.** `tests/build.test.ts` asserts that no `shared/agents/*.md` file lists `devflow:compliance` in its frontmatter `skills:` block. This guard exists specifically to prevent accidental frontmatter-preloading — adding the compliance skill to agent frontmatter triggers the re-entrancy guard (PF-002) and silently produces no output. The test parses only the YAML frontmatter block, not body text, so body-instruction (the correct pattern) passes the guard.
 
 ## Key Files
 
 - `commands/_partials/_compliance.mds` — the `compliance_gate` MDS partial; imported by all 3 host commands; defines the full 4-step gate resolution
-- `shared/skills/compliance/SKILL.md` — main compliance skill; 6 control categories, severity table, framework mapping, checklist, reference index
+- `shared/skills/compliance/SKILL.md` — main compliance skill; 6 control categories, severity table, framework mapping, checklist, reference index, and clean-report contract
 - `shared/skills/compliance/references/` — 8 reference files: `gdpr.md`, `hipaa.md`, `pci-dss.md`, `soc2.md`, `iso-27001.md`, `sox.md`, `detection.md`, `sources.md`
 - `shared/rules/compliance.md` — global always-on rule (`paths: []`); 6 compliance reminders
 - `plugins/devflow-compliance/.claude-plugin/plugin.json` — plugin manifest; declares `skills: ["compliance"]`, `rules: ["compliance"]`, no agents
 - `shared/agents/coder.md` — body-instructs compliance skill invocation (line ~75); COMPLIANCE field contract
-- `shared/agents/reviewer.md` — compliance reviewer in the conditional table (line ~59)
+- `shared/agents/reviewer.md` — compliance activation row is condition-only (the clean-report contract lives in SKILL.md, not in this file's frontmatter or the row text)
 - `shared/agents/synthesizer.md` — merge-don't-boost rule for compliance+security overlaps (line ~214, ~315)
 - `shared/agents/triager.md` — compliance disposition default (FIX_SEPARATE/TECH_DEBT) at line ~63
 - `shared/agents/designer.md` — compliance focus as the 5th gap-analysis Designer
 - `shared/skills/gap-analysis/SKILL.md` — §7 compliance detection patterns (regulatory gaps, IaC, segregation of duties)
 - `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` registry entry; `LEGACY_SKILLS_V2X` bare-name entry at line ~553
+- `tests/build.test.ts` — skills+rules sync tests (parameterized via `it.each`); frontmatter compliance guard (enforces PF-002)
+- `tests/build-mds.test.ts` — COMPLIANCE_ENABLED wiring guard for all 3 compiled host commands
 
 ## Related
 
 - ADR-007: Gate is command-markdown only — no deterministic helper scripts; `compliance_gate` follows this exactly
 - ADR-010: `installViaFileCopy` sole install path — plugin registration is pure registry data; `devflow-compliance` uses the standard install path
-- PF-002: Compliance skill is body-instructed in coder.md, deliberately NOT frontmatter-preloaded
+- PF-002: Compliance skill is body-instructed in coder.md, deliberately NOT frontmatter-preloaded — now test-enforced by `tests/build.test.ts`
+- PF-011: `build-mds.ts` uses tmp+rename to avoid delete-then-write ENOENT race; error-path now cleans orphaned `.tmp` files on `renameSync` failure
 - ADR-003: End-state docs — no tombstone comments when modifying compliance references
 - Feature knowledge: `resolve-pipeline` — Triager disposition rules for compliance issues
 - Feature knowledge: `installer-shadowing` — install/uninstall mechanics that explain why Step 2 asset verify is necessary
