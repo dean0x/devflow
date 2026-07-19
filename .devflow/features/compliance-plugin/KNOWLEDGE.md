@@ -159,7 +159,7 @@ The compliance skill and its reference files use specific edition identifiers. A
 
 **`Frameworks: none` is not the same as an absent `## Compliance` section.** An absent section triggers generic controls + a one-time suggestion to declare frameworks when regulated data is present. `Frameworks: none` is an explicit opt-out that disables the gate entirely (Step 4). Only write `Frameworks: none` when a project actively does not want any compliance analysis.
 
-**LEGACY_SKILLS_V2X entry required for new skills.** When the `compliance` skill was added, a bare-name entry `'compliance'` was added to `LEGACY_SKILLS_V2X` in `src/cli/plugins.ts` (line ~553). Any new skill added to devflow must get a corresponding bare-name entry in `LEGACY_SKILLS_V2X` at add-time, so that future namespace migrations can clean up pre-namespace installs.
+**Post-namespace skills must NOT get bare `LEGACY_SKILLS_V2X` entries.** `LEGACY_SKILL_NAMES` (the exported union of `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, and `LEGACY_SKILLS_V2X`) is a frozen list covering only the 39 skills that existed before the namespace migration (commit dcecda3, 2026-03-30). `tests/skill-namespace.test.ts` enforces this with an inverse guard (Assertion B) that fails the test if any post-namespace skill — including `compliance` — appears bare in the list. The `'compliance'` bare entry has been removed. Do not add bare entries for any skill born after the namespace migration.
 
 **`_compliance.mds` counts toward the partial assertion.** `tests/build-mds.test.ts` asserts `commands/_partials/` contains exactly **10** partials. Adding another partial requires updating this count (was 9 before `_compliance.mds` was added).
 
@@ -184,7 +184,9 @@ The compliance skill and its reference files use specific edition identifiers. A
 - `shared/agents/triager.md` — compliance disposition default (FIX_SEPARATE/TECH_DEBT) at line ~63
 - `shared/agents/designer.md` — compliance focus as the 5th gap-analysis Designer
 - `shared/skills/gap-analysis/SKILL.md` — §7 compliance detection patterns (regulatory gaps, IaC, segregation of duties)
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` registry entry; `LEGACY_SKILLS_V2X` bare-name entry at line ~553
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` registry entry; `LEGACY_SKILL_NAMES` frozen list (39 pre-namespace skills; `compliance` is NOT in this list — it is a post-namespace skill)
+- `tests/skill-namespace.test.ts` — Assertion A (pre-namespace skills need bare entries) + Assertion B inverse guard (post-namespace skills must not appear bare in `LEGACY_SKILL_NAMES`)
+- `tests/skill-references.test.ts` — allowlist extended to the frozen historical pre-namespace skill set
 - `tests/build.test.ts` — skills+rules sync tests (parameterized via `it.each`); frontmatter compliance guard (enforces PF-002)
 - `tests/build-mds.test.ts` — COMPLIANCE_ENABLED wiring guard for all 3 compiled host commands
 
