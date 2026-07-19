@@ -1,13 +1,11 @@
 /**
- * Bump version across all Devflow files and extract release notes.
+ * Bump version across Devflow files and extract release notes.
  *
  * Usage: npx tsx scripts/bump-version.ts <version>
  *
  * Updates:
  *   - package.json
  *   - package-lock.json (via npm install --package-lock-only)
- *   - 17 plugins/devflow-*\/.claude-plugin/plugin.json
- *   - .claude-plugin/marketplace.json
  *   - CHANGELOG.md ([Unreleased] → [version] - date + compare link)
  *
  * Writes extracted release notes to stdout.
@@ -76,42 +74,9 @@ if (alreadyBumped) {
 
   execSync('npm install --package-lock-only', { cwd: ROOT, stdio: 'pipe' });
   process.stderr.write(`  package-lock.json: synced\n`);
-
-  // ── 3. Plugin plugin.json files ──────────────────────────────
-
-  const pluginJsonPaths = execSync(
-    'find plugins/devflow-*/.claude-plugin/plugin.json -type f',
-    { cwd: ROOT, encoding: 'utf-8' }
-  )
-    .trim()
-    .split('\n')
-    .filter(Boolean);
-
-  for (const rel of pluginJsonPaths) {
-    const abs = join(ROOT, rel);
-    const pj = readJson(abs) as { version: string };
-    pj.version = newVersion;
-    writeJson(abs, pj);
-  }
-  process.stderr.write(`  plugin.json: ${pluginJsonPaths.length} plugins updated\n`);
-
-  // ── 4. marketplace.json ──────────────────────────────────────
-
-  const marketplacePath = join(ROOT, '.claude-plugin', 'marketplace.json');
-  const marketplace = readJson(marketplacePath) as {
-    plugins: Array<{ version: string }>;
-  };
-
-  let marketplaceCount = 0;
-  for (const plugin of marketplace.plugins) {
-    plugin.version = newVersion;
-    marketplaceCount++;
-  }
-  writeJson(marketplacePath, marketplace);
-  process.stderr.write(`  marketplace.json: ${marketplaceCount} entries updated\n`);
 }
 
-// ── 5. CHANGELOG.md ─────────────────────────────────────────
+// ── 3. CHANGELOG.md ─────────────────────────────────────────
 
 const changelogPath = join(ROOT, 'CHANGELOG.md');
 let changelog = readFileSync(changelogPath, 'utf-8');
@@ -151,7 +116,7 @@ if (versionHeaderExists) {
   process.stderr.write(`  CHANGELOG.md: [Unreleased] → [${newVersion}] - ${today()}\n`);
 }
 
-// ── 6. Extract release notes to stdout ──────────────────────
+// ── 4. Extract release notes to stdout ──────────────────────
 
 const versionHeader = `## [${newVersion}]`;
 const headerIdx = changelog.indexOf(versionHeader);
