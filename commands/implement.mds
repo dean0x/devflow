@@ -326,8 +326,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
    MISALIGNMENTS: \{structured misalignments from Evaluator\}
-   COMPLIANCE: \{enabled|(none)\}
    SCOPE: Fix only the listed misalignments, no other changes
+   COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
    ```
    - Spawn Validator to verify fix didn't break tests:
