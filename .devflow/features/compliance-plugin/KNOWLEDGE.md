@@ -12,7 +12,7 @@ directories:
   - commands/plan.mds
   - commands/implement.mds
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 ---
 
 # Compliance Plugin & Installed-Gate Pattern
@@ -125,14 +125,21 @@ Compliance issues are often policy/architecture-level (missing retention policy,
 
 The compliance skill and its reference files use specific edition identifiers. Always cite these when adding or modifying framework content — do not regress to older editions:
 
-| Framework | Authoritative edition |
-|-----------|----------------------|
-| ISO 27001 | ISO/IEC 27001:2022 Annex A (e.g., A.5.12, A.8.15, A.8.24, A.8.25) |
-| PCI DSS | PCI DSS v4.0 sub-requirement IDs (e.g., 3.3.1.1, 3.3.1.2, 3.3.1.3, 3.5.1) |
-| GDPR | Articles 17, 25, 30, 32, 33 |
-| HIPAA | §164.312 safeguards |
-| SOC 2 | AICPA TSC CC6/CC7/CC8.1 |
-| SOX | ITGC, §802 |
+| Framework | Authoritative edition | Key notes |
+|-----------|----------------------|-----------|
+| ISO 27001 | ISO/IEC 27001:2022 + Amd 1:2024 (e.g., A.5.12, A.8.15, A.8.24, A.8.25) | Amd 1:2024 adds climate-action guidance; Annex A control numbering is unchanged from the 2022 edition. Never cite 2013 Annex A IDs (A.12.x, etc.). |
+| PCI DSS | PCI DSS v4.0.1 (June 2024 — v4.0 is retired; sub-requirement numbering unchanged) | Key sub-reqs: 3.3.1.x (SAD non-storage), 3.5.1 (PAN must be rendered unreadable), 3.2.1 (need-based retention). PCI DSS sets **no fixed retention period** — never write a numeric "3-year" PCI retention anchor. |
+| GDPR | Articles 17, 25, 30, 32, 33 | |
+| HIPAA | §164.312 safeguards | The 6-year figure is required-documentation retention under §164.530(j) — it is NOT a PHI retention mandate. State law governs PHI retention periods. |
+| SOC 2 | AICPA TSC CC6/CC7/CC8.1 | |
+| SOX | ITGC, §802 | |
+
+**Watch items — verified not in force as of 2026-07-19; do not cite as active requirements:**
+
+- **HIPAA Security Rule final rule**: Jan 2025 NPRM remains in proposed status; no final rule issued.
+- **NIST SSDF v1.2**: draft published Dec 2025; not yet finalized.
+- **GDPR Digital Omnibus Art. 30(5)**: proposed SME processing-records threshold change; not adopted.
+- **OWASP ASVS 5.0.1**: anticipated patch release; 5.0.0 remains current.
 
 ## Anti-Patterns
 
