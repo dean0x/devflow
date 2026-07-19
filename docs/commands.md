@@ -44,11 +44,13 @@ Creates a PR when complete.
 
 ## /code-review
 
-Multi-perspective code review with up to 18 specialized reviewers running in parallel:
+Multi-perspective code review with up to 20 specialized reviewers running in parallel:
 
-**Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing
+**Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing, Reliability
 
-**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, Go, Python, Java, Rust, Database, Dependencies, Documentation
+**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation
+
+**Plugin-gated** (when devflow-compliance plugin installed): Compliance
 
 Each reviewer produces findings with:
 - **Category**: Blocking (must-fix), Should-Fix, Pre-existing (informational)

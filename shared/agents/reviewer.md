@@ -56,6 +56,7 @@ The orchestrator provides:
 | `python` | `devflow:python` |
 | `reliability` | `devflow:reliability` |
 | `rust` | `devflow:rust` |
+| `compliance` | `devflow:compliance` |
 
 ## Apply Decisions
 
@@ -201,3 +202,4 @@ Report format for `{output_path}`:
 | java | If .java files changed |
 | python | If .py files changed |
 | rust | If .rs files changed |
+| compliance | If devflow-compliance plugin installed (orchestrator-gated) |

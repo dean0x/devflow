@@ -1,0 +1,28 @@
+{
+  "name": "devflow-compliance",
+  "description": "Regulatory compliance patterns - GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX code-level controls, audit trails, data retention",
+  "author": {
+    "name": "Dean0x"
+  },
+  "version": "1.8.3",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": [
+    "compliance",
+    "gdpr",
+    "hipaa",
+    "pci-dss",
+    "soc2",
+    "iso-27001",
+    "sox",
+    "audit"
+  ],
+  "agents": [],
+  "skills": [
+    "compliance"
+  ],
+  "rules": [
+    "compliance"
+  ]
+}

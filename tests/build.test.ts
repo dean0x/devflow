@@ -122,6 +122,51 @@ describe('no orphaned declarations', () => {
 });
 
 // ---------------------------------------------------------------------------
+// agent frontmatter compliance contract (avoids PF-002)
+//
+// Guards that no shared agent lists devflow:compliance in its frontmatter
+// skills: block. The compliance skill is intentionally body-instructed only
+// (agents invoke it via Skill() when regulated surface is detected) — adding
+// it to frontmatter triggers the re-entrancy guard and silently produces
+// zero-work agents while the orchestrator still reports success.
+// ---------------------------------------------------------------------------
+
+describe('agent frontmatter compliance contract', () => {
+  it('no shared/agents/*.md frontmatter skills: block lists devflow:compliance', async () => {
+    const agentsDir = path.join(ROOT, 'shared', 'agents');
+    const agentFiles = await fs.readdir(agentsDir);
+
+    for (const file of agentFiles.filter(f => f.endsWith('.md'))) {
+      const agentName = path.basename(file, '.md');
+      const content = await fs.readFile(path.join(agentsDir, file), 'utf-8');
+
+      // Parse only the YAML frontmatter block (between first --- markers), not body text
+      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+      if (!fmMatch) continue;
+
+      const fmLines = fmMatch[1].split('\n');
+      let inSkills = false;
+      const skillItems: string[] = [];
+      for (const line of fmLines) {
+        if (/^skills:/.test(line)) { inSkills = true; continue; }
+        // A non-indented non-empty line ends the skills block (new top-level YAML key)
+        if (inSkills && /^\S/.test(line)) inSkills = false;
+        if (inSkills) {
+          const m = line.match(/^\s*-\s+(.+)$/);
+          if (m) skillItems.push(m[1].trim());
+        }
+      }
+
+      expect(
+        skillItems,
+        `shared/agents/${agentName}.md frontmatter skills: must not list devflow:compliance — ` +
+          `use body-instruction only (avoids PF-002: skill re-entrancy silent bail)`,
+      ).not.toContain('devflow:compliance');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // marketplace.json ↔ DEVFLOW_PLUGINS name parity (applies ADR-014)
 //
 // Guards the whole project: every plugin in src/cli/plugins.ts must have a
@@ -250,6 +295,41 @@ describe('devflow-dynamic declared commands ↔ commands/ source parity', () => 
         declaredSet.has(expectedCmd),
         `commands/${e.name} targets devflow-dynamic but '${expectedCmd}' is not declared in DEVFLOW_PLUGINS. Add it to devflow-dynamic.commands in src/cli/plugins.ts`,
       ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plugin.json ↔ DEVFLOW_PLUGINS skills + rules sync
+//
+// For every plugin, its plugin.json `skills` and `rules` arrays must equal the
+// corresponding arrays in the DEVFLOW_PLUGINS entry in src/cli/plugins.ts.
+// This closes the unguarded manual-sync pair: a developer could add a skill to
+// plugins.ts but forget to add it to plugin.json (or vice-versa), and the build
+// would silently produce an inconsistency. Absent `rules` in plugin.json is
+// treated as an empty array (manifest may legitimately omit rules);
+// PluginDefinition.rules is a required field so no registry-side guard is needed.
+// ---------------------------------------------------------------------------
+
+describe('plugin.json ↔ DEVFLOW_PLUGINS skills + rules sync', () => {
+  it.each([
+    { field: 'skills' as const },
+    { field: 'rules' as const },
+  ])('every plugin has matching $field between plugin.json and DEVFLOW_PLUGINS', async ({ field }) => {
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
+      const raw = await fs.readFile(manifestPath, 'utf-8');
+      // Absent field in plugin.json is treated as empty array (manifest may legitimately omit rules)
+      const manifest = JSON.parse(raw) as { skills?: string[]; rules?: string[] };
+
+      const manifestValues = (manifest[field] ?? []).slice().sort();
+      const registryValues = plugin[field].slice().sort();
+
+      expect(
+        manifestValues,
+        `Plugin '${plugin.name}': plugin.json ${field} [${manifestValues.join(', ')}] ` +
+          `do not match DEVFLOW_PLUGINS ${field} [${registryValues.join(', ')}]`,
+      ).toEqual(registryValues);
     }
   });
 });

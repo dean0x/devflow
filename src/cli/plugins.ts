@@ -260,6 +260,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     optional: true,
     rules: ['rust'],
   },
+  {
+    name: 'devflow-compliance',
+    description: 'Regulatory compliance patterns - GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX code-level controls, audit trails, data retention',
+    commands: [],
+    agents: [],
+    skills: ['compliance'],
+    optional: true,
+    rules: ['compliance'],
+  },
 ];
 
 /**
@@ -394,23 +403,6 @@ const LEGACY_SKILLS_V2: string[] = [
   'devflow:input-validation',
   'devflow:architecture-patterns',
   'devflow:frontend-design',
-  // v2.0.0 skill renames: new bare names (for pre-namespace installs that had old-name → new-name)
-  'git',
-  'software-design',
-  'boundary-validation',
-  'testing',
-  'architecture',
-  'performance',
-  'security',
-  'ui-design',
-  'complexity',
-  'consistency',
-  'regression',
-  'database',
-  'dependencies',
-  'documentation',
-  // v2.0.0 new skills: bare names for pre-namespace installs
-  'qa',
   // v2.0.0 git consolidation: prefixed old names for cleanup
   'devflow:git-safety',
   'devflow:git-workflow',
@@ -441,7 +433,6 @@ const LEGACY_SKILLS_V2: string[] = [
   'review',
   'resolve',
   'pipeline',
-  'patterns',
   'research',
   'devflow:research',
   // v2.0.0 orch rename: prefixed short names for cleanup
@@ -462,20 +453,16 @@ const LEGACY_SKILLS_V2: string[] = [
   'review:orch',
   'resolve:orch',
   'pipeline:orch',
-  // v2.0.0 quality-gates: bare name for pre-namespace installs
-  'quality-gates',
 ];
 
-/** v2.x: incremental additions across the v2 minor series. */
+/**
+ * v2.x: incremental additions across the v2 minor series.
+ * Bare entries (no devflow: prefix) = skills that shipped pre-namespace only
+ * (dcecda3, 2026-03-30). Skills born after namespacing must not appear bare here.
+ */
 const LEGACY_SKILLS_V2X: string[] = [
-  // v2.x plan plugin: new skills bare names for pre-namespace installs
-  'gap-analysis',
-  'design-review',
-  // v2.x knowledge index pattern: new shared skill bare name for pre-namespace installs
+  // v2.x knowledge index pattern: old bare name for cleanup
   'apply-knowledge',
-  // v2.x feature knowledge bases: bare names for pre-namespace installs (current names)
-  'feature-knowledge',
-  'apply-feature-knowledge',
   // v2.x kb→knowledge rename: old namespaced skill names for cleanup
   'devflow:feature-kb',
   'devflow:apply-feature-kb',
@@ -485,19 +472,11 @@ const LEGACY_SKILLS_V2X: string[] = [
   // v2.x knowledge→decisions rename: old namespaced skill names for cleanup
   'devflow:apply-knowledge',
   'devflow:knowledge-persistence',
-  // v2.x knowledge→decisions rename: current bare names for pre-namespace installs
-  'apply-decisions',
+  // v2.x knowledge→decisions rename: old bare name for cleanup
   'decisions-format',
-  // v2.x research + release: new bare names for pre-namespace installs
-  'research-codebase',
-  'research-external',
-  'research-market',
-  'research-competitor',
-  'research-technology',
+  // v2.x research + release: old orch names for cleanup
   'research:orch',
   'release:orch',
-  // v2.x research → dependency-research rename: bare name for pre-namespace installs
-  'dependency-research',
   // v2.x guided skill split: bare names for pre-namespace installs
   'implement:guided',
   'debug:guided',
@@ -506,9 +485,7 @@ const LEGACY_SKILLS_V2X: string[] = [
   'review:guided',
   'research:guided',
   'release:guided',
-  // v2.x reliability: bare name for pre-namespace installs
-  'reliability',
-  // v2.x triage skills: bare names for pre-namespace installs
+  // v2.x triage skills: old bare names for cleanup
   'implement:triage',
   'debug:triage',
   'explore:triage',
@@ -725,10 +702,9 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
     if (plugin.commands.length > 0) {
       workflow.push(plugin);
     } else {
-      // "language" bucket: today every command-less selectable plugin is a
-      // language/ecosystem plugin. If a non-language command-less plugin is
-      // added in the future, it will land here — update the bucket name or
-      // add an explicit category field at that point.
+      // "language" bucket: command-less selectable plugins — language/ecosystem
+      // plugins (typescript, go, etc.) and cross-cutting optional rules (compliance).
+      // If a command-less plugin needs a distinct install group, add a category field.
       language.push(plugin);
     }
   }

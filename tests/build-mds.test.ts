@@ -92,10 +92,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 9 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 10 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(9);
+    expect(partialFiles).toHaveLength(10);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -755,5 +755,43 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
   it('compiled dynamic-profile.md still contains --dry-run (untouched by plan)', async () => {
     const content = await fs.readFile(path.join(DYNAMIC_DIR, 'dynamic-profile.md'), 'utf-8');
     expect(content).toContain('--dry-run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. compliance_gate wiring in compiled host commands
+//
+// Guards that the compliance_gate() partial was not silently dropped from
+// the three host commands that import it. A forgotten call site compiles
+// cleanly but leaves the gate absent; asserting COMPLIANCE_ENABLED (the
+// gate's canonical output variable) catches the regression before it ships.
+// ---------------------------------------------------------------------------
+
+describe('compliance_gate wiring in compiled host commands', () => {
+  const COMPLIANCE_GATE_HOSTS: Record<string, string> = {
+    'code-review': 'plugins/devflow-code-review/commands',
+    'plan':        'plugins/devflow-plan/commands',
+    'implement':   'plugins/devflow-implement/commands',
+  };
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('code-review, plan, and implement compiled outputs each contain COMPLIANCE_ENABLED', async () => {
+    for (const [basename, destRelDir] of Object.entries(COMPLIANCE_GATE_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      const content = await fs.readFile(outputPath, 'utf-8');
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain COMPLIANCE_ENABLED — ` +
+          `compliance_gate() call site may be missing from ${basename}.mds`,
+      ).toContain('COMPLIANCE_ENABLED');
+    }
   });
 });

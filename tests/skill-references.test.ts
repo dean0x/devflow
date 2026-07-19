@@ -766,6 +766,9 @@ describe('Test infrastructure skill references', () => {
     // Files whose tests intentionally use old skill names as test data
     const ALLOWLIST_FILES = new Set([
       'init-logic.test.ts',
+      // PRE_NAMESPACE_SKILLS is a frozen historical set of pre-namespace skill names
+      // used as the source-of-truth for the legacy bare-entry invariant test
+      'skill-namespace.test.ts',
     ]);
 
     for (const relFile of testFiles) {

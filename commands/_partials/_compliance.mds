@@ -1,0 +1,43 @@
+@define compliance_gate():
+### Compliance Plugin Gate
+
+Resolve `COMPLIANCE_ENABLED` **once per run** before Phase 1 begins, then reuse the cached value for every worktree. Silent — no prompts, no warnings emitted. Read-only: ≤3 file reads, no subprocess, no LLM call, never writes files.
+
+Resolve the worktree root using `devflow:worktree-support` (WORKTREE_PATH if provided, else cwd). All paths below are relative to `\{worktree\}`.
+
+**Step 1 — Manifest (scope-aware):**
+
+Attempt to read `\{worktree\}/.devflow/manifest.json`.
+- If the file parses: check whether its `plugins` array contains `"devflow-compliance"`.
+  - Yes → proceed to Step 2 using **local scope** paths.
+  - No → set `COMPLIANCE_ENABLED=false`. Stop.
+- If absent or unreadable: attempt to read `~/.devflow/manifest.json`.
+  - If the file parses: check whether its `plugins` array contains `"devflow-compliance"`.
+    - Yes → proceed to Step 2 using **home scope** paths.
+    - No → set `COMPLIANCE_ENABLED=false`. Stop.
+  - If also absent or unreadable → proceed to Step 3.
+
+**Step 2 — Asset verify (self-heals stale manifest):**
+
+Uninstall does not rewrite the `plugins` array, so a manifest hit can be stale. Verify the skill asset exists:
+- Local scope: check that `\{worktree\}/.claude/skills/devflow:compliance/SKILL.md` exists. Missing → `COMPLIANCE_ENABLED=false`. Stop.
+- Home scope: check that `~/.claude/skills/devflow:compliance/SKILL.md` exists. Missing → `COMPLIANCE_ENABLED=false`. Stop.
+
+If the skill asset exists → `COMPLIANCE_ENABLED=true`. Proceed to Step 4.
+
+**Step 3 — Fallback (no readable manifest):**
+
+Set `COMPLIANCE_ENABLED=true` if either of these files exists:
+- `~/.claude/rules/devflow/compliance.md`
+- `\{worktree\}/.claude/rules/devflow/compliance.md`
+
+If neither exists → `COMPLIANCE_ENABLED=false`. Stop.
+
+If either exists → `COMPLIANCE_ENABLED=true`. Proceed to Step 4.
+
+**Step 4 — Project opt-out (only when COMPLIANCE_ENABLED=true):**
+
+Read `\{worktree\}/CLAUDE.md`. If the file contains a `## Compliance` section whose body includes a `Frameworks: none` line, set `COMPLIANCE_ENABLED=false`.
+@end
+
+@export compliance_gate

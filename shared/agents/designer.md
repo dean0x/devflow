@@ -1,6 +1,6 @@
 ---
 name: Designer
-description: Design analysis agent with preloaded mode skills. Modes: gap-analysis (completeness, architecture, security, performance, consistency, dependencies), design-review (anti-pattern detection).
+description: Design analysis agent with preloaded mode skills. Modes: gap-analysis (completeness, architecture, security, performance, compliance, consistency, dependencies), design-review (anti-pattern detection).
 model: opus
 skills:
   - devflow:worktree-support
@@ -34,7 +34,7 @@ Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index
 
 | Mode | Focus (optional) | Skill (preloaded) |
 |------|-------------------|------------------------------|
-| `gap-analysis` | completeness, architecture, security, performance, consistency, dependencies | `devflow:gap-analysis` |
+| `gap-analysis` | completeness, architecture, security, performance, compliance, consistency, dependencies | `devflow:gap-analysis` |
 | `design-review` | (all anti-patterns in one pass) | `devflow:design-review` |
 
 ## Responsibilities

@@ -4,6 +4,7 @@ output-dir: plugins/devflow-plan/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Plan Command
 
@@ -134,10 +135,12 @@ Combine into: user needs, similar features, constraints, failure modes"
 
 #### Phase 5: Gap Analysis (Parallel)
 
-**Produces:** GAP_OUTPUTS
+**Produces:** GAP_OUTPUTS, COMPLIANCE_ENABLED
 **Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
-**Single-issue**: Spawn 4 Designer agents **in a single message**:
+{compliance_gate()}
+
+**Single-issue**: Spawn 4 Designer agents **in a single message** (**5 when COMPLIANCE_ENABLED**):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -145,8 +148,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 | architecture | Pattern violations, missing integration points, layering issues |
 | security | Auth gaps, input validation, secret handling, OWASP |
 | performance | N+1 patterns, missing caching, concurrency, query patterns |
+| compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_ENABLED) |
 
-**Multi-issue**: Spawn 6 Designer agents **in a single message** (same 4 plus):
+**Multi-issue**: Spawn 6 Designer agents **in a single message** (**7 when COMPLIANCE_ENABLED**; same 4/5 plus):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -164,7 +168,7 @@ Each designer receives:
 ```
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
-Focus: {completeness|architecture|security|performance|consistency|dependencies}
+Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
@@ -443,6 +447,7 @@ Display completion summary:
 │  │  ├─ Designer: architecture
 │  │  ├─ Designer: security
 │  │  ├─ Designer: performance
+│  │  ├─ Designer: compliance (plugin-gated — only when COMPLIANCE_ENABLED)
 │  │  ├─ Designer: consistency (multi-issue only)
 │  │  └─ Designer: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis

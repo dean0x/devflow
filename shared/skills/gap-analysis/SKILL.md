@@ -103,6 +103,22 @@ Detect ordering constraints and shared resource conflicts across issues.
 
 **Evidence trigger:** Any issue that references state, contracts, or resources that may be in flux due to another issue in the batch.
 
+### 7. Compliance (when devflow-compliance installed)
+
+Detect regulatory gaps that security doesn't cover. Load `devflow:compliance` references before analyzing.
+
+**Detection patterns:**
+- Missing audit trails on regulated mutations — writes to financial records, PHI, PCI-scoped data without durable logging
+- PII flows without retention/erasure specification — data collected but deletion/expiry policy absent
+- Missing encryption requirements — regulated data at rest or in transit without specified encryption control
+- Sensitive data in observability — PII or credentials leaking into logs, traces, or metrics
+- IaC exposure — infrastructure definitions without required security controls (open ports, unencrypted storage, missing IAM boundaries)
+- Self-approval flows — change requires segregation of duties (SOX/SOC 2 CC8.1) but single-actor path exists in the design
+
+**Explicit scope note:** Do NOT duplicate §3 Security's checks (secrets, injection, authZ). Compliance focus is on regulatory control requirements — retention periods, erasure rights, audit completeness, and segregation of duties — not general application security.
+
+**Evidence trigger:** Any regulated-data flow or infrastructure element in the design that does not specify a required control (retention policy, encryption spec, audit log destination, approval workflow).
+
 ---
 
 ## Extended References
