@@ -332,7 +332,7 @@ export const initCommand = new Command('init')
         'devflow-java': 'Java patterns',
         'devflow-python': 'Python patterns',
         'devflow-rust': 'Rust patterns',
-        'devflow-compliance': 'GDPR, HIPAA, PCI DSS, SOC 2',
+        'devflow-compliance': 'GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX',
       };
 
       const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);

@@ -1,6 +1,6 @@
 ---
 name: compliance
-description: This skill should be used when reviewing code handling PII, payment data, health records, audit logs, data retention, or IaC under GDPR, HIPAA, PCI DSS, or SOC 2.
+description: This skill should be used when reviewing code handling PII, payment data, health records, audit logs, data retention, or IaC under GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, or SOX.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

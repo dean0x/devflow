@@ -48,7 +48,7 @@ Multi-perspective code review with up to 20 specialized reviewers running in par
 
 **Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing, Reliability
 
-**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, Go, Python, Java, Rust, Database, Dependencies, Documentation
+**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation
 
 **Plugin-gated** (when devflow-compliance plugin installed): Compliance
 

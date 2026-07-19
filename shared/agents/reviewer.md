@@ -202,4 +202,4 @@ Report format for `{output_path}`:
 | java | If .java files changed |
 | python | If .py files changed |
 | rust | If .rs files changed |
-| compliance | If devflow-compliance plugin installed (orchestrator-gated via manifest check). Clean-report contract: when the diff has no regulated surface (PII fields, auth flows, data retention, IaC), emit zero findings and note "no compliance-relevant surface detected" in the Summary. |
+| compliance | If devflow-compliance plugin installed (orchestrator-gated) |

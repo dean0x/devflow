@@ -108,7 +108,7 @@ Items marked with **[auto]** are handled by CI:
 - [ ] CHANGELOG.md `[Unreleased]` section has content
 - [x] **[auto]** Version bumped in package.json
 - [x] **[auto]** package-lock.json synced
-- [x] **[auto]** All 22 plugin.json files updated
+- [x] **[auto]** All 23 plugin.json files updated
 - [x] **[auto]** marketplace.json updated
 - [x] **[auto]** CHANGELOG.md dated and linked
 - [x] **[auto]** Build succeeds
