@@ -150,7 +150,7 @@ describe('agent frontmatter compliance contract', () => {
       for (const line of fmLines) {
         if (/^skills:/.test(line)) { inSkills = true; continue; }
         // A non-indented non-empty line ends the skills block (new top-level YAML key)
-        if (inSkills && line.length > 0 && !/^\s/.test(line)) inSkills = false;
+        if (inSkills && /^\S/.test(line)) inSkills = false;
         if (inSkills) {
           const m = line.match(/^\s*-\s+(.+)$/);
           if (m) skillItems.push(m[1].trim());
