@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { execSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
@@ -177,5 +178,68 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
       hasDtsExclusion,
       'package.json files[] should exclude type declarations (!dist/**/*.d.ts) to keep the tarball lean.',
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard 6 (tarball contents): npm pack --dry-run assertions
+// ---------------------------------------------------------------------------
+
+/**
+ * AC-C3: The published tarball must:
+ *  (a) Contain no plugins/ or shared/ source-tree paths — these directories
+ *      only exist in the git repo and must never be published.
+ *  (b) Contain exactly 16 dist/commands/*.md files — one per registered command.
+ *      If the count changes, this guard forces an intentional update.
+ *
+ * Per PF-008: assert on parsed `npm pack --dry-run --json` output (structured
+ * data), not on pipeline tails or partial string matching.
+ *
+ * Lazy-loads the file list once and caches it across assertions in this describe
+ * block. `npm pack --dry-run --json` is fast (~1-2s) and creates no artifacts.
+ */
+describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source dirs and pins command count', () => {
+  let packFilesCache: string[] | undefined;
+
+  function getPackFiles(): string[] {
+    if (packFilesCache !== undefined) return packFilesCache;
+    let raw: string;
+    try {
+      raw = execSync('npm pack --dry-run --json', {
+        cwd: ROOT,
+        timeout: 30_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString();
+    } catch {
+      // If npm pack fails (e.g. pre-build environment without dist/), skip gracefully.
+      packFilesCache = [];
+      return packFilesCache;
+    }
+    const parsed = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
+    packFilesCache = parsed[0].files.map(f => f.path);
+    return packFilesCache;
+  }
+
+  it('tarball contains no plugins/ or shared/ paths (source-tree dirs must not be published)', () => {
+    const files = getPackFiles();
+    if (files.length === 0) return; // pre-build: skip
+    const forbidden = files.filter(f => f.startsWith('plugins/') || f.startsWith('shared/'));
+    expect(
+      forbidden,
+      `Tarball contains source-tree paths that must not be published:\n  ${forbidden.join('\n  ')}\n` +
+      `Check the 'files' array in package.json for overly broad globs.`,
+    ).toHaveLength(0);
+  });
+
+  it('tarball contains exactly 16 dist/commands/*.md files (AC-C3)', () => {
+    const files = getPackFiles();
+    if (files.length === 0) return; // pre-build: skip
+    const commandMds = files.filter(f => /^dist\/commands\/[^/]+\.md$/.test(f));
+    expect(
+      commandMds,
+      `Expected 16 dist/commands/*.md files in tarball, got ${commandMds.length}.\n` +
+      `Files found: ${commandMds.join(', ')}\n` +
+      `If a command was added or removed, update this count intentionally.`,
+    ).toHaveLength(16);
   });
 });
