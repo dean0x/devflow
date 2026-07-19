@@ -21,8 +21,8 @@ import * as os from 'os';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
-const JSON_HELPER_BIN = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
-const RENDER_BIN = path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs');
+const JSON_HELPER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
+const RENDER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 const {
   renderDecisionsFile,
@@ -115,14 +115,14 @@ function readDecisionsMd(dir: string): string {
 // ---------------------------------------------------------------------------
 // Learning agent content-presence assertions (AC-C3)
 //
-// The Learning agent (shared/agents/learning.md) is the sole decisions processor:
+// The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
 // it claims the queue, reads the data files directly, and writes through the
 // three ledger ops. These describe pins hold the curation contract strings in
 // place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
 describe('Learning agent curation contract (AC-C3)', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
   let agentContent: string;
 
   beforeAll(() => {
@@ -426,7 +426,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
 // ---------------------------------------------------------------------------
 
 describe('AC-F9: rotation step wired into curation (contract check)', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
   let agentContent: string;
 
   beforeAll(() => {
@@ -495,12 +495,12 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
 describe('observation-io: updateDecisionsStatus is removed', () => {
   it('observation-io module does not export updateDecisionsStatus', async () => {
     // Dynamic import to check actual module exports
-    const mod = await import(path.join(ROOT, 'src/cli/utils/observation-io.js'));
+    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
     expect((mod as Record<string, unknown>).updateDecisionsStatus).toBeUndefined();
   });
 
   it('observation-io still exports readObservations, writeObservations, warnIfInvalid', async () => {
-    const mod = await import(path.join(ROOT, 'src/cli/utils/observation-io.js'));
+    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
     expect(typeof (mod as Record<string, unknown>).readObservations).toBe('function');
     expect(typeof (mod as Record<string, unknown>).writeObservations).toBe('function');
     expect(typeof (mod as Record<string, unknown>).warnIfInvalid).toBe('function');

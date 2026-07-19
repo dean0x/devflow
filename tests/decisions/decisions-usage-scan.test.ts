@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execSync, spawnSync } from 'child_process';
 
-const SCANNER = path.resolve(import.meta.dirname, '../../scripts/hooks/decisions-usage-scan.cjs');
+const SCANNER = path.resolve(import.meta.dirname, '../../src/assets/scripts/hooks/decisions-usage-scan.cjs');
 
 function runScanner(cwd: string, stdin: string): string {
   try {

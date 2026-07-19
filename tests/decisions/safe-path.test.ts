@@ -10,7 +10,7 @@ import * as path from 'path';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
-const { safePath } = require(path.join(ROOT, 'scripts/hooks/lib/safe-path.cjs')) as {
+const { safePath } = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/safe-path.cjs')) as {
   safePath: (filePath: string, allowedRoot?: string) => string;
 };
 

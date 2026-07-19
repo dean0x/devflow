@@ -7,14 +7,14 @@ import { loadFile, extractSection } from './helpers'
 
 describe('Command surfaces — index.md direct read', () => {
   const surfaces: Array<[string, string]> = [
-    ['plan.md', 'plugins/devflow-plan/commands/plan.md'],
-    ['resolve.md', 'plugins/devflow-resolve/commands/resolve.md'],
-    ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
-    ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
-    ['debug.md', 'plugins/devflow-debug/commands/debug.md'],
-    ['implement.md', 'plugins/devflow-implement/commands/implement.md'],
-    ['research.md', 'plugins/devflow-research/commands/research.md'],
-    ['bug-analysis.md', 'plugins/devflow-bug-analysis/commands/bug-analysis.md'],
+    ['plan.md', 'dist/commands/plan.md'],
+    ['resolve.md', 'dist/commands/resolve.md'],
+    ['self-review.md', 'dist/commands/self-review.md'],
+    ['code-review.md', 'dist/commands/code-review.md'],
+    ['debug.md', 'dist/commands/debug.md'],
+    ['implement.md', 'dist/commands/implement.md'],
+    ['research.md', 'dist/commands/research.md'],
+    ['bug-analysis.md', 'dist/commands/bug-analysis.md'],
   ]
 
   for (const [label, relPath] of surfaces) {
@@ -34,12 +34,12 @@ describe('Command surfaces — index.md direct read', () => {
 
 describe('debug.md — decisions is orchestrator-local, not fanned to Explore investigators', () => {
   it('debug.md contains DECISIONS_CONTEXT (orchestrator uses it)', () => {
-    const content = loadFile('plugins/devflow-debug/commands/debug.md')
+    const content = loadFile('dist/commands/debug.md')
     expect(content).toContain('DECISIONS_CONTEXT')
   })
 
   it('debug.md Investigate phase does NOT pass DECISIONS_CONTEXT to Explore investigators', () => {
-    const content = loadFile('plugins/devflow-debug/commands/debug.md')
+    const content = loadFile('dist/commands/debug.md')
     const phase3 = extractSection(content, 'Phase 3: Investigate', '### Phase 4')
     expect(phase3).not.toContain('DECISIONS_CONTEXT')
   })
@@ -51,10 +51,10 @@ describe('debug.md — decisions is orchestrator-local, not fanned to Explore in
 
 describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form without fallback', () => {
   const templateSurfaces: Array<[string, string]> = [
-    ['plan.md', 'plugins/devflow-plan/commands/plan.md'],
-    ['resolve.md', 'plugins/devflow-resolve/commands/resolve.md'],
-    ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
-    ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
+    ['plan.md', 'dist/commands/plan.md'],
+    ['resolve.md', 'dist/commands/resolve.md'],
+    ['self-review.md', 'dist/commands/self-review.md'],
+    ['code-review.md', 'dist/commands/code-review.md'],
   ]
 
   for (const [label, relPath] of templateSurfaces) {
@@ -75,10 +75,10 @@ describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form
 
 describe('Consumer agents — devflow:apply-decisions in skills frontmatter', () => {
   const agents: Array<[string, string]> = [
-    ['triager.md', 'shared/agents/triager.md'],
-    ['designer.md', 'shared/agents/designer.md'],
-    ['scrutinizer.md', 'shared/agents/scrutinizer.md'],
-    ['reviewer.md', 'shared/agents/reviewer.md'],
+    ['triager.md', 'src/assets/agents/triager.md'],
+    ['designer.md', 'src/assets/agents/designer.md'],
+    ['scrutinizer.md', 'src/assets/agents/scrutinizer.md'],
+    ['reviewer.md', 'src/assets/agents/reviewer.md'],
   ]
 
   for (const [label, relPath] of agents) {
@@ -93,7 +93,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
   }
 
   it('simplifier.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
-    const content = loadFile('shared/agents/simplifier.md')
+    const content = loadFile('src/assets/agents/simplifier.md')
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
     expect(frontmatterMatch).toBeTruthy()
     const frontmatter = frontmatterMatch![1]
@@ -110,10 +110,10 @@ describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
     '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
-    ['triager.md', 'shared/agents/triager.md'],
-    ['designer.md', 'shared/agents/designer.md'],
-    ['scrutinizer.md', 'shared/agents/scrutinizer.md'],
-    ['reviewer.md', 'shared/agents/reviewer.md'],
+    ['triager.md', 'src/assets/agents/triager.md'],
+    ['designer.md', 'src/assets/agents/designer.md'],
+    ['scrutinizer.md', 'src/assets/agents/scrutinizer.md'],
+    ['reviewer.md', 'src/assets/agents/reviewer.md'],
   ]
 
   for (const [label, relPath] of consumerAgents) {
@@ -130,23 +130,23 @@ describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
 
 describe('DECISIONS_CONTEXT variable — present in all four command surfaces', () => {
   it('plan.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('plugins/devflow-plan/commands/plan.md')).toContain('DECISIONS_CONTEXT')
+    expect(loadFile('dist/commands/plan.md')).toContain('DECISIONS_CONTEXT')
   })
 
   it('self-review.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('plugins/devflow-self-review/commands/self-review.md')).toContain('DECISIONS_CONTEXT')
+    expect(loadFile('dist/commands/self-review.md')).toContain('DECISIONS_CONTEXT')
   })
 
   it('code-review.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('plugins/devflow-code-review/commands/code-review.md')).toContain('DECISIONS_CONTEXT')
+    expect(loadFile('dist/commands/code-review.md')).toContain('DECISIONS_CONTEXT')
   })
 
   it('debug.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('plugins/devflow-debug/commands/debug.md')).toContain('DECISIONS_CONTEXT')
+    expect(loadFile('dist/commands/debug.md')).toContain('DECISIONS_CONTEXT')
   })
 
   it('resolve.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('plugins/devflow-resolve/commands/resolve.md')).toContain('DECISIONS_CONTEXT')
+    expect(loadFile('dist/commands/resolve.md')).toContain('DECISIONS_CONTEXT')
   })
 })
 
@@ -156,7 +156,7 @@ describe('DECISIONS_CONTEXT variable — present in all four command surfaces', 
 
 describe('reviewer.md — Apply Decisions section', () => {
   it('contains Apply Decisions section referencing devflow:apply-decisions', () => {
-    const content = loadFile('shared/agents/reviewer.md')
+    const content = loadFile('src/assets/agents/reviewer.md')
     expect(content).toMatch(/## Apply Decisions|### Apply Decisions/)
     expect(content).toContain('devflow:apply-decisions')
   })
@@ -168,7 +168,7 @@ describe('reviewer.md — Apply Decisions section', () => {
 
 describe('plan.md — decisions loading phase', () => {
   it('contains a decisions-loading step (load decisions index)', () => {
-    const content = loadFile('plugins/devflow-plan/commands/plan.md')
+    const content = loadFile('dist/commands/plan.md')
     expect(content).toMatch(/[Ll]oad.*[Dd]ecisions|[Dd]ecisions.*[Ll]oad/i)
   })
 })
@@ -179,7 +179,7 @@ describe('plan.md — decisions loading phase', () => {
 
 describe('code-review.md — decisions loading phase', () => {
   it('contains a decisions-loading step', () => {
-    const content = loadFile('plugins/devflow-code-review/commands/code-review.md')
+    const content = loadFile('dist/commands/code-review.md')
     expect(content).toMatch(/[Ll]oad.*[Dd]ecisions|[Dd]ecisions.*[Ll]oad/i)
   })
 })

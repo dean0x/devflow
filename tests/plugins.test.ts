@@ -8,10 +8,12 @@ import {
   partitionSelectablePlugins,
   prefixSkillName,
   WORKFLOW_ORDER,
+  type PluginDefinition,
+} from '../src/core/plugins.js';
+import {
   LEGACY_SKILL_NAMES,
   LEGACY_AGENT_NAMES,
-  type PluginDefinition,
-} from '../src/cli/plugins.js';
+} from '../src/targets/claude-code/legacy.js';
 
 describe('getAllSkillNames', () => {
   it('returns a deduplicated list of skills across all plugins', () => {

@@ -9,7 +9,7 @@ import { execSync } from 'child_process';
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
+export const JSON_HELPER = path.resolve(__dirname, '../../src/assets/scripts/hooks/json-helper.cjs');
 
 /**
  * Run json-helper.cjs with the given CLI args string and return stdout.

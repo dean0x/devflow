@@ -6,7 +6,7 @@ import { loadFile, extractSection, computeFpRatio } from '../helpers'
 // -------------------------------------------------------------------------
 
 describe('reviewer.md — convergence inputs', () => {
-  const content = loadFile('shared/agents/reviewer.md')
+  const content = loadFile('src/assets/agents/reviewer.md')
 
   it('declares PRIOR_RESOLUTIONS in Input section', () => {
     const input = extractSection(content, '## Input', '## Focus Areas')
@@ -59,7 +59,7 @@ describe('reviewer.md — convergence inputs', () => {
 // -------------------------------------------------------------------------
 
 describe('code-review.md — convergence gate', () => {
-  const content = loadFile('plugins/devflow-code-review/commands/code-review.md')
+  const content = loadFile('dist/commands/code-review.md')
 
   it('has Step 0d-i (Load Prior Resolution)', () => {
     expect(content).toContain('Step 0d-i')
@@ -116,7 +116,7 @@ describe('code-review.md — convergence gate', () => {
 // -------------------------------------------------------------------------
 
 describe('synthesizer.md — convergence status', () => {
-  const content = loadFile('shared/agents/synthesizer.md')
+  const content = loadFile('src/assets/agents/synthesizer.md')
 
   it('review mode mentions convergence or Convergence Status', () => {
     const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
@@ -146,9 +146,9 @@ describe('synthesizer.md — convergence status', () => {
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
-  const reviewer = loadFile('shared/agents/reviewer.md')
-  const codeReview = loadFile('plugins/devflow-code-review/commands/code-review.md')
-  const synthesizer = loadFile('shared/agents/synthesizer.md')
+  const reviewer = loadFile('src/assets/agents/reviewer.md')
+  const codeReview = loadFile('dist/commands/code-review.md')
+  const synthesizer = loadFile('src/assets/agents/synthesizer.md')
 
   it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')

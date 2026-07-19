@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
 
 // Mock git.ts before importing paths.ts
-vi.mock('../src/cli/utils/git.js', () => ({
+vi.mock('../src/core/git.js', () => ({
   getGitRoot: vi.fn(),
 }));
 
-import { getHomeDirectory, getClaudeDirectory, getDevFlowDirectory, getInstallationPaths } from '../src/cli/utils/paths.js';
-import { getGitRoot } from '../src/cli/utils/git.js';
+import { getHomeDirectory, getClaudeDirectory, getDevFlowDirectory, getInstallationPaths } from '../src/targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../src/core/git.js';
 
 beforeEach(() => {
   vi.unstubAllEnvs();

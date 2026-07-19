@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

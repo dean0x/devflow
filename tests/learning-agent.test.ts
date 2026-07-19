@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AGENT_PATH = path.resolve(__dirname, '../shared/agents/learning.md');
+const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/learning.md');
 const ROOT = path.resolve(__dirname, '..');
 
 /** Recursively find all files matching an extension under a directory. */
@@ -159,7 +159,7 @@ describe('learning agent', () => {
 // ---------------------------------------------------------------------------
 
 describe('lockstep: Learning agent 900s staleness matches directive', () => {
-  const SESSION_START_CONTEXT = path.resolve(ROOT, 'scripts/hooks/session-start-context');
+  const SESSION_START_CONTEXT = path.resolve(ROOT, 'src/assets/scripts/hooks/session-start-context');
 
   it('session-start-context directive also uses 900s as the freshness threshold', async () => {
     // Let readFile throw if the hook is missing — a missing hook is a real failure, not a skip
@@ -176,13 +176,13 @@ describe('lockstep: Learning agent 900s staleness matches directive', () => {
 });
 
 describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_type="Dream"', () => {
+  // After the src/ restructure: shared/ → src/assets/, scripts/hooks/ → src/assets/scripts/hooks/,
+  // commands/ → src/assets/commands/. Scan src/assets/ as the single source tree.
   const SHIPPED_DIRS = [
-    path.join(ROOT, 'shared'),
-    path.join(ROOT, 'scripts', 'hooks'),
-    path.join(ROOT, 'commands'),
+    path.join(ROOT, 'src', 'assets'),
   ];
 
-  it('no .md or .mds file in shared/ or scripts/hooks/ or commands/ references .devflow/dream/', () => {
+  it('no .md or .mds file in src/assets/ references .devflow/dream/', () => {
     const files = SHIPPED_DIRS.flatMap(dir => findFiles(dir, ['.md', '.mds']));
 
     const violations: string[] = [];
@@ -205,8 +205,8 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
     expect(violations).toEqual([]);
   });
 
-  it('no .md or .mds file in shared/ references subagent_type="Dream"', () => {
-    const files = findFiles(path.join(ROOT, 'shared'), ['.md', '.mds']);
+  it('no .md or .mds file in src/assets/ references subagent_type="Dream"', () => {
+    const files = findFiles(path.join(ROOT, 'src', 'assets'), ['.md', '.mds']);
 
     const violations: string[] = [];
     for (const f of files) {
@@ -227,26 +227,17 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
   });
 });
 
-describe('lockstep: no plugins/*/agents/dream.md after build', () => {
-  it('dream.md does not exist in any plugin agents directory (build prunes it)', () => {
-    const pluginsDir = path.join(ROOT, 'plugins');
-    const violations: string[] = [];
-    if (fsSync.existsSync(pluginsDir)) {
-      for (const entry of fsSync.readdirSync(pluginsDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const agentsDir = path.join(pluginsDir, entry.name, 'agents');
-        const dreamPath = path.join(agentsDir, 'dream.md');
-        if (fsSync.existsSync(dreamPath)) {
-          violations.push(path.relative(ROOT, dreamPath));
-        }
-      }
-    }
-    expect(violations).toHaveLength(0);
+describe('lockstep: dream.md not in src/assets/agents/', () => {
+  it('dream.md does not exist in src/assets/agents/ (renamed to learning.md)', () => {
+    // Ensures the old agent name never resurfaces in the canonical assets dir
+    const dreamPath = path.join(ROOT, 'src', 'assets', 'agents', 'dream.md');
+    expect(fsSync.existsSync(dreamPath), 'src/assets/agents/dream.md must not exist (use learning.md)').toBe(false);
   });
 });
 
 describe('AC-C9: decisions_load() (none) fallback for both absent and empty index', () => {
-  const DECISIONS_MDS = path.resolve(ROOT, 'commands/_partials/_decisions.mds');
+  // commands/ moved to src/assets/commands/ during the src/ restructure.
+  const DECISIONS_MDS = path.resolve(ROOT, 'src/assets/commands/_partials/_decisions.mds');
 
   it('_decisions.mds sets DECISIONS_CONTEXT to (none) when index is absent', async () => {
     const content = await fs.readFile(DECISIONS_MDS, 'utf-8');

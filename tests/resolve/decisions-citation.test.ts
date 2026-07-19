@@ -25,13 +25,13 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
 const { selectActiveRows } = require(
-  path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')
+  path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')
 ) as {
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
 };
 
 const { buildIndexContent } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
+  path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
 ) as {
   buildIndexContent: (
     activeDecisionRows: Record<string, unknown>[],
@@ -148,7 +148,7 @@ describe('decisions pipeline active-only contract (post-render row input)', () =
   });
 
   it('filterDecisionsContext is NOT a function on decisions-format (removed in Phase 8 cleanup)', () => {
-    const mod = require(path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')) as Record<string, unknown>;
+    const mod = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as Record<string, unknown>;
     expect(mod.filterDecisionsContext).toBeUndefined();
   });
 });
@@ -158,7 +158,7 @@ describe('decisions pipeline active-only contract (post-render row input)', () =
 // ---------------------------------------------------------------------------
 
 describe('resolve.md — base command', () => {
-  const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
+  const content = loadFile('dist/commands/resolve.md');
 
   it('contains Step 0d: Load Project Decisions after Phase 0c', () => {
     expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
@@ -209,11 +209,11 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: shared/agents/triager.md
+// Structural tests: src/assets/agents/triager.md
 // ---------------------------------------------------------------------------
 
 describe('triager.md — Input Context and Apply Decisions section', () => {
-  const content = loadFile('shared/agents/triager.md');
+  const content = loadFile('src/assets/agents/triager.md');
 
   it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
@@ -259,17 +259,17 @@ describe('triager.md — Input Context and Apply Decisions section', () => {
 
 describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
   it('resolve.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
+    const content = loadFile('dist/commands/resolve.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
   it('triager.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('shared/agents/triager.md');
+    const content = loadFile('src/assets/agents/triager.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
   it('resolve.md Phase 2 passes DECISIONS_CONTEXT to Triager', () => {
-    const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
+    const content = loadFile('dist/commands/resolve.md');
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
     expect(phase2).toContain('DECISIONS_CONTEXT');
   });

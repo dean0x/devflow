@@ -1,5 +1,5 @@
 // tests/bug-analysis/structural.test.ts
-// Structural tests for plugins/devflow-bug-analysis/commands/bug-analysis.md.
+// Structural tests for dist/commands/bug-analysis.md.
 //
 // Strategy: parse the markdown command file to verify structural invariants:
 //   1. Phase ordering — all 7 phases present in correct order with Produces/Requires annotations
@@ -16,8 +16,8 @@
 import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection } from '../helpers';
 
-const content = loadFile('plugins/devflow-bug-analysis/commands/bug-analysis.md');
-const agentContent = loadFile('shared/agents/bug-analyzer.md');
+const content = loadFile('dist/commands/bug-analysis.md');
+const agentContent = loadFile('src/assets/agents/bug-analyzer.md');
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations

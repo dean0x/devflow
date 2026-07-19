@@ -43,14 +43,14 @@ import {
   getResearchDir,
   getHandoffPath,
   getGitignoreEntries,
-} from '../src/cli/utils/project-paths.js';
-import * as tsPathsNs from '../src/cli/utils/project-paths.js';
+} from '../src/core/project-paths.js';
+import * as tsPathsNs from '../src/core/project-paths.js';
 
 // Load CJS module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const requireCjs = createRequire(import.meta.url);
-const cjsPaths = requireCjs(path.join(__dirname, '..', 'scripts', 'hooks', 'lib', 'project-paths.cjs'));
+const cjsPaths = requireCjs(path.join(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'lib', 'project-paths.cjs'));
 
 const ROOT = '/some/project';
 

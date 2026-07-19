@@ -13,12 +13,12 @@ import { loadFile, extractSection } from '../helpers'
 // ## Escalations) are already pinned in decisions-citation.test.ts. This
 // file pins the UNSAFE-to-rename literals only.
 //
-// Read target: compiled plugins/devflow-resolve/commands/resolve.md
+// Read target: compiled dist/commands/resolve.md
 // (same convention as decisions-citation.test.ts which loads the compiled file)
 // -------------------------------------------------------------------------
 
 describe('resolve.md — byte-stable Statistics row labels (parser contract)', () => {
-  const content = loadFile('plugins/devflow-resolve/commands/resolve.md')
+  const content = loadFile('dist/commands/resolve.md')
   const outputArtifact = extractSection(content, '## Output Artifact', null)
 
   it('Statistics row "| Fixed |" is byte-stable', () => {

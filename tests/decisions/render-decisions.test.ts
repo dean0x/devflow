@@ -21,7 +21,7 @@ const {
   parseLedger,
   isActive,
   anchorNumeric,
-} = require(path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')) as {
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
@@ -30,7 +30,7 @@ const {
   anchorNumeric: (anchorId: string) => number;
 };
 
-const RENDERER = path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs');
+const RENDERER = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 afterAll(() => cleanupTmpWorktrees());
 

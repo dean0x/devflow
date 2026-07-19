@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 
 const jsonHelper = require(
-  path.join(ROOT, 'scripts/hooks/json-helper.cjs')
+  path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs')
 ) as {
   nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
   rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
@@ -38,13 +38,13 @@ const {
   renderDecisionsFile,
   parseLedger,
   isActive,
-} = require(path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')) as {
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
   isActive: (row: Record<string, unknown>) => boolean;
 };
 
-const JSON_HELPER_BIN = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
+const JSON_HELPER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
 // ---------------------------------------------------------------------------
 // Fixture factories
@@ -749,7 +749,7 @@ describe('assign-anchor precondition assertions', () => {
 
 describe('toLedgerRow projector — canonical committed shape', () => {
   const formatModule = require(
-    path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
+    path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
   ) as {
     toLedgerRow: (
       obs: Record<string, unknown>,

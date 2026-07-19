@@ -9,9 +9,9 @@
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
- *  5. Script happy-path exit — build:mds exits 0 and produces all 14 outputs.
+ *  5. Script happy-path exit — build:mds exits 0 and produces all 14+2=16 outputs in dist/commands/.
  *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 5 dynamic outputs present.
- *  7. Dest safety negative (C3) — a host with a nonexistent plugin parent → exit 1 + "does not exist".
+ *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
  *  9. Ignored-dir walk (P3) — a .mds with output-dir: under node_modules/ is not compiled.
  * 10. dynamic-build.md doctrine greps.
@@ -26,32 +26,33 @@ import { spawnSync } from 'child_process';
 import { init, compile, isMdsError } from '@mdscript/mds';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const COMMANDS_DIR = path.join(ROOT, 'commands');
+const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
 const PARTIALS_DIR = path.join(COMMANDS_DIR, '_partials');
+const DIST_COMMANDS = 'dist/commands';
 
 /** Path to the local tsx binary (avoids npx install in temp dirs). */
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 
-/** The 9 knowledge hosts: basename → expected output plugin commands/ dir */
+/** The 9 knowledge hosts: basename → expected output dir (all compile to dist/commands) */
 const KNOWLEDGE_HOSTS: Record<string, string> = {
-  'implement':    'plugins/devflow-implement/commands',
-  'plan':         'plugins/devflow-plan/commands',
-  'resolve':      'plugins/devflow-resolve/commands',
-  'code-review':  'plugins/devflow-code-review/commands',
-  'self-review':  'plugins/devflow-self-review/commands',
-  'research':     'plugins/devflow-research/commands',
-  'bug-analysis': 'plugins/devflow-bug-analysis/commands',
-  'explore':      'plugins/devflow-explore/commands',
-  'debug':        'plugins/devflow-debug/commands',
+  'implement':    DIST_COMMANDS,
+  'plan':         DIST_COMMANDS,
+  'resolve':      DIST_COMMANDS,
+  'code-review':  DIST_COMMANDS,
+  'self-review':  DIST_COMMANDS,
+  'research':     DIST_COMMANDS,
+  'bug-analysis': DIST_COMMANDS,
+  'explore':      DIST_COMMANDS,
+  'debug':        DIST_COMMANDS,
 };
 
-/** The 5 dynamic hosts: basename → expected output plugin commands/ dir */
+/** The 5 dynamic hosts: basename → expected output dir (all compile to dist/commands) */
 const DYNAMIC_HOSTS: Record<string, string> = {
-  'dynamic-build':   'plugins/devflow-dynamic/commands',
-  'dynamic-plan':    'plugins/devflow-dynamic/commands',
-  'dynamic-profile': 'plugins/devflow-dynamic/commands',
-  'dynamic-tickets': 'plugins/devflow-dynamic/commands',
-  'dynamic-wave':    'plugins/devflow-dynamic/commands',
+  'dynamic-build':   DIST_COMMANDS,
+  'dynamic-plan':    DIST_COMMANDS,
+  'dynamic-profile': DIST_COMMANDS,
+  'dynamic-tickets': DIST_COMMANDS,
+  'dynamic-wave':    DIST_COMMANDS,
 };
 
 const ALL_HOSTS = { ...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS };
@@ -404,22 +405,34 @@ describe('expected-command-set guard (C2)', () => {
       ).resolves.toBeUndefined();
     }
   });
+
+  it('dist/commands/ contains exactly 16 .md files (14 compiled + 2 hand-authored)', async () => {
+    // The 2 hand-authored files are audit-claude.md and release.md, copied verbatim by build-mds.ts.
+    const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
+    const mdFiles = files.filter(f => f.endsWith('.md'));
+    expect(
+      mdFiles.length,
+      `Expected 16 .md files in dist/commands/ (14 compiled + 2 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+    ).toBe(16);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// 7. Dest safety negative (C3) — nonexistent plugin parent → exit 1
+// 7. Dest safety negative (C3) — wrong output-dir → exit 1
 // ---------------------------------------------------------------------------
 
 describe('dest safety negative (C3)', () => {
-  it('exits 1 with "does not exist" message when output-dir parent plugin is absent', async () => {
-    // Plant a temporary .mds host file in the real commands/ dir pointing at a
-    // nonexistent plugin parent. build-mds.ts walks from ROOT (derived from its
-    // own __filename, not cwd), so the test file must live in the real repo.
-    // It is created and removed atomically — never staged, never shipped.
-    const tmpHostPath = path.join(ROOT, 'commands', '_test-dest-safety.mds');
+  it('exits 1 with "typo?" message when output-dir is not the expected dist/commands', async () => {
+    // Plant a temporary .mds host file in src/assets/commands/ pointing at the
+    // wrong output-dir. In the restructured layout every host must declare
+    // output-dir: dist/commands — any other value is a typo and must hard-fail.
+    // build-mds.ts walks from ROOT (derived from its own __filename, not cwd), so
+    // the test file must live in the real repo. Created and removed atomically —
+    // never staged, never shipped.
+    const tmpHostPath = path.join(ROOT, 'src', 'assets', 'commands', '_test-dest-safety.mds');
     await fs.writeFile(
       tmpHostPath,
-      '---\ndescription: dest safety test\noutput-dir: plugins/devflow-nope-does-not-exist/commands\n---\n\n# Test\n',
+      '---\ndescription: dest safety test\noutput-dir: dist/wrong-dir\n---\n\n# Test\n',
       'utf-8',
     );
     try {
@@ -437,14 +450,14 @@ describe('dest safety negative (C3)', () => {
 
       expect(
         result.status,
-        `Expected exit 1 for nonexistent plugin parent but got ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+        `Expected exit 1 for wrong output-dir but got ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
       ).toBe(1);
 
       const combined = (result.stdout ?? '') + (result.stderr ?? '');
       expect(
         combined,
-        'Expected "does not exist" in output for missing plugin parent',
-      ).toMatch(/does not exist/i);
+        'Expected "typo?" in output for wrong output-dir',
+      ).toMatch(/typo\?/i);
     } finally {
       // Always clean up — ensure the temp file never gets staged
       try { await fs.unlink(tmpHostPath); } catch { /* already gone */ }
@@ -458,7 +471,7 @@ describe('dest safety negative (C3)', () => {
     // (.+?), which required >=1 char and silently reclassified an empty key as a
     // partial — dropping the command from the build. Same atomic-plant discipline
     // as the dest-safety test above: created and removed, never staged.
-    const tmpHostPath = path.join(ROOT, 'commands', '_test-empty-output-dir.mds');
+    const tmpHostPath = path.join(ROOT, 'src', 'assets', 'commands', '_test-empty-output-dir.mds');
     await fs.writeFile(
       tmpHostPath,
       '---\ndescription: empty output-dir test\noutput-dir:\n---\n\n# Test\n',
@@ -587,7 +600,7 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     });
     if (result.error) throw result.error;
     compiled = await fs.readFile(
-      path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands', 'dynamic-build.md'),
+      path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
     );
   });
@@ -666,7 +679,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     });
     if (result.error) throw result.error;
     compiled = await fs.readFile(
-      path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands', 'dynamic-build.md'),
+      path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
     );
   });
@@ -731,7 +744,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 
 describe('compiled dynamic commands: --dry-run removal (C7)', () => {
   const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets', 'dynamic-wave'] as const;
-  const DYNAMIC_DIR = path.join(ROOT, 'plugins', 'devflow-dynamic', 'commands');
+  const DYNAMIC_DIR = path.join(ROOT, 'dist', 'commands');
 
   beforeAll(() => {
     const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
@@ -769,9 +782,9 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 
 describe('compliance_gate wiring in compiled host commands', () => {
   const COMPLIANCE_GATE_HOSTS: Record<string, string> = {
-    'code-review': 'plugins/devflow-code-review/commands',
-    'plan':        'plugins/devflow-plan/commands',
-    'implement':   'plugins/devflow-implement/commands',
+    'code-review': DIST_COMMANDS,
+    'plan':        DIST_COMMANDS,
+    'implement':   DIST_COMMANDS,
   };
 
   beforeAll(() => {

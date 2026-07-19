@@ -38,7 +38,7 @@ afterEach(() => {
 // Dynamic imports so DEVFLOW_DIR is respected
 async function importCostHistory() {
   // Dynamic import — getCostFilePaths reads DEVFLOW_DIR at call time
-  const mod = await import('../src/cli/hud/cost-history.js');
+  const mod = await import('../src/hud/cost-history.js');
   return mod;
 }
 

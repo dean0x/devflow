@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
 const MEMORY_WORKER_HOOK = path.join(HOOKS_DIR, 'memory-worker');
 const SESSION_START_MEMORY_HOOK = path.join(HOOKS_DIR, 'session-start-memory');
@@ -1279,7 +1279,7 @@ describe('S12: install survival — background-memory-update not deleted by init
   });
 
   it('background-memory-update exists and is executable in the source hooks dir', () => {
-    const workerPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'background-memory-update');
+    const workerPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'background-memory-update');
     expect(fs.existsSync(workerPath)).toBe(true);
     // Check executable bit for owner
     const mode = fs.statSync(workerPath).mode;

@@ -20,12 +20,12 @@ import {
   removeFromProfile,
   generateSafeDeleteBlock,
   SAFE_DELETE_BLOCK_VERSION,
-} from '../src/cli/utils/safe-delete-install.js';
+} from '../src/core/safe-delete-install.js';
 import {
   detectShell,
   getProfilePath,
   hasSafeDelete,
-} from '../src/cli/utils/safe-delete.js';
+} from '../src/core/safe-delete.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

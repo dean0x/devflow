@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings } from '../src/cli/commands/uninstall.js';
-import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
+import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/core/plugins.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {

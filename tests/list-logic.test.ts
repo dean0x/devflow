@@ -7,7 +7,7 @@ import {
   resolveSecurityTriState,
   type TriState,
 } from '../src/cli/commands/list.js';
-import type { ManifestData } from '../src/cli/utils/manifest.js';
+import type { ManifestData } from '../src/core/manifest.js';
 
 const allOff: ManifestData['features'] = {
   ambient: false, memory: false,

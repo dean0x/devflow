@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import type { GatherContext, GitStatus, TranscriptData } from '../src/cli/hud/types.js';
+import type { GatherContext, GitStatus, TranscriptData } from '../src/hud/types.js';
 
 // Import components
-import directory from '../src/cli/hud/components/directory.js';
-import gitBranch from '../src/cli/hud/components/git-branch.js';
-import gitAheadBehind from '../src/cli/hud/components/git-ahead-behind.js';
-import diffStats from '../src/cli/hud/components/diff-stats.js';
-import model from '../src/cli/hud/components/model.js';
-import contextUsage from '../src/cli/hud/components/context-usage.js';
-import sessionDuration from '../src/cli/hud/components/session-duration.js';
-import usageQuota, { formatCountdown } from '../src/cli/hud/components/usage-quota.js';
-import todoProgress from '../src/cli/hud/components/todo-progress.js';
-import sessionCost from '../src/cli/hud/components/session-cost.js';
-import releaseInfo from '../src/cli/hud/components/release-info.js';
-import worktreeCount from '../src/cli/hud/components/worktree-count.js';
-import configCounts from '../src/cli/hud/components/config-counts.js';
-import { stripAnsi } from '../src/cli/hud/colors.js';
+import directory from '../src/hud/components/directory.js';
+import gitBranch from '../src/hud/components/git-branch.js';
+import gitAheadBehind from '../src/hud/components/git-ahead-behind.js';
+import diffStats from '../src/hud/components/diff-stats.js';
+import model from '../src/hud/components/model.js';
+import contextUsage from '../src/hud/components/context-usage.js';
+import sessionDuration from '../src/hud/components/session-duration.js';
+import usageQuota, { formatCountdown } from '../src/hud/components/usage-quota.js';
+import todoProgress from '../src/hud/components/todo-progress.js';
+import sessionCost from '../src/hud/components/session-cost.js';
+import releaseInfo from '../src/hud/components/release-info.js';
+import worktreeCount from '../src/hud/components/worktree-count.js';
+import configCounts from '../src/hud/components/config-counts.js';
+import { stripAnsi } from '../src/hud/colors.js';
 
 function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
   return {

@@ -7,7 +7,7 @@
 // new optional fields' types when present; reject malformed new fields.
 
 import { describe, it, expect } from 'vitest';
-import { isLearningObservation } from '#cli/utils/observations.js';
+import { isLearningObservation } from '#core/observations.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

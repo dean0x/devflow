@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 // @ts-expect-error — CJS module without type declarations
-const helpers = require('../../scripts/hooks/json-helper.cjs');
+const helpers = require('../../src/assets/scripts/hooks/json-helper.cjs');
 
 describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
   let tmpDir: string;

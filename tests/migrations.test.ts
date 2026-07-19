@@ -11,7 +11,7 @@ import {
   type Migration,
   type MigrationLogger,
   type RunMigrationsResult,
-} from '../src/cli/utils/migrations.js';
+} from '../src/core/migrations.js';
 
 describe('readAppliedMigrations', () => {
   let tmpDir: string;

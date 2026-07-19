@@ -20,7 +20,7 @@ const {
   formatPitfallBody,
   buildTldrLine,
   buildIndexContent,
-} = require(path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')) as {
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
   formatPitfallBody: (row: Record<string, unknown>) => string;
@@ -425,7 +425,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 
-const JSON_HELPER = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
+const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
 describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
   it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
@@ -531,13 +531,13 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 // Learning agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
 // These lightweight checks verify that the Learning agent instructions
-// (shared/agents/learning.md) contain the required creation-bar elements. They do
+// (src/assets/agents/learning.md) contain the required creation-bar elements. They do
 // not test LLM judgment — that is validated by the Tester agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 
 describe('Learning agent creation-bar contract', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
 
   let agentContent: string;
   beforeAll(() => {

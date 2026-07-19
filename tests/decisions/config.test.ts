@@ -6,7 +6,7 @@ import {
   loadLearningTuningConfig,
   applyLearningTuningConfigLayer,
   type LearningTuningConfig,
-} from '../../src/cli/utils/learning-tuning-config.js';
+} from '../../src/core/learning-tuning-config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

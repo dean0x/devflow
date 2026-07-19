@@ -10,14 +10,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import learningCounts, {
   gatherLearningCounts,
-} from '../src/cli/hud/components/learning-counts.js';
-import { stripAnsi } from '../src/cli/hud/colors.js';
-import type { LearningCountsData, GatherContext } from '../src/cli/hud/types.js';
+} from '../src/hud/components/learning-counts.js';
+import { stripAnsi } from '../src/hud/colors.js';
+import type { LearningCountsData, GatherContext } from '../src/hud/types.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
 const { isActive: cjsIsActive } = require(
-  path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs'),
+  path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs'),
 ) as { isActive: (row: Record<string, unknown>) => boolean };
 
 // Helper: build a minimal ledger JSONL row with the given fields

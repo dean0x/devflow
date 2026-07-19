@@ -25,14 +25,14 @@ const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
 
 const { selectActiveRows, renderAndWriteAll } = require(
-  path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')
+  path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')
 ) as {
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
 }
 
 const { buildIndexContent } = require(
-  path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
+  path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
 ) as {
   buildIndexContent: (
     activeDecisionRows: Record<string, unknown>[],

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AGENT_PATH = path.resolve(__dirname, '../shared/agents/skimmer.md');
+const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/skimmer.md');
 
 /** Extract frontmatter tools array from markdown agent file */
 function parseToolsFromFrontmatter(content: string): string[] {
