@@ -4,10 +4,10 @@ import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { syncManifestFeature } from '../utils/manifest.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { syncManifestFeature } from '../../core/manifest.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import type { HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
 const LEGACY_HOOK_MARKER = 'ambient-prompt';

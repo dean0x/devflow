@@ -3,9 +3,9 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { FLAG_REGISTRY, applyFlags, stripFlags, getDefaultFlags } from '../utils/flags.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { FLAG_REGISTRY, applyFlags, stripFlags, getDefaultFlags } from '../../core/flags.js';
+import { readManifest, writeManifest } from '../../core/manifest.js';
 
 /**
  * Resolve current enabled flags from manifest (falls back to defaults if no manifest).

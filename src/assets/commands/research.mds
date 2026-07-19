@@ -1,6 +1,6 @@
 ---
 description: Research a topic using parallel multi-type researchers with trust-aware synthesis
-output-dir: plugins/devflow-research/commands
+output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

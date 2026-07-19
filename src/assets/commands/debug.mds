@@ -1,6 +1,6 @@
 ---
 description: Debug issues using competing hypothesis investigation with parallel agents
-output-dir: plugins/devflow-debug/commands
+output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

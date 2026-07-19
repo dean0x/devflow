@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getDevFlowDirectory } from './paths.js';
+import { getDevFlowDirectory } from '../targets/claude-code/claude-paths.js';
 import { getLearningTuningConfigPath } from './project-paths.js';
 
 /**

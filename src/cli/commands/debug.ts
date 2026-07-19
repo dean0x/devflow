@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getHomeDirectory } from '../utils/paths.js';
+import { getClaudeDirectory, getHomeDirectory } from '../../targets/claude-code/claude-paths.js';
 
 interface DebugOptions {
   enable?: boolean;

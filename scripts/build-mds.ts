@@ -157,11 +157,11 @@ async function compileHost(host: HostEntry): Promise<CompileOutcome> {
     );
   }
 
-  // Dest safety: the PARENT of output-dir (the plugin dir) must already exist.
-  const pluginDir = path.dirname(outAbs);
-  if (!fs.existsSync(pluginDir)) {
+  // Dest safety: output-dir must be dist/commands — a typo'd value hard-fails.
+  const expectedOutputDir = 'dist/commands';
+  if (host.outputDir !== expectedOutputDir) {
     console.error(
-      `ERROR: ${path.relative(ROOT, host.file)}: output-dir parent '${path.relative(ROOT, pluginDir)}' does not exist — typo?`,
+      `ERROR: ${path.relative(ROOT, host.file)}: output-dir '${host.outputDir}' is not the expected '${expectedOutputDir}' — typo?`,
     );
     process.exit(1);
   }
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   if (hosts.length === 0) {
     console.error(
       "ERROR: No MDS host files discovered — expected 14 hosts. " +
-      "Ensure commands/*.mds files declare output-dir: in their frontmatter.",
+      "Ensure src/assets/commands/*.mds files declare output-dir: in their frontmatter.",
     );
     process.exit(1);
   }
@@ -249,6 +249,28 @@ async function main(): Promise<void> {
       `\n${errors.length} compile error(s) — build FAILED. Fix the mds::* errors above before shipping.`,
     );
     process.exit(1);
+  }
+
+  // Copy 2 hand-authored command files verbatim into dist/commands/
+  const handAuthored = [
+    path.join(ROOT, 'src', 'assets', 'commands', 'audit-claude.md'),
+    path.join(ROOT, 'src', 'assets', 'commands', 'release.md'),
+  ];
+  const commandsDest = path.join(ROOT, 'dist', 'commands');
+  fs.mkdirSync(commandsDest, { recursive: true });
+  for (const src of handAuthored) {
+    if (fs.existsSync(src)) {
+      const dest = path.join(commandsDest, path.basename(src));
+      const tmp = `${dest}.tmp`;
+      fs.copyFileSync(src, tmp);
+      try {
+        fs.renameSync(tmp, dest);
+      } catch (e) {
+        fs.rmSync(tmp, { force: true });
+        throw e;
+      }
+      console.log(`  copied:  ${path.relative(ROOT, src)} → ${path.relative(ROOT, dest)}`);
+    }
   }
 
   console.log("\nMDS commands build complete!");

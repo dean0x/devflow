@@ -1,6 +1,6 @@
 ---
 description: Proactive bug finding with static and semantic analysis — hunts real bugs in changed code before merge
-output-dir: plugins/devflow-bug-analysis/commands
+output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

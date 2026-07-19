@@ -1,6 +1,6 @@
 ---
 description: Comprehensive branch review using specialized sub-agents for PR readiness
-output-dir: plugins/devflow-code-review/commands
+output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

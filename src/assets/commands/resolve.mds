@@ -1,6 +1,6 @@
 ---
 description: Process review issues - validate with Triager, fix with Coder, verify with Validator
-output-dir: plugins/devflow-resolve/commands
+output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

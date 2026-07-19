@@ -3,18 +3,18 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { syncManifestFeature } from '../utils/manifest.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { discoverProjectGitRoots } from '../utils/post-install.js';
-import { getGitRoot } from '../utils/git.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { syncManifestFeature } from '../../core/manifest.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
+import { getGitRoot } from '../../core/git.js';
 import {
   getMemoryDir,
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
-} from '../utils/project-paths.js';
-import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
+} from '../../core/project-paths.js';
+import type { HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
+import { updateFeature, isFeatureEnabled } from '../../core/feature-config.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.

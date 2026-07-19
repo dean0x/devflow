@@ -1,6 +1,6 @@
 ---
 description: Unified design planning - combines requirements discovery, gap analysis, implementation planning, and design review into a single workflow
-output-dir: plugins/devflow-plan/commands
+output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"

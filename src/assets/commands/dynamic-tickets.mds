@@ -1,7 +1,7 @@
 ---
 description: Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue
 argument-hint: "[initiative | spec-doc]"
-output-dir: plugins/devflow-dynamic/commands
+output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"

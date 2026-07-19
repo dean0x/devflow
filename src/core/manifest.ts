@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
+import { LEGACY_PLUGIN_NAMES } from './plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
 
 /**

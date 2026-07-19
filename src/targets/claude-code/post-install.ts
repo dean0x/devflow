@@ -3,10 +3,10 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
-import { getManagedSettingsPath } from './paths.js';
-import { getGitignoreEntries, getDocsDir } from './project-paths.js';
-import { writeFileAtomicExclusive } from './fs-atomic.js';
-import type { SecurityMode } from './manifest.js';
+import { getManagedSettingsPath } from './claude-paths.js';
+import { getGitignoreEntries, getDocsDir } from '../../core/project-paths.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import type { SecurityMode } from '../../core/manifest.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -503,7 +503,7 @@ export function resolveSecurityAction(
  * coerces each element to string. Returns [] on any read or parse failure (never throws).
  */
 export function loadTemplateDenyEntries(rootDir: string): Promise<string[]> {
-  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+  const sourceManaged = path.join(rootDir, 'src', 'targets', 'claude-code', 'templates', 'managed-settings.json');
   return fs.readFile(sourceManaged, 'utf-8')
     .then((raw) => {
       const tmpl = JSON.parse(raw) as Record<string, unknown>;
@@ -713,7 +713,7 @@ export async function removeManagedSettings(
 
 // Re-export canonical SecurityMode for callers that import from post-install.ts
 // (canonical definition lives in manifest.ts — avoids re-declaration in 7 places).
-export type { SecurityMode } from './manifest.js';
+export type { SecurityMode } from '../../core/manifest.js';
 
 /**
  * Apply the Devflow deny list atomically to the user settings file (~/.claude/settings.json).
@@ -788,7 +788,7 @@ export async function installSettings(
   verbose: boolean,
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
-  const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
+  const sourceSettingsPath = path.join(rootDir, 'src', 'targets', 'claude-code', 'templates', 'settings.json');
 
   try {
     const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
@@ -861,7 +861,7 @@ export async function installClaudeignore(
   verbose: boolean,
 ): Promise<boolean> {
   const claudeignorePath = path.join(gitRoot, '.claudeignore');
-  const claudeignoreTemplatePath = path.join(rootDir, 'src', 'templates', 'claudeignore.template');
+  const claudeignoreTemplatePath = path.join(rootDir, 'src', 'targets', 'claude-code', 'templates', 'claudeignore.template');
 
   try {
     const claudeignoreContent = await fs.readFile(claudeignoreTemplatePath, 'utf-8');

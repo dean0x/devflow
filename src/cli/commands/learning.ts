@@ -8,19 +8,19 @@ import {
   getLearningTuningConfigPath,
   getDecisionsLogPath,
   getDecisionsLockDir,
-} from '../utils/project-paths.js';
-import { updateFeature, isFeatureEnabled } from '../utils/feature-config.js';
-import { syncManifestFeature } from '../utils/manifest.js';
-import { getDevFlowDirectory } from '../utils/paths.js';
-import { getGitRoot } from '../utils/git.js';
-import { sweepLegacyDreamMarkers, drainLearningQueue } from '../utils/learning-queue-cleanup.js';
+} from '../../core/project-paths.js';
+import { updateFeature, isFeatureEnabled } from '../../core/feature-config.js';
+import { syncManifestFeature } from '../../core/manifest.js';
+import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../../core/git.js';
+import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import {
   type DecisionsEntryStatus,
-} from '../utils/observations.js';
+} from '../../core/observations.js';
 import {
   readObservations,
   warnIfInvalid,
-} from '../utils/observation-io.js';
+} from '../../core/observation-io.js';
 
 /**
  * DecisionsEntryStatus is defined in observations.ts (pure data module) and

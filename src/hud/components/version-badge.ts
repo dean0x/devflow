@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { ComponentResult, GatherContext } from '../types.js';
 import { yellow } from '../colors.js';
 import { readCache, writeCache } from '../cache.js';
+import { getPackageRoot } from '../../core/paths.js';
 
 const VERSION_CACHE_KEY = 'version-check';
 const VERSION_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -24,13 +25,7 @@ function getCurrentVersion(devflowDir: string): string | null {
 
   // Try package.json as fallback
   try {
-    const pkgPath = path.join(
-      path.dirname(new URL(import.meta.url).pathname),
-      '..',
-      '..',
-      '..',
-      'package.json',
-    );
+    const pkgPath = path.join(getPackageRoot(), 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
     if (typeof pkg.version === 'string') return pkg.version;
   } catch {

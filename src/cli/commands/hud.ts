@@ -3,14 +3,14 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { syncManifestFeature } from '../utils/manifest.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { syncManifestFeature } from '../../core/manifest.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import {
   HUD_COMPONENTS,
   loadConfig,
   saveConfig,
-} from '../hud/config.js';
+} from '../../hud/config.js';
 
 interface StatusLine {
   type: string;

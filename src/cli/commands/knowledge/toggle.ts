@@ -7,11 +7,11 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getGitRoot } from '../../utils/git.js';
-import { getDevFlowDirectory } from '../../utils/paths.js';
-import { readManifest, writeManifest } from '../../utils/manifest.js';
-import { updateFeature, isFeatureEnabled } from '../../utils/feature-config.js';
-import { getFeaturesDir } from '../../utils/project-paths.js';
+import { getGitRoot } from '../../../core/git.js';
+import { getDevFlowDirectory } from '../../../targets/claude-code/claude-paths.js';
+import { readManifest, writeManifest } from '../../../core/manifest.js';
+import { updateFeature, isFeatureEnabled } from '../../../core/feature-config.js';
+import { getFeaturesDir } from '../../../core/project-paths.js';
 
 async function getWorktreePath(): Promise<string> {
   return (await getGitRoot()) ?? process.cwd();

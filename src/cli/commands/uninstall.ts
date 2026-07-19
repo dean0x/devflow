@@ -1,12 +1,12 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
-import { getGitRoot } from '../utils/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
+import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../../core/git.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
 import { removeCaptureHooks } from './capture.js';
@@ -15,12 +15,13 @@ import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
 import { listShadowedRules } from './rules.js';
-import { detectShell, getProfilePath } from '../utils/safe-delete.js';
-import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
-import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { stripFlags, stripViewMode } from '../utils/flags.js';
-import { stripDevflowTeammateModeFromJson } from '../utils/teammate-mode-cleanup.js';
+import { detectShell, getProfilePath } from '../../core/safe-delete.js';
+import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
+import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { stripFlags, stripViewMode } from '../../core/flags.js';
+import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
+import { getPackageRoot } from '../../core/paths.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -457,7 +458,7 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       // 6. Security deny list (user settings + managed settings)
-      const uninstallRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+      const uninstallRootDir = getPackageRoot();
 
       // Detect what's installed
       let userSettingsJsonForSecurity: string | null = null;

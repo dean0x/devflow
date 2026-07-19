@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { DEVFLOW_PLUGINS, type PluginDefinition } from '../plugins.js';
-import { getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
-import { getGitRoot } from '../utils/git.js';
-import { readManifest, type ManifestData } from '../utils/manifest.js';
+import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../core/plugins.js';
+import { getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../../core/git.js';
+import { readManifest, type ManifestData } from '../../core/manifest.js';
 import { getSafeDeleteStatus } from './safe-delete.js';
 import * as path from 'path';
 import { promises as fs } from 'fs';

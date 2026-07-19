@@ -1,7 +1,7 @@
 ---
 description: Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents
 argument-hint: "[ticket | issue-url | plan-doc]"
-output-dir: plugins/devflow-dynamic/commands
+output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"

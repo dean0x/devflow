@@ -1,7 +1,7 @@
 ---
 description: Full-pipeline wave driver — sequence dynamic-tickets → dynamic-plan → dynamic-build with human gates between runs
 argument-hint: "[initiative]"
-output-dir: plugins/devflow-dynamic/commands
+output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 

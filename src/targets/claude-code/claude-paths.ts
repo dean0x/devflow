@@ -1,6 +1,6 @@
 import { homedir, platform } from 'os';
 import * as path from 'path';
-import { getGitRoot } from './git.js';
+import { getGitRoot } from '../../core/git.js';
 
 /**
  * Get the OS-specific path for Claude Code managed settings.

@@ -3,9 +3,9 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../plugins.js';
-import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../utils/installer.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../../core/plugins.js';
+import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../../targets/claude-code/installer.js';
 
 /**
  * Check if a directory exists.

@@ -1,7 +1,11 @@
 import { promises as fs } from 'fs';
+import { existsSync } from 'fs';
 import * as path from 'path';
-import type { PluginDefinition } from '../plugins.js';
-import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
+import type { PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, prefixSkillName } from '../../core/plugins.js';
+import { LEGACY_AGENT_NAMES } from './legacy.js';
+import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
+import { getPackageRoot } from '../../core/paths.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -107,14 +111,12 @@ export async function validateRuleShadow(shadowFile: string): Promise<RuleShadow
  */
 export async function installRuleFile(
   ruleName: string,
-  ownerPlugin: string,
-  pluginsDir: string,
   devflowDir: string,
   rulesTarget: string,
 ): Promise<RuleInstallOutcome> {
   const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
   const targetFile = path.join(rulesTarget, `${ruleName}.md`);
-  const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+  const ruleSource = path.join(rulesDir(), `${ruleName}.md`);
 
   const shadowState = await validateRuleShadow(shadowFile);
 
@@ -158,13 +160,12 @@ export async function installRuleFile(
  */
 export async function installAllRules(
   rulesMap: Map<string, string>,
-  pluginsDir: string,
   devflowDir: string,
   rulesTarget: string,
 ): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
   return Promise.all(
-    [...rulesMap.entries()].map(async ([ruleName, ownerPlugin]) => {
-      const outcome = await installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget);
+    [...rulesMap.entries()].map(async ([ruleName]) => {
+      const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget);
       return { ruleName, outcome };
     }),
   );
@@ -222,14 +223,97 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Script composer
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose the ~/.devflow/scripts/ directory from:
+ *   (a) src/assets/scripts/ verbatim (hooks/ + hud.sh) with executable bits preserved
+ *   (b) Transitive closure of dist/hud/index.js compiled imports, mirrored
+ *       under ~/.devflow/scripts/ at the same relative-to-dist/ paths
+ *   (c) ~/.devflow/scripts/package.json → {"type":"module"}
+ *
+ * Frozen externally-referenced paths:
+ *   ~/.devflow/scripts/hooks/run-hook   (hook bootstrap entry)
+ *   ~/.devflow/scripts/hud.sh           (HUD entry script)
+ */
+export async function composeScripts(scriptsTarget: string): Promise<void> {
+  await fs.mkdir(scriptsTarget, { recursive: true });
+
+  // (a) src/assets/scripts/ verbatim
+  const srcScripts = scriptsDir();
+  try {
+    await copyDirectory(srcScripts, scriptsTarget);
+    if (process.platform !== 'win32') {
+      await chmodRecursive(scriptsTarget, 0o755);
+    }
+  } catch { /* scripts dir may not exist yet during development */ }
+
+  // (b) Walk dist/hud/ import graph and copy transitive deps
+  const distRoot = path.join(getPackageRoot(), 'dist');
+  const hudEntry = path.join(distRoot, 'hud', 'index.js');
+
+  if (existsSync(hudEntry)) {
+    const IMPORT_RE = /(?:import|export)[\s\S]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+
+    function collectRelativeImports(source: string): string[] {
+      const specs: string[] = [];
+      for (const match of source.matchAll(IMPORT_RE)) {
+        const spec = match[1] ?? match[2];
+        if (spec) specs.push(spec);
+      }
+      return specs;
+    }
+
+    const visited = new Set<string>();
+    const queue: string[] = [hudEntry];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      // Copy file to target, preserving relative path from distRoot
+      const rel = path.relative(distRoot, current);
+      const destPath = path.join(scriptsTarget, rel);
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      try {
+        await fs.copyFile(current, destPath);
+      } catch { /* file inaccessible — skip */ }
+
+      // Collect imports for further walking
+      let source: string;
+      try {
+        source = await fs.readFile(current, 'utf-8');
+      } catch { continue; }
+
+      const currentDir = path.dirname(current);
+      for (const spec of collectRelativeImports(source)) {
+        const resolved = path.resolve(currentDir, spec);
+        if (!resolved.startsWith(distRoot + path.sep)) continue;
+        if (!resolved.endsWith('.js')) continue;
+        if (visited.has(resolved)) continue;
+        const exists = await fs.access(resolved).then(() => true).catch(() => false);
+        if (!exists) continue;
+        queue.push(resolved);
+      }
+    }
+  }
+
+  // (c) package.json for ESM resolution
+  const pkgJsonPath = path.join(scriptsTarget, 'package.json');
+  try {
+    await fs.writeFile(pkgJsonPath, '{"type":"module"}\n', { encoding: 'utf-8', flag: 'wx' });
+  } catch { /* already exists from prior install — leave as-is */ }
+}
+
+// ---------------------------------------------------------------------------
 // File copy installer
 // ---------------------------------------------------------------------------
 
 export interface FileCopyOptions {
   plugins: PluginDefinition[];
   claudeDir: string;
-  pluginsDir: string;
-  rootDir: string;
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
@@ -250,8 +334,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   const {
     plugins,
     claudeDir,
-    pluginsDir,
-    rootDir,
     devflowDir,
     skillsMap,
     agentsMap,
@@ -301,47 +383,54 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     } catch { /* ignore */ }
   }
 
-  // Install commands and agents from selected plugins (with deduplication)
+  // Install commands from selected plugins using registry-driven lookup.
+  // Source: dist/commands/{name}.md (single lookup directory for all commands).
+  // A declared command with no compiled source file is a hard error, not a skip.
   spinner.message('Installing commands and agents...');
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const cDir = commandsDir();
+  const commandsSourceNames = new Set<string>();
   for (const plugin of plugins) {
-    const pluginSourceDir = path.join(pluginsDir, plugin.name);
-
-    // Install commands (every .md file — one variant per command)
-    const commandsSource = path.join(pluginSourceDir, 'commands');
-    const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-    try {
-      const allFiles = await fs.readdir(commandsSource);
-      const commandFiles = allFiles.filter(f => f.endsWith('.md'));
-
-      if (commandFiles.length > 0) {
-        await fs.mkdir(commandsTarget, { recursive: true });
-        for (const file of commandFiles) {
-          await fs.copyFile(
-            path.join(commandsSource, file),
-            path.join(commandsTarget, file),
-          );
-        }
+    for (const cmd of plugin.commands) {
+      const name = cmd.startsWith('/') ? cmd.slice(1) : cmd;
+      commandsSourceNames.add(name);
+    }
+  }
+  if (commandsSourceNames.size > 0) {
+    await fs.mkdir(commandsTarget, { recursive: true });
+    for (const name of commandsSourceNames) {
+      const srcFile = path.join(cDir, `${name}.md`);
+      try {
+        await fs.access(srcFile);
+      } catch {
+        throw new Error(
+          `Command source not found for declared command "${name}": ${srcFile}. ` +
+          `Ensure build:mds ran successfully before install.`,
+        );
       }
-    } catch { /* no commands directory */ }
+      await fs.copyFile(srcFile, path.join(commandsTarget, `${name}.md`));
+    }
+  }
 
-    // Install agents (deduplicated)
-    const agentsSource = path.join(pluginSourceDir, 'agents');
-    try {
-      const files = await fs.readdir(agentsSource);
-      if (files.length > 0) {
-        await fs.mkdir(agentsTarget, { recursive: true });
-        for (const file of files) {
-          const agentName = path.basename(file, '.md');
-          if (agentsMap.get(agentName) === plugin.name) {
-            await fs.copyFile(
-              path.join(agentsSource, file),
-              path.join(agentsTarget, file),
-            );
-          }
-        }
+  // Install agents (deduplicated) from flat src/assets/agents/{name}.md
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const aDir = agentsDir();
+  const allAgentNames = new Set<string>();
+  for (const plugin of plugins) {
+    for (const agent of plugin.agents) {
+      if (!allAgentNames.has(agent) && agentsMap.get(agent) === plugin.name) {
+        allAgentNames.add(agent);
       }
-    } catch { /* no agents directory */ }
+    }
+  }
+  if (allAgentNames.size > 0) {
+    await fs.mkdir(agentsTarget, { recursive: true });
+    for (const agentName of allAgentNames) {
+      const srcFile = path.join(aDir, `${agentName}.md`);
+      try {
+        await fs.copyFile(srcFile, path.join(agentsTarget, `${agentName}.md`));
+      } catch { /* agent file doesn't exist in assets — skip */ }
+    }
   }
 
   // Clean up legacy agent files (renamed or removed agents from prior versions)
@@ -352,15 +441,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   }
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
-  // Skills are tiny markdown files — universal install ensures commands
-  // can spawn agents that depend on skills from other plugins.
+  // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).
   spinner.message('Installing skills...');
-  for (const [skillName, ownerPlugin] of skillsMap) {
-    const skillSource = path.join(pluginsDir, ownerPlugin, 'skills', skillName);
+  for (const [skillName] of skillsMap) {
+    const skillSource = path.join(skillsDir(), skillName);
     try {
       const stat = await fs.stat(skillSource);
       if (!stat.isDirectory()) continue;
-    } catch { continue; /* skill dir doesn't exist in built plugin */ }
+    } catch { continue; /* skill dir doesn't exist in assets */ }
 
     const shadowDir = path.join(devflowDir, 'skills', skillName);
     const prefixedName = prefixSkillName(skillName);
@@ -372,23 +460,20 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       await copyDirectory(shadowDir, skillTarget);
       report.shadowedSkills.push(skillName);
     } else if (shadowState === 'missing-skill-md') {
-      // Shadow dir exists but is invalid — warn + install Devflow source
       report.skippedShadows.push({ kind: 'skill', name: skillName, reason: 'missing-skill-md' });
       await copyDirectory(skillSource, skillTarget);
     } else {
-      // 'none' — no shadow, install source silently
       await copyDirectory(skillSource, skillTarget);
     }
   }
 
   // Install rules from selected plugins (rulesMap covers selected plugins only).
-  // Rules are flat .md files — no prefix, no directory nesting.
-  // Shadow: ~/.devflow/rules/{name}.md overrides source.
+  // Rules are flat .md files resolved from src/assets/rules/{name}.md (no per-plugin subdir).
   spinner.message('Installing rules...');
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
   if (rulesMap.size > 0) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
+    const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
     for (const { ruleName, outcome } of outcomes) {
       if (outcome === 'shadow') {
         report.shadowedRules.push(ruleName);
@@ -400,17 +485,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
   }
 
-  // Install scripts (always from root scripts/ directory)
+  // Install scripts via composer — keeps only what is needed at runtime
+  // (no dev tooling, no raw TypeScript).
   spinner.message('Installing scripts...');
-  const scriptsSource = path.join(rootDir, 'scripts');
   const scriptsTarget = path.join(devflowDir, 'scripts');
-  try {
-    await fs.mkdir(scriptsTarget, { recursive: true });
-    await copyDirectory(scriptsSource, scriptsTarget);
-    if (process.platform !== 'win32') {
-      await chmodRecursive(scriptsTarget, 0o755);
-    }
-  } catch { /* scripts may not exist */ }
+  await composeScripts(scriptsTarget);
 
   spinner.stop('Components installed via file copy');
   return report;

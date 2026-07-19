@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import type { ComponentResult, GatherContext, LearningCountsData } from '../types.js';
 import { dim } from '../colors.js';
-import { getDecisionsLedgerPath } from '../../utils/project-paths.js';
+import { getDecisionsLedgerPath } from '../../core/project-paths.js';
 
 /**
  * @devflow-design-decision D309
