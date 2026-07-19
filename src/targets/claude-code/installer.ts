@@ -164,7 +164,7 @@ export async function installAllRules(
   rulesTarget: string,
 ): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
   return Promise.all(
-    [...rulesMap.entries()].map(async ([ruleName]) => {
+    [...rulesMap.keys()].map(async (ruleName) => {
       const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget);
       return { ruleName, outcome };
     }),
@@ -226,6 +226,19 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 // Script composer
 // ---------------------------------------------------------------------------
 
+/** Matches relative ES import/export specifiers and dynamic import() calls. */
+const IMPORT_RE = /(?:import|export)[\s\S]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+
+/** Extract all relative module specifiers from compiled JS source. */
+function collectRelativeImports(source: string): string[] {
+  const specs: string[] = [];
+  for (const match of source.matchAll(IMPORT_RE)) {
+    const spec = match[1] ?? match[2];
+    if (spec) specs.push(spec);
+  }
+  return specs;
+}
+
 /**
  * Compose the ~/.devflow/scripts/ directory from:
  *   (a) src/assets/scripts/ verbatim (hooks/ + hud.sh) with executable bits preserved
@@ -254,17 +267,6 @@ export async function composeScripts(scriptsTarget: string): Promise<void> {
   const hudEntry = path.join(distRoot, 'hud', 'index.js');
 
   if (existsSync(hudEntry)) {
-    const IMPORT_RE = /(?:import|export)[\s\S]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
-
-    function collectRelativeImports(source: string): string[] {
-      const specs: string[] = [];
-      for (const match of source.matchAll(IMPORT_RE)) {
-        const spec = match[1] ?? match[2];
-        if (spec) specs.push(spec);
-      }
-      return specs;
-    }
-
     const visited = new Set<string>();
     const queue: string[] = [hudEntry];
 

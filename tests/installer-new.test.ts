@@ -102,7 +102,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
 
     const { skillsMap, agentsMap } = buildAssetMaps([fakePlugin]);
 
-    const spinner = { message: (_m: string) => undefined };
+    const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
     await expect(
       installViaFileCopy({
@@ -131,7 +131,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
     };
 
     const { skillsMap, agentsMap } = buildAssetMaps([fakePlugin]);
-    const spinner = { message: (_m: string) => undefined };
+    const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
     let caught: Error | undefined;
     try {

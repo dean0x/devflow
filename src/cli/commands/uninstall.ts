@@ -458,7 +458,6 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       // 6. Security deny list (user settings + managed settings)
-      const uninstallRootDir = getPackageRoot();
 
       // Detect what's installed
       let userSettingsJsonForSecurity: string | null = null;
@@ -528,7 +527,7 @@ export const uninstallCommand = new Command('uninstall')
           }
           // Strip from managed settings (ENOENT-tolerant via removeManagedSettings)
           if (managedExistsForSecurity) {
-            await removeManagedSettings(uninstallRootDir, verbose);
+            await removeManagedSettings(getPackageRoot(), verbose);
           }
         }
       }
