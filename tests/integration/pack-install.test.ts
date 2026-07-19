@@ -102,7 +102,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
   });
 
   it('installed package has dist/cli.js (main CLI entry point)', async () => {
-    const cliPath = path.join(INSTALL_DIR, 'node_modules', 'devflow', 'dist', 'cli.js');
+    const cliPath = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'cli.js');
     await expect(
       fs.access(cliPath),
       `dist/cli.js not found in the installed package at ${cliPath}. ` +
@@ -111,7 +111,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
   });
 
   it('installed CLI exits 0 with --version flag', async () => {
-    const cliPath = path.join(INSTALL_DIR, 'node_modules', 'devflow', 'dist', 'cli.js');
+    const cliPath = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'cli.js');
     const result = runSync(`node "${cliPath}" --version`, { timeout: 15_000 });
 
     expect(
@@ -127,7 +127,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
   });
 
   it('installed package has src/assets/ tree with hook scripts', async () => {
-    const hooksDir = path.join(INSTALL_DIR, 'node_modules', 'devflow', 'src', 'assets', 'scripts', 'hooks');
+    const hooksDir = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'src', 'assets', 'scripts', 'hooks');
 
     await expect(
       fs.access(hooksDir),
@@ -144,7 +144,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
   });
 
   it('installed package has src/assets/agents/ with at least one shared agent', async () => {
-    const agentsDir = path.join(INSTALL_DIR, 'node_modules', 'devflow', 'src', 'assets', 'agents');
+    const agentsDir = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'src', 'assets', 'agents');
 
     await expect(
       fs.access(agentsDir),
@@ -162,7 +162,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {
     const templatesDir = path.join(
-      INSTALL_DIR, 'node_modules', 'devflow',
+      INSTALL_DIR, 'node_modules', 'devflow-kit',
       'src', 'targets', 'claude-code', 'templates',
     );
 
