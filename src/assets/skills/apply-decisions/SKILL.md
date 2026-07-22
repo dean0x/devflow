@@ -31,7 +31,7 @@ Decisions (N):
   ADR-002  Another decision             [Active]
 
 Pitfalls (M):
-  PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs
+  PF-004  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs
   PF-011  DECISIONS_CONTEXT fan-out    [Active]  —  src/assets/commands/...
 
 ADR-NNN entries live in {worktree}/.devflow/learning/decisions.md
