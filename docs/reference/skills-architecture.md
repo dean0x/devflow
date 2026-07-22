@@ -77,12 +77,6 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 | `java` | Records, sealed classes, composition, modern Java | Java codebases |
 | `rust` | Ownership, borrowing, error handling, type-driven design | Rust codebases |
 
-### Format-Spec Skills (Not Plugin-Distributed)
-
-Some skills exist in `shared/skills/` but are not distributed to any plugin. They serve as on-disk format specifications consumed by background processes, not by agents or commands.
-
-- **decisions-format** — Format spec for `.devflow/learning/decisions.md` and `pitfalls.md` (entry format, lock protocol). Consumed by the `assign-anchor`/`retire-anchor` render path in `json-helper.cjs`, driven by the background Learning agent. Not distributed to plugins per D9.
-
 ## How Skills Activate
 
 Skills activate through two guaranteed mechanisms:

@@ -205,15 +205,8 @@ Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agen
 
 ## HUD (Heads-Up Display)
 
-The HUD (`src/assets/scripts/hud.sh` → `dist/hud/index.js`) is a configurable TypeScript status line with 15 components and 4 presets:
+The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, todo progress, config counts, and learning counts.
 
-| Preset | Components | Layout |
-|--------|-----------|--------|
-| Minimal | directory, git branch, model, context % | Single line |
-| Classic | + ahead/behind, diff stats, version badge | Single line |
-| Standard (default) | + session duration, usage quota | 2 lines |
-| Full | + tool/agent activity, todos, speed, config counts | 3-4 lines |
-
-Configuration: `~/.devflow/hud.json` (preset + component toggles). Manage via `devflow hud --configure`.
+Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
 Data source: `context_window.current_usage` from Claude Code's JSON stdin. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
