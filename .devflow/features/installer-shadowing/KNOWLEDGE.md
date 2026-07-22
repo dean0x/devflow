@@ -1,18 +1,18 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope or leftover-warning behavior, or extending the CLI skills/rules management commands. Keywords: installViaFileCopy, installAllRules, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, computeShadowLeftoverWarnings, ShadowWarning."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope or leftover-warning behavior, extending the CLI skills/rules management commands, or working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution. Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, computeShadowLeftoverWarnings, ShadowWarning, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES."
 category: architecture
-directories: [src/cli/utils/installer.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/plugins.ts]
+directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts]
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-19
 ---
 
 # Installer & Skill/Rule Shadowing
 
 ## Overview
 
-Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/cli/utils/installer.ts`. File copy is the sole install mechanism. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
+Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/targets/claude-code/installer.ts`. File copy is the sole install mechanism. All asset source paths are resolved via named accessors in `src/core/assets.ts`, which are backed by `getPackageRoot()` in `src/core/paths.ts`. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
 
 The shadow override system lets users place personal versions of skills or rules at well-known paths under `~/.devflow/`. On every `devflow init` or `devflow rules --enable`, Devflow detects a valid shadow and installs the user's copy instead of the Devflow source — without failing init. This knowledge covers the entire install-to-uninstall lifecycle and the CLI surface for managing overrides.
 
@@ -25,6 +25,24 @@ The installer is called from two entry points:
 Shadow state is also read by `devflow skills list` and `devflow rules list` for the status display, and by `uninstall.ts` to emit leftover warnings.
 
 ## Component Architecture
+
+### Asset Directory Accessors (`src/core/assets.ts`)
+
+Every path to a source asset is obtained through a named accessor — no scattered `path.resolve(__dirname, '../..')` lookups anywhere in the installer:
+
+| Accessor | Resolves to |
+|----------|-------------|
+| `skillsDir()` | `{root}/src/assets/skills/` — flat; one subdir per skill |
+| `agentsDir()` | `{root}/src/assets/agents/` — flat; one `.md` per agent |
+| `rulesDir()` | `{root}/src/assets/rules/` — flat; one `.md` per rule |
+| `scriptsDir()` | `{root}/src/assets/scripts/` — hooks/ and hud.sh |
+| `commandsDir()` | `{root}/dist/commands/` — compiled MDS + verbatim .md files |
+
+All five call `getPackageRoot()` internally.
+
+### Package Root Resolution (`src/core/paths.ts`)
+
+`getPackageRoot()` resolves the package root from `import.meta.url` depth — 2 levels up from compiled `dist/core/paths.js`. It **throws loudly** if `package.json` is absent at the resolved root. Depth-mismatch bugs surface immediately at install time rather than silently producing wrong paths.
 
 ### InstallReport
 
@@ -44,7 +62,7 @@ export interface ShadowSkip {
 }
 ```
 
-`init.ts` iterates `skippedShadows` and emits a warning per entry via an exhaustive switch on `ShadowSkipReason` (with `never` guard). Invalid shadows never cause init to exit non-zero.
+`init.ts` iterates `skippedShadows` and emits a warning per entry via an exhaustive switch on `ShadowSkipReason` (with `never` guard). Invalid shadows never cause init to exit non-zero. (applies ADR-010)
 
 ### RuleInstallOutcome
 
@@ -63,8 +81,6 @@ The compound `source-invalid-shadow:*` variants carry the specific reason direct
 
 ### SkillShadowState / RuleShadowState
 
-Named exported types for the return values of the two validators:
-
 ```typescript
 export type SkillShadowState = 'valid' | 'missing-skill-md' | 'none';
 export type RuleShadowState = 'valid' | 'empty-shadow-file' | 'not-a-file' | 'none';
@@ -74,35 +90,63 @@ Both are exported from `installer.ts` and imported by `skills.ts` and `rules.ts`
 
 ### installAllRules
 
-The single compute site for rule installation. Both `installViaFileCopy` and `rules --enable` call it:
+The single compute site for rule installation. Both `installViaFileCopy` and `rules --enable` call it. There is **no `pluginsDir` or `ownerPlugin` parameter** — rule source is resolved internally by `installRuleFile` via `rulesDir()`:
 
 ```typescript
 export async function installAllRules(
   rulesMap: Map<string, string>,
-  pluginsDir: string,
   devflowDir: string,
   rulesTarget: string,
 ): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]>
 ```
 
-`installViaFileCopy` consumes the outcomes to populate `InstallReport`. `rules --enable` renders per-rule log lines. One place computes; callers present.
+One place computes; callers present the outcomes.
 
-### Skill namespace (`prefixSkillName` / `unprefixSkillName`)
+### composeScripts
 
-Skills install under `~/.claude/skills/devflow:{name}` (prefixed). The `devflow:` prefix is applied at install time; source directories in `shared/skills/` stay unprefixed. Shadow dirs also stay unprefixed at `~/.devflow/skills/{name}/`.
+`composeScripts(scriptsTarget)` assembles `~/.devflow/scripts/` from three sources in order:
+
+**(a) `src/assets/scripts/` verbatim** — hooks/ subdirectory and `hud.sh` entry script copied via `copyDirectory`, with executable bits applied via `chmodRecursive` (non-Windows only).
+
+**(b) Transitive `dist/hud/` import graph** — starting from `dist/hud/index.js`, walks all relative JS import/export specifiers (matched by `IMPORT_RE`), copies each reachable module to `scriptsTarget` preserving its `dist/`-relative path. Files that cannot be accessed are skipped silently.
+
+**(c) `package.json` with `{"type":"module"}`** — written with `flag: 'wx'` (exclusive create); an existing file is left as-is.
+
+Frozen externally-referenced paths that must not move:
+- `~/.devflow/scripts/hooks/run-hook` — hook bootstrap entry point
+- `~/.devflow/scripts/hud.sh` — HUD entry script
+
+### Command Install (registry-driven)
+
+Commands are installed from `dist/commands/{name}.md` (compiled MDS output). A declared command whose source file is absent from `dist/commands/` is a **hard throw** — init exits non-zero with a clear error. This is intentional: a missing compiled command is a build failure, not a skip. Contrast with agents (missing source is a silent skip) and skills (missing source dir skipped silently).
+
+### Skill Namespace (`prefixSkillName` / `unprefixSkillName`)
+
+Skills install under `~/.claude/skills/devflow:{name}` (prefixed). The `devflow:` prefix is applied at install time; source directories in `src/assets/skills/` stay unprefixed. Shadow dirs also stay unprefixed at `~/.devflow/skills/{name}/`.
 
 `skills.ts` CLI accepts both prefixed and bare input (`unprefixSkillName` normalizes before lookup).
 
-### Universal skill install
+### Universal Skill Install
 
 All skills from ALL plugins install regardless of plugin selection. `skillsMap` passed to `installViaFileCopy` is built by `buildFullSkillsMap` which covers every `DEVFLOW_PLUGINS` entry — not just the selected subset. Rules, by contrast, are plugin-scoped (only selected plugins' rules install).
 
+### LEGACY_* Symbol Split
+
+Legacy cleanup lists are split across two files:
+
+| Symbol | File |
+|--------|------|
+| `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (+ `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`) | `src/targets/claude-code/legacy.ts` |
+| `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES` | `src/core/plugins.ts` |
+
+The split keeps target-specific delete lists separate from the plugin registry consumed by cross-cutting CLI commands. (avoids PF-012)
+
 ## Component Interactions
 
-### Shadow validation flow (skills)
+### Shadow Validation Flow (skills)
 
 `validateSkillShadow(shadowDir)` in `installer.ts`:
-- Returns `'none'` — shadow dir absent (no override)
+- Returns `'none'` — shadow dir absent
 - Returns `'valid'` — dir exists with a non-empty `SKILL.md` file
 - Returns `'missing-skill-md'` — dir exists but `SKILL.md` absent, empty, or not a file
 
@@ -110,31 +154,30 @@ On `'valid'`: `copyDirectory(shadowDir, skillTarget)` replaces the install with 
 On `'missing-skill-md'`: adds to `skippedShadows`, installs Devflow source.
 On `'none'`: installs Devflow source silently.
 
-### Shadow validation flow (rules)
+### Shadow Validation Flow (rules)
 
 `validateRuleShadow(shadowFile)` in `installer.ts`:
 - Returns `'none'` — file absent
 - Returns `'valid'` — file exists, is a regular file, non-empty
-- Returns `'empty-shadow-file'` — file is size 0
+- Returns `'empty-shadow-file'` — file exists and is a file but has size 0
 - Returns `'not-a-file'` — path exists but is not a file (e.g. a directory)
 
-`installRuleFile` uses this result:
-- `'valid'` → attempts `copyFile(shadowFile, targetFile)`; if the copy fails (e.g. `EACCES`, `EISDIR` on the target), falls through and installs Devflow source (returns `'source'`).
+`installRuleFile(ruleName, devflowDir, rulesTarget)` uses this result. Rule source is always resolved internally: `path.join(rulesDir(), `${ruleName}.md`)`.
+- `'valid'` → attempts `copyFile(shadowFile, targetFile)`; if the copy fails, falls through and installs Devflow source.
 - `'empty-shadow-file'` or `'not-a-file'` → installs source, returns the matching `source-invalid-shadow:*` variant.
 - `'none'` → installs source, returns `'source'`.
 
-Both the shadow copy and the source copy paths are individually wrapped in try/catch inside `installRuleFile`, so `installAllRules`'s outer `Promise.all` cannot abort from a per-rule failure.
+Both the shadow copy and the source copy paths are individually wrapped in try/catch inside `installRuleFile`, so `installAllRules`'s outer `Promise.all` cannot abort from a per-rule failure. (avoids PF-009)
 
-### Uninstall scope
+### Uninstall Scope
 
-`uninstall.ts` removes `~/.devflow/scripts/` (not the whole `~/.devflow/` tree — user shadows and config live there). This is computed as:
+`removeAllDevFlow(claudeDir, devflowScriptsDir, verbose)` removes four directory paths:
+- `~/.claude/commands/devflow/`
+- `~/.claude/agents/devflow/`
+- `~/.claude/rules/devflow/`
+- `devflowScriptsDir` (computed by caller as `path.join(paths.devflowDir, 'scripts')`)
 
-```typescript
-devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
-// removeAllDevFlow receives devflowScriptsDir, NOT paths.devflowDir
-```
-
-Uninstall removes only `~/.devflow/scripts/` because the rest of `~/.devflow/` (shadows, config) is user-owned; the `devflowDataDir` prompt applies only to the project's cwd-relative `.devflow/`, never `~/.devflow/`.
+Skills are removed separately by iterating `getAllSkillNames() + LEGACY_SKILL_NAMES`, removing both prefixed (`devflow:{name}`) and bare variants. The rest of `~/.devflow/` (shadows, config) is user-owned and survives uninstall. The project `.devflow/` directory (docs, memory, learning) is prompted separately with `--keep-docs` as a bypass.
 
 ### computeShadowLeftoverWarnings
 
@@ -151,11 +194,11 @@ export function computeShadowLeftoverWarnings(opts: {
 }): ShadowWarning[]
 ```
 
-Returns `[]` for selective uninstalls. For full uninstall, each non-empty shadow list produces a `warn` entry (leftover notice) followed by an `info` entry (cleanup hint). The caller emits these after `removeAllDevFlow` runs, using lists captured before removal.
+Returns `[]` for selective uninstalls. For full uninstall, each non-empty shadow list produces a `warn` entry followed by an `info` cleanup hint. Shadow lists are captured before `removeAllDevFlow` runs.
 
 ## Integration Patterns
 
-### Shadow paths (canonical)
+### Shadow Paths (canonical)
 
 | Asset | Shadow path | Install target |
 |-------|-------------|----------------|
@@ -168,26 +211,24 @@ Positional command only (no flags). Unknown action exits 1.
 
 - `shadow <name>` — validates the skill is installed; copies `~/.claude/skills/devflow:{name}/` to `~/.devflow/skills/{name}/` as a starting point; accepts both bare and prefixed input.
 - `unshadow <name>` — removes `~/.devflow/skills/{name}/`; restores Devflow source on next `devflow init`.
-- `list` — pre-reads `shadowDirSet` from `~/.devflow/skills/`, then uses `shadowDirSet.has(skill)` as a short-circuit before calling `validateSkillShadow` (skips the stat for skills with no shadow directory). All rows are built via `Promise.all`. Shadow state renders via `buildSkillShadowTag` exhaustive switch. Orphan directories (in shadow root but not a known skill) are shown as "unknown skill".
+- `list` — pre-reads `shadowDirSet` from `~/.devflow/skills/`, uses `shadowDirSet.has(skill)` as a short-circuit before calling `validateSkillShadow`. Shadow state renders via `buildSkillShadowTag` exhaustive switch. Orphan directories are shown as "unknown skill".
 
 Exports: `hasShadow(skillName, devflowDir?)`, `listShadowed(devflowDir?)` — used by uninstall.
 
 ### `devflow rules` CLI
 
-Positional actions dispatch **before** flags. When `action` is present, flag options (`--enable`, `--disable`, `--status`, `--list`) are never evaluated. Unknown positional action exits 1.
+Positional actions dispatch before flags. Unknown positional action exits 1.
 
-- `shadow <name>` — validates the rule name against `allRules`; seeds via `seedRuleShadow` (3-tier); emits a manual-create hint when seeding fails. Implemented in `handleRuleShadow`.
-- `unshadow <name>` — validates the rule name against `allRules` (exits 1 on unknown names, mirroring the shadow guard); removes `~/.devflow/rules/{name}.md`. Implemented in `handleRuleUnshadow`.
+- `shadow <name>` — validates against `allRules`; seeds via `seedRuleShadow`; emits a manual-create hint when seeding fails.
+- `unshadow <name>` — validates against `allRules` (exits 1 on unknown names); removes `~/.devflow/rules/{name}.md`.
 - `list` — delegates to `printRulesList`; same output as `--list`.
 
-`printRulesList` collects shadow state for all known rules via `Promise.all`, renders a `(N known, M shadowed)` header, shows valid shadow state as a green unbracketed tag, and marks orphan shadows (in `~/.devflow/rules/` but not in `getAllRuleNames()`) as "unknown rule".
-
-`seedRuleShadow` (named export — injected `pluginsDir` makes it testable):
-- Tier 1: installed rule at `~/.claude/rules/devflow/{name}.md`
-- Tier 2: built plugin source at `pluginsDir/{owner}/rules/{name}.md`
+`seedRuleShadow(name, shadowFile, rulesTarget, devflowDir)` — 3-tier, **no `pluginsDir` param**:
+- Tier 1: installed rule at `rulesTarget/{name}.md` (fastest path when rules are enabled)
+- Tier 2: flat source at `rulesDir()/{name}.md` → `src/assets/rules/{name}.md` (fallback when rules are disabled)
 - Tier 3: returns `'none'` — caller emits manual-create instruction
 
-`buildRuleShadowTag` / `buildSkillShadowTag` use exhaustive switches over their respective state types (with `never` guard), so a new state added to either union causes a compile error until display coverage is added.
+`buildRuleShadowTag` / `buildSkillShadowTag` use exhaustive switches with `never` guards, so adding a new state variant causes a compile error until display coverage is added.
 
 Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)`, `seedRuleShadow(...)` — used by uninstall and tests.
 
@@ -195,31 +236,41 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 - **Installing all of `~/.devflow/` on uninstall** — only `~/.devflow/scripts/` is Devflow-owned; `~/.devflow/skills/`, `~/.devflow/rules/`, and config files are user-owned and must survive uninstall.
 - **Staging shadow state after removal** — `listShadowed()` / `listShadowedRules()` must be called before the removal block; the files may be gone by the time warnings are emitted.
-- **Running `devflow rules shadow` without a built CLI** — `seedRuleShadow` tier 2 resolves `pluginsDir` from `dist/`; running from source without `npm run build` silently misses the plugin-source fallback.
+- **Installing without `npm run build`** — commands fail hard with a loud throw when `dist/commands/{name}.md` is missing; rules and skills skip silently when `src/assets/` content is absent. Run `npm run build` (or `build:mds` for commands alone) before any install.
 - **Skipping `prefixSkillName` at install time** — the install target must always be the prefixed path `devflow:{name}`; shadow dirs stay unprefixed. Mixing these causes duplicate installs or missed cleanup.
-- **Adding failure modes to `installRuleFile` without per-path catches** — both the shadow copy and source copy paths must be individually caught. A bare throw inside `installRuleFile` escapes to the `installAllRules` `Promise.all` and aborts rule installation for the whole batch.
+- **Adding a failure path to `installRuleFile` without per-path try/catch** — both the shadow copy and source copy paths must be individually caught. A bare throw inside `installRuleFile` escapes to the `installAllRules` `Promise.all` and aborts rule installation for the whole batch.
+- **Restoring `pluginsDir` to `installAllRules` or `installRuleFile`** — rule source is exclusively `rulesDir()` (flat `src/assets/rules/`); there is no per-plugin subdirectory path to provide.
 
 ## Gotchas
 
-- **`validateRuleShadow`'s `isFile()` guard is load-bearing.** Without the `stat.isFile()` check, a directory at `~/.devflow/rules/{name}.md` would pass the `size > 0` guard (directories report non-zero `st_size` on some FSes) and return `'valid'`, triggering `copyFile(shadowDir, targetFile)`. That `copyFile` throws `EISDIR`. The valid-shadow copy block catches this and falls through to install the Devflow source — so the user's shadow is silently bypassed (degraded path), not an abort. `fs.stat` follows symlinks: a symlink pointing to a regular file is a valid shadow; a symlink pointing to a directory returns `'not-a-file'`.
+- **`validateRuleShadow`'s `isFile()` guard is load-bearing.** Without `stat.isFile()`, a directory at `~/.devflow/rules/{name}.md` passes the `size > 0` check on some FSes and returns `'valid'`, causing `copyFile(shadowDir, targetFile)` to throw `EISDIR`. The valid-shadow block catches this and falls through to install the Devflow source (degraded path, not an abort). `fs.stat` follows symlinks: symlink → regular file = valid; symlink → directory = `'not-a-file'`.
 
-- **Skills are cleaned before install on every run.** `installViaFileCopy` removes both the legacy unprefixed and current prefixed skill directories for all known skills before reinstalling. This ensures no stale duplicate `{name}` directory coexists with `devflow:{name}`. Partial installs (via `--plugin`) still clean all skills universally.
+- **Skills are cleaned before install on every run.** `installViaFileCopy` removes both the legacy unprefixed and current prefixed skill directories for all known skills before reinstalling. Partial installs (via `--plugin`) still clean all skills universally.
 
-- **Shadow seed from plugin source requires built dist.** `seedRuleShadow` tier 2 falls back to `dist/../plugins/...` when the installed rule is absent (e.g. rules are disabled). This path only works from a `dist/` build; running via `ts-node` from `src/` will miss the fallback.
+- **`seedRuleShadow` tier 2 requires a built package root.** `rulesDir()` calls `getPackageRoot()`, which resolves from `dist/core/paths.js` depth and throws loudly if `package.json` is absent at the resolved root. Running `devflow rules shadow` without a built `dist/` causes a loud throw on tier-2 fallback (e.g. when rules are disabled and the installed file is absent).
 
-- **`hasRuleShadow` uses `fs.access` (not `validateRuleShadow`).** The `hasRuleShadow` export in `rules.ts` just checks existence — it does not validate file content. The status display calls `validateRuleShadow` directly for the full state. Do not conflate the two.
+- **`composeScripts` writes `package.json` with `wx` (exclusive create) flag.** A pre-existing `~/.devflow/scripts/package.json` is silently left as-is. If it is corrupt from a failed prior install, the next `devflow init` will not repair it — manual delete is needed.
+
+- **`hasRuleShadow` uses `fs.access`, not `validateRuleShadow`.** It only checks existence. The status display calls `validateRuleShadow` for the full state. Do not conflate the two.
+
+- **Command install hard-throws on a missing `dist/commands/` entry.** A declared command with no compiled source file aborts init — it is not a skip. This distinguishes commands (build output, must exist) from agents and skills (source files, may be absent, silent skip).
 
 ## Key Files
 
-- `src/cli/utils/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`
-- `src/cli/commands/init.ts` — consumes `InstallReport`; calls `installViaFileCopy` with `skillsMap`, `agentsMap`, `rulesMap`; exhaustive `ShadowSkipReason` switch with `never` guard in post-install summary
-- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (scoped to scripts dir), `computeShadowLeftoverWarnings` (pure, returns `ShadowWarning[]`), `computeAssetsToRemove`
-- `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow`, `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`
+- `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
+- `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`
+- `src/targets/claude-code/legacy.ts` — `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
+- `src/cli/commands/init.ts` — consumes `InstallReport`; calls `installViaFileCopy`; exhaustive `ShadowSkipReason` switch with `never` guard; imports `LEGACY_SKILL_NAMES` from `legacy.ts`
+- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (removes commands/agents/rules dirs + `devflowScriptsDir` + all skill variants), `computeShadowLeftoverWarnings` (pure), `computeAssetsToRemove`; imports `LEGACY_SKILL_NAMES` from `legacy.ts`
+- `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow` (3-tier, uses `rulesDir()` flat source), `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
 - `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`, `listShadowed`
-- `src/cli/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_SKILL_NAMES`, `LEGACY_AGENT_NAMES`
+- `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES` (note: `LEGACY_SKILL_NAMES` and `LEGACY_AGENT_NAMES` moved to `legacy.ts`)
 
 ## Related
 
-- ADR-010: Productionalize skill/rule shadowing — governs the decision to make `installViaFileCopy` the sole install path and to surface invalid shadows as warn-and-install-source (not hard-fail) (applies ADR-010)
-- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup (no tombstone comments, no `*_old` names; `LEGACY_SKILL_NAMES` tracks accumulated deprecated names) (applies ADR-003)
+- ADR-010: Productionalize skill/rule shadowing — governs `installViaFileCopy` as sole install path and warn-and-install-source (not hard-fail) for invalid shadows (applies ADR-010)
+- ADR-003: Leave the end-state, not the transition — governs removals and legacy cleanup; `LEGACY_SKILL_NAMES` accumulates deprecated names, never deletes them (applies ADR-003)
+- PF-009: Per-item failure isolation in rule/skill fan-out — per-rule try/catch inside `installRuleFile` ensures one failing rule does not abort the `Promise.all` (avoids PF-009)
+- PF-012: LEGACY_* lists deletion-risk — lists now split between `src/targets/claude-code/legacy.ts` (skill/agent) and `src/core/plugins.ts` (plugin/command/rule); both must be retained across upgrades (avoids PF-012)
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (`ensureDevflowGitignore` in `post-install.ts`)

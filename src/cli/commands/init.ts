@@ -1,13 +1,12 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths } from '../utils/paths.js';
-import { getGitRoot } from '../utils/git.js';
-import { installViaFileCopy, copyDirectory, type InstallReport } from '../utils/installer.js';
+import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../../core/git.js';
+import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -25,33 +24,35 @@ import {
   loadTemplateDenyEntries,
   stripUserSecurityDenyList,
   type SecurityMode,
-} from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
-import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
-import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
+} from '../../targets/claude-code/post-install.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, type PluginDefinition } from '../../core/plugins.js';
+import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
+import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
+import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
-import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
-import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
-import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
+import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../../core/manifest.js';
+import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { writeConfig } from '../utils/feature-config.js';
-import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeConfig } from '../../core/feature-config.js';
+import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
+export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
 export { removeDreamHook, hasDreamHook } from './legacy-hooks.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
-import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
+import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../../core/migrations.js';
+import { getPackageRoot } from '../../core/paths.js';
 
 export type { MigrationLogger };
 
@@ -94,9 +95,6 @@ export async function runMigrationsWithFallback(
   return migrationResult;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 /**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
@@ -111,25 +109,6 @@ export function classifySafeDeleteState(
 }
 
 export { addContextHook, removeContextHook, hasContextHook };
-
-/**
- * Parse a comma-separated plugin selection string into normalized plugin names.
- * Validates against known plugins; returns invalid names as errors.
- */
-export function parsePluginSelection(
-  input: string,
-  validPlugins: PluginDefinition[],
-): { selected: string[]; invalid: string[] } {
-  const selected = input.split(',').map(raw => {
-    const trimmed = raw.trim();
-    const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
-    return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
-  });
-
-  const validNames = validPlugins.map(pl => pl.name);
-  const invalid = selected.filter(name => !validNames.includes(name));
-  return { selected, invalid };
-}
 
 /**
  * Combine workflow and language selections into a single plugin list.
@@ -199,7 +178,7 @@ export const initCommand = new Command('init')
   .option('--advanced', 'Show all configuration prompts')
   .action(async (options: InitOptions) => {
     // Get package version
-    const packageJsonPath = path.resolve(__dirname, '../../package.json');
+    const packageJsonPath = path.join(getPackageRoot(), 'package.json');
     let version = '';
     try {
       const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
@@ -258,26 +237,12 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
-      // Copy HUD scripts to devflow dir
-      const rootDir = path.resolve(__dirname, '..', '..');
-      const scriptsSource = path.join(rootDir, 'scripts');
+      // Install HUD scripts to devflow dir
       const scriptsTarget = path.join(devflowDir, 'scripts');
       try {
-        await fs.mkdir(scriptsTarget, { recursive: true });
-        // Copy hud.sh
-        await fs.copyFile(
-          path.join(scriptsSource, 'hud.sh'),
-          path.join(scriptsTarget, 'hud.sh'),
-        );
-        // Copy hud/ directory
-        const hudSource = path.join(scriptsSource, 'hud');
-        const hudTarget = path.join(scriptsTarget, 'hud');
-        await copyDirectory(hudSource, hudTarget);
-        if (process.platform !== 'win32') {
-          await fs.chmod(path.join(scriptsTarget, 'hud.sh'), 0o755);
-        }
+        await composeScripts(scriptsTarget);
       } catch (error) {
-        p.log.error(`Failed to copy HUD scripts: ${error instanceof Error ? error.message : error}`);
+        p.log.error(`Failed to install HUD scripts: ${error instanceof Error ? error.message : error}`);
         process.exit(1);
       }
 
@@ -896,7 +861,7 @@ export const initCommand = new Command('init')
       let managedExists = false;
       let managedContentJson: string | null = null;
       try {
-        const { getManagedSettingsPath: getMgdPath } = await import('../utils/paths.js');
+        const { getManagedSettingsPath: getMgdPath } = await import('../../targets/claude-code/claude-paths.js');
         const mgdPath = getMgdPath();
         managedContentJson = await fs.readFile(mgdPath, 'utf-8');
         managedExists = true;
@@ -955,8 +920,7 @@ export const initCommand = new Command('init')
 
     // Resolve plugins and deduplication maps
     s.message('Installing components');
-    const rootDir = path.resolve(__dirname, '../..');
-    const pluginsDir = path.join(rootDir, 'plugins');
+    const rootDir = getPackageRoot();
 
     let pluginsToInstall = selectedPlugins.length > 0
       ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
@@ -987,7 +951,7 @@ export const initCommand = new Command('init')
     // absent, so fresh installs are safe no-ops. State lives at the home-dir ~/.devflow
     // location regardless of install scope (D30).
     {
-      const { runMigrations } = await import('../utils/migrations.js');
+      const { runMigrations } = await import('../../core/migrations.js');
       const userDevflowDir = path.join(os.homedir(), '.devflow');
       await runMigrationsWithFallback(
         discoveredProjects,
@@ -1005,8 +969,6 @@ export const initCommand = new Command('init')
       installReport = await installViaFileCopy({
         plugins: pluginsToInstall,
         claudeDir,
-        pluginsDir,
-        rootDir,
         devflowDir,
         skillsMap,
         agentsMap,

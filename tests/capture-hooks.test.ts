@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
 const CAPTURE_TURN = path.join(HOOKS_DIR, 'capture-turn');
 const CAPTURE_QUESTION = path.join(HOOKS_DIR, 'capture-question');

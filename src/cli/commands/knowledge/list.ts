@@ -9,8 +9,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getGitRoot } from '../../utils/git.js';
-import { getFeaturesDir } from '../../utils/project-paths.js';
+import { getGitRoot } from '../../../core/git.js';
+import { getFeaturesDir } from '../../../core/project-paths.js';
 
 /**
  * A lightweight entry parsed from either index.md lines or KNOWLEDGE.md frontmatter.

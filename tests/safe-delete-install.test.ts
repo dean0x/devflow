@@ -9,7 +9,7 @@ import {
   removeFromProfile,
   getInstalledVersion,
   SAFE_DELETE_BLOCK_VERSION,
-} from '../src/cli/utils/safe-delete-install.js';
+} from '../src/core/safe-delete-install.js';
 
 describe('generateSafeDeleteBlock', () => {
   it('generates bash/zsh block with markers, existence check, and both functions', () => {

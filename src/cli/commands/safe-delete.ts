@@ -7,14 +7,14 @@ import {
   getProfilePath,
   getSafeDeleteInfo,
   hasSafeDelete,
-} from '../utils/safe-delete.js';
+} from '../../core/safe-delete.js';
 import {
   generateSafeDeleteBlock,
   installToProfile,
   removeFromProfile,
   getInstalledVersion,
   SAFE_DELETE_BLOCK_VERSION,
-} from '../utils/safe-delete-install.js';
+} from '../../core/safe-delete-install.js';
 
 /**
  * Tri-state status for the safe-delete block in the user's shell profile.

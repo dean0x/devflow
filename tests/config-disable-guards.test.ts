@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -21,8 +21,6 @@ function mkTmpDir(): string {
 
 function mkMemoryDir(base: string): void {
   fs.mkdirSync(path.join(base, '.devflow', 'memory'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'dream'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'decisions'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
 }
 

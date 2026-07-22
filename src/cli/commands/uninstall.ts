@@ -1,12 +1,12 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
-import { getGitRoot } from '../utils/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
+import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { getGitRoot } from '../../core/git.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
 import { removeCaptureHooks } from './capture.js';
@@ -15,12 +15,13 @@ import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
 import { listShadowedRules } from './rules.js';
-import { detectShell, getProfilePath } from '../utils/safe-delete.js';
-import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
-import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { stripFlags, stripViewMode } from '../utils/flags.js';
-import { stripDevflowTeammateModeFromJson } from '../utils/teammate-mode-cleanup.js';
+import { detectShell, getProfilePath } from '../../core/safe-delete.js';
+import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
+import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { stripFlags, stripViewMode } from '../../core/flags.js';
+import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
+import { getPackageRoot } from '../../core/paths.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -178,7 +179,7 @@ export const uninstallCommand = new Command('uninstall')
   .description('Uninstall Devflow from Claude Code')
   .option('--keep-docs', 'Keep .devflow/ directory and project data')
   .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
-  .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,review)')
+  .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--verbose', 'Show detailed uninstall output')
   .option('--dry-run', 'Show what would be removed without actually removing anything')
   .action(async (options) => {
@@ -191,16 +192,11 @@ export const uninstallCommand = new Command('uninstall')
     // Parse plugin selection
     let selectedPluginNames: string[] = [];
     if (options.plugin) {
-      selectedPluginNames = options.plugin.split(',').map((s: string) => {
-        const trimmed = s.trim();
-        return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
-      });
-
-      const validNames = DEVFLOW_PLUGINS.map(p => p.name);
-      const invalidPlugins = selectedPluginNames.filter(n => !validNames.includes(n));
-      if (invalidPlugins.length > 0) {
-        p.log.error(`Unknown plugin(s): ${invalidPlugins.join(', ')}`);
-        p.log.info(`Valid plugins: ${validNames.join(', ')}`);
+      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      selectedPluginNames = selected;
+      if (invalid.length > 0) {
+        p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
+        p.log.info(`Valid plugins: ${DEVFLOW_PLUGINS.map(pl => pl.name).join(', ')}`);
         process.exit(1);
       }
     }
@@ -457,7 +453,6 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       // 6. Security deny list (user settings + managed settings)
-      const uninstallRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
       // Detect what's installed
       let userSettingsJsonForSecurity: string | null = null;
@@ -527,7 +522,7 @@ export const uninstallCommand = new Command('uninstall')
           }
           // Strip from managed settings (ENOENT-tolerant via removeManagedSettings)
           if (managedExistsForSecurity) {
-            await removeManagedSettings(uninstallRootDir, verbose);
+            await removeManagedSettings(getPackageRoot(), verbose);
           }
         }
       }

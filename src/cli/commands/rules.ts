@@ -1,15 +1,13 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../plugins.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
-import { installAllRules, validateRuleShadow, type RuleShadowState } from '../utils/installer.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../../core/plugins.js';
+import { readManifest, writeManifest } from '../../core/manifest.js';
+import { rulesDir } from '../../core/assets.js';
+import { installAllRules, validateRuleShadow, type RuleShadowState } from '../../targets/claude-code/installer.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -129,7 +127,7 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
  *
  * D35 — seedRuleShadow tiers (applies ADR-010):
  *   Tier 1 — installed rule at rulesTarget/{name}.md (fastest path when rules are enabled)
- *   Tier 2 — built plugin source at pluginsDir/{owner}/rules/{name}.md (fallback when rules are disabled)
+ *   Tier 2 — flat source at src/assets/rules/{name}.md (fallback when rules are disabled)
  *   Tier 3 — 'none': caller emits a manual-create instruction
  */
 export async function seedRuleShadow(
@@ -137,7 +135,6 @@ export async function seedRuleShadow(
   shadowFile: string,
   rulesTarget: string,
   devflowDir: string,
-  pluginsDir: string,
 ): Promise<'installed' | 'source' | 'none'> {
   await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
 
@@ -145,17 +142,13 @@ export async function seedRuleShadow(
   try {
     await fs.copyFile(path.join(rulesTarget, `${name}.md`), shadowFile);
     return 'installed';
-  } catch { /* not present — try plugin source */ }
+  } catch { /* not present — try flat source */ }
 
-  // Tier 2: seed from built plugin source
-  const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
-  const ownerPlugin = ownerMap.get(name);
-  if (ownerPlugin) {
-    try {
-      await fs.copyFile(path.join(pluginsDir, ownerPlugin, 'rules', `${name}.md`), shadowFile);
-      return 'source';
-    } catch { /* source not found */ }
-  }
+  // Tier 2: seed from flat rules source
+  try {
+    await fs.copyFile(path.join(rulesDir(), `${name}.md`), shadowFile);
+    return 'source';
+  } catch { /* source not found */ }
 
   return 'none';
 }
@@ -184,8 +177,7 @@ async function handleRuleShadow(
     return;
   }
 
-  const pluginsDir = path.join(path.resolve(__dirname, '../..'), 'plugins');
-  const tier = await seedRuleShadow(name, shadowFile, rulesTarget, devflowDir, pluginsDir);
+  const tier = await seedRuleShadow(name, shadowFile, rulesTarget, devflowDir);
 
   if (tier !== 'none') {
     p.log.success(`Shadowed ${color.cyan(name)}`);
@@ -267,14 +259,12 @@ export const rulesCommand = new Command('rules')
 
       const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
       const rulesMap = buildRulesMap(installedPlugins);
-      const pluginsDir = path.join(path.resolve(__dirname, '../..'), 'plugins');
-
       // Wipe stale rules from previously uninstalled plugins before re-installing.
       // Mirrors the init flow which always starts from a clean rules directory.
       await fs.rm(rulesTarget, { recursive: true, force: true });
       await fs.mkdir(rulesTarget, { recursive: true });
 
-      const outcomes = await installAllRules(rulesMap, pluginsDir, devflowDir, rulesTarget);
+      const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
 
       const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
       const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';

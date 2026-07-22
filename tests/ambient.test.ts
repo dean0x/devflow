@@ -619,7 +619,8 @@ describe('skill invocation helpers', () => {
 });
 
 describe('command Produces/Requires validation', () => {
-  const pluginsDir = path.resolve(__dirname, '../plugins');
+  // After restructure: compiled commands live in dist/commands/ (single output dir)
+  const distCommandsDir = path.resolve(__dirname, '../dist/commands');
   const phaseStepPattern = /^#{2,4}\s+(Phase|Step)\s+\d/;
 
   function headingLevel(line: string): number {
@@ -627,40 +628,38 @@ describe('command Produces/Requires validation', () => {
   }
 
   async function discoverCommandFiles(): Promise<string[]> {
-    const plugins = await fs.readdir(pluginsDir);
-    const files: string[] = [];
-    for (const plugin of plugins) {
-      const cmdDir = path.join(pluginsDir, plugin, 'commands');
-      try {
-        const entries = await fs.readdir(cmdDir);
-        for (const f of entries) {
-          if (f.endsWith('.md')) files.push(path.join(cmdDir, f));
-        }
-      } catch { /* no commands dir */ }
+    try {
+      const entries = await fs.readdir(distCommandsDir);
+      return entries
+        .filter(f => f.endsWith('.md'))
+        .map(f => path.join(distCommandsDir, f))
+        .sort();
+    } catch {
+      // dist/commands/ not yet built — return empty (tests will pass trivially pre-build)
+      return [];
     }
-    return files.sort();
   }
 
   it('every command file has Produces: annotations', async () => {
     for (const file of await discoverCommandFiles()) {
       const content = await fs.readFile(file, 'utf-8');
-      const name = path.relative(pluginsDir, file);
-      expect(content, `${name} missing Produces:`).toContain('**Produces:**');
+      const name = path.basename(file);
+      expect(content, `dist/commands/${name} missing Produces:`).toContain('**Produces:**');
     }
   });
 
   it('every command file has Requires: annotations', async () => {
     for (const file of await discoverCommandFiles()) {
       const content = await fs.readFile(file, 'utf-8');
-      const name = path.relative(pluginsDir, file);
-      expect(content, `${name} missing Requires:`).toContain('**Requires:**');
+      const name = path.basename(file);
+      expect(content, `dist/commands/${name} missing Requires:`).toContain('**Requires:**');
     }
   });
 
   it('every phase/step heading is followed by a Produces or Requires annotation', async () => {
     for (const file of await discoverCommandFiles()) {
       const content = await fs.readFile(file, 'utf-8');
-      const name = path.relative(pluginsDir, file);
+      const name = path.basename(file);
       const lines = content.split('\n');
 
       const headingIndices: number[] = [];

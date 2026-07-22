@@ -7,7 +7,7 @@ import {
   applyViewMode,
   stripViewMode,
   type ViewMode,
-} from '../src/cli/utils/flags.js';
+} from '../src/core/flags.js';
 
 describe('FLAG_REGISTRY', () => {
   it('has unique IDs', () => {

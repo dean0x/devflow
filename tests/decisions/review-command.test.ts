@@ -17,7 +17,7 @@ import {
   parseLearningLog,
   isLearningObservation,
   type LearningObservation,
-} from '../../src/cli/utils/observations.js';
+} from '../../src/core/observations.js';
 import { runHelper } from './learning-helpers.js';
 
 // Helper: serialize an array of observations to JSONL
@@ -104,7 +104,7 @@ describe('isLearningObservation v2', () => {
 // status changes live in tests/decisions/learning-curation.test.ts.
 describe('updateDecisionsStatus (removed in Phase 6)', () => {
   it('observation-io module does not export updateDecisionsStatus', async () => {
-    const mod = await import('../../src/cli/utils/observation-io.js');
+    const mod = await import('../../src/core/observation-io.js');
     expect((mod as Record<string, unknown>).updateDecisionsStatus).toBeUndefined();
   });
 });

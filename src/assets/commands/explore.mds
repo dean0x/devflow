@@ -1,0 +1,150 @@
+---
+description: Explore codebase with structured analysis and optional feature knowledge creation
+output-dir: dist/commands
+---
+@import { knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { decisions_load } from "./_partials/_decisions.mds"
+
+# Explore Command
+
+Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with optional feature knowledge created as a byproduct.
+
+## Usage
+
+```
+/explore "how does the auth system work"
+/explore "trace the request lifecycle from API to database"
+/explore "what patterns does the payments module use"
+```
+
+## Input
+
+`$ARGUMENTS` contains whatever follows `/explore`:
+- Area description: "how does the auth system work"
+- Flow question: "trace the request lifecycle"
+- Empty: use conversation context
+
+## Phases
+
+### Phase 1: Load Decisions (Orchestrator-Local)
+
+**Produces:** DECISIONS_CONTEXT
+
+{decisions_load()}
+
+The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
+
+**No up-front feature knowledge load** — explore investigation workers read code directly to avoid confirmation bias. Feature knowledge is only created as a write-back at the end, after exploration is complete.
+
+### Phase 2: Orient
+
+**Produces:** ORIENT_OUTPUT
+
+Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the exploration question:
+
+- File structure and module boundaries in the target area
+- Entry points and key abstractions
+- Related patterns and conventions
+
+### Phase 3: Explore
+
+**Produces:** EXPLORE_OUTPUT
+**Requires:** ORIENT_OUTPUT
+
+Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
+
+- **Flow explorer**: Trace the primary call chain end-to-end — entry point through to side effects
+- **Dependency explorer**: Map imports, shared types, module boundaries, and integration points
+- **Pattern explorer**: Identify recurring patterns, conventions, and architectural decisions in the area
+
+Adjust explorer focus based on the specific exploration question.
+
+### Phase 4: Synthesize
+
+**Produces:** MERGED_FINDINGS
+**Requires:** EXPLORE_OUTPUT
+
+Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined findings:
+
+- Merge overlapping discoveries from parallel explorers
+- Resolve any contradictions between explorer findings
+- Organize into the Output format below
+
+### Phase 5: Present
+
+**Requires:** MERGED_FINDINGS
+
+Main session reviews synthesis for:
+
+- **Gaps**: Areas the explorers missed or couldn't reach
+- **Surprises**: Unexpected patterns, hidden dependencies, non-obvious design choices
+- **Depth**: Areas where the user might want to drill deeper
+
+Present findings to user. Use AskUserQuestion to offer focused follow-up exploration.
+
+### Phase 6: Suggest Feature Knowledge Creation (Conditional)
+
+**Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
+**Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
+
+1. Check if matching feature knowledge already exists by reading `\{worktree\}/.devflow/features/index.md` (or globbing frontmatter if absent). If covered → skip
+2. Use AskUserQuestion: "No feature knowledge exists for \{explored area\}. Create one to capture these patterns?"
+3. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
+4. If user accepts: proceed with write-back below.
+
+{knowledge_writeback()}
+
+Set FEATURE_KNOWLEDGE_STATUS = created (if agent spawned) or skipped.
+
+**Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
+
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
+## Output
+
+Structured exploration findings with concrete code references:
+
+- Scope (what was explored and boundaries)
+- Architecture Map (modules, layers, key abstractions with file:line)
+- Flow Trace (call chain from entry to exit with file:line at each step)
+- Integration Points (module boundaries, shared types, external dependencies)
+- Patterns (recurring conventions, design decisions observed)
+- Key Insights (non-obvious findings, surprises, potential concerns)
+
+## Architecture
+
+```
+/explore (orchestrator)
+│
+├─ Phase 1: Load Decisions (Orchestrator-Local)
+│
+├─ Phase 2: Orient
+│  └─ Skimmer agent (codebase overview)
+│
+├─ Phase 3: Parallel exploration
+│  └─ 2-3 Explore agents (flow, dependency, pattern) in single message
+│
+├─ Phase 4: Synthesize
+│  └─ Synthesizer aggregates findings in exploration mode
+│
+├─ Phase 5: Present findings with drill-down offer
+│
+└─ Phase 6: Suggest feature knowledge creation (conditional)
+   └─ Knowledge agent write-back (if user accepts and no existing feature knowledge)
+```
+
+## Principles
+
+1. **Structure over browsing** - Every claim must cite file:line references
+2. **Parallel execution** - All explorers run simultaneously for speed
+3. **Knowledge-informed** - Prior decisions guide where to look; NO pre-loaded feature knowledge in sub-agents (avoids confirmation bias)
+4. **User-driven depth** - Present findings, then offer drill-down into specific areas
+
+## Error Handling
+
+- If Skimmer returns no relevant files: report "No files found matching exploration scope"
+- If all explorers error: report partial findings from any that succeeded, note gaps
+- If an explorer errors: continue with remaining results, note the gap
+- If feature knowledge creation fails: log failure, report exploration results normally

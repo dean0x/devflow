@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings } from '../src/cli/commands/uninstall.js';
-import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
+import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
@@ -419,5 +419,34 @@ describe('computeShadowLeftoverWarnings', () => {
       devflowDir,
     });
     expect(result).toHaveLength(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Legacy plugin name resolution via shared parsePluginSelection
+//
+// Before this fix uninstall's --plugin flag had its own inline parser that
+// did NOT apply LEGACY_PLUGIN_NAMES, so `--plugin frontend-design` reported
+// "Unknown plugin" instead of resolving to devflow-ui-design. avoids PF-012
+// ---------------------------------------------------------------------------
+
+describe('legacy plugin name resolution in uninstall (parsePluginSelection shared from plugins.ts)', () => {
+  it('legacy name frontend-design resolves to devflow-ui-design and flows into computeAssetsToRemove', () => {
+    const { selected, invalid } = parsePluginSelection('frontend-design', DEVFLOW_PLUGINS); // legacy → devflow-ui-design
+    expect(selected).toEqual(['devflow-ui-design']);
+    expect(invalid).toEqual([]);
+    // Verify the resolved name maps to a real plugin and flows into computeAssetsToRemove
+    const uiDesignPlugin = DEVFLOW_PLUGINS.find(pl => pl.name === 'devflow-ui-design');
+    expect(uiDesignPlugin).toBeDefined();
+    const { commands } = computeAssetsToRemove([uiDesignPlugin!], DEVFLOW_PLUGINS);
+    expect(commands).toEqual([]); // devflow-ui-design has no commands (skills-only plugin)
+  });
+
+  it('legacy name devflow-specify resolves to devflow-plan in the registry', () => {
+    const { selected, invalid } = parsePluginSelection('devflow-specify', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-plan']);
+    expect(invalid).toEqual([]);
+    const planPlugin = DEVFLOW_PLUGINS.find(pl => pl.name === 'devflow-plan');
+    expect(planPlugin).toBeDefined();
   });
 });

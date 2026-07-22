@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '../src/cli/hud/render.js';
+import { render } from '../src/hud/render.js';
 import {
   HUD_COMPONENTS,
   loadConfig,
   resolveComponents,
-} from '../src/cli/hud/config.js';
-import { stripAnsi } from '../src/cli/hud/colors.js';
-import type { GatherContext, HudConfig, ComponentId } from '../src/cli/hud/types.js';
+} from '../src/hud/config.js';
+import { stripAnsi } from '../src/hud/colors.js';
+import type { GatherContext, HudConfig, ComponentId } from '../src/hud/types.js';
 
 function makeCtx(
   overrides: Partial<GatherContext> & { config?: Partial<HudConfig> & { components?: ComponentId[] } } = {},

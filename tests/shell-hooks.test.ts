@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
 function localDateString(): string {
   const d = new Date();
@@ -454,7 +454,7 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
 
 describe('preamble — orchestrator charter mode', () => {
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
-  const PREAMBLE_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'preamble');
+  const PREAMBLE_SRC = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'preamble');
 
   let tmpDir: string;   // has a .git dir → git gate passes
   let noGitDir: string; // plain dir, no .git → git gate rejects
@@ -831,7 +831,7 @@ describe('preamble — orchestrator charter mode', () => {
       // Note: `.git` appears as a path string literal ("$_dir/.git") which is fine —
       // we check for `git` as a command invocation (git followed by whitespace+word),
       // not as a path component.
-      const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker'), 'utf-8');
+      const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'git-marker'), 'utf-8');
       const codeLines = src
         .split('\n')
         .filter((line) => !line.trimStart().startsWith('#'))
@@ -888,7 +888,7 @@ describe('preamble — orchestrator charter mode', () => {
 // =============================================================================
 
 describe('git-marker helper: df_has_git_marker', () => {
-  const GIT_MARKER_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'git-marker');
+  const GIT_MARKER_SRC = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'git-marker');
 
   /**
    * Source git-marker and run df_has_git_marker on the given directory.
@@ -974,7 +974,7 @@ describe('git-marker helper: df_has_git_marker', () => {
 
 describe('session-start-orchestrator', () => {
   const ORCHESTRATOR_HOOK = path.join(HOOKS_DIR, 'session-start-orchestrator');
-  const CHARTER_FILE = path.resolve(__dirname, '..', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md');
+  const CHARTER_FILE = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md');
 
   let tmpDir: string;   // has a .git dir
   let homeDir: string;

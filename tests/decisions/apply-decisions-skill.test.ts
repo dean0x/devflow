@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'fs'
 import * as path from 'path'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const SKILL_PATH = path.join(ROOT, 'shared/skills/apply-decisions/SKILL.md')
+const SKILL_PATH = path.join(ROOT, 'src/assets/skills/apply-decisions/SKILL.md')
 
 function loadSkill(): string {
   return readFileSync(SKILL_PATH, 'utf8')
@@ -14,7 +14,7 @@ function loadSkill(): string {
 // -------------------------------------------------------------------------
 
 describe('apply-decisions skill — file existence', () => {
-  it('shared/skills/apply-decisions/SKILL.md exists', () => {
+  it('src/assets/skills/apply-decisions/SKILL.md exists', () => {
     expect(existsSync(SKILL_PATH)).toBe(true)
   })
 })

@@ -1,0 +1,44 @@
+#!/bin/bash
+# mkdir-based locking, portable across BSD (macOS) and GNU (Linux) stat.
+#
+# Source-order requirement: source get-mtime (src/assets/scripts/hooks/get-mtime) BEFORE
+# sourcing this file so get_mtime() is defined and stale-lock detection uses a
+# real mtime. If get_mtime is not yet defined when a lock_dir already exists,
+# this file falls back to treating the lock as maximally stale (immediate
+# break) rather than crashing on a BSD-only stat flag — safe-by-construction,
+# never a hard failure, but source get-mtime first for accurate staleness.
+
+learning_lock_acquire() {
+  local lock_dir="$1"
+  local timeout="${2:-3}"
+  local stale_threshold=30
+  local waited=0
+
+  # Break stale locks
+  if [ -d "$lock_dir" ]; then
+    local lock_age lock_mtime
+    if declare -F get_mtime >/dev/null 2>&1; then
+      lock_mtime=$(get_mtime "$lock_dir")
+    else
+      lock_mtime=""
+    fi
+    lock_mtime="${lock_mtime:-0}"
+    lock_age=$(( $(date +%s) - lock_mtime ))
+    if [ "$lock_age" -gt "$stale_threshold" ]; then
+      rmdir "$lock_dir" 2>/dev/null || true
+    fi
+  fi
+
+  while [ "$waited" -lt "$timeout" ]; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  return 1
+}
+
+learning_lock_release() {
+  rmdir "$1" 2>/dev/null || true
+}

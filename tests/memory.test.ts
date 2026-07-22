@@ -495,7 +495,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
 
 describe('session-start-memory hook integration', () => {
   let tmpDir: string;
-  const hookPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'session-start-memory');
+  const hookPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'session-start-memory');
 
   function runHook(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -540,7 +540,7 @@ describe('session-start-memory hook integration', () => {
 
 describe('session-start-context hook integration', () => {
   let tmpDir: string;
-  const hookPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'session-start-context');
+  const hookPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'session-start-context');
 
   function runHook(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {

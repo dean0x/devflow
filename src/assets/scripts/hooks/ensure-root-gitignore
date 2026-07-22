@@ -1,0 +1,92 @@
+#!/bin/bash
+# ensure-root-gitignore — single source of truth for the project root .gitignore
+# rules that govern .devflow/.
+#
+# .devflow/ holds per-developer runtime state (memory, learning, docs, locks) —
+# local by default. The ONE exception is feature knowledge bases under
+# .devflow/features/: index.md and every {slug}/KNOWLEDGE.md are shared via git
+# (tracked, then committed by the Knowledge agent at workflow end). Everything
+# else under .devflow/features/ stays local. A user opts back out by re-adding
+# `.devflow/features/` to their own .gitignore.
+#
+# Re-including files under an ignored tree requires un-ignoring each level with a
+# `dir/*` + `!dir/keep` pair: a bare `.devflow/` excludes the directory outright,
+# so git never descends and later negations are dead. Hence the multi-line block.
+#
+# Sourced by:
+#   - ensure-devflow-init (reached via the memory/learning hooks)
+#   - session-start-context (always-on, memory-independent — covers memory-off
+#     projects that still use learning/knowledge)
+# Both reach this one writer so the rule is applied identically everywhere; this
+# decouples git-tracking of .devflow/ from any single feature toggle (avoids PF-014).
+#
+# Idempotent and O(1) after the first run via the .root-gitignore-configured-v2
+# marker. The marker is versioned: bumping it (v1 → v2) forces existing installs
+# to re-run once and upgrade their legacy wholesale `.devflow/` entry to the
+# features carve-out.
+#
+# Usage: source ensure-root-gitignore "$PROJECT_ROOT"
+# Sourced helper: uses `return` (never exit), _ERG_-prefixed locals (never clobbers
+# caller vars).
+
+[ -z "$1" ] && return 1
+
+_ERG_DEVFLOW_DIR="$1/.devflow"
+_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2"
+
+# Fast-path: the marker means the root .gitignore was already configured (current
+# format) for this project.
+[ -f "$_ERG_MARKER" ] && return 0
+
+# The marker lives under .devflow/, so the directory must exist before we touch it.
+# (ensure-devflow-init creates it earlier; session-start-context may reach here first.)
+mkdir -p "$_ERG_DEVFLOW_DIR" 2>/dev/null || return 1
+
+_ERG_GITIGNORE="$1/.gitignore"
+
+# The carve-out block, built once into _ERG_BLOCK (emitted on create and append).
+# Keep byte-identical to ensureDevflowGitignore in src/targets/claude-code/post-install.ts.
+printf -v _ERG_BLOCK '%s\n' \
+  '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
+  '# Exception: feature knowledge bases under .devflow/features/ are shared via git —' \
+  '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else' \
+  '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`' \
+  '# to your own .gitignore.' \
+  '.devflow/*' \
+  '!.devflow/features/' \
+  '.devflow/features/*' \
+  '!.devflow/features/index.md' \
+  '!.devflow/features/*/' \
+  '.devflow/features/*/*' \
+  '!.devflow/features/*/KNOWLEDGE.md'
+
+_ERG_OK=0
+if [ ! -f "$_ERG_GITIGNORE" ]; then
+  # No .gitignore yet — create it with the block.
+  printf '%s' "$_ERG_BLOCK" > "$_ERG_GITIGNORE" && _ERG_OK=1
+elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
+  # Carve-out already present — nothing to do.
+  _ERG_OK=1
+elif grep -qE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
+  # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
+  # comment, then append the carve-out block. Portable (grep filter + mv; no sed -i,
+  # which differs on BSD/GNU). An empty filter result is fine — the block is appended
+  # regardless; a leading blank is added only when prior content survived.
+  _ERG_TMP="$_ERG_GITIGNORE.devflow-tmp.$$"
+  grep -vE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE" 2>/dev/null \
+    | grep -vF '# Devflow runtime data (local by default; remove to share via git)' \
+    > "$_ERG_TMP" 2>/dev/null
+  { [ -s "$_ERG_TMP" ] && printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_TMP" \
+    && mv "$_ERG_TMP" "$_ERG_GITIGNORE" && _ERG_OK=1
+  [ "$_ERG_OK" = 1 ] || rm -f "$_ERG_TMP" 2>/dev/null
+elif grep -qE '^/\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
+  # User-authored `/.devflow/` (leading slash) — respect it; don't force the carve-out.
+  _ERG_OK=1
+else
+  # .gitignore exists but has no Devflow entry — append the block.
+  { printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_GITIGNORE" && _ERG_OK=1
+fi
+
+# On success, stamp the current-format marker and drop the legacy one.
+[ "$_ERG_OK" = 1 ] && { touch "$_ERG_MARKER"; rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null; }
+return 0

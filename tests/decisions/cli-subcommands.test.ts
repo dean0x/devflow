@@ -14,19 +14,19 @@ import * as os from 'os';
 // Mocks — all set up before any imports from the module under test.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/cli/utils/learning-tuning-config.js', () => ({
+vi.mock('../../src/core/learning-tuning-config.js', () => ({
   loadLearningTuningConfig: vi.fn(() => ({
     model: 'opus',
     debug: false,
   })),
 }));
 
-vi.mock('../../src/cli/utils/paths.js', () => ({
+vi.mock('../../src/targets/claude-code/claude-paths.js', () => ({
   getClaudeDirectory: vi.fn(() => '/home/user/.claude'),
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
 }));
 
-vi.mock('../../src/cli/utils/git.js', () => ({
+vi.mock('../../src/core/git.js', () => ({
   getGitRoot: vi.fn(),
 }));
 
@@ -50,8 +50,8 @@ import {
   parseLearningLog,
   loadAndCountObservations,
   type LearningObservation,
-} from '../../src/cli/utils/observations.js';
-import { getGitRoot } from '../../src/cli/utils/git.js';
+} from '../../src/core/observations.js';
+import { getGitRoot } from '../../src/core/git.js';
 import { learningCommand } from '../../src/cli/commands/learning.js';
 import * as p from '@clack/prompts';
 import {
@@ -60,7 +60,7 @@ import {
   getFeatureConfigPath,
   getPendingTurnsPath,
   getDecisionsLogPath,
-} from '../../src/cli/utils/project-paths.js';
+} from '../../src/core/project-paths.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

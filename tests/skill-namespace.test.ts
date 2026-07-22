@@ -7,9 +7,9 @@ import {
   prefixSkillName,
   unprefixSkillName,
   getAllSkillNames,
-  LEGACY_SKILL_NAMES,
-} from '../src/cli/plugins.js';
-import { installViaFileCopy, type InstallReport, type Spinner } from '../src/cli/utils/installer.js';
+} from '../src/core/plugins.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
+import { installViaFileCopy, type InstallReport, type Spinner } from '../src/targets/claude-code/installer.js';
 import { hasShadow } from '../src/cli/commands/skills.js';
 
 /** No-op spinner for tests */
@@ -187,37 +187,23 @@ describe('hasShadow normalizes prefixed names', () => {
   });
 });
 
+// installViaFileCopy skill lifecycle
+// After restructure: skills are read from skillsDir() = src/assets/skills/ (no pluginsDir).
+// Using a real skill name ('security') that exists in src/assets/skills/security/.
+
 describe('installViaFileCopy skill lifecycle', () => {
   let claudeDir: string;
   let devflowDir: string;
-  let pluginsDir: string;
-  let rootDir: string;
-  const testSkillName = 'test-skill';
+  // 'security' exists in src/assets/skills/security/SKILL.md — used as a real source
+  const testSkillName = 'security';
 
-  /** Seed a minimal plugin with one skill in the build output directory */
-  async function seedPlugin(skillName: string, content: string): Promise<void> {
-    const pluginName = 'devflow-test-plugin';
-    const skillDir = path.join(pluginsDir, pluginName, 'skills', skillName);
-    await fs.mkdir(skillDir, { recursive: true });
-    await fs.writeFile(path.join(skillDir, 'SKILL.md'), content);
-  }
-
-  /** Run installViaFileCopy with a single test skill */
+  /** Run installViaFileCopy with the security skill (real source, no seedPlugin needed) */
   async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<InstallReport> {
-    const pluginDef = {
-      name: 'devflow-test-plugin',
-      description: 'test',
-      commands: [],
-      agents: [],
-      skills: [testSkillName],
-    };
     return installViaFileCopy({
-      plugins: [pluginDef],
+      plugins: [],
       claudeDir,
-      pluginsDir,
-      rootDir,
       devflowDir,
-      skillsMap: new Map([[testSkillName, 'devflow-test-plugin']]),
+      skillsMap: new Map([[testSkillName, 'devflow-core-skills']]),
       agentsMap: new Map(),
       isPartialInstall: opts?.isPartialInstall ?? false,
       spinner: noopSpinner,
@@ -227,24 +213,22 @@ describe('installViaFileCopy skill lifecycle', () => {
   beforeEach(async () => {
     claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-claude-'));
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-home-'));
-    pluginsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-plugins-'));
-    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-root-'));
   });
 
   afterEach(async () => {
     await fs.rm(claudeDir, { recursive: true, force: true });
     await fs.rm(devflowDir, { recursive: true, force: true });
-    await fs.rm(pluginsDir, { recursive: true, force: true });
-    await fs.rm(rootDir, { recursive: true, force: true });
   });
 
-  it('installs skill to prefixed path', async () => {
-    await seedPlugin(testSkillName, 'source content');
+  it('installs skill to prefixed path from src/assets/skills/', async () => {
     await runInstall();
 
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
+    const stat = await fs.stat(installed);
+    expect(stat.isFile(), `devflow:${testSkillName}/SKILL.md should be installed`).toBe(true);
+    // Verify it has real content (not an empty placeholder)
     const content = await fs.readFile(installed, 'utf-8');
-    expect(content).toBe('source content');
+    expect(content.length, 'installed SKILL.md should have non-empty content').toBeGreaterThan(10);
   });
 
   it('removes legacy unprefixed dir during cleanup', async () => {
@@ -254,7 +238,6 @@ describe('installViaFileCopy skill lifecycle', () => {
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
 
-    await seedPlugin(testSkillName, 'new content');
     await runInstall();
 
     // Legacy dir for real skill should be gone (cleaned by DEVFLOW_PLUGINS loop)
@@ -269,51 +252,44 @@ describe('installViaFileCopy skill lifecycle', () => {
     await fs.writeFile(path.join(oldPrefixed, 'SKILL.md'), 'old');
     await fs.writeFile(path.join(oldPrefixed, 'stale-file.md'), 'should be removed');
 
-    await seedPlugin(testSkillName, 'test content');
     await runInstall();
 
     // Cleanup should have wiped the old prefixed dir for real skill
-    // (it gets reinstalled by the real plugin if available, but in our temp pluginsDir
-    // the real plugin doesn't exist, so no reinstall — dir should be gone)
+    // (it gets reinstalled from src/assets/skills/ if it exists there, but stale-file.md won't be)
     await expect(fs.stat(path.join(oldPrefixed, 'stale-file.md'))).rejects.toThrow();
   });
 
   it('shadowed skill installs shadow content to prefixed path', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
     // Create shadow override at ~/.devflow/skills/{bare-name}/
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
-    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'shadow override');
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), '# Shadow Override');
 
     await runInstall();
 
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
     const content = await fs.readFile(installed, 'utf-8');
-    expect(content).toBe('shadow override');
+    expect(content).toBe('# Shadow Override');
   });
 
   it('empty shadow dir falls back to source', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
-    // Create empty shadow directory
+    // Create empty shadow directory (no SKILL.md inside)
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
 
     const report = await runInstall();
 
+    // Source from src/assets/skills/security/SKILL.md should be installed
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
-    const content = await fs.readFile(installed, 'utf-8');
-    expect(content).toBe('source content');
-    // empty shadow dir → missing-skill-md skip reported
+    const stat = await fs.stat(installed);
+    expect(stat.isFile()).toBe(true);
+    // empty shadow dir → missing-skill-md skip reported, NOT in shadowedSkills
     expect(report.shadowedSkills).not.toContain(testSkillName);
     expect(report.skippedShadows).toHaveLength(1);
     expect(report.skippedShadows[0]).toMatchObject({ kind: 'skill', name: testSkillName, reason: 'missing-skill-md' });
   });
 
   it('shadow dir with only notes.md (no SKILL.md) → source installed + skip reported', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
     await fs.writeFile(path.join(shadowDir, 'notes.md'), 'my notes');
@@ -321,35 +297,31 @@ describe('installViaFileCopy skill lifecycle', () => {
     const report = await runInstall();
 
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
-    const content = await fs.readFile(installed, 'utf-8');
-    expect(content).toBe('source content');
+    const stat = await fs.stat(installed);
+    expect(stat.isFile()).toBe(true);
     expect(report.skippedShadows).toHaveLength(1);
     expect(report.skippedShadows[0]).toMatchObject({ kind: 'skill', name: testSkillName, reason: 'missing-skill-md' });
   });
 
   it('shadow dir with subdirectory: shadow content copied fully to prefixed path', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(path.join(shadowDir, 'references'), { recursive: true });
-    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'shadow override');
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), '# Shadow Override');
     await fs.writeFile(path.join(shadowDir, 'references', 'extra.md'), 'extra');
 
     const report = await runInstall();
 
     const skillTarget = path.join(claudeDir, 'skills', `devflow:${testSkillName}`);
-    expect(await fs.readFile(path.join(skillTarget, 'SKILL.md'), 'utf-8')).toBe('shadow override');
+    expect(await fs.readFile(path.join(skillTarget, 'SKILL.md'), 'utf-8')).toBe('# Shadow Override');
     expect(await fs.readFile(path.join(skillTarget, 'references', 'extra.md'), 'utf-8')).toBe('extra');
     expect(report.shadowedSkills).toContain(testSkillName);
     expect(report.skippedShadows).toHaveLength(0);
   });
 
   it('valid shadow → name reported in shadowedSkills', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
-    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'shadow content');
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), '# Shadow Content');
 
     const report = await runInstall();
 
@@ -358,8 +330,6 @@ describe('installViaFileCopy skill lifecycle', () => {
   });
 
   it('no shadow → empty report fields', async () => {
-    await seedPlugin(testSkillName, 'source content');
-
     const report = await runInstall();
 
     expect(report.shadowedSkills).toHaveLength(0);
@@ -374,14 +344,14 @@ describe('installViaFileCopy skill lifecycle', () => {
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
 
-    await seedPlugin(testSkillName, 'new content');
     await runInstall({ isPartialInstall: true });
 
     // Legacy bare-named dir should be gone (skill cleanup always runs)
     await expect(fs.stat(legacyDir)).rejects.toThrow();
-    // Prefixed dir for test skill should be installed
+    // Prefixed dir for test skill should be installed from src/assets/skills/
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
-    expect(await fs.readFile(installed, 'utf-8')).toBe('new content');
+    const stat = await fs.stat(installed);
+    expect(stat.isFile()).toBe(true);
   });
 
   it('partial install preserves commands and agents dirs', async () => {
@@ -390,7 +360,6 @@ describe('installViaFileCopy skill lifecycle', () => {
     await fs.mkdir(commandsDir, { recursive: true });
     await fs.writeFile(path.join(commandsDir, 'existing.md'), 'keep me');
 
-    await seedPlugin(testSkillName, 'content');
     await runInstall({ isPartialInstall: true });
 
     // Commands dir should still exist (only wiped on full install)
@@ -398,31 +367,29 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(content).toBe('keep me');
   });
 
-  it('full shadow cycle: install → shadow → reinstall uses shadow', async () => {
-    await seedPlugin(testSkillName, 'v1 source');
-
-    // First install: source content
+  it('full shadow cycle: install → shadow → reinstall uses shadow → remove shadow → source wins', async () => {
+    // First install: source from src/assets/skills/security/SKILL.md
     await runInstall();
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
-    expect(await fs.readFile(installed, 'utf-8')).toBe('v1 source');
+    const sourceContent = await fs.readFile(installed, 'utf-8');
+    expect(sourceContent.length).toBeGreaterThan(10);
 
     // User creates shadow override
     const shadowDir = path.join(devflowDir, 'skills', testSkillName);
     await fs.mkdir(shadowDir, { recursive: true });
-    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), 'user customization');
+    await fs.writeFile(path.join(shadowDir, 'SKILL.md'), '# User Customization');
 
-    // Source gets updated
-    await seedPlugin(testSkillName, 'v2 source');
-
-    // Second install: shadow wins over updated source
+    // Second install: shadow wins over source
     await runInstall();
-    expect(await fs.readFile(installed, 'utf-8')).toBe('user customization');
+    expect(await fs.readFile(installed, 'utf-8')).toBe('# User Customization');
 
     // User removes shadow
     await fs.rm(shadowDir, { recursive: true, force: true });
 
-    // Third install: falls back to latest source
+    // Third install: falls back to source
     await runInstall();
-    expect(await fs.readFile(installed, 'utf-8')).toBe('v2 source');
+    const afterRemove = await fs.readFile(installed, 'utf-8');
+    expect(afterRemove).not.toBe('# User Customization');
+    expect(afterRemove.length).toBeGreaterThan(10);
   });
 });

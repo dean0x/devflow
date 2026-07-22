@@ -20,7 +20,7 @@ const {
   formatPitfallBody,
   buildTldrLine,
   buildIndexContent,
-} = require(path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')) as {
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
   formatPitfallBody: (row: Record<string, unknown>) => string;
@@ -143,12 +143,12 @@ describe('formatPitfallBody', () => {
       anchor_id: 'PF-007',
       pattern: 'Editing installed hook scripts directly',
       id: 'obs_n4rs8t',
-      details: 'area: scripts/hooks/; issue: edits to installed copies; impact: silently overwritten; resolution: edit source + rebuild + reinstall',
+      details: 'area: src/assets/scripts/hooks/; issue: edits to installed copies; impact: silently overwritten; resolution: edit source + rebuild + reinstall',
     };
     const result = formatPitfallBody(row);
 
     expect(result).toMatch(/^\n## PF-007: Editing installed hook scripts directly\n\n/);
-    expect(result).toContain('- **Area**: scripts/hooks/\n');
+    expect(result).toContain('- **Area**: src/assets/scripts/hooks/\n');
     expect(result).toContain('- **Issue**: edits to installed copies\n');
     expect(result).toContain('- **Impact**: silently overwritten\n');
     expect(result).toContain('- **Resolution**: edit source + rebuild + reinstall\n');
@@ -252,8 +252,8 @@ describe('buildTldrLine', () => {
 // ---------------------------------------------------------------------------
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/decisions/decisions.md',
-  pitfallsFilePath:  '/project/.devflow/decisions/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/learning/decisions.md',
+  pitfallsFilePath:  '/project/.devflow/learning/pitfalls.md',
 };
 
 function makeAdrRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -274,7 +274,7 @@ function makePfRow(overrides: Record<string, unknown> = {}): Record<string, unkn
     type: 'pitfall',
     anchor_id: 'PF-002',
     pattern: 'Editing installed scripts directly',
-    details: 'area: scripts/hooks/; issue: overwritten on reinstall; impact: lost; resolution: rebuild',
+    details: 'area: src/assets/scripts/hooks/; issue: overwritten on reinstall; impact: lost; resolution: rebuild',
     ...overrides,
   };
 }
@@ -300,7 +300,7 @@ describe('buildIndexContent', () => {
     expect(result).toContain('PF-002');
     expect(result).toContain('Editing installed scripts directly');
     expect(result).toContain('[Active]');
-    expect(result).toContain('scripts/hooks/');
+    expect(result).toContain('src/assets/scripts/hooks/');
     // No decisions block
     expect(result).not.toMatch(/^Decisions/m);
   });
@@ -425,7 +425,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 
-const JSON_HELPER = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
+const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
 describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
   it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
@@ -487,7 +487,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
       last_seen: '2026-01-02T00:00:00Z',
       status: 'observing',
       evidence: [],
-      details: 'area: scripts/hooks/; issue: changes overwritten on reinstall; impact: lost changes; resolution: edit source + rebuild',
+      details: 'area: src/assets/scripts/hooks/; issue: changes overwritten on reinstall; impact: lost changes; resolution: edit source + rebuild',
       quality_ok: true,
     });
 
@@ -504,7 +504,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
       // Heading format
       expect(written).toContain('\n## PF-001: Editing installed files directly\n');
       // Area present, NO Date
-      expect(written).toContain('- **Area**: scripts/hooks/');
+      expect(written).toContain('- **Area**: src/assets/scripts/hooks/');
       expect(written).not.toContain('**Date**');
       // Status
       expect(written).toContain('- **Status**: Active\n');
@@ -531,13 +531,13 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 // Learning agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
 // These lightweight checks verify that the Learning agent instructions
-// (shared/agents/learning.md) contain the required creation-bar elements. They do
+// (src/assets/agents/learning.md) contain the required creation-bar elements. They do
 // not test LLM judgment — that is validated by the Tester agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 
 describe('Learning agent creation-bar contract', () => {
-  const AGENT_PATH = path.join(ROOT, 'shared/agents/learning.md');
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
 
   let agentContent: string;
   beforeAll(() => {

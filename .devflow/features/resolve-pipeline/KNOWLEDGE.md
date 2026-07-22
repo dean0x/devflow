@@ -3,7 +3,7 @@ feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
 description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triager disposition rules, adjusting Coder operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, or understanding how DIFF_FILES flows from git validate-branch into blast-radius triage. Keywords: resolve, triager, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt."
 category: architecture
-directories: [commands/resolve.mds, shared/agents/triager.md, shared/agents/coder.md, plugins/devflow-resolve, commands/code-review.mds]
+directories: [src/assets/commands/resolve.mds, src/assets/agents/triager.md, src/assets/agents/coder.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
 updated: 2026-07-08
 ---
@@ -30,7 +30,7 @@ Agents in the pipeline:
 | Simplifier | sonnet | refine changed code after fixes |
 | Validator | **haiku** | build/typecheck/lint/test gate |
 
-Plugin registry (`plugins.ts`, `plugin.json`, tests) must be triple-consistent: `agents: [git, triager, coder, simplifier, validator]`.
+Plugin registry (`DEVFLOW_PLUGINS` in `plugins.ts`) and its tests (`tests/registry-integrity.test.ts`) must stay consistent: `agents: [git, triager, coder, simplifier, validator]`.
 
 ## Component Architecture
 
@@ -192,12 +192,12 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 ## Key Files
 
-- `commands/resolve.mds` — MDS source for /resolve orchestration command (10-phase pipeline); compiled to `plugins/devflow-resolve/commands/`
-- `shared/agents/triager.md` — Triager agent (opus): blast-radius disposition matrix, evidence rules, verdict ledger format
-- `shared/agents/coder.md` — Coder agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
-- `plugins/devflow-resolve/.claude-plugin/plugin.json` — Plugin manifest: agents registry `[git, triager, coder, simplifier, validator]`
-- `src/cli/plugins.ts` — `LEGACY_AGENT_NAMES` includes `resolver` → removed from installs on `devflow init`
-- `commands/code-review.mds` — Contains convergence parser that reads `resolution-summary.md` Statistics rows and section headings
+- `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (10-phase pipeline); compiled to `dist/commands/`
+- `src/assets/agents/triager.md` — Triager agent (opus): blast-radius disposition matrix, evidence rules, verdict ledger format
+- `src/assets/agents/coder.md` — Coder agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
+- `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triager, coder, simplifier, validator]`
+- `src/core/plugins.ts` — `LEGACY_AGENT_NAMES` includes `resolver` → removed from installs on `devflow init`
+- `src/assets/commands/code-review.mds` — Contains convergence parser that reads `resolution-summary.md` Statistics rows and section headings
 
 ## Related
 

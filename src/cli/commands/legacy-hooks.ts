@@ -1,4 +1,4 @@
-import type { Settings, HookMatcher } from '../utils/hooks.js';
+import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
 
 // ─── Dream worker hook cleanup ──────────────────────────────────────────────
 //

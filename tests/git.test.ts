@@ -25,7 +25,7 @@ vi.mock('util', async (importOriginal) => {
 });
 
 import { exec } from 'child_process';
-import { getGitRoot } from '../src/cli/utils/git.js';
+import { getGitRoot } from '../src/core/git.js';
 
 const mockedExec = vi.mocked(exec);
 

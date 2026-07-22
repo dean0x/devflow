@@ -1,0 +1,162 @@
+---
+description: Full-pipeline wave driver — sequence dynamic-tickets → dynamic-plan → dynamic-build with human gates between runs
+argument-hint: "[initiative]"
+output-dir: dist/commands
+---
+@import { authoring_preamble } from "./_partials/_preamble.mds"
+
+{authoring_preamble()}
+
+---
+
+## dynamic-wave — orchestrate the full delivery pipeline with human gates
+
+This command is a **thin driver** that sequences the three pipeline commands with human review gates between each run. It does NOT author a single large workflow; it runs each command in turn and uses `AskUserQuestion` between them.
+
+**The gate structure is the point.** Per §11 (F4), a workflow cannot pause mid-run — human gates live between workflow runs, not inside them. This driver IS those gates.
+
+```
+/devflow:dynamic-tickets   →   [gate: review the roadmap]
+/devflow:dynamic-plan      →   [gate: review DECISIONS-NEEDED.md]
+/devflow:dynamic-build     →   [gate: review the merged integration result]
+```
+
+The driver does NOT run the internals of any command — it orchestrates at the command level only.
+
+---
+
+### Preflight checks
+
+Before starting, verify:
+
+1. **An initiative is provided.** If the user only typed `/devflow:dynamic-wave` with no input, ask: "What initiative or feature do you want to build? Provide a description or a spec document path."
+2. **GitHub:** check whether `gh` is authenticated (`gh auth status`). Note the result — `dynamic-tickets` and `dynamic-plan` handle the fallback paths; you don't need to block.
+3. **Preference profile:** check whether `~/.devflow/preference-profile.md` exists. If not, suggest: "Run /devflow:dynamic-profile first to generate a preference profile — it helps /devflow:dynamic-plan auto-resolve design decisions. You can skip this and proceed without one."
+
+---
+
+### Gate 0 — Initiative setup
+
+Before any commands run:
+
+1. Read the user's input (initiative description or spec doc path).
+2. Summarize what the wave will build in 2–3 sentences.
+3. Ask the user: "Ready to start the ticket-factory step? This will propose a ticket slate for your review."
+
+Do not proceed until the user confirms.
+
+---
+
+### Step 1 — Run /devflow:dynamic-tickets
+
+**Requires:** confirmed initiative input from Gate 0
+**Produces:** ticket files at `.devflow/docs/tickets/\{slug\}/\{ts\}/`, tracking-issue.md
+
+Invoke `/devflow:dynamic-tickets` with the initiative as input.
+
+The tickets command will:
+- Propose a candidate ticket slate (you, the main model, propose it before authoring the workflow)
+- Ask you to confirm the slate
+- Run the draft → review → revise → cross-critic → amend → tracking-issue pipeline
+- Write ticket files to `.devflow/docs/tickets/\{slug\}/\{ts\}/`
+
+**Gate 1 — Review the roadmap**
+
+After `/devflow:dynamic-tickets` completes:
+
+1. Tell the user where the ticket files and tracking issue were written.
+2. Ask: "Please review the ticket files and tracking issue. When you're ready to proceed to planning, say 'proceed' or point me to any changes you want made first."
+3. Wait for the user to confirm. Honor any edits they request before proceeding.
+
+---
+
+### Step 2 — Run /devflow:dynamic-plan
+
+**Requires:** ticket files from Step 1 (user-confirmed via Gate 1)
+**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/\{slug\}/\{ts\}/`
+
+Invoke `/devflow:dynamic-plan` with the tickets directory from Step 1 as input.
+
+The plan command will:
+- Read all tickets in parallel
+- Draft and challenge a plan per ticket (gaps, edge cases, side-effects)
+- Produce acceptance criteria + test plans (Gate 2 contract for `/devflow:dynamic-build`)
+- Run a cross-plan conflict critic
+- Auto-resolve decisions matching the preference profile
+- Write per-ticket plan files + `DECISIONS-NEEDED.md` to `.devflow/docs/design/\{slug\}/\{ts\}/`
+
+**Gate 2 — Review DECISIONS-NEEDED.md**
+
+After `/devflow:dynamic-plan` completes:
+
+1. Read `.devflow/docs/design/\{slug\}/\{ts\}/DECISIONS-NEEDED.md`.
+2. If it contains open decisions, surface each one to the user via `AskUserQuestion`:
+   - One question per decision, or group closely related ones.
+   - Include the context and options the plan command identified.
+3. Incorporate the user's answers (the user may edit plan files directly; note where they answered each decision).
+4. Ask: "Open decisions answered. Ready to proceed to the build step? This will implement, review, and verify all tickets."
+
+Do not proceed until the user confirms.
+
+---
+
+### Step 3 — Run /devflow:dynamic-build
+
+**Requires:** ticket files from Step 1 + per-ticket plans from Step 2 (open decisions answered via Gate 2)
+**Produces:** wave run report at `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`, integration branch `wave/\{slug\}`
+
+Invoke `/devflow:dynamic-build` in WAVE mode with:
+- The wave tickets (from Step 1)
+- The per-ticket plans and acceptance criteria (from Step 2)
+- The initiative name as the wave slug (for the integration branch `wave/\{slug\}`)
+
+The build command will:
+- Read wave tickets and reason about their dependency order
+- For each ready ticket: implement → Gate 1 → Gate 2 (Evaluator + Tester) → review loop
+- Merge completed tickets to the integration branch `wave/\{slug\}`
+- Quarantine and escalate tickets it cannot complete
+- Write a wave run report to `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`
+
+**Gate 3 — Review the merged integration result**
+
+After `/devflow:dynamic-build` completes:
+
+1. Report the wave run result: tickets merged, tickets escalated, overall verdict.
+2. If there are escalations: surface each one to the user via `AskUserQuestion`.
+3. Tell the user:
+
+   "The integration branch `wave/\{slug\}` is ready for your review. **You merge it to your main branch yourself — this pipeline never auto-merges to main.**
+
+   Next steps:
+   - Review the branch: `git diff main...wave/\{slug\}`
+   - Review the wave report: `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`
+   - If satisfied, merge: `git checkout main && git merge wave/\{slug\}`
+   - If there are escalations, resolve them and re-run `/devflow:dynamic-build` for the affected tickets."
+
+---
+
+### Artifact paths
+
+Tickets → `.devflow/docs/tickets/\{slug\}/\{ts\}/`
+
+Plans → `.devflow/docs/design/\{slug\}/\{ts\}/`
+
+Wave run report → `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`
+
+Honor the `WORKTREE_PATH` prefix when provided: all paths become `\{WORKTREE_PATH\}/.devflow/docs/...`.
+
+---
+
+### What this driver does NOT do
+
+- It does NOT author a single monolithic workflow containing all three steps.
+- It does NOT skip any gate — every gate requires explicit user confirmation.
+- It does NOT merge to `main` or `master` — the user merges themselves after reviewing.
+- It does NOT run the internals of the sub-commands; it only invokes them at the command level.
+- It does NOT bypass the ticket-slate confirmation gate in `/devflow:dynamic-tickets`.
+
+---
+
+### Maintenance note
+
+This driver sequences three commands by name. When those commands are renamed or their artifact paths change, update the paths referenced here. The gate structure (tickets → plan → build, with AskUserQuestion between each) is load-bearing and must not be collapsed into a single workflow. Per ADR-008 Iron Rule: the driver is instructions only — no deterministic orchestration logic is authored here.

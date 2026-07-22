@@ -24,11 +24,16 @@ After setup, Devflow commands (`/code-review`, `/implement`, etc.) are available
 
 ```
 devflow/
-├── shared/skills/       # 41 skills (single source of truth)
-├── shared/agents/       # 12 shared agents (single source of truth)
-├── plugins/devflow-*/   # 17 plugins (8 core + 9 optional)
-├── scripts/hooks/       # Working Memory hooks
-├── src/cli/             # TypeScript CLI (init, list, uninstall)
+├── src/assets/skills/   # 41 skills (single source of truth)
+├── src/assets/agents/   # 17 agents (single source of truth)
+├── src/assets/rules/    # 13 rules (single source of truth, flat .md files)
+├── src/assets/commands/ # Command sources (.mds + 2 static .md; partials in _partials/)
+├── src/assets/scripts/hooks/  # Working Memory + ambient hooks
+├── src/core/            # Shared CLI logic (DEVFLOW_PLUGINS registry, paths, flags, …)
+├── src/cli/             # TypeScript CLI command modules (init, list, uninstall, …)
+├── src/hud/             # HUD TypeScript source
+├── src/targets/claude-code/ # Claude Code install target (installer, hooks, templates)
+├── scripts/             # Dev tooling (build-mds.ts, bump-version.ts)
 ├── tests/               # Test suite (Vitest)
 └── docs/reference/      # Detailed reference docs
 ```
@@ -37,19 +42,17 @@ For the full file organization, see [docs/reference/file-organization.md](docs/r
 
 ## How to Add a New Skill
 
-1. Create `shared/skills/{skill-name}/SKILL.md` with frontmatter and Iron Law
-2. Add the skill name to the relevant plugin's `skills` array in `src/cli/plugins.ts`
-3. Run `npm run build` to distribute the skill to plugin directories
-4. Run `node dist/cli.js init` to install locally
+1. Create `src/assets/skills/{skill-name}/SKILL.md` with frontmatter and Iron Law
+2. Add the skill name to the relevant plugin entry's `skills` array in `src/core/plugins.ts`
+3. Run `node dist/cli.js init` to install locally (no rebuild required for skills)
 
 Skills are read-only (`allowed-tools: Read, Grep, Glob`) and auto-activate based on context. Target ~120-150 lines per SKILL.md with progressive disclosure to `references/` subdirectories.
 
 ## How to Add a New Agent
 
-1. Create `shared/agents/{agent-name}.md` with frontmatter
-2. Add the agent name to the relevant plugin's `agents` array in `src/cli/plugins.ts`
-3. Run `npm run build` to distribute the agent to plugin directories
-4. Run `node dist/cli.js init` to install locally
+1. Create `src/assets/agents/{agent-name}.md` with frontmatter
+2. Add the agent name to the relevant plugin entry's `agents` array in `src/core/plugins.ts`
+3. Run `node dist/cli.js init` to install locally (no rebuild required for agents)
 
 Agents target 50-150 lines depending on type (Utility 50-80, Worker 80-120).
 
@@ -57,11 +60,10 @@ Agents target 50-150 lines depending on type (Utility 50-80, Worker 80-120).
 
 See [docs/reference/adding-commands.md](docs/reference/adding-commands.md) for the full guide. The short version:
 
-1. Create a plugin directory under `plugins/devflow-{name}/`
-2. Add a `plugin.json` manifest declaring commands, agents, and skills
-3. Create command files in `plugins/devflow-{name}/commands/`
-4. Register the plugin in `DEVFLOW_PLUGINS` in `src/cli/plugins.ts`
-5. `npm run build && node dist/cli.js init`
+1. Create the command as a `.mds` (or `.md`) file in `src/assets/commands/`
+2. Run `npm run build:mds` to compile `.mds` → `dist/commands/`
+3. Add a new plugin entry to `DEVFLOW_PLUGINS` in `src/core/plugins.ts` with the command in its `commands` array
+4. Run `node dist/cli.js init` to install
 
 ## Running Tests
 
@@ -73,9 +75,9 @@ npm run test:watch    # Run tests in watch mode
 ## Build Commands
 
 ```bash
-npm run build          # Full build (TypeScript + skill/agent distribution)
+npm run build          # Full build (TypeScript + MDS command compilation)
 npm run build:cli      # TypeScript compilation only
-npm run build:plugins  # Skill/agent distribution only
+npm run build:mds      # Compile src/assets/commands/*.mds → dist/commands/
 ```
 
 ## Commit Conventions

@@ -1,7 +1,7 @@
 /**
  * tests/queue-append.test.ts
  *
- * Tests for scripts/hooks/queue-append — the shared dual-queue-append helper
+ * Tests for src/assets/scripts/hooks/queue-append — the shared dual-queue-append helper
  * used by capture-prompt, capture-turn, and capture-question.
  *
  * Harness note: queue_append_row/queue_append_both/queue_read_gates are bash
@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
+const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const QUEUE_APPEND = path.join(HOOKS_DIR, 'queue-append');
 
 /** Source the full dependency chain queue-append needs, then run `script`. */

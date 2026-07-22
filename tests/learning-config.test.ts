@@ -9,7 +9,7 @@ import {
   updateFeature,
   isFeatureEnabled,
   type FeatureConfig,
-} from '../src/cli/utils/feature-config.js';
+} from '../src/core/feature-config.js';
 
 describe('getConfigPath', () => {
   it('returns .devflow/config.json under project root', () => {

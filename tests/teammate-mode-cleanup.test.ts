@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stripDevflowTeammateModeFromJson,
-} from '../src/cli/utils/teammate-mode-cleanup.js';
+} from '../src/core/teammate-mode-cleanup.js';
 
 describe('stripDevflowTeammateModeFromJson (string pipeline)', () => {
   it('removes teammateMode when value is exactly "auto"', () => {

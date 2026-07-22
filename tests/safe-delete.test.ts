@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { detectPlatform, getSafeDeleteInfo, detectShell, getProfilePath, type Platform, type Shell } from '../src/cli/utils/safe-delete.js';
+import { detectPlatform, getSafeDeleteInfo, detectShell, getProfilePath, type Platform, type Shell } from '../src/core/safe-delete.js';
 import * as path from 'path';
 
 describe('detectPlatform', () => {

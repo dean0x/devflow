@@ -2,8 +2,8 @@ import { Command } from 'commander';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
-import { readManifest, syncManifestFeature } from '../utils/manifest.js';
+import { getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { readManifest, syncManifestFeature } from '../../core/manifest.js';
 import {
   mergeDenyList,
   stripUserDenyList,
@@ -13,13 +13,10 @@ import {
   installManagedSettings,
   loadTemplateDenyEntries,
   stripUserSecurityDenyList,
-} from '../utils/post-install.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
+} from '../../targets/claude-code/post-install.js';
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { promises as fs } from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getPackageRoot } from '../../core/paths.js';
 
 interface SecurityOptions {
   status?: boolean;
@@ -59,7 +56,7 @@ export const securityCommand = new Command('security')
     const claudeDir = getClaudeDirectory();
     const devflowDir = getDevFlowDirectory();
     const userSettingsPath = path.join(claudeDir, 'settings.json');
-    const rootDir = path.resolve(__dirname, '../..');
+    const rootDir = getPackageRoot();
 
     // ── Load current state ──────────────────────────────────────────────────
     let userSettingsJson: string | null = null;

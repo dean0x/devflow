@@ -3,13 +3,12 @@
 // Tests for render-decisions.cjs: golden, idempotency, round-trip, empty corpus,
 // --check exit codes, and AC-P1 (O(N) performance, ratio/bounded-delta, per ADR-014).
 
-import { describe, it, expect, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { cleanupTmpWorktrees, makeTmpWorktree } from './fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -21,7 +20,7 @@ const {
   parseLedger,
   isActive,
   anchorNumeric,
-} = require(path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs')) as {
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
@@ -30,9 +29,7 @@ const {
   anchorNumeric: (anchorId: string) => number;
 };
 
-const RENDERER = path.join(ROOT, 'scripts/hooks/lib/render-decisions.cjs');
-
-afterAll(() => cleanupTmpWorktrees());
+const RENDERER = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 // ---------------------------------------------------------------------------
 // Test fixtures

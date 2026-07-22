@@ -5,50 +5,6 @@ node_modules/
 dist/
 *.log
 
-# Generated plugin commands (compiled from commands/*.mds at build time)
-plugins/devflow-dynamic/commands/
-
-# Generated plugin commands (compiled from commands/*.mds at build time)
-plugins/devflow-implement/commands/implement.md
-plugins/devflow-plan/commands/plan.md
-plugins/devflow-resolve/commands/resolve.md
-plugins/devflow-code-review/commands/code-review.md
-plugins/devflow-self-review/commands/self-review.md
-plugins/devflow-research/commands/research.md
-plugins/devflow-bug-analysis/commands/bug-analysis.md
-plugins/devflow-explore/commands/explore.md
-plugins/devflow-debug/commands/debug.md
-
-# Generated plugin skills (copied from shared/skills/ at build time)
-plugins/*/skills/
-
-# Generated plugin rules (copied from shared/rules/ at build time)
-plugins/devflow-*/rules/
-
-# Generated HUD scripts (copied from dist/hud/ at build time along with
-# any transitive dist/ dependencies the HUD imports — currently scripts/utils/).
-scripts/hud/
-scripts/utils/
-scripts/package.json
-
-# Generated shared agents (copied from shared/agents/ at build time)
-# Note: plugin-specific agents (catch-up.md, devlog.md) are committed in their plugins
-plugins/*/agents/git.md
-plugins/*/agents/synthesizer.md
-plugins/*/agents/skimmer.md
-plugins/*/agents/simplifier.md
-plugins/*/agents/coder.md
-plugins/*/agents/reviewer.md
-plugins/*/agents/triager.md
-plugins/*/agents/evaluator.md
-plugins/*/agents/tester.md
-plugins/*/agents/scrutinizer.md
-plugins/*/agents/validator.md
-plugins/*/agents/designer.md
-plugins/*/agents/knowledge.md
-plugins/*/agents/researcher.md
-plugins/*/agents/bug-analyzer.md
-plugins/*/agents/learning.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -75,10 +31,6 @@ Thumbs.db
 *.swo
 *~
 
-# Local configuration overrides
-config/local-*
-commands/local-*
-
 # Installation logs
 install.log
 # Devflow local scope installation (use --scope local)
@@ -96,8 +48,6 @@ install.log
 !.devflow/features/*/
 .devflow/features/*/*
 !.devflow/features/*/KNOWLEDGE.md
-
-src/claude/CLAUDE.legacy.md
 
 # Launch marketing materials
 /launch/

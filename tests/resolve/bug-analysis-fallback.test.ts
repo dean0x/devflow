@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection } from '../helpers';
 
-const resolveContent = loadFile('plugins/devflow-resolve/commands/resolve.md');
+const resolveContent = loadFile('dist/commands/resolve.md');
 
 // ---------------------------------------------------------------------------
 // Group 1: resolve.md — bug-analysis fallback (Step 0c-5b)

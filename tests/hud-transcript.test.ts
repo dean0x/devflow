@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { parseTranscript } from '../src/cli/hud/transcript.js';
+import { parseTranscript } from '../src/hud/transcript.js';
 
 /** Build a JSONL line for an assistant turn with the given content blocks. */
 function assistantLine(blocks: Record<string, unknown>[]): string {

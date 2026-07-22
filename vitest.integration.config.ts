@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '#cli': new URL('./src/cli/', import.meta.url).pathname,
+      '#core': new URL('./src/core/', import.meta.url).pathname,
     },
   },
 });

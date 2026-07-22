@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# SessionStart Hook: Orchestrator Charter Injection
+# Presence-gated: registered/removed by `devflow ambient --enable/--disable`.
+# Git repos only: silent outside a git repo (df_has_git_marker bounded walk).
+# Charter includes the plan-handoff fallback bullet — SessionStart provably fires
+# (SessionStart:clear) in plan-handoff sessions even if UserPromptSubmit does not.
+# NOTE: the literal prefix `Implement the following plan:` is duplicated in
+# src/assets/scripts/hooks/preamble — update both if Claude Code changes the handoff format.
+
+# Safe no-op fallback: must exist before hook-bootstrap is sourced.
+dbg() { :; }
+
+# set -e intentionally omitted: a failure in this section must not crash the hook.
+
+# Re-entrancy guard — before hook-bootstrap to minimize background session overhead.
+# The memory worker's own claude -p session fires SessionStart hooks; without this
+# guard the nested session would re-inject the charter (and receive a plan-handoff
+# directive it must never act on).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/hook-bootstrap" "session-start-orchestrator"
+
+source "$SCRIPT_DIR/json-parse" || { echo "session-start-orchestrator: failed to source json-parse" >&2; exit 1; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
+  dbg "EXIT: bad CWD"
+  exit 0
+fi
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
+
+source "$SCRIPT_DIR/hook-log-init" "session-start-orchestrator"
+
+source "$SCRIPT_DIR/git-marker" || true
+if ! df_has_git_marker "$CWD" 2>/dev/null; then dbg "EXIT: not a git repo"; exit 0; fi
+
+CHARTER_FILE="$SCRIPT_DIR/assets/orchestrator-charter.md"
+if [ ! -f "$CHARTER_FILE" ]; then dbg "EXIT: charter missing"; exit 0; fi
+CHARTER=$(cat "$CHARTER_FILE")
+if [ -z "$CHARTER" ]; then dbg "EXIT: charter empty"; exit 0; fi
+if [ "${#CHARTER}" -gt 4096 ]; then dbg "EXIT: charter exceeds cap (${#CHARTER})"; exit 0; fi
+
+dbg "OUTPUT_LENGTH=${#CHARTER}"
+log "Injecting charter (${#CHARTER} chars)"
+json_session_output "$CHARTER"
+dbg "=== HOOK COMPLETE ==="

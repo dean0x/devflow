@@ -3,7 +3,6 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  parsePluginSelection,
   combineSelection,
   shouldRetry,
   substituteSettingsTemplate,
@@ -12,7 +11,8 @@ import {
   discoverProjectGitRoots,
   runMigrationsWithFallback,
 } from '../src/cli/commands/init.js';
-import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
+import { parsePluginSelection } from '../src/core/plugins.js';
+import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
 import {
   installManagedSettings,
   installClaudeignore,
@@ -24,10 +24,10 @@ import {
   applyUserSecurityDenyList,
   loadTemplateDenyEntries,
   ensureDevflowGitignore,
-} from '../src/cli/utils/post-install.js';
-import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap } from '../src/cli/plugins.js';
-import type { RunMigrationsResult } from '../src/cli/utils/migrations.js';
+} from '../src/targets/claude-code/post-install.js';
+import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap } from '../src/core/plugins.js';
+import type { RunMigrationsResult } from '../src/core/migrations.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -167,7 +167,7 @@ describe('substituteSettingsTemplate', () => {
 // SessionStart/PreCompact memory-dream bundle) exactly, not rely on init's
 // addCaptureHooks runtime healing to fill gaps.
 describe('settings.json template: AC-C2 complete hook seed shape', () => {
-  const TEMPLATE_PATH = path.resolve(__dirname, '..', 'src', 'templates', 'settings.json');
+  const TEMPLATE_PATH = path.resolve(__dirname, '..', 'src', 'targets', 'claude-code', 'templates', 'settings.json');
 
   async function loadHooks(): Promise<Record<string, Array<{ matcher?: string; hooks: { command: string }[] }>>> {
     const raw = await fs.readFile(TEMPLATE_PATH, 'utf-8');
@@ -702,9 +702,9 @@ describe('installManagedSettings', () => {
     templateDir = path.join(tmpDir, 'root');
 
     // Create template file at expected location
-    await fs.mkdir(path.join(templateDir, 'src', 'templates'), { recursive: true });
+    await fs.mkdir(path.join(templateDir, 'src', 'targets', 'claude-code', 'templates'), { recursive: true });
     await fs.writeFile(
-      path.join(templateDir, 'src', 'templates', 'managed-settings.json'),
+      path.join(templateDir, 'src', 'targets', 'claude-code', 'templates', 'managed-settings.json'),
       templateContent,
       'utf-8',
     );
@@ -716,7 +716,7 @@ describe('installManagedSettings', () => {
   });
 
   it('returns false when getManagedSettingsPath throws (unsupported platform)', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockImplementation(() => {
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockImplementation(() => {
       throw new Error('Unsupported platform');
     });
 
@@ -725,7 +725,7 @@ describe('installManagedSettings', () => {
   });
 
   it('returns false when template file cannot be read', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
 
     // Use a rootDir with no template file
     const emptyRoot = path.join(tmpDir, 'empty-root');
@@ -736,7 +736,7 @@ describe('installManagedSettings', () => {
   });
 
   it('writes managed settings via direct write when directory is writable', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
 
     const result = await installManagedSettings(templateDir, false);
 
@@ -746,7 +746,7 @@ describe('installManagedSettings', () => {
   });
 
   it('merges with existing managed settings (preserves existing entries)', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
 
     // Pre-populate existing managed settings with an extra entry
     await fs.mkdir(managedDir, { recursive: true });
@@ -764,7 +764,7 @@ describe('installManagedSettings', () => {
   });
 
   it('returns false on EACCES when not in TTY', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
 
     // Make the parent dir exist but not writable
     await fs.mkdir(managedDir, { recursive: true });
@@ -785,9 +785,9 @@ describe('installManagedSettings', () => {
   });
 
   it('returns false on non-EACCES write errors', async () => {
-    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(
+    vi.spyOn(await import('../src/targets/claude-code/claude-paths.js'), 'getManagedSettingsPath').mockReturnValue(
       // Point to a path inside a file (not a directory) to trigger ENOTDIR
-      path.join(templateDir, 'src', 'templates', 'managed-settings.json', 'impossible', 'managed-settings.json'),
+      path.join(templateDir, 'src', 'targets', 'claude-code', 'templates', 'managed-settings.json', 'impossible', 'managed-settings.json'),
     );
 
     const result = await installManagedSettings(templateDir, false);
@@ -798,16 +798,12 @@ describe('installManagedSettings', () => {
 describe('installViaFileCopy cleanup (isPartialInstall)', () => {
   let tmpDir: string;
   let claudeDir: string;
-  let pluginsDir: string;
-  let rootDir: string;
   let devflowDir: string;
   const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
     claudeDir = path.join(tmpDir, 'claude');
-    pluginsDir = path.join(tmpDir, 'plugins');
-    rootDir = tmpDir;
     devflowDir = path.join(tmpDir, 'devflow');
 
     // Seed a stale command and agent that should be cleaned on full install
@@ -827,8 +823,6 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     await installViaFileCopy({
       plugins: [],
       claudeDir,
-      pluginsDir,
-      rootDir,
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
@@ -845,8 +839,6 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     await installViaFileCopy({
       plugins: [],
       claudeDir,
-      pluginsDir,
-      rootDir,
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
@@ -982,9 +974,9 @@ describe('installClaudeignore return value', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-claudeignore-test-'));
     rootDir = path.join(tmpDir, 'root');
-    await fs.mkdir(path.join(rootDir, 'src', 'templates'), { recursive: true });
+    await fs.mkdir(path.join(rootDir, 'src', 'targets', 'claude-code', 'templates'), { recursive: true });
     await fs.writeFile(
-      path.join(rootDir, 'src', 'templates', 'claudeignore.template'),
+      path.join(rootDir, 'src', 'targets', 'claude-code', 'templates', 'claudeignore.template'),
       '# .claudeignore\nnode_modules/\n',
       'utf-8',
     );
@@ -1200,9 +1192,9 @@ describe('loadTemplateDenyEntries', () => {
   it('returns the template deny entries for a valid template', async () => {
     const denyEntries = ['Bash(rm -rf /*)', 'Bash(sudo *)', 'Read(/etc/shadow)'];
     const templateContent = JSON.stringify({ permissions: { deny: denyEntries } }, null, 2);
-    await fs.mkdir(path.join(tmpDir, 'src', 'templates'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'src', 'targets', 'claude-code', 'templates'), { recursive: true });
     await fs.writeFile(
-      path.join(tmpDir, 'src', 'templates', 'managed-settings.json'),
+      path.join(tmpDir, 'src', 'targets', 'claude-code', 'templates', 'managed-settings.json'),
       templateContent,
       'utf-8',
     );
@@ -1213,9 +1205,9 @@ describe('loadTemplateDenyEntries', () => {
 
   it('returns [] when permissions.deny is a non-array (e.g. a string)', async () => {
     const templateContent = JSON.stringify({ permissions: { deny: 'not-an-array' } });
-    await fs.mkdir(path.join(tmpDir, 'src', 'templates'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'src', 'targets', 'claude-code', 'templates'), { recursive: true });
     await fs.writeFile(
-      path.join(tmpDir, 'src', 'templates', 'managed-settings.json'),
+      path.join(tmpDir, 'src', 'targets', 'claude-code', 'templates', 'managed-settings.json'),
       templateContent,
       'utf-8',
     );
