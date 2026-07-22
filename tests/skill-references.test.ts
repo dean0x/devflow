@@ -304,8 +304,8 @@ describe('Format 3b: Shadow path references', () => {
 
 describe('Format 4: Source directory path references', () => {
   /**
-   * Template placeholders like `shared/skills/skill-name/` or
-   * `shared/skills/{name}/` are not real skill names — filter them.
+   * Template placeholders like `src/assets/skills/skill-name/` or
+   * `src/assets/skills/{name}/` are not real skill names — filter them.
    */
   function isPlaceholder(name: string): boolean {
     return name.includes('{') || name === 'skill-name';
