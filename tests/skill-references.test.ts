@@ -32,9 +32,9 @@ function extractInstallPaths(content: string): string[] {
   return [...matches].map(m => m[1]);
 }
 
-/** Extract source directory path references (shared/skills/NAME/). */
+/** Extract source directory path references (src/assets/skills/NAME/). */
 function extractSourceDirRefs(content: string): string[] {
-  const matches = content.matchAll(/shared\/skills\/([\w:-]+)\//g);
+  const matches = content.matchAll(/src\/assets\/skills\/([\w:-]+)\//g);
   return [...matches].map(m => m[1]);
 }
 
@@ -311,7 +311,7 @@ describe('Format 4: Source directory path references', () => {
     return name.includes('{') || name === 'skill-name';
   }
 
-  it('all shared/skills/NAME/ references in CLAUDE.md are canonical', () => {
+  it('all src/assets/skills/NAME/ references in CLAUDE.md are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const content = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf-8');
     const refs = extractSourceDirRefs(content).filter(r => !isPlaceholder(r));
@@ -319,12 +319,12 @@ describe('Format 4: Source directory path references', () => {
     for (const ref of refs) {
       expect(
         canonicalSkills.has(ref),
-        `CLAUDE.md: source path 'shared/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
+        `CLAUDE.md: source path 'src/assets/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
       ).toBe(true);
     }
   });
 
-  it('all shared/skills/NAME/ references in docs/reference/ are canonical', () => {
+  it('all src/assets/skills/NAME/ references in docs/reference/ are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const refDir = path.join(ROOT, 'docs', 'reference');
     const docFiles = readdirSync(refDir).filter(f => f.endsWith('.md'));
@@ -337,7 +337,7 @@ describe('Format 4: Source directory path references', () => {
       for (const ref of refs) {
         expect(
           canonicalSkills.has(ref),
-          `docs/reference/${file}: source path 'shared/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
+          `docs/reference/${file}: source path 'src/assets/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
         ).toBe(true);
       }
     }
@@ -701,7 +701,6 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
 
     // These meta-skills don't correspond to reviewer focus areas
     const NON_FOCUS_SKILLS = new Set([
-      'decisions-format',
       'review-methodology',
       'worktree-support',
       'apply-feature-knowledge',  // consumption meta-skill, not a review focus

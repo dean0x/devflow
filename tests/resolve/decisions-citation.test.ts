@@ -41,8 +41,8 @@ const { buildIndexContent } = require(
 };
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/decisions/decisions.md',
-  pitfallsFilePath: '/project/.devflow/decisions/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/learning/decisions.md',
+  pitfallsFilePath: '/project/.devflow/learning/pitfalls.md',
 };
 
 const NOW = '2026-01-01T00:00:00Z';
@@ -80,7 +80,7 @@ function makePfRow(overrides: Record<string, unknown> = {}): Record<string, unkn
     last_seen: NOW,
     status: 'created',
     evidence: [],
-    details: 'area: scripts/hooks/foo.cjs, scripts/hooks/background-learning; issue: god scripts; impact: hard to test; resolution: split concerns',
+    details: 'area: src/assets/scripts/hooks/foo.cjs, src/assets/scripts/hooks/background-learning; issue: god scripts; impact: hard to test; resolution: split concerns',
     quality_ok: true,
     ...overrides,
   };

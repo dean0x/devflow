@@ -80,15 +80,15 @@ function makePitfallRow(overrides: Record<string, unknown> = {}): Record<string,
     last_seen: NOW,
     status: 'created',
     evidence: [],
-    details: 'area: scripts/hooks/foo.cjs; issue: god scripts; impact: hard to test; resolution: split concerns',
+    details: 'area: src/assets/scripts/hooks/foo.cjs; issue: god scripts; impact: hard to test; resolution: split concerns',
     quality_ok: true,
     ...overrides,
   }
 }
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/decisions/decisions.md',
-  pitfallsFilePath: '/project/.devflow/decisions/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/learning/decisions.md',
+  pitfallsFilePath: '/project/.devflow/learning/pitfalls.md',
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ describe('selectActiveRows + buildIndexContent — active-only contract', () => 
     expect(result).toContain('PF-004')
     expect(result).toContain('Background hook god scripts')
     expect(result).toMatch(/^Pitfalls \(1\):/m)
-    expect(result).toContain('scripts/hooks/foo.cjs')
+    expect(result).toContain('src/assets/scripts/hooks/foo.cjs')
   })
 
   it('shows both Decisions and Pitfalls blocks for mixed corpus', () => {

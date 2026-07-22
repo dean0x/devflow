@@ -21,8 +21,6 @@ function mkTmpDir(): string {
 
 function mkMemoryDir(base: string): void {
   fs.mkdirSync(path.join(base, '.devflow', 'memory'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'dream'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'decisions'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
 }
 
