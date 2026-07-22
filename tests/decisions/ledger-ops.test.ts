@@ -1206,3 +1206,59 @@ describe('ADR-011 straggler fix: assign-anchor / retire-anchor on a bare project
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lock release on early-exit error paths (S3b regression)
+//
+// process.exit(1) inside a try/finally block bypasses the finally block in
+// Node.js. Any early-exit path that called process.exit(1) while holding
+// .decisions.lock left a stale lock directory. The fix replaces process.exit
+// with throw inside locked regions so finally always runs and releases the lock.
+// ---------------------------------------------------------------------------
+
+describe('lock release on early-exit error paths', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-release-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('assign-anchor: missing log file — lock dir released after controlled error', () => {
+    // No log file written — parseLedger returns [], findIndex returns -1 → early-exit path
+    const result = runHelper('assign-anchor decision obs_missing_log', tmpDir);
+    expect(result.code).not.toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('assign-anchor: obs_id not found in existing log — lock dir released after controlled error', () => {
+    // Log file exists but obs_id is absent
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_real', type: 'decision', status: 'ready' })]);
+    const result = runHelper('assign-anchor decision obs_nonexistent', tmpDir);
+    expect(result.code).not.toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('retire-anchor: missing ledger — lock dir released after controlled error', () => {
+    // No ledger file — parseLedger returns [], findIndex returns -1 → early-exit path
+    const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
+    expect(result.code).not.toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('retire-anchor: anchor_id not found in existing ledger — lock dir released after controlled error', () => {
+    // Ledger exists but the requested anchor_id is absent
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
+    const result = runHelper('retire-anchor ADR-999 Retired', tmpDir);
+    expect(result.code).not.toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+});

@@ -527,8 +527,8 @@ try {
         let aaLogEntries = parseLedger(aaLogPath);
         const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
         if (aaObsIdx === -1) {
-          process.stderr.write(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}\n`);
-          process.exit(1);
+          // throw instead of process.exit so the finally block releases the lock
+          throw new Error(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}`);
         }
         const aaObs = aaLogEntries[aaObsIdx];
 
@@ -541,11 +541,11 @@ try {
         //     never fire in normal operation — it guards against double-assign
         //     bugs (e.g. assign called twice for the same obs_id in a crash loop).
         if (aaLedgerRows.some(r => r.anchor_id === aaAnchorId)) {
-          process.stderr.write(
+          // throw instead of process.exit so the finally block releases the lock
+          throw new Error(
             `assign-anchor: anchor_id '${aaAnchorId}' already present in ledger — ` +
-            `possible double-assign; refusing to overwrite committed entry\n`
+            `possible double-assign; refusing to overwrite committed entry`
           );
-          process.exit(1);
         }
         //
         // (b) The target observation must not already have an anchor_id set.
@@ -553,11 +553,11 @@ try {
         //     (the old anchor would remain in the ledger AND the new one would
         //     be added), corrupting the committed source of truth.
         if (aaObs.anchor_id) {
-          process.stderr.write(
+          // throw instead of process.exit so the finally block releases the lock
+          throw new Error(
             `assign-anchor: obs_id '${assignObsId}' is already anchored as '${aaObs.anchor_id}'; ` +
-            `use retire-anchor to change its status instead\n`
+            `use retire-anchor to change its status instead`
           );
-          process.exit(1);
         }
 
         // Build canonical committed-ledger row via toLedgerRow projector.
@@ -644,8 +644,8 @@ try {
         const raRows = parseLedger(raLedgerPath);
         const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
         if (raIdx === -1) {
-          process.stderr.write(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger\n`);
-          process.exit(1);
+          // throw instead of process.exit so the finally block releases the lock
+          throw new Error(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger`);
         }
 
         // Idempotent: if already set to same status, still write (no-op equivalent)
