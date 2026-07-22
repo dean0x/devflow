@@ -210,7 +210,6 @@ describe('optional plugin flag', () => {
     expect(ambient!.skills).toContain('security');
     // Ambient must declare resolve dependencies
     expect(ambient!.skills).toContain('patterns');
-    // decisions-format removed per D9 — format-spec only, not plugin-distributed
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');
     expect(ambient!.agents).toContain('synthesizer');
