@@ -30,7 +30,7 @@ Agents in the pipeline:
 | Simplifier | sonnet | refine changed code after fixes |
 | Validator | **haiku** | build/typecheck/lint/test gate |
 
-Plugin registry (`plugins.ts`, `plugin.json`, tests) must be triple-consistent: `agents: [git, triager, coder, simplifier, validator]`.
+Plugin registry (`DEVFLOW_PLUGINS` in `plugins.ts`) and its tests (`tests/registry-integrity.test.ts`) must stay consistent: `agents: [git, triager, coder, simplifier, validator]`.
 
 ## Component Architecture
 

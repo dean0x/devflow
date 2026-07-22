@@ -97,7 +97,7 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 
 ### Flow 3: MDS build-time compilation
 
-`npm run build:mds` (part of `npm run build` chain after `build:plugins`):
+`npm run build:mds` (part of `npm run build` = `build:cli` + `build:mds`):
 
 1. Walks the repo from root, skipping `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`
 2. For each `.mds` file: reads frontmatter; if it declares a non-empty `output-dir:` key, treats it as a host
@@ -196,4 +196,4 @@ compiled output.
 
 - Working Memory (`.devflow/memory/WORKING-MEMORY.md`, `background-memory-update` worker) — sibling persistence layer; independent toggle.
 - Decisions pipeline (`.devflow/learning/`, `decisions-ledger.jsonl`) — sibling persistence layer; independent toggle.
-- ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.
+- ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `src/assets/scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.

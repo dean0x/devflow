@@ -183,7 +183,7 @@ The compliance skill and its reference files use specific edition identifiers. A
 - `src/assets/agents/synthesizer.md` — merge-don't-boost rule for compliance+security overlaps (line ~214, ~315)
 - `src/assets/agents/triager.md` — compliance disposition default (FIX_SEPARATE/TECH_DEBT) at line ~63
 - `src/assets/agents/designer.md` — compliance focus as the 5th gap-analysis Designer
-- `shared/skills/gap-analysis/SKILL.md` — §7 compliance detection patterns (regulatory gaps, IaC, segregation of duties)
+- `src/assets/skills/gap-analysis/SKILL.md` — §7 compliance detection patterns (regulatory gaps, IaC, segregation of duties)
 - `src/core/plugins.ts` — `DEVFLOW_PLUGINS` registry entry; `LEGACY_SKILL_NAMES` frozen list (39 pre-namespace skills; `compliance` is NOT in this list — it is a post-namespace skill)
 - `tests/skill-namespace.test.ts` — Assertion A (pre-namespace skills need bare entries) + Assertion B inverse guard (post-namespace skills must not appear bare in `LEGACY_SKILL_NAMES`)
 - `tests/skill-references.test.ts` — allowlist extended to the frozen historical pre-namespace skill set

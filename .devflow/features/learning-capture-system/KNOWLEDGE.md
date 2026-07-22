@@ -1,7 +1,7 @@
 ---
 feature: learning-capture-system
 name: Learning & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (shared/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, render-decisions."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, render-decisions."
 category: architecture
 directories:
   - src/assets/scripts/hooks
@@ -68,12 +68,12 @@ Feature toggles and tuning config live in two separate files with different loca
 **`.devflow/config.json` is at the `.devflow/` root — not inside `learning/`.** All learning
 runtime data (queue, content, tuning config) lives in `.devflow/learning/`.
 
-Module `src/cli/utils/feature-config.ts` owns feature toggle reads/writes. Its `coerceConfig`
+Module `src/core/feature-config.ts` owns feature toggle reads/writes. Its `coerceConfig`
 coalesces the legacy `decisions` key into `learning` — if both are present, `decisions` wins.
 This preserves old configs silently.
 
 Tuning resolution: project `learning.json` → global `~/.devflow/learning.json` → defaults
-(`model: "opus"`, `debug: false`). Module `src/cli/utils/learning-tuning-config.ts` handles
+(`model: "opus"`, `debug: false`). Module `src/core/learning-tuning-config.ts` handles
 the merge. The bash hook in `session-start-context` resolves the same priority chain directly
 — duplicated by design so the hook needs no subprocess for TS evaluation.
 
@@ -195,7 +195,7 @@ itself is intentionally lock-free (accepted-class race, shared with the memory d
 
 ### HUD Component
 
-`src/cli/hud/components/learning-counts.ts` exports `gatherLearningCounts(cwd)`: reads
+`src/hud/components/learning-counts.ts` exports `gatherLearningCounts(cwd)`: reads
 `.devflow/learning/decisions-ledger.jsonl` directly and counts active anchored rows (those
 with `anchor_id` set and `decisions_status` not in `{Deprecated, Superseded, Retired}`). It
 does NOT read `decisions.md`/`pitfalls.md` — using the ledger as source of truth prevents
