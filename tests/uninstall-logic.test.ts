@@ -435,13 +435,11 @@ describe('legacy plugin name resolution in uninstall (parsePluginSelection share
     const { selected, invalid } = parsePluginSelection('frontend-design', DEVFLOW_PLUGINS); // legacy → devflow-ui-design
     expect(selected).toEqual(['devflow-ui-design']);
     expect(invalid).toEqual([]);
-    // Verify the resolved name maps to a real plugin in the registry
+    // Verify the resolved name maps to a real plugin and flows into computeAssetsToRemove
     const uiDesignPlugin = DEVFLOW_PLUGINS.find(pl => pl.name === 'devflow-ui-design');
     expect(uiDesignPlugin).toBeDefined();
-    // And can be passed directly into computeAssetsToRemove
     const { commands } = computeAssetsToRemove([uiDesignPlugin!], DEVFLOW_PLUGINS);
-    expect(commands).toBeDefined();
-    expect(Array.isArray(commands)).toBe(true);
+    expect(commands).toEqual([]); // devflow-ui-design has no commands (skills-only plugin)
   });
 
   it('legacy name devflow-specify resolves to devflow-plan in the registry', () => {
