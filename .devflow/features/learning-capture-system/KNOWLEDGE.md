@@ -15,7 +15,7 @@ directories:
   - src/hud/components/learning-counts.ts
   - src/assets/commands/_partials
 created: 2026-07-15
-updated: 2026-07-15
+updated: 2026-07-22
 ---
 
 # Learning & Capture System
@@ -173,6 +173,21 @@ Each op self-locks. Never wrap them in an external lock; never call more than on
 are **never hand-edited** — they are exclusively owned by `assign-anchor`/`retire-anchor`/
 `render-decisions.cjs`.
 
+**Directory bootstrapping**: Both `assign-anchor` and `retire-anchor` call
+`fs.mkdirSync(path.dirname(lockDir), { recursive: true })` before acquiring `.decisions.lock`.
+`path.dirname(lockDir)` resolves to `.devflow/learning/`, so this creates the correct
+directory tree on the first run of a fresh project — no pre-init needed. The obsolete
+`.devflow/decisions/` directory is never created (applies ADR-011 — last runtime straggler
+of the decisions→learning rename removed on the `refactor/restructure-src` branch).
+
+**Error paths inside the lock use `throw`, not `process.exit`**: Any early-exit condition
+that fires while holding `.decisions.lock` (obs_id not found, anchor_id not found) calls
+`throw new Error(...)` rather than `process.exit(1)`. Node's `process.exit()` skips `finally`
+blocks; throwing ensures the `finally` always runs `releaseLock(lockDir)`. An outer
+`catch (err)` in the `if (require.main === module)` block catches the throw, writes
+`json-helper error: <message>` to stderr, and exits 1. Net contract: controlled non-zero
+exit, `json-helper error: ` prefix on locked-path errors, lock always released.
+
 ### decisions_load() and index.md Consumption
 
 The compiled `decisions_load()` partial (from `src/assets/commands/_partials/_decisions.mds`) instructs
@@ -281,9 +296,17 @@ agents must not "fix" the naming mismatch.
   project-only).
 
 - **json_extract_cwd_field SOH delimiter**: `capture-turn` splits the combined `cwd+field`
-  output using `$'\001'` (bash SOH literal). The jq side emits `""`. If you add a
+  output using `$'\001'` (bash SOH literal). The jq side emits `""`. If you add a
   new hook that uses this helper, verify both branches (jq and node fallback) emit the same
   delimiter — the node fallback in `json-helper.cjs` uses `String.fromCharCode(1)`.
+
+- **`process.exit()` skips `finally` blocks in Node.js `.cjs` helpers**: Any locked code path
+  that calls `process.exit(1)` directly will leak the lock directory — Node's `process.exit()`
+  does not run `finally`. The established pattern in `json-helper.cjs` is to `throw new Error(...)`
+  inside the locked `try` block and let the outer `catch (err)` in `if (require.main === module)`
+  print `json-helper error: <message>` and exit 1. Copy this pattern for any new locked
+  operation added to `.cjs` helpers; never call `process.exit()` from inside a `try` that
+  holds a lock directory.
 
 ## Key Files
 
@@ -312,6 +335,7 @@ agents must not "fix" the naming mismatch.
 - **ADR-002** — only `.devflow/features/` is git-tracked; all learning runtime files stay gitignored
 - **ADR-003** — document end-state only; the bash `opus` default is duplicated by design so the hook avoids a TS subprocess
 - **ADR-007** — `index.md` consumption is a plain Read; no subprocess, no `.cjs` script
+- **ADR-011** — decisions→learning rename; `assign-anchor`/`retire-anchor` no longer create `.devflow/decisions/` — they bootstrap `.devflow/learning/` via `fs.mkdirSync(path.dirname(lockDir), { recursive: true })` (last runtime straggler removed on `refactor/restructure-src`)
 - **PF-003** — agent instruction deletions use `unlink`, never bare `rm` (deny-list contract)
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system)
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
