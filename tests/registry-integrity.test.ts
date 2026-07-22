@@ -4,8 +4,7 @@
  * Guard 1 (forward): every skill/agent/rule declared in DEVFLOW_PLUGINS exists on disk
  *   in src/assets/{skills,agents,rules}/.
  * Guard 2 (reverse/orphan): every file in src/assets/{skills,agents,rules}/ is claimed
- *   by at least one plugin in DEVFLOW_PLUGINS (with a known exception list for
- *   format-spec skills that are consumed by background processes, not plugin agents).
+ *   by at least one plugin in DEVFLOW_PLUGINS.
  *
  * These guards replace the plugin.json manifest checks that were removed in the
  * src/ restructure. The DEVFLOW_PLUGINS registry in src/core/plugins.ts is now the
@@ -66,26 +65,16 @@ describe('Guard 1 (forward): every declared asset exists on disk', () => {
 // Guard 2: Reverse/orphan — disk → registry
 // ---------------------------------------------------------------------------
 
-/**
- * Skills that intentionally live in src/assets/skills/ but are not distributed
- * through any plugin. These are format specifications consumed by background
- * processes (the Learning agent), not by agents or commands.
- * See D9 in .devflow/learning/decisions.md for rationale.
- */
-const FORMAT_SPEC_SKILLS = new Set(['decisions-format']);
-
 describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin', () => {
-  it('every dir in src/assets/skills/ is declared in DEVFLOW_PLUGINS (or is a known format-spec)', async () => {
+  it('every dir in src/assets/skills/ is declared in DEVFLOW_PLUGINS', async () => {
     const referencedSkills = new Set(getAllSkillNames());
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
 
-    const orphans = skillDirs.filter(
-      dir => !referencedSkills.has(dir) && !FORMAT_SPEC_SKILLS.has(dir),
-    );
+    const orphans = skillDirs.filter(dir => !referencedSkills.has(dir));
 
     expect(
       orphans,
-      `Orphaned skill dirs in src/assets/skills/ are not declared in DEVFLOW_PLUGINS:\n  ${orphans.join('\n  ')}\nAdd them to a plugin in src/core/plugins.ts or to FORMAT_SPEC_SKILLS if intentionally undistributed.`,
+      `Orphaned skill dirs in src/assets/skills/ are not declared in DEVFLOW_PLUGINS:\n  ${orphans.join('\n  ')}\nAdd them to a plugin in src/core/plugins.ts.`,
     ).toHaveLength(0);
   });
 
