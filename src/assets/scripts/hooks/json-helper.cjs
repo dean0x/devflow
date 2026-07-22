@@ -505,12 +505,11 @@ try {
       }
 
       const aaProjectRoot = process.cwd();
-      const aaDecisionsDir = path.join(aaProjectRoot, '.devflow', 'decisions');
       const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
       const aaLogPath = getDecisionsLogPath(aaProjectRoot);
       const aaLockDir = getDecisionsLockDir(aaProjectRoot);
 
-      fs.mkdirSync(aaDecisionsDir, { recursive: true });
+      fs.mkdirSync(path.dirname(aaLockDir), { recursive: true });
 
       if (!acquireMkdirLock(aaLockDir, 30000, 60000)) {
         process.stderr.write(`assign-anchor: timeout acquiring lock at ${aaLockDir}\n`);
@@ -634,7 +633,7 @@ try {
       const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
       const raLockDir = getDecisionsLockDir(raProjectRoot);
 
-      fs.mkdirSync(path.join(raProjectRoot, '.devflow', 'decisions'), { recursive: true });
+      fs.mkdirSync(path.dirname(raLockDir), { recursive: true });
 
       if (!acquireMkdirLock(raLockDir, 30000, 60000)) {
         process.stderr.write(`retire-anchor: timeout acquiring lock at ${raLockDir}\n`);

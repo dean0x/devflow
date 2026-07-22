@@ -1143,3 +1143,66 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-011 straggler fix: fresh project directory layout
+//
+// Before the fix both assign-anchor and retire-anchor called:
+//   fs.mkdirSync(path.join(projectRoot, '.devflow', 'decisions'), { recursive: true })
+// — the obsolete path from the pre-ADR-011 rename. This created the wrong dir
+// and then immediately crashed because acquireMkdirLock tried to mkdir
+// '.devflow/learning/.decisions.lock' with recursive:false while
+// '.devflow/learning/' did not yet exist (ENOENT re-throw from mkdirSync
+// non-EEXIST guard). applies ADR-011
+// ---------------------------------------------------------------------------
+
+describe('ADR-011 straggler fix: assign-anchor / retire-anchor on a bare project directory', () => {
+  it('assign-anchor on bare dir exits with controlled "not found" error — not an ENOENT crash — and creates .devflow/learning/, not .devflow/decisions/', () => {
+    // bare dir — no .devflow/ at all (simulates a fresh project)
+    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-bare-'));
+    try {
+      const result = runHelper('assign-anchor decision any_obs_id', bareDir);
+      // Must fail (obs log absent) but the error must be controlled
+      expect(result.code).not.toBe(0);
+      // Before fix: ENOENT crash from acquireMkdirLock; after fix: controlled
+      // "not found in" error message from the obs-id lookup guard
+      expect(result.stderr).not.toMatch(/ENOENT/);
+      // Fix creates .devflow/learning/ as a side effect of mkdir(path.dirname(lockDir))
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'learning'))).toBe(true);
+      // Legacy .devflow/decisions/ must NOT be created
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
+    } finally {
+      fs.rmSync(bareDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retire-anchor on bare dir exits with controlled "not found in ledger" error — not an ENOENT crash — and creates .devflow/learning/, not .devflow/decisions/', () => {
+    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ra-bare-'));
+    try {
+      const result = runHelper('retire-anchor ADR-001 Retired', bareDir);
+      expect(result.code).not.toBe(0);
+      // Before fix: ENOENT crash; after fix: controlled "not found in ledger"
+      expect(result.stderr).not.toMatch(/ENOENT/);
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'learning'))).toBe(true);
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
+    } finally {
+      fs.rmSync(bareDir, { recursive: true, force: true });
+    }
+  });
+
+  it('assign-anchor success path never creates .devflow/decisions/ (legacy dir must not appear)', () => {
+    // Normal setup — .devflow/learning/ pre-exists; verifies the legacy mkdir is gone
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-no-decisions-'));
+    try {
+      fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+      writeLog(tmpDir, [makeObsRow({ id: 'obs_nodec_01', type: 'decision', status: 'ready' })]);
+      const result = runHelper('assign-anchor decision obs_nodec_01', tmpDir);
+      expect(result.code).toBe(0);
+      // Before fix: fs.mkdirSync('.devflow/decisions', {recursive:true}) was called
+      // unconditionally; after fix it is gone
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'decisions'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
