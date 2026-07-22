@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -179,7 +179,7 @@ export const uninstallCommand = new Command('uninstall')
   .description('Uninstall Devflow from Claude Code')
   .option('--keep-docs', 'Keep .devflow/ directory and project data')
   .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
-  .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,review)')
+  .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--verbose', 'Show detailed uninstall output')
   .option('--dry-run', 'Show what would be removed without actually removing anything')
   .action(async (options) => {
@@ -192,16 +192,11 @@ export const uninstallCommand = new Command('uninstall')
     // Parse plugin selection
     let selectedPluginNames: string[] = [];
     if (options.plugin) {
-      selectedPluginNames = options.plugin.split(',').map((s: string) => {
-        const trimmed = s.trim();
-        return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
-      });
-
-      const validNames = DEVFLOW_PLUGINS.map(p => p.name);
-      const invalidPlugins = selectedPluginNames.filter(n => !validNames.includes(n));
-      if (invalidPlugins.length > 0) {
-        p.log.error(`Unknown plugin(s): ${invalidPlugins.join(', ')}`);
-        p.log.info(`Valid plugins: ${validNames.join(', ')}`);
+      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      selectedPluginNames = selected;
+      if (invalid.length > 0) {
+        p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
+        p.log.info(`Valid plugins: ${DEVFLOW_PLUGINS.map(pl => pl.name).join(', ')}`);
         process.exit(1);
       }
     }

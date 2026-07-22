@@ -25,7 +25,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -109,25 +109,6 @@ export function classifySafeDeleteState(
 }
 
 export { addContextHook, removeContextHook, hasContextHook };
-
-/**
- * Parse a comma-separated plugin selection string into normalized plugin names.
- * Validates against known plugins; returns invalid names as errors.
- */
-export function parsePluginSelection(
-  input: string,
-  validPlugins: PluginDefinition[],
-): { selected: string[]; invalid: string[] } {
-  const selected = input.split(',').map(raw => {
-    const trimmed = raw.trim();
-    const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
-    return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
-  });
-
-  const validNames = validPlugins.map(pl => pl.name);
-  const invalid = selected.filter(name => !validNames.includes(name));
-  return { selected, invalid };
-}
 
 /**
  * Combine workflow and language selections into a single plugin list.

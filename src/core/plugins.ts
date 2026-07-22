@@ -281,6 +281,28 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
 };
 
 /**
+ * Parse a comma-separated plugin selection string into normalized plugin names.
+ * Validates against known plugins; returns invalid names as errors.
+ *
+ * D-MOVE: moved from src/cli/commands/init.ts so uninstall can share it
+ * without creating a command→command import cycle.
+ */
+export function parsePluginSelection(
+  input: string,
+  validPlugins: PluginDefinition[],
+): { selected: string[]; invalid: string[] } {
+  const selected = input.split(',').map(raw => {
+    const trimmed = raw.trim();
+    const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
+    return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
+  });
+
+  const validNames = validPlugins.map(pl => pl.name);
+  const invalid = selected.filter(name => !validNames.includes(name));
+  return { selected, invalid };
+}
+
+/**
  * Deprecated command names from old installations.
  * Used during init to clean up stale command files on upgrade.
  */

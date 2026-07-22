@@ -3,7 +3,6 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  parsePluginSelection,
   combineSelection,
   shouldRetry,
   substituteSettingsTemplate,
@@ -12,6 +11,7 @@ import {
   discoverProjectGitRoots,
   runMigrationsWithFallback,
 } from '../src/cli/commands/init.js';
+import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
 import {
   installManagedSettings,
