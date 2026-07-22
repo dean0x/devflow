@@ -1,6 +1,6 @@
 /**
- * Tests for src/cli/utils/project-paths.ts (TypeScript module) and
- * scripts/hooks/lib/project-paths.cjs (CJS counterpart).
+ * Tests for src/core/project-paths.ts (TypeScript module) and
+ * src/assets/scripts/hooks/lib/project-paths.cjs (CJS counterpart).
  *
  * Goals:
  * 1. Each function returns the expected path under a given projectRoot.

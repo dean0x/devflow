@@ -6,7 +6,7 @@
 # Charter includes the plan-handoff fallback bullet — SessionStart provably fires
 # (SessionStart:clear) in plan-handoff sessions even if UserPromptSubmit does not.
 # NOTE: the literal prefix `Implement the following plan:` is duplicated in
-# scripts/hooks/preamble — update both if Claude Code changes the handoff format.
+# src/assets/scripts/hooks/preamble — update both if Claude Code changes the handoff format.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }

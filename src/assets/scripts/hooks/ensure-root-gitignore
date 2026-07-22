@@ -45,7 +45,7 @@ mkdir -p "$_ERG_DEVFLOW_DIR" 2>/dev/null || return 1
 _ERG_GITIGNORE="$1/.gitignore"
 
 # The carve-out block, built once into _ERG_BLOCK (emitted on create and append).
-# Keep byte-identical to ensureDevflowGitignore in src/cli/utils/post-install.ts.
+# Keep byte-identical to ensureDevflowGitignore in src/targets/claude-code/post-install.ts.
 printf -v _ERG_BLOCK '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
   '# Exception: feature knowledge bases under .devflow/features/ are shared via git —' \

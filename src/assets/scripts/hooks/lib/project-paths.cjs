@@ -1,4 +1,4 @@
-// scripts/hooks/lib/project-paths.cjs
+// src/assets/scripts/hooks/lib/project-paths.cjs
 //
 // Centralized path construction for all project-relative directories and files.
 //

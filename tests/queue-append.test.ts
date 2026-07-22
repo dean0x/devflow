@@ -1,7 +1,7 @@
 /**
  * tests/queue-append.test.ts
  *
- * Tests for scripts/hooks/queue-append — the shared dual-queue-append helper
+ * Tests for src/assets/scripts/hooks/queue-append — the shared dual-queue-append helper
  * used by capture-prompt, capture-turn, and capture-question.
  *
  * Harness note: queue_append_row/queue_append_both/queue_read_gates are bash

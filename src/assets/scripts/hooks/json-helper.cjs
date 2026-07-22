@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// scripts/hooks/json-helper.cjs
+// src/assets/scripts/hooks/json-helper.cjs
 // Provides jq-equivalent operations for hooks when jq is not installed.
 // SECURITY: This is a local CLI helper invoked only by shell hooks with controlled arguments.
 // File path arguments come from hook-owned variables, not from external/untrusted input.

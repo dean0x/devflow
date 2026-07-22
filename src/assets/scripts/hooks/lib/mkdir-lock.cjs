@@ -1,4 +1,4 @@
-// scripts/hooks/lib/mkdir-lock.cjs
+// src/assets/scripts/hooks/lib/mkdir-lock.cjs
 //
 // Shared mkdir-based locking helpers used by json-helper.cjs, render-decisions.cjs,
 // and any other CJS hook that needs exclusive access to a shared resource.

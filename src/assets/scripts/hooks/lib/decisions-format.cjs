@@ -1,4 +1,4 @@
-// scripts/hooks/lib/decisions-format.cjs
+// src/assets/scripts/hooks/lib/decisions-format.cjs
 //
 // Shared pure formatting helpers for decisions.md and pitfalls.md output.
 //

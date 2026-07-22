@@ -407,7 +407,7 @@ export function isValidRuleName(name: string): boolean {
  * Rules are plugin-scoped (unlike skills which install from all plugins).
  * First plugin to declare a rule wins.
  * Throws if any rule name fails the isValidRuleName check — catches
- * misconfigured plugin.json entries at map-build time rather than at
+ * misconfigured `DEVFLOW_PLUGINS` rules entries at map-build time rather than at
  * path-construction time.
  */
 export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> {

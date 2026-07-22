@@ -9,7 +9,7 @@
  *
  * ARCHITECTURE: This module is the single source of truth for path layout.
  *
- * CJS COUNTERPART: scripts/hooks/lib/project-paths.cjs must mirror this file
+ * CJS COUNTERPART: src/assets/scripts/hooks/lib/project-paths.cjs must mirror this file
  * exactly. Keep them in sync when adding or changing functions.
  */
 
@@ -187,7 +187,7 @@ export function getHandoffPath(projectRoot: string, branchSlug: string): string 
  * for ALL scopes. Adding a bare `.devflow/` here would append a wholesale-ignore
  * line after the carve-out and re-bury it (last match wins in .gitignore).
  *
- * CJS mirror: scripts/hooks/lib/project-paths.cjs getGitignoreEntries().
+ * CJS mirror: src/assets/scripts/hooks/lib/project-paths.cjs getGitignoreEntries().
  */
 export function getGitignoreEntries(): string[] {
   return ['.claude/'];

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/hooks/lib/render-decisions.cjs
+// src/assets/scripts/hooks/lib/render-decisions.cjs
 //
 // Pure renderer for decisions.md and pitfalls.md from a decisions-ledger.jsonl.
 //
@@ -14,7 +14,7 @@
 //   - decisions_status: undefined|'Accepted'|'Active' → included
 //     'Deprecated'|'Superseded'|'Retired' → excluded
 //
-// Row shape: see LearningObservation in src/cli/utils/observations.ts.
+// Row shape: see LearningObservation in src/core/observations.ts.
 // Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
 // If absent, treat as empty corpus.
 //

@@ -31,10 +31,6 @@ Thumbs.db
 *.swo
 *~
 
-# Local configuration overrides
-config/local-*
-commands/local-*
-
 # Installation logs
 install.log
 # Devflow local scope installation (use --scope local)

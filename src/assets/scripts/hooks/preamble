@@ -5,7 +5,7 @@
 #   1. Plan-handoff fast-path: if prompt begins `Implement the following plan:` (Claude Code's
 #      native plan-mode handoff), inject a directive to invoke devflow:implement immediately.
 #      NOTE: the literal prefix is duplicated in orchestrator-charter.md (fallback bullet)
-#      and scripts/hooks/preamble — update both together if Claude Code changes the handoff format.
+#      and src/assets/scripts/hooks/preamble — update both together if Claude Code changes the handoff format.
 #   2. Slash skip: no reminder for slash commands (/...).
 #   3. Orchestrator reminder (2 lines): all other prompts get a delegation reminder.
 

@@ -47,7 +47,7 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
  * needs a `dir/*` + `!dir/keep` pair at each level — a bare `.devflow/` excludes
  * the directory so git never descends and later negations are dead.
  *
- * Kept BYTE-IDENTICAL to the block emitted by scripts/hooks/ensure-root-gitignore
+ * Kept BYTE-IDENTICAL to the block emitted by src/assets/scripts/hooks/ensure-root-gitignore
  * so the init-time path and the always-on hook path produce the same file.
  */
 export const DEVFLOW_GITIGNORE_BLOCK = [
@@ -133,7 +133,7 @@ export function mergeDenyList(existingJson: string, newDenyEntries: string[]): s
  */
 // D-SECURITY-01: frozen at module load — any future template entry must appear here too.
 export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Set<string>([
-  // v1 batch — 154 entries shipped in src/templates/managed-settings.json
+  // v1 batch — 154 entries shipped in src/targets/claude-code/templates/managed-settings.json
   'Bash(rm -rf /*)',
   'Bash(rm -rf ~*)',
   'Bash(rm -rf .*)',
@@ -962,7 +962,7 @@ export async function updateGitignore(
  *
  * Manages ONLY `.devflow/` — never `.claude/` — because user-scope installs must
  * not gitignore `.claude/`. This is the init-time counterpart to the always-on
- * scripts/hooks/ensure-root-gitignore shell helper; both write the identical
+ * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both write the identical
  * DEVFLOW_GITIGNORE_BLOCK, so the two paths are byte-compatible and mutually
  * idempotent. Called unconditionally (independent of install scope and every
  * feature toggle) whenever a git root is known, so a fresh install tracks feature

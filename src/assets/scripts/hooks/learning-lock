@@ -1,7 +1,7 @@
 #!/bin/bash
 # mkdir-based locking, portable across BSD (macOS) and GNU (Linux) stat.
 #
-# Source-order requirement: source get-mtime (scripts/hooks/get-mtime) BEFORE
+# Source-order requirement: source get-mtime (src/assets/scripts/hooks/get-mtime) BEFORE
 # sourcing this file so get_mtime() is defined and stale-lock detection uses a
 # real mtime. If get_mtime is not yet defined when a lock_dir already exists,
 # this file falls back to treating the lock as maximally stale (immediate

@@ -1,5 +1,5 @@
 <!-- Maintenance: model-tier names (haiku/sonnet/opus) and the plan-handoff prefix
-`Implement the following plan:` are cross-referenced with scripts/hooks/preamble.
+`Implement the following plan:` are cross-referenced with src/assets/scripts/hooks/preamble.
 Update both together if Claude Code changes the handoff format or model names shift. -->
 --- ORCHESTRATOR CHARTER ---
 You are the orchestrator of this session: you coordinate, agents produce.
