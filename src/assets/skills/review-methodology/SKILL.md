@@ -95,8 +95,8 @@ For detailed implementation:
 | Reference | Content |
 |-----------|---------|
 | `references/report-template.md` | Full report template with all sections |
-| `references/pr-comments.md` | PR comment API integration details |
-| `references/commands.md` | Bash commands for getting diffs and saving reports |
+| `references/patterns.md` | Diff commands (lines 29–113) and PR comment API integration (lines 117–181) |
+| `references/violations.md` | Review process anti-patterns and violations |
 
 ---
 

@@ -136,7 +136,8 @@ Status: READY / BLOCKED
 ## Extended References
 
 For detailed checklists, examples, and red flags for each pillar:
-- See `references/pillars.md`
+- See `references/patterns.md` (9-pillar evaluation patterns and issue classification)
+- See `references/violations.md` (pillar-organized anti-patterns and P0/P1 red flags)
 
 For complete report templates and examples:
 - See `references/report-template.md`

@@ -432,7 +432,7 @@ describe('computeShadowLeftoverWarnings', () => {
 
 describe('legacy plugin name resolution in uninstall (parsePluginSelection shared from plugins.ts)', () => {
   it('legacy name frontend-design resolves to devflow-ui-design and flows into computeAssetsToRemove', () => {
-    const { selected, invalid } = parsePluginSelection('frontend-design', DEVFLOW_PLUGINS);
+    const { selected, invalid } = parsePluginSelection('frontend-design', DEVFLOW_PLUGINS); // legacy → devflow-ui-design
     expect(selected).toEqual(['devflow-ui-design']);
     expect(invalid).toEqual([]);
     // Verify the resolved name maps to a real plugin in the registry
