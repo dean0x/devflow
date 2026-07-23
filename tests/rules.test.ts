@@ -221,12 +221,12 @@ describe('installRuleFile', () => {
     expect(outcome).toBe('shadow');
   });
 
-  it('skips silently when rule does not exist in src/assets/rules/', async () => {
-    // 'nonexistent-rule-xyz' is not in src/assets/rules/ — installRuleFile returns skipped
-    const outcome = await installRuleFile('nonexistent-rule-xyz', devflowDir, rulesTarget);
-
-    expect(outcome).toBe('skipped');
-    await expect(fs.access(path.join(rulesTarget, 'nonexistent-rule-xyz.md'))).rejects.toThrow();
+  it('throws when declared rule source does not exist in src/assets/rules/ (WS6a)', async () => {
+    // 'nonexistent-rule-xyz' is not in src/assets/rules/ — hard-error since it is declared.
+    // Previously returned 'skipped'; now throws to surface build/packaging failures early.
+    await expect(
+      installRuleFile('nonexistent-rule-xyz', devflowDir, rulesTarget),
+    ).rejects.toThrow(/Rule source not found for declared rule "nonexistent-rule-xyz"/);
   });
 
   it('places target file at rulesTarget/{name}.md (flat, no nesting)', async () => {
@@ -281,18 +281,18 @@ describe('installRuleFile', () => {
     }
   });
 
-  it('empty shadow file with missing source → returns "skipped"', async () => {
+  it('empty shadow file with missing source → throws (WS6a hard-error)', async () => {
     // Shadow exists but is invalid (empty); 'orphan-rule' is not in src/assets/rules/.
-    // The compound-variant outcome ('source-invalid-shadow:empty-shadow-file') is unreachable
-    // when the source is also absent: installRuleFile falls to the source catch-block and
-    // returns 'skipped'. This pins the edge case — any behavior change is a separate decision.
+    // Previously returned 'skipped'; now throws because the declared source is absent.
+    // ADR-010 shadow tolerance still applies — the shadow is invalid, but the hard-error
+    // fires for the missing declared source, not for the invalid shadow.
     const shadowDir = path.join(devflowDir, 'rules');
     await fs.mkdir(shadowDir, { recursive: true });
     await fs.writeFile(path.join(shadowDir, 'orphan-rule.md'), '', 'utf-8');
 
-    const outcome = await installRuleFile('orphan-rule', devflowDir, rulesTarget);
-
-    expect(outcome).toBe('skipped');
+    await expect(
+      installRuleFile('orphan-rule', devflowDir, rulesTarget),
+    ).rejects.toThrow(/Rule source not found for declared rule "orphan-rule"/);
     await expect(fs.access(path.join(rulesTarget, 'orphan-rule.md'))).rejects.toThrow();
   });
 });
@@ -403,7 +403,7 @@ describe('installViaFileCopy rules report', () => {
     }
   });
 
-  it('empty shadow with missing source → skippedShadows has no entry (outcome is "skipped", not "source-invalid-shadow")', async () => {
+  it('empty shadow with missing source → installViaFileCopy throws (WS6a hard-error)', async () => {
     const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
     const localTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rules-skip-missing-'));
     const localDevflowDir = path.join(localTmpDir, 'devflow');
@@ -411,28 +411,27 @@ describe('installViaFileCopy rules report', () => {
 
     try {
       // No source for 'orphan-rule' in src/assets/rules/ — only an empty (invalid) shadow exists.
-      // installRuleFile can't reach the invalid-shadow reporting branch when source is
-      // missing: the source access() throws, returning 'skipped'. installViaFileCopy
-      // only pushes to skippedShadows for 'source-invalid-shadow:*' outcomes.
+      // Previously installViaFileCopy returned a report with no skippedShadows entry.
+      // Now installRuleFile throws for the missing declared source, which propagates out of
+      // installViaFileCopy. Hard-error surfaces packaging failures instead of silently skipping.
       const shadowRulesDir = path.join(localDevflowDir, 'rules');
       await fs.mkdir(shadowRulesDir, { recursive: true });
       await fs.writeFile(path.join(shadowRulesDir, 'orphan-rule.md'), '', 'utf-8');
 
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
-      const report = await installViaFileCopy({
-        plugins: [],
-        claudeDir: localClaudeDir,
-        devflowDir: localDevflowDir,
-        skillsMap: new Map(),
-        agentsMap: new Map(),
-        rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
-        isPartialInstall: true,
-        spinner: noopSpinner,
-      });
-
-      expect(report.skippedShadows).not.toContainEqual(expect.objectContaining({ name: 'orphan-rule' }));
-      expect(report.shadowedRules).not.toContain('orphan-rule');
+      await expect(
+        installViaFileCopy({
+          plugins: [],
+          claudeDir: localClaudeDir,
+          devflowDir: localDevflowDir,
+          skillsMap: new Map(),
+          agentsMap: new Map(),
+          rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
+          isPartialInstall: true,
+          spinner: noopSpinner,
+        }),
+      ).rejects.toThrow(/Rule source not found for declared rule "orphan-rule"/);
     } finally {
       await fs.rm(localTmpDir, { recursive: true, force: true });
     }
