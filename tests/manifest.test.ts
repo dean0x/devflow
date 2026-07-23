@@ -790,12 +790,43 @@ describe('knownFlags / knownPlugins schema', () => {
     expect(result!.features.knownFlags).toBeUndefined();
   });
 
+  it('self-heals mixed-type knownFlags array (non-string elements) to undefined', async () => {
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], knownFlags: [1, null] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.knownFlags).toBeUndefined();
+  });
+
   it('self-heals non-array knownPlugins to undefined', async () => {
     const raw = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
       knownPlugins: 42,
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.knownPlugins).toBeUndefined();
+  });
+
+  it('self-heals mixed-type knownPlugins array (non-string elements) to undefined', async () => {
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      knownPlugins: [42, 'devflow-core-skills'],
       features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',

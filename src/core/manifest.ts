@@ -90,11 +90,11 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
 
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
-    // Self-heal: non-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
-    const knownFlags: string[] | undefined = Array.isArray(features.knownFlags)
+    // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
+    const knownFlags: string[] | undefined = Array.isArray(features.knownFlags) && (features.knownFlags as unknown[]).every(e => typeof e === 'string')
       ? features.knownFlags as string[]
       : undefined;
-    const knownPlugins: string[] | undefined = Array.isArray(data.knownPlugins)
+    const knownPlugins: string[] | undefined = Array.isArray(data.knownPlugins) && (data.knownPlugins as unknown[]).every(e => typeof e === 'string')
       ? data.knownPlugins as string[]
       : undefined;
 
