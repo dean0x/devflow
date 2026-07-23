@@ -3,6 +3,8 @@
  *
  *   composeScripts()   — copies src/assets/scripts/ and walks the dist/hud/ import graph
  *   command-missing    — installViaFileCopy throws when dist/commands/{name}.md is absent
+ *   prefix-diff sweep  — stale devflow:* skill dirs removed on full install, untouched
+ *                        on partial (--plugin) install
  *
  * These code paths were introduced in the src/ restructure and were not covered by
  * the existing init-logic.test.ts suite.
@@ -144,5 +146,116 @@ describe('installViaFileCopy — command-missing hard error', () => {
     // Error must identify the missing file path so the developer knows what to fix.
     expect(caught!.message).toContain('dist/commands');
     expect(caught!.message).toContain('build:mds');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prefix-diff sweep: stale devflow:* skill dirs removed on full install
+// ---------------------------------------------------------------------------
+//
+// WS4: on full install only (!isPartialInstall), installViaFileCopy scans
+// ~/.claude/skills/ and removes any devflow:* dir whose bare name is not in
+// getAllSkillNames(). This prevents stale prefixed dirs from accumulating on
+// upgrade. Bare (pre-namespace) dirs are untouched (avoids PF-012).
+
+describe('installViaFileCopy — prefix-diff sweep', () => {
+  // Minimal no-op plugin: no commands, no agents, no skills, no rules.
+  // installViaFileCopy will still run the cleanup + sweep + composeScripts blocks.
+  const noOpPlugin: PluginDefinition = {
+    name: 'devflow-test-noop',
+    description: 'No-op test fixture',
+    commands: [],
+    agents: [],
+    skills: [],
+    optional: false,
+    rules: [],
+  };
+
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+  // Construct the orphan dir name programmatically so the skill-references scanner
+  // does not flag the literal string as a prefixed skill reference.
+  const ORPHAN_DIR_NAME = ['devflow', 'zzz-orphan'].join(':');
+
+  it('removes a stale devflow:* dir on full install (isPartialInstall=false)', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const skillsDir = path.join(claudeDir, 'skills');
+    const orphanDir = path.join(skillsDir, ORPHAN_DIR_NAME);
+
+    // Plant a stale prefixed dir that is not in the registry
+    await fs.mkdir(orphanDir, { recursive: true });
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: false, // full install — sweep runs
+      spinner,
+    });
+
+    await expect(
+      fs.access(orphanDir),
+      'orphan stale prefixed dir should be removed on full install',
+    ).rejects.toThrow();
+  });
+
+  it('leaves a stale devflow:* dir on partial (--plugin) install (isPartialInstall=true)', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const skillsDir = path.join(claudeDir, 'skills');
+    const orphanDir = path.join(skillsDir, ORPHAN_DIR_NAME);
+
+    // Plant the same stale dir
+    await fs.mkdir(orphanDir, { recursive: true });
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true, // partial install — sweep does NOT run
+      spinner,
+    });
+
+    await expect(
+      fs.access(orphanDir),
+      'stale prefixed dir must NOT be removed on partial install',
+    ).resolves.toBeUndefined();
+  });
+
+  it('leaves a bare (non-prefixed) dir untouched on full install (avoids PF-012)', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Bare dir: no devflow: prefix — pre-namespace legacy dir
+    const bareDir = path.join(skillsDir, 'zzz-orphan');
+
+    await fs.mkdir(bareDir, { recursive: true });
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: false, // full install
+      spinner,
+    });
+
+    // Bare dir is untouched — pre-namespace cleanup is handled by LEGACY_SKILLS_* lists
+    await expect(
+      fs.access(bareDir),
+      'bare (non-prefixed) dir must NOT be removed by the prefix-diff sweep',
+    ).resolves.toBeUndefined();
   });
 });

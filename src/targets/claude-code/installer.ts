@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, prefixSkillName } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames } from '../../core/plugins.js';
 import { LEGACY_AGENT_NAMES } from './legacy.js';
 import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
@@ -364,6 +364,28 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         await fs.rm(dir, { recursive: true, force: true });
       } catch { /* ignore */ }
     }
+
+    // Sweep stale devflow:* skill dirs — remove any dir under ~/.claude/skills/
+    // whose bare name is no longer present in the registry. The devflow: namespace
+    // is exclusively Devflow's so removals are safe. Bare (pre-namespace) dirs are
+    // intentionally untouched — they are handled by the frozen LEGACY_SKILLS_* lists
+    // in legacy.ts (avoids PF-012: those lists are deletion manifests for pre-namespace
+    // paths and must not be modified). Shadow dirs (~/.devflow/skills/) are keyed by
+    // bare registry name and are unaffected by this sweep.
+    const skillsInstallDir = path.join(claudeDir, 'skills');
+    try {
+      const installedDirs = await fs.readdir(skillsInstallDir);
+      const knownSkillNames = new Set(getAllSkillNames());
+      for (const dir of installedDirs) {
+        if (!dir.startsWith(SKILL_NAMESPACE)) continue; // only our devflow: namespace
+        const bareName = unprefixSkillName(dir);
+        if (!knownSkillNames.has(bareName)) {
+          try {
+            await fs.rm(path.join(skillsInstallDir, dir), { recursive: true, force: true });
+          } catch { /* ignore individual removal errors */ }
+        }
+      }
+    } catch { /* skills dir absent or unreadable — not an error */ }
   }
 
   // Skills are universally installed — always clean both naming variants
