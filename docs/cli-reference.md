@@ -25,6 +25,9 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
+| `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
+| `--advanced` | Show all configuration prompts |
+| `--reset` | Factory reset — restore all defaults, ignoring prior installation state; mutually exclusive with `--plugin` |
 | `--security <user\|managed\|none>` | Security deny list location (default: user) |
 | `--verbose` | Show detailed output |
 
@@ -177,7 +180,7 @@ npx devflow-kit uninstall
 
 | Option | Description |
 |--------|-------------|
-| `--scope <user\|local>` | Uninstall scope (default: user) |
+| `--scope <user\|local>` | Uninstall scope (default: auto-detect all installed scopes) |
 | `--plugin <names>` | Selective uninstall by plugin name |
 | `--keep-docs` | Preserve `.devflow/docs/` directory |
 | `--dry-run` | Show what would be removed |
