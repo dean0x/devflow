@@ -6,6 +6,7 @@ import {
   resolveInitSeed,
   applyCliToggles,
   resolveResetGatedInputs,
+  resolveNonSelectableOptionalCarry,
   FEATURE_DEFAULTS,
   type FeatureSeed,
 } from '../src/cli/commands/init-seed.js';
@@ -485,5 +486,69 @@ describe('resolveResetGatedInputs', () => {
     const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
 
     expect(seed.viewMode).toBe('focus');
+  });
+});
+
+// ── resolveNonSelectableOptionalCarry ─────────────────────────────────────────
+
+describe('resolveNonSelectableOptionalCarry', () => {
+  it('null manifestPlugins (fresh install) → empty carry', () => {
+    const carry = resolveNonSelectableOptionalCarry(null, DEVFLOW_PLUGINS);
+    expect(carry).toEqual([]);
+  });
+
+  it('null manifestPlugins (--reset simulation via resolveResetGatedInputs) → empty carry', () => {
+    // --reset sets seedManifest to null; callers pass seedManifest?.plugins ?? null
+    const carry = resolveNonSelectableOptionalCarry(null, DEVFLOW_PLUGINS);
+    expect(carry).toEqual([]);
+  });
+
+  it('devflow-audit-claude in manifest → carried (non-selectable optional plugin preserved)', () => {
+    const manifestPlugins = ['devflow-implement', 'devflow-code-review', 'devflow-audit-claude'];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).toContain('devflow-audit-claude');
+  });
+
+  it('only selectable plugins in manifest → empty carry', () => {
+    const manifestPlugins = ['devflow-implement', 'devflow-code-review', 'devflow-typescript'];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).toEqual([]);
+  });
+
+  it('devflow-core-skills (non-optional always-installed) → not in carry', () => {
+    // core-skills is excluded from selection buckets but it is NOT optional — should not be carried
+    const manifestPlugins = ['devflow-core-skills', 'devflow-implement'];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).not.toContain('devflow-core-skills');
+  });
+
+  it('devflow-ambient (non-optional always-installed) → not in carry', () => {
+    const manifestPlugins = ['devflow-ambient', 'devflow-implement'];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).not.toContain('devflow-ambient');
+  });
+
+  it('carry contains only devflow-audit-claude when both selectable and non-selectable plugins present', () => {
+    const manifestPlugins = [
+      'devflow-implement',
+      'devflow-code-review',
+      'devflow-typescript',
+      'devflow-core-skills',
+      'devflow-ambient',
+      'devflow-audit-claude',
+    ];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).toEqual(['devflow-audit-claude']);
+  });
+
+  it('unknown/stale plugin name in manifest → excluded from carry', () => {
+    const manifestPlugins = ['devflow-implement', 'devflow-obsolete-plugin'];
+    const carry = resolveNonSelectableOptionalCarry(manifestPlugins, DEVFLOW_PLUGINS);
+    expect(carry).not.toContain('devflow-obsolete-plugin');
+  });
+
+  it('empty manifestPlugins array → empty carry', () => {
+    const carry = resolveNonSelectableOptionalCarry([], DEVFLOW_PLUGINS);
+    expect(carry).toEqual([]);
   });
 });

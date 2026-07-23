@@ -264,6 +264,49 @@ export function resolveResetGatedInputs(
 }
 
 /**
+ * Identify non-selectable optional plugins from the prior manifest that should be
+ * carried forward on a plugin-less full re-init.
+ *
+ * Non-selectable optional plugins (e.g. devflow-audit-claude) are excluded from
+ * the init prompt buckets by partitionSelectablePlugins and therefore never appear
+ * in the seed's workflowPlugins/languagePlugins. Without an explicit carry, a
+ * plugin-less full re-init would silently drop them — violating the
+ * "re-init preserves all existing state" acceptance criterion.
+ *
+ * Rules:
+ *   - null manifestPlugins (fresh install OR --reset) → empty carry set
+ *   - Otherwise: carry set = manifestPlugins ∩ optional ∩ not-in-selectable-buckets
+ *   - Unknown/stale names (not in allPlugins) are excluded
+ *
+ * The caller is responsible for injecting the carry set into pluginsToInstall only
+ * on full (plugin-less) re-inits. Partial installs (--plugin flag) already merge
+ * via resolvePluginList. --reset produces null seedManifest → null manifestPlugins
+ * so the carry is empty by construction (factory reset drops them, as intended).
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function resolveNonSelectableOptionalCarry(
+  manifestPlugins: string[] | null,
+  allPlugins: PluginDefinition[],
+): string[] {
+  if (manifestPlugins === null || manifestPlugins.length === 0) return [];
+
+  const { workflow, language } = partitionSelectablePlugins(allPlugins);
+  const selectableNames = new Set([
+    ...workflow.map(p => p.name),
+    ...language.map(p => p.name),
+  ]);
+
+  // Carry only OPTIONAL non-selectable plugins that exist in the registry.
+  // Non-optional always-installed plugins (core-skills, ambient) are excluded —
+  // they are guaranteed to be in pluginsToInstall by other mechanisms.
+  return manifestPlugins.filter(name => {
+    const plugin = allPlugins.find(p => p.name === name);
+    return plugin !== undefined && plugin.optional && !selectableNames.has(name);
+  });
+}
+
+/**
  * Apply CLI-explicit feature toggles on top of a seed's features.
  *
  * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;

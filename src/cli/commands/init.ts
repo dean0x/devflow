@@ -42,7 +42,7 @@ import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, Vi
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
-import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolveNonSelectableOptionalCarry } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -1010,6 +1010,28 @@ export const initCommand = new Command('init')
     const ambientPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     if (ambientEnabled && ambientPlugin && !pluginsToInstall.includes(ambientPlugin)) {
       pluginsToInstall.push(ambientPlugin);
+    }
+
+    // Carry non-selectable optional plugins (e.g. devflow-audit-claude) from the prior
+    // install on full re-inits. These plugins are excluded from the init prompt buckets
+    // by partitionSelectablePlugins, so they never appear in selectedPlugins and would
+    // otherwise be silently dropped on any plugin-less re-init.
+    //
+    // --reset: seedManifest is null (resolveResetGatedInputs zeros it) → carry is empty.
+    //   Factory reset correctly drops non-selectable optional plugins.
+    // --plugin X partial install: resolvePluginList already merges the full manifest list
+    //   at the manifest-write step; physical dirs are preserved (no full wipe on partial).
+    //   Skip carry here to avoid force-reinstalling plugins the user didn't target.
+    if (!options.plugin) {
+      const carryNames = resolveNonSelectableOptionalCarry(
+        seedManifest?.plugins ?? null, DEVFLOW_PLUGINS,
+      );
+      for (const name of carryNames) {
+        const plugin = DEVFLOW_PLUGINS.find(p => p.name === name);
+        if (plugin && !pluginsToInstall.includes(plugin)) {
+          pluginsToInstall.push(plugin);
+        }
+      }
     }
 
     // Skills: install ALL from ALL plugins (skills are tiny markdown files;
