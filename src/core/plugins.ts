@@ -32,7 +32,19 @@ export interface PluginDefinition {
   name: string;
   description: string;
   commands: string[];
+  /**
+   * Agents spawned by this plugin's commands. Must exactly match the set of
+   * subagent_type values used in the compiled dist/commands/{name}.md output.
+   * Guarded by registry-integrity.test.ts Guard 5 (bidirectional spawn check).
+   */
   agents: string[];
+  /**
+   * Skills owned by this plugin — ownership declarations for universal install,
+   * NOT a usage list. All skills from ALL plugins are always installed regardless
+   * of plugin selection (see buildFullSkillsMap). Cross-plugin skill usage is normal
+   * and expected; agents reference skills by the devflow: namespace prefix at runtime.
+   * Guard 1/2 in registry-integrity.test.ts enforce set-completeness (no orphans).
+   */
   skills: string[];
   /** Optional plugins are not installed by default — require explicit --plugin flag */
   optional?: boolean;
@@ -56,7 +68,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['git', 'skimmer', 'synthesizer', 'designer', 'knowledge'],
+    agents: ['skimmer', 'synthesizer', 'designer'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -64,7 +76,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
+    agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator', 'knowledge'],
     skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -80,7 +92,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-resolve',
     description: 'Process and fix code review issues with blast-radius triage, Coder fixes, and Validator verification',
     commands: ['/resolve'],
-    agents: ['git', 'triager', 'coder', 'simplifier', 'validator'],
+    agents: ['git', 'triager', 'coder', 'simplifier', 'validator', 'knowledge'],
     skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     rules: [],
   },
@@ -88,7 +100,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesizer'],
+    agents: ['git', 'synthesizer', 'simplifier', 'knowledge'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -112,7 +124,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-release',
     description: 'Adaptive project release with learned configuration',
     commands: ['/release'],
-    agents: ['git', 'synthesizer', 'validator'],
+    agents: ['git', 'validator'],
     skills: ['git', 'worktree-support'],
     rules: [],
   },
@@ -120,7 +132,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-self-review',
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
-    agents: ['simplifier', 'scrutinizer', 'validator'],
+    agents: ['simplifier', 'scrutinizer', 'validator', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -311,6 +323,20 @@ export const LEGACY_COMMAND_NAMES: string[] = [
   'specify',
   'specify-teams',
 ];
+
+/**
+ * Derive unique command names (without leading /) from all plugins.
+ * Returns one entry per distinct command, preserving DEVFLOW_PLUGINS declaration order.
+ */
+export function getAllCommandNames(): string[] {
+  const commands = new Set<string>();
+  for (const plugin of DEVFLOW_PLUGINS) {
+    for (const cmd of plugin.commands) {
+      commands.add(cmd.startsWith('/') ? cmd.slice(1) : cmd);
+    }
+  }
+  return [...commands];
+}
 
 /**
  * Derive unique skill names from all plugins.
