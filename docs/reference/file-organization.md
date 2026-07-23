@@ -9,7 +9,7 @@ devflow/
 ├── src/
 │   ├── cli.ts                        # CLI entry point
 │   ├── cli/                          # CLI command modules
-│   │   ├── commands/                 # init.ts, list.ts, memory.ts, learning.ts, ambient.ts,
+│   │   ├── commands/                 # init.ts, memory.ts, learning.ts, ambient.ts,
 │   │   │                             #   flags.ts, rules.ts, skills.ts, context.ts, hud.ts,
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, knowledge/

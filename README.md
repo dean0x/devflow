@@ -133,7 +133,6 @@ For deep dives: [Working Memory](docs/working-memory.md) | [CLI Reference](docs/
 ```bash
 npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
-npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
 npx devflow-kit learning --enable       # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules

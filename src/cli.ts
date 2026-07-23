@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initCommand } from './cli/commands/init.js';
 import { uninstallCommand } from './cli/commands/uninstall.js';
-import { listCommand } from './cli/commands/list.js';
 import { ambientCommand } from './cli/commands/ambient.js';
 import { memoryCommand } from './cli/commands/memory.js';
 import { skillsCommand } from './cli/commands/skills.js';
@@ -34,12 +33,11 @@ program
   .description('Agentic Development Toolkit for Claude Code\n\nEnhance your AI-assisted development with intelligent commands and workflows.')
   .version(packageJson.version, '-v, --version', 'Display version number')
   .helpOption('-h, --help', 'Display help information')
-  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all Devflow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,code-review  Install multiple plugins\n  $ devflow list                       List available plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow hud --status               Show current HUD config\n  $ devflow security --status          Check security deny list state\n  $ devflow security --disable         Remove the security deny list\n  $ devflow safe-delete --status       Check safe-delete shell function state\n  $ devflow safe-delete --enable       Install safe-delete shell function\n  $ devflow uninstall                  Remove Devflow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
+  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all Devflow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,code-review  Install multiple plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow hud --status               Show current HUD config\n  $ devflow security --status          Check security deny list state\n  $ devflow security --disable         Remove the security deny list\n  $ devflow safe-delete --status       Check safe-delete shell function state\n  $ devflow safe-delete --enable       Install safe-delete shell function\n  $ devflow uninstall                  Remove Devflow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
 
 // Register commands
 program.addCommand(initCommand);
 program.addCommand(uninstallCommand);
-program.addCommand(listCommand);
 program.addCommand(ambientCommand);
 program.addCommand(memoryCommand);
 program.addCommand(skillsCommand);

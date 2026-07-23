@@ -36,7 +36,6 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 ## Plugin Management
 
 ```bash
-npx devflow-kit list                          # List available plugins
 npx devflow-kit init --plugin=implement       # Install specific plugin
 npx devflow-kit init --plugin=implement,code-review  # Install multiple
 ```
