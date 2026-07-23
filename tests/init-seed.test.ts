@@ -366,3 +366,69 @@ describe('applyCliToggles', () => {
     expect(base).toEqual(original);
   });
 });
+
+// ── Phase 4 integration scenarios (WS1 composability) ────────────────────────
+
+describe('resolveInitSeed — re-init composability (WS1)', () => {
+  it('non-interactive re-init preserves existing plugin selection via workflowPlugins + languagePlugins', () => {
+    // Simulate: user had devflow-implement + devflow-typescript installed; runs non-interactive
+    // re-init with --recommended. Seed must carry the prior selection into selectedPlugins.
+    const manifest = makeManifest({
+      plugins: ['devflow-implement', 'devflow-code-review', 'devflow-typescript'],
+      features: { ...makeManifest().features },
+    });
+    // knownPlugins snapshot written by commit 7b: all current plugin names
+    const manifestWithKnown = {
+      ...manifest,
+      knownPlugins: DEVFLOW_PLUGINS.map(p => p.name),
+      features: {
+        ...manifest.features,
+        knownFlags: FLAG_REGISTRY.map(f => f.id),
+      },
+    };
+
+    const seed = resolveInitSeed(manifestWithKnown as unknown as typeof manifest, null, '{}', DEVFLOW_PLUGINS);
+
+    // Prior workflow selection is preserved
+    expect(seed.workflowPlugins).toContain('devflow-implement');
+    expect(seed.workflowPlugins).toContain('devflow-code-review');
+    // Prior language selection is preserved
+    expect(seed.languagePlugins).toContain('devflow-typescript');
+  });
+
+  it('factory reset (--reset): null manifest → fresh seed, not prior state', () => {
+    // Simulate --reset: seedManifest = null, seedConfig = null (prior state ignored)
+    const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS);
+
+    // Features: all FEATURE_DEFAULTS (all true)
+    expect(seed.features).toEqual(FEATURE_DEFAULTS);
+    // viewMode: 'default' (no settings, no manifest)
+    expect(seed.viewMode).toBe('default');
+    // workflowPlugins: only non-optional workflow plugins (fresh install defaults)
+    for (const name of seed.workflowPlugins) {
+      const plugin = DEVFLOW_PLUGINS.find(p => p.name === name);
+      expect(plugin?.optional).toBeFalsy();
+    }
+    // languagePlugins: empty (fresh install)
+    expect(seed.languagePlugins).toEqual([]);
+  });
+
+  it('composability fix: --no-memory on re-init preserves other prior state via applyCliToggles', () => {
+    // The original composability bug: devflow flags --disable tui + devflow memory --disable
+    // were reset to defaults on --recommended re-init. After WS1, applyCliToggles(seed, {memory:false})
+    // preserves the seed's other values while only overriding memory.
+    const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS); // fresh seed for this test
+
+    const seedWithMemoryDisabled: FeatureSeed = {
+      ...seed.features,
+      memory: false,
+    };
+
+    const result = applyCliToggles(seed.features, { memory: false });
+    expect(result).toEqual(seedWithMemoryDisabled);
+    // Other seed fields preserved
+    expect(result.ambient).toBe(seed.features.ambient);
+    expect(result.learning).toBe(seed.features.learning);
+    expect(result.knowledge).toBe(seed.features.knowledge);
+  });
+});
