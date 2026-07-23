@@ -1406,7 +1406,23 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, learning: learningEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
+      // Snapshot of known plugin names at this install — used by resolveSeedPlugins on next init
+      // to detect new non-optional plugins and auto-adopt them.
+      knownPlugins: DEVFLOW_PLUGINS.map(p => p.name),
+      features: {
+        ambient: ambientEnabled,
+        memory: memoryEnabled,
+        hud: hudEnabled,
+        knowledge: knowledgeEnabled,
+        learning: learningEnabled,
+        rules: rulesEnabled,
+        flags: enabledFlags,
+        // Snapshot of known flag ids at this install — used by resolveSeedFlags on next init
+        // to detect new default-ON flags and auto-adopt them.
+        knownFlags: FLAG_REGISTRY.map(f => f.id),
+        viewMode,
+        security: securityMode,
+      },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

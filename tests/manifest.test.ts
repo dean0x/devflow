@@ -693,3 +693,134 @@ describe('syncManifestFeature', () => {
     expect(updated!.features.security).toBe('user');
   });
 });
+
+describe('knownFlags / knownPlugins schema', () => {
+  let tmpDir: string;
+
+  const baseManifest = (): ManifestData => ({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills', 'devflow-implement'],
+    scope: 'user',
+    features: {
+      ambient: true,
+      memory: true,
+      hud: false,
+      knowledge: false,
+      learning: false,
+      rules: true,
+      flags: ['tui'],
+    },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-known-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('round-trips knownFlags through write+read', async () => {
+    const data: ManifestData = {
+      ...baseManifest(),
+      features: { ...baseManifest().features, knownFlags: ['tui', 'lsp', 'tool-search'] },
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.knownFlags).toEqual(['tui', 'lsp', 'tool-search']);
+  });
+
+  it('round-trips knownPlugins through write+read', async () => {
+    const data: ManifestData = {
+      ...baseManifest(),
+      knownPlugins: ['devflow-core-skills', 'devflow-implement', 'devflow-plan'],
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.knownPlugins).toEqual(['devflow-core-skills', 'devflow-implement', 'devflow-plan']);
+  });
+
+  it('returns undefined knownFlags when field is absent (pre-7b manifest)', async () => {
+    // Write raw JSON without the knownFlags key
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.knownFlags).toBeUndefined();
+  });
+
+  it('returns undefined knownPlugins when field is absent (pre-7b manifest)', async () => {
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.knownPlugins).toBeUndefined();
+  });
+
+  it('self-heals non-array knownFlags to undefined', async () => {
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], knownFlags: 'garbage' },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.knownFlags).toBeUndefined();
+  });
+
+  it('self-heals non-array knownPlugins to undefined', async () => {
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      knownPlugins: 42,
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.knownPlugins).toBeUndefined();
+  });
+
+  it('preserves other features fields alongside knownFlags', async () => {
+    const data: ManifestData = {
+      ...baseManifest(),
+      features: {
+        ...baseManifest().features,
+        knownFlags: ['tui'],
+        viewMode: 'verbose',
+        security: 'user',
+      },
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.knownFlags).toEqual(['tui']);
+    expect(result!.features.viewMode).toBe('verbose');
+    expect(result!.features.security).toBe('user');
+  });
+});

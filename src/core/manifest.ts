@@ -20,6 +20,13 @@ export interface ManifestData {
   version: string;
   plugins: string[];
   scope: 'user' | 'local';
+  /**
+   * Snapshot of DEVFLOW_PLUGINS names written at the last install.
+   * Used by resolveSeedPlugins to detect new non-optional plugins added
+   * to the registry since the previous install and auto-adopt them.
+   * Absent in pre-7b manifests — readManifest self-heals to undefined.
+   */
+  knownPlugins?: string[];
   features: {
     ambient: boolean;
     memory: boolean;
@@ -29,6 +36,13 @@ export interface ManifestData {
     learning: boolean;
     rules: boolean;
     flags: string[];
+    /**
+     * Snapshot of all FLAG_REGISTRY ids written at the last install.
+     * Used by resolveSeedFlags to detect new default-ON flags added to the
+     * registry since the previous install and auto-adopt them.
+     * Absent in pre-7b manifests — readManifest self-heals to undefined.
+     */
+    knownFlags?: string[];
     viewMode?: ViewMode;
     /**
      * Security deny list location. 'user' = ~/.claude/settings.json,
@@ -76,10 +90,19 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
 
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
+    // Self-heal: non-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
+    const knownFlags: string[] | undefined = Array.isArray(features.knownFlags)
+      ? features.knownFlags as string[]
+      : undefined;
+    const knownPlugins: string[] | undefined = Array.isArray(data.knownPlugins)
+      ? data.knownPlugins as string[]
+      : undefined;
+
     const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
       scope: data.scope as 'user' | 'local',
+      knownPlugins,
       features: {
         ambient: features.ambient as boolean,
         memory: features.memory as boolean,
@@ -88,6 +111,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         learning,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
+        knownFlags,
         viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)
           ? features.viewMode as ViewMode
           : undefined,
