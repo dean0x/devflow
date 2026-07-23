@@ -133,8 +133,20 @@ describe('resolveSeedFlags', () => {
 
   it('fresh uses real FLAG_REGISTRY when no registry override provided', () => {
     const result = resolveSeedFlags(null, undefined);
-    const expected = FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
-    expect(result.sort()).toEqual(expected.sort());
+    // Hard-coded: the 8 default-ON flags as of the current registry.
+    // If this test fails after a registry change, update both the registry
+    // and this list explicitly — that is the point of pinning it.
+    const EXPECTED_DEFAULT_ON: string[] = [
+      'tui',
+      'tool-search',
+      'lsp',
+      'prompt-caching-1h',
+      'show-turn-duration',
+      'clear-context-on-plan',
+      'disable-bundled-skills',
+      'pin-sonnet-4-6',
+    ];
+    expect(result.sort()).toEqual(EXPECTED_DEFAULT_ON.sort());
   });
 
   it('knownFlags === undefined (old manifest) → return enabledFlags as-is, adopt nothing', () => {
@@ -428,10 +440,11 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
 
     const result = applyCliToggles(seed.features, { memory: false });
     expect(result).toEqual(seedWithMemoryDisabled);
-    // Other seed fields preserved
-    expect(result.ambient).toBe(seed.features.ambient);
-    expect(result.learning).toBe(seed.features.learning);
-    expect(result.knowledge).toBe(seed.features.knowledge);
+    // Other seed fields preserved — pin to hard-coded defaults (FEATURE_DEFAULTS)
+    // rather than re-deriving from seed to ensure the assertion is non-tautological.
+    expect(result.ambient).toBe(true);
+    expect(result.learning).toBe(true);
+    expect(result.knowledge).toBe(true);
   });
 });
 

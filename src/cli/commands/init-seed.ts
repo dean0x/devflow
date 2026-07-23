@@ -74,16 +74,16 @@ export function resolveSeedFeatures(
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
 
-  // memory/learning/knowledge: projectConfig wins whenever present (ADR-001)
-  const memory = projectConfig !== null
-    ? projectConfig.memory
-    : (manifest?.features.memory ?? FEATURE_DEFAULTS.memory);
-  const knowledge = projectConfig !== null
-    ? projectConfig.knowledge
-    : (manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge);
-  const learning = projectConfig !== null
-    ? projectConfig.learning
-    : (manifest?.features.learning ?? FEATURE_DEFAULTS.learning);
+  // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
+  // Helper eliminates the repeated projectConfig !== null ternary pattern.
+  const fromConfig = (key: 'memory' | 'knowledge' | 'learning'): boolean =>
+    projectConfig !== null
+      ? projectConfig[key]
+      : (manifest?.features[key] ?? FEATURE_DEFAULTS[key]);
+
+  const memory = fromConfig('memory');
+  const knowledge = fromConfig('knowledge');
+  const learning = fromConfig('learning');
 
   return { ambient, memory, hud, knowledge, learning, rules };
 }
@@ -150,9 +150,9 @@ export function resolveSeedFlags(
  *   - Otherwise → split + adopt newly-added non-optional selectable plugins
  *     whose name is ∉ knownPlugins and ∉ manifestPlugins
  *
- * Excluded always-installed plugins (devflow-core-skills, devflow-ambient,
- * devflow-audit-claude) are filtered out by partitionSelectablePlugins and
- * never appear in the returned buckets.
+ * Always-installed plugins (devflow-core-skills, devflow-ambient) and
+ * non-selectable optional plugins (devflow-audit-claude) are filtered out by
+ * partitionSelectablePlugins and never appear in the returned buckets.
  */
 export function resolveSeedPlugins(
   manifestPlugins: string[] | null,
@@ -297,11 +297,14 @@ export function resolveNonSelectableOptionalCarry(
     ...language.map(p => p.name),
   ]);
 
+  // Build a name→plugin Map for O(1) lookup, replacing an O(n·m) find-in-filter.
+  const pluginMap = new Map(allPlugins.map(p => [p.name, p]));
+
   // Carry only OPTIONAL non-selectable plugins that exist in the registry.
   // Non-optional always-installed plugins (core-skills, ambient) are excluded —
   // they are guaranteed to be in pluginsToInstall by other mechanisms.
   return manifestPlugins.filter(name => {
-    const plugin = allPlugins.find(p => p.name === name);
+    const plugin = pluginMap.get(name);
     return plugin !== undefined && plugin.optional && !selectableNames.has(name);
   });
 }
