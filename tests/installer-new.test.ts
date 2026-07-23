@@ -259,3 +259,144 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// WS6a: hard-error on missing declared agent / skill / rule source
+// ---------------------------------------------------------------------------
+//
+// A declared source file that is absent is a build/packaging failure, not a
+// per-item degradation. Each of the three asset types must throw a plain Error
+// (matching the command pattern) rather than silently skipping.
+//
+// Shadow validation paths remain tolerant (ADR-010): invalid shadows
+// still warn-and-install-source rather than throwing.
+// Per-item copy failures (EACCES, ENOSPC, etc.) remain isolated (PF-009).
+
+describe('installViaFileCopy — hard-error on missing declared source (WS6a)', () => {
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+  it('throws when a declared agent source file is absent', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+
+    const fakePlugin: PluginDefinition = {
+      name: 'devflow-test-ws6a',
+      description: 'Test fixture for WS6a agent check',
+      commands: [],
+      agents: ['nonexistent-xyz-ws6a-agent'],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+
+    const { agentsMap } = buildAssetMaps([fakePlugin]);
+
+    await expect(
+      installViaFileCopy({
+        plugins: [fakePlugin],
+        claudeDir,
+        devflowDir,
+        skillsMap: new Map(),
+        agentsMap,
+        isPartialInstall: false,
+        spinner,
+      }),
+    ).rejects.toThrow(/Agent source not found for declared agent "nonexistent-xyz-ws6a-agent"/);
+  });
+
+  it('error message for missing agent includes path and fix hint', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+
+    const fakePlugin: PluginDefinition = {
+      name: 'devflow-test-ws6a',
+      description: 'Test fixture',
+      commands: [],
+      agents: ['nonexistent-xyz-ws6a-agent'],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+
+    const { agentsMap } = buildAssetMaps([fakePlugin]);
+
+    let caught: Error | undefined;
+    try {
+      await installViaFileCopy({
+        plugins: [fakePlugin],
+        claudeDir,
+        devflowDir,
+        skillsMap: new Map(),
+        agentsMap,
+        isPartialInstall: false,
+        spinner,
+      });
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('src/assets/agents');
+  });
+
+  it('throws when a declared skill source directory is absent', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+
+    const noOpPlugin: PluginDefinition = {
+      name: 'devflow-test-ws6a-noop',
+      description: 'Test fixture',
+      commands: [],
+      agents: [],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+
+    // skillsMap entry with a skill whose source dir does not exist in src/assets/skills/
+    const skillsMap = new Map([['nonexistent-xyz-ws6a-skill', 'devflow-test-ws6a-noop']]);
+
+    await expect(
+      installViaFileCopy({
+        plugins: [noOpPlugin],
+        claudeDir,
+        devflowDir,
+        skillsMap,
+        agentsMap: new Map(),
+        isPartialInstall: false,
+        spinner,
+      }),
+    ).rejects.toThrow(/Skill source not found for declared skill "nonexistent-xyz-ws6a-skill"/);
+  });
+
+  it('throws when a declared rule source file is absent', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+
+    const noOpPlugin: PluginDefinition = {
+      name: 'devflow-test-ws6a-noop',
+      description: 'Test fixture',
+      commands: [],
+      agents: [],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+
+    // rulesMap entry with a rule whose source file does not exist in src/assets/rules/
+    const rulesMap = new Map([['nonexistent-xyz-ws6a-rule', 'devflow-test-ws6a-noop']]);
+
+    await expect(
+      installViaFileCopy({
+        plugins: [noOpPlugin],
+        claudeDir,
+        devflowDir,
+        skillsMap: new Map(),
+        agentsMap: new Map(),
+        rulesMap,
+        isPartialInstall: false,
+        spinner,
+      }),
+    ).rejects.toThrow(/Rule source not found for declared rule "nonexistent-xyz-ws6a-rule"/);
+  });
+});

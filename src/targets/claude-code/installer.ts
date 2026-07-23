@@ -107,7 +107,12 @@ export async function validateRuleShadow(shadowFile: string): Promise<RuleShadow
  * ~/.devflow/rules/{name}.md over the built plugin source.
  *
  * Returns the installation outcome so callers can aggregate reporting.
- * Skips silently (returns 'skipped') if the source file does not exist.
+ *
+ * D: Missing declared source is a build/packaging failure — throws rather than
+ * silently returning 'skipped' (mirrors command hard-error pattern). Per-item
+ * copy failures (EACCES, ENOSPC, etc.) are still isolated (avoids PF-009
+ * blast-radius: one bad copy does not abort the whole batch).
+ * Invalid shadows still warn-and-install-source (applies ADR-010).
  */
 export async function installRuleFile(
   ruleName: string,
@@ -139,12 +144,24 @@ export async function installRuleFile(
     invalidShadowOutcome = 'source-invalid-shadow:empty-shadow-file';
   }
 
+  // Hard-error on missing declared source: a build/packaging failure, not a
+  // per-item degradation. Matches command install behavior.
   try {
     await fs.access(ruleSource);
+  } catch {
+    throw new Error(
+      `Rule source not found for declared rule "${ruleName}": ${ruleSource}. ` +
+      `Ensure the rule file exists in src/assets/rules/.`,
+    );
+  }
+
+  // Copy is isolated per PF-009: a copy failure degrades to 'skipped' so one
+  // bad rule does not abort the entire installAllRules Promise.all batch.
+  try {
     await fs.copyFile(ruleSource, targetFile);
     return invalidShadowOutcome ?? 'source';
   } catch {
-    return 'skipped'; /* source missing — skip silently */
+    return 'skipped'; /* copy failed (EACCES, ENOSPC, etc.) — degrade gracefully */
   }
 }
 
@@ -436,7 +453,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
   }
 
-  // Install agents (deduplicated) from flat src/assets/agents/{name}.md
+  // Install agents (deduplicated) from flat src/assets/agents/{name}.md.
+  // A declared agent whose source file is absent is a build/packaging failure
+  // and throws rather than silently skipping (matches command pattern).
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
   const aDir = agentsDir();
   const allAgentNames = new Set<string>();
@@ -452,8 +471,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     for (const agentName of allAgentNames) {
       const srcFile = path.join(aDir, `${agentName}.md`);
       try {
-        await fs.copyFile(srcFile, path.join(agentsTarget, `${agentName}.md`));
-      } catch { /* agent file doesn't exist in assets — skip */ }
+        await fs.access(srcFile);
+      } catch {
+        throw new Error(
+          `Agent source not found for declared agent "${agentName}": ${srcFile}. ` +
+          `Ensure the agent file exists in src/assets/agents/.`,
+        );
+      }
+      await fs.copyFile(srcFile, path.join(agentsTarget, `${agentName}.md`));
     }
   }
 
@@ -466,13 +491,22 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).
+  // A declared skill whose source directory is absent is a build/packaging failure
+  // and throws rather than silently skipping (matches command pattern).
   spinner.message('Installing skills...');
   for (const [skillName] of skillsMap) {
     const skillSource = path.join(skillsDir(), skillName);
+    let isDir = false;
     try {
       const stat = await fs.stat(skillSource);
-      if (!stat.isDirectory()) continue;
-    } catch { continue; /* skill dir doesn't exist in assets */ }
+      isDir = stat.isDirectory();
+    } catch { /* stat failed — source absent */ }
+    if (!isDir) {
+      throw new Error(
+        `Skill source not found for declared skill "${skillName}": ${skillSource}. ` +
+        `Ensure the skill directory exists in src/assets/skills/.`,
+      );
+    }
 
     const shadowDir = path.join(devflowDir, 'skills', skillName);
     const prefixedName = prefixSkillName(skillName);
