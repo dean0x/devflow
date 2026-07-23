@@ -50,8 +50,15 @@ program.addCommand(debugCommand);
 program.addCommand(securityCommand);
 program.addCommand(safeDeleteCommand);
 
-// Handle no command
+// Handle no command (bare `devflow`) or unknown subcommand.
+// When Commander sees an unrecognised first argument it does not route to any
+// registered subcommand; instead the root action fires with that argument
+// present in program.args. Detect that case and exit non-zero so callers
+// (scripts, CI) can distinguish a typo from a successful no-op help print.
 program.action(() => {
+  if (program.args.length > 0) {
+    program.error(`unknown command '${program.args[0]}'`);
+  }
   program.help();
 });
 
