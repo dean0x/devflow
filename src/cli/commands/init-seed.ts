@@ -310,6 +310,39 @@ export function resolveNonSelectableOptionalCarry(
 }
 
 /**
+ * Apply the non-selectable optional plugin carry on a full (plugin-less) re-init.
+ *
+ * Encapsulates the `!options.plugin` gate + resolveNonSelectableOptionalCarry call
+ * + dedup-merge loop from initAction, extracted as a pure function to make the
+ * carry wiring independently testable without spinning up the full init action.
+ *
+ * @param isPartialInstall - true when --plugin was passed (carry is skipped)
+ * @param manifestPlugins  - Plugin list from seedManifest (null on fresh/--reset)
+ * @param pluginsToInstall - Current install list (not mutated; returns new array)
+ * @param allPlugins       - Full plugin registry
+ * @returns Updated plugin list with carry plugins merged in (deduped, order preserved)
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function applyNonSelectableCarry(
+  isPartialInstall: boolean,
+  manifestPlugins: string[] | null,
+  pluginsToInstall: PluginDefinition[],
+  allPlugins: PluginDefinition[],
+): PluginDefinition[] {
+  if (isPartialInstall) return pluginsToInstall;
+  const carryNames = resolveNonSelectableOptionalCarry(manifestPlugins, allPlugins);
+  const result = [...pluginsToInstall];
+  for (const name of carryNames) {
+    const plugin = allPlugins.find(p => p.name === name);
+    if (plugin && !result.includes(plugin)) {
+      result.push(plugin);
+    }
+  }
+  return result;
+}
+
+/**
  * Apply CLI-explicit feature toggles on top of a seed's features.
  *
  * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;

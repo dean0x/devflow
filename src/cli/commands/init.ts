@@ -42,7 +42,7 @@ import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, Vi
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
-import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolveNonSelectableOptionalCarry } from './init-seed.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, applyNonSelectableCarry } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -284,12 +284,13 @@ export const initCommand = new Command('init')
     let existingManifest: ManifestData | null = null;
     let earlyProjectConfig: FeatureConfig | null = null;
     let earlySettingsJson: string | null = null;
+    let earlyGitRoot: string | null = null;
     try {
       const earlyPaths = await getInstallationPaths(scope);
       existingManifest = await readManifest(earlyPaths.devflowDir);
-      const earlyGitRootHoist = earlyPaths.gitRoot ?? await getGitRoot();
-      if (earlyGitRootHoist) {
-        earlyProjectConfig = await readConfigIfPresent(earlyGitRootHoist);
+      earlyGitRoot = earlyPaths.gitRoot ?? await getGitRoot();
+      if (earlyGitRoot) {
+        earlyProjectConfig = await readConfigIfPresent(earlyGitRoot);
       }
       try {
         earlySettingsJson = await fs.readFile(
@@ -460,9 +461,6 @@ export const initCommand = new Command('init')
       useRecommended = modeChoice === 'recommended';
     }
 
-    // Early git detection (needed by both paths)
-    const earlyGitRoot = await getGitRoot();
-
     // Feature toggles — seeded from prior state (fresh installs use registry defaults via seed)
     let ambientEnabled = seed.features.ambient;
     let memoryEnabled = seed.features.memory;
@@ -473,7 +471,7 @@ export const initCommand = new Command('init')
     let enabledFlags = seed.flags;
     let viewMode: ViewMode = seed.viewMode;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
-    // Used by resolveFinalViewMode (7g) to decide whether to clobber an externally-set /focus value.
+    // Used by resolveFinalViewMode to decide whether to clobber an externally-set /focus value.
     // --reset forces viewMode back to 'default': resolveResetGatedInputs empties the settings snapshot
     // so seed.viewMode collapses to 'default', and explicit=true makes that 'default' win at write time.
     let viewModeExplicit = !!options.reset;
@@ -752,7 +750,7 @@ export const initCommand = new Command('init')
       }
       viewMode = viewModeChoice as 'default' | 'verbose' | 'focus';
       // Mark as explicit: user actively selected this mode, so resolveFinalViewMode will
-      // let it win over an externally-set /focus value (commit 7g gate).
+      // let it win over an externally-set /focus value.
       viewModeExplicit = true;
 
       // .claudeignore prompt
@@ -1022,17 +1020,12 @@ export const initCommand = new Command('init')
     // --plugin X partial install: resolvePluginList already merges the full manifest list
     //   at the manifest-write step; physical dirs are preserved (no full wipe on partial).
     //   Skip carry here to avoid force-reinstalling plugins the user didn't target.
-    if (!options.plugin) {
-      const carryNames = resolveNonSelectableOptionalCarry(
-        seedManifest?.plugins ?? null, DEVFLOW_PLUGINS,
-      );
-      for (const name of carryNames) {
-        const plugin = DEVFLOW_PLUGINS.find(p => p.name === name);
-        if (plugin && !pluginsToInstall.includes(plugin)) {
-          pluginsToInstall.push(plugin);
-        }
-      }
-    }
+    pluginsToInstall = applyNonSelectableCarry(
+      !!options.plugin,
+      seedManifest?.plugins ?? null,
+      pluginsToInstall,
+      DEVFLOW_PLUGINS,
+    );
 
     // Skills: install ALL from ALL plugins (skills are tiny markdown files;
     // commands need skills from other plugins to function)
