@@ -235,6 +235,35 @@ export function resolveInitSeed(
 }
 
 /**
+ * Resolve the three seed inputs under the --reset gate.
+ *
+ * --reset is a factory reset: the prior manifest, the prior project config, AND
+ * the current settings.json snapshot are all discarded so the seed collapses to
+ * registry defaults. Emptying the settings snapshot is essential — otherwise
+ * resolveInitSeed's viewMode resolution would surface an externally-set value
+ * (e.g. a /focus mode persisted in settings.json) and defeat the reset. This
+ * keeps --reset faithful to its USER-LOCKED contract: viewMode is forced to
+ * 'default'.
+ *
+ * The caller must still use the REAL (un-emptied) settings/manifest elsewhere —
+ * e.g. for security deny-state detection and installedAt preservation. This
+ * helper only shapes the inputs handed to resolveInitSeed.
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function resolveResetGatedInputs(
+  reset: boolean,
+  manifest: ManifestData | null,
+  projectConfig: FeatureConfig | null,
+  settingsJson: string,
+): { seedManifest: ManifestData | null; seedConfig: FeatureConfig | null; seedSettings: string } {
+  if (reset) {
+    return { seedManifest: null, seedConfig: null, seedSettings: '' };
+  }
+  return { seedManifest: manifest, seedConfig: projectConfig, seedSettings: settingsJson };
+}
+
+/**
  * Apply CLI-explicit feature toggles on top of a seed's features.
  *
  * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;

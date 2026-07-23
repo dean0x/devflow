@@ -42,7 +42,7 @@ import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, Vi
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
-import { resolveInitSeed, applyCliToggles } from './init-seed.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -298,10 +298,15 @@ export const initCommand = new Command('init')
       } catch { /* settings.json absent — treated as empty */ }
     } catch { /* path resolution deferred to install-begins gate */ }
     // --reset: factory reset — treat as a fresh install for all seeding and routing decisions.
-    // The REAL existingManifest is still used below for installedAt preservation and upgrade messaging.
-    const seedManifest = options.reset ? null : existingManifest;
-    const seedConfig = options.reset ? null : earlyProjectConfig;
-    const seed = resolveInitSeed(seedManifest, seedConfig, earlySettingsJson ?? '', DEVFLOW_PLUGINS);
+    // The REAL existingManifest / earlySettingsJson are still used below for installedAt
+    // preservation, upgrade messaging, and security deny-state detection. resolveResetGatedInputs
+    // discards the manifest, config, AND settings snapshot under --reset so the seed collapses to
+    // registry defaults — including viewMode 'default' (an externally-set /focus in settings.json
+    // must not survive a factory reset).
+    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+      !!options.reset, existingManifest, earlyProjectConfig, earlySettingsJson ?? '',
+    );
+    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
 
     // Select plugins to install
     let selectedPlugins: string[] = [];
@@ -469,7 +474,8 @@ export const initCommand = new Command('init')
     let viewMode: ViewMode = seed.viewMode;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
     // Used by resolveFinalViewMode (7g) to decide whether to clobber an externally-set /focus value.
-    // --reset forces viewMode back to 'default' (seedManifest=null → seed.viewMode='default').
+    // --reset forces viewMode back to 'default': resolveResetGatedInputs empties the settings snapshot
+    // so seed.viewMode collapses to 'default', and explicit=true makes that 'default' win at write time.
     let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];

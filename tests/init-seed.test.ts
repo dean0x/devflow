@@ -5,6 +5,7 @@ import {
   resolveSeedPlugins,
   resolveInitSeed,
   applyCliToggles,
+  resolveResetGatedInputs,
   FEATURE_DEFAULTS,
   type FeatureSeed,
 } from '../src/cli/commands/init-seed.js';
@@ -430,5 +431,59 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
     expect(result.ambient).toBe(seed.features.ambient);
     expect(result.learning).toBe(seed.features.learning);
     expect(result.knowledge).toBe(seed.features.knowledge);
+  });
+});
+
+// ── resolveResetGatedInputs ─────────────────────────────────────────────────────
+
+describe('resolveResetGatedInputs', () => {
+  it('reset=false: passes manifest, config, and settings through unchanged', () => {
+    const manifest = makeManifest();
+    const config = { memory: false, learning: false, knowledge: true };
+    const settings = JSON.stringify({ viewMode: 'focus' });
+
+    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+      false, manifest, config, settings,
+    );
+
+    expect(seedManifest).toBe(manifest);
+    expect(seedConfig).toBe(config);
+    expect(seedSettings).toBe(settings);
+  });
+
+  it('reset=true: discards manifest, config, and settings snapshot', () => {
+    const manifest = makeManifest();
+    const config = { memory: false, learning: false, knowledge: false };
+    const settings = JSON.stringify({ viewMode: 'focus' });
+
+    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+      true, manifest, config, settings,
+    );
+
+    expect(seedManifest).toBeNull();
+    expect(seedConfig).toBeNull();
+    expect(seedSettings).toBe('');
+  });
+
+  it('reset=true forces viewMode "default" even when settings.json has a non-default mode', () => {
+    // Regression guard: --reset must not preserve an externally-set /focus mode.
+    // The bug was passing the REAL settings snapshot to resolveInitSeed under --reset,
+    // which surfaced viewMode:'focus' and (with viewModeExplicit=true) survived the reset.
+    const manifest = makeManifest({ features: { ...makeManifest().features, viewMode: 'verbose' } });
+    const settings = JSON.stringify({ viewMode: 'focus' });
+
+    const gated = resolveResetGatedInputs(true, manifest, null, settings);
+    const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
+
+    expect(seed.viewMode).toBe('default');
+  });
+
+  it('reset=false preserves a non-default viewMode from the settings snapshot', () => {
+    // Complement to the reset case: without --reset, an externally-set /focus survives seeding.
+    const settings = JSON.stringify({ viewMode: 'focus' });
+    const gated = resolveResetGatedInputs(false, null, null, settings);
+    const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
+
+    expect(seed.viewMode).toBe('focus');
   });
 });
