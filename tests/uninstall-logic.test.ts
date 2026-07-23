@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings } from '../src/cli/commands/uninstall.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings, enumerateUserDevFlowContent } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -448,5 +451,124 @@ describe('legacy plugin name resolution in uninstall (parsePluginSelection share
     expect(invalid).toEqual([]);
     const planPlugin = DEVFLOW_PLUGINS.find(pl => pl.name === 'devflow-plan');
     expect(planPlugin).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WS5: enumerateUserDevFlowContent — pre-deletion gate for full devflow dir cleanup
+// ---------------------------------------------------------------------------
+//
+// Pure async enumeration helper that inspects a devflowDir for user-authored
+// content worth backing up before a full cleanup. Used by the uninstall
+// confirm gate to inform the user before wiping ~/.devflow/.
+
+describe('enumerateUserDevFlowContent (WS5)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-ws5-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // === empty devflow dir ===
+
+  it('returns empty array when devflowDir has no user-authored content', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array when skills/ dir exists but is empty', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array when rules/ dir exists but is empty', async () => {
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  // === skill shadows ===
+
+  it('includes skill shadow entry when skills/ has at least one entry', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'my-skill'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(true);
+  });
+
+  it('skill shadow entry includes the skills/ directory path', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'foo'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    const skillsPath = path.join(tmpDir, 'skills');
+    expect(result.some(s => s.includes(skillsPath))).toBe(true);
+  });
+
+  // === rule shadows ===
+
+  it('includes rule shadow entry when rules/ has at least one entry', async () => {
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'rules', 'my-rule.md'), '# Rule', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(true);
+  });
+
+  // === preference-profile.md ===
+
+  it('includes preference-profile.md when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+  });
+
+  it('does not include preference-profile.md when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(false);
+  });
+
+  // === learning.json ===
+
+  it('includes learning.json when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{"model":"opus"}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+
+  it('does not include learning.json when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('learning.json'))).toBe(false);
+  });
+
+  // === combined ===
+
+  it('returns all four entries when all user-authored items exist', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'rules', 'my-rule.md'), '# Rule', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{"model":"opus"}', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(4);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(true);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(true);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+
+  it('returns only the items that actually exist (partial set)', async () => {
+    // Only preference-profile.md and learning.json — no shadow dirs
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(2);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(false);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(false);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
   });
 });

@@ -13,8 +13,6 @@ import { removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
-import { listShadowed } from './skills.js';
-import { listShadowedRules } from './rules.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
@@ -164,6 +162,79 @@ export function computeShadowLeftoverWarnings(opts: {
 }
 
 /**
+ * Enumerate user-authored content in devflowDir that would be deleted by a
+ * full cleanup of the directory.
+ *
+ * Checks for items that exist on disk and are worth backing up:
+ *   devflowDir/skills/   — skill shadow overrides (user-maintained)
+ *   devflowDir/rules/    — rule shadow overrides (user-maintained)
+ *   devflowDir/preference-profile.md — dynamic-plan preference profile
+ *   devflowDir/learning.json         — global learning agent tuning config
+ *
+ * Returns labels for each item that actually exists. Empty array means nothing
+ * user-authored is present in the directory.
+ *
+ * Pure I/O — no side effects, no output, fully testable.
+ *
+ * @D4 Called BEFORE any removal so shadow state is captured from real disk.
+ * Avoids the anti-pattern of checking existence after files are removed.
+ */
+export async function enumerateUserDevFlowContent(devflowDir: string): Promise<string[]> {
+  const items: string[] = [];
+
+  // Skill shadow overrides (~/.devflow/skills/{name}/)
+  try {
+    const entries = await fs.readdir(path.join(devflowDir, 'skills'));
+    if (entries.length > 0) {
+      items.push(`skill shadows (${path.join(devflowDir, 'skills')})`);
+    }
+  } catch { /* dir absent or unreadable */ }
+
+  // Rule shadow overrides (~/.devflow/rules/{name}.md)
+  try {
+    const entries = await fs.readdir(path.join(devflowDir, 'rules'));
+    if (entries.length > 0) {
+      items.push(`rule shadows (${path.join(devflowDir, 'rules')})`);
+    }
+  } catch { /* dir absent or unreadable */ }
+
+  // preference-profile.md — user-curated decision-preference profile
+  try {
+    await fs.access(path.join(devflowDir, 'preference-profile.md'));
+    items.push('preference-profile.md');
+  } catch { /* absent */ }
+
+  // learning.json — global learning agent tuning config
+  try {
+    await fs.access(path.join(devflowDir, 'learning.json'));
+    items.push('learning.json');
+  } catch { /* absent */ }
+
+  return items;
+}
+
+/**
+ * Remove only Devflow install artifacts from devflowDir: manifest.json.
+ * The scripts/ directory is already removed by removeAllDevFlow; this handles
+ * the remaining install state so the manifest does not outlive the assets.
+ *
+ * Used for:
+ *   - Local scope (always — never removes project data under .devflow/)
+ *   - User scope when full-dir confirm is declined or session is non-interactive
+ */
+async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
+  const manifestPath = path.join(devflowDir, 'manifest.json');
+  try {
+    await fs.rm(manifestPath, { force: true });
+    if (verbose) {
+      p.log.success('Removed manifest.json');
+    }
+  } catch (error) {
+    p.log.warn(`Could not remove manifest.json: ${error}`);
+  }
+}
+
+/**
  * Check if Devflow is installed at the given paths
  */
 async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
@@ -282,19 +353,16 @@ export const uninstallCommand = new Command('uninstall')
       return;
     }
 
-    // Belt-and-braces: capture shadow state BEFORE any removal so warnings
-    // are correct even if removal scope changes.
-    const shadowedSkillsBefore = !isSelectiveUninstall ? await listShadowed() : [];
-    const shadowedRulesBefore = !isSelectiveUninstall ? await listShadowedRules() : [];
-
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
       let claudeDir: string;
       let devflowScriptsDir: string;
+      let devflowDir: string;
 
       try {
         const paths = await getInstallationPaths(scope);
         claudeDir = paths.claudeDir;
+        devflowDir = paths.devflowDir;
         devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
 
         if (scope === 'user') {
@@ -325,7 +393,53 @@ export const uninstallCommand = new Command('uninstall')
           } catch { /* settings.json may not exist */ }
         }
       } else {
+        // removeAllDevFlow removes Claude Code assets (commands, agents, rules, skills)
+        // and devflowDir/scripts/. Scope-aware cleanup handles the rest of devflowDir.
         await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
+
+        if (scope === 'local') {
+          // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
+          // (memory, learning, features, docs, config.json). Never remove those —
+          // only remove install artifacts: scripts/ (done above) + manifest.json.
+          await removeDevFlowInstallArtifacts(devflowDir, verbose);
+          p.log.info('Local project data (memory, learning, features, docs) preserved');
+        } else {
+          // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a
+          // confirm gate that enumerates user-authored content worth backing up.
+          // Non-interactive or no user content → remove only install artifacts.
+          const userContent = await enumerateUserDevFlowContent(devflowDir);
+
+          if (process.stdin.isTTY && userContent.length > 0) {
+            p.log.info(`User-authored content in ${devflowDir}:`);
+            for (const item of userContent) {
+              p.log.info(`  ${item}`);
+            }
+
+            const confirmFullCleanup = await p.confirm({
+              message: `Remove entire ${devflowDir}? (includes the items listed above)`,
+              initialValue: false,
+            });
+
+            if (p.isCancel(confirmFullCleanup)) {
+              p.cancel('Uninstall cancelled.');
+              process.exit(0);
+            }
+
+            if (confirmFullCleanup) {
+              await fs.rm(devflowDir, { recursive: true, force: true });
+              p.log.success(`${devflowDir} removed`);
+            } else {
+              await removeDevFlowInstallArtifacts(devflowDir, verbose);
+              p.log.info(`${devflowDir} preserved (removing scripts and manifest only)`);
+            }
+          } else {
+            // Non-interactive or no user content — remove only install artifacts
+            await removeDevFlowInstallArtifacts(devflowDir, verbose);
+            if (!process.stdin.isTTY && userContent.length > 0) {
+              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and manifest only)`);
+            }
+          }
+        }
       }
 
       const pluginLabel = isSelectiveUninstall
@@ -550,21 +664,6 @@ export const uninstallCommand = new Command('uninstall')
         } else {
           p.log.info(`Safe-delete function preserved in ${profilePath} (non-interactive mode)`);
         }
-      }
-    }
-
-    // Warn about personal skill/rule overrides (captured before removal).
-    const leftoverWarnings = computeShadowLeftoverWarnings({
-      shadowedSkills: shadowedSkillsBefore,
-      shadowedRules: shadowedRulesBefore,
-      isSelectiveUninstall,
-      devflowDir: getDevFlowDirectory(),
-    });
-    for (const { level, message } of leftoverWarnings) {
-      if (level === 'warn') {
-        p.log.warn(message);
-      } else {
-        p.log.info(color.dim(message));
       }
     }
 
