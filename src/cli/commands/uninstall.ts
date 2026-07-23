@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -116,6 +117,60 @@ export function resolveSecurityRemovalDecision(opts: {
 }): 'skip' | 'preserve' | 'prompt' {
   if (!opts.anySecurityPresent || opts.keepDocs) return 'skip';
   if (!opts.isTTY) return 'preserve';
+  return 'prompt';
+}
+
+/**
+ * Determine the appropriate cleanup action for the user-scope devflow directory on
+ * full uninstall. Mirrors the resolveSecurityRemovalDecision pattern.
+ *
+ * PURE — no I/O, no side effects, fully testable. All decision logic lives here;
+ * the .action() caller performs I/O and prompt rendering only.
+ *
+ * Safety invariants checked as preconditions (guard fires → 'artifacts-only'):
+ *   1. basename(devflowDir) must be '.devflow'
+ *   2. devflowDir must not equal homeDir
+ *   3. devflowDir must not be the filesystem root '/'
+ *   4. devflowDir must reside inside $HOME (guards DEVFLOW_DIR env overrides)
+ *
+ * Returns:
+ *   - 'artifacts-only' — remove only manifest.json; leave the directory intact
+ *   - 'prompt'         — interactive session with user-authored content; caller should ask
+ *
+ * @D5 Precondition guard: any anomalous devflowDir falls back to 'artifacts-only' rather
+ * than throwing — business logic must not throw (engineering rule). The explicit guard
+ * makes the invariant present in production code, not only in tests (reliability rule).
+ * @D6 avoids PF-014: the caller must NOT process.exit() after a cancel/decline response;
+ * removeAllDevFlow has already run by the time the prompt fires, so removeDevFlowInstallArtifacts
+ * must execute on every non-confirm path to leave a clean end-state (applies ADR-003).
+ */
+export function resolveDevflowDirCleanup(opts: {
+  scope: 'user' | 'local';
+  isTTY: boolean;
+  userContent: string[];
+  devflowDir: string;
+  homeDir: string;
+}): 'artifacts-only' | 'prompt' {
+  // Local scope never removes project data — only install artifacts.
+  if (opts.scope !== 'user') return 'artifacts-only';
+
+  // Precondition guard: devflowDir must be a well-known, safe-to-rm path.
+  // Any anomalous value (DEVFLOW_DIR override, bare homedir, filesystem root)
+  // resolves to artifacts-only — never throw in business logic (engineering rule).
+  const isBasenameValid = path.basename(opts.devflowDir) === '.devflow';
+  const isNotHomeDir = opts.devflowDir !== opts.homeDir;
+  const isNotRoot = opts.devflowDir !== '/';
+  const isInsideHome = opts.devflowDir.startsWith(opts.homeDir + path.sep);
+  if (!isBasenameValid || !isNotHomeDir || !isNotRoot || !isInsideHome) {
+    return 'artifacts-only';
+  }
+
+  // Non-interactive: never prompt for or perform full-dir removal.
+  if (!opts.isTTY) return 'artifacts-only';
+
+  // No user-authored content: nothing to warn about; artifacts-only without prompting.
+  if (opts.userContent.length === 0) return 'artifacts-only';
+
   return 'prompt';
 }
 
@@ -362,39 +417,47 @@ export const uninstallCommand = new Command('uninstall')
           await removeDevFlowInstallArtifacts(devflowDir, verbose);
           p.log.info('Local project data (memory, learning, features, docs) preserved');
         } else {
-          // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a
-          // confirm gate that enumerates user-authored content worth backing up.
-          // Non-interactive or no user content → remove only install artifacts.
+          // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
+          // that enumerates user-authored content worth backing up before wiping the dir.
+          // Non-interactive, no user content, or precondition guard failure → artifacts-only.
           const userContent = await enumerateUserDevFlowContent(devflowDir);
+          const cleanupDecision = resolveDevflowDirCleanup({
+            scope: 'user',
+            isTTY: process.stdin.isTTY,
+            userContent,
+            devflowDir,
+            homeDir: os.homedir(),
+          });
 
-          if (process.stdin.isTTY && userContent.length > 0) {
+          if (cleanupDecision === 'artifacts-only') {
+            await removeDevFlowInstallArtifacts(devflowDir, verbose);
+            if (!process.stdin.isTTY && userContent.length > 0) {
+              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and manifest only)`);
+            }
+          } else {
+            // cleanupDecision === 'prompt': interactive session with user-authored content present.
             p.log.info(`User-authored content in ${devflowDir}:`);
             for (const item of userContent) {
               p.log.info(`  ${item}`);
             }
 
             const confirmFullCleanup = await p.confirm({
-              message: `Remove entire ${devflowDir}? (includes the items listed above)`,
+              message: `Remove entire ${devflowDir}? (includes the items listed above, plus logs and install metadata)`,
               initialValue: false,
             });
 
             if (p.isCancel(confirmFullCleanup)) {
-              p.cancel('Uninstall cancelled.');
-              process.exit(0);
-            }
-
-            if (confirmFullCleanup) {
+              // removeAllDevFlow already ran — clean up the manifest to leave a consistent
+              // state. avoids PF-014: process.exit() here would skip removeDevFlowInstallArtifacts,
+              // leaving a stale manifest.json that points to assets no longer on disk.
+              await removeDevFlowInstallArtifacts(devflowDir, verbose);
+              p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and manifest only)`);
+            } else if (confirmFullCleanup) {
               await fs.rm(devflowDir, { recursive: true, force: true });
               p.log.success(`${devflowDir} removed`);
             } else {
               await removeDevFlowInstallArtifacts(devflowDir, verbose);
               p.log.info(`${devflowDir} preserved (removing scripts and manifest only)`);
-            }
-          } else {
-            // Non-interactive or no user content — remove only install artifacts
-            await removeDevFlowInstallArtifacts(devflowDir, verbose);
-            if (!process.stdin.isTTY && userContent.length > 0) {
-              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and manifest only)`);
             }
           }
         }

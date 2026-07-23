@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -420,5 +420,165 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('rule shadow'))).toBe(false);
     expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
     expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveDevflowDirCleanup — pure decision function for user-scope ~/.devflow/ cleanup
+//
+// Mirrors the resolveSecurityRemovalDecision pattern. No I/O inside the function;
+// the .action() caller performs all I/O and prompt rendering. Tests express intended
+// BEHAVIOR not implementation details (avoids PF-009 per-item coupling).
+// ---------------------------------------------------------------------------
+
+describe('resolveDevflowDirCleanup', () => {
+  const HOME = '/Users/testuser';
+  const VALID_DIR = `${HOME}/.devflow`;
+  const SOME_CONTENT = ['skill shadows (/Users/testuser/.devflow/skills)'];
+
+  // === local scope: never prompt ===
+  // The local-scope invariant: .devflow/ under a git root holds project data
+  // (memory, learning, docs). It must NEVER be a candidate for full rm.
+
+  it('returns artifacts-only for local scope regardless of isTTY or user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'local',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only for local scope even when non-interactive and no content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'local',
+      isTTY: false,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === user scope + interactive + user content → prompt ===
+
+  it('returns prompt for user scope when interactive and user content is present', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('prompt');
+  });
+
+  it('returns prompt for user scope with multiple user content items', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: ['skill shadows (...)', 'rule shadows (...)', 'learning.json'],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('prompt');
+  });
+
+  // === user scope + non-interactive → artifacts-only ===
+  // Non-interactive sessions must never prompt for or perform full-dir removal.
+
+  it('returns artifacts-only for user scope when non-interactive (isTTY=false)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only for user scope when non-interactive even with no user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === no user content → artifacts-only (no reason to prompt) ===
+
+  it('returns artifacts-only when user content is empty even if interactive', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === precondition guards — anomalous devflowDir → artifacts-only ===
+  // These guards protect the fs.rm(devflowDir, {recursive}) call from running
+  // on unexpected paths (DEVFLOW_DIR env override, misconfiguration, etc.).
+
+  it('returns artifacts-only when devflowDir is outside $HOME (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: '/tmp/.devflow',
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir basename is not .devflow (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: `${HOME}/custom-dir`,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir is the home directory itself (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: HOME,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir is the filesystem root (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: '/',
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === exhaustiveness — both outcomes are reachable ===
+
+  it('covers both return values (artifacts-only and prompt)', () => {
+    const artifactsOnly = resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    });
+    const prompt = resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    });
+    expect(artifactsOnly).toBe('artifacts-only');
+    expect(prompt).toBe('prompt');
   });
 });
