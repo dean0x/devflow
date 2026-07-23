@@ -180,7 +180,9 @@ export const hudCommand = new Command('hud')
         settingsContent = '{}';
       }
 
-      // Ensure statusLine is registered
+      // Ensure statusLine is registered (idempotent — adds only if missing).
+      // This runs unconditionally so a missing statusLine is repaired even when
+      // config already says enabled (D2: symmetric self-heal with --disable).
       if (!hasHudStatusLine(settingsContent)) {
         // Check for non-Devflow statusLine
         if (hasNonDevFlowStatusLine(settingsContent)) {
@@ -210,17 +212,24 @@ export const hudCommand = new Command('hud')
         await writeFileAtomicExclusive(settingsPath, updated);
       }
 
-      // Update config
+      // Always update config and sync manifest — removing the already-enabled
+      // early-return makes --enable self-healing symmetric with --disable.
+      // D2: a drifted manifest (hud=false when config says enabled) is repaired
+      // on --enable without requiring a disable/re-enable cycle.
       const config = loadConfig();
-      if (config.enabled) {
-        p.log.info('HUD already enabled');
-        return;
+      const wasEnabled = config.enabled;
+      if (!wasEnabled) {
+        saveConfig({ ...config, enabled: true });
       }
-      saveConfig({ ...config, enabled: true });
 
       await syncManifestFeature(devflowDir, 'hud', true);
-      p.log.success('HUD enabled');
-      p.log.info(color.dim('Restart Claude Code to see the HUD'));
+
+      if (wasEnabled) {
+        p.log.info('HUD already enabled');
+      } else {
+        p.log.success('HUD enabled');
+        p.log.info(color.dim('Restart Claude Code to see the HUD'));
+      }
     }
 
     if (options.disable) {
