@@ -1,11 +1,11 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, resolveNonSelectableOptionalCarry, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, applyNonSelectableCarry). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, resolveNonSelectableOptionalCarry, applyNonSelectableCarry, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed."
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts]
 created: 2026-07-13
-updated: 2026-07-23
+updated: 2026-07-24
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -90,7 +90,7 @@ export interface ShadowSkip {
 - `ManifestData.features.knownFlags?: string[]` — all `FLAG_REGISTRY` IDs at the time of the last install
 - `ManifestData.knownPlugins?: string[]` — all `DEVFLOW_PLUGINS` names at the time of the last install
 
-Both are absent in pre-7b manifests; `readManifest` self-heals non-array or absent values to `undefined` (never partial/garbage). These snapshots are consumed by the init seeding layer to detect newly added flags and plugins.
+Both are absent in pre-7b manifests; `readManifest` self-heals via a local `asStringArray` helper that requires all elements to pass `typeof e === 'string'` — a mixed/garbage array like `[1, null]` self-heals to `undefined`, not just non-arrays. These snapshots are consumed by the init seeding layer to detect newly added flags and plugins.
 
 ### RuleInstallOutcome
 
@@ -196,11 +196,17 @@ Before any copy: the skill source directory is stat-checked and throws if absent
 - `devflowScriptsDir` (`{devflowDir}/scripts/`)
 - All skill variants for every skill in `getAllSkillNames() ∪ LEGACY_SKILL_NAMES` (prefixed, bare, and `devflow-{name}` variants)
 
-After `removeAllDevFlow`, scope-specific logic handles the remainder of `devflowDir`:
+After `removeAllDevFlow`, scope-specific logic handles the remainder of `devflowDir`. The scope decision lives in `resolveDevflowDirCleanup(opts)`, a **pure exported function** (mirrors `resolveSecurityRemovalDecision`) — no I/O, no side effects, fully testable.
 
-**Local scope** (`gitRoot/.devflow/`): Never removes project data (memory, learning, features, docs, config.json). Only `removeDevFlowInstallArtifacts` runs — removes `manifest.json`.
+**Precondition guard** (inside `resolveDevflowDirCleanup`): four invariants must hold — `basename(devflowDir) === '.devflow'`, `devflowDir !== homeDir`, `devflowDir !== '/'`, and `devflowDir.startsWith(homeDir + sep)`. Any invariant failure → returns `'artifacts-only'` immediately (never throws in business logic; guards DEVFLOW_DIR env overrides and malformed paths).
 
-**User scope** (`~/.devflow/`): Calls `enumerateUserDevFlowContent(devflowDir)` first (before any removal — avoids reading files that no longer exist). If user content is found AND the session is interactive: prompts to confirm full `rm -rf devflowDir`; if declined, runs `removeDevFlowInstallArtifacts` only. Non-interactive or no user content: runs `removeDevFlowInstallArtifacts` only (no prompt, no removal of user data).
+Returns `'artifacts-only'` or `'prompt'`:
+
+**Local scope** (`gitRoot/.devflow/`): `resolveDevflowDirCleanup` returns `'artifacts-only'` immediately (`scope !== 'user'`). Never removes project data (memory, learning, features, docs, config.json). Only `removeDevFlowInstallArtifacts` runs — removes `manifest.json`.
+
+**User scope** (`~/.devflow/`): Calls `enumerateUserDevFlowContent(devflowDir)` first (before any removal — avoids reading files that no longer exist). Then calls `resolveDevflowDirCleanup`:
+- `'artifacts-only'` — non-interactive session, no user content, or precondition guard failure; runs `removeDevFlowInstallArtifacts` only.
+- `'prompt'` — interactive session with user content present; prompt states full scope (listed user-authored items, plus logs and install metadata). Confirm → `fs.rm(devflowDir, {recursive: true, force: true})`; decline OR cancel → falls through to `removeDevFlowInstallArtifacts` (clean end-state — never `process.exit()` here; applies ADR-003, avoids PF-014).
 
 `enumerateUserDevFlowContent(devflowDir)` checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, and `devflowDir/learning.json`. Returns a human-readable label for each that exists. Pure I/O — no side effects.
 
@@ -228,7 +234,7 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 - Old manifest (no `knownPlugins`): split existing into workflow/language buckets, adopt nothing.
 - Re-init with `knownPlugins`: split + adopt newly-added non-optional selectable plugins ∉ knownPlugins.
 
-**Non-selectable optional carry** (`resolveNonSelectableOptionalCarry`): Identifies optional plugins from the prior manifest (e.g. `devflow-audit-claude`) that are excluded from the selectable buckets by `partitionSelectablePlugins`. Without this carry, a full re-init would silently drop them.
+**Non-selectable optional carry**: `resolveNonSelectableOptionalCarry(manifestPlugins, allPlugins)` identifies optional plugins from the prior manifest (e.g. `devflow-audit-claude`) that are excluded from the selectable buckets by `partitionSelectablePlugins`. Internally uses a name→plugin `Map` for O(1) lookup (was a `.find()`-in-`.filter()` O(n·m) scan). `applyNonSelectableCarry(isPartialInstall, manifestPlugins, pluginsToInstall, allPlugins)` (pure exported helper) encapsulates the `!options.plugin` gate + carry call + dedup-merge loop; `init.ts` delegates to it. Without the carry, a full re-init would silently drop non-selectable optional plugins.
 
 **Reset gate** (`resolveResetGatedInputs`): `--reset` zeroes seedManifest, seedConfig, AND settingsSnapshot (the empty settings string prevents `resolveExistingViewMode` from surfacing an externally-set viewMode and defeating the factory reset). The real manifest/settings are still used for security deny-state detection and `installedAt` preservation.
 
@@ -255,7 +261,7 @@ Positional command only (no flags). Unknown action exits 1.
 - `unshadow <name>` — removes `~/.devflow/skills/{name}/`; restores Devflow source on next `devflow init`.
 - `list` — pre-reads `shadowDirSet` from `~/.devflow/skills/`, uses `shadowDirSet.has(skill)` as a short-circuit before calling `validateSkillShadow`. Shadow state renders via `buildSkillShadowTag` exhaustive switch. Orphan directories are shown as "unknown skill".
 
-Exports: `hasShadow(skillName, devflowDir?)`, `listShadowed(devflowDir?)` — used by uninstall.
+Exports: `hasShadow(skillName, devflowDir?)`.
 
 ### `devflow rules` CLI
 
@@ -270,6 +276,8 @@ Positional actions dispatch before flags. Unknown positional action exits 1.
 - Tier 2: flat source at `rulesDir()/{name}.md` (fallback when rules are disabled)
 - Tier 3: returns `'none'` — caller emits manual-create instruction
 
+**`--enable` error isolation**: `installAllRules` is wrapped in `try/catch` inside the `--enable` handler. If `installAllRules` throws (e.g. a missing declared rule source triggers the hard-error policy), the error surfaces as a clean CLI failure message and exits 1 — rather than an unhandled rejection after the rules directory was already wiped. (avoids PF-009)
+
 `buildRuleShadowTag` / `buildSkillShadowTag` use exhaustive switches with `never` guards, so adding a new state variant causes a compile error until display coverage is added.
 
 Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)`, `seedRuleShadow(...)` — used by uninstall and tests.
@@ -277,11 +285,12 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 ## Anti-Patterns
 
 - **Treating a missing declared source as a skip** — all four asset types (commands, agents, skills, rules) now throw on missing declared sources. `'skipped'` in `RuleInstallOutcome` means copy-level failure only (EACCES, ENOSPC), not a missing source file. Silently skipping a declared source hides build or packaging bugs.
-- **Installing all of `~/.devflow/` on uninstall** — only `~/.devflow/scripts/` is Devflow-owned; `~/.devflow/skills/`, `~/.devflow/rules/`, and config files are user-owned and must survive uninstall. The new `enumerateUserDevFlowContent` + `removeDevFlowInstallArtifacts` pattern enforces this boundary.
+- **Installing all of `~/.devflow/` on uninstall** — only `~/.devflow/scripts/` is Devflow-owned; `~/.devflow/skills/`, `~/.devflow/rules/`, and config files are user-owned and must survive uninstall. The `resolveDevflowDirCleanup` + `removeDevFlowInstallArtifacts` pattern enforces this boundary.
 - **Staging shadow state after removal** — `enumerateUserDevFlowContent` must be called before the removal block; the files may be gone by the time a confirmation prompt is shown.
+- **Calling `process.exit()` after `removeAllDevFlow` on a cancel/decline path** — `removeAllDevFlow` has already run by the time any prompt fires; exiting early leaves stale `manifest.json` on disk. Cancel and decline must both fall through to `removeDevFlowInstallArtifacts`. (avoids PF-014, applies ADR-003)
 - **Installing without `npm run build`** — commands, agents, skills, and rules all throw hard errors when their source is absent (not a no-op). Run `npm run build` (or `build:mds` for commands alone) before any install.
 - **Skipping `prefixSkillName` at install time** — the install target must always be the prefixed path `devflow:{name}`; shadow dirs stay unprefixed. Mixing these causes duplicate installs or missed cleanup.
-- **Adding a failure path to `installRuleFile` without per-path try/catch** — the source-copy path must be individually caught. A bare throw inside `installRuleFile` escapes to the `installAllRules` `Promise.all` and aborts rule installation for the whole batch. (avoids PF-009)
+- **Calling `installAllRules` outside a try/catch after wiping the rules directory** — if `installAllRules` throws (hard-error policy), the caller must catch and surface a clean error. Without the guard, the error becomes an unhandled rejection and the rules directory is left empty with no recovery signal. (avoids PF-009)
 - **Restoring `pluginsDir` to `installAllRules` or `installRuleFile`** — rule source is exclusively `rulesDir()` (flat `src/assets/rules/`); there is no per-plugin subdirectory.
 - **Combining `--reset` with `--plugin`** — factory reset and partial install are mutually exclusive; init rejects the combination before seeding.
 - **Auto-adopting default-OFF flags in `resolveSeedFlags`** — only default-ON flags are auto-adopted when they are new (∉ knownFlags). Default-OFF flags must always be explicitly user-selected.
@@ -306,6 +315,8 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 - **`knownPlugins` is a top-level field; `knownFlags` is inside `features`.** Both are snapshotted at install time. The asymmetric placement mirrors the schema: plugins are top-level in `ManifestData`, flags are nested in `ManifestData.features`.
 
+- **`asStringArray` in `readManifest` validates element types, not just array shape.** A value like `[1, null, "valid"]` self-heals to `undefined` — the entire array must pass `every(e => typeof e === 'string')`. This means a partially-corrupted snapshot is treated as absent (safe) rather than partially trusted (unsafe).
+
 ## Key Files
 
 - `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; orphan sweep on full install
@@ -313,11 +324,11 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`
 - `src/targets/claude-code/legacy.ts` — `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
 - `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; calls `installViaFileCopy`; exhaustive `ShadowSkipReason` switch with `never` guard
-- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `resolveNonSelectableOptionalCarry`, `applyCliToggles`, `FEATURE_DEFAULTS`
-- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (internal), `enumerateUserDevFlowContent`, `removeDevFlowInstallArtifacts`, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`
+- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `resolveNonSelectableOptionalCarry`, `applyNonSelectableCarry`, `applyCliToggles`, `FEATURE_DEFAULTS`
+- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (internal), `enumerateUserDevFlowContent`, `removeDevFlowInstallArtifacts`, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup`
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow` (3-tier), `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
-- `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`, `listShadowed`
-- `src/core/manifest.ts` — `ManifestData` (with `knownPlugins` and `features.knownFlags`), `readManifest` (self-heals snapshots), `writeManifest`, `syncManifestFeature`, `resolvePluginList`
+- `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`
+- `src/core/manifest.ts` — `ManifestData` (with `knownPlugins` and `features.knownFlags`), `readManifest` (self-heals snapshots via `asStringArray`), `writeManifest`, `syncManifestFeature`, `resolvePluginList`
 - `src/core/flags.ts` — `FLAG_REGISTRY`, `resolveExistingViewMode`, `resolveFinalViewMode`, `applyFlags`, `stripFlags`, `getDefaultFlags`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
 - `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `partitionSelectablePlugins`, `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`
@@ -325,9 +336,10 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 ## Related
 
 - ADR-001: Config-only feature gates — governs `readConfigIfPresent` as the init-seed source for memory/learning/knowledge; config.json is the source of truth, manifest is secondary (applies ADR-001)
-- ADR-003: End-state not transition — governs removals and legacy cleanup; `LEGACY_SKILL_NAMES` accumulates deprecated names, never deletes them (applies ADR-003)
+- ADR-003: End-state not transition — governs removals and legacy cleanup; cancel/decline on uninstall falls through to `removeDevFlowInstallArtifacts` rather than `process.exit()` so cleanup always runs (applies ADR-003)
 - ADR-010: Shadow tolerance — governs `installViaFileCopy` as sole install path and warn-and-install-source (not hard-fail) for invalid shadows; hard-error policy applies only to declared Devflow sources (applies ADR-010)
 - ADR-013: Core/adapter boundary — governs `init-seed.ts` living in `src/cli/commands/` (CLI-init-specific logic) rather than `src/core/` (applies ADR-013)
-- PF-009: Per-item failure isolation in rule/skill fan-out — per-rule try/catch inside `installRuleFile` ensures one failing rule copy does not abort the `Promise.all` (avoids PF-009)
+- PF-009: Per-item failure isolation in rule/skill fan-out — per-rule try/catch inside `installRuleFile` ensures one failing rule copy does not abort the `Promise.all`; `rules --enable` wraps `installAllRules` in try/catch so a hard-error throw surfaces as a clean CLI failure rather than an unhandled rejection after the rules dir was wiped (avoids PF-009)
 - PF-012: LEGACY_* lists deletion-risk — lists split between `src/targets/claude-code/legacy.ts` (skill/agent) and `src/core/plugins.ts` (plugin/command/rule); both must be retained across upgrades (avoids PF-012)
+- PF-014: process.exit() skips cleanup — governs the cancel/decline path in user-scope uninstall; `removeAllDevFlow` has already run by the time the full-cleanup prompt fires, so `removeDevFlowInstallArtifacts` must execute on every non-confirm path (avoids PF-014)
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (`ensureDevflowGitignore` in `post-install.ts`)
