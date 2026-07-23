@@ -317,7 +317,10 @@ export function resolveExistingViewMode(settingsJson: string): ViewMode | undefi
  * @param current  - Existing viewMode from settings.json (resolveExistingViewMode).
  *                   undefined means no opinion in the current settings.
  * @param selected - What the init prompt (or recommended path) would use.
- * @param explicit - true when the user passed an explicit --view-mode flag.
+ * @param explicit - true when the user made an explicit interactive selection in
+ *                   the Advanced init prompt, or when --reset was passed (which
+ *                   forces viewMode back to 'default' and sets explicit=true so
+ *                   that 'default' wins over any externally-set value).
  *
  * Rules:
  *   1. explicit ⇒ selected wins (user intent is unambiguous, even 'default')

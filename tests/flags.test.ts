@@ -55,7 +55,18 @@ describe('FLAG_REGISTRY', () => {
 describe('getDefaultFlags', () => {
   it('returns IDs of flags where defaultEnabled is true', () => {
     const defaults = getDefaultFlags();
-    const expected = FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
+    // Hard-coded to catch unintended additions/removals from the default-on set.
+    // Update this list intentionally when the registry changes.
+    const expected = [
+      'tui',
+      'tool-search',
+      'lsp',
+      'prompt-caching-1h',
+      'show-turn-duration',
+      'clear-context-on-plan',
+      'disable-bundled-skills',
+      'pin-sonnet-4-6',
+    ];
     expect(defaults).toEqual(expected);
   });
 });
