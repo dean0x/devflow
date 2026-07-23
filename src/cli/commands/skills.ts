@@ -34,22 +34,6 @@ export async function hasShadow(skillName: string, devflowDir?: string): Promise
   return dirExists(getShadowDir(dir, skillName));
 }
 
-/**
- * List all shadowed skill names (directory names under ~/.devflow/skills/).
- * Used by the uninstall warning.
- */
-export async function listShadowed(devflowDir?: string): Promise<string[]> {
-  const dir = devflowDir ?? getDevFlowDirectory();
-  const shadowsRoot = path.join(dir, 'skills');
-
-  try {
-    const entries = await fs.readdir(shadowsRoot, { withFileTypes: true });
-    return entries.filter(e => e.isDirectory()).map(e => e.name);
-  } catch {
-    return [];
-  }
-}
-
 /** Render the shadow-state display tag for a skill. Exhaustive switch catches new states at compile time. */
 function buildSkillShadowTag(shadowState: SkillShadowState): string {
   switch (shadowState) {
