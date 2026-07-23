@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
@@ -117,48 +117,6 @@ export function resolveSecurityRemovalDecision(opts: {
   if (!opts.anySecurityPresent || opts.keepDocs) return 'skip';
   if (!opts.isTTY) return 'preserve';
   return 'prompt';
-}
-
-export interface ShadowWarning {
-  level: 'warn' | 'info';
-  message: string;
-}
-
-/**
- * Compute shadow-leftover warnings to emit after a full uninstall.
- * Pure function — no I/O, fully testable.
- *
- * Returns [] when isSelectiveUninstall is true (shadow warnings only apply
- * to full uninstall). Each non-empty shadow list produces a warn entry
- * (the leftover notice) followed by an info entry (the cleanup hint).
- *
- * @D3 Shadow state MUST be captured before the removal block. This function
- * operates on pre-captured lists — see KNOWLEDGE.md §Anti-Patterns
- * ("staging shadow state after removal").
- */
-export function computeShadowLeftoverWarnings(opts: {
-  shadowedSkills: string[];
-  shadowedRules: string[];
-  isSelectiveUninstall: boolean;
-  devflowDir: string;
-}): ShadowWarning[] {
-  if (opts.isSelectiveUninstall) return [];
-
-  const warnings: ShadowWarning[] = [];
-
-  if (opts.shadowedSkills.length > 0) {
-    const shadowPath = path.join(opts.devflowDir, 'skills');
-    warnings.push({ level: 'warn', message: `Personal skill overrides remain in ${shadowPath}: ${opts.shadowedSkills.join(', ')}` });
-    warnings.push({ level: 'info', message: `Remove manually or run: rm -rf ${shadowPath}` });
-  }
-
-  if (opts.shadowedRules.length > 0) {
-    const ruleShadowPath = path.join(opts.devflowDir, 'rules');
-    warnings.push({ level: 'warn', message: `Personal rule overrides remain in ${ruleShadowPath}: ${opts.shadowedRules.join(', ')}` });
-    warnings.push({ level: 'info', message: `Remove manually or run: rm -rf ${ruleShadowPath}` });
-  }
-
-  return warnings;
 }
 
 /**
