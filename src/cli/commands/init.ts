@@ -36,11 +36,12 @@ import { removeDreamHook } from './legacy-hooks.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
-import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../../core/manifest.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeConfig } from '../../core/feature-config.js';
+import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
+import { resolveInitSeed } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -264,6 +265,29 @@ export const initCommand = new Command('init')
       p.outro(color.green('HUD-only install complete.'));
       return;
     }
+
+    // ── Hoist reads: resolve paths early to compute InitSeed for pre-seeded prompts (Phase 4) ──
+    // Best-effort: if path resolution fails here, _seed falls back to fresh-install defaults.
+    // The authoritative error gate for failed path resolution remains at the install-begins
+    // spinner (see "Resolving paths" below).
+    // D-hoist-7c: hoisted above multiselect so Phase 4 can pre-seed plugin/flag/feature prompts.
+    let existingManifest: ManifestData | null = null;
+    let _earlyProjectConfig: FeatureConfig | null = null;
+    let _earlySettingsJson: string | null = null;
+    try {
+      const _earlyPaths = await getInstallationPaths(scope);
+      existingManifest = await readManifest(_earlyPaths.devflowDir);
+      const _earlyGitRoot = _earlyPaths.gitRoot ?? await getGitRoot();
+      if (_earlyGitRoot) {
+        _earlyProjectConfig = await readConfigIfPresent(_earlyGitRoot);
+      }
+      try {
+        _earlySettingsJson = await fs.readFile(
+          path.join(_earlyPaths.claudeDir, 'settings.json'), 'utf-8',
+        );
+      } catch { /* settings.json absent — treated as empty */ }
+    } catch { /* path resolution deferred to install-begins gate */ }
+    const _seed = resolveInitSeed(existingManifest, _earlyProjectConfig, _earlySettingsJson ?? '', DEVFLOW_PLUGINS);
 
     // Select plugins to install
     let selectedPlugins: string[] = [];
@@ -841,8 +865,7 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Check existing manifest for upgrade detection
-    const existingManifest = await readManifest(devflowDir);
+    // existingManifest was read early above (hoisted for seed computation); use it here for upgrade detection
     if (existingManifest) {
       const upgrade = detectUpgrade(version, existingManifest.version);
       if (upgrade.isUpgrade) {
@@ -853,10 +876,9 @@ export const initCommand = new Command('init')
     }
 
     // Detect current deny list state in user settings (read-only; write happens in security step)
+    // _earlySettingsJson was read above using the same claudeDir resolved from scope; reuse it.
     {
-      const userSettingsPath = path.join(claudeDir, 'settings.json');
-      let userSettingsJson: string | null = null;
-      try { userSettingsJson = await fs.readFile(userSettingsPath, 'utf-8'); } catch { /* absent */ }
+      const userSettingsJson: string | null = _earlySettingsJson;
 
       let managedExists = false;
       let managedContentJson: string | null = null;
