@@ -276,3 +276,60 @@ export function stripViewMode(settingsJson: string): string {
   delete settings[VIEW_MODE_KEY];
   return JSON.stringify(settings, null, 2) + '\n';
 }
+
+/**
+ * Extract the non-default view mode from a settings JSON string.
+ *
+ * Returns the persisted ViewMode when it is a recognised non-default value
+ * ('focus' or 'verbose'), so callers can chain with ?? to fall through to
+ * a manifest value or the 'default' literal:
+ *
+ *   viewMode = resolveExistingViewMode(snapshot) ?? manifest?.features.viewMode ?? 'default'
+ *
+ * Returns undefined when:
+ *   - JSON is malformed
+ *   - the viewMode key is absent
+ *   - viewMode is 'default' (no meaningful override to preserve)
+ *   - viewMode is an unrecognised string
+ */
+export function resolveExistingViewMode(settingsJson: string): ViewMode | undefined {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const existing = (parsed as Record<string, unknown>)[VIEW_MODE_KEY];
+      if (
+        typeof existing === 'string' &&
+        (VIEW_MODES as readonly string[]).includes(existing) &&
+        existing !== 'default'
+      ) {
+        return existing as ViewMode;
+      }
+    }
+  } catch { /* malformed settings.json — treat as no opinion */ }
+  return undefined;
+}
+
+/**
+ * Resolve the final view mode to write, combining an existing settings value,
+ * an init-prompt-selected value, and whether the selection was explicit (via
+ * CLI flag) or implicit (prompt default / recommended path).
+ *
+ * @param current  - Existing viewMode from settings.json (resolveExistingViewMode).
+ *                   undefined means no opinion in the current settings.
+ * @param selected - What the init prompt (or recommended path) would use.
+ * @param explicit - true when the user passed an explicit --view-mode flag.
+ *
+ * Rules:
+ *   1. explicit ⇒ selected wins (user intent is unambiguous, even 'default')
+ *   2. non-default current ⇒ current wins (preserve externally-set mode, e.g. /focus)
+ *   3. else ⇒ selected
+ */
+export function resolveFinalViewMode(
+  current: ViewMode | undefined,
+  selected: ViewMode,
+  explicit: boolean,
+): ViewMode {
+  if (explicit) return selected;
+  if (current !== undefined && current !== 'default') return current;
+  return selected;
+}

@@ -6,6 +6,8 @@ import {
   stripFlags,
   applyViewMode,
   stripViewMode,
+  resolveExistingViewMode,
+  resolveFinalViewMode,
   type ViewMode,
 } from '../src/core/flags.js';
 
@@ -413,5 +415,102 @@ describe('stripViewMode', () => {
       expect(result.viewMode).toBeUndefined();
       expect(result.hooks).toEqual({ Stop: [] });
     }
+  });
+});
+
+describe('resolveExistingViewMode', () => {
+  // Returns the persisted non-default viewMode so callers can ?? to a fallback:
+  //   viewMode = resolveExistingViewMode(snapshot) ?? manifest?.features.viewMode ?? 'default'
+
+  it('returns "focus" when settings.json has viewMode: "focus"', () => {
+    const input = JSON.stringify({ viewMode: 'focus', hooks: {} }, null, 2);
+    expect(resolveExistingViewMode(input)).toBe('focus');
+  });
+
+  it('returns "verbose" when settings.json has viewMode: "verbose"', () => {
+    const input = JSON.stringify({ viewMode: 'verbose' }, null, 2);
+    expect(resolveExistingViewMode(input)).toBe('verbose');
+  });
+
+  it('returns undefined when viewMode key is absent (no opinion)', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    expect(resolveExistingViewMode(input)).toBeUndefined();
+  });
+
+  it('returns undefined when viewMode is "default" (no meaningful override to preserve)', () => {
+    // 'default' means "no preference" — treat as undefined so ?? chains work
+    const input = JSON.stringify({ viewMode: 'default', hooks: {} }, null, 2);
+    expect(resolveExistingViewMode(input)).toBeUndefined();
+  });
+
+  it('returns undefined for an unrecognised viewMode value', () => {
+    const input = JSON.stringify({ viewMode: 'ultra-verbose' }, null, 2);
+    expect(resolveExistingViewMode(input)).toBeUndefined();
+  });
+
+  it('returns undefined gracefully for malformed JSON (never throws)', () => {
+    expect(() => resolveExistingViewMode('not-json{{{')).not.toThrow();
+    expect(resolveExistingViewMode('not-json{{{')).toBeUndefined();
+  });
+
+  it('returns undefined for empty string input (never throws)', () => {
+    expect(() => resolveExistingViewMode('')).not.toThrow();
+    expect(resolveExistingViewMode('')).toBeUndefined();
+  });
+
+  it('regression: existing "verbose" mode is preserved for reinstall display', () => {
+    // Pinned: user has verbose set; reinstall must surface "verbose", not "default"
+    const existingSettings = JSON.stringify({ viewMode: 'verbose', hooks: {} }, null, 2);
+    const resolved = resolveExistingViewMode(existingSettings);
+    expect(resolved).toBe('verbose');
+    expect(resolved).not.toBeUndefined();
+  });
+});
+
+describe('resolveFinalViewMode', () => {
+  // Rules:
+  //   1. explicit=true → selected wins unconditionally
+  //   2. explicit=false, non-default current → current wins (preserve externally-set mode)
+  //   3. explicit=false, current=undefined or 'default' → selected
+
+  it('explicit=true: selected "default" beats current "focus" (user explicitly chose default)', () => {
+    const result = resolveFinalViewMode('focus', 'default', true);
+    expect(result).toBe('default');
+  });
+
+  it('explicit=true: selected "verbose" beats current "focus"', () => {
+    const result = resolveFinalViewMode('focus', 'verbose', true);
+    expect(result).toBe('verbose');
+  });
+
+  it('explicit=true: selected "focus" is used even when current is undefined', () => {
+    const result = resolveFinalViewMode(undefined, 'focus', true);
+    expect(result).toBe('focus');
+  });
+
+  it('explicit=false: non-default current "focus" preserved (external /focus respected)', () => {
+    const result = resolveFinalViewMode('focus', 'default', false);
+    expect(result).toBe('focus');
+  });
+
+  it('explicit=false: non-default current "verbose" preserved', () => {
+    const result = resolveFinalViewMode('verbose', 'default', false);
+    expect(result).toBe('verbose');
+  });
+
+  it('explicit=false: undefined current → selected is used', () => {
+    const result = resolveFinalViewMode(undefined, 'verbose', false);
+    expect(result).toBe('verbose');
+  });
+
+  it('explicit=false: undefined current + selected "default" → "default"', () => {
+    const result = resolveFinalViewMode(undefined, 'default', false);
+    expect(result).toBe('default');
+  });
+
+  it('explicit=false: current "default" → selected wins (no meaningful current to preserve)', () => {
+    // If current is 'default', treat as "no opinion" and use selected
+    const result = resolveFinalViewMode('default', 'verbose', false);
+    expect(result).toBe('verbose');
   });
 });

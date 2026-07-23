@@ -1,0 +1,272 @@
+/**
+ * Pure seeding helpers for devflow init.
+ *
+ * Computes the initial state (seed) for init prompts from:
+ * - The existing manifest (from a prior install)
+ * - The project feature config (.devflow/config.json)
+ * - The current settings.json snapshot (for viewMode)
+ * - The plugin registry
+ *
+ * All exported functions are pure — no I/O, no side effects.
+ *
+ * Applies ADR-013: seeding helpers are CLI-init-specific logic, so they live
+ * beside init.ts in src/cli/commands/ rather than in src/core/ (which holds
+ * agent-neutral, target-agnostic utilities).
+ */
+
+import { resolveExistingViewMode, FLAG_REGISTRY, type ClaudeCodeFlag, type ViewMode } from '../../core/flags.js';
+import { type FeatureConfig } from '../../core/feature-config.js';
+import { type ManifestData } from '../../core/manifest.js';
+import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+/** Per-feature boolean state for the init seed. */
+export interface FeatureSeed {
+  ambient: boolean;
+  memory: boolean;
+  hud: boolean;
+  knowledge: boolean;
+  learning: boolean;
+  rules: boolean;
+}
+
+/** Registry defaults — all features enabled. Used for fresh installs. */
+export const FEATURE_DEFAULTS: FeatureSeed = {
+  ambient: true,
+  memory: true,
+  hud: true,
+  knowledge: true,
+  learning: true,
+  rules: true,
+};
+
+/** The complete initial state passed from the hoisted-reads block to init prompts. */
+export interface InitSeed {
+  features: FeatureSeed;
+  flags: string[];
+  viewMode: ViewMode;
+  workflowPlugins: string[];
+  languagePlugins: string[];
+}
+
+/**
+ * Local extension type for manifest fields added in commit 7b.
+ * Lets 7a helpers read the optional snapshot fields safely without a
+ * runtime error on old manifests where they are simply absent (undefined).
+ * Once ManifestData is updated in 7b this cast becomes redundant but safe.
+ */
+type ManifestWithKnownFields = ManifestData & {
+  readonly features: ManifestData['features'] & { readonly knownFlags?: string[] };
+  readonly knownPlugins?: string[];
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve feature booleans for the init seed.
+ *
+ * - memory / learning / knowledge come from projectConfig WHENEVER present,
+ *   independent of whether a manifest exists (covers config-present /
+ *   manifest-missing cases such as a fresh project with a prior learning run).
+ * - ambient / hud / rules come from manifest.features; registry defaults
+ *   (all true) are used when the manifest is absent.
+ *
+ * Applies ADR-001: .devflow/config.json is the source of truth for
+ * memory/learning/knowledge; manifest reflects the last install choices for
+ * the remaining toggles.
+ */
+export function resolveSeedFeatures(
+  manifest: ManifestData | null,
+  projectConfig: FeatureConfig | null,
+): FeatureSeed {
+  // ambient/hud/rules: manifest is the source; fall back to registry defaults
+  const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
+  const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
+  const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
+
+  // memory/learning/knowledge: projectConfig wins whenever present (ADR-001)
+  const memory = projectConfig !== null
+    ? projectConfig.memory
+    : (manifest?.features.memory ?? FEATURE_DEFAULTS.memory);
+  const knowledge = projectConfig !== null
+    ? projectConfig.knowledge
+    : (manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge);
+  const learning = projectConfig !== null
+    ? projectConfig.learning
+    : (manifest?.features.learning ?? FEATURE_DEFAULTS.learning);
+
+  return { ambient, memory, hud, knowledge, learning, rules };
+}
+
+/**
+ * Resolve the enabled flag set for the init seed.
+ *
+ * @param enabledFlags - Currently-enabled flag IDs from the manifest,
+ *                       or null for a fresh install (no prior manifest).
+ * @param knownFlags   - Snapshot of all flag IDs known at the last install
+ *                       (manifest.features.knownFlags), or undefined when
+ *                       the manifest pre-dates the snapshot feature.
+ * @param registry     - Flag registry to consult; injectable for tests.
+ *
+ * Rules:
+ *   - null enabledFlags (fresh) → all default-ON flags in the registry
+ *   - knownFlags === undefined (old manifest, migration) → return enabledFlags
+ *     as-is; adopt nothing new (safe: user's prior choices preserved)
+ *   - Otherwise → enabledFlags ∪ {default-ON flags whose id ∉ knownFlags}
+ *     (newly added registry entries that the user never saw before are auto-adopted)
+ *   - Default-OFF flags are NEVER auto-added regardless of knownFlags
+ */
+export function resolveSeedFlags(
+  enabledFlags: string[] | null,
+  knownFlags: string[] | undefined,
+  registry: readonly ClaudeCodeFlag[] = FLAG_REGISTRY,
+): string[] {
+  // Fresh install → all default-ON flags from the registry
+  if (enabledFlags === null) {
+    return registry.filter(f => f.defaultEnabled).map(f => f.id);
+  }
+
+  // Old manifest without a knownFlags snapshot → adopt nothing new
+  if (knownFlags === undefined) {
+    return [...enabledFlags];
+  }
+
+  // Re-init with a knownFlags snapshot: union existing + newly-added default-ON entries
+  const knownSet = new Set(knownFlags);
+  const result = new Set(enabledFlags);
+  for (const flag of registry) {
+    if (flag.defaultEnabled && !knownSet.has(flag.id)) {
+      result.add(flag.id);
+    }
+  }
+  return [...result];
+}
+
+/**
+ * Resolve the plugin selection buckets for the init seed.
+ *
+ * @param manifestPlugins - Plugin names stored in the existing manifest,
+ *                          or null for a fresh install.
+ * @param knownPlugins    - Plugin name snapshot from the last install
+ *                          (manifest.knownPlugins), or undefined when the
+ *                          manifest pre-dates the snapshot feature.
+ * @param allPlugins      - Full plugin registry.
+ *
+ * Rules:
+ *   - null manifestPlugins (fresh) → non-optional workflow plugins preselected,
+ *     empty language list (matches current init UI defaults)
+ *   - knownPlugins === undefined → split existing into workflow/language buckets,
+ *     adopt nothing new
+ *   - Otherwise → split + adopt newly-added non-optional selectable plugins
+ *     whose name is ∉ knownPlugins and ∉ manifestPlugins
+ *
+ * Excluded always-installed plugins (devflow-core-skills, devflow-ambient,
+ * devflow-audit-claude) are filtered out by partitionSelectablePlugins and
+ * never appear in the returned buckets.
+ */
+export function resolveSeedPlugins(
+  manifestPlugins: string[] | null,
+  knownPlugins: string[] | undefined,
+  allPlugins: PluginDefinition[],
+): { workflowPlugins: string[]; languagePlugins: string[] } {
+  const { workflow, language } = partitionSelectablePlugins(allPlugins);
+  const workflowNames = new Set(workflow.map(p => p.name));
+  const languageNames = new Set(language.map(p => p.name));
+
+  // Fresh install → non-optional workflow plugins preselected, empty language
+  if (manifestPlugins === null) {
+    return {
+      workflowPlugins: workflow.filter(p => !p.optional).map(p => p.name),
+      languagePlugins: [],
+    };
+  }
+
+  // Split existing manifest plugins into the selectable buckets
+  const workflowPlugins = manifestPlugins.filter(n => workflowNames.has(n));
+  const languagePlugins = manifestPlugins.filter(n => languageNames.has(n));
+
+  // Old manifest (no knownPlugins snapshot) → adopt nothing new
+  if (knownPlugins === undefined) {
+    return { workflowPlugins, languagePlugins };
+  }
+
+  // Re-init with a knownPlugins snapshot: adopt new non-optional selectable plugins
+  const knownSet = new Set(knownPlugins);
+  const manifestSet = new Set(manifestPlugins);
+
+  for (const plugin of allPlugins) {
+    if (plugin.optional) continue;            // never auto-adopt optional plugins
+    if (knownSet.has(plugin.name)) continue;  // was known at last install
+    if (manifestSet.has(plugin.name)) continue; // already in the selection
+
+    if (workflowNames.has(plugin.name)) {
+      workflowPlugins.push(plugin.name);
+    } else if (languageNames.has(plugin.name)) {
+      languagePlugins.push(plugin.name);
+    }
+    // excluded always-installed plugins: neither bucket — silently ignored
+  }
+
+  return { workflowPlugins, languagePlugins };
+}
+
+/**
+ * Compose the full init seed from manifest, project config, settings, and registry.
+ *
+ * viewMode priority: existing settings.json (non-default) → manifest → 'default'
+ *
+ * This is the single composition point; callers (init.ts hoist block) call this
+ * once and pass `seed` down to Phase 4's prompt wiring.
+ */
+export function resolveInitSeed(
+  seedManifest: ManifestData | null,
+  seedConfig: FeatureConfig | null,
+  settingsSnapshot: string,
+  plugins: PluginDefinition[],
+): InitSeed {
+  const features = resolveSeedFeatures(seedManifest, seedConfig);
+
+  // enabledFlags: null for fresh (no manifest), string[] from manifest otherwise
+  const enabledFlags: string[] | null = seedManifest !== null ? seedManifest.features.flags : null;
+  // Read snapshot fields that ManifestData gains in commit 7b
+  const extManifest = seedManifest as ManifestWithKnownFields | null;
+  const knownFlags: string[] | undefined = extManifest?.features.knownFlags;
+  const flags = resolveSeedFlags(enabledFlags, knownFlags);
+
+  // manifestPlugins: null for fresh, array from manifest otherwise
+  const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
+  const knownPlugins: string[] | undefined = extManifest?.knownPlugins;
+  const { workflowPlugins, languagePlugins } = resolveSeedPlugins(manifestPlugins, knownPlugins, plugins);
+
+  // viewMode: non-default setting wins; else manifest; else 'default'
+  const viewMode: ViewMode =
+    resolveExistingViewMode(settingsSnapshot) ??
+    seedManifest?.features.viewMode ??
+    'default';
+
+  return { features, flags, viewMode, workflowPlugins, languagePlugins };
+}
+
+/**
+ * Apply CLI-explicit feature toggles on top of a seed's features.
+ *
+ * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;
+ * undefined means "user did not specify this flag, keep the seed value".
+ *
+ * Used in Phase 4 to honour --ambient/--no-ambient etc. passed alongside
+ * --recommended.
+ */
+export function applyCliToggles(
+  base: FeatureSeed,
+  toggles: Partial<FeatureSeed>,
+): FeatureSeed {
+  return {
+    ambient: toggles.ambient ?? base.ambient,
+    memory: toggles.memory ?? base.memory,
+    hud: toggles.hud ?? base.hud,
+    knowledge: toggles.knowledge ?? base.knowledge,
+    learning: toggles.learning ?? base.learning,
+    rules: toggles.rules ?? base.rules,
+  };
+}
