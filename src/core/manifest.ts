@@ -91,12 +91,12 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
-    const knownFlags: string[] | undefined = Array.isArray(features.knownFlags) && (features.knownFlags as unknown[]).every(e => typeof e === 'string')
-      ? features.knownFlags as string[]
-      : undefined;
-    const knownPlugins: string[] | undefined = Array.isArray(data.knownPlugins) && (data.knownPlugins as unknown[]).every(e => typeof e === 'string')
-      ? data.knownPlugins as string[]
-      : undefined;
+    const asStringArray = (val: unknown): string[] | undefined =>
+      Array.isArray(val) && (val as unknown[]).every(e => typeof e === 'string')
+        ? (val as string[])
+        : undefined;
+    const knownFlags = asStringArray(features.knownFlags);
+    const knownPlugins = asStringArray(data.knownPlugins);
 
     const manifest: ManifestData = {
       version: data.version as string,
