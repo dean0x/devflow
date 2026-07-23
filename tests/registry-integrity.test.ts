@@ -286,6 +286,11 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 
     const violations: string[] = [];
 
+    // Aggregates spawned agents per plugin across ALL its commands.
+    // Used by the reverse check so a declared agent only needs to appear
+    // in at least one of the plugin's commands — not every command.
+    const pluginAggregateSpawned = new Map<string, Set<string>>();
+
     for (const [cmdName, plugin] of commandOwner) {
       const filePath = path.join(distCommandsDir, `${cmdName}.md`);
       let content: string;
@@ -308,7 +313,7 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 
       const declaredAgents = new Set(plugin.agents.map(normalize));
 
-      // Forward: spawned → declared
+      // Forward: spawned → declared (per-command)
       for (const agentNorm of spawned) {
         if (!declaredAgents.has(agentNorm)) {
           violations.push(
@@ -317,11 +322,25 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
         }
       }
 
-      // Reverse: declared → spawned (only when the command uses subagent_type syntax)
+      // Accumulate per-plugin for the post-loop reverse check.
+      const aggregate = pluginAggregateSpawned.get(plugin.name) ?? new Set<string>();
+      for (const agentNorm of spawned) aggregate.add(agentNorm);
+      pluginAggregateSpawned.set(plugin.name, aggregate);
+    }
+
+    // Reverse: declared → spawned (per-plugin aggregate).
+    // Checks that each declared agent is spawned in AT LEAST ONE of the plugin's
+    // compiled commands — not necessarily every command.
+    // Naturally skips plugins that use only agentType: syntax (never entered the map above).
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const aggregate = pluginAggregateSpawned.get(plugin.name);
+      if (aggregate === undefined) continue; // no subagent_type syntax in any command — skip
+
+      const declaredAgents = new Set(plugin.agents.map(normalize));
       for (const agentNorm of declaredAgents) {
-        if (!spawned.has(agentNorm)) {
+        if (!aggregate.has(agentNorm)) {
           violations.push(
-            `'${plugin.name}'.agents declares '${agentNorm}' but ${cmdName}.md never spawns it via subagent_type`,
+            `'${plugin.name}'.agents declares '${agentNorm}' but none of its compiled commands spawn it via subagent_type`,
           );
         }
       }

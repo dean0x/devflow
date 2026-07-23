@@ -73,12 +73,24 @@ describe('composeScripts', () => {
 
   it('is idempotent — second call does not overwrite existing package.json content', async () => {
     const target = path.join(tmpDir, 'scripts');
-    await composeScripts(target);
-    await composeScripts(target); // second call
+    await composeScripts(target); // first call: creates package.json with {type:'module'}
 
+    // Write a sentinel key into the existing package.json before the second call.
+    // If composeScripts uses 'wx' (exclusive-create), the second call leaves the file
+    // untouched and the sentinel survives. If it incorrectly uses 'w' (overwrite), the
+    // sentinel is wiped and the assertion below fails — proving the flag matters.
     const pkgPath = path.join(target, 'package.json');
-    const content = await fs.readFile(pkgPath, 'utf-8');
-    expect(JSON.parse(content)).toMatchObject({ type: 'module' });
+    const firstContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8')) as Record<string, unknown>;
+    await fs.writeFile(pkgPath, JSON.stringify({ ...firstContent, _sentinel: true }));
+
+    await composeScripts(target); // second call — must not overwrite
+
+    const parsed = JSON.parse(await fs.readFile(pkgPath, 'utf-8')) as Record<string, unknown>;
+    expect(parsed.type).toBe('module');
+    expect(
+      parsed['_sentinel'],
+      'sentinel key was wiped — composeScripts must use wx (exclusive-create) for package.json',
+    ).toBe(true);
   });
 });
 

@@ -8,9 +8,15 @@
  */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import { promises as fs } from 'fs';
 import * as path from 'path';
 
 const CLI = path.resolve(import.meta.dirname, '..', 'dist', 'cli.js');
+
+// Guard: skip all tests when dist/cli.js has not been built.
+// npm test has no pretest build step — a missing or stale dist would validate wrong output.
+// Mirrors the graceful-skip pattern used in Guards 4/5 of registry-integrity.test.ts.
+const distExists = await fs.access(CLI).then(() => true).catch(() => false);
 
 function runCli(...args: string[]) {
   return spawnSync('node', [CLI, ...args], {
@@ -19,7 +25,7 @@ function runCli(...args: string[]) {
   });
 }
 
-describe('CLI: bare invocation exits 0 with help', () => {
+describe.skipIf(!distExists)('CLI: bare invocation exits 0 with help', () => {
   it('devflow (no args) exits 0 and prints usage', () => {
     const result = runCli();
     expect(result.status).toBe(0);
@@ -33,7 +39,7 @@ describe('CLI: bare invocation exits 0 with help', () => {
   });
 });
 
-describe('CLI: unknown subcommand exits 1 with error message', () => {
+describe.skipIf(!distExists)('CLI: unknown subcommand exits 1 with error message', () => {
   it('devflow list (removed command) exits 1', () => {
     const result = runCli('list');
     expect(result.status).toBe(1);
@@ -52,7 +58,7 @@ describe('CLI: unknown subcommand exits 1 with error message', () => {
   });
 });
 
-describe('CLI: real subcommands are unaffected', () => {
+describe.skipIf(!distExists)('CLI: real subcommands are unaffected', () => {
   it('devflow init --help exits 0', () => {
     const result = runCli('init', '--help');
     expect(result.status).toBe(0);
