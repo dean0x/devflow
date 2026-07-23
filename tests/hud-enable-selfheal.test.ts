@@ -9,9 +9,15 @@
  * The prior bug was an early-return in the --enable path that exited
  * after logging "HUD already enabled", bypassing syncManifestFeature
  * entirely. This test pins the repaired behavior.
+ *
+ * Also covers the non-Devflow statusLine confirm/skip branch:
+ *   - non-interactive mode skips without overwriting
+ *   - user declining the confirm prompt preserves the existing statusLine
+ *   - user confirming the prompt replaces it with the Devflow HUD
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -41,7 +47,11 @@ vi.mock('@clack/prompts', () => ({
 // Imports AFTER mocks
 // ---------------------------------------------------------------------------
 
-import { hudCommand } from '../src/cli/commands/hud.js';
+import { createHudCommand } from '../src/cli/commands/hud.js';
+// Static import of the mocked @clack/prompts so vi.mocked() targets the
+// same mock instance that hud.ts's action closure captures. Both resolve
+// via the module registry at file-load time — no vi.resetModules() needed.
+import * as clack from '@clack/prompts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,6 +92,13 @@ function makeHudConfig(enabled: boolean): string {
   return JSON.stringify({ enabled, detail: false }, null, 2) + '\n';
 }
 
+/** Settings.json with a non-Devflow statusLine */
+function makeSettingsWithNonDevflowStatusLine(command: string): string {
+  return JSON.stringify({
+    statusLine: { type: 'command', command },
+  }, null, 2) + '\n';
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -89,34 +106,28 @@ function makeHudConfig(enabled: boolean): string {
 describe('hud --enable self-healing (WS6b)', () => {
   let tmpClaudeDir: string;
   let tmpDevflowDir: string;
-  let prevClaudeCodeDir: string | undefined;
-  let prevDevflowDir: string | undefined;
+
+  // Fresh Command per test via the exported factory — avoids coupling to
+  // Commander's private _optionValues field for cross-test option isolation.
+  // A Commander internal rename would silently no-op a _optionValues = {}
+  // reset and let cross-test option bleed return undetected; the factory
+  // approach is impervious to such renames.
+  let hudCmd: Command;
 
   beforeEach(async () => {
     tmpClaudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hud-enable-claude-'));
     tmpDevflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hud-enable-devflow-'));
 
-    // Point env vars at temp dirs so all path resolution picks them up
-    prevClaudeCodeDir = process.env.CLAUDE_CODE_DIR;
-    prevDevflowDir = process.env.DEVFLOW_DIR;
-    process.env.CLAUDE_CODE_DIR = tmpClaudeDir;
-    process.env.DEVFLOW_DIR = tmpDevflowDir;
+    // vi.stubEnv tracks mutations; vi.unstubAllEnvs() in afterEach restores
+    // them unconditionally — leak-proof even when the test throws.
+    vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
+    vi.stubEnv('DEVFLOW_DIR', tmpDevflowDir);
 
-    // Reset Commander option state between tests to prevent cross-test bleed
-    (hudCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    hudCmd = createHudCommand();
   });
 
   afterEach(async () => {
-    if (prevClaudeCodeDir === undefined) {
-      delete process.env.CLAUDE_CODE_DIR;
-    } else {
-      process.env.CLAUDE_CODE_DIR = prevClaudeCodeDir;
-    }
-    if (prevDevflowDir === undefined) {
-      delete process.env.DEVFLOW_DIR;
-    } else {
-      process.env.DEVFLOW_DIR = prevDevflowDir;
-    }
+    vi.unstubAllEnvs();
     await fs.rm(tmpClaudeDir, { recursive: true, force: true });
     await fs.rm(tmpDevflowDir, { recursive: true, force: true });
   });
@@ -146,7 +157,7 @@ describe('hud --enable self-healing (WS6b)', () => {
       'utf-8',
     );
 
-    await hudCommand.parseAsync(['--enable'], { from: 'user' });
+    await hudCmd.parseAsync(['--enable'], { from: 'user' });
 
     // syncManifestFeature must have updated hud to true
     const manifestContent = await fs.readFile(
@@ -177,7 +188,7 @@ describe('hud --enable self-healing (WS6b)', () => {
 
     // No manifest.json — syncManifestFeature is a no-op without a manifest (fine here)
 
-    await hudCommand.parseAsync(['--enable'], { from: 'user' });
+    await hudCmd.parseAsync(['--enable'], { from: 'user' });
 
     // statusLine must have been written to settings.json
     const settingsContent = await fs.readFile(
@@ -187,5 +198,78 @@ describe('hud --enable self-healing (WS6b)', () => {
     const settings = JSON.parse(settingsContent) as { statusLine?: { command: string } };
     expect(settings.statusLine).toBeDefined();
     expect(settings.statusLine!.command).toContain('hud.sh');
+  });
+
+  // ---------------------------------------------------------------------------
+  // TEST-7: non-Devflow statusLine confirm/skip branch
+  // ---------------------------------------------------------------------------
+
+  it('skips in non-interactive mode when non-Devflow statusLine is present', async () => {
+    // Set up: settings.json has a non-Devflow statusLine.
+    // process.stdin.isTTY is falsy in the test runner — the non-interactive
+    // branch fires automatically without any stub.
+    await fs.writeFile(
+      path.join(tmpClaudeDir, 'settings.json'),
+      makeSettingsWithNonDevflowStatusLine('/usr/local/bin/other-tool.sh'),
+      'utf-8',
+    );
+
+    await hudCmd.parseAsync(['--enable'], { from: 'user' });
+
+    // Non-interactive path returns early — existing statusLine must be unchanged.
+    const content = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
+    const settings = JSON.parse(content) as { statusLine?: { command: string } };
+    expect(settings.statusLine?.command).toBe('/usr/local/bin/other-tool.sh');
+  });
+
+  it('skips when user declines to overwrite existing non-Devflow statusLine', async () => {
+    // Set up: settings.json has a non-Devflow statusLine; stdin is interactive.
+    // The confirm mock returns false (default) — user declines.
+    await fs.writeFile(
+      path.join(tmpClaudeDir, 'settings.json'),
+      makeSettingsWithNonDevflowStatusLine('/usr/local/bin/other-tool.sh'),
+      'utf-8',
+    );
+
+    // Make stdin appear interactive so the confirm prompt fires instead of the
+    // non-interactive skip path. Restored in finally so the stub cannot leak.
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    try {
+      await hudCmd.parseAsync(['--enable'], { from: 'user' });
+    } finally {
+      delete (process.stdin as unknown as Record<string, unknown>).isTTY;
+    }
+
+    // User declined (confirm=false, isCancel=false) → statusLine preserved.
+    const content = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
+    const settings = JSON.parse(content) as { statusLine?: { command: string } };
+    expect(settings.statusLine?.command).toBe('/usr/local/bin/other-tool.sh');
+  });
+
+  it('replaces existing non-Devflow statusLine when user confirms', async () => {
+    // Set up: settings.json has a non-Devflow statusLine; stdin is interactive.
+    // The confirm mock is configured to return true — user accepts the overwrite.
+    await fs.writeFile(
+      path.join(tmpClaudeDir, 'settings.json'),
+      makeSettingsWithNonDevflowStatusLine('/usr/local/bin/other-tool.sh'),
+      'utf-8',
+    );
+
+    // Configure confirm to return true for this one call. Both this test and
+    // hud.ts's action use the same mock instance (static import, no resetModules).
+    vi.mocked(clack.confirm).mockResolvedValueOnce(true);
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    try {
+      await hudCmd.parseAsync(['--enable'], { from: 'user' });
+    } finally {
+      delete (process.stdin as unknown as Record<string, unknown>).isTTY;
+    }
+
+    // User confirmed → non-Devflow statusLine replaced with Devflow HUD.
+    const content = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
+    const settings = JSON.parse(content) as { statusLine?: { command: string } };
+    expect(settings.statusLine?.command).toContain('hud.sh');
+    expect(settings.statusLine?.command).not.toBe('/usr/local/bin/other-tool.sh');
   });
 });

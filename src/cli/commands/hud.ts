@@ -105,7 +105,13 @@ export function hasNonDevFlowStatusLine(settingsJson: string): boolean {
   return !isDevFlowStatusLine(settings.statusLine);
 }
 
-export const hudCommand = new Command('hud')
+/**
+ * Build a fresh Commander Command for the `hud` subcommand.
+ * Exported for tests that need per-test isolation without resorting to
+ * Commander's private `_optionValues` field.
+ */
+export function createHudCommand(): Command {
+  return new Command('hud')
   .description('Configure the HUD (status line)')
   .option('--status', 'Show current HUD config')
   .option('--detail', 'Show tool/agent descriptions in HUD')
@@ -182,7 +188,7 @@ export const hudCommand = new Command('hud')
 
       // Ensure statusLine is registered (idempotent — adds only if missing).
       // This runs unconditionally so a missing statusLine is repaired even when
-      // config already says enabled (D2: symmetric self-heal with --disable).
+      // config already says enabled (@D2 symmetric self-heal with --disable).
       if (!hasHudStatusLine(settingsContent)) {
         // Check for non-Devflow statusLine
         if (hasNonDevFlowStatusLine(settingsContent)) {
@@ -200,6 +206,13 @@ export const hudCommand = new Command('hud')
               p.log.info('HUD not enabled — existing statusLine preserved');
               return;
             }
+            // User confirmed: clear the non-Devflow statusLine so
+            // addHudStatusLine can write the Devflow HUD. The guard inside
+            // addHudStatusLine protects callers that haven't confirmed yet;
+            // this call site has confirmed, so clear the field first.
+            const confirmed = JSON.parse(settingsContent) as Settings;
+            delete confirmed.statusLine;
+            settingsContent = JSON.stringify(confirmed, null, 2) + '\n';
           } else {
             p.log.info(
               'Non-interactive mode — skipping (existing statusLine would be overwritten)',
@@ -214,7 +227,7 @@ export const hudCommand = new Command('hud')
 
       // Always update config and sync manifest — removing the already-enabled
       // early-return makes --enable self-healing symmetric with --disable.
-      // D2: a drifted manifest (hud=false when config says enabled) is repaired
+      // @D2 a drifted manifest (hud=false when config says enabled) is repaired
       // on --enable without requiring a disable/re-enable cycle.
       const config = loadConfig();
       const wasEnabled = config.enabled;
@@ -241,7 +254,7 @@ export const hudCommand = new Command('hud')
         saveConfig({ ...config, enabled: false });
       }
 
-      // D1: Always attempt to hard-remove the statusLine from settings.json,
+      // @D1 Always attempt to hard-remove the statusLine from settings.json,
       // regardless of config.enabled. This self-heals drift where hud.json says
       // disabled but a Devflow statusLine still lingers in settings.json from a
       // partial prior state (e.g. crash between config-write and settings-write).
@@ -268,3 +281,6 @@ export const hudCommand = new Command('hud')
       p.log.success('HUD disabled');
     }
   });
+}
+
+export const hudCommand = createHudCommand();
