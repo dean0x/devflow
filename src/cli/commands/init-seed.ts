@@ -50,17 +50,6 @@ export interface InitSeed {
   languagePlugins: string[];
 }
 
-/**
- * Local extension type for manifest fields added in commit 7b.
- * Lets 7a helpers read the optional snapshot fields safely without a
- * runtime error on old manifests where they are simply absent (undefined).
- * Once ManifestData is updated in 7b this cast becomes redundant but safe.
- */
-type ManifestWithKnownFields = ManifestData & {
-  readonly features: ManifestData['features'] & { readonly knownFlags?: string[] };
-  readonly knownPlugins?: string[];
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -227,17 +216,14 @@ export function resolveInitSeed(
 ): InitSeed {
   const features = resolveSeedFeatures(seedManifest, seedConfig);
 
-  // enabledFlags: null for fresh (no manifest), string[] from manifest otherwise
+  // null for a fresh install (no manifest); string[] from manifest otherwise
   const enabledFlags: string[] | null = seedManifest !== null ? seedManifest.features.flags : null;
-  // Read snapshot fields that ManifestData gains in commit 7b
-  const extManifest = seedManifest as ManifestWithKnownFields | null;
-  const knownFlags: string[] | undefined = extManifest?.features.knownFlags;
-  const flags = resolveSeedFlags(enabledFlags, knownFlags);
+  const flags = resolveSeedFlags(enabledFlags, seedManifest?.features.knownFlags);
 
-  // manifestPlugins: null for fresh, array from manifest otherwise
   const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
-  const knownPlugins: string[] | undefined = extManifest?.knownPlugins;
-  const { workflowPlugins, languagePlugins } = resolveSeedPlugins(manifestPlugins, knownPlugins, plugins);
+  const { workflowPlugins, languagePlugins } = resolveSeedPlugins(
+    manifestPlugins, seedManifest?.knownPlugins, plugins,
+  );
 
   // viewMode: non-default setting wins; else manifest; else 'default'
   const viewMode: ViewMode =

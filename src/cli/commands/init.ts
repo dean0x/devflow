@@ -279,29 +279,29 @@ export const initCommand = new Command('init')
     // ── Hoist reads: resolve paths early to compute InitSeed for pre-seeded prompts (Phase 4) ──
     // Best-effort: if path resolution fails here, seed falls back to fresh-install defaults.
     // The authoritative error gate for failed path resolution remains at the install-begins
-    // spinner (see "Resolving paths" below).
-    // D-hoist-7c: hoisted above multiselect so Phase 4 can pre-seed plugin/flag/feature prompts.
+    // spinner (see "Resolving paths" below). Hoisted above multiselect so Phase 4 can
+    // pre-seed plugin/flag/feature prompts.
     let existingManifest: ManifestData | null = null;
-    let _earlyProjectConfig: FeatureConfig | null = null;
-    let _earlySettingsJson: string | null = null;
+    let earlyProjectConfig: FeatureConfig | null = null;
+    let earlySettingsJson: string | null = null;
     try {
-      const _earlyPaths = await getInstallationPaths(scope);
-      existingManifest = await readManifest(_earlyPaths.devflowDir);
-      const _earlyGitRoot = _earlyPaths.gitRoot ?? await getGitRoot();
-      if (_earlyGitRoot) {
-        _earlyProjectConfig = await readConfigIfPresent(_earlyGitRoot);
+      const earlyPaths = await getInstallationPaths(scope);
+      existingManifest = await readManifest(earlyPaths.devflowDir);
+      const earlyGitRootHoist = earlyPaths.gitRoot ?? await getGitRoot();
+      if (earlyGitRootHoist) {
+        earlyProjectConfig = await readConfigIfPresent(earlyGitRootHoist);
       }
       try {
-        _earlySettingsJson = await fs.readFile(
-          path.join(_earlyPaths.claudeDir, 'settings.json'), 'utf-8',
+        earlySettingsJson = await fs.readFile(
+          path.join(earlyPaths.claudeDir, 'settings.json'), 'utf-8',
         );
       } catch { /* settings.json absent — treated as empty */ }
     } catch { /* path resolution deferred to install-begins gate */ }
     // --reset: factory reset — treat as a fresh install for all seeding and routing decisions.
     // The REAL existingManifest is still used below for installedAt preservation and upgrade messaging.
     const seedManifest = options.reset ? null : existingManifest;
-    const seedConfig = options.reset ? null : _earlyProjectConfig;
-    const seed = resolveInitSeed(seedManifest, seedConfig, _earlySettingsJson ?? '', DEVFLOW_PLUGINS);
+    const seedConfig = options.reset ? null : earlyProjectConfig;
+    const seed = resolveInitSeed(seedManifest, seedConfig, earlySettingsJson ?? '', DEVFLOW_PLUGINS);
 
     // Select plugins to install
     let selectedPlugins: string[] = [];
@@ -925,9 +925,8 @@ export const initCommand = new Command('init')
     }
 
     // Detect current deny list state in user settings (read-only; write happens in security step)
-    // _earlySettingsJson was read above using the same claudeDir resolved from scope; reuse it.
     {
-      const userSettingsJson: string | null = _earlySettingsJson;
+      const userSettingsJson: string | null = earlySettingsJson;
 
       let managedExists = false;
       let managedContentJson: string | null = null;
@@ -1167,7 +1166,6 @@ export const initCommand = new Command('init')
     const settingsPath = path.join(claudeDir, 'settings.json');
 
     // Configure ambient hook, memory hooks, and HUD statusLine in a single read-modify-write pass
-    let settingsConfigured = false;
     try {
       let content = await fs.readFile(settingsPath, 'utf-8');
       const original = content;
@@ -1231,11 +1229,13 @@ export const initCommand = new Command('init')
           p.log.info(`HUD ${hudEnabled ? 'enabled' : 'disabled'}`);
         }
       }
-      settingsConfigured = true;
     } catch (err) {
       // settings.json write failed — warn but do not abort. The manifest records the
       // intended state; the user can re-run devflow init to retry the settings write.
-      p.log.warn(`Could not configure settings.json: ${err instanceof Error ? err.message : err}`);
+      p.log.warn(
+        `Could not configure settings.json: ${err instanceof Error ? err.message : err}. ` +
+        'Manifest records intended state; run devflow init again to retry.',
+      );
     }
 
     // Write .devflow/config.json to manage per-feature enable/disable at runtime.
@@ -1505,10 +1505,6 @@ export const initCommand = new Command('init')
       await writeManifest(devflowDir, manifestData);
     } catch (error) {
       p.log.warn(`Failed to write installation manifest (install succeeded): ${error instanceof Error ? error.message : error}`);
-    }
-
-    if (!settingsConfigured) {
-      p.log.warn('settings.json was not updated — manifest records intended state; run devflow init again to retry.');
     }
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));
