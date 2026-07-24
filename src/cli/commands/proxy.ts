@@ -566,7 +566,9 @@ async function runStatus(): Promise<void> {
       process.kill(pidFromFile, 0);
       // Process alive
       if (processState === 'running-ours') {
-        p.log.info(`Process: ${color.green('running')} (pid ${pidFromFile})`);
+        p.log.info(
+          `Process: ${color.green('running')} (pid ${pidFromFile}) — stop manually with: kill ${pidFromFile}`,
+        );
       } else if (processState === 'port-squatted') {
         p.log.warn(`Process: ${color.yellow('port squatted by another app')} (pid ${pidFromFile} alive but port ${port} is not our relay)`);
       } else {

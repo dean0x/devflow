@@ -200,22 +200,27 @@ Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts
 Configure which AI model each Devflow agent uses. Changes persist across reinstalls — Devflow reapplies your mapping after every `devflow init`.
 
 ```bash
-npx devflow-kit agents           # Open interactive TUI (requires TTY)
-npx devflow-kit agents --list    # List all agents with current model assignment
-npx devflow-kit agents --set <agent>=<model>   # Assign a model to one agent
-npx devflow-kit agents --reset [agent]         # Reset one agent (or all) to shipped default
+npx devflow-kit agents                                      # Open interactive TUI (requires TTY)
+npx devflow-kit agents --list                               # List all agents with current model assignment
+npx devflow-kit agents --set <agent> --model <model>        # Assign a model to one agent
+npx devflow-kit agents --set <agent> --effort <level>       # Assign an effort level to one agent
+npx devflow-kit agents --set <agent> --model default        # Clear model override (restores shipped default)
+npx devflow-kit agents --reset                              # Clear all agent customisations (prompts for confirmation)
+npx devflow-kit agents --reset --yes                        # Skip confirmation prompt
 ```
 
 **TUI keybindings:**
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` | Navigate agents |
-| `←` / `→` | Cycle model for selected agent |
+| `↑` / `↓` or `k` / `j` | Navigate agents |
+| `Tab` | Switch between model and effort fields |
+| `←` / `→` or `Space` | Cycle active field (model or effort) |
+| `d` | Reset active field to default |
 | `Enter` | Confirm and save all changes |
 | `Escape` / `q` | Quit without saving |
 
-GPT model assignments are **dormant** when external model routing is disabled — they are saved to `~/.devflow/agent-models.json` but not applied to agent frontmatter until routing is enabled. The TUI shows dormant GPT assignments with a dim annotation (`gpt-4.5 saved`). Enabling routing re-applies the mapping; disabling routing reverts frontmatter to Claude defaults while preserving your mapping.
+GPT model assignments are **dormant** when external model routing is disabled — they are saved to `~/.devflow/agent-models.json` but not applied to agent frontmatter until routing is enabled. The TUI shows dormant GPT assignments with a dim annotation (`gpt-5.5 saved`). Enabling routing re-applies the mapping; disabling routing reverts frontmatter to Claude defaults while preserving your mapping.
 
 ## Uninstall
 
