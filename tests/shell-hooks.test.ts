@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1740,6 +1740,22 @@ describe('ensure-proxy behavioral tests', () => {
     writeProxyJson({ enabled: true, port: 49187, binPath: null });
     const { stdout } = runHook(PROXY_HOOK, PROMPT_INPUT, homeDir);
     expect(stdout).toBe('');
+  });
+
+  // ── First-run: no proxy.log yet → no stderr ──────────────────────────────────
+
+  it('emits no stderr on first run when proxy.log does not exist', () => {
+    // Use spawnSync so we can capture stderr even when the hook exits 0.
+    // execSync does not expose stderr for successful invocations.
+    writeProxyJson({ enabled: true, port: 49189, binPath: null });
+    // Intentionally do NOT create $DEVFLOW_DIR/logs/proxy.log
+    const result = spawnSync('bash', [PROXY_HOOK], {
+      input: JSON.stringify(SESSION_INPUT),
+      env: { ...process.env, HOME: homeDir },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
   });
 
   // ── Warning strings must not contain "subswitch" ──────────────────────────────

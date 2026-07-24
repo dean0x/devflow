@@ -79,10 +79,15 @@ mkdir -p "$LOG_DIR" 2>/dev/null || true
 LOG_FILE="$LOG_DIR/proxy.log"
 
 # 2MB tail-guard (matches hook-log-init pattern)
-_LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) || \
-_LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) || \
-_LOG_SIZE=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ') || \
+# Existence guard is required: the wc -c fallback uses a shell redirect whose
+# failure is emitted by bash itself (before wc starts), bypassing 2>/dev/null.
 _LOG_SIZE=0
+if [ -f "$LOG_FILE" ]; then
+  _LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) || \
+  _LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) || \
+  _LOG_SIZE=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ') || \
+  _LOG_SIZE=0
+fi
 _LOG_SIZE="${_LOG_SIZE:-0}"
 if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt 2097152 ]; then
   _LTMP="$LOG_FILE.tmp.$$"
