@@ -469,10 +469,263 @@ async function realSpawnDoctor(
           resolve(code ?? 1);
         }
       });
+      // REL-1: OS-level spawn failure (EMFILE, ENOMEM, EAGAIN) must be handled — an
+      // unhandled 'error' event becomes an uncaught exception. Resolve(1) so the
+      // finally block closes logFd and callers get a clean failure path.
+      proc.on('error', () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(1);
+        }
+      });
     });
   } finally {
     await logFd.close();
   }
+}
+
+// ─── ARCH-1: Production preflight deps factory (replaces inline copies) ──────
+
+/**
+ * Options for buildRealPreflightDeps.
+ * Captures the deliberate caller-specific difference in readSettingsJson behaviour.
+ */
+export interface BuildRealPreflightDepsOptions {
+  /** Absolute path to ~/.claude/settings.json. */
+  settingsPath: string;
+  /** Called on non-fatal preflight warnings (e.g. ANTHROPIC_API_KEY present). */
+  onWarn?: (msg: string) => void;
+  /**
+   * When true, readSettingsJson swallows I/O errors and returns '{}' instead of
+   * throwing. Set to true for init.ts (which writes settings.json itself and should
+   * tolerate an absent file); leave false (default) for runEnable where a read error
+   * is surfaced to the user.
+   */
+  swallowSettingsReadError?: boolean;
+}
+
+/**
+ * Build the real (production) ProxyPreflightDeps from the given options.
+ * Centralises the three private implementations so both runEnable and init.ts
+ * can consume them without byte-identical inline copies.
+ *
+ * applies ADR-013: pure configuration factory; I/O implementations factored once.
+ */
+export function buildRealPreflightDeps(opts: BuildRealPreflightDepsOptions): ProxyPreflightDeps {
+  const { settingsPath, onWarn, swallowSettingsReadError = false } = opts;
+  return {
+    resolveProxyBin,
+    fileExists: async (filePath: string) => {
+      try { await fs.access(filePath); return true; } catch { return false; }
+    },
+    tcpConnectable: realTcpConnectable,
+    httpGet: realHttpGet,
+    readSettingsJson: swallowSettingsReadError
+      ? async () => { try { return await fs.readFile(settingsPath, 'utf-8'); } catch { return '{}'; } }
+      : () => fs.readFile(settingsPath, 'utf-8'),
+    spawnDoctor: realSpawnDoctor,
+    onWarn,
+  };
+}
+
+// ─── CPLX-2 + TEST-3: Injectable spawn-and-wait helper ───────────────────────
+
+/**
+ * Injectable dependencies for spawnRelayAndWaitForPort.
+ * All I/O is behind this interface so every relay spawn path is unit-testable.
+ */
+export interface SpawnAndWaitDeps {
+  /** Open logPath for appending. Returns fd + close function. */
+  openLog: (logPath: string) => Promise<{ fd: number; close: () => Promise<void> }>;
+  /**
+   * Spawn the relay process as a detached background process.
+   * The implementation MUST attach `onError` via `proc.on('error', onError)` before
+   * returning — this is the REL-1 invariant. Returns the spawned process pid.
+   */
+  spawnProcess: (opts: {
+    execPath: string;
+    args: string[];
+    env: Record<string, string>;
+    stdioFd: number;
+    /** Called on OS-level spawn failure (EMFILE, ENOMEM, EAGAIN). */
+    onError: (err: Error) => void;
+  }) => { pid?: number };
+  /** Write pid to file. Failures are non-fatal (caller treats as best-effort). */
+  writePid: (pidPath: string, pid: number) => Promise<void>;
+  /** Sleep ms milliseconds. */
+  sleep: (ms: number) => Promise<void>;
+  /**
+   * Check if a process is alive via signal 0. Returns false when dead.
+   * Production: wraps process.kill(pid, 0); never throws.
+   */
+  isProcessAlive: (pid: number) => boolean;
+  /** Attempt a TCP connect to 127.0.0.1:port. True = accepted. */
+  tcpConnectable: (port: number, timeoutMs: number) => Promise<boolean>;
+}
+
+/** Result type for spawnRelayAndWaitForPort. */
+export type SpawnRelayResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Spawn the relay (unless adopted) and wait up to 50×100ms for TCP accept.
+ *
+ * When `adopted` is true, the relay is already running — skip spawn entirely.
+ *
+ * Returns `{ ok: true }` when the port accepts connections.
+ * Returns `{ ok: false }` when:
+ *   - relay never accepted after 50 probes (caller should rollback proxy.json)
+ *   - relay process died before the port came up
+ *   - OS-level spawn error (EMFILE, ENOMEM, EAGAIN) — REL-1 guarantee: always
+ *     handled via the injected onError callback, never an uncaught exception
+ *
+ * avoids PF-014: no process.exit() — returns Result; caller decides error handling.
+ */
+export async function spawnRelayAndWaitForPort(
+  port: number,
+  binPath: string,
+  configPath: string,
+  logPath: string,
+  pidPath: string,
+  adopted: boolean,
+  deps: SpawnAndWaitDeps,
+): Promise<SpawnRelayResult> {
+  if (adopted) {
+    // Port already hosting our relay — skip spawn entirely, proceed to settings pass.
+    return { ok: true };
+  }
+
+  const logHandle = await deps.openLog(logPath);
+
+  let spawnError: Error | undefined;
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    SUBSWITCH_CONFIG: configPath,
+  };
+
+  const { pid } = deps.spawnProcess({
+    execPath: process.execPath,
+    args: [binPath, 'serve'],
+    env,
+    stdioFd: logHandle.fd,
+    // REL-1: captured here; breaks the wait loop on the next iteration
+    onError: (err) => { spawnError = err; },
+  });
+  // Parent closes its copy; the spawned child retains the fd through the OS
+  await logHandle.close();
+
+  if (pid !== undefined) {
+    // Non-fatal: best-effort pid record for devflow proxy --status
+    await deps.writePid(pidPath, pid);
+  }
+
+  // Bounded wait: ≤50×100ms (5s max) for TCP accept
+  let portUp = false;
+  for (let i = 0; i < 50; i++) {
+    await deps.sleep(100);
+
+    if (spawnError !== undefined) {
+      // OS-level error fired — no point waiting; relay will never start
+      break;
+    }
+
+    if (pid !== undefined && !deps.isProcessAlive(pid)) {
+      // Process died before port came up — check for EADDRINUSE race
+      // (another session may have started and already owns the port)
+      if (await deps.tcpConnectable(port, 500)) {
+        portUp = true;
+      }
+      break;
+    }
+
+    if (await deps.tcpConnectable(port, 500)) {
+      portUp = true;
+      break;
+    }
+  }
+
+  if (!portUp) {
+    return { ok: false, reason: 'relay-not-started' };
+  }
+  return { ok: true };
+}
+
+/** Build the real (production) SpawnAndWaitDeps. Not exported — internal to runEnable. */
+function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
+  return {
+    openLog: async (logPath) => {
+      const handle = await fs.open(logPath, 'a');
+      return { fd: handle.fd, close: () => handle.close() };
+    },
+    spawnProcess: ({ execPath, args, env, stdioFd, onError }) => {
+      const proc = cpSpawn(execPath, args, {
+        detached: true,
+        stdio: ['ignore', stdioFd, stdioFd],
+        env,
+      });
+      // REL-1: attach error handler before unref so OS-level failures are caught
+      proc.on('error', onError);
+      proc.unref();
+      return { pid: proc.pid };
+    },
+    writePid: async (pidPath, pid) => {
+      // Non-fatal: failure is inconvenient (--status loses pid) but not blocking
+      try { await fs.writeFile(pidPath, String(pid), 'utf-8'); } catch { /* non-fatal */ }
+    },
+    sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+    isProcessAlive: (pid) => {
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    },
+    tcpConnectable: realTcpConnectable,
+  };
+}
+
+// ─── CPLX-2: Extracted atomic settings mutation ───────────────────────────────
+
+/**
+ * Perform the single atomic settings.json pass for enable:
+ * strip old hooks + env, then apply new hooks + env in one write.
+ *
+ * REL-2: the writeFileAtomicExclusive call is guarded — ENOSPC/EACCES returns Err
+ * instead of crashing with an unhandled rejection.
+ *
+ * Returns Ok(undefined) on success, Err(reason) on hard failure.
+ */
+async function applyEnableSettingsPass(
+  settingsPath: string,
+  devflowDir: string,
+  port: number,
+): Promise<Result<undefined, string>> {
+  let settingsContent: string;
+  try {
+    settingsContent = await fs.readFile(settingsPath, 'utf-8');
+  } catch {
+    // Missing settings.json is fine — start from an empty object
+    settingsContent = '{}';
+  }
+
+  let parsedSettings: Settings;
+  try {
+    parsedSettings = JSON.parse(settingsContent) as Settings;
+  } catch {
+    return Err('settings.json is malformed — fix it before enabling the proxy');
+  }
+
+  // Atomic 4-call settings mutation: strip stale entries, then apply fresh ones
+  removeProxyHooks(parsedSettings);
+  _stripProxyEnvFromObject(parsedSettings);
+  addProxyHooks(parsedSettings, devflowDir);
+  _applyProxyEnvToObject(parsedSettings, port);
+
+  try {
+    await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
+  } catch (err) {
+    return Err(
+      `Could not write settings.json: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return Ok(undefined);
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -689,25 +942,31 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const s = p.spinner();
   s.start('Running preflight checks...');
 
-  // Step 2: Write routing config
+  // Step 2: Write routing config — REL-2: guard ENOSPC/EACCES
   await fs.mkdir(devflowDir, { recursive: true });
   await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
-  await fs.writeFile(configPath, buildRoutingConfigJson(port, externalModelIds()), 'utf-8');
+  try {
+    await fs.writeFile(configPath, buildRoutingConfigJson(port, externalModelIds()), 'utf-8');
+  } catch (err) {
+    s.stop(color.red('Failed to write routing config'));
+    p.log.error(`Could not write routing config: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+    return;
+  }
 
-  // Step 3: runProxyPreflight
-  const realDeps: ProxyPreflightDeps = {
-    resolveProxyBin,
-    fileExists: async (p) => {
-      try { await fs.access(p); return true; } catch { return false; }
-    },
-    tcpConnectable: realTcpConnectable,
-    httpGet: realHttpGet,
-    readSettingsJson: () => fs.readFile(settingsPath, 'utf-8'),
-    spawnDoctor: realSpawnDoctor,
-    onWarn: (msg) => { s.stop(''); p.log.warn(msg); s.start(''); },
-  };
-
-  const preflightResult = await runProxyPreflight(port, codexAuthPath, configPath, logPath, realDeps);
+  // Step 3: runProxyPreflight — ARCH-1: use shared factory instead of inline deps copy
+  const preflightResult = await runProxyPreflight(
+    port,
+    codexAuthPath,
+    configPath,
+    logPath,
+    buildRealPreflightDeps({
+      settingsPath,
+      // runEnable propagates settings read errors (init.ts swallows — see swallowSettingsReadError)
+      swallowSettingsReadError: false,
+      onWarn: (msg) => { s.stop(''); p.log.warn(msg); s.start(''); },
+    }),
+  );
   if (!preflightResult.ok) {
     s.stop(color.red('Preflight failed'));
     p.log.error(preflightResult.error);
@@ -730,89 +989,61 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   if (!writeStateResult.ok) {
     s.stop(color.red('Failed to write proxy state'));
     p.log.error(writeStateResult.error);
+    process.exitCode = 1;
     return;
   }
 
-  // Step 5: Spawn relay (unless already adopted)
+  // Step 5: Spawn relay and wait for port — CPLX-2: extracted; REL-1 handled inside spawnProcess
   if (!adopted) {
     s.message('Starting relay...');
-
-    const logFd = await fs.open(logPath, 'a');
-    const proc = cpSpawn(process.execPath, [binPath, 'serve'], {
-      detached: true,
-      stdio: ['ignore', logFd.fd, logFd.fd],
-      env: { ...process.env as Record<string, string>, SUBSWITCH_CONFIG: configPath },
+  }
+  const spawnResult = await spawnRelayAndWaitForPort(
+    port,
+    binPath,
+    configPath,
+    logPath,
+    pidPath,
+    adopted,
+    buildRealSpawnAndWaitDeps(),
+  );
+  if (!spawnResult.ok) {
+    // Rollback: write proxy.json enabled:false, keep port/binPath for next attempt
+    const rollback = buildProxyState({
+      enabled: false,
+      port,
+      binPath,
+      configPath,
+      models: externalModelIds(),
+      devflowVersion: getDevflowVersion(),
     });
-    proc.unref();
-    await logFd.close(); // Parent closes; child retains its copy of the fd
-
-    if (proc.pid) {
-      await fs.writeFile(pidPath, String(proc.pid), 'utf-8');
-    }
-
-    // Bounded wait: ≤50×100ms for TCP accept
-    let portUp = false;
-    for (let i = 0; i < 50; i++) {
-      await new Promise<void>((r) => setTimeout(r, 100));
-      // Check if relay process is still alive
-      if (proc.pid) {
-        try {
-          process.kill(proc.pid, 0);
-        } catch (err) {
-          // Process died — check EADDRINUSE race (another session may own the port)
-          if (await realTcpConnectable(port, 500)) {
-            portUp = true;
-          }
-          break;
-        }
-      }
-      if (await realTcpConnectable(port, 500)) {
-        portUp = true;
-        break;
-      }
-    }
-
-    if (!portUp) {
-      // Rollback: write proxy.json enabled:false, keep port/binPath for next attempt
-      const rollback = buildProxyState({
-        enabled: false,
-        port,
-        binPath,
-        configPath,
-        models: externalModelIds(),
-        devflowVersion: getDevflowVersion(),
-      });
-      await writeProxyState(devflowDir, rollback);
-      s.stop(color.red('Relay failed to start'));
-      p.log.error(`Proxy failed to start — check ${logPath}`);
-      return;
-    }
+    // Best-effort rollback — a write failure here is secondary to the spawn failure
+    await writeProxyState(devflowDir, rollback);
+    s.stop(color.red('Relay failed to start'));
+    p.log.error(`Proxy failed to start — check ${logPath}`);
+    process.exitCode = 1;
+    return;
   }
 
   s.message('Updating settings...');
 
-  // Step 6: Single atomic settings.json pass
-  let settingsContent: string;
-  try {
-    settingsContent = await fs.readFile(settingsPath, 'utf-8');
-  } catch {
-    settingsContent = '{}';
-  }
-
-  let parsedSettings: Settings;
-  try {
-    parsedSettings = JSON.parse(settingsContent) as Settings;
-  } catch {
+  // Step 6: Atomic settings mutation — CPLX-2: extracted; REL-2: write guarded
+  const settingsResult = await applyEnableSettingsPass(settingsPath, devflowDir, port);
+  if (!settingsResult.ok) {
+    // Roll back to disabled state — settings write failed after relay started
+    const rollback = buildProxyState({
+      enabled: false,
+      port,
+      binPath,
+      configPath,
+      models: externalModelIds(),
+      devflowVersion: getDevflowVersion(),
+    });
+    await writeProxyState(devflowDir, rollback);
     s.stop(color.red('Cannot update settings'));
-    p.log.error('settings.json is malformed — fix it before enabling the proxy');
+    p.log.error(settingsResult.error);
+    process.exitCode = 1;
     return;
   }
-
-  removeProxyHooks(parsedSettings);
-  _stripProxyEnvFromObject(parsedSettings);
-  addProxyHooks(parsedSettings, devflowDir);
-  _applyProxyEnvToObject(parsedSettings, port);
-  await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
 
   // Step 7: Sync manifest
   await syncManifestFeature(devflowDir, 'proxy', true);
@@ -871,7 +1102,16 @@ async function runDisable(): Promise<void> {
 
   const changed = applyDisableToSettings(parsedSettings);
   if (changed) {
-    await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
+    // REL-2: guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
+    try {
+      await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
+    } catch (err) {
+      p.log.error(
+        `Could not write settings.json: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
   }
 
   // Step 2: Write proxy.json enabled:false (keep port/models/binPath)
@@ -886,7 +1126,13 @@ async function runDisable(): Promise<void> {
     models: priorState?.models ?? [],
     devflowVersion: getDevflowVersion(),
   });
-  await writeProxyState(devflowDir, disabledState);
+  // REL-2: guard proxy state write
+  const writeDisabledResult = await writeProxyState(devflowDir, disabledState);
+  if (!writeDisabledResult.ok) {
+    p.log.error(`Could not write proxy state: ${writeDisabledResult.error}`);
+    process.exitCode = 1;
+    return;
+  }
 
   // Step 3: Sync manifest
   await syncManifestFeature(devflowDir, 'proxy', false);

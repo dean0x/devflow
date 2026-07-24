@@ -1,10 +1,7 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execSync, spawn } from 'child_process';
-import * as net from 'net';
-import * as http from 'http';
-import * as https from 'https';
+import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
@@ -36,9 +33,9 @@ import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
-import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, type ProxyPreflightDeps } from './proxy.js';
+import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
 import { reapplyAgentMapping } from '../../core/agent-models.js';
-import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT, resolveProxyBin } from '../../core/proxy-state.js';
+import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
 import { externalModelIds } from '../../core/external-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
@@ -1254,52 +1251,21 @@ export const initCommand = new Command('init')
       }
 
       if (routingConfigWritten) {
-        // Build real dep implementations for preflight (see proxy.ts for identical patterns)
-        const preflightDeps: ProxyPreflightDeps = {
-          resolveProxyBin,
-          fileExists: async (p) => { try { await fs.access(p); return true; } catch { return false; } },
-          tcpConnectable: (port, timeoutMs) => new Promise((resolve) => {
-            const socket = net.createConnection({ host: '127.0.0.1', port, timeout: timeoutMs });
-            socket.on('connect', () => { socket.destroy(); resolve(true); });
-            socket.on('error', () => { socket.destroy(); resolve(false); });
-            socket.on('timeout', () => { socket.destroy(); resolve(false); });
-          }),
-          httpGet: (url, timeoutMs) => {
-            const mod = url.startsWith('https://') ? https : http;
-            return new Promise<{ ok: true; value: string } | { ok: false; error: string }>((resolve) => {
-              const req = mod.get(url, { timeout: timeoutMs }, (res) => {
-                let body = '';
-                res.on('data', (c: Buffer) => { body += c.toString(); });
-                res.on('end', () => { resolve({ ok: true, value: body }); });
-              });
-              req.on('error', (e) => { resolve({ ok: false, error: e.message }); });
-              req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
-            });
-          },
-          readSettingsJson: async () => { try { return await fs.readFile(settingsPath, 'utf-8'); } catch { return '{}'; } },
-          spawnDoctor: async (binPath, env, timeoutMs, logFile) => {
-            const fd = await fs.open(logFile, 'a');
-            try {
-              return await new Promise<number>((resolve) => {
-                const proc = spawn(process.execPath, [binPath, 'doctor'], {
-                  env,
-                  stdio: ['ignore', fd.fd, fd.fd],
-                });
-                let resolved = false;
-                const timer = setTimeout(() => { if (!resolved) { resolved = true; proc.kill(); resolve(1); } }, timeoutMs);
-                proc.on('close', (code) => {
-                  if (!resolved) { resolved = true; clearTimeout(timer); resolve(code ?? 1); }
-                });
-              });
-            } finally {
-              await fd.close();
-            }
-          },
-          onWarn: (msg) => p.log.warn(msg),
-        };
-
+        // ARCH-1: consume shared factory — removes 40-line inline copy that duplicated
+        // proxy.ts implementations byte-identically. Deliberate difference preserved:
+        // init.ts swallows settings.json read errors (swallowSettingsReadError: true)
+        // because init creates settings.json itself and must tolerate an absent file,
+        // while runEnable propagates read errors to the user (default false).
         const preflightResult = await runProxyPreflight(
-          DEFAULT_PROXY_PORT, codexAuthPath, configPath, logPath, preflightDeps,
+          DEFAULT_PROXY_PORT,
+          codexAuthPath,
+          configPath,
+          logPath,
+          buildRealPreflightDeps({
+            settingsPath,
+            onWarn: (msg) => p.log.warn(msg),
+            swallowSettingsReadError: true,
+          }),
         );
 
         if (!preflightResult.ok) {
