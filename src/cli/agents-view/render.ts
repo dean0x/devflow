@@ -117,9 +117,7 @@ function renderEffortCell(
   maxWidth: number,
 ): string {
   const dirty = isDirtyEffort(row);
-  const value = row.configuredEffort === 'default'
-    ? `default`
-    : row.configuredEffort;
+  const value = row.configuredEffort;
 
   let cell: string;
   if (isCursor && isActive) {

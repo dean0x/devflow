@@ -1284,8 +1284,7 @@ export const initCommand = new Command('init')
           }),
           httpGet: (url, timeoutMs) => {
             const mod = url.startsWith('https://') ? https : http;
-            type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
-            return new Promise<Result<string, string>>((resolve) => {
+            return new Promise<{ ok: true; value: string } | { ok: false; error: string }>((resolve) => {
               const req = mod.get(url, { timeout: timeoutMs }, (res) => {
                 let body = '';
                 res.on('data', (c: Buffer) => { body += c.toString(); });
@@ -1296,9 +1295,10 @@ export const initCommand = new Command('init')
             });
           },
           readSettingsJson: async () => { try { return await fs.readFile(settingsPath, 'utf-8'); } catch { return '{}'; } },
-          spawnDoctor: (binPath, env, timeoutMs, logFile) => {
-            return fs.open(logFile, 'a').then((fd) =>
-              new Promise<number>((resolve) => {
+          spawnDoctor: async (binPath, env, timeoutMs, logFile) => {
+            const fd = await fs.open(logFile, 'a');
+            try {
+              return await new Promise<number>((resolve) => {
                 const proc = spawn(process.execPath, [binPath, 'doctor'], {
                   env,
                   stdio: ['ignore', fd.fd, fd.fd],
@@ -1308,8 +1308,10 @@ export const initCommand = new Command('init')
                 proc.on('close', (code) => {
                   if (!resolved) { resolved = true; clearTimeout(timer); resolve(code ?? 1); }
                 });
-              }).finally(() => fd.close())
-            );
+              });
+            } finally {
+              await fd.close();
+            }
           },
           onWarn: (msg) => p.log.warn(msg),
         };

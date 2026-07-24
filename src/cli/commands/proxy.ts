@@ -14,11 +14,9 @@
  */
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
-import { readFileSync } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as path from 'path';
-import { dirname, join } from 'path';
 import * as net from 'net';
 import * as http from 'http';
 import * as https from 'https';
@@ -73,14 +71,14 @@ const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
 // ─── Version helper ───────────────────────────────────────────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
-let _cachedVersion: string | null | undefined = undefined;
+let _cachedVersion: string | null | undefined;
 function getDevflowVersion(): string | null {
   if (_cachedVersion !== undefined) return _cachedVersion;
   try {
     // dist/cli/commands/ → ../../.. → repo root
-    const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'package.json'), 'utf-8')) as Record<string, unknown>;
+    const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', '..', '..', 'package.json'), 'utf-8')) as Record<string, unknown>;
     _cachedVersion = typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     _cachedVersion = null;
@@ -679,7 +677,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   await fs.writeFile(configPath, buildRoutingConfigJson(port, externalModelIds()), 'utf-8');
 
   // Step 3: runProxyPreflight
-  const settingsPath2 = settingsPath; // for closure
   const realDeps: ProxyPreflightDeps = {
     resolveProxyBin,
     fileExists: async (p) => {
@@ -687,7 +684,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     },
     tcpConnectable: realTcpConnectable,
     httpGet: realHttpGet,
-    readSettingsJson: () => fs.readFile(settingsPath2, 'utf-8'),
+    readSettingsJson: () => fs.readFile(settingsPath, 'utf-8'),
     spawnDoctor: realSpawnDoctor,
     onWarn: (msg) => { s.stop(''); p.log.warn(msg); s.start(''); },
   };
