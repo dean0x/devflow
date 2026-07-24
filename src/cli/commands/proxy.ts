@@ -229,7 +229,7 @@ export function readProxyEnvState(
   return 'foreign';
 }
 
-// ─── Pure hook helpers (exported for Phase 4 reuse) ──────────────────────────
+// ─── Pure hook helpers ──────────────────────────────────────────────────────────
 
 /**
  * Add ensure-proxy hooks to BOTH SessionStart and UserPromptSubmit events.
@@ -292,7 +292,7 @@ export function hasProxyHooks(input: string | Settings): boolean {
   return check('SessionStart') || check('UserPromptSubmit');
 }
 
-// ─── Health-check identity helper (CPLX-9) ───────────────────────────────────
+// ─── Health-check identity helper ────────────────────────────────────────────
 
 /**
  * Return true when the raw health-check response body identifies our relay.
@@ -385,7 +385,7 @@ export async function runProxyPreflight(
   // ③ Port probe
   const portAccepting = await deps.tcpConnectable(port, PROBE_TIMEOUT_MS);
   if (portAccepting) {
-    // Port is up — check health identity (CPLX-9: uses shared isOurRelayBody helper)
+    // Port is up — check health identity
     const healthResult = await deps.httpGet(
       `${proxyBaseUrl(port)}/__subswitch/health`,
       PROBE_TIMEOUT_MS,
@@ -511,7 +511,7 @@ async function realSpawnDoctor(
         if (!resolved) {
           resolved = true;
           proc.kill(); // SIGTERM — ask the process to terminate gracefully
-          // REL-3: a SIGTERM-trapping child keeps the event loop alive (no unref on
+          // A SIGTERM-trapping child keeps the event loop alive (no unref on
           // proc here, since we are awaiting the promise). Schedule a SIGKILL escalation
           // after a short grace period. The escalation timer is unref()'d so it never
           // prevents the CLI from exiting on its own if the process exits first.
@@ -529,7 +529,7 @@ async function realSpawnDoctor(
           resolve(code ?? 1);
         }
       });
-      // REL-1: OS-level spawn failure (EMFILE, ENOMEM, EAGAIN) must be handled — an
+      // OS-level spawn failure (EMFILE, ENOMEM, EAGAIN) must be handled — an
       // unhandled 'error' event becomes an uncaught exception. Resolve(1) so the
       // finally block closes logFd and callers get a clean failure path.
       proc.on('error', () => {
@@ -545,7 +545,7 @@ async function realSpawnDoctor(
   }
 }
 
-// ─── ARCH-1: Production preflight deps factory (replaces inline copies) ──────
+// ─── Production preflight deps factory ───────────────────────────────────────
 
 /**
  * Options for buildRealPreflightDeps.
@@ -589,7 +589,7 @@ export function buildRealPreflightDeps(opts: BuildRealPreflightDepsOptions): Pro
   };
 }
 
-// ─── CPLX-2 + TEST-3: Injectable spawn-and-wait helper ───────────────────────
+// ─── Injectable spawn-and-wait helper ────────────────────────────────────────
 
 /**
  * Injectable dependencies for spawnRelayAndWaitForPort.
@@ -601,7 +601,7 @@ export interface SpawnAndWaitDeps {
   /**
    * Spawn the relay process as a detached background process.
    * The implementation MUST attach `onError` via `proc.on('error', onError)` before
-   * returning — this is the REL-1 invariant. Returns the spawned process pid.
+   * returning — this is a required invariant. Returns the spawned process pid.
    */
   spawnProcess: (opts: {
     execPath: string;
@@ -636,8 +636,8 @@ export type SpawnRelayResult = { ok: true } | { ok: false; reason: string };
  * Returns `{ ok: false }` when:
  *   - relay never accepted after 50 probes (caller should rollback proxy.json)
  *   - relay process died before the port came up
- *   - OS-level spawn error (EMFILE, ENOMEM, EAGAIN) — REL-1 guarantee: always
- *     handled via the injected onError callback, never an uncaught exception
+ *   - OS-level spawn error (EMFILE, ENOMEM, EAGAIN) — always handled via the
+ *     injected onError callback, never an uncaught exception
  *
  * avoids PF-014: no process.exit() — returns Result; caller decides error handling.
  */
@@ -668,7 +668,7 @@ export async function spawnRelayAndWaitForPort(
     args: [binPath, 'serve'],
     env,
     stdioFd: logHandle.fd,
-    // REL-1: captured here; breaks the wait loop on the next iteration
+    // Captured here; breaks the wait loop on the next iteration
     onError: (err) => { spawnError = err; },
   });
   // Parent closes its copy; the spawned child retains the fd through the OS
@@ -723,7 +723,7 @@ function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
         stdio: ['ignore', stdioFd, stdioFd],
         env,
       });
-      // REL-1: attach error handler before unref so OS-level failures are caught
+      // Attach error handler before unref so OS-level failures are caught
       proc.on('error', onError);
       proc.unref();
       return { pid: proc.pid };
@@ -740,13 +740,13 @@ function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
   };
 }
 
-// ─── CPLX-2: Extracted atomic settings mutation ───────────────────────────────
+// ─── Atomic settings mutation for enable ─────────────────────────────────────
 
 /**
  * Perform the single atomic settings.json pass for enable:
  * strip old hooks + env, then apply new hooks + env in one write.
  *
- * REL-2: the writeFileAtomicExclusive call is guarded — ENOSPC/EACCES returns Err
+ * The writeFileAtomicExclusive call is guarded — ENOSPC/EACCES returns Err
  * instead of crashing with an unhandled rejection.
  *
  * Returns Ok(undefined) on success, Err(reason) on hard failure.
@@ -825,7 +825,7 @@ async function resolveProcessState(
     `${proxyBaseUrl(port)}/__subswitch/health`,
     PROBE_TIMEOUT_MS,
   );
-  // CPLX-9: use shared isOurRelayBody helper (same logic as runProxyPreflight check)
+  // Uses shared isOurRelayBody helper (same logic as runProxyPreflight)
   if (healthResult.ok && isOurRelayBody(healthResult.value)) {
     return 'running-ours';
   }
@@ -884,7 +884,7 @@ function formatProcessLine(
   }
 }
 
-// ─── Port resolution (TS-1) ───────────────────────────────────────────────────
+// ─── Port resolution ──────────────────────────────────────────────────────────
 
 /**
  * Resolve the effective port for enable.
@@ -984,7 +984,7 @@ async function runStatus(): Promise<void> {
     (proxyState?.port ? ` (port ${proxyState.port})` : ''),
   );
 
-  // Process state — CPLX-3: resolveProcessState + readPidFile + formatProcessLine
+  // Process state
   const port = proxyState?.port ?? DEFAULT_PROXY_PORT;
   const processState = await resolveProcessState(featureEnabled, port);
   const pidFromFile = await readPidFile(pidPath);
@@ -1066,7 +1066,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
 
-  // Step 1: Read prior proxy.json (remembered port); --port flag overrides (TS-1 + CONS-1)
+  // Step 1: Read prior proxy.json (remembered port); --port flag overrides
   const priorStateResult = await readProxyState(devflowDir);
   const priorPort = priorStateResult.ok ? priorStateResult.value.port : DEFAULT_PROXY_PORT;
 
@@ -1081,7 +1081,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const s = p.spinner();
   s.start('Running preflight checks...');
 
-  // Step 2: Write routing config — REL-2: guard ENOSPC/EACCES
+  // Step 2: Write routing config
   await fs.mkdir(devflowDir, { recursive: true });
   await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
   try {
@@ -1093,7 +1093,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     return;
   }
 
-  // Step 3: runProxyPreflight — ARCH-1: use shared factory instead of inline deps copy
+  // Step 3: Preflight checks
   const preflightResult = await runProxyPreflight(
     port,
     codexAuthPath,
@@ -1133,7 +1133,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     return;
   }
 
-  // Step 5: Spawn relay and wait for port — CPLX-2: extracted; REL-1 handled inside spawnProcess
+  // Step 5: Spawn relay and wait for port
   if (!adopted) {
     s.message('Starting relay...');
   }
@@ -1166,7 +1166,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
 
   s.message('Updating settings...');
 
-  // Step 6: Atomic settings mutation — CPLX-2: extracted; REL-2: write guarded
+  // Step 6: Atomic settings mutation
   const settingsResult = await applyEnableSettingsPass(settingsPath, devflowDir, port);
   if (!settingsResult.ok) {
     // Roll back to disabled state — settings write failed after relay started
@@ -1251,7 +1251,7 @@ async function runDisable(): Promise<void> {
 
   const changed = applyDisableToSettings(parsedSettings, managedPort);
   if (changed) {
-    // REL-2: guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
+    // Guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
     try {
       await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
     } catch (err) {
@@ -1264,8 +1264,6 @@ async function runDisable(): Promise<void> {
   }
 
   // Step 2: Write proxy.json enabled:false (keep port/models/binPath)
-  // (priorStateResult already read above for managedPort)
-
   const disabledState = buildProxyState({
     enabled: false,
     port: priorState?.port ?? DEFAULT_PROXY_PORT,
@@ -1296,7 +1294,7 @@ async function runDisable(): Promise<void> {
   if (pidFromFile !== null) {
     try {
       process.kill(pidFromFile, 0);
-      // SEC-3: cross-check relay identity before emitting the kill hint. A stale or
+      // Cross-check relay identity before emitting the kill hint. A stale or
       // recycled PID that passes signal 0 may belong to an unrelated process. We
       // confirm identity via a port health check — the relay is ours only if the health
       // endpoint returns isOurRelayBody. Non-blocking: we never kill programmatically.

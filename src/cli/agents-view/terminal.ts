@@ -24,8 +24,6 @@ import type { AgentsViewState } from './state.js';
 /** Hard upper bound on keypress events — resolves with 'cancel' on exhaustion. */
 export const MAX_KEYPRESSES = 50_000;
 
-// FIXED_ROWS and computeViewportHeight imported from render.ts (single source of truth).
-
 // ---------------------------------------------------------------------------
 // Terminal escape sequences
 // ---------------------------------------------------------------------------

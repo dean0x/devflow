@@ -14,7 +14,7 @@ import { removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
-import { removeProxyHooks, stripProxyEnv } from './proxy.js';
+import { applyDisableToSettings } from './proxy.js';
 import { readProxyState, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
@@ -610,19 +610,16 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = stripFlags(settingsContent);
           settingsContent = stripViewMode(settingsContent);
           settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
-          // Remove proxy hooks (parse/mutate/serialize) and ANTHROPIC_BASE_URL env override.
+          // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
           // REG-1: scope the URL strip to the port Devflow manages — read proxy.json to
           // determine which port we own; a user's own localhost gateway on any other port
           // is left in settings untouched.
           {
-            const parsedSettings = JSON.parse(settingsContent) as Settings;
-            removeProxyHooks(parsedSettings);
-            settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
-          }
-          {
             const proxyStateForStrip = await readProxyState(paths.devflowDir);
             const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
-            settingsContent = stripProxyEnv(settingsContent, managedPort);
+            const parsedSettings = JSON.parse(settingsContent) as Settings;
+            applyDisableToSettings(parsedSettings, managedPort);
+            settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
           }
 
           if (settingsContent !== originalContent) {

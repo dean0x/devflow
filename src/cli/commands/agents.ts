@@ -40,10 +40,10 @@ import {
 } from '../../targets/claude-code/claude-paths.js';
 import {
   buildRow,
+  computeViewportHeight,
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
-import { computeViewportHeight } from '../agents-view/render.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern)

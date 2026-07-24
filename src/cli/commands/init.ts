@@ -1251,11 +1251,9 @@ export const initCommand = new Command('init')
       }
 
       if (routingConfigWritten) {
-        // ARCH-1: consume shared factory — removes 40-line inline copy that duplicated
-        // proxy.ts implementations byte-identically. Deliberate difference preserved:
-        // init.ts swallows settings.json read errors (swallowSettingsReadError: true)
-        // because init creates settings.json itself and must tolerate an absent file,
-        // while runEnable propagates read errors to the user (default false).
+        // Deliberate difference from runEnable: init swallows settings.json read errors
+        // (swallowSettingsReadError: true) because init creates settings.json itself
+        // and must tolerate an absent file; runEnable propagates read errors to the user.
         const preflightResult = await runProxyPreflight(
           DEFAULT_PROXY_PORT,
           codexAuthPath,
@@ -1312,10 +1310,10 @@ export const initCommand = new Command('init')
     // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
     // in agent frontmatter after a preflight failure. Per-item failures are non-fatal (avoids PF-009).
     //
-    // PERF-3 guard (INIT CALL SITE ONLY): skip reapply when mapping is empty AND proxy is off.
-    // An empty mapping means every agent uses its shipped default; the file copy already wrote
-    // those defaults, so reapply would read ~34 files and write zero.  The disable/revert paths
-    // call reapplyAgentMapping directly (not through this guard) and always need the full walk.
+    // Init-only optimization: skip reapply when mapping is empty AND proxy is off.
+    // An empty mapping means every agent uses its shipped default; the file copy already
+    // wrote those defaults, so reapply would read ~34 files and write zero. The
+    // disable/revert paths call reapplyAgentMapping directly and always need the full walk.
     {
       const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
       const preCheckMapping = await readAgentMapping(devflowDir);

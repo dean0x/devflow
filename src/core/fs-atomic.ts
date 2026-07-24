@@ -45,7 +45,7 @@ export async function writeFileAtomicExclusive(filePath: string, data: string): 
     await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
   }
 
-  // Preserve the target's permission mode across the atomic replace (SEC-1).
+  // Preserve the target's permission mode across the atomic replace.
   // A user who hardened the target (e.g. settings.json → 0600 to protect
   // ANTHROPIC_API_KEY) must not have it silently widened to umask default
   // (~0644) on every proxy enable/disable or post-install rewrite.
