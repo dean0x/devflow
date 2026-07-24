@@ -17,6 +17,7 @@ import {
   hasProxyHooks,
   applyDisableToSettings,
   runProxyPreflight,
+  resolvePort,
   type ProxyPreflightDeps,
 } from '../src/cli/commands/proxy.js';
 import type { Settings } from '../src/targets/claude-code/hooks.js';
@@ -598,5 +599,64 @@ describe('runProxyPreflight', () => {
     });
     await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(spawnDoctor).not.toHaveBeenCalled();
+  });
+});
+
+// ─── resolvePort ─────────────────────────────────────────────────────────────
+//
+// TS-1 regression: commander had `.option('--port <n>', ..., String(DEFAULT_PROXY_PORT))`
+// which made options.port always the string '4141' — never undefined. The remembered-port
+// fallback inside runEnable was dead code: a user who enabled on port 5000, disabled, then
+// re-enabled without --port would silently revert to 4141 (spawning a second relay, leaking
+// the old one on 5000).
+//
+// Fix: drop the commander default so omission is detectable as undefined; resolvePort treats
+// undefined as "use prior port".
+
+describe('resolvePort', () => {
+  it('prior port 5000 + no --port → uses remembered port 5000 (TS-1 regression)', () => {
+    const result = resolvePort(undefined, 5000);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(5000);
+  });
+
+  it('explicit --port 8080 overrides prior port', () => {
+    const result = resolvePort('8080', 5000);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(8080);
+  });
+
+  it('returns prior port when portOption is undefined regardless of prior value', () => {
+    const result = resolvePort(undefined, 4141);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(4141);
+  });
+
+  it('returns Err for non-numeric --port (NaN)', () => {
+    const result = resolvePort('not-a-port', 4141);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('Invalid port');
+  });
+
+  it('returns Err for port 0 (out of range)', () => {
+    const result = resolvePort('0', 4141);
+    expect(result.ok).toBe(false);
+  });
+
+  it('returns Err for port 65536 (out of range)', () => {
+    const result = resolvePort('65536', 4141);
+    expect(result.ok).toBe(false);
+  });
+
+  it('returns Ok for port 1 (min valid)', () => {
+    const result = resolvePort('1', 4141);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+  });
+
+  it('returns Ok for port 65535 (max valid)', () => {
+    const result = resolvePort('65535', 4141);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(65535);
   });
 });

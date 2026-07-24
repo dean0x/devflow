@@ -68,6 +68,23 @@ const PROXY_HOOK_MARKER = 'ensure-proxy';
 /** Pattern matching our relay's ANTHROPIC_BASE_URL value. */
 const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
 
+/** Timeout for individual TCP connect probes and HTTP health checks (ms). */
+const PROBE_TIMEOUT_MS = 2000;
+/** Timeout for the relay doctor subprocess (ms). */
+const DOCTOR_TIMEOUT_MS = 10_000;
+/**
+ * Maximum number of relay port probes during the CLI spawn wait (5s at 100ms each).
+ *
+ * Note: the ensure-proxy hook uses a larger budget (80×0.1s = 8s) — intentional;
+ * the hook tolerates slower startup from a cold relay. A later batch documents
+ * the CLI-5s vs hook-8s difference fully.
+ */
+const RELAY_SPAWN_MAX_PROBES = 50;
+/** Interval between relay port probes during the CLI spawn wait (ms). */
+const RELAY_SPAWN_PROBE_INTERVAL_MS = 100;
+/** TCP connect timeout for each relay port probe during the CLI spawn wait (ms). */
+const RELAY_SPAWN_PER_PROBE_TIMEOUT_MS = 500;
+
 // ─── Version helper ───────────────────────────────────────────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
@@ -323,12 +340,12 @@ export async function runProxyPreflight(
   }
 
   // ③ Port probe
-  const portAccepting = await deps.tcpConnectable(port, 2000);
+  const portAccepting = await deps.tcpConnectable(port, PROBE_TIMEOUT_MS);
   if (portAccepting) {
     // Port is up — check health identity
     const healthResult = await deps.httpGet(
       `${proxyBaseUrl(port)}/__subswitch/health`,
-      2000,
+      PROBE_TIMEOUT_MS,
     );
     if (healthResult.ok) {
       try {
@@ -388,7 +405,7 @@ export async function runProxyPreflight(
     ...(process.env as Record<string, string>),
     SUBSWITCH_CONFIG: configPath,
   };
-  const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, 10_000, logPath);
+  const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, DOCTOR_TIMEOUT_MS, logPath);
   if (doctorExit !== 0) {
     return Err(`routing preflight failed — see ${logPath}`);
   }
@@ -619,10 +636,10 @@ export async function spawnRelayAndWaitForPort(
     await deps.writePid(pidPath, pid);
   }
 
-  // Bounded wait: ≤50×100ms (5s max) for TCP accept
+  // Bounded wait: ≤RELAY_SPAWN_MAX_PROBES×100ms (5s max) for TCP accept
   let portUp = false;
-  for (let i = 0; i < 50; i++) {
-    await deps.sleep(100);
+  for (let i = 0; i < RELAY_SPAWN_MAX_PROBES; i++) {
+    await deps.sleep(RELAY_SPAWN_PROBE_INTERVAL_MS);
 
     if (spawnError !== undefined) {
       // OS-level error fired — no point waiting; relay will never start
@@ -632,13 +649,13 @@ export async function spawnRelayAndWaitForPort(
     if (pid !== undefined && !deps.isProcessAlive(pid)) {
       // Process died before port came up — check for EADDRINUSE race
       // (another session may have started and already owns the port)
-      if (await deps.tcpConnectable(port, 500)) {
+      if (await deps.tcpConnectable(port, RELAY_SPAWN_PER_PROBE_TIMEOUT_MS)) {
         portUp = true;
       }
       break;
     }
 
-    if (await deps.tcpConnectable(port, 500)) {
+    if (await deps.tcpConnectable(port, RELAY_SPAWN_PER_PROBE_TIMEOUT_MS)) {
       portUp = true;
       break;
     }
@@ -728,6 +745,131 @@ async function applyEnableSettingsPass(
   return Ok(undefined);
 }
 
+// ─── Shared status/disable helpers ───────────────────────────────────────────
+
+/** Relay process state as observed by TCP probe + health check. */
+type ProcessState = 'down' | 'running-ours' | 'port-squatted';
+
+/**
+ * Read and parse the relay PID file. Returns null on ENOENT, parse failure, or
+ * invalid value — callers treat null as "no pid available".
+ */
+async function readPidFile(pidPath: string): Promise<number | null> {
+  try {
+    const pidStr = await fs.readFile(pidPath, 'utf-8');
+    const pid = parseInt(pidStr.trim(), 10);
+    return !isNaN(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Probe relay process state via TCP connect + health identity check.
+ * Returns 'down' when featureEnabled is false or the port is not accepting.
+ */
+async function resolveProcessState(
+  featureEnabled: boolean,
+  port: number,
+): Promise<ProcessState> {
+  if (!featureEnabled) return 'down';
+  const portUp = await realTcpConnectable(port, PROBE_TIMEOUT_MS);
+  if (!portUp) return 'down';
+  const healthResult = await realHttpGet(
+    `${proxyBaseUrl(port)}/__subswitch/health`,
+    PROBE_TIMEOUT_MS,
+  );
+  if (healthResult.ok) {
+    try {
+      const body = JSON.parse(healthResult.value) as Record<string, unknown>;
+      // Internal check: 'subswitch' is the internal package name — fine in code, not in output
+      return body['name'] === 'subswitch' ? 'running-ours' : 'port-squatted';
+    } catch {
+      return 'port-squatted';
+    }
+  }
+  // Port accepting but health unreachable — may not be our relay
+  return 'port-squatted';
+}
+
+/**
+ * Pure: compute the process log line from resolved state.
+ * Returns null when no line should be emitted (dead pid + non-down processState).
+ */
+function formatProcessLine(
+  processState: ProcessState,
+  pidAlive: boolean,
+  pidFromFile: number | null,
+  port: number,
+): { level: 'info' | 'warn'; msg: string } | null {
+  if (pidFromFile !== null) {
+    if (pidAlive) {
+      if (processState === 'running-ours') {
+        return {
+          level: 'info',
+          msg: `Process: ${color.green('running')} (pid ${pidFromFile}) — stop manually with: kill ${pidFromFile}`,
+        };
+      } else if (processState === 'port-squatted') {
+        return {
+          level: 'warn',
+          msg: `Process: ${color.yellow('port squatted by another app')} (pid ${pidFromFile} alive but port ${port} is not our relay)`,
+        };
+      } else {
+        return {
+          level: 'info',
+          msg: `Process: ${color.yellow('pid alive but port not responding')} (pid ${pidFromFile})`,
+        };
+      }
+    }
+    // Pid dead
+    if (processState === 'down') {
+      return {
+        level: 'info',
+        msg: `Process: ${color.dim('down')} (last pid ${pidFromFile}, no longer running)`,
+      };
+    }
+    return null; // pid dead but port squatted/running — unusual, no line
+  }
+  // No pid file
+  if (processState === 'running-ours') {
+    return { level: 'info', msg: `Process: ${color.green('running')} (no pid file)` };
+  } else if (processState === 'port-squatted') {
+    return {
+      level: 'warn',
+      msg: `Process: ${color.yellow('port squatted')} — port ${port} is in use by another application`,
+    };
+  } else {
+    return { level: 'info', msg: `Process: ${color.dim('down')}` };
+  }
+}
+
+// ─── Port resolution (TS-1) ───────────────────────────────────────────────────
+
+/**
+ * Resolve the effective port for enable.
+ *
+ * When portOption is undefined (--port flag not provided by the user), falls back to
+ * priorPort from proxy.json. This is the remembered-port path: a user who enabled on
+ * port 5000, disabled, then re-enables without --port correctly reuses 5000.
+ *
+ * Previously the commander option carried a String(DEFAULT_PROXY_PORT) default so
+ * portOption was never undefined — the fallback was dead code (TS-1 regression).
+ *
+ * @param portOption  Commander --port value; undefined when flag not provided
+ * @param priorPort   Last-used port from proxy.json (or DEFAULT_PROXY_PORT)
+ */
+export function resolvePort(
+  portOption: string | undefined,
+  priorPort: number,
+): Result<number, string> {
+  if (portOption === undefined) return Ok(priorPort);
+  const parsed = parseInt(portOption, 10);
+  if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    return Err(`Invalid port: ${portOption}`);
+  }
+  return Ok(parsed);
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 interface ProxyOptions {
@@ -742,7 +884,7 @@ export const proxyCommand = new Command('proxy')
   .option('--enable', 'Enable external model routing via the Devflow proxy')
   .option('--disable', 'Disable external model routing')
   .option('--status', 'Show proxy status')
-  .option('--port <n>', 'Port for the local relay (default: 4141)', String(DEFAULT_PROXY_PORT))
+  .option('--port <n>', 'Port for the local relay (default: remembered or 4141)')
   .action(async (options: ProxyOptions) => {
     // No flag → show status
     const hasFlag = options.enable || options.disable || options.status;
@@ -801,62 +943,20 @@ async function runStatus(): Promise<void> {
     (proxyState?.port ? ` (port ${proxyState.port})` : ''),
   );
 
-  // Process state
+  // Process state — CPLX-3: resolveProcessState + readPidFile + formatProcessLine
   const port = proxyState?.port ?? DEFAULT_PROXY_PORT;
-  let processState: 'down' | 'running-ours' | 'port-squatted' = 'down';
-  let pidFromFile: number | null = null;
-
-  try {
-    const pidStr = await fs.readFile(pidPath, 'utf-8');
-    const pid = parseInt(pidStr.trim(), 10);
-    if (!isNaN(pid) && pid > 0) pidFromFile = pid;
-  } catch { /* no pid file */ }
-
-  if (featureEnabled) {
-    const portUp = await realTcpConnectable(port, 2000);
-    if (portUp) {
-      const healthResult = await realHttpGet(`${proxyBaseUrl(port)}/__subswitch/health`, 2000);
-      if (healthResult.ok) {
-        try {
-          const body = JSON.parse(healthResult.value) as Record<string, unknown>;
-          processState = body['name'] === 'subswitch' ? 'running-ours' : 'port-squatted';
-        } catch {
-          processState = 'port-squatted';
-        }
-      } else {
-        // Port accepting but health unreachable — may not be our relay
-        processState = 'port-squatted';
-      }
-    }
+  const processState = await resolveProcessState(featureEnabled, port);
+  const pidFromFile = await readPidFile(pidPath);
+  let pidAlive = false;
+  if (pidFromFile !== null) {
+    try { process.kill(pidFromFile, 0); pidAlive = true; } catch { /* dead */ }
   }
-
-  // PID cross-check
-  if (pidFromFile) {
-    try {
-      process.kill(pidFromFile, 0);
-      // Process alive
-      if (processState === 'running-ours') {
-        p.log.info(
-          `Process: ${color.green('running')} (pid ${pidFromFile}) — stop manually with: kill ${pidFromFile}`,
-        );
-      } else if (processState === 'port-squatted') {
-        p.log.warn(`Process: ${color.yellow('port squatted by another app')} (pid ${pidFromFile} alive but port ${port} is not our relay)`);
-      } else {
-        p.log.info(`Process: ${color.yellow('pid alive but port not responding')} (pid ${pidFromFile})`);
-      }
-    } catch {
-      // Process dead
-      if (processState === 'down') {
-        p.log.info(`Process: ${color.dim('down')} (last pid ${pidFromFile}, no longer running)`);
-      }
-    }
-  } else {
-    if (processState === 'running-ours') {
-      p.log.info(`Process: ${color.green('running')} (no pid file)`);
-    } else if (processState === 'port-squatted') {
-      p.log.warn(`Process: ${color.yellow('port squatted')} — port ${port} is in use by another application`);
+  const processLine = formatProcessLine(processState, pidAlive, pidFromFile, port);
+  if (processLine !== null) {
+    if (processLine.level === 'warn') {
+      p.log.warn(processLine.msg);
     } else {
-      p.log.info(`Process: ${color.dim('down')}`);
+      p.log.info(processLine.msg);
     }
   }
 
@@ -925,19 +1025,17 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
 
-  // Step 1: Read prior proxy.json (remembered port); --port flag overrides
+  // Step 1: Read prior proxy.json (remembered port); --port flag overrides (TS-1 + CONS-1)
   const priorStateResult = await readProxyState(devflowDir);
   const priorPort = priorStateResult.ok ? priorStateResult.value.port : DEFAULT_PROXY_PORT;
 
-  let port: number = priorPort;
-  if (portOption !== undefined) {
-    const parsed = parseInt(portOption, 10);
-    if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
-      p.log.error(`Invalid port: ${portOption}`);
-      return;
-    }
-    port = parsed;
+  const portResult = resolvePort(portOption, priorPort);
+  if (!portResult.ok) {
+    p.log.error(portResult.error);
+    process.exitCode = 1;
+    return;
   }
+  const port = portResult.value;
 
   const s = p.spinner();
   s.start('Running preflight checks...');
@@ -970,6 +1068,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   if (!preflightResult.ok) {
     s.stop(color.red('Preflight failed'));
     p.log.error(preflightResult.error);
+    process.exitCode = 1;
     return;
   }
   const { binPath, npxWarning, adopted } = preflightResult.value;
@@ -1097,6 +1196,7 @@ async function runDisable(): Promise<void> {
     parsedSettings = JSON.parse(settingsContent) as Settings;
   } catch {
     p.log.error('settings.json is malformed — fix it before disabling the proxy');
+    process.exitCode = 1;
     return;
   }
 
@@ -1143,14 +1243,9 @@ async function runDisable(): Promise<void> {
   p.log.success('External model routing disabled — takes effect in new Claude Code sessions');
 
   // Step 5: Note about running relay (plan D3: leave it running for live sessions)
-  let pidFromFile: number | null = null;
-  try {
-    const pidStr = await fs.readFile(pidPath, 'utf-8');
-    const pid = parseInt(pidStr.trim(), 10);
-    if (!isNaN(pid) && pid > 0) pidFromFile = pid;
-  } catch { /* no pid file */ }
-
-  if (pidFromFile) {
+  // CPLX-7: readPidFile replaces the inline read/parse/validate idiom
+  const pidFromFile = await readPidFile(pidPath);
+  if (pidFromFile !== null) {
     try {
       process.kill(pidFromFile, 0);
       p.log.info(
