@@ -507,7 +507,6 @@ async function runStatus(): Promise<void> {
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
   const codexAuthPath = path.join(home, '.codex', 'auth.json');
-  const installDir = path.join(claudeDir, 'agents', 'devflow');
 
   p.intro(color.bgBlue(color.white(' Devflow Proxy Status ')));
 

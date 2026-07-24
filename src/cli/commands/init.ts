@@ -1117,24 +1117,6 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Reapply agent model mapping after fresh file copy — installViaFileCopy writes shipped
-    // defaults; this converges them back to the user's saved model/effort assignments.
-    // Per-item failures are non-fatal (avoids PF-009).
-    {
-      const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
-      const reapplyResult = await reapplyAgentMapping({
-        proxyEnabled,
-        installDir: agentInstallDir,
-        devflowDir,
-        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-      });
-      if (reapplyResult.updated.length > 0) {
-        if (verbose) {
-          p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
-        }
-      }
-    }
-
     // Clean up stale skills from previous installations
     s.message('Cleaning up');
     const skillsDir = path.join(claudeDir, 'skills');
@@ -1354,6 +1336,27 @@ export const initCommand = new Command('init')
           models: existingProxyState.value.models,
           devflowVersion: existingProxyState.value.devflowVersion,
         })).catch(() => { /* non-fatal */ });
+      }
+    }
+
+    // Reapply agent model mapping after fresh file copy — installViaFileCopy writes shipped
+    // defaults; this converges them back to the user's saved model/effort assignments.
+    // MUST run AFTER the proxy preflight block above: preflight can force proxyEnabled=false
+    // on failure, and reapply's dormancy (GPT models materialize only while proxy enabled)
+    // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
+    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal (avoids PF-009).
+    {
+      const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
+      const reapplyResult = await reapplyAgentMapping({
+        proxyEnabled,
+        installDir: agentInstallDir,
+        devflowDir,
+        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+      });
+      if (reapplyResult.updated.length > 0) {
+        if (verbose) {
+          p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
+        }
       }
     }
 

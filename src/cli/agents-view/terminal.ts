@@ -156,6 +156,11 @@ export async function runAgentsTui(initialState: AgentsViewState): Promise<TuiRe
         try { stdin.setRawMode(false); } catch { /* ignore */ }
       }
 
+      // Pause stdin to release the ref'd TTY handle — mirrors the stdin.resume()
+      // at startup. Without this the resumed stdin keeps the event loop alive and
+      // the CLI (which has no forced process.exit) hangs after the TUI resolves.
+      stdin.pause();
+
       stdout.write(LEAVE_ALT + SHOW_CURSOR);
     }
 
