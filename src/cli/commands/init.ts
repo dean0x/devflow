@@ -34,7 +34,7 @@ import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
-import { reapplyAgentMapping } from '../../core/agent-models.js';
+import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.js';
 import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
 import { externalModelIds } from '../../core/external-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
@@ -1311,17 +1311,26 @@ export const initCommand = new Command('init')
     // on failure, and reapply's dormancy (GPT models materialize only while proxy enabled)
     // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
     // in agent frontmatter after a preflight failure. Per-item failures are non-fatal (avoids PF-009).
+    //
+    // PERF-3 guard (INIT CALL SITE ONLY): skip reapply when mapping is empty AND proxy is off.
+    // An empty mapping means every agent uses its shipped default; the file copy already wrote
+    // those defaults, so reapply would read ~34 files and write zero.  The disable/revert paths
+    // call reapplyAgentMapping directly (not through this guard) and always need the full walk.
     {
       const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
-      const reapplyResult = await reapplyAgentMapping({
-        proxyEnabled,
-        installDir: agentInstallDir,
-        devflowDir,
-        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-      });
-      if (reapplyResult.updated.length > 0) {
-        if (verbose) {
-          p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
+      const preCheckMapping = await readAgentMapping(devflowDir);
+      const hasMappingEntries = preCheckMapping.ok && Object.keys(preCheckMapping.value.agents).length > 0;
+      if (hasMappingEntries || proxyEnabled) {
+        const reapplyResult = await reapplyAgentMapping({
+          proxyEnabled,
+          installDir: agentInstallDir,
+          devflowDir,
+          onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+        });
+        if (reapplyResult.updated.length > 0) {
+          if (verbose) {
+            p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
+          }
         }
       }
     }
@@ -1390,8 +1399,13 @@ export const initCommand = new Command('init')
         if (proxyEnabled) addProxyHooks(parsedSettings, devflowDir);
         content = JSON.stringify(parsedSettings, null, 2) + '\n';
       }
-      // Proxy env: ANTHROPIC_BASE_URL strip-then-add (string-space, pattern-guarded)
-      content = stripProxyEnv(content);
+      // Proxy env: ANTHROPIC_BASE_URL strip-then-add, scoped to managed port.
+      // REG-1: read proxy.json to learn which port we own — only that URL is
+      // stripped.  A user's own localhost gateway on any other port is preserved.
+      // proxy.json reflects the final settled state after the preflight block above.
+      const proxyStateForStrip = await readProxyState(devflowDir);
+      const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+      content = stripProxyEnv(content, managedPort);
       if (proxyEnabled) content = applyProxyEnv(content, DEFAULT_PROXY_PORT);
 
       if (content !== original) {

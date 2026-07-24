@@ -71,63 +71,88 @@ describe('applyProxyEnv', () => {
 });
 
 // ─── stripProxyEnv ───────────────────────────────────────────────────────────
+//
+// REG-1 regression: the old implementation used OUR_BASE_URL_PATTERN which matched
+// ANY localhost port.  A user with LiteLLM on 127.0.0.1:4000 had ANTHROPIC_BASE_URL
+// silently deleted on every `devflow init`.  The fix scopes the strip to the exact
+// managed port Devflow owns (proxy.json.port or DEFAULT_PROXY_PORT).
 
 describe('stripProxyEnv', () => {
-  it('removes ANTHROPIC_BASE_URL when it matches our relay pattern', () => {
+  it('removes ANTHROPIC_BASE_URL when it matches our relay on the managed port', () => {
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: OUR_URL, OTHER: 'keep' } });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect((result.env as Record<string, string>).ANTHROPIC_BASE_URL).toBeUndefined();
     expect((result.env as Record<string, string>).OTHER).toBe('keep');
   });
 
   it('removes env object entirely when relay URL was the only key', () => {
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: OUR_URL } });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect(result.env).toBeUndefined();
   });
 
-  it('does NOT remove ANTHROPIC_BASE_URL when it points to a foreign gateway', () => {
+  it('does NOT remove ANTHROPIC_BASE_URL when it points to a foreign HTTPS gateway', () => {
     const foreignUrl = 'https://my-custom-gateway.example.com';
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: foreignUrl } });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect((result.env as Record<string, string>).ANTHROPIC_BASE_URL).toBe(foreignUrl);
   });
 
   it('does NOT remove ANTHROPIC_BASE_URL when it uses HTTPS (not our relay)', () => {
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://127.0.0.1:4141' } });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect((result.env as Record<string, string>).ANTHROPIC_BASE_URL).toBe('https://127.0.0.1:4141');
   });
 
-  it('removes relay URLs on any port matching the pattern', () => {
-    const otherPortUrl = 'http://127.0.0.1:9999';
-    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: otherPortUrl } });
-    const result = JSON.parse(stripProxyEnv(input));
+  // REG-1 regression: foreign localhost URL must survive init-path strip
+  it('REG-1: does NOT strip a localhost URL on a port Devflow does not manage', () => {
+    // User has their own LiteLLM gateway on 4000; Devflow manages 4141.
+    const litellmUrl = 'http://127.0.0.1:4000';
+    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: litellmUrl } });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT /* 4141 */));
+    // 4000 ≠ 4141 → must NOT be stripped
+    expect((result.env as Record<string, string>).ANTHROPIC_BASE_URL).toBe(litellmUrl);
+  });
+
+  // REG-1 regression: our port IS stripped when managed port matches
+  it('REG-1: strips relay URL on a non-default managed port when port matches', () => {
+    const customPortUrl = 'http://127.0.0.1:9999';
+    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: customPortUrl } });
+    const result = JSON.parse(stripProxyEnv(input, 9999 /* managedPort */));
     expect(result.env).toBeUndefined();
+  });
+
+  // REG-1 regression: ours-other-port (not managed) is left alone
+  it('REG-1: does NOT strip ours-other-port URL when managed port is different', () => {
+    // URL=5000 (old enable), managed port now 4141 → 5000 is not our current port
+    const oldUrl = 'http://127.0.0.1:5000';
+    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: oldUrl } });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT /* 4141 */));
+    expect((result.env as Record<string, string>).ANTHROPIC_BASE_URL).toBe(oldUrl);
   });
 
   it('is a no-op when ANTHROPIC_BASE_URL not set', () => {
     const input = JSON.stringify({ env: { SOME_VAR: 'value' } });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect((result.env as Record<string, string>).SOME_VAR).toBe('value');
   });
 
   it('is a no-op when env block absent', () => {
     const input = JSON.stringify({ hooks: {} });
-    const result = JSON.parse(stripProxyEnv(input));
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     expect(result.env).toBeUndefined();
   });
 
   it('is idempotent — double strip is the same as single strip', () => {
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: OUR_URL } });
-    const once = stripProxyEnv(input);
-    const twice = stripProxyEnv(once);
+    const once = stripProxyEnv(input, DEFAULT_PORT);
+    const twice = stripProxyEnv(once, DEFAULT_PORT);
     expect(JSON.parse(twice).env).toBeUndefined();
   });
 
   it('does not mutate input', () => {
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: OUR_URL } });
-    stripProxyEnv(input);
+    stripProxyEnv(input, DEFAULT_PORT);
     expect(JSON.parse(input).env.ANTHROPIC_BASE_URL).toBe(OUR_URL);
   });
 });
@@ -357,6 +382,9 @@ describe('hasProxyHooks', () => {
 // Regression for the || short-circuit bug: when hooks were present, the old
 // code `removeProxyHooks(s) || _stripProxyEnv(s)` short-circuited and never
 // stripped ANTHROPIC_BASE_URL, leaving sessions pointed at a disabled relay.
+//
+// REG-1: the second argument is the managed port.  Tests use DEFAULT_PORT (4141)
+// which matches OUR_URL — callers in production read proxy.json.port.
 
 describe('applyDisableToSettings', () => {
   it('removes BOTH proxy hooks AND ANTHROPIC_BASE_URL when both are present (regression)', () => {
@@ -364,7 +392,7 @@ describe('applyDisableToSettings', () => {
     addProxyHooks(settings, DEVFLOW_DIR);
     (settings as Record<string, unknown>).env = { ANTHROPIC_BASE_URL: OUR_URL };
 
-    const changed = applyDisableToSettings(settings);
+    const changed = applyDisableToSettings(settings, DEFAULT_PORT);
 
     expect(changed).toBe(true);
     expect(hasProxyHooks(settings)).toBe(false);
@@ -375,7 +403,7 @@ describe('applyDisableToSettings', () => {
     const settings: Settings = {};
     addProxyHooks(settings, DEVFLOW_DIR);
 
-    const changed = applyDisableToSettings(settings);
+    const changed = applyDisableToSettings(settings, DEFAULT_PORT);
 
     expect(changed).toBe(true);
     expect(hasProxyHooks(settings)).toBe(false);
@@ -384,7 +412,7 @@ describe('applyDisableToSettings', () => {
   it('removes only ANTHROPIC_BASE_URL when hooks absent', () => {
     const settings = { env: { ANTHROPIC_BASE_URL: OUR_URL } } as unknown as Settings;
 
-    const changed = applyDisableToSettings(settings);
+    const changed = applyDisableToSettings(settings, DEFAULT_PORT);
 
     expect(changed).toBe(true);
     expect((settings as Record<string, unknown>).env).toBeUndefined();
@@ -392,20 +420,38 @@ describe('applyDisableToSettings', () => {
 
   it('returns false when settings already clean (no-op)', () => {
     const settings: Settings = {};
-    expect(applyDisableToSettings(settings)).toBe(false);
+    expect(applyDisableToSettings(settings, DEFAULT_PORT)).toBe(false);
   });
 
-  it('does NOT strip ANTHROPIC_BASE_URL when it points to a foreign gateway', () => {
+  it('does NOT strip ANTHROPIC_BASE_URL when it points to a foreign HTTPS gateway', () => {
     const settings = {
       env: { ANTHROPIC_BASE_URL: 'https://my-custom-gateway.example.com' },
     } as unknown as Settings;
 
-    const changed = applyDisableToSettings(settings);
+    const changed = applyDisableToSettings(settings, DEFAULT_PORT);
 
     expect(changed).toBe(false);
     expect(
       (settings as Record<string, unknown> & { env: Record<string, string> }).env.ANTHROPIC_BASE_URL,
     ).toBe('https://my-custom-gateway.example.com');
+  });
+
+  // REG-1: disable strips OUR port but not a foreign localhost port
+  it('REG-1: strips relay URL on the managed port', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:5000' } } as unknown as Settings;
+    const changed = applyDisableToSettings(settings, 5000 /* managedPort = our port */);
+    expect(changed).toBe(true);
+    expect((settings as Record<string, unknown>).env).toBeUndefined();
+  });
+
+  it('REG-1: does NOT strip a foreign localhost URL on a different port from managedPort', () => {
+    // User's own LiteLLM on 4000; we manage 4141 → leave 4000 alone
+    const settings = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:4000' } } as unknown as Settings;
+    const changed = applyDisableToSettings(settings, DEFAULT_PORT /* 4141 */);
+    expect(changed).toBe(false);
+    expect(
+      (settings as Record<string, unknown> & { env: Record<string, string> }).env.ANTHROPIC_BASE_URL,
+    ).toBe('http://127.0.0.1:4000');
   });
 });
 

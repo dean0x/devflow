@@ -126,15 +126,23 @@ function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
 
 /**
  * Mutate a parsed Settings object in place: remove ANTHROPIC_BASE_URL only when
- * its value matches the relay URL pattern (^http://127\.0\.0\.1:\d+$).
- * Never clobbers a user's custom gateway URL.
+ * its value exactly matches our relay on the given managed port.
+ *
+ * REG-1: scoped to `managedPort` so a user's own localhost gateway (LiteLLM,
+ * local Ollama proxy, etc.) on ANY other port is never clobbered.
+ * The caller is responsible for passing the port Devflow currently owns:
+ *   - disable path  → proxy.json.port (or DEFAULT_PROXY_PORT)
+ *   - init path     → proxy.json.port after the preflight block
+ *   - enable path   → the new port being applied (followed immediately by _applyProxyEnvToObject)
+ *   - uninstall     → proxy.json.port (or DEFAULT_PROXY_PORT)
+ *
  * Returns true when the object was changed.
  */
-function _stripProxyEnvFromObject(settings: Settings): boolean {
+function _stripProxyEnvFromObject(settings: Settings, managedPort: number): boolean {
   const s = settings as Record<string, unknown>;
   const env = s.env as Record<string, unknown> | undefined;
   if (typeof env?.ANTHROPIC_BASE_URL !== 'string') return false;
-  if (!OUR_BASE_URL_PATTERN.test(env.ANTHROPIC_BASE_URL)) return false;
+  if (env.ANTHROPIC_BASE_URL !== proxyBaseUrl(managedPort)) return false;
   delete env.ANTHROPIC_BASE_URL;
   if (Object.keys(env).length === 0) delete s.env;
   return true;
@@ -182,14 +190,19 @@ export function applyProxyEnv(settingsJson: string, port: number): string {
 }
 
 /**
- * Remove ANTHROPIC_BASE_URL from settings JSON, but ONLY when its value matches
- * the relay pattern (^http://127\.0\.0\.1:\d+$).
+ * Remove ANTHROPIC_BASE_URL from settings JSON, but ONLY when its value exactly
+ * matches our relay on `managedPort`.
+ *
+ * REG-1: `managedPort` scopes the strip to the port Devflow owns — a user's own
+ * localhost gateway on any other port is never touched.  Pass `proxy.json.port`
+ * (or `DEFAULT_PROXY_PORT` when the file is absent) at every call site.
+ *
  * Returns new serialized settings string. Does not mutate input.
- * Cleans up an emptied env object. Never clobbers a foreign gateway URL.
+ * Cleans up an emptied env object.
  */
-export function stripProxyEnv(settingsJson: string): string {
+export function stripProxyEnv(settingsJson: string, managedPort: number): string {
   const settings = JSON.parse(settingsJson) as Settings;
-  _stripProxyEnvFromObject(settings);
+  _stripProxyEnvFromObject(settings, managedPort);
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -253,11 +266,14 @@ export function removeProxyHooks(settings: Settings): boolean {
  * settings when hooks were present, keeping new sessions pointed at a disabled
  * relay.
  *
+ * REG-1: `managedPort` scopes the URL strip to the port Devflow owns — pass
+ * `proxy.json.port` (or `DEFAULT_PROXY_PORT`) at the call site.
+ *
  * Mutates settings in place. Returns true when any change was made.
  */
-export function applyDisableToSettings(settings: Settings): boolean {
+export function applyDisableToSettings(settings: Settings, managedPort: number): boolean {
   const removedHooks = removeProxyHooks(settings);
-  const strippedEnv = _stripProxyEnvFromObject(settings);
+  const strippedEnv = _stripProxyEnvFromObject(settings, managedPort);
   return removedHooks || strippedEnv;
 }
 
@@ -755,9 +771,12 @@ async function applyEnableSettingsPass(
     return Err('settings.json is malformed — fix it before enabling the proxy');
   }
 
-  // Atomic 4-call settings mutation: strip stale entries, then apply fresh ones
+  // Atomic 4-call settings mutation: strip stale entries, then apply fresh ones.
+  // REG-1: strip is scoped to `port` (the new port being applied). The apply
+  // call below always overwrites ANTHROPIC_BASE_URL regardless, so the strip
+  // here primarily removes any exact-port match before the write-set cycle.
   removeProxyHooks(parsedSettings);
-  _stripProxyEnvFromObject(parsedSettings);
+  _stripProxyEnvFromObject(parsedSettings, port);
   addProxyHooks(parsedSettings, devflowDir);
   _applyProxyEnvToObject(parsedSettings, port);
 
@@ -1205,6 +1224,14 @@ async function runDisable(): Promise<void> {
   const installDir = path.join(claudeDir, 'agents', 'devflow');
   const pidPath = path.join(devflowDir, 'proxy.pid');
 
+  // Read prior state FIRST (before settings pass) to determine managed port.
+  // REG-1: applyDisableToSettings strips ANTHROPIC_BASE_URL only when the URL
+  // port matches the port Devflow manages — callers must supply it.  Reading
+  // proxy.json here also consolidates state for Step 2 below.
+  const priorStateResult = await readProxyState(devflowDir);
+  const priorState = priorStateResult.ok ? priorStateResult.value : null;
+  const managedPort = priorState?.port ?? DEFAULT_PROXY_PORT;
+
   // Step 1: Settings pass (removeProxyHooks + stripProxyEnv, single atomic write)
   let settingsContent: string;
   try {
@@ -1222,7 +1249,7 @@ async function runDisable(): Promise<void> {
     return;
   }
 
-  const changed = applyDisableToSettings(parsedSettings);
+  const changed = applyDisableToSettings(parsedSettings, managedPort);
   if (changed) {
     // REL-2: guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
     try {
@@ -1237,8 +1264,7 @@ async function runDisable(): Promise<void> {
   }
 
   // Step 2: Write proxy.json enabled:false (keep port/models/binPath)
-  const priorStateResult = await readProxyState(devflowDir);
-  const priorState = priorStateResult.ok ? priorStateResult.value : null;
+  // (priorStateResult already read above for managedPort)
 
   const disabledState = buildProxyState({
     enabled: false,

@@ -15,6 +15,7 @@ import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { removeProxyHooks, stripProxyEnv } from './proxy.js';
+import { readProxyState, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -244,7 +245,7 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
  *   - Local scope (always — never removes project data under .devflow/)
  *   - User scope when full-dir confirm is declined or session is non-interactive
  */
-async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
+export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
   try {
     await fs.rm(manifestPath, { force: true });
@@ -609,13 +610,20 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = stripFlags(settingsContent);
           settingsContent = stripViewMode(settingsContent);
           settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
-          // Remove proxy hooks (parse/mutate/serialize) and ANTHROPIC_BASE_URL env override
+          // Remove proxy hooks (parse/mutate/serialize) and ANTHROPIC_BASE_URL env override.
+          // REG-1: scope the URL strip to the port Devflow manages — read proxy.json to
+          // determine which port we own; a user's own localhost gateway on any other port
+          // is left in settings untouched.
           {
             const parsedSettings = JSON.parse(settingsContent) as Settings;
             removeProxyHooks(parsedSettings);
             settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
           }
-          settingsContent = stripProxyEnv(settingsContent);
+          {
+            const proxyStateForStrip = await readProxyState(paths.devflowDir);
+            const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+            settingsContent = stripProxyEnv(settingsContent, managedPort);
+          }
 
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');
