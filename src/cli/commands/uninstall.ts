@@ -14,6 +14,9 @@ import { removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
+import { removeProxyHooks, stripProxyEnv } from './proxy.js';
+import { revertExternalAgents } from '../../core/agent-models.js';
+import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
@@ -223,6 +226,12 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
     items.push('learning.json');
   } catch { /* absent */ }
 
+  // agent-models.json — user model/effort assignments for agents
+  try {
+    await fs.access(path.join(devflowDir, 'agent-models.json'));
+    items.push('agent-models.json (agent model assignments)');
+  } catch { /* absent */ }
+
   return items;
 }
 
@@ -244,6 +253,37 @@ async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolea
     }
   } catch (error) {
     p.log.warn(`Could not remove manifest.json: ${error}`);
+  }
+
+  // Proxy install artifacts — remove non-fatally (per-item failure isolation, avoids PF-009)
+  // Inform the user if a proxy relay process is still running (never kill — informational only).
+  try {
+    const pidContent = await fs.readFile(path.join(devflowDir, 'proxy.pid'), 'utf-8');
+    const pid = parseInt(pidContent.trim(), 10);
+    if (!isNaN(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0); // existence check — throws if process is gone
+        p.log.warn(
+          `Proxy relay process (PID ${pid}) is still running — it will exit when ` +
+          `Claude Code closes, or stop it manually: kill ${pid}`,
+        );
+      } catch { /* process is gone — nothing to report */ }
+    }
+  } catch { /* proxy.pid absent or unreadable — non-fatal */ }
+
+  const proxyArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
+    { relPath: 'proxy.json' },
+    { relPath: 'proxy-routing.json' },
+    { relPath: 'proxy.pid' },
+    { relPath: '.proxy-spawn.lock', isDir: true },
+    { relPath: path.join('logs', 'proxy.log') },
+  ];
+  for (const artifact of proxyArtifacts) {
+    const fullPath = path.join(devflowDir, artifact.relPath);
+    try {
+      await fs.rm(fullPath, { force: true, recursive: artifact.isDir });
+      if (verbose) p.log.success(`Removed ${artifact.relPath}`);
+    } catch { /* absent or unreadable — non-fatal */ }
   }
 }
 
@@ -406,6 +446,21 @@ export const uninstallCommand = new Command('uninstall')
           } catch { /* settings.json may not exist */ }
         }
       } else {
+        // Revert GPT agent frontmatter before removing agents — ensures no orphaned
+        // GPT model lines remain if agents dir is preserved by a later partial flow.
+        // Non-fatal: tolerate missing agents dir or revert errors.
+        {
+          const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
+          try {
+            await fs.access(agentsInstallDir);
+            await revertExternalAgents({
+              installDir: agentsInstallDir,
+              devflowDir,
+              onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+            });
+          } catch { /* agents dir absent or revert failed — non-fatal */ }
+        }
+
         // removeAllDevFlow removes Claude Code assets (commands, agents, rules, skills)
         // and devflowDir/scripts/. Scope-aware cleanup handles the rest of devflowDir.
         await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
@@ -554,6 +609,13 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = stripFlags(settingsContent);
           settingsContent = stripViewMode(settingsContent);
           settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
+          // Remove proxy hooks (parse/mutate/serialize) and ANTHROPIC_BASE_URL env override
+          {
+            const parsedSettings = JSON.parse(settingsContent) as Settings;
+            removeProxyHooks(parsedSettings);
+            settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
+          }
+          settingsContent = stripProxyEnv(settingsContent);
 
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');

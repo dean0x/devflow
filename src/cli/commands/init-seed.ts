@@ -29,9 +29,11 @@ export interface FeatureSeed {
   knowledge: boolean;
   learning: boolean;
   rules: boolean;
+  /** External model routing. Advanced-init only; never part of Recommended defaults. */
+  proxy: boolean;
 }
 
-/** Registry defaults — all features enabled. Used for fresh installs. */
+/** Registry defaults — all features enabled except proxy (advanced-only, off by default). */
 export const FEATURE_DEFAULTS: FeatureSeed = {
   ambient: true,
   memory: true,
@@ -39,6 +41,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   knowledge: true,
   learning: true,
   rules: true,
+  proxy: false,
 };
 
 /** The complete initial state passed from the hoisted-reads block to init prompts. */
@@ -69,10 +72,12 @@ export function resolveSeedFeatures(
   manifest: ManifestData | null,
   projectConfig: FeatureConfig | null,
 ): FeatureSeed {
-  // ambient/hud/rules: manifest is the source; fall back to registry defaults
+  // ambient/hud/rules/proxy: manifest is the source; fall back to registry defaults.
+  // proxy follows the manifest group (like ambient) per ADR-001 — it is NOT config.json-gated.
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
+  const proxy = manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy;
 
   // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
   // Helper eliminates the repeated projectConfig !== null ternary pattern.
@@ -85,7 +90,7 @@ export function resolveSeedFeatures(
   const knowledge = fromConfig('knowledge');
   const learning = fromConfig('learning');
 
-  return { ambient, memory, hud, knowledge, learning, rules };
+  return { ambient, memory, hud, knowledge, learning, rules, proxy };
 }
 
 /**
@@ -362,5 +367,6 @@ export function applyCliToggles(
     knowledge: toggles.knowledge ?? base.knowledge,
     learning: toggles.learning ?? base.learning,
     rules: toggles.rules ?? base.rules,
+    proxy: toggles.proxy ?? base.proxy,
   };
 }
