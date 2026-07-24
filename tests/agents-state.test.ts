@@ -145,10 +145,14 @@ describe('isDirtyModel / isDirtyEffort / unsavedCount', () => {
     expect(isDirtyModel(row)).toBe(true);
   });
 
-  it('not dirty after touch-then-revert', () => {
-    // Simulate: change model to 'opus', then change back to 'default'
-    const row = makeRow({ configuredModel: 'default', originalModel: 'default' });
-    expect(isDirtyModel(row)).toBe(false);
+  it('not dirty after touch-then-revert (driven via reduce)', () => {
+    // Drive reduce: advance to 'haiku', then retreat to 'default'.
+    // isDirtyModel is false again because current === original.
+    const state = makeState({ activeField: 'model', cursor: 1 });
+    const { state: s1 } = reduce(state, 'right'); // default → haiku
+    expect(isDirtyModel(s1.rows[1])).toBe(true);
+    const { state: s2 } = reduce(s1, 'left');  // haiku → default
+    expect(isDirtyModel(s2.rows[1])).toBe(false);
   });
 
   it('isDirtyEffort tracks effort field independently', () => {

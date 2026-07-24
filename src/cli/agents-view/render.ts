@@ -44,8 +44,18 @@ import {
 // Layout constants
 // ---------------------------------------------------------------------------
 
-const FIXED_ROWS = 9; // non-viewport lines (see layout comment above)
+/** Non-viewport fixed lines in a rendered frame (see layout comment above). */
+export const FIXED_ROWS = 9;
 const MIN_VIEWPORT = 1;
+
+// ---------------------------------------------------------------------------
+// Viewport height (exported so terminal.ts and agents.ts share one definition)
+// ---------------------------------------------------------------------------
+
+/** Return the number of data rows the terminal can display given its height. */
+export function computeViewportHeight(termRows: number): number {
+  return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
+}
 
 const COL_AGENT = 20;
 const COL_MODEL = 32;

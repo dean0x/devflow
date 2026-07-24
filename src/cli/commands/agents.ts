@@ -43,6 +43,7 @@ import {
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
+import { computeViewportHeight } from '../agents-view/render.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern)
@@ -301,7 +302,7 @@ async function buildTuiState(
     cursor: 0,
     activeField: 'model',
     viewportOffset: 0,
-    viewportHeight: Math.max(1, (process.stdout.rows ?? 24) - 9),
+    viewportHeight: computeViewportHeight(process.stdout.rows ?? 24),
     proxyEnabled,
   };
 }
@@ -316,16 +317,13 @@ async function applyTuiSave(
   devflowDir: string,
   installDir: string,
   proxyEnabled: boolean,
-): Promise<{ updated: number; unchanged: number; warnings: string[] }> {
+): Promise<Result<{ updated: number; unchanged: number; warnings: string[] }>> {
   // Build new mapping by merging dirty fields from TUI state onto original.
   // Per plan D: only dirty rows modify the mapping — dormant entries for
   // untouched rows are preserved byte-identical from the original.
   const newAgents: Record<string, AgentMapping> = { ...originalMapping.agents };
 
   for (const row of tuiState.rows) {
-    const origModel = originalMapping.agents[row.name]?.model;
-    const origEffort = originalMapping.agents[row.name]?.effort;
-
     const modelDirty = row.configuredModel !== row.originalModel;
     const effortDirty = row.configuredEffort !== row.originalEffort;
 
@@ -357,9 +355,9 @@ async function applyTuiSave(
   }
 
   const newMapping: AgentMappingFile = { version: 1, agents: newAgents };
-  const saveResult = await saveAgentMapping(devflowDir, newMapping);
-  if (!saveResult.ok) {
-    throw new Error(saveResult.error);
+  const persistResult = await saveAgentMapping(devflowDir, newMapping);
+  if (!persistResult.ok) {
+    return Err(persistResult.error);
   }
 
   const reapplyResult = await reapplyAgentMapping({
@@ -368,11 +366,11 @@ async function applyTuiSave(
     proxyEnabled,
   });
 
-  return {
+  return Ok({
     updated: reapplyResult.updated.length,
     unchanged: reapplyResult.unchanged.length,
     warnings: reapplyResult.warnings,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -592,24 +590,25 @@ export const agentsCommand = new Command('agents')
     }
 
     // Save
-    try {
-      const { updated, unchanged, warnings } = await applyTuiSave(
-        result.state,
-        mapping,
-        devflowDir,
-        installDir,
-        proxyEnabled,
-      );
-
-      for (const warn of warnings) {
-        p.log.warn(warn);
-      }
-      p.outro(
-        `Saved. Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
-        `${color.dim(`${unchanged} unchanged`)}.`
-      );
-    } catch (err: unknown) {
-      p.log.error(`Save failed: ${(err as Error).message}`);
+    const saveResult = await applyTuiSave(
+      result.state,
+      mapping,
+      devflowDir,
+      installDir,
+      proxyEnabled,
+    );
+    if (!saveResult.ok) {
+      p.log.error(`Save failed: ${saveResult.error}`);
       process.exitCode = 1;
+      return;
     }
+
+    const { updated, unchanged, warnings } = saveResult.value;
+    for (const warn of warnings) {
+      p.log.warn(warn);
+    }
+    p.outro(
+      `Saved. Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
+      `${color.dim(`${unchanged} unchanged`)}.`
+    );
   });

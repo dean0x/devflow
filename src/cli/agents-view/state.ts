@@ -112,6 +112,48 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
 }
 
 // ---------------------------------------------------------------------------
+// Row and field helpers (pure) — single-row update and cycle direction
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a new rows array with the row at `cursor` replaced by `newRow`.
+ * All other rows are returned by reference (no unnecessary copies).
+ */
+function replaceRow(
+  rows: readonly AgentRow[],
+  cursor: number,
+  newRow: AgentRow,
+): readonly AgentRow[] {
+  return rows.map((r, i) => (i === cursor ? newRow : r));
+}
+
+/**
+ * Return a new AgentRow with the named field cycled one step in the given direction.
+ * Model cycle is proxy-aware (GPT models included only when proxy is on).
+ * Pure: no I/O, no side effects.
+ */
+function cycleField(
+  row: AgentRow,
+  field: 'model' | 'effort',
+  dir: 'forward' | 'backward',
+  proxyEnabled: boolean,
+): AgentRow {
+  if (field === 'model') {
+    const cycle = buildModelCycle(proxyEnabled);
+    // When current value is not in the cycle (dormant proxy-off case), start from 'default'.
+    const effective = cycle.includes(row.configuredModel) ? row.configuredModel : 'default';
+    const next = dir === 'forward' ? cycleNext(cycle, effective) : cyclePrev(cycle, effective);
+    return { ...row, configuredModel: next };
+  } else {
+    const next =
+      dir === 'forward'
+        ? cycleNext(EFFORT_CYCLE, row.configuredEffort)
+        : cyclePrev(EFFORT_CYCLE, row.configuredEffort);
+    return { ...row, configuredEffort: next };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Viewport adjustment (pure)
 // ---------------------------------------------------------------------------
 
@@ -222,63 +264,20 @@ export function reduce(state: AgentsViewState, key: string): ReduceResult {
     case 'right':
     case 'space': {
       if (n === 0) return { state, intent: 'none' };
-      const row = rows[cursor];
-      if (activeField === 'model') {
-        const cycle = buildModelCycle(proxyEnabled);
-        // When current value is not in the cycle (dormant proxy-off case), start from 'default'.
-        const effective = cycle.includes(row.configuredModel)
-          ? row.configuredModel
-          : 'default';
-        const next = cycleNext(cycle, effective);
-        const newRow: AgentRow = { ...row, configuredModel: next };
-        return {
-          state: {
-            ...state,
-            rows: rows.map((r, i) => (i === cursor ? newRow : r)),
-          },
-          intent: 'none',
-        };
-      } else {
-        const next = cycleNext(EFFORT_CYCLE, row.configuredEffort);
-        const newRow: AgentRow = { ...row, configuredEffort: next };
-        return {
-          state: {
-            ...state,
-            rows: rows.map((r, i) => (i === cursor ? newRow : r)),
-          },
-          intent: 'none',
-        };
-      }
+      const newRow = cycleField(rows[cursor], activeField, 'forward', proxyEnabled);
+      return {
+        state: { ...state, rows: replaceRow(rows, cursor, newRow) },
+        intent: 'none',
+      };
     }
 
     case 'left': {
       if (n === 0) return { state, intent: 'none' };
-      const row = rows[cursor];
-      if (activeField === 'model') {
-        const cycle = buildModelCycle(proxyEnabled);
-        const effective = cycle.includes(row.configuredModel)
-          ? row.configuredModel
-          : 'default';
-        const prev = cyclePrev(cycle, effective);
-        const newRow: AgentRow = { ...row, configuredModel: prev };
-        return {
-          state: {
-            ...state,
-            rows: rows.map((r, i) => (i === cursor ? newRow : r)),
-          },
-          intent: 'none',
-        };
-      } else {
-        const prev = cyclePrev(EFFORT_CYCLE, row.configuredEffort);
-        const newRow: AgentRow = { ...row, configuredEffort: prev };
-        return {
-          state: {
-            ...state,
-            rows: rows.map((r, i) => (i === cursor ? newRow : r)),
-          },
-          intent: 'none',
-        };
-      }
+      const newRow = cycleField(rows[cursor], activeField, 'backward', proxyEnabled);
+      return {
+        state: { ...state, rows: replaceRow(rows, cursor, newRow) },
+        intent: 'none',
+      };
     }
 
     case 'd': {
@@ -289,10 +288,7 @@ export function reduce(state: AgentsViewState, key: string): ReduceResult {
           ? { ...row, configuredModel: 'default' }
           : { ...row, configuredEffort: 'default' };
       return {
-        state: {
-          ...state,
-          rows: rows.map((r, i) => (i === cursor ? newRow : r)),
-        },
+        state: { ...state, rows: replaceRow(rows, cursor, newRow) },
         intent: 'none',
       };
     }

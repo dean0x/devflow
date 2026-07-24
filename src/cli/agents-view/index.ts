@@ -5,7 +5,7 @@
  */
 
 export { reduce, buildRow, isDirtyModel, isDirtyEffort, unsavedCount } from './state.js';
-export { renderFrame } from './render.js';
+export { renderFrame, FIXED_ROWS, computeViewportHeight } from './render.js';
 export type {
   AgentRow,
   AgentsViewState,
@@ -14,5 +14,5 @@ export type {
   InitRowInput,
 } from './state.js';
 export type { RenderDims } from './render.js';
-export type { TuiResult } from './terminal.js';
-export { runAgentsTui } from './terminal.js';
+export type { TuiResult, TuiIO } from './terminal.js';
+export { runAgentsTui, MAX_KEYPRESSES } from './terminal.js';

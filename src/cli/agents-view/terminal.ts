@@ -14,17 +14,17 @@
 
 import * as readline from 'readline';
 import { reduce } from './state.js';
-import { renderFrame } from './render.js';
+import { renderFrame, FIXED_ROWS, computeViewportHeight } from './render.js';
 import type { AgentsViewState } from './state.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_KEYPRESSES = 50_000;
+/** Hard upper bound on keypress events — resolves with 'cancel' on exhaustion. */
+export const MAX_KEYPRESSES = 50_000;
 
-/** Non-viewport fixed lines in a rendered frame (see render.ts layout). */
-const FIXED_ROWS = 9;
+// FIXED_ROWS and computeViewportHeight imported from render.ts (single source of truth).
 
 // ---------------------------------------------------------------------------
 // Terminal escape sequences
@@ -68,33 +68,51 @@ function normalizeKey(str: string, key: ReadlineKey | null | undefined): string 
 }
 
 // ---------------------------------------------------------------------------
-// Dims / viewport
+// Optional I/O injection (for testing)
 // ---------------------------------------------------------------------------
 
-function getDims(): { rows: number; cols: number } {
-  return {
-    rows: process.stdout.rows ?? 24,
-    cols: process.stdout.columns ?? 80,
+/**
+ * Minimal stdin/stdout surface required by the TUI shell.
+ * Default values are process.stdin/stdout. Exposed so tests can pass fake streams.
+ */
+export interface TuiIO {
+  stdin: NodeJS.EventEmitter & {
+    isTTY?: boolean;
+    setRawMode?: (mode: boolean) => void;
+    resume(): void;
+    pause(): void;
+  };
+  stdout: NodeJS.EventEmitter & {
+    rows?: number;
+    columns?: number;
+    write(data: string, cb?: (err?: Error | null) => void): boolean;
   };
 }
 
-function computeViewportHeight(termRows: number): number {
-  return Math.max(1, termRows - FIXED_ROWS);
+// ---------------------------------------------------------------------------
+// Dims / viewport
+// ---------------------------------------------------------------------------
+
+function getDims(stdout: TuiIO['stdout']): { rows: number; cols: number } {
+  return {
+    rows: stdout.rows ?? 24,
+    cols: stdout.columns ?? 80,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Redraw
 // ---------------------------------------------------------------------------
 
-function redraw(state: AgentsViewState): void {
-  const dims = getDims();
+function redraw(state: AgentsViewState, stdout: TuiIO['stdout']): void {
+  const dims = getDims(stdout);
   const lines = renderFrame(state, dims);
 
   let out = HOME;
   for (const line of lines) {
     out += line + ERASE_EOL + '\n';
   }
-  process.stdout.write(out);
+  stdout.write(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,14 +132,22 @@ export interface TuiResult {
  * Launch the interactive agents TUI.
  *
  * @param initialState - Initial state built by the agents command.
+ * @param io - Optional I/O override (defaults to process.stdin/stdout). Pass fake
+ *   streams in tests to drive the TUI without a real TTY.
  * @returns Promise resolving to { action, state } when the user saves or cancels.
  */
-export async function runAgentsTui(initialState: AgentsViewState): Promise<TuiResult> {
-  const stdin = process.stdin;
-  const stdout = process.stdout;
+export async function runAgentsTui(
+  initialState: AgentsViewState,
+  io?: Partial<TuiIO>,
+): Promise<TuiResult> {
+  // D-SEAM: default to process.stdin/stdout; callers (tests) may inject fakes.
+  const stdin: TuiIO['stdin'] = (io?.stdin ?? process.stdin) as TuiIO['stdin'];
+  const stdout: TuiIO['stdout'] = (io?.stdout ?? process.stdout) as TuiIO['stdout'];
 
   // ── Enable readline keypress events ─────────────────────────────────────
-  readline.emitKeypressEvents(stdin);
+  // Cast required: readline expects NodeJS.ReadableStream; real stdin and test
+  // PassThrough streams both satisfy it at runtime.
+  readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadableStream);
 
   // ── Enter alt-screen, hide cursor ───────────────────────────────────────
   stdout.write(ENTER_ALT + HIDE_CURSOR);
@@ -138,9 +164,9 @@ export async function runAgentsTui(initialState: AgentsViewState): Promise<TuiRe
     let keypressCount = 0;
 
     // Initial viewport size
-    const dims = getDims();
+    const dims = getDims(stdout);
     state = { ...state, viewportHeight: computeViewportHeight(dims.rows) };
-    redraw(state);
+    redraw(state, stdout);
 
     // ── Cleanup (idempotent) ───────────────────────────────────────────────
     function cleanup(): void {
@@ -171,9 +197,9 @@ export async function runAgentsTui(initialState: AgentsViewState): Promise<TuiRe
 
     // ── Resize handler ─────────────────────────────────────────────────────
     function onResize(): void {
-      const d = getDims();
+      const d = getDims(stdout);
       state = { ...state, viewportHeight: computeViewportHeight(d.rows) };
-      redraw(state);
+      redraw(state, stdout);
     }
 
     // ── Keypress handler ───────────────────────────────────────────────────
@@ -197,12 +223,12 @@ export async function runAgentsTui(initialState: AgentsViewState): Promise<TuiRe
           settle({ action: 'cancel', state });
           return;
         case 'none':
-          redraw(state);
+          redraw(state, stdout);
           return;
         default: {
           const _: never = intent;
           void _;
-          redraw(state);
+          redraw(state, stdout);
         }
       }
     }

@@ -142,15 +142,15 @@ describe('applySetMapping', () => {
     expect(result.agents['coder']?.effort).toBeUndefined();
   });
 
-  it('removes agent entry entirely when both fields become default', () => {
+  it('clears model field and leaves an empty entry (entry removal is the TUI-save layer\'s job)', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: { coder: { model: 'opus' } },
     };
     const result = applySetMapping(mapping, 'coder', { model: 'default' });
-    // Empty object — the entry can be removed or kept empty; both are valid deviations-only
-    // This test just checks the model is cleared
+    // model key is gone, but the entry itself remains (applySetMapping never removes empty entries)
     expect(result.agents['coder']?.model).toBeUndefined();
+    expect('coder' in result.agents).toBe(true);
   });
 
   it('does not mutate the original mapping', () => {
