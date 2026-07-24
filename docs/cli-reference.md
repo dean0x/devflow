@@ -183,14 +183,14 @@ Route Devflow agents through GPT models via your OpenAI/Codex subscription. When
 npx devflow-kit proxy --enable   # Enable external model routing (runs preflight checks)
 npx devflow-kit proxy --disable  # Disable and revert agents to Claude defaults
 npx devflow-kit proxy --status   # Show routing status, port, and active relay PID
-npx devflow-kit proxy --port <n> # Set the relay port (default: 4141)
+npx devflow-kit proxy --enable --port <n>  # Enable on a specific port (default: 4141)
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, injects `ANTHROPIC_BASE_URL` into `settings.json`, applies saved agent model mapping |
-| `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable |
-| `--status` | Show enabled/disabled, port, relay PID (if running), and relay binary path |
+| `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable; the relay process is left running for live sessions (a manual `kill <pid>` hint is shown) |
+| `--status` | Show enabled/disabled, port, relay PID (if running), and proxy log path |
 | `--port <n>` | Override the relay port (default 4141); takes effect on next enable |
 
 Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts on `SessionStart` and `UserPromptSubmit` via the `ensure-proxy` hook. Routing state is stored in `~/.devflow/proxy.json`; per-agent model mapping in `~/.devflow/agent-models.json`.
@@ -215,7 +215,7 @@ npx devflow-kit agents --reset --yes                        # Skip confirmation 
 |-----|--------|
 | `↑` / `↓` or `k` / `j` | Navigate agents |
 | `Tab` | Switch between model and effort fields |
-| `←` / `→` or `Space` | Cycle active field (model or effort) |
+| `←` / `→` or `Space` | Cycle value of active field (← backward, →/Space forward) |
 | `d` | Reset active field to default |
 | `Enter` | Confirm and save all changes |
 | `Escape` / `q` | Quit without saving |

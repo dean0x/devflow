@@ -35,7 +35,7 @@ The routing runtime is an internal package (`subswitch@0.1.0`, exact-pinned in `
 1. Write `proxy-routing.json` with all external model IDs.
 2. Run `runProxyPreflight()` (5 ordered checks — see Preflight section).
 3. On success: write `proxy.json` `enabled:true`, spawn relay with bounded wait.
-4. Spawn wait: 80×100ms probe loop (8s maximum, well within the hook's 15s timeout).
+4. Spawn wait: ≤50×100ms probe loop (5s maximum).
 5. If relay never accepts: write `proxy.json` `enabled:false` (rollback), return error.
 6. Settings pass: `removeProxyHooks` + `_stripProxyEnvFromObject` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls in one atomic JSON write** to `~/.claude/settings.json`.
 7. Sync manifest.
