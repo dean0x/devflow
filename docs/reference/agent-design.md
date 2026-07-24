@@ -99,9 +99,9 @@ Devflow ships with explicit model assignments in agent frontmatter (Opus for ana
 ```bash
 npx devflow-kit agents               # Interactive TUI — navigate, cycle model, save
 npx devflow-kit agents --list        # Print all agents with current assignments
-npx devflow-kit agents --set reviewer=gpt-4.5   # Assign one agent via CLI
-npx devflow-kit agents --reset reviewer         # Reset one agent to shipped default
-npx devflow-kit agents --reset                  # Reset all agents to shipped defaults
+npx devflow-kit agents --set reviewer --model gpt-5.5   # Assign one agent via CLI
+npx devflow-kit agents --reset                          # Reset all agents to shipped defaults (prompts)
+npx devflow-kit agents --reset --yes                    # Skip confirmation prompt
 ```
 
 **Convergence:** `reapplyAgentMapping` runs after every `devflow init` (post-install). It reads `agent-models.json` and rewrites the matching agent frontmatter so your assignments survive reinstalls and plugin updates.
