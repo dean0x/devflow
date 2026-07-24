@@ -282,7 +282,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
   for (const artifact of proxyArtifacts) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     try {
-      await fs.rm(fullPath, { force: true, recursive: artifact.isDir });
+      await fs.rm(fullPath, { force: true, recursive: artifact.isDir === true });
       if (verbose) p.log.success(`Removed ${artifact.relPath}`);
     } catch { /* absent or unreadable — non-fatal */ }
   }
