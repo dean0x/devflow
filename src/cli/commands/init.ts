@@ -33,14 +33,16 @@ import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
+import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
-import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../../core/manifest.js';
-import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../../core/flags.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
+import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeConfig } from '../../core/feature-config.js';
+import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, applyNonSelectableCarry } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -153,6 +155,7 @@ interface InitOptions {
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
+  reset?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -176,6 +179,7 @@ export const initCommand = new Command('init')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
+  .option('--reset', 'Factory reset — restore all defaults, ignoring prior installation state')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.join(getPackageRoot(), 'package.json');
@@ -191,6 +195,13 @@ export const initCommand = new Command('init')
 
     // Start the CLI flow
     p.intro(color.bgCyan(color.black(` Devflow v${version} `)));
+
+    // --reset + --plugin are mutually exclusive: --reset clears prior state while --plugin
+    // does a partial install that relies on the existing manifest — contradictory intents.
+    if (options.reset && options.plugin) {
+      p.log.error('--reset and --plugin are mutually exclusive. Use --reset alone to restore defaults, or --plugin to update a specific plugin.');
+      process.exit(1);
+    }
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
@@ -265,6 +276,39 @@ export const initCommand = new Command('init')
       return;
     }
 
+    // ── Hoist reads: resolve paths early to compute InitSeed for pre-seeded prompts (Phase 4) ──
+    // Best-effort: if path resolution fails here, seed falls back to fresh-install defaults.
+    // The authoritative error gate for failed path resolution remains at the install-begins
+    // spinner (see "Resolving paths" below). Hoisted above multiselect so Phase 4 can
+    // pre-seed plugin/flag/feature prompts.
+    let existingManifest: ManifestData | null = null;
+    let earlyProjectConfig: FeatureConfig | null = null;
+    let earlySettingsJson: string | null = null;
+    let earlyGitRoot: string | null = null;
+    try {
+      const earlyPaths = await getInstallationPaths(scope);
+      existingManifest = await readManifest(earlyPaths.devflowDir);
+      earlyGitRoot = earlyPaths.gitRoot ?? await getGitRoot();
+      if (earlyGitRoot) {
+        earlyProjectConfig = await readConfigIfPresent(earlyGitRoot);
+      }
+      try {
+        earlySettingsJson = await fs.readFile(
+          path.join(earlyPaths.claudeDir, 'settings.json'), 'utf-8',
+        );
+      } catch { /* settings.json absent — treated as empty */ }
+    } catch { /* path resolution deferred to install-begins gate */ }
+    // --reset: factory reset — treat as a fresh install for all seeding and routing decisions.
+    // The REAL existingManifest / earlySettingsJson are still used below for installedAt
+    // preservation, upgrade messaging, and security deny-state detection. resolveResetGatedInputs
+    // discards the manifest, config, AND settings snapshot under --reset so the seed collapses to
+    // registry defaults — including viewMode 'default' (an externally-set /focus in settings.json
+    // must not survive a factory reset).
+    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+      !!options.reset, existingManifest, earlyProjectConfig, earlySettingsJson ?? '',
+    );
+    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+
     // Select plugins to install
     let selectedPlugins: string[] = [];
     if (options.plugin) {
@@ -311,9 +355,9 @@ export const initCommand = new Command('init')
       const workflowChoices = workflow.map(toChoice);
       const languageChoices = language.map(toChoice);
 
-      const workflowInitialValues = workflow
-        .filter(pl => !pl.optional)
-        .map(pl => pl.name);
+      // Pre-seed from prior state: if this is a re-init, seed.workflowPlugins carries the prior selection;
+      // on fresh installs it defaults to the non-optional workflow plugins.
+      const workflowInitialValues = seed.workflowPlugins;
 
       // Bounded selection loop — max 3 attempts (reliability rule: no unbounded loops)
       const MAX_ATTEMPTS = 3;
@@ -344,6 +388,8 @@ export const initCommand = new Command('init')
           const step2 = await p.multiselect({
             message: 'Step 2 — Language & ecosystem plugins',
             options: languageChoices,
+            // Pre-seed from prior state (empty array on fresh installs)
+            initialValues: seed.languagePlugins,
             required: false,
           });
           if (p.isCancel(step2)) {
@@ -368,6 +414,15 @@ export const initCommand = new Command('init')
       }
     }
 
+    // Non-interactive re-init: preserve prior plugin selection.
+    // When no --plugin flag is given and a manifest exists, the seed carries the prior
+    // selection (existing plugins ∪ new non-optional plugins not yet in knownPlugins).
+    // Fresh non-interactive installs (no manifest) fall through to the default path
+    // in pluginsToInstall which installs all non-optional plugins.
+    if (!options.plugin && !process.stdin.isTTY && seedManifest !== null) {
+      selectedPlugins = [...seed.workflowPlugins, ...seed.languagePlugins];
+    }
+
     // ╭──────────────────────────────────────────────────────────╮
     // │  Setup mode: Recommended vs Advanced                     │
     // ╰──────────────────────────────────────────────────────────╯
@@ -385,6 +440,12 @@ export const initCommand = new Command('init')
       useRecommended = false;
     } else if (!process.stdin.isTTY) {
       useRecommended = true;
+    } else if (seedManifest !== null) {
+      // Re-init: skip the Recommended/Advanced mode prompt entirely and go straight to
+      // advanced-style prompts pre-seeded from prior state. Enter-through keeps everything.
+      // (seedManifest is null under --reset, so that path shows the mode prompt again.)
+      p.log.info('Existing installation detected — press Enter through prompts to keep current settings.');
+      useRecommended = false;
     } else {
       const modeChoice = await p.select({
         message: 'Setup mode',
@@ -400,18 +461,20 @@ export const initCommand = new Command('init')
       useRecommended = modeChoice === 'recommended';
     }
 
-    // Early git detection (needed by both paths)
-    const earlyGitRoot = await getGitRoot();
-
-    // Feature toggles — defaults for recommended, prompts for advanced
-    let ambientEnabled = true;
-    let memoryEnabled = true;
-    let hudEnabled = true;
-    let knowledgeEnabled = true;
-    let learningEnabled = true;
-    let rulesEnabled = true;
-    let enabledFlags = getDefaultFlags();
-    let viewMode: ViewMode = 'default';
+    // Feature toggles — seeded from prior state (fresh installs use registry defaults via seed)
+    let ambientEnabled = seed.features.ambient;
+    let memoryEnabled = seed.features.memory;
+    let hudEnabled = seed.features.hud;
+    let knowledgeEnabled = seed.features.knowledge;
+    let learningEnabled = seed.features.learning;
+    let rulesEnabled = seed.features.rules;
+    let enabledFlags = seed.flags;
+    let viewMode: ViewMode = seed.viewMode;
+    // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
+    // Used by resolveFinalViewMode to decide whether to clobber an externally-set /focus value.
+    // --reset forces viewMode back to 'default': resolveResetGatedInputs empties the settings snapshot
+    // so seed.viewMode collapses to 'default', and explicit=true makes that 'default' win at write time.
+    let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
@@ -431,13 +494,23 @@ export const initCommand = new Command('init')
     if (useRecommended) {
       // ── Recommended path: apply all defaults silently ──
 
-      // Respect explicit CLI flags even in recommended mode
-      if (options.ambient !== undefined) ambientEnabled = options.ambient;
-      if (options.memory !== undefined) memoryEnabled = options.memory;
-      if (options.hud !== undefined) hudEnabled = options.hud;
-      if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
-      if (options.learning !== undefined) learningEnabled = options.learning;
-      if (options.rules !== undefined) rulesEnabled = options.rules;
+      // Apply explicit CLI toggles on top of the seed.
+      // Precedence: explicit CLI flag > seed value (which already encodes: prior state > registry default).
+      const effectiveFeatures = applyCliToggles(seed.features, {
+        ambient: options.ambient,
+        memory: options.memory,
+        hud: options.hud,
+        knowledge: options.knowledge,
+        learning: options.learning,
+        rules: options.rules,
+      });
+      ambientEnabled = effectiveFeatures.ambient;
+      memoryEnabled = effectiveFeatures.memory;
+      hudEnabled = effectiveFeatures.hud;
+      knowledgeEnabled = effectiveFeatures.knowledge;
+      learningEnabled = effectiveFeatures.learning;
+      rulesEnabled = effectiveFeatures.rules;
+      // enabledFlags and viewMode are already initialised to seed values above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -506,6 +579,7 @@ export const initCommand = new Command('init')
             { value: true, label: 'Yes', hint: 'Recommended' },
             { value: false, label: 'No', hint: 'Plain sessions — no charter, no reminder' },
           ],
+          initialValue: seed.features.ambient,
         });
         if (p.isCancel(ambientChoice)) {
           p.cancel('Installation cancelled.');
@@ -527,7 +601,7 @@ export const initCommand = new Command('init')
         );
         const memoryChoice = await p.confirm({
           message: 'Enable working memory? (Recommended)',
-          initialValue: true,
+          initialValue: seed.features.memory,
         });
         if (p.isCancel(memoryChoice)) {
           p.cancel('Installation cancelled.');
@@ -546,7 +620,7 @@ export const initCommand = new Command('init')
         );
         const hudChoice = await p.confirm({
           message: 'Enable HUD? (Recommended)',
-          initialValue: true,
+          initialValue: seed.features.hud,
         });
         if (p.isCancel(hudChoice)) {
           p.cancel('Installation cancelled.');
@@ -566,7 +640,7 @@ export const initCommand = new Command('init')
         );
         const knowledgeChoice = await p.confirm({
           message: 'Enable feature knowledge bases? (Recommended)',
-          initialValue: true,
+          initialValue: seed.features.knowledge,
         });
         if (p.isCancel(knowledgeChoice)) {
           p.cancel('Installation cancelled.');
@@ -586,7 +660,7 @@ export const initCommand = new Command('init')
         );
         const learningChoice = await p.confirm({
           message: 'Enable learning? (Recommended)',
-          initialValue: true,
+          initialValue: seed.features.learning,
         });
         if (p.isCancel(learningChoice)) {
           p.cancel('Installation cancelled.');
@@ -607,7 +681,7 @@ export const initCommand = new Command('init')
         );
         const rulesChoice = await p.confirm({
           message: 'Enable rules? (Recommended)',
-          initialValue: true,
+          initialValue: seed.features.rules,
         });
         if (p.isCancel(rulesChoice)) {
           p.cancel('Installation cancelled.');
@@ -632,8 +706,6 @@ export const initCommand = new Command('init')
           hint: f.hint,
         })),
       ];
-      const flagDefaults = getDefaultFlags();
-
       p.note(
         'Recommended flags are pre-selected. Optional flags are for\n' +
         'advanced users — if you don\'t recognize one, skip it.',
@@ -643,7 +715,8 @@ export const initCommand = new Command('init')
       const flagSelection = await p.multiselect({
         message: 'Claude Code flags',
         options: flagChoices,
-        initialValues: flagDefaults,
+        // Pre-seeded from prior state; fresh installs start with all default-ON flags.
+        initialValues: seed.flags,
         required: false,
       });
 
@@ -668,13 +741,17 @@ export const initCommand = new Command('init')
           { value: 'verbose', label: 'Verbose', hint: 'shows everything including thinking' },
           { value: 'focus', label: 'Focus', hint: 'minimal output, one-line summaries' },
         ],
-        initialValue: 'default',
+        // Pre-seeded from prior state (fresh installs default to 'default').
+        initialValue: seed.viewMode,
       });
       if (p.isCancel(viewModeChoice)) {
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
       viewMode = viewModeChoice as 'default' | 'verbose' | 'focus';
+      // Mark as explicit: user actively selected this mode, so resolveFinalViewMode will
+      // let it win over an externally-set /focus value.
+      viewModeExplicit = true;
 
       // .claudeignore prompt
       if (earlyGitRoot) {
@@ -841,8 +918,7 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Check existing manifest for upgrade detection
-    const existingManifest = await readManifest(devflowDir);
+    // existingManifest was read early above (hoisted for seed computation); use it here for upgrade detection
     if (existingManifest) {
       const upgrade = detectUpgrade(version, existingManifest.version);
       if (upgrade.isUpgrade) {
@@ -854,9 +930,7 @@ export const initCommand = new Command('init')
 
     // Detect current deny list state in user settings (read-only; write happens in security step)
     {
-      const userSettingsPath = path.join(claudeDir, 'settings.json');
-      let userSettingsJson: string | null = null;
-      try { userSettingsJson = await fs.readFile(userSettingsPath, 'utf-8'); } catch { /* absent */ }
+      const userSettingsJson: string | null = earlySettingsJson;
 
       let managedExists = false;
       let managedContentJson: string | null = null;
@@ -935,6 +1009,23 @@ export const initCommand = new Command('init')
     if (ambientEnabled && ambientPlugin && !pluginsToInstall.includes(ambientPlugin)) {
       pluginsToInstall.push(ambientPlugin);
     }
+
+    // Carry non-selectable optional plugins (e.g. devflow-audit-claude) from the prior
+    // install on full re-inits. These plugins are excluded from the init prompt buckets
+    // by partitionSelectablePlugins, so they never appear in selectedPlugins and would
+    // otherwise be silently dropped on any plugin-less re-init.
+    //
+    // --reset: seedManifest is null (resolveResetGatedInputs zeros it) → carry is empty.
+    //   Factory reset correctly drops non-selectable optional plugins.
+    // --plugin X partial install: resolvePluginList already merges the full manifest list
+    //   at the manifest-write step; physical dirs are preserved (no full wipe on partial).
+    //   Skip carry here to avoid force-reinstalling plugins the user didn't target.
+    pluginsToInstall = applyNonSelectableCarry(
+      !!options.plugin,
+      seedManifest?.plugins ?? null,
+      pluginsToInstall,
+      DEVFLOW_PLUGINS,
+    );
 
     // Skills: install ALL from ALL plugins (skills are tiny markdown files;
     // commands need skills from other plugins to function)
@@ -1134,20 +1225,18 @@ export const initCommand = new Command('init')
       // the Learning agent via directive).
       content = removeDreamHook(content);
 
+      // Strip Devflow-managed teammateMode ("auto"). User-set values (e.g. "tmux") are preserved.
+      content = stripDevflowTeammateModeFromJson(content);
+
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
 
-      // Preserve existing viewMode before stripping (user may have set it via /focus or settings.json)
-      try {
-        const parsed: unknown = JSON.parse(content);
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const existing = (parsed as Record<string, unknown>).viewMode;
-          if (VIEW_MODES.includes(existing as ViewMode) && existing !== 'default') {
-            viewMode = existing as ViewMode;
-          }
-        }
-      } catch { /* malformed settings.json — keep default */ }
+      // Resolve the final viewMode to write.
+      // - explicit=true (interactive selection or --reset): selected value always wins
+      // - explicit=false (recommended/non-TTY): preserve an externally-set /focus value;
+      //   otherwise use the seeded viewMode (which already reflects the prior manifest value)
+      viewMode = resolveFinalViewMode(resolveExistingViewMode(content), viewMode, viewModeExplicit);
 
       // View mode — strip then apply for upgrade safety
       content = stripViewMode(content);
@@ -1161,7 +1250,14 @@ export const initCommand = new Command('init')
           p.log.info(`HUD ${hudEnabled ? 'enabled' : 'disabled'}`);
         }
       }
-    } catch { /* settings.json may not exist yet */ }
+    } catch (err) {
+      // settings.json write failed — warn but do not abort. The manifest records the
+      // intended state; the user can re-run devflow init to retry the settings write.
+      p.log.warn(
+        `Could not configure settings.json: ${err instanceof Error ? err.message : err}. ` +
+        'Manifest records intended state; run devflow init again to retry.',
+      );
+    }
 
     // Write .devflow/config.json to manage per-feature enable/disable at runtime.
     // Uses writeConfig (full atomic write) rather than three updateFeature calls because
@@ -1406,7 +1502,23 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, learning: learningEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
+      // Snapshot of known plugin names at this install — used by resolveSeedPlugins on next init
+      // to detect new non-optional plugins and auto-adopt them.
+      knownPlugins: DEVFLOW_PLUGINS.map(p => p.name),
+      features: {
+        ambient: ambientEnabled,
+        memory: memoryEnabled,
+        hud: hudEnabled,
+        knowledge: knowledgeEnabled,
+        learning: learningEnabled,
+        rules: rulesEnabled,
+        flags: enabledFlags,
+        // Snapshot of known flag ids at this install — used by resolveSeedFlags on next init
+        // to detect new default-ON flags and auto-adopt them.
+        knownFlags: FLAG_REGISTRY.map(f => f.id),
+        viewMode,
+        security: securityMode,
+      },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

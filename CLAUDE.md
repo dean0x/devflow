@@ -63,7 +63,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 Knowledge write-back is in-command (not a background pipeline): gated by `devflow knowledge --enable/--disable` (flips `knowledge` in feature config); Knowledge agent writes directly at workflow end.
 
-**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learning ON, rules ON, HUD ON, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags. Use `--learning/--no-learning` to toggle the learning agent independently. Use `--rules/--no-rules` to toggle rules independently.
+**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learning ON, rules ON, HUD ON, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags. Use `--learning/--no-learning` to toggle the learning agent independently. Use `--rules/--no-rules` to toggle rules independently. **State-aware re-init**: on re-init the wizard reads the prior manifest, config, and settings.json and pre-seeds every prompt with existing values, skipping the Recommended/Advanced question entirely. Use `--reset` for a factory reset that ignores all prior state (mutually exclusive with `--plugin`).
 
 **Migrations**: Run-once migrations execute automatically on `devflow init`, tracked at `~/.devflow/migrations.json` (scope-independent; single file regardless of user-scope vs local-scope installs). To add a 2.x migration, append an entry to `MIGRATIONS` in `src/core/migrations.ts`. Scopes: `global` (runs once per machine, no project context) vs `per-project` (sweeps all discovered Claude-enabled projects in parallel). Failures are non-fatal — migrations retry on next init. The registry is empty as of 2.0 — no 1.x upgrade path.
 
@@ -73,7 +73,7 @@ Knowledge write-back is in-command (not a background pipeline): gated by `devflo
 devflow/
 ├── src/
 │   ├── cli.ts              # CLI entry point
-│   ├── cli/                # CLI command modules (init, list, uninstall, ambient, learning, flags, knowledge, rules, debug, hud)
+│   ├── cli/                # CLI command modules (init, init-seed, uninstall, ambient, learning, flags, knowledge, rules, debug, hud)
 │   ├── core/               # Shared logic (plugins.ts registry, paths.ts, assets.ts, flags.ts, fs-atomic.ts, migrations.ts, …)
 │   ├── hud/                # HUD module (TypeScript source — index.ts, render.ts, components/, …)
 │   ├── targets/claude-code/ # Claude Code install target (installer, hooks.ts, post-install, claude-paths, legacy, templates/)

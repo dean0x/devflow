@@ -53,8 +53,8 @@ describe('buildAssetMaps', () => {
     // 'accessibility' first appears in devflow-accessibility (optional plugin)
     expect(skillsMap.get('accessibility')).toBe('devflow-accessibility');
 
-    // 'git' first appears in devflow-plan (inserted before devflow-implement)
-    expect(agentsMap.get('git')).toBe('devflow-plan');
+    // 'git' first appears in devflow-implement (devflow-plan no longer declares it)
+    expect(agentsMap.get('git')).toBe('devflow-implement');
 
     // 'synthesizer' first appears in devflow-plan
     expect(agentsMap.get('synthesizer')).toBe('devflow-plan');

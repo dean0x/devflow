@@ -109,3 +109,28 @@ export async function isFeatureEnabled(
   const config = await readConfig(projectRoot);
   return config[feature];
 }
+
+/**
+ * Read the feature config for a project root, returning null when the file
+ * is absent or malformed.
+ *
+ * Unlike readConfig (which falls back to DEFAULT_CONFIG on any error),
+ * readConfigIfPresent distinguishes "not configured yet" (null) from
+ * "configured with specific values" (FeatureConfig).  The distinction
+ * matters for init-seed resolution: a present config overrides the
+ * manifest for memory/learning/knowledge even when the manifest is absent.
+ *
+ * Applies ADR-001: .devflow/config.json is the source of truth; null means
+ * the config file does not exist or is unreadable — not that all features
+ * are disabled.
+ */
+export async function readConfigIfPresent(projectRoot: string): Promise<FeatureConfig | null> {
+  const configPath = getFeatureConfigPath(projectRoot);
+  try {
+    const text = await fs.readFile(configPath, 'utf-8');
+    return coerceConfig(JSON.parse(text)); // null when JSON is not a plain object
+  } catch {
+    // ENOENT (absent) or SyntaxError (malformed) — treat as not present
+    return null;
+  }
+}

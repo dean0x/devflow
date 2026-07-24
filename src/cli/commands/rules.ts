@@ -7,7 +7,7 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-co
 import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../../core/plugins.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { rulesDir } from '../../core/assets.js';
-import { installAllRules, validateRuleShadow, type RuleShadowState } from '../../targets/claude-code/installer.js';
+import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -264,7 +264,18 @@ export const rulesCommand = new Command('rules')
       await fs.rm(rulesTarget, { recursive: true, force: true });
       await fs.mkdir(rulesTarget, { recursive: true });
 
-      const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+      // Guard against a hard-error throw (e.g. missing declared source — PF-009).
+      // Without this, the rm above leaves rules removed and the error becomes an
+      // unhandled rejection rather than a clean CLI failure.
+      let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[];
+      try {
+        outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+      } catch (err) {
+        p.log.error(
+          `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
 
       const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
       const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';

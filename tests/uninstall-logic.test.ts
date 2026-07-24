@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, computeShadowLeftoverWarnings } from '../src/cli/commands/uninstall.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -272,156 +275,6 @@ describe('resolveSecurityRemovalDecision', () => {
   });
 });
 
-describe('computeShadowLeftoverWarnings', () => {
-  const devflowDir = '/home/user/.devflow';
-
-  // === selective-uninstall gate ===
-
-  it('returns empty array for selective uninstall regardless of shadow lists', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['my-skill'],
-      shadowedRules: ['my-rule'],
-      isSelectiveUninstall: true,
-      devflowDir,
-    });
-    expect(result).toEqual([]);
-  });
-
-  it('returns empty array for selective uninstall with empty shadow lists', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: [],
-      shadowedRules: [],
-      isSelectiveUninstall: true,
-      devflowDir,
-    });
-    expect(result).toEqual([]);
-  });
-
-  // === full-uninstall, empty shadow lists ===
-
-  it('returns empty array when both shadow lists are empty (full uninstall)', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: [],
-      shadowedRules: [],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result).toEqual([]);
-  });
-
-  // === full-uninstall, populated skill list ===
-
-  it('includes shadowed skill names in the warning message', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['my-custom-skill', 'another-skill'],
-      shadowedRules: [],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result.some(m => m.message.includes('my-custom-skill'))).toBe(true);
-    expect(result.some(m => m.message.includes('another-skill'))).toBe(true);
-  });
-
-  it('uses canonical warning text for skill overrides', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['foo'],
-      shadowedRules: [],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
-    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
-  });
-
-  it('includes the skills shadow path in the warning', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['foo'],
-      shadowedRules: [],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    // Path should be devflowDir/skills
-    const expectedPath = `${devflowDir}/skills`;
-    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
-  });
-
-  // === full-uninstall, populated rule list ===
-
-  it('includes shadowed rule names in the warning message', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: [],
-      shadowedRules: ['my-custom-rule'],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result.some(m => m.message.includes('my-custom-rule'))).toBe(true);
-  });
-
-  it('uses canonical warning text for rule overrides', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: [],
-      shadowedRules: ['bar'],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
-    expect(result.some(m => m.message.includes('rm -rf'))).toBe(true);
-  });
-
-  it('includes the rules shadow path in the warning', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: [],
-      shadowedRules: ['bar'],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    const expectedPath = `${devflowDir}/rules`;
-    expect(result.some(m => m.message.includes(expectedPath))).toBe(true);
-  });
-
-  // === both lists populated ===
-
-  it('includes warnings for both skills and rules when both lists are populated', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['skill-a'],
-      shadowedRules: ['rule-b'],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result.some(m => m.message.includes('skill-a'))).toBe(true);
-    expect(result.some(m => m.message.includes('rule-b'))).toBe(true);
-    expect(result.some(m => m.message.includes('Personal skill overrides remain in'))).toBe(true);
-    expect(result.some(m => m.message.includes('Personal rule overrides remain in'))).toBe(true);
-  });
-
-  // === message pairing — warn + hint ===
-
-  it('returns a warn message followed by a cleanup hint for each shadowed list', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['s1'],
-      shadowedRules: [],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    // Expect exactly 2 entries: the warning + the rm -rf hint
-    expect(result).toHaveLength(2);
-    expect(result[0].level).toBe('warn');
-    expect(result[0].message).toContain('Personal skill overrides remain in');
-    expect(result[1].level).toBe('info');
-    expect(result[1].message).toContain('rm -rf');
-  });
-
-  it('returns four entries when both skill and rule lists are populated', () => {
-    const result = computeShadowLeftoverWarnings({
-      shadowedSkills: ['s1'],
-      shadowedRules: ['r1'],
-      isSelectiveUninstall: false,
-      devflowDir,
-    });
-    expect(result).toHaveLength(4);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Legacy plugin name resolution via shared parsePluginSelection
 //
@@ -448,5 +301,284 @@ describe('legacy plugin name resolution in uninstall (parsePluginSelection share
     expect(invalid).toEqual([]);
     const planPlugin = DEVFLOW_PLUGINS.find(pl => pl.name === 'devflow-plan');
     expect(planPlugin).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WS5: enumerateUserDevFlowContent — pre-deletion gate for full devflow dir cleanup
+// ---------------------------------------------------------------------------
+//
+// Pure async enumeration helper that inspects a devflowDir for user-authored
+// content worth backing up before a full cleanup. Used by the uninstall
+// confirm gate to inform the user before wiping ~/.devflow/.
+
+describe('enumerateUserDevFlowContent (WS5)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-ws5-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // === empty devflow dir ===
+
+  it('returns empty array when devflowDir has no user-authored content', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array when skills/ dir exists but is empty', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array when rules/ dir exists but is empty', async () => {
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  // === skill shadows ===
+
+  it('includes skill shadow entry when skills/ has at least one entry', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'my-skill'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(true);
+  });
+
+  it('skill shadow entry includes the skills/ directory path', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'foo'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    const skillsPath = path.join(tmpDir, 'skills');
+    expect(result.some(s => s.includes(skillsPath))).toBe(true);
+  });
+
+  // === rule shadows ===
+
+  it('includes rule shadow entry when rules/ has at least one entry', async () => {
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'rules', 'my-rule.md'), '# Rule', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(true);
+  });
+
+  // === preference-profile.md ===
+
+  it('includes preference-profile.md when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+  });
+
+  it('does not include preference-profile.md when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(false);
+  });
+
+  // === learning.json ===
+
+  it('includes learning.json when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{"model":"opus"}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+
+  it('does not include learning.json when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('learning.json'))).toBe(false);
+  });
+
+  // === combined ===
+
+  it('returns all four entries when all user-authored items exist', async () => {
+    await fs.mkdir(path.join(tmpDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'rules', 'my-rule.md'), '# Rule', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{"model":"opus"}', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(4);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(true);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(true);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+
+  it('returns only the items that actually exist (partial set)', async () => {
+    // Only preference-profile.md and learning.json — no shadow dirs
+    await fs.writeFile(path.join(tmpDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(2);
+    expect(result.some(s => s.includes('skill shadow'))).toBe(false);
+    expect(result.some(s => s.includes('rule shadow'))).toBe(false);
+    expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveDevflowDirCleanup — pure decision function for user-scope ~/.devflow/ cleanup
+//
+// Mirrors the resolveSecurityRemovalDecision pattern. No I/O inside the function;
+// the .action() caller performs all I/O and prompt rendering. Tests express intended
+// BEHAVIOR not implementation details (avoids PF-009 per-item coupling).
+// ---------------------------------------------------------------------------
+
+describe('resolveDevflowDirCleanup', () => {
+  const HOME = '/Users/testuser';
+  const VALID_DIR = `${HOME}/.devflow`;
+  const SOME_CONTENT = ['skill shadows (/Users/testuser/.devflow/skills)'];
+
+  // === local scope: never prompt ===
+  // The local-scope invariant: .devflow/ under a git root holds project data
+  // (memory, learning, docs). It must NEVER be a candidate for full rm.
+
+  it('returns artifacts-only for local scope regardless of isTTY or user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'local',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only for local scope even when non-interactive and no content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'local',
+      isTTY: false,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === user scope + interactive + user content → prompt ===
+
+  it('returns prompt for user scope when interactive and user content is present', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('prompt');
+  });
+
+  it('returns prompt for user scope with multiple user content items', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: ['skill shadows (...)', 'rule shadows (...)', 'learning.json'],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('prompt');
+  });
+
+  // === user scope + non-interactive → artifacts-only ===
+  // Non-interactive sessions must never prompt for or perform full-dir removal.
+
+  it('returns artifacts-only for user scope when non-interactive (isTTY=false)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only for user scope when non-interactive even with no user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === no user content → artifacts-only (no reason to prompt) ===
+
+  it('returns artifacts-only when user content is empty even if interactive', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === precondition guards — anomalous devflowDir → artifacts-only ===
+  // These guards protect the fs.rm(devflowDir, {recursive}) call from running
+  // on unexpected paths (DEVFLOW_DIR env override, misconfiguration, etc.).
+
+  it('returns artifacts-only when devflowDir is outside $HOME (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: '/tmp/.devflow',
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir basename is not .devflow (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: `${HOME}/custom-dir`,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir is the home directory itself (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: HOME,
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  it('returns artifacts-only when devflowDir is the filesystem root (precondition guard)', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: '/',
+      homeDir: HOME,
+    })).toBe('artifacts-only');
+  });
+
+  // === exhaustiveness — both outcomes are reachable ===
+
+  it('covers both return values (artifacts-only and prompt)', () => {
+    const artifactsOnly = resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: false,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    });
+    const prompt = resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    });
+    expect(artifactsOnly).toBe('artifacts-only');
+    expect(prompt).toBe('prompt');
   });
 });

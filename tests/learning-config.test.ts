@@ -5,6 +5,7 @@ import * as os from 'os';
 import {
   getConfigPath,
   readConfig,
+  readConfigIfPresent,
   writeConfig,
   updateFeature,
   isFeatureEnabled,
@@ -335,5 +336,70 @@ describe('writeConfig atomic pattern', () => {
     const read = await readConfig(tmpDir);
     expect(read.memory).toBe(false);
     expect(read.learning).toBe(false);
+  });
+});
+
+// ── readConfigIfPresent ───────────────────────────────────────────────────────
+
+describe('readConfigIfPresent', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cfg-present-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when config.json is absent (distinct from DEFAULT_CONFIG)', async () => {
+    // No .devflow/ dir or config.json
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when .devflow/ directory exists but config.json is absent', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns coerced config when config.json is present', async () => {
+    await writeConfig(tmpDir, { memory: false, learning: true, knowledge: false });
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.memory).toBe(false);
+    expect(result!.learning).toBe(true);
+    expect(result!.knowledge).toBe(false);
+  });
+
+  it('coalesces legacy "decisions" key into "learning" (same as readConfig)', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    const configPath = path.join(tmpDir, '.devflow', 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ decisions: false, learning: true, memory: true, knowledge: true }));
+    // decisions wins over learning (backward-compat coalescing in coerceConfig)
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.learning).toBe(false); // decisions: false wins
+  });
+
+  it('returns null for malformed JSON (not default config — truly absent/unreadable)', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    const configPath = path.join(tmpDir, '.devflow', 'config.json');
+    fs.writeFileSync(configPath, 'not-valid-json{{{');
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for non-object JSON (number, array)', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    const configPath = path.join(tmpDir, '.devflow', 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify([1, 2, 3]));
+    const result = await readConfigIfPresent(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('never throws even for unreadable paths (returns null)', async () => {
+    await expect(readConfigIfPresent('/nonexistent/project/path/xyz')).resolves.toBeNull();
   });
 });
