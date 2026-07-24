@@ -1,7 +1,7 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, applyNonSelectableCarry). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, resolveNonSelectableOptionalCarry, applyNonSelectableCarry, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, applyNonSelectableCarry, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, resolveNonSelectableOptionalCarry, applyNonSelectableCarry, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, removeProxyHooks, stripProxyEnv."
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts]
 created: 2026-07-13
@@ -83,7 +83,7 @@ export interface ShadowSkip {
 
 `init.ts` iterates `skippedShadows` and emits a warning per entry via an exhaustive switch on `ShadowSkipReason` (with `never` guard). Invalid shadows never cause init to exit non-zero. (applies ADR-010)
 
-### Manifest Snapshots: `knownFlags` and `knownPlugins`
+### Manifest Snapshots: `knownFlags`, `knownPlugins`, and `proxy`
 
 `manifest.ts` stores two registry snapshots at install time:
 
@@ -91,6 +91,8 @@ export interface ShadowSkip {
 - `ManifestData.knownPlugins?: string[]` — all `DEVFLOW_PLUGINS` names at the time of the last install
 
 Both are absent in pre-7b manifests; `readManifest` self-heals via a local `asStringArray` helper that requires all elements to pass `typeof e === 'string'` — a mixed/garbage array like `[1, null]` self-heals to `undefined`, not just non-arrays. These snapshots are consumed by the init seeding layer to detect newly added flags and plugins.
+
+`ManifestData.features.proxy: boolean` tracks whether external model routing was enabled at the last install. `readManifest` self-heals absent fields to `false` (applies ADR-014 self-heal idiom). The value written to the manifest is the **final resolved value after preflight** — a preflight failure forces `proxyEnabled = false` before the manifest write, so the manifest always reflects the actual settled state.
 
 ### RuleInstallOutcome
 
@@ -187,6 +189,10 @@ Before any copy: the skill source directory is stat-checked and throws if absent
 
 `installRuleFile(ruleName, devflowDir, rulesTarget)` uses this result. Rule source is always resolved internally: `path.join(rulesDir(), `${ruleName}.md`)`. The declared source is checked via `fs.access` and throws if absent — this check runs after shadow validation so a valid shadow bypasses it. Per-copy failures are isolated (avoids PF-009).
 
+### Proxy Preflight and `reapplyAgentMapping` Ordering (init.ts)
+
+When `proxyEnabled` is true entering the install apply pass, `runProxyPreflight` runs **before** the settings mutation block. A failed preflight emits a `p.log.warn` and forces `proxyEnabled = false` without aborting init (avoids PF-009). `reapplyAgentMapping` runs **after** the preflight block — this ordering is load-bearing: `reapplyAgentMapping` applies the dormancy invariant using the **final** `proxyEnabled` value (GPT model assignments materialize in agent frontmatter only while proxy is enabled). Running it before preflight resolves would leave GPT model lines in agent files after a preflight failure, breaking the dormancy contract. Deep proxy mechanics (lifecycle, preflight protocol, dormancy, frontmatter rewriting) live in the `external-model-routing` feature KB.
+
 ### Uninstall Scope
 
 `removeAllDevFlow(claudeDir, devflowScriptsDir, verbose)` (internal, not exported) removes:
@@ -196,21 +202,25 @@ Before any copy: the skill source directory is stat-checked and throws if absent
 - `devflowScriptsDir` (`{devflowDir}/scripts/`)
 - All skill variants for every skill in `getAllSkillNames() ∪ LEGACY_SKILL_NAMES` (prefixed, bare, and `devflow-{name}` variants)
 
+**`revertExternalAgents` runs before `removeAllDevFlow`** — strips GPT model lines from installed agent frontmatter before the agents directory is removed. This prevents orphaned GPT model assignments from persisting if the agents directory survives a partial flow. Non-fatal: a missing agents dir or revert error is silently ignored.
+
 After `removeAllDevFlow`, scope-specific logic handles the remainder of `devflowDir`. The scope decision lives in `resolveDevflowDirCleanup(opts)`, a **pure exported function** (mirrors `resolveSecurityRemovalDecision`) — no I/O, no side effects, fully testable.
 
 **Precondition guard** (inside `resolveDevflowDirCleanup`): four invariants must hold — `basename(devflowDir) === '.devflow'`, `devflowDir !== homeDir`, `devflowDir !== '/'`, and `devflowDir.startsWith(homeDir + sep)`. Any invariant failure → returns `'artifacts-only'` immediately (never throws in business logic; guards DEVFLOW_DIR env overrides and malformed paths).
 
 Returns `'artifacts-only'` or `'prompt'`:
 
-**Local scope** (`gitRoot/.devflow/`): `resolveDevflowDirCleanup` returns `'artifacts-only'` immediately (`scope !== 'user'`). Never removes project data (memory, learning, features, docs, config.json). Only `removeDevFlowInstallArtifacts` runs — removes `manifest.json`.
+**Local scope** (`gitRoot/.devflow/`): `resolveDevflowDirCleanup` returns `'artifacts-only'` immediately (`scope !== 'user'`). Never removes project data (memory, learning, features, docs, config.json). Only `removeDevFlowInstallArtifacts` runs — removes `manifest.json` and proxy artifacts.
 
 **User scope** (`~/.devflow/`): Calls `enumerateUserDevFlowContent(devflowDir)` first (before any removal — avoids reading files that no longer exist). Then calls `resolveDevflowDirCleanup`:
 - `'artifacts-only'` — non-interactive session, no user content, or precondition guard failure; runs `removeDevFlowInstallArtifacts` only.
 - `'prompt'` — interactive session with user content present; prompt states full scope (listed user-authored items, plus logs and install metadata). Confirm → `fs.rm(devflowDir, {recursive: true, force: true})`; decline OR cancel → falls through to `removeDevFlowInstallArtifacts` (clean end-state — never `process.exit()` here; applies ADR-003, avoids PF-014).
 
-`enumerateUserDevFlowContent(devflowDir)` checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, and `devflowDir/learning.json`. Returns a human-readable label for each that exists. Pure I/O — no side effects.
+`enumerateUserDevFlowContent(devflowDir)` checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, `devflowDir/learning.json`, and `devflowDir/agent-models.json` (agent model assignments). Returns a human-readable label for each that exists. Pure I/O — no side effects.
 
-`removeDevFlowInstallArtifacts(devflowDir, verbose)` removes only `manifest.json` (install state). Scripts are already gone via `removeAllDevFlow`.
+`removeDevFlowInstallArtifacts(devflowDir, verbose)` removes `manifest.json` (install state) plus proxy install artifacts non-fatally: `proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` (directory), and `logs/proxy.log`. Before removing `proxy.pid`, it reads the PID and checks process existence via `process.kill(pid, 0)` — if the relay is still running, a warning is emitted with a manual kill hint. **The relay is never killed by uninstall** — informational only. Scripts are already gone via `removeAllDevFlow`. Per-artifact failures are silently ignored (avoids PF-009).
+
+Settings cleanup in uninstall (the settings read-modify-write pass) also strips proxy hooks via `removeProxyHooks(parsedSettings)` (parse/mutate/serialize pattern) and `stripProxyEnv(settingsContent)` (removes `ANTHROPIC_BASE_URL` env override, string-space pattern-guarded).
 
 ### Init Seeding Layer (`init-seed.ts`)
 
@@ -222,7 +232,7 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 
 **Feature seeding** (`resolveSeedFeatures`):
 - `memory / learning / knowledge`: projectConfig wins when present (ADR-001 — config.json is the source of truth); falls back to manifest; then registry defaults (all true).
-- `ambient / hud / rules`: manifest is the source; registry defaults when manifest absent.
+- `ambient / hud / rules / proxy`: manifest is the source; registry defaults when manifest absent. `proxy` defaults to `false` in `FEATURE_DEFAULTS` — it is Advanced-only and never part of Recommended defaults. Because proxy seeds from the manifest group (not config.json), `--reset` null-seeds the manifest and correctly resets proxy to `false`.
 
 **Flag seeding** (`resolveSeedFlags`):
 - Fresh install (no manifest): all default-ON registry flags.
@@ -240,7 +250,7 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 
 **viewMode resolution** (in `resolveInitSeed`): `resolveExistingViewMode(settingsSnapshot) ?? seedManifest?.features.viewMode ?? 'default'`. `resolveExistingViewMode` returns non-default values only ('focus' or 'verbose') — 'default' is returned as undefined so `??` falls through. `resolveFinalViewMode(current, selected, explicit)` resolves the final value to write: explicit CLI flag wins; otherwise a non-default current setting wins; otherwise the selected prompt value.
 
-**CLI toggles** (`applyCliToggles`): Applies explicit CLI feature flags (e.g. `--no-learning`) on top of the resolved seed. Undefined means "not specified" — seed value is kept.
+**CLI toggles** (`applyCliToggles`): Applies explicit CLI feature flags (e.g. `--no-learning`, `--proxy`, `--no-proxy`) on top of the resolved seed. Undefined means "not specified" — seed value is kept. All `FeatureSeed` fields including `proxy` are covered.
 
 **`--reset --plugin` rejection**: Combining factory reset with a partial install is rejected as conflicting intent; init exits with an error before reaching the seed resolution.
 
@@ -294,6 +304,8 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 - **Restoring `pluginsDir` to `installAllRules` or `installRuleFile`** — rule source is exclusively `rulesDir()` (flat `src/assets/rules/`); there is no per-plugin subdirectory.
 - **Combining `--reset` with `--plugin`** — factory reset and partial install are mutually exclusive; init rejects the combination before seeding.
 - **Auto-adopting default-OFF flags in `resolveSeedFlags`** — only default-ON flags are auto-adopted when they are new (∉ knownFlags). Default-OFF flags must always be explicitly user-selected.
+- **Killing the proxy relay during uninstall** — the relay is user-session infrastructure; uninstall only removes the artifacts and emits an informational warning if the process is still running. Killing it would interrupt an active Claude Code session.
+- **Running `reapplyAgentMapping` before proxy preflight resolves** — `reapplyAgentMapping` must use the final `proxyEnabled` value (after preflight may force it off). Running it earlier would materialize GPT model lines in agent frontmatter even after a preflight failure, breaking the dormancy invariant.
 
 ## Gotchas
 
@@ -317,29 +329,33 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 - **`asStringArray` in `readManifest` validates element types, not just array shape.** A value like `[1, null, "valid"]` self-heals to `undefined` — the entire array must pass `every(e => typeof e === 'string')`. This means a partially-corrupted snapshot is treated as absent (safe) rather than partially trusted (unsafe).
 
+- **`proxy` seeds from the manifest group, not the config group.** Unlike `memory`/`learning`/`knowledge` (where config.json wins per ADR-001), `proxy` follows the same seeding path as `ambient`/`hud`/`rules` — manifest is authoritative, then registry default (`false`). Do not gate `proxy` on `readConfigIfPresent`.
+
 ## Key Files
 
 - `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; orphan sweep on full install
 - `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`
 - `src/targets/claude-code/legacy.ts` — `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
-- `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; calls `installViaFileCopy`; exhaustive `ShadowSkipReason` switch with `never` guard
-- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `resolveNonSelectableOptionalCarry`, `applyNonSelectableCarry`, `applyCliToggles`, `FEATURE_DEFAULTS`
-- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (internal), `enumerateUserDevFlowContent`, `removeDevFlowInstallArtifacts`, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup`
+- `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; calls `installViaFileCopy`; proxy preflight block + `reapplyAgentMapping` call (ordering load-bearing); proxy hooks + env in settings mutation pass; exhaustive `ShadowSkipReason` switch with `never` guard
+- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures` (proxy in manifest group), `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `resolveNonSelectableOptionalCarry`, `applyNonSelectableCarry`, `applyCliToggles` (proxy toggle), `FEATURE_DEFAULTS` (proxy: false)
+- `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (internal), `enumerateUserDevFlowContent` (now includes agent-models.json), `removeDevFlowInstallArtifacts` (proxy artifacts + relay PID check), `revertExternalAgents` (before removeAllDevFlow), `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup`; settings cleanup strips proxy hooks + env
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow` (3-tier), `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
 - `src/cli/commands/skills.ts` — `skillsCommand` positional dispatch, `buildSkillShadowTag`, `hasShadow`
-- `src/core/manifest.ts` — `ManifestData` (with `knownPlugins` and `features.knownFlags`), `readManifest` (self-heals snapshots via `asStringArray`), `writeManifest`, `syncManifestFeature`, `resolvePluginList`
+- `src/core/manifest.ts` — `ManifestData` (with `knownPlugins`, `features.knownFlags`, `features.proxy`), `readManifest` (self-heals snapshots via `asStringArray`; proxy absent→false), `writeManifest`, `syncManifestFeature`, `resolvePluginList`
 - `src/core/flags.ts` — `FLAG_REGISTRY`, `resolveExistingViewMode`, `resolveFinalViewMode`, `applyFlags`, `stripFlags`, `getDefaultFlags`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
 - `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `partitionSelectablePlugins`, `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`
 
 ## Related
 
-- ADR-001: Config-only feature gates — governs `readConfigIfPresent` as the init-seed source for memory/learning/knowledge; config.json is the source of truth, manifest is secondary (applies ADR-001)
+- ADR-001: Config-only feature gates — governs `readConfigIfPresent` as the init-seed source for memory/learning/knowledge; config.json is the source of truth, manifest is secondary. Note: proxy is NOT in this group — it seeds from the manifest like ambient/hud/rules (applies ADR-001)
 - ADR-003: End-state not transition — governs removals and legacy cleanup; cancel/decline on uninstall falls through to `removeDevFlowInstallArtifacts` rather than `process.exit()` so cleanup always runs (applies ADR-003)
 - ADR-010: Shadow tolerance — governs `installViaFileCopy` as sole install path and warn-and-install-source (not hard-fail) for invalid shadows; hard-error policy applies only to declared Devflow sources (applies ADR-010)
 - ADR-013: Core/adapter boundary — governs `init-seed.ts` living in `src/cli/commands/` (CLI-init-specific logic) rather than `src/core/` (applies ADR-013)
-- PF-009: Per-item failure isolation in rule/skill fan-out — per-rule try/catch inside `installRuleFile` ensures one failing rule copy does not abort the `Promise.all`; `rules --enable` wraps `installAllRules` in try/catch so a hard-error throw surfaces as a clean CLI failure rather than an unhandled rejection after the rules dir was wiped (avoids PF-009)
+- ADR-014: State-aware re-init — governs `readManifest` self-heal idiom (`proxy` absent→false) and the `knownFlags`/`knownPlugins` snapshot pattern for detecting newly added registry entries across upgrades (applies ADR-014)
+- PF-009: Per-item failure isolation in rule/skill fan-out — per-rule try/catch inside `installRuleFile`; `rules --enable` wraps `installAllRules` in try/catch; proxy preflight failure warns + forces off without aborting init; proxy artifact removal is per-item non-fatal (avoids PF-009)
 - PF-012: LEGACY_* lists deletion-risk — lists split between `src/targets/claude-code/legacy.ts` (skill/agent) and `src/core/plugins.ts` (plugin/command/rule); both must be retained across upgrades (avoids PF-012)
 - PF-014: process.exit() skips cleanup — governs the cancel/decline path in user-scope uninstall; `removeAllDevFlow` has already run by the time the full-cleanup prompt fires, so `removeDevFlowInstallArtifacts` must execute on every non-confirm path (avoids PF-014)
+- Feature knowledge: `external-model-routing` — deep proxy mechanics (lifecycle, preflight protocol, ensure-proxy hook, per-agent model mapping, dormancy invariant, agent frontmatter rewriting, TUI); `installer-shadowing` covers only proxy's footprint in the install/uninstall pipeline and init seeding
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (`ensureDevflowGitignore` in `post-install.ts`)
