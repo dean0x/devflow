@@ -1652,6 +1652,24 @@ describe('ensure-proxy behavioral tests', () => {
     expect(stdout).toBe('');
   });
 
+  it('exits 0 silently when proxy.json contains malformed JSON (TEST-6)', () => {
+    // Regression: a corrupted proxy.json (partial write, manual edit) must never
+    // crash the hook or emit any output. json_field_file returns the default value
+    // ("false") when parsing fails, so PROXY_ENABLED!="true" → early silent exit.
+    fs.writeFileSync(
+      path.join(homeDir, '.devflow', 'proxy.json'),
+      'not-json{{{',
+    );
+    const result = spawnSync('bash', [PROXY_HOOK], {
+      input: JSON.stringify(SESSION_INPUT),
+      env: { ...process.env, HOME: homeDir },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+  });
+
   it('exits 0 silently when proxy is disabled', () => {
     writeProxyJson({ enabled: false });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
@@ -1819,6 +1837,58 @@ describe('ensure-proxy behavioral tests', () => {
         expect(stdout).toBe('');
       } finally {
         fs.rmSync(epTmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('exits 0 silently on SessionStart when port is UP and curl is absent — no spurious warning (CONS-4)', () => {
+      // Regression test: before the fix, the hook called curl unconditionally; if curl was
+      // absent from PATH, HEALTH_BODY="" fell through to the "*)" branch and emitted
+      // a spurious "port occupied by another application" warning even when the relay was ours.
+      // After the fix: "command -v curl" guards the health check; absent curl → assume ours,
+      // exit 0 with no output.
+      //
+      // We create a controlled shadow bin directory that contains all commands the hook
+      // needs for the SessionStart + port-UP path (dirname, node/jq) but deliberately
+      // omits curl. Using PATH=shadowBin:/bin ensures curl is not findable while keeping
+      // /bin builtins (cat, mkdir, date, mv, rm, sleep) available.
+
+      const shadowBin = fs.mkdtempSync(path.join(os.tmpdir(), 'nocurl-bin-'));
+      try {
+        // Symlink dirname — needed for SCRIPT_DIR resolution (may be in /usr/bin, not /bin)
+        const dirnameR = spawnSync('which', ['dirname'], { encoding: 'utf-8' });
+        const dirnamePath = dirnameR.stdout.trim();
+        if (dirnamePath) {
+          try { fs.symlinkSync(dirnamePath, path.join(shadowBin, 'dirname')); } catch { /* ok */ }
+        }
+
+        // Symlink node or jq — needed for json-parse to be available (one is sufficient)
+        const nodeR = spawnSync('which', ['node'], { encoding: 'utf-8' });
+        const nodePath = nodeR.stdout.trim();
+        if (nodePath) {
+          try { fs.symlinkSync(nodePath, path.join(shadowBin, 'node')); } catch { /* ok */ }
+        } else {
+          const jqR = spawnSync('which', ['jq'], { encoding: 'utf-8' });
+          const jqPath = jqR.stdout.trim();
+          if (jqPath) {
+            try { fs.symlinkSync(jqPath, path.join(shadowBin, 'jq')); } catch { /* ok */ }
+          }
+        }
+
+        // Deliberately DO NOT symlink curl → "command -v curl" will fail inside the hook
+
+        writeProxyJson({ enabled: true, port: listenPort });
+
+        const result = spawnSync('bash', [PROXY_HOOK], {
+          input: JSON.stringify(SESSION_INPUT),
+          // PATH: shadowBin first (has dirname, node, no curl), then /bin for cat/mkdir/date
+          env: { ...process.env, HOME: homeDir, PATH: `${shadowBin}:/bin` },
+          encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(''); // no spurious "port occupied" warning
+        expect(result.stderr).toBe('');
+      } finally {
+        fs.rmSync(shadowBin, { recursive: true, force: true });
       }
     });
   });

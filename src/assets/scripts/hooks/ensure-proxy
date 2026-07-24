@@ -6,7 +6,11 @@
 # NOT project-scoped: proxy state lives at $DEVFLOW_DIR/proxy.json (user-scope).
 #
 # SessionStart:  probe port → if DOWN attempt spawn → inject additionalContext warning if still down
-# UserPromptSubmit: probe port → if UP fast exit; if DOWN silently log (SessionStart warned already)
+# UserPromptSubmit: fast exit (both port-up and port-down) — silent; SessionStart handles all warnings
+#
+# Performance: binPath/configPath reads, log mkdir/stat, and CWD extraction are all deferred
+# to SessionStart-only branches so the UserPromptSubmit hot path pays zero subprocess cost
+# beyond reading enabled+port from proxy.json (already done for the enabled guard).
 #
 # Branding: "subswitch" is an internal identifier (health check body match, SUBSWITCH_CONFIG env var,
 # spawn args); it MUST NOT appear in user-visible strings or additionalContext messages.
@@ -25,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/hook-bootstrap" "ensure-proxy"
 
-source "$SCRIPT_DIR/json-parse" || { exit 0; }
+source "$SCRIPT_DIR/json-parse" || { echo "ensure-proxy: failed to source json-parse" >&2; exit 0; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -69,18 +73,40 @@ case "$PROXY_PORT_RAW" in
     ;;
 esac
 
-PROXY_BIN=$(json_field_file "$PROXY_STATE_FILE" "binPath" "")
-PROXY_CONFIG=$(json_field_file "$PROXY_STATE_FILE" "configPath" "")
-dbg "PROXY_PORT=$PROXY_PORT BIN=$PROXY_BIN CONFIG=$PROXY_CONFIG"
+# ── UserPromptSubmit fast path ─────────────────────────────────────────────────
+# Both port-up and port-down exits are silent on UserPromptSubmit — the TCP probe
+# itself is skipped because neither branch produces any output. SessionStart already
+# warned the model if the relay was down; spamming additionalContext every prompt
+# would pollute context with identical warnings.
+# binPath/configPath reads, log mkdir/stat, and CWD extraction are deferred to
+# SessionStart-only branches below — keeping them here costs two json_field_file
+# subprocesses + mkdir + stat on EVERY prompt when the proxy is enabled.
+if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
+  dbg "UserPromptSubmit: fast exit (SessionStart handles all state changes)"
+  exit 0
+fi
 
-# ── Log setup ──────────────────────────────────────────────────────────────────
+# ── CWD for debug tracing (SessionStart only, gated behind debug flag) ─────────
+# json_field spawns a subprocess — only worthwhile when debug tracing is active.
+if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then
+  _CWD=$(printf '%s' "$INPUT" | json_field "cwd" "" 2>/dev/null || true)
+  if [ -n "$_CWD" ]; then
+    devflow_debug_set_cwd "$_CWD" 2>/dev/null || true
+  fi
+fi
+
+# ── Log setup (SessionStart only) ──────────────────────────────────────────────
 LOG_DIR="$DEVFLOW_DIR/logs"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 LOG_FILE="$LOG_DIR/proxy.log"
 
-# 2MB tail-guard (matches hook-log-init pattern)
-# Existence guard is required: the wc -c fallback uses a shell redirect whose
-# failure is emitted by bash itself (before wc starts), bypassing 2>/dev/null.
+# Size guard: 2MB max → truncate to 1MB tail (matches hook-log-init guard pattern).
+# Sharing hook-log-init is not feasible here: hook-log-init requires $CWD and targets
+# the per-project log path; ensure-proxy uses the user-scope $DEVFLOW_DIR/logs path.
+# The existence guard is required: wc -c uses a shell redirect whose failure is emitted
+# by bash itself (before wc starts), bypassing 2>/dev/null.
+_LOG_MAX_BYTES=2097152
+_LOG_TAIL_BYTES=1048576
 _LOG_SIZE=0
 if [ -f "$LOG_FILE" ]; then
   _LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) || \
@@ -89,9 +115,9 @@ if [ -f "$LOG_FILE" ]; then
   _LOG_SIZE=0
 fi
 _LOG_SIZE="${_LOG_SIZE:-0}"
-if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt 2097152 ]; then
+if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt "$_LOG_MAX_BYTES" ]; then
   _LTMP="$LOG_FILE.tmp.$$"
-  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && \
+  tail -c "$_LOG_TAIL_BYTES" "$LOG_FILE" > "$_LTMP" 2>/dev/null && \
     mv "$_LTMP" "$LOG_FILE" 2>/dev/null || \
     rm -f "$_LTMP" 2>/dev/null || true
 fi
@@ -99,13 +125,6 @@ fi
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [ensure-proxy] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
-
-# ── CWD for debug tracing ──────────────────────────────────────────────────────
-# Non-gating: CWD is only used for devflow debug traces; proxy doesn't need it.
-_CWD=$(printf '%s' "$INPUT" | json_field "cwd" "" 2>/dev/null || true)
-if [ -n "$_CWD" ]; then
-  devflow_debug_set_cwd "$_CWD" 2>/dev/null || true
-fi
 
 # ── TCP probe (bash built-in, no nc/curl, Bash 3.2-safe) ──────────────────────
 # /dev/tcp is a bash built-in; the exec runs in a subshell so failures don't
@@ -117,44 +136,46 @@ proxy_tcp_up() {
   return $?
 }
 
-# ── Main logic ─────────────────────────────────────────────────────────────────
+# ── Main logic: SessionStart ───────────────────────────────────────────────────
 if proxy_tcp_up "$PROXY_PORT"; then
   dbg "port $PROXY_PORT up"
 
-  if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
-    # Fast-exit: relay is up; model already has context from SessionStart
-    log "UserPromptSubmit: port $PROXY_PORT up — ok"
-    exit 0
+  # SessionStart: verify identity to avoid adopting a foreign service on this port.
+  # Guard: curl may be absent on minimal hosts; when absent, assume the relay is ours
+  # (the CLI --status provides the authoritative identity check; this hook is advisory).
+  if command -v curl >/dev/null 2>&1; then
+    HEALTH_BODY=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_PORT}/__subswitch/health" 2>/dev/null || true)
+    dbg "health_body=$HEALTH_BODY"
+    case "$HEALTH_BODY" in
+      # Internal check: 'subswitch' is the package name — acceptable in hook code and logs, not in user output
+      *'"name":"subswitch"'*)
+        log "SessionStart: port $PROXY_PORT healthy (correct identity)"
+        exit 0
+        ;;
+      *)
+        log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
+        CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
+        json_session_output "$CONTEXT"
+        exit 0
+        ;;
+    esac
   fi
 
-  # SessionStart: verify identity to avoid adopting a foreign service on this port
-  HEALTH_BODY=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_PORT}/__subswitch/health" 2>/dev/null || true)
-  dbg "health_body=$HEALTH_BODY"
-  case "$HEALTH_BODY" in
-    # Internal check: 'subswitch' is the package name — acceptable in hook code and logs, not in user output
-    *'"name":"subswitch"'*)
-      log "SessionStart: port $PROXY_PORT healthy (correct identity)"
-      exit 0
-      ;;
-    *)
-      log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
-      CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
-      json_session_output "$CONTEXT"
-      exit 0
-      ;;
-  esac
+  # curl absent — assume the relay is ours (no warning; CLI --status is the authoritative check)
+  log "SessionStart: port $PROXY_PORT up (curl absent — assuming ours)"
+  exit 0
 fi
 
 # Port NOT accepting connections
 
-if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
-  # Silent: SessionStart already warned the model; avoid spamming context on every prompt
-  log "UserPromptSubmit: port $PROXY_PORT down — silent exit"
-  exit 0
-fi
-
 # ── SessionStart: attempt to start the relay ───────────────────────────────────
 log "SessionStart: port $PROXY_PORT down — attempting start"
+
+# Read binPath and configPath only here — deferred from the top-level block so that
+# UserPromptSubmit and SessionStart-port-up paths pay zero json_field_file cost.
+PROXY_BIN=$(json_field_file "$PROXY_STATE_FILE" "binPath" "")
+PROXY_CONFIG=$(json_field_file "$PROXY_STATE_FILE" "configPath" "")
+dbg "PROXY_BIN=$PROXY_BIN PROXY_CONFIG=$PROXY_CONFIG"
 
 # Validate prerequisites before spawning
 if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
