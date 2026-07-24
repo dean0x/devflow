@@ -5,7 +5,7 @@ description: "Use when working on the proxy lifecycle (enable/disable/status/pre
 category: architecture
 directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-25
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -32,31 +32,36 @@ The routing runtime is an internal package (`subswitch@0.1.0`, exact-pinned in `
 
 ### Enable path (crash-safe)
 
-1. Write `proxy-routing.json` with all external model IDs.
-2. Run `runProxyPreflight()` (5 ordered checks — see Preflight section).
-3. On success: write `proxy.json` `enabled:true`, spawn relay with bounded wait.
-4. Spawn wait: ≤50×100ms probe loop (5s maximum).
-5. If relay never accepts: write `proxy.json` `enabled:false` (rollback), return error.
-6. Settings pass: `removeProxyHooks` + `_stripProxyEnvFromObject` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls in one atomic JSON write** to `~/.claude/settings.json`.
+1. Read `proxy.json` for the remembered port; `resolvePort(portOption, priorPort)` picks the effective port. `--port` has **no commander default** — omission leaves `portOption` as `undefined` and the remembered port from `proxy.json` wins (TS-1 fix).
+2. Write `proxy-routing.json` with all external model IDs.
+3. Run `runProxyPreflight()` (5 ordered checks — see Preflight section).
+4. On success: write `proxy.json` `enabled:true`.
+5. Spawn relay via `spawnRelayAndWaitForPort()` (exported): bounded ≤50×100ms probe loop (5s max). If relay never accepts, write `proxy.json` `enabled:false` (rollback), return error.
+6. Settings pass via `applyEnableSettingsPass()` (internal named function, not exported): `removeProxyHooks` + `_stripProxyEnvFromObject(s, port)` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls, then one atomic write** to `~/.claude/settings.json`.
 7. Sync manifest.
 8. `reapplyAgentMapping({ proxyEnabled: true })` — materializes GPT model entries into agent frontmatter.
+
+Hard failures at any step set `process.exitCode = 1` and return — never `process.exit()` (avoids PF-014).
 
 ### Disable path (never kills relay)
 
 The relay process is intentionally left running on `--disable` for any live Claude Code sessions. The disable path:
-1. `applyDisableToSettings(parsedSettings)` — removes hooks AND strips `ANTHROPIC_BASE_URL` (see invariant below).
-2. Writes `proxy.json` `enabled:false` — **keeps** `port`, `binPath`, `configPath`, `models` for the next enable.
-3. Syncs manifest to `proxy: false`.
-4. `revertExternalAgents()` — rewrites installed agent files to shipped default models.
-5. Emits a note with the relay PID and a manual `kill` command; **never calls `kill` programmatically**.
+1. Read `proxy.json` first to determine `managedPort` for the URL strip.
+2. `applyDisableToSettings(parsedSettings, managedPort)` — removes hooks AND strips `ANTHROPIC_BASE_URL` (see invariant below).
+3. Writes `proxy.json` `enabled:false` — **keeps** `port`, `binPath`, `configPath`, `models` for the next enable.
+4. Syncs manifest to `proxy: false`.
+5. `revertExternalAgents()` — rewrites installed agent files to shipped default models.
+6. Emits relay PID info with kill hint **only after cross-checking relay identity** (TCP probe + health check confirms `isOurRelayBody` before printing). Never calls `kill` programmatically.
+
+Hard failures (e.g., malformed `settings.json`) set `process.exitCode = 1` and return early.
 
 ### `applyDisableToSettings` — both-operations invariant
 
 ```typescript
-// CORRECT — both operations run unconditionally:
-export function applyDisableToSettings(settings: Settings): boolean {
+// CORRECT — both operations run unconditionally; managedPort scopes the URL strip:
+export function applyDisableToSettings(settings: Settings, managedPort: number): boolean {
   const removedHooks = removeProxyHooks(settings);
-  const strippedEnv = _stripProxyEnvFromObject(settings);
+  const strippedEnv = _stripProxyEnvFromObject(settings, managedPort);
   return removedHooks || strippedEnv;
 }
 ```
@@ -72,16 +77,33 @@ The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvF
    └── if accepting: health check → adopted=true | port-conflict Err
 ④ readSettingsJson parseable; ANTHROPIC_BASE_URL not 'foreign'; API key warn (non-fatal)
 ⑤ spawnDoctor(binPath, SUBSWITCH_CONFIG=configPath, 10s) — doctor exits 0
+   └── timeout: SIGTERM → 2s grace → SIGKILL (grace timer unref'd)
 ```
 
-All five are injectable via `ProxyPreflightDeps`, making every branch unit-testable without filesystem access.
+All five are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDeps(opts)`** (exported) builds the production implementation and is shared between `runEnable` and `init.ts` — inline copies were deleted. Key option: `swallowSettingsReadError: true` for init.ts (which writes `settings.json` itself); `false` for `runEnable` (propagates read errors to the user).
+
+### Exported seams in proxy.ts
+
+| Export | Purpose |
+|--------|---------|
+| `buildRealPreflightDeps(opts)` | Production `ProxyPreflightDeps` factory — shared by `runEnable` and `init.ts` |
+| `spawnRelayAndWaitForPort(...)` | Spawn relay + bounded 50×100ms TCP wait; injectable via `SpawnAndWaitDeps` |
+| `resolvePort(portOption, priorPort)` | Port resolution with remembered-port fallback |
+| `isOurRelayBody(body)` | Health-check identity check (`name === 'subswitch'`) |
+| `applyProxyEnv`, `stripProxyEnv` | Settings JSON string transforms (pure, no mutation) |
+| `applyDisableToSettings` | Unconditional hooks-remove + URL-strip on parsed Settings object |
+| `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks` | Hook mutation helpers |
+| `runProxyPreflight`, `ProxyPreflightDeps`, `PreflightResult` | Preflight contract |
+| `SpawnAndWaitDeps`, `SpawnRelayResult`, `BuildRealPreflightDepsOptions` | Injectable interfaces |
+| `readProxyEnvState` | Returns `'ours'|'ours-other-port'|'foreign'|'absent'` for `--status` display |
+
+Internal named functions (not exported): `applyEnableSettingsPass`, `resolveProcessState`, `formatProcessLine`, `readPidFile`, `PROBE_TIMEOUT_MS`, `DOCTOR_TIMEOUT_MS`, `RELAY_SPAWN_*` constants.
 
 ## ensure-proxy Hook Contract
 
 The hook is registered on **both** `SessionStart` and `UserPromptSubmit` with a 15-second timeout. A single bash script handles both events:
 
 ```bash
-# Event detection — UUIDs cannot contain '"prompt"' with both quotes
 HOOK_EVENT="SessionStart"
 case "$INPUT" in
   *'"prompt"'*) HOOK_EVENT="UserPromptSubmit" ;;
@@ -90,113 +112,149 @@ esac
 
 | Event | Port state | Behavior |
 |-------|-----------|---------|
-| UserPromptSubmit | UP | exit 0, no output (fast path) |
-| UserPromptSubmit | DOWN | exit 0, no output (silent — SessionStart already warned) |
+| UserPromptSubmit | any | **immediate exit 0** (before TCP probe — silent; SessionStart handles all state) |
 | SessionStart | UP + correct identity | exit 0, no output |
 | SessionStart | UP + wrong identity | exit 0 + `json_session_output` warning ("port occupied by another application") |
 | SessionStart | DOWN + missing bin/config | exit 0 + `json_session_output` warning ("relay binary not found" / "routing config not found") |
-| SessionStart | DOWN + prerequisites ok | acquire spawn lock → nohup spawn → wait 80×0.1s → exit 0 [+warning if never up] |
+| SessionStart | DOWN + prerequisites ok | acquire spawn lock → nohup spawn → wait 80×0.1s = 8s → exit 0 [+warning if never up] |
 
-The hook is **not git-gated** (unlike `preamble` and `session-start-orchestrator`). Proxy is a user-scope global feature — no `source git-marker` check.
+**UserPromptSubmit fast exit happens before any TCP probe or log I/O** — enabled/port check from `proxy.json` is the only work done, then the hook exits. This keeps the hot path at near-zero subprocess cost.
 
-Port value is digit-validated via `case` pattern before interpolation into `/dev/tcp` and context strings (avoids PF-001). The spawn lock (`$DEVFLOW_DIR/.proxy-spawn.lock`, 2s acquire timeout, 30s stale break) uses the shared `learning-lock` helper to prevent concurrent sessions from double-spawning the relay. `SUBSWITCH_CONFIG` is exported into the relay's environment before the `nohup` spawn.
+**binPath/configPath are read only in the SessionStart-down branch** — deferred so the enabled+port check path (UserPromptSubmit and SessionStart-port-up) pays zero additional json_field_file cost.
+
+**curl is guarded** with `command -v curl >/dev/null 2>&1` before the health-check identity call. When curl is absent, the hook assumes the relay is ours and exits 0 (no spurious warning). The CLI `--status` command is the authoritative identity check.
+
+**json-parse source failure** emits a named stderr diagnostic (`echo "ensure-proxy: failed to source json-parse" >&2`) and exits 0 — previously silent.
+
+**Log guard literals are named**: `_LOG_MAX_BYTES=2097152` (2MB) and `_LOG_TAIL_BYTES=1048576` (1MB) are named variables, matching the hook-log-init guard pattern.
+
+The hook is **not git-gated** (unlike `preamble` and `session-start-orchestrator`). Proxy is a user-scope global feature.
+
+The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. This difference is intentional: the hook fires inside a 15-second platform timeout and needs a wider cold-start window; the CLI user is waiting interactively.
 
 ## Mapping Engine (agent-models.json)
 
 `~/.devflow/agent-models.json` is a **deviations-only** mapping: agents that use their shipped defaults are omitted entirely. There is **no `previousModel` field** — shipped defaults are read live from `src/assets/agents/` source files at convergence time via `loadShippedDefaults()`.
 
-### Dormancy semantics
+### isDormantGptModel — single dormancy predicate
 
-A mapping entry whose `model` is a GPT ID (in `externalModelIds()`) materializes into installed agent frontmatter **only while the proxy is enabled**. When the proxy is off, `resolveEffective()` returns the shipped default instead. The mapping entry itself is preserved on disk.
-
-Effort is orthogonal to dormancy — it always applies regardless of proxy state.
+`isDormantGptModel(model, proxyEnabled)` is exported from `src/core/external-models.ts` (leaf module, no project imports — avoids cycles). It is the **single source of truth** for the dormancy predicate, consumed by:
+- `resolveEffective()` in agent-models.ts
+- `buildRow()` in agents-view/state.ts
+- `buildListRows()` and the `--set` warning in agents.ts
 
 ```typescript
-// resolveEffective — pure function, no I/O
-function resolveEffective(agentName, mapping, shippedDefaults, proxyEnabled): EffectiveConfig {
-  const entry = mapping.agents[agentName];
-  const isGpt = entry?.model !== undefined && gptIds.includes(entry.model);
-
-  let model: string | undefined;
-  if (isGpt && !proxyEnabled) {
-    model = shippedDefaults[agentName];  // dormant — use shipped default
-  } else {
-    model = entry?.model ?? shippedDefaults[agentName];
-  }
-  // effort always from entry regardless of proxy state:
-  return { model, effort: entry?.effort };
+// Returns true when model is a GPT ID AND proxy is disabled (entry is dormant).
+export function isDormantGptModel(model: string | undefined, proxyEnabled: boolean): boolean {
+  if (model === undefined) return false;
+  return EXTERNAL_GPT_MODELS.some(m => m.id === model) && !proxyEnabled;
 }
 ```
 
-### `reapplyAgentMapping` idempotent convergence
+Callers that previously duplicated this check inline have been replaced with this export.
 
-Walks ALL installed agent files (registry names ∪ mapping keys) and calls `rewriteAgentFrontmatter()` for each. `RewriteResult.changed` is a byte-level check — files already in the desired state are untouched. Missing installed files are recorded as `skippedMissing` (not errors). Malformed frontmatter generates a warning and skips.
+### Dormancy semantics
 
-**Must run AFTER preflight resolves the final `proxyEnabled` value.** In `devflow init`, the proxy preflight block can force `proxyEnabled=false` on failure. If `reapplyAgentMapping` runs before that resolution, a preflight failure leaves GPT model identifiers written into agent frontmatter files (dormancy violation — GPT lines materialize for a disabled proxy).
+A mapping entry whose `model` is a GPT ID materializes into installed agent frontmatter **only while the proxy is enabled**. When the proxy is off, `resolveEffective()` returns the shipped default instead. The mapping entry itself is preserved on disk.
+
+Effort is orthogonal to dormancy — it always applies regardless of proxy state.
+
+### `loadShippedDefaults` and `reapplyAgentMapping` — parallel execution
+
+Both now use `Promise.all` for parallel I/O:
+- `loadShippedDefaults()` reads all agent `.md` files from `agentsDir()` concurrently.
+- `reapplyAgentMapping()` processes all agent files concurrently via `Promise.all` over the agent name list.
+
+Warning collection is **deterministic**: each parallel task returns its local warnings alongside its bucket result; the outer loop aggregates in `allNamesList` insertion order. Warnings are emitted to `opts.onWarning` immediately for live feedback and also collected for the returned `ReapplyResult.warnings` array.
+
+**init.ts guard**: `reapplyAgentMapping` is skipped when mapping is empty AND proxy is off (optimization: all agents already have shipped defaults from the file copy; skips ~34 reads that would produce zero writes). Callers on the disable/revert path always run the full walk.
+
+**Must run AFTER preflight resolves the final `proxyEnabled` value.** In `devflow init`, the proxy preflight block can force `proxyEnabled=false` on failure. Running `reapplyAgentMapping` earlier would leave GPT model identifiers in agent frontmatter files when preflight fails (dormancy violation).
 
 ## agent-frontmatter Surgical Rewrite Invariants
 
-`rewriteAgentFrontmatter()` in `src/core/agent-frontmatter.ts` is a pure, zero-I/O function. Key invariants that callers depend on:
+`rewriteAgentFrontmatter()` in `src/core/agent-frontmatter.ts` is a pure, zero-I/O function. Key invariants:
 
-- **First-block-scoped**: the regex `FM_RE = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/` matches only the first `---...---` block. A `model:` or `effort:` line in the document body is never touched.
-- **CRLF-safe**: EOL style (`\r\n` or `\n`) is detected from the opening delimiter line and threaded through all replacements. Output preserves the file's original line-ending style byte-for-byte.
+- **First-block-scoped**: `FM_RE = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/` matches only the first `---...---` block. A `model:` or `effort:` line in the document body is never touched.
+- **CRLF-safe**: EOL style (`\r\n` or `\n`) is detected from the opening delimiter line and threaded through all replacements.
 - **Body bytes untouched**: `afterClose` (everything after the closing `---`) is appended unchanged.
-- **`RewriteResult.changed`** is a byte-level comparison (`newContent !== content`), not a semantic one. A no-op rewrite returns `changed: false` — callers use this for cheap idempotency checks.
+- **`RewriteResult.changed`** is a byte-level comparison (`newContent !== content`), not a semantic one.
 
-For error returns (`no-frontmatter`, `unterminated-frontmatter`), `reapplyAgentMapping` warns and records the agent as `skippedMissing`.
+**D-EFR-1: Surgical effort-line removal** (`effort: null`): removes only the matched effort line plus exactly one adjacent EOL — no global `\n{2,}` collapse. The adjacent EOL consumed depends on position:
+- effort is last line → swallow the preceding `\r?\n` (no trailing EOL in fmBody)
+- effort is mid-body → swallow the trailing `\r?\n` after the line
+- effort is first and only line → clear fmBody to `''`
+
+This prevents silent corruption of multi-line YAML values that legitimately contain blank lines.
 
 ## Agents TUI Architecture
 
 The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (applies ADR-013):
 
-- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` initializes dormancy state. All types and dirty helpers exported. No I/O.
-- **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Returns one string per terminal line with no embedded newlines.
+- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantGptModel()` (from external-models) to initialize dormancy state. All types and dirty helpers exported. No I/O.
+- **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants).
 - **`terminal.ts`** — impure shell. Manages alt-screen, raw mode, SIGINT/SIGTERM handlers, SIGWINCH resize. All cleanup wired via `resolve()` inside the Promise constructor — never `process.exit()` inside a finally-guarded scope (avoids PF-014).
 
-Two TUI-specific invariants:
+**`TuiIO` injectable seam** (`terminal.ts`): `runAgentsTui(initialState, io?)` accepts an optional `TuiIO` override with fake `stdin`/`stdout` for testing. The default is `process.stdin`/`process.stdout`. Tests pass `PassThrough` streams to drive the TUI without a real TTY.
 
-**`MAX_KEYPRESSES = 50_000`**: Hard upper bound on the event loop — if the TUI receives 50,000 keypresses it resolves with `action: 'cancel'`. Satisfies the project reliability rule requiring all loops to have a fixed bound.
+**`MAX_KEYPRESSES = 50_000`**: Exported constant — hard upper bound on the event loop. Resolves with `action: 'cancel'` on exhaustion. Tests pin this value directly (agents-terminal.test.ts).
 
-**`stdin.pause()` in cleanup**: The `runAgentsTui` function calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves, and the CLI process hangs. This is the regression guard.
+**`stdin.pause()` in cleanup**: `runAgentsTui` calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves and the CLI hangs.
+
+**`FIXED_ROWS`/`computeViewportHeight` single-sourced from `render.ts`**: `terminal.ts` imports both from render.ts — no duplication.
 
 **Lazy-import of `terminal.ts`** in `agents.ts`: `import('../agents-view/terminal.js')` is deferred until the interactive path runs. `--list`, `--set`, `--reset`, and non-TTY calls never load readline/tty machinery.
+
+## writeFileAtomicExclusive — Mode Preservation
+
+`writeFileAtomicExclusive` (in `src/core/fs-atomic.ts`) now preserves the target file's permission mode across atomic replace:
+
+1. Write to `.tmp` with O_EXCL (crash-safe).
+2. `stat(filePath)` to read the existing mode (permission bits only, masked with `0o777`).
+3. `chmod(tmp, mode)` — best-effort, non-fatal on ENOENT (fresh file) or any other error.
+4. `rename(tmp, filePath)` — POSIX atomic.
+
+A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) no longer has it silently widened to the umask default on every proxy enable/disable. The chmod step is non-fatal (avoids PF-009) — write correctness is never sacrificed for mode preservation.
 
 ## Anti-Patterns
 
 - **Naming the internal routing runtime in user-visible strings**: use "external model routing" or "Devflow proxy". "subswitch" is acceptable only in code comments, logs, health-check body comparisons, and env var names.
-- **Short-circuiting the disable settings pass with `||`**: `removeProxyHooks(s) || _stripProxyEnvFromObject(s)` leaves `ANTHROPIC_BASE_URL` set when hooks are present. Both operations must run unconditionally — see `applyDisableToSettings`.
-- **Running `reapplyAgentMapping` before proxy preflight completes**: preflight can force `proxyEnabled=false`, and the dormancy logic depends on the final resolved value. In init, the comment at line 1344 in `init.ts` is the canonical placement anchor.
+- **Short-circuiting the disable settings pass with `||`**: `removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)` leaves `ANTHROPIC_BASE_URL` set when hooks are present. Both operations must run unconditionally — see `applyDisableToSettings`.
+- **Running `reapplyAgentMapping` before proxy preflight completes**: preflight can force `proxyEnabled=false`, and the dormancy logic depends on the final resolved value. In init, the guard is placed immediately after the proxy preflight block.
 - **Calling `process.exit()` inside a finally-guarded scope in the TUI**: cleanup must be wired via Promise `resolve()`. Any `process.exit()` inside `finally` terminates without running cleanup and causes event-loop issues (avoids PF-014).
 - **Using previousModel in agent-models.json**: The mapping has no `previousModel` field. Shipped defaults are always read live from `agentsDir()` source files. Caching a previousModel creates stale drift when source agent files are updated.
+- **Duplicating the dormancy predicate**: `isDormantGptModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `externalModelIds().includes(model) && !proxyEnabled` at call sites.
 
 ## Gotchas
 
 - **`proxy.json` ENOENT is not an error**: `readProxyState()` returns a default disabled state when the file is missing. Callers that treat ENOENT as an error will get a false negative on fresh installs.
-- **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `runEnable` skips spawning. The enable path then writes `proxy.json` and proceeds — the existing relay is adopted as-is.
-- **`stripProxyEnv` only removes our relay's URL**: it matches `^http://127\.0\.0\.1:\d+$`. A user's own custom `ANTHROPIC_BASE_URL` (e.g., a corporate gateway) is never touched. `readProxyEnvState` distinguishes: `'ours'`, `'ours-other-port'`, `'foreign'`, `'absent'`.
-- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` sets `configuredModel='default'` and stores the GPT name in `dormantModel`. On save, `applyTuiSave` checks `isDirtyModel` — if the user didn't touch the dormant row, the original GPT mapping entry is preserved byte-identical (not overwritten with 'default').
+- **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning.
+- **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
+- **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`. Prior to this fix, the commander default of `String(DEFAULT_PROXY_PORT)` made the remembered port dead code.
+- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantGptModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
 - **`binPath` must be spawned with `node <path>`**: npm does not guarantee executable bits on installed package binaries. Always spawn as `node <binPath>`, never `<binPath>` directly.
 - **`resolveProxyBin()` uses `createRequire(import.meta.url)`**: ESM-safe way to resolve CommonJS package paths. The `require.resolve('subswitch/package.json')` approach finds the package relative to devflow's own `node_modules`, not the user's project.
 
 ## Key Files
 
 - `src/core/proxy-state.ts` — ProxyState schema, read/write, `isProxyEnabled()`, `resolveProxyBin()`, `buildRoutingConfigJson()`
-- `src/core/external-models.ts` — `EXTERNAL_GPT_MODELS` registry and `externalModelIds()` (leaf module, no project imports)
+- `src/core/external-models.ts` — `EXTERNAL_GPT_MODELS` registry, `externalModelIds()`, `isDormantGptModel()` (leaf module, no project imports)
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`
 - `src/core/agent-models.ts` — `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
-- `src/cli/commands/proxy.ts` — `proxyCommand`, `runProxyPreflight()`, `applyProxyEnv()`, `stripProxyEnv()`, `applyDisableToSettings()`, `addProxyHooks()`, `removeProxyHooks()`, `hasProxyHooks()`
+- `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
+- `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`
 - `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()`, `applySetMapping()`, `buildListRows()`
 - `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `unsavedCount()`
-- `src/cli/agents-view/render.ts` — pure frame renderer
-- `src/cli/agents-view/terminal.ts` — impure TUI shell, `runAgentsTui()`
+- `src/cli/agents-view/render.ts` — pure frame renderer; exports `FIXED_ROWS`, `computeViewportHeight`
+- `src/cli/agents-view/terminal.ts` — impure TUI shell, `runAgentsTui()`, `TuiIO`, `MAX_KEYPRESSES`
 - `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook
-- `src/cli/commands/init.ts` — proxy preflight block (lines ~1233–1360), `reapplyAgentMapping` after preflight (line ~1344)
+- `src/cli/commands/init.ts` — proxy preflight block; `reapplyAgentMapping` guard after preflight
 
 ## Related
 
 - **ADR-013**: src/core vs src/cli boundary — all state I/O and pure logic in `src/core/`; CLI orchestration and user-facing action handlers in `src/cli/`. The proxy feature is the canonical multi-module example of this split.
 - **ADR-014**: state-aware re-init — `proxy` is seeded from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy` in `resolveSeedFeatures`. On `--reset`, seeds as `false`. Never read from `config.json`.
 - **PF-009**: all proxy artifact removals in uninstall/disable are non-fatal; preflight failure warns but never aborts `devflow init` — `proxyEnabled` is simply forced to `false`.
-- **PF-014**: no `process.exit()` inside finally-guarded scopes — TUI cleanup wired via Promise `resolve()`; `applyDisableToSettings` does not call exit on partial state.
+- **PF-014**: no `process.exit()` inside finally-guarded scopes — TUI cleanup wired via Promise `resolve()`; hard failures in CLI commands set `process.exitCode = 1` and return.
 - **PF-001**: port digit-validated before /dev/tcp interpolation in `ensure-proxy`.
 - Feature knowledge: `installer-shadowing` — covers `resolveSeedFeatures`, manifest-group feature seeding, and uninstall artifact cleanup patterns that proxy extends.
