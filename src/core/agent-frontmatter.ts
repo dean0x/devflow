@@ -145,8 +145,8 @@ export interface RewriteResult {
  * Rules:
  *  - Only the FIRST `---…---` block is modified; body bytes are untouched.
  *  - EOL style (LF or CRLF) is detected and preserved throughout.
- *  - `effort: null` removes the effort line (collapsing any resulting double
- *    blank line, mirroring the build-mds.ts:114 idiom).
+ *  - `effort: null` removes the effort line and exactly one adjacent EOL
+ *    (preceding when effort is last, trailing otherwise) — no global collapse.
  *  - When effort is a string: insert after model line (if absent) or replace
  *    existing effort line.
  *  - `changed` is a byte-level comparison — cheap idempotency check.
@@ -203,17 +203,34 @@ export function rewriteAgentFrontmatter(
       newBody = newBody.replace(MODEL_RE2, (match) => `${match}${eol}effort: ${opts.effort}`);
     }
   } else {
-    // effort: null — remove effort line if present
+    // effort: null — remove effort line if present.
+    //
+    // D-EFR-1: Remove ONLY the matched effort line plus exactly one adjacent
+    // EOL. Never run a global \n{2,} collapse — that would silently corrupt
+    // any multi-line YAML value that legitimately contains a blank line.
+    //
+    // EOL consumed:
+    //   • effort is last line  → consume the PRECEDING \r?\n (no trailing EOL
+    //     exists in fmBody), so reassembly doesn't produce a stray blank line.
+    //   • effort is mid-body   → consume the TRAILING \r?\n after the line.
+    //   • effort is first+only → clear the body entirely.
     if (effortMatch) {
-      // Remove the effort line; handle both LF and CRLF.
-      newBody = newBody.replace(/^effort:[ \t]*.*(\r?\n|$)/m, '');
-      // Collapse any double blank line that may result (mirrors build-mds.ts:114 idiom).
-      // Inside a frontmatter body the only "blank" lines would be lines with just \r.
-      // We clean up consecutive empty lines (matching `\n\n` sequences in the body).
-      newBody = newBody.replace(/\n{2,}/g, '\n');
-      if (eol === '\r\n') {
-        // For CRLF files: collapse \r\n\r\n (double blank) → \r\n
-        newBody = newBody.replace(/(\r\n){2,}/g, '\r\n');
+      const effortStart = effortMatch.index;
+      const effortEnd = effortStart + effortMatch[0].length;
+
+      if (effortEnd < newBody.length) {
+        // Not the last line: swallow the trailing EOL (\r?\n) after the line.
+        const trailingEolLen = newBody[effortEnd] === '\r' ? 2 : 1;
+        newBody = newBody.slice(0, effortStart) + newBody.slice(effortEnd + trailingEolLen);
+      } else if (effortStart > 0) {
+        // Last line: swallow the preceding EOL (\r?\n) before the line.
+        const eolStart = (effortStart >= 2 && newBody[effortStart - 2] === '\r')
+          ? effortStart - 2
+          : effortStart - 1;
+        newBody = newBody.slice(0, eolStart) + newBody.slice(effortEnd);
+      } else {
+        // effort is the first and only line — clear the body.
+        newBody = '';
       }
     }
   }

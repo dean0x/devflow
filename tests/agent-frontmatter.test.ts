@@ -361,3 +361,67 @@ describe('rewriteAgentFrontmatter — body bytes untouched', () => {
     expect(result.value.content.slice(closeIdx)).toBe(body.slice(1)); // body without leading \n
   });
 });
+
+// ---------------------------------------------------------------------------
+// REL-4 + TS-2 regression: effort removal edge cases
+// ---------------------------------------------------------------------------
+
+describe('rewriteAgentFrontmatter — effort removal edge cases (REL-4/TS-2)', () => {
+  it('effort as last key (LF): removal yields clean ...\\n--- with no stray blank line', () => {
+    // effort: is the last frontmatter key — no key follows it
+    const content = '---\nname: Test\nmodel: sonnet\neffort: high\n---\n\nbody\n';
+    const result = rewriteAgentFrontmatter(content, { model: 'sonnet', effort: null });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.changed).toBe(true);
+    expect(result.value.content).not.toMatch(/^effort:/m);
+    // Must NOT contain a blank line before the closing ---
+    expect(result.value.content).not.toContain('\n\n---');
+    // Round-trip: content must be parseable and model unchanged
+    const readBack = readFrontmatterModel(result.value.content);
+    expect(readBack.ok).toBe(true);
+    if (readBack.ok) expect(readBack.value).toBe('sonnet');
+  });
+
+  it('effort as last key (CRLF): removal yields clean ...\\r\\n--- with no stray blank line', () => {
+    const content = '---\r\nname: Test\r\nmodel: sonnet\r\neffort: high\r\n---\r\n\r\nbody\r\n';
+    const result = rewriteAgentFrontmatter(content, { model: 'sonnet', effort: null });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.changed).toBe(true);
+    expect(result.value.content).not.toMatch(/^effort:/m);
+    // Must NOT contain a blank line before the closing ---
+    expect(result.value.content).not.toContain('\r\n\r\n---');
+    // Must preserve CRLF throughout (no bare LF)
+    expect(result.value.content).not.toMatch(/(?<!\r)\n/);
+    const readBack = readFrontmatterModel(result.value.content);
+    expect(readBack.ok).toBe(true);
+    if (readBack.ok) expect(readBack.value).toBe('sonnet');
+  });
+
+  it('intentional blank line inside frontmatter body survives effort removal byte-identically', () => {
+    // A multi-line YAML value that legitimately contains a blank line.
+    // The global \n{2,} collapse in the old implementation would corrupt this.
+    const content = [
+      '---',
+      'name: Test',
+      'description: |',
+      '  line one',
+      '',
+      '  line two',
+      'model: sonnet',
+      'effort: low',
+      '---',
+      '',
+      'body',
+      '',
+    ].join('\n');
+    const result = rewriteAgentFrontmatter(content, { model: 'sonnet', effort: null });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.changed).toBe(true);
+    expect(result.value.content).not.toMatch(/^effort:/m);
+    // The intentional blank line inside the description value must be preserved
+    expect(result.value.content).toContain('  line one\n\n  line two');
+  });
+});
