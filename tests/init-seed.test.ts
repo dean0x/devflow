@@ -29,6 +29,7 @@ function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
       knowledge: true,
       learning: true,
       rules: true,
+      proxy: false,
       flags: ['tui', 'lsp', 'tool-search'],
       viewMode: 'default',
     },
@@ -54,7 +55,7 @@ describe('resolveSeedFeatures', () => {
     expect(result).toEqual(FEATURE_DEFAULTS);
   });
 
-  it('manifest present, no config → reads ambient/hud/rules and memory/knowledge/learning from manifest', () => {
+  it('manifest present, no config → reads ambient/hud/rules/proxy and memory/knowledge/learning from manifest', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
@@ -63,6 +64,7 @@ describe('resolveSeedFeatures', () => {
         knowledge: false,
         learning: false,
         rules: false,
+        proxy: false,
         flags: [],
       },
     });
@@ -74,6 +76,7 @@ describe('resolveSeedFeatures', () => {
       knowledge: false,
       learning: false,
       rules: false,
+      proxy: false,
     });
   });
 
@@ -89,7 +92,7 @@ describe('resolveSeedFeatures', () => {
     expect(result.rules).toBe(FEATURE_DEFAULTS.rules);
   });
 
-  it('both present → config wins for memory/learning/knowledge; manifest wins for ambient/hud/rules', () => {
+  it('both present → config wins for memory/learning/knowledge; manifest wins for ambient/hud/rules/proxy', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
@@ -98,6 +101,7 @@ describe('resolveSeedFeatures', () => {
         knowledge: true, // overridden by config
         learning: true, // overridden by config
         rules: false,
+        proxy: true,  // manifest wins for proxy (not config-gated per ADR-001)
         flags: [],
       },
     });
@@ -107,10 +111,11 @@ describe('resolveSeedFeatures', () => {
     expect(result.memory).toBe(false);
     expect(result.learning).toBe(false);
     expect(result.knowledge).toBe(false);
-    // manifest wins for ambient/hud/rules
+    // manifest wins for ambient/hud/rules/proxy
     expect(result.ambient).toBe(false);
     expect(result.hud).toBe(false);
     expect(result.rules).toBe(false);
+    expect(result.proxy).toBe(true);
   });
 
   it('config with learning: true overrides manifest learning: false (applies ADR-001)', () => {
@@ -343,6 +348,7 @@ describe('applyCliToggles', () => {
     knowledge: true,
     learning: true,
     rules: true,
+    proxy: false,
   };
 
   it('empty toggles → base unchanged', () => {
@@ -366,7 +372,7 @@ describe('applyCliToggles', () => {
   });
 
   it('explicit true overrides base false', () => {
-    const allFalse: FeatureSeed = { ambient: false, memory: false, hud: false, knowledge: false, learning: false, rules: false };
+    const allFalse: FeatureSeed = { ambient: false, memory: false, hud: false, knowledge: false, learning: false, rules: false, proxy: false };
     const result = applyCliToggles(allFalse, { ambient: true, knowledge: true });
     expect(result.ambient).toBe(true);
     expect(result.knowledge).toBe(true);
@@ -563,5 +569,78 @@ describe('resolveNonSelectableOptionalCarry', () => {
   it('empty manifestPlugins array → empty carry', () => {
     const carry = resolveNonSelectableOptionalCarry([], DEVFLOW_PLUGINS);
     expect(carry).toEqual([]);
+  });
+});
+
+// ── proxy seeding (resolveSeedFeatures + applyCliToggles) ─────────────────────
+
+describe('proxy seeding', () => {
+  it('FEATURE_DEFAULTS.proxy is false (Advanced-only, never auto-enabled)', () => {
+    expect(FEATURE_DEFAULTS.proxy).toBe(false);
+  });
+
+  it('fresh install (null manifest) → proxy defaults to false', () => {
+    const result = resolveSeedFeatures(null, null);
+    expect(result.proxy).toBe(false);
+  });
+
+  it('manifest.features.proxy=true → seeded as true (manifest group, not config-gated)', () => {
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, proxy: true },
+    });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.proxy).toBe(true);
+  });
+
+  it('manifest.features.proxy=false → seeded as false', () => {
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, proxy: false },
+    });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.proxy).toBe(false);
+  });
+
+  it('--reset (null manifest) → proxy seeds as false regardless of prior state', () => {
+    // --reset passes seedManifest=null via resolveResetGatedInputs; proxy must fall
+    // back to FEATURE_DEFAULTS.proxy=false rather than carrying a prior true value.
+    const result = resolveSeedFeatures(null, null);
+    expect(result.proxy).toBe(false);
+  });
+
+  it('project config has no effect on proxy (proxy is manifest-gated, not config-gated)', () => {
+    // Proxy is in the manifest group (like ambient/hud/rules), not the config group.
+    // Passing a config with memory/learning/knowledge must not affect the proxy seed.
+    const config = { memory: false, learning: false, knowledge: false };
+    const result = resolveSeedFeatures(null, config);
+    expect(result.proxy).toBe(false); // still falls back to FEATURE_DEFAULTS
+  });
+
+  it('applyCliToggles: --proxy overrides seed proxy=false', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, proxy: false };
+    const result = applyCliToggles(seed, { proxy: true });
+    expect(result.proxy).toBe(true);
+    // other fields untouched
+    expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
+    expect(result.memory).toBe(FEATURE_DEFAULTS.memory);
+  });
+
+  it('applyCliToggles: --no-proxy overrides seed proxy=true', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, proxy: true };
+    const result = applyCliToggles(seed, { proxy: false });
+    expect(result.proxy).toBe(false);
+  });
+
+  it('applyCliToggles: undefined proxy toggle preserves seed value', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, proxy: true };
+    const result = applyCliToggles(seed, {}); // no proxy toggle
+    expect(result.proxy).toBe(true);
+  });
+
+  it('resolveInitSeed: proxy included in features result', () => {
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, proxy: true },
+    });
+    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    expect(seed.features.proxy).toBe(true);
   });
 });

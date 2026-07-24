@@ -63,7 +63,11 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 Knowledge write-back is in-command (not a background pipeline): gated by `devflow knowledge --enable/--disable` (flips `knowledge` in feature config); Knowledge agent writes directly at workflow end.
 
-**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learning ON, rules ON, HUD ON, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags. Use `--learning/--no-learning` to toggle the learning agent independently. Use `--rules/--no-rules` to toggle rules independently. **State-aware re-init**: on re-init the wizard reads the prior manifest, config, and settings.json and pre-seeds every prompt with existing values, skipping the Recommended/Advanced question entirely. Use `--reset` for a factory reset that ignores all prior state (mutually exclusive with `--plugin`).
+**External Model Routing (Devflow Proxy)**: Routes Devflow agents through GPT models via an OpenAI/Codex subscription using a local relay. Feature state is manifest-gated (like ambient/hud/rules, per ADR-001): `manifest.features.proxy` is the source of truth; `~/.devflow/proxy.json` holds runtime authority (enabled, port, binPath). `~/.devflow/proxy-routing.json` holds the routing config (port + models). The `ensure-proxy` hook (SessionStart + UserPromptSubmit, registered/removed by `addProxyHooks`/`removeProxyHooks`) auto-starts the relay and injects `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` into `settings.json` via `applyProxyEnv`/`stripProxyEnv`. Toggle via `devflow proxy --enable/--disable/--status` or via the Advanced init wizard. Enabling runs `runProxyPreflight` (5 checks: bin, codex auth, port, settings, doctor subprocess); on failure: warning + force-disabled, init never aborted (avoids PF-009). Disabling reverts agent frontmatter to Claude defaults but preserves the model mapping for re-enable. Default OFF; Advanced-only — never part of Recommended defaults.
+
+**Per-Agent Model Configuration**: User overrides to agent model assignments persist in `~/.devflow/agent-models.json` (deviations only — absent entry = shipped default). `reapplyAgentMapping` runs after every `devflow init` post-install to re-apply user overrides to freshly copied agent files. `revertExternalAgents` reverts all agents to shipped defaults (called on proxy disable and before agent removal on uninstall). GPT model assignments are **dormant** when routing is off — they are stored in `agent-models.json` but not written to agent frontmatter until routing is enabled. Manage via `devflow agents` TUI or `devflow agents --list/--set/--reset`. Core source files: `src/core/agent-frontmatter.ts` (pure rewrite engine), `src/core/agent-models.ts` (schema + apply/revert), `src/core/external-models.ts` (GPT model IDs), `src/core/proxy-state.ts` (state I/O), `src/cli/commands/proxy.ts` (CLI + hook wiring), `src/cli/commands/agents.ts` (CLI), `src/cli/agents-view/` (TUI — state, render, terminal).
+
+**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learning ON, rules ON, HUD ON, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags, and a proxy prompt (external model routing — default OFF, requires Codex auth; never part of Recommended defaults). Use `--learning/--no-learning` to toggle the learning agent independently. Use `--rules/--no-rules` to toggle rules independently. Use `--proxy/--no-proxy` to set external model routing (Advanced-only; init runs preflight on enable). **State-aware re-init**: on re-init the wizard reads the prior manifest, config, and settings.json and pre-seeds every prompt with existing values, skipping the Recommended/Advanced question entirely. Use `--reset` for a factory reset that ignores all prior state (mutually exclusive with `--plugin`).
 
 **Migrations**: Run-once migrations execute automatically on `devflow init`, tracked at `~/.devflow/migrations.json` (scope-independent; single file regardless of user-scope vs local-scope installs). To add a 2.x migration, append an entry to `MIGRATIONS` in `src/core/migrations.ts`. Scopes: `global` (runs once per machine, no project context) vs `per-project` (sweeps all discovered Claude-enabled projects in parallel). Failures are non-fatal — migrations retry on next init. The registry is empty as of 2.0 — no 1.x upgrade path.
 
@@ -73,8 +77,9 @@ Knowledge write-back is in-command (not a background pipeline): gated by `devflo
 devflow/
 ├── src/
 │   ├── cli.ts              # CLI entry point
-│   ├── cli/                # CLI command modules (init, init-seed, uninstall, ambient, learning, flags, knowledge, rules, debug, hud)
-│   ├── core/               # Shared logic (plugins.ts registry, paths.ts, assets.ts, flags.ts, fs-atomic.ts, migrations.ts, …)
+│   ├── cli/                # CLI command modules (init, init-seed, uninstall, ambient, learning, flags, knowledge, rules, debug, hud, proxy, agents)
+│   │   └── agents-view/    # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
+│   ├── core/               # Shared logic (plugins.ts registry, paths.ts, assets.ts, flags.ts, fs-atomic.ts, migrations.ts, agent-frontmatter.ts, agent-models.ts, external-models.ts, proxy-state.ts, …)
 │   ├── hud/                # HUD module (TypeScript source — index.ts, render.ts, components/, …)
 │   ├── targets/claude-code/ # Claude Code install target (installer, hooks.ts, post-install, claude-paths, legacy, templates/)
 │   └── assets/             # All installable assets (single source of truth)
@@ -82,7 +87,7 @@ devflow/
 │       ├── agents/         # 17 agents (16 shared + 1 plugin-specific claude-md-auditor)
 │       ├── rules/          # 13 rules (flat .md files)
 │       ├── commands/       # MDS command sources (14 hosts + 10 partials in _partials/; 2 static .md)
-│       └── scripts/hooks/  # Capture + memory + learning + ambient hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
+│       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts)
 ├── docs/reference/         # Detailed reference documentation
@@ -188,9 +193,14 @@ Per-project runtime files live under `.devflow/`:
     ├── {slug}/KNOWLEDGE.md
     └── index.md                  # Regenerable cache (line format: `- **{slug}** — {areas} — {Use-when}`); frontmatter is authoritative if absent
 
-~/.devflow/logs/{project-slug}/
-├── .capture-turn.log                  # capture-turn (Stop hook) log
-└── .background-memory-update.log      # background-memory-update worker log
+~/.devflow/
+├── proxy.json                         # Proxy runtime state (enabled, port, binPath) — global, not per-project
+├── proxy-routing.json                 # Routing config (port + model list) read by the ensure-proxy hook
+├── agent-models.json                  # Per-agent model overrides (deviations only; absent = shipped default)
+└── logs/{project-slug}/
+    ├── .capture-turn.log              # capture-turn (Stop hook) log
+    ├── .background-memory-update.log  # background-memory-update worker log
+    └── proxy.log                      # Proxy relay stdout/stderr (appended by ensure-proxy)
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
@@ -203,7 +213,7 @@ Per-project runtime files live under `.devflow/`:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `src/assets/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer, learning, triager), Sonnet for execution agents (coder, simplifier, skimmer, tester, knowledge), Haiku for I/O agents (git, synthesizer, validator). The Learning agent's spawn directive additionally resolves a per-project model override (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus`). Memory is refreshed by the detached `background-memory-update` worker (`claude -p --model claude-sonnet-4-6`), spawned by the `memory-worker` Stop hook. Knowledge is not a background worker — the Knowledge agent (sonnet) is spawned in-command by `knowledge_writeback()` at workflow end.
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer, learning, triager), Sonnet for execution agents (coder, simplifier, skimmer, tester, knowledge), Haiku for I/O agents (git, synthesizer, validator). The Learning agent's spawn directive additionally resolves a per-project model override (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus`). Memory is refreshed by the detached `background-memory-update` worker (`claude -p --model claude-sonnet-4-6`), spawned by the `memory-worker` Stop hook. Knowledge is not a background worker — the Knowledge agent (sonnet) is spawned in-command by `knowledge_writeback()` at workflow end. **Per-agent overrides**: users can assign custom models (including GPT models when routing is enabled) via `devflow agents`. Overrides persist in `~/.devflow/agent-models.json` and are re-applied by `reapplyAgentMapping` on every `devflow init`.
 
 ## Agent & Command Roster
 

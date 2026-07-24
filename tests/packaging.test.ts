@@ -1,6 +1,9 @@
 /**
  * Packaging guards.
  *
+ * Guard 3 (dependency pin): critical dependencies are pinned to exact versions.
+ *   Prevents accidental range upgrades from shipping routing runtime at wrong version.
+ *
  * Guard 4 (commands source): every dist/commands/*.md is the output of a known
  *   source file in src/assets/commands/ — either a compiled .mds or a hand-authored .md.
  *   This prevents stale or orphaned compiled files from shipping when a command source
@@ -17,6 +20,52 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
+
+// ---------------------------------------------------------------------------
+// Guard 3: dependency pin integrity
+// ---------------------------------------------------------------------------
+
+/**
+ * The routing runtime dependency must be pinned to an exact version (no ^/~ range).
+ * Prevents accidental upgrades from shipping an incompatible routing runtime.
+ *
+ * The internal package name ("subswitch") is intentionally used here — this is
+ * an internal test file, not user-visible output. User-facing vocabulary uses
+ * "external model routing" / "Devflow proxy".
+ */
+describe('Guard 3 (dependency pin): routing runtime pinned to exact version', () => {
+  let dependencies: Record<string, string>;
+
+  async function loadDependencies(): Promise<Record<string, string>> {
+    if (dependencies) return dependencies;
+    const pkgJson = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8')) as {
+      dependencies?: Record<string, string>;
+    };
+    dependencies = pkgJson.dependencies ?? {};
+    return dependencies;
+  }
+
+  it('subswitch is declared as an exact-pinned dependency (no ^ or ~ range prefix)', async () => {
+    const deps = await loadDependencies();
+    expect(
+      deps['subswitch'],
+      'package.json must declare subswitch in dependencies with an exact version (no ^ or ~)',
+    ).toBeDefined();
+
+    const version = deps['subswitch']!;
+    expect(
+      version,
+      `subswitch version "${version}" must be an exact pin (no ^ or ~). ` +
+      `This prevents accidental upgrades to an incompatible routing runtime version.`,
+    ).toBe('0.1.0');
+
+    expect(
+      version.startsWith('^') || version.startsWith('~'),
+      `subswitch version "${version}" must not use ^ or ~ range prefix — exact pin required.`,
+    ).toBe(false);
+  });
+});
+
 
 // ---------------------------------------------------------------------------
 // Guard 4: Commands source guard
