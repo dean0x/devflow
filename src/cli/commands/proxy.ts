@@ -223,6 +223,23 @@ export function removeProxyHooks(settings: Settings): boolean {
 }
 
 /**
+ * Apply the disable settings-pass: remove proxy hooks AND strip ANTHROPIC_BASE_URL.
+ *
+ * Both operations always run unconditionally — never short-circuited with ||.
+ * A full enabled state (hooks present AND ANTHROPIC_BASE_URL set) requires
+ * both calls to be evaluated; short-circuiting left ANTHROPIC_BASE_URL in
+ * settings when hooks were present, keeping new sessions pointed at a disabled
+ * relay.
+ *
+ * Mutates settings in place. Returns true when any change was made.
+ */
+export function applyDisableToSettings(settings: Settings): boolean {
+  const removedHooks = removeProxyHooks(settings);
+  const strippedEnv = _stripProxyEnvFromObject(settings);
+  return removedHooks || strippedEnv;
+}
+
+/**
  * Check whether the ensure-proxy hook is registered on at least one event.
  * Returns true if present on either SessionStart or UserPromptSubmit.
  * Partial state (one event present, other missing) returns true —
@@ -852,7 +869,7 @@ async function runDisable(): Promise<void> {
     return;
   }
 
-  const changed = removeProxyHooks(parsedSettings) || _stripProxyEnvFromObject(parsedSettings);
+  const changed = applyDisableToSettings(parsedSettings);
   if (changed) {
     await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
   }

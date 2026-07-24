@@ -15,6 +15,7 @@ import {
   addProxyHooks,
   removeProxyHooks,
   hasProxyHooks,
+  applyDisableToSettings,
   runProxyPreflight,
   type ProxyPreflightDeps,
 } from '../src/cli/commands/proxy.js';
@@ -346,6 +347,63 @@ describe('hasProxyHooks', () => {
       },
     };
     expect(hasProxyHooks(settings)).toBe(false);
+  });
+});
+
+// ─── applyDisableToSettings ──────────────────────────────────────────────────
+//
+// Regression for the || short-circuit bug: when hooks were present, the old
+// code `removeProxyHooks(s) || _stripProxyEnv(s)` short-circuited and never
+// stripped ANTHROPIC_BASE_URL, leaving sessions pointed at a disabled relay.
+
+describe('applyDisableToSettings', () => {
+  it('removes BOTH proxy hooks AND ANTHROPIC_BASE_URL when both are present (regression)', () => {
+    const settings: Settings = {};
+    addProxyHooks(settings, DEVFLOW_DIR);
+    (settings as Record<string, unknown>).env = { ANTHROPIC_BASE_URL: OUR_URL };
+
+    const changed = applyDisableToSettings(settings);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+    expect((settings as Record<string, unknown>).env).toBeUndefined();
+  });
+
+  it('removes only hooks when env var absent', () => {
+    const settings: Settings = {};
+    addProxyHooks(settings, DEVFLOW_DIR);
+
+    const changed = applyDisableToSettings(settings);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+  });
+
+  it('removes only ANTHROPIC_BASE_URL when hooks absent', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: OUR_URL } } as unknown as Settings;
+
+    const changed = applyDisableToSettings(settings);
+
+    expect(changed).toBe(true);
+    expect((settings as Record<string, unknown>).env).toBeUndefined();
+  });
+
+  it('returns false when settings already clean (no-op)', () => {
+    const settings: Settings = {};
+    expect(applyDisableToSettings(settings)).toBe(false);
+  });
+
+  it('does NOT strip ANTHROPIC_BASE_URL when it points to a foreign gateway', () => {
+    const settings = {
+      env: { ANTHROPIC_BASE_URL: 'https://my-custom-gateway.example.com' },
+    } as unknown as Settings;
+
+    const changed = applyDisableToSettings(settings);
+
+    expect(changed).toBe(false);
+    expect(
+      (settings as Record<string, unknown> & { env: Record<string, string> }).env.ANTHROPIC_BASE_URL,
+    ).toBe('https://my-custom-gateway.example.com');
   });
 });
 
