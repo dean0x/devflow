@@ -64,6 +64,40 @@ describe('Guard 3 (dependency pin): routing runtime pinned to exact version', ()
       `subswitch version "${version}" must not use ^ or ~ range prefix — exact pin required.`,
     ).toBe(false);
   });
+
+  it('package-lock.json resolves subswitch to version 0.1.0 with a sha512 integrity field (DEP-3)', async () => {
+    const lockJson = JSON.parse(
+      await fs.readFile(path.join(ROOT, 'package-lock.json'), 'utf-8'),
+    ) as {
+      packages?: Record<string, { version?: string; integrity?: string }>;
+    };
+
+    const subswitchNode = lockJson.packages?.['node_modules/subswitch'];
+    expect(
+      subswitchNode,
+      'package-lock.json must contain a node_modules/subswitch entry. ' +
+      'Run npm install to regenerate the lockfile.',
+    ).toBeDefined();
+
+    expect(
+      subswitchNode!.version,
+      `package-lock.json subswitch resolved version must be "0.1.0", ` +
+      `got "${subswitchNode!.version}". ` +
+      `The lockfile is out of sync with the exact pin in package.json.`,
+    ).toBe('0.1.0');
+
+    expect(
+      subswitchNode!.integrity,
+      'package-lock.json subswitch node must have an integrity field. ' +
+      'A missing integrity field bypasses tamper detection on npm install.',
+    ).toBeDefined();
+
+    expect(
+      subswitchNode!.integrity,
+      `integrity field must be a sha512 hash (starts with "sha512-"), ` +
+      `got "${subswitchNode!.integrity}".`,
+    ).toMatch(/^sha512-/);
+  });
 });
 
 
