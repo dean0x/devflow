@@ -1,0 +1,231 @@
+#!/bin/bash
+
+# ensure-proxy — SessionStart + UserPromptSubmit hook
+# Ensures the Devflow proxy relay is running when external model routing is enabled.
+# NOT git-gated (proxy is a global user-scope feature, not per-project).
+# NOT project-scoped: proxy state lives at $DEVFLOW_DIR/proxy.json (user-scope).
+#
+# SessionStart:  probe port → if DOWN attempt spawn → inject additionalContext warning if still down
+# UserPromptSubmit: probe port → if UP fast exit; if DOWN silently log (SessionStart warned already)
+#
+# Branding: "subswitch" is an internal identifier (health check body match, SUBSWITCH_CONFIG env var,
+# spawn args); it MUST NOT appear in user-visible strings or additionalContext messages.
+#
+# avoids PF-001: port is digit-validated before interpolation into /dev/tcp and context strings.
+# avoids PF-014: hook always exits 0; no fd held across exit.
+
+# Safe no-op fallback — must exist before hook-bootstrap is sourced
+dbg() { :; }
+
+# Re-entrancy guard — must come before hook-bootstrap to minimize overhead
+# in background worker sessions (claude -p for memory / learning workers fire hooks too)
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/hook-bootstrap" "ensure-proxy"
+
+source "$SCRIPT_DIR/json-parse" || { exit 0; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+# ── Event detection ────────────────────────────────────────────────────────────
+# Distinguish SessionStart vs UserPromptSubmit by presence of the "prompt" key.
+# Session IDs are UUIDs — they cannot contain the literal string '"prompt"'.
+# CWD paths that contain "prompt" still won't match '"prompt"' (with both quotes).
+HOOK_EVENT="SessionStart"
+case "$INPUT" in
+  *'"prompt"'*) HOOK_EVENT="UserPromptSubmit" ;;
+esac
+dbg "HOOK_EVENT=$HOOK_EVENT"
+
+# ── Proxy state ────────────────────────────────────────────────────────────────
+# Proxy is user-scope (global), not project-scoped. Use $DEVFLOW_DIR (env) or default.
+DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
+PROXY_STATE_FILE="$DEVFLOW_DIR/proxy.json"
+
+if [ ! -f "$PROXY_STATE_FILE" ]; then
+  dbg "EXIT: no proxy state file"
+  exit 0
+fi
+
+PROXY_ENABLED=$(json_field_file "$PROXY_STATE_FILE" "enabled" "false")
+if [ "$PROXY_ENABLED" != "true" ]; then
+  dbg "EXIT: proxy disabled"
+  exit 0
+fi
+
+# Digit-validate port before use in /dev/tcp and string interpolation (avoids PF-001)
+PROXY_PORT_RAW=$(json_field_file "$PROXY_STATE_FILE" "port" "4141")
+PROXY_PORT="4141"
+case "$PROXY_PORT_RAW" in
+  [0-9]|\
+  [0-9][0-9]|\
+  [0-9][0-9][0-9]|\
+  [0-9][0-9][0-9][0-9]|\
+  [0-9][0-9][0-9][0-9][0-9])
+    PROXY_PORT="$PROXY_PORT_RAW"
+    ;;
+esac
+
+PROXY_BIN=$(json_field_file "$PROXY_STATE_FILE" "binPath" "")
+PROXY_CONFIG=$(json_field_file "$PROXY_STATE_FILE" "configPath" "")
+dbg "PROXY_PORT=$PROXY_PORT BIN=$PROXY_BIN CONFIG=$PROXY_CONFIG"
+
+# ── Log setup ──────────────────────────────────────────────────────────────────
+LOG_DIR="$DEVFLOW_DIR/logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+LOG_FILE="$LOG_DIR/proxy.log"
+
+# 2MB tail-guard (matches hook-log-init pattern)
+_LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) || \
+_LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) || \
+_LOG_SIZE=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ') || \
+_LOG_SIZE=0
+_LOG_SIZE="${_LOG_SIZE:-0}"
+if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt 2097152 ]; then
+  _LTMP="$LOG_FILE.tmp.$$"
+  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && \
+    mv "$_LTMP" "$LOG_FILE" 2>/dev/null || \
+    rm -f "$_LTMP" 2>/dev/null || true
+fi
+
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [ensure-proxy] $1" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+# ── CWD for debug tracing ──────────────────────────────────────────────────────
+# Non-gating: CWD is only used for devflow debug traces; proxy doesn't need it.
+_CWD=$(printf '%s' "$INPUT" | json_field "cwd" "" 2>/dev/null || true)
+if [ -n "$_CWD" ]; then
+  devflow_debug_set_cwd "$_CWD" 2>/dev/null || true
+fi
+
+# ── TCP probe (bash built-in, no nc/curl, Bash 3.2-safe) ──────────────────────
+# /dev/tcp is a bash built-in; the exec runs in a subshell so failures don't
+# affect the parent. bash 3.2 on macOS supports /dev/tcp.
+# Port value is digit-validated above — safe to interpolate.
+proxy_tcp_up() {
+  local _p="$1"
+  ( exec 3<>/dev/tcp/127.0.0.1/"$_p" ) 2>/dev/null
+  return $?
+}
+
+# ── Main logic ─────────────────────────────────────────────────────────────────
+if proxy_tcp_up "$PROXY_PORT"; then
+  dbg "port $PROXY_PORT up"
+
+  if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
+    # Fast-exit: relay is up; model already has context from SessionStart
+    log "UserPromptSubmit: port $PROXY_PORT up — ok"
+    exit 0
+  fi
+
+  # SessionStart: verify identity to avoid adopting a foreign service on this port
+  HEALTH_BODY=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_PORT}/__subswitch/health" 2>/dev/null || true)
+  dbg "health_body=$HEALTH_BODY"
+  case "$HEALTH_BODY" in
+    # Internal check: 'subswitch' is the package name — acceptable in hook code and logs, not in user output
+    *'"name":"subswitch"'*)
+      log "SessionStart: port $PROXY_PORT healthy (correct identity)"
+      exit 0
+      ;;
+    *)
+      log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
+      CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
+      json_session_output "$CONTEXT"
+      exit 0
+      ;;
+  esac
+fi
+
+# Port NOT accepting connections
+
+if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
+  # Silent: SessionStart already warned the model; avoid spamming context on every prompt
+  log "UserPromptSubmit: port $PROXY_PORT down — silent exit"
+  exit 0
+fi
+
+# ── SessionStart: attempt to start the relay ───────────────────────────────────
+log "SessionStart: port $PROXY_PORT down — attempting start"
+
+# Validate prerequisites before spawning
+if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
+  log "prereq fail: binPath missing or not a file: $PROXY_BIN"
+  CONTEXT="[Devflow proxy] Warning: relay binary not found. Run 'devflow proxy --enable' to restore external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+NODE_BIN=$(command -v node 2>/dev/null || true)
+if [ -z "$NODE_BIN" ]; then
+  log "prereq fail: node not found in PATH"
+  CONTEXT="[Devflow proxy] Warning: Node.js not found in PATH. Install Node.js to enable external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+if [ -z "$PROXY_CONFIG" ] || [ ! -f "$PROXY_CONFIG" ]; then
+  log "prereq fail: configPath missing or not a file: $PROXY_CONFIG"
+  CONTEXT="[Devflow proxy] Warning: routing config not found. Run 'devflow proxy --enable' to restore external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+# Acquire spawn lock — prevents concurrent sessions from double-spawning the relay
+# Stale break: 30s (lock abandoned by crashed hook)
+source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+source "$SCRIPT_DIR/learning-lock" 2>/dev/null || true
+
+SPAWN_LOCK="$DEVFLOW_DIR/.proxy-spawn.lock"
+
+if ! learning_lock_acquire "$SPAWN_LOCK" 2 2>/dev/null; then
+  # Another session is racing to start the proxy — give it a moment then re-probe
+  log "spawn lock busy — another session may be starting proxy"
+  sleep 1
+  if proxy_tcp_up "$PROXY_PORT"; then
+    log "proxy started by another session — ok"
+    exit 0
+  fi
+  log "still down after lock wait"
+  CONTEXT="[Devflow proxy] Note: relay is starting in another session. If models are unavailable, retry your prompt."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+# We hold the lock — spawn the relay
+log "spawning relay: $NODE_BIN $PROXY_BIN serve"
+
+export SUBSWITCH_CONFIG="$PROXY_CONFIG"
+nohup "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
+_RELAY_PID=$!
+disown "$_RELAY_PID" 2>/dev/null || true
+
+log "relay spawned with pid $_RELAY_PID"
+
+# Bounded wait: 80×0.1s = 8s maximum (well within 15s hook timeout)
+_i=0
+_RELAY_UP=false
+while [ "$_i" -lt 80 ]; do
+  sleep 0.1
+  if proxy_tcp_up "$PROXY_PORT"; then
+    _RELAY_UP=true
+    break
+  fi
+  _i=$(( _i + 1 ))
+done
+
+learning_lock_release "$SPAWN_LOCK"
+
+if [ "$_RELAY_UP" = "true" ]; then
+  log "relay ready after $(( _i + 1 )) probe(s)"
+  exit 0
+fi
+
+# Relay did not accept connections within the bounded wait
+log "relay not ready after 80 probes — emitting warning"
+CONTEXT="[Devflow proxy] Warning: relay failed to start on port ${PROXY_PORT}. External model routing unavailable this session. See ${LOG_FILE} for details."
+json_session_output "$CONTEXT"
+exit 0
