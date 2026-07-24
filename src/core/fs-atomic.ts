@@ -44,5 +44,24 @@ export async function writeFileAtomicExclusive(filePath: string, data: string): 
     try { await fs.unlink(tmp); } catch { /* race — already removed */ }
     await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
   }
+
+  // Preserve the target's permission mode across the atomic replace (SEC-1).
+  // A user who hardened the target (e.g. settings.json → 0600 to protect
+  // ANTHROPIC_API_KEY) must not have it silently widened to umask default
+  // (~0644) on every proxy enable/disable or post-install rewrite.
+  //
+  // Non-fatal path: if stat fails (ENOENT → fresh file, or any other I/O
+  // error), skip chmod and keep the umask default — the write must still
+  // complete correctly (avoids PF-009 failure-isolation principle).
+  try {
+    const { mode } = await fs.stat(filePath);
+    // mode includes file-type bits; mask to permission bits only for chmod.
+    await fs.chmod(tmp, mode & 0o777);
+  } catch {
+    // Fresh write (ENOENT) or stat/chmod failure — use umask default.
+    // Intentionally non-fatal: mode preservation is best-effort; the write
+    // itself must never be corrupted by a chmod error.
+  }
+
   await fs.rename(tmp, filePath);
 }
