@@ -75,9 +75,14 @@ const DOCTOR_TIMEOUT_MS = 10_000;
 /**
  * Maximum number of relay port probes during the CLI spawn wait (5s at 100ms each).
  *
- * Note: the ensure-proxy hook uses a larger budget (80×0.1s = 8s) — intentional;
- * the hook tolerates slower startup from a cold relay. A later batch documents
- * the CLI-5s vs hook-8s difference fully.
+ * The ensure-proxy hook uses a larger budget (80×0.1s = 8s) — this difference is
+ * intentional:
+ *   - CLI (--enable): the user is waiting at an interactive terminal. 5s is the
+ *     maximum comfortable wait; a cold relay start typically completes in <2s.
+ *   - Hook (ensure-proxy): the hook fires inside a 15-second platform timeout. The
+ *     relay may be starting from a cold OS state (first session after reboot) where
+ *     5s is too short. 8s gives a wider revival window while leaving 7s of headroom
+ *     before the platform kills the hook.
  */
 const RELAY_SPAWN_MAX_PROBES = 50;
 /** Interval between relay port probes during the CLI spawn wait (ms). */
@@ -271,6 +276,28 @@ export function hasProxyHooks(input: string | Settings): boolean {
   return check('SessionStart') || check('UserPromptSubmit');
 }
 
+// ─── Health-check identity helper (CPLX-9) ───────────────────────────────────
+
+/**
+ * Return true when the raw health-check response body identifies our relay.
+ *
+ * The internal check `parsed['name'] === 'subswitch'` is correct here — 'subswitch'
+ * is the internal package name (fine in code, not in user-facing output — see branding
+ * note at the top of this file). Returns false on JSON parse failure, empty body, or a
+ * mismatched name field.
+ *
+ * Note: the ensure-proxy shell hook has its own inline copy of this check — it is a
+ * different language and cannot share the TypeScript module.
+ */
+export function isOurRelayBody(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    return parsed['name'] === 'subswitch';
+  } catch {
+    return false;
+  }
+}
+
 // ─── Dependency injection interface for runProxyPreflight ─────────────────────
 
 /**
@@ -342,23 +369,15 @@ export async function runProxyPreflight(
   // ③ Port probe
   const portAccepting = await deps.tcpConnectable(port, PROBE_TIMEOUT_MS);
   if (portAccepting) {
-    // Port is up — check health identity
+    // Port is up — check health identity (CPLX-9: uses shared isOurRelayBody helper)
     const healthResult = await deps.httpGet(
       `${proxyBaseUrl(port)}/__subswitch/health`,
       PROBE_TIMEOUT_MS,
     );
-    if (healthResult.ok) {
-      try {
-        const body = JSON.parse(healthResult.value) as Record<string, unknown>;
-        // Internal check: 'subswitch' is the internal package name — fine in code, not in output
-        if (body['name'] === 'subswitch') {
-          return Ok({ binPath, npxWarning, adopted: true });
-        }
-      } catch {
-        /* JSON parse error — treat as wrong identity */
-      }
+    if (healthResult.ok && isOurRelayBody(healthResult.value)) {
+      return Ok({ binPath, npxWarning, adopted: true });
     }
-    // Port accepting but not our relay
+    // Port accepting but health timed out, failed, or not our relay
     return Err(
       `port ${port} is in use by another application — pick a different port with \`devflow proxy --enable --port <n>\``,
     );
@@ -475,7 +494,15 @@ async function realSpawnDoctor(
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          proc.kill();
+          proc.kill(); // SIGTERM — ask the process to terminate gracefully
+          // REL-3: a SIGTERM-trapping child keeps the event loop alive (no unref on
+          // proc here, since we are awaiting the promise). Schedule a SIGKILL escalation
+          // after a short grace period. The escalation timer is unref()'d so it never
+          // prevents the CLI from exiting on its own if the process exits first.
+          const sigkillTimer = setTimeout(() => {
+            try { proc.kill('SIGKILL'); } catch { /* already dead — ignore */ }
+          }, 2000);
+          sigkillTimer.unref();
           resolve(1);
         }
       }, timeoutMs);
@@ -779,16 +806,11 @@ async function resolveProcessState(
     `${proxyBaseUrl(port)}/__subswitch/health`,
     PROBE_TIMEOUT_MS,
   );
-  if (healthResult.ok) {
-    try {
-      const body = JSON.parse(healthResult.value) as Record<string, unknown>;
-      // Internal check: 'subswitch' is the internal package name — fine in code, not in output
-      return body['name'] === 'subswitch' ? 'running-ours' : 'port-squatted';
-    } catch {
-      return 'port-squatted';
-    }
+  // CPLX-9: use shared isOurRelayBody helper (same logic as runProxyPreflight check)
+  if (healthResult.ok && isOurRelayBody(healthResult.value)) {
+    return 'running-ours';
   }
-  // Port accepting but health unreachable — may not be our relay
+  // Port accepting but health timed out, failed, or not our relay
   return 'port-squatted';
 }
 
@@ -1248,12 +1270,36 @@ async function runDisable(): Promise<void> {
   if (pidFromFile !== null) {
     try {
       process.kill(pidFromFile, 0);
-      p.log.info(
-        color.dim(
-          `Relay process (pid ${pidFromFile}) is still running for any live sessions and will stop at reboot. ` +
-          `Manual stop: kill ${pidFromFile}`,
-        ),
-      );
+      // SEC-3: cross-check relay identity before emitting the kill hint. A stale or
+      // recycled PID that passes signal 0 may belong to an unrelated process. We
+      // confirm identity via a port health check — the relay is ours only if the health
+      // endpoint returns isOurRelayBody. Non-blocking: we never kill programmatically.
+      const disablePort = priorState?.port ?? DEFAULT_PROXY_PORT;
+      const portUp = await realTcpConnectable(disablePort, PROBE_TIMEOUT_MS);
+      let identityConfirmed = false;
+      if (portUp) {
+        const healthResult = await realHttpGet(
+          `${proxyBaseUrl(disablePort)}/__subswitch/health`,
+          PROBE_TIMEOUT_MS,
+        );
+        identityConfirmed = healthResult.ok && isOurRelayBody(healthResult.value);
+      }
+      if (identityConfirmed) {
+        p.log.info(
+          color.dim(
+            `Relay process (pid ${pidFromFile}) is still running for any live sessions and will stop at reboot. ` +
+            `Manual stop: kill ${pidFromFile}`,
+          ),
+        );
+      } else {
+        p.log.info(
+          color.dim(
+            `A process with pid ${pidFromFile} from proxy.pid appears alive — ` +
+            `identity could not be confirmed (port not responding as our relay). ` +
+            `Verify it is the relay before stopping it manually.`,
+          ),
+        );
+      }
     } catch { /* process not running */ }
   }
 }

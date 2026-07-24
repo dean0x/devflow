@@ -17,6 +17,7 @@ import {
   hasProxyHooks,
   applyDisableToSettings,
   runProxyPreflight,
+  isOurRelayBody,
   resolvePort,
   type ProxyPreflightDeps,
 } from '../src/cli/commands/proxy.js';
@@ -579,6 +580,22 @@ describe('runProxyPreflight', () => {
     }
   });
 
+  // TEST-11: Health-check timeout path — httpGet Err('timeout') must fold into the
+  // port-conflict Err, not a separate path. Pinned explicitly so a future refactor
+  // cannot accidentally diverge timeout from connection-refused.
+  it('returns port-conflict Err when port is up but health check times out (timeout folds into port-conflict path)', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: false, error: 'timeout' }),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // timeout folds into the same port-conflict path as connection-refused
+      expect(result.error).toContain('in use by another application');
+    }
+  });
+
   // Ordering: later checks not run if earlier checks fail
   it('does not check codex auth when bin resolution fails', async () => {
     const fileExists = vi.fn();
@@ -599,6 +616,38 @@ describe('runProxyPreflight', () => {
     });
     await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(spawnDoctor).not.toHaveBeenCalled();
+  });
+});
+
+// ─── isOurRelayBody ──────────────────────────────────────────────────────────
+//
+// CPLX-9: extracted helper used by both runProxyPreflight and resolveProcessState
+// to identify the relay without duplicating the parse/check logic.
+
+describe('isOurRelayBody', () => {
+  it('returns true for a valid relay health body with name=subswitch', () => {
+    expect(isOurRelayBody('{"name":"subswitch","version":"0.1.0"}')).toBe(true);
+  });
+
+  it('returns false for a body with a different name field', () => {
+    expect(isOurRelayBody('{"name":"some-other-app"}')).toBe(false);
+  });
+
+  it('returns false for invalid JSON', () => {
+    expect(isOurRelayBody('not json')).toBe(false);
+  });
+
+  it('returns false for an empty string', () => {
+    expect(isOurRelayBody('')).toBe(false);
+  });
+
+  it('returns false for valid JSON without a name field', () => {
+    expect(isOurRelayBody('{"status":"ok","version":"0.1.0"}')).toBe(false);
+  });
+
+  it('returns false for a body where name is not exactly "subswitch"', () => {
+    expect(isOurRelayBody('{"name":"Subswitch"}')).toBe(false);
+    expect(isOurRelayBody('{"name":"subswitch2"}')).toBe(false);
   });
 });
 
