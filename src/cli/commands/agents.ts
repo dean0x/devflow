@@ -31,7 +31,7 @@ import {
   type AgentMappingFile,
   type AgentMapping,
 } from '../../core/agent-models.js';
-import { externalModelIds } from '../../core/external-models.js';
+import { externalModelIds, isDormantGptModel } from '../../core/external-models.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
 import {
@@ -178,7 +178,6 @@ export async function buildListRows(
   input: BuildListRowsInput,
 ): Promise<ListRow[]> {
   const { agentNames, mapping, installDir, shippedDefaults, proxyEnabled } = input;
-  const gptIds = externalModelIds();
 
   const rows: ListRow[] = await Promise.all(
     agentNames.map(async (name): Promise<ListRow> => {
@@ -199,7 +198,7 @@ export async function buildListRows(
       let state: RowState;
       if (!installed) {
         state = 'not-installed';
-      } else if (configured !== 'default' && gptIds.includes(configured) && !proxyEnabled) {
+      } else if (isDormantGptModel(configured, proxyEnabled)) {
         state = 'saved-inactive';
       } else {
         state = 'active';
@@ -528,8 +527,7 @@ export const agentsCommand = new Command('agents')
       });
 
       // Warn on GPT model while proxy off
-      const gptIds = externalModelIds();
-      if (options.model && gptIds.includes(options.model) && !proxyEnabled) {
+      if (isDormantGptModel(options.model, proxyEnabled)) {
         p.log.warn(
           `GPT model saved — inactive until you run ${color.bold('devflow proxy --enable')}`
         );

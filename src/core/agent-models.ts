@@ -25,7 +25,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { externalModelIds } from './external-models.js';
+import { externalModelIds, isDormantGptModel } from './external-models.js';
 import { isProxyEnabled } from './proxy-state.js';
 import { rewriteAgentFrontmatter, readFrontmatterModel } from './agent-frontmatter.js';
 import { agentsDir } from './assets.js';
@@ -197,17 +197,13 @@ export function resolveEffective(
   proxyEnabled: boolean,
 ): EffectiveConfig {
   const entry = mapping.agents[agentName];
-  const gptIds = externalModelIds();
 
   let model: string | undefined;
   if (entry?.model !== undefined) {
-    const isGpt = gptIds.includes(entry.model);
-    if (isGpt && !proxyEnabled) {
-      // Dormant: GPT model configured but proxy is off → fall back to shipped default.
-      model = shippedDefaults[agentName];
-    } else {
-      model = entry.model;
-    }
+    // Dormant: GPT model configured but proxy is off → fall back to shipped default.
+    model = isDormantGptModel(entry.model, proxyEnabled)
+      ? shippedDefaults[agentName]
+      : entry.model;
   } else {
     // No mapping entry → use shipped default.
     model = shippedDefaults[agentName];
@@ -237,17 +233,27 @@ export async function loadShippedDefaults(): Promise<Record<string, string>> {
     return defaults;
   }
 
-  for (const file of entries) {
-    if (!file.endsWith('.md')) continue;
-    const agentName = file.slice(0, -3); // strip .md
-    try {
-      const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
-      const result = readFrontmatterModel(content);
-      if (result.ok && result.value) {
-        defaults[agentName] = result.value;
+  const mdFiles = entries.filter(file => file.endsWith('.md'));
+
+  const pairs = await Promise.all(
+    mdFiles.map(async (file): Promise<readonly [string, string] | null> => {
+      const agentName = file.slice(0, -3); // strip .md
+      try {
+        const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
+        const result = readFrontmatterModel(content);
+        if (result.ok && result.value) {
+          return [agentName, result.value] as const;
+        }
+      } catch {
+        // Silently skip unreadable files
       }
-    } catch {
-      // Silently skip unreadable files
+      return null;
+    })
+  );
+
+  for (const pair of pairs) {
+    if (pair !== null) {
+      defaults[pair[0]] = pair[1];
     }
   }
 
@@ -313,57 +319,80 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const mappingNames = new Set(Object.keys(mapping.agents));
   const allNames = new Set([...registryNames, ...mappingNames]);
 
+  // 'write-error' = warning emitted but agent placed in no bucket (original semantics).
+  type AgentBucket = 'updated' | 'unchanged' | 'skipped' | 'write-error';
+  type AgentOutcome = { bucket: AgentBucket; localWarnings: string[] };
+
+  // Stable iteration order — Set preserves insertion order, array fixes it for the map.
+  const allNamesList = [...allNames];
+
+  const perResults = await Promise.all(
+    allNamesList.map(async (agentName): Promise<AgentOutcome> => {
+      const localWarnings: string[] = [];
+      // Emit to callback immediately for live feedback; collect for deterministic aggregation.
+      const localWarn = (msg: string): void => {
+        localWarnings.push(msg);
+        opts.onWarning?.(msg);
+      };
+
+      const installPath = path.join(opts.installDir, `${agentName}.md`);
+
+      let currentContent: string;
+      try {
+        currentContent = await fs.readFile(installPath, 'utf-8');
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') {
+          localWarn(`reapplyAgentMapping: cannot read ${agentName}.md — ${(err as Error).message}`);
+        }
+        return { bucket: 'skipped', localWarnings };
+      }
+
+      const effective = resolveEffective(agentName, mapping, shippedDefaults, opts.proxyEnabled);
+
+      if (effective.model === undefined) {
+        // No shipped default and no mapping → nothing to write
+        return { bucket: 'unchanged', localWarnings };
+      }
+
+      const rewriteResult = rewriteAgentFrontmatter(currentContent, {
+        model: effective.model,
+        effort: effective.effort ?? null,
+      });
+
+      if (!rewriteResult.ok) {
+        localWarn(`reapplyAgentMapping: malformed frontmatter in ${agentName}.md (${rewriteResult.error}) — skipping`);
+        return { bucket: 'skipped', localWarnings }; // treated as unprocessable
+      }
+
+      if (!rewriteResult.value.changed) {
+        return { bucket: 'unchanged', localWarnings };
+      }
+
+      try {
+        await writeFileAtomicExclusive(installPath, rewriteResult.value.content);
+        return { bucket: 'updated', localWarnings };
+      } catch (err: unknown) {
+        localWarn(`reapplyAgentMapping: failed to write ${agentName}.md — ${(err as Error).message}`);
+        return { bucket: 'write-error', localWarnings };
+      }
+    })
+  );
+
+  // Aggregate in allNamesList order — deterministic warning order and bucket assignment.
   const updated: string[] = [];
   const unchanged: string[] = [];
   const skippedMissing: string[] = [];
 
-  for (const agentName of allNames) {
-    const installPath = path.join(opts.installDir, `${agentName}.md`);
-
-    // Check if installed file exists
-    let currentContent: string;
-    try {
-      currentContent = await fs.readFile(installPath, 'utf-8');
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        skippedMissing.push(agentName);
-        continue;
-      }
-      warn(`reapplyAgentMapping: cannot read ${agentName}.md — ${(err as Error).message}`);
-      skippedMissing.push(agentName);
-      continue;
-    }
-
-    const effective = resolveEffective(agentName, mapping, shippedDefaults, opts.proxyEnabled);
-
-    if (effective.model === undefined) {
-      // No shipped default and no mapping → nothing to write
-      unchanged.push(agentName);
-      continue;
-    }
-
-    const rewriteResult = rewriteAgentFrontmatter(currentContent, {
-      model: effective.model,
-      effort: effective.effort ?? null,
-    });
-
-    if (!rewriteResult.ok) {
-      warn(`reapplyAgentMapping: malformed frontmatter in ${agentName}.md (${rewriteResult.error}) — skipping`);
-      skippedMissing.push(agentName); // treated as unprocessable
-      continue;
-    }
-
-    if (!rewriteResult.value.changed) {
-      unchanged.push(agentName);
-      continue;
-    }
-
-    try {
-      await writeFileAtomicExclusive(installPath, rewriteResult.value.content);
-      updated.push(agentName);
-    } catch (err: unknown) {
-      warn(`reapplyAgentMapping: failed to write ${agentName}.md — ${(err as Error).message}`);
+  for (let i = 0; i < allNamesList.length; i++) {
+    const agentName = allNamesList[i];
+    const { bucket, localWarnings } = perResults[i];
+    warnings.push(...localWarnings);
+    switch (bucket) {
+      case 'updated':    updated.push(agentName); break;
+      case 'unchanged':  unchanged.push(agentName); break;
+      case 'skipped':    skippedMissing.push(agentName); break;
+      case 'write-error': break; // warning already emitted; no bucket (original semantics)
     }
   }
 

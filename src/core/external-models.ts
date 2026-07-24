@@ -34,3 +34,25 @@ export const EXTERNAL_GPT_MODELS: readonly ExternalModel[] = [
 export function externalModelIds(): string[] {
   return EXTERNAL_GPT_MODELS.map(m => m.id);
 }
+
+/**
+ * Returns true when `model` is an external GPT model ID (per EXTERNAL_GPT_MODELS)
+ * AND the Devflow proxy is currently disabled — i.e., the entry is DORMANT and
+ * the shipped default model should be used instead.
+ *
+ * Undefined `model` always returns false (no mapping entry → not dormant).
+ *
+ * Single source of truth for the dormancy predicate — avoids duplication across
+ * resolveEffective (agent-models), buildRow (agents-view/state), buildListRows,
+ * and the --set warning (agents CLI).
+ *
+ * Pure function, no I/O. Lives in external-models (leaf module, no project imports)
+ * so callers in agents-view/state.ts can import it without creating cycles.
+ */
+export function isDormantGptModel(
+  model: string | undefined,
+  proxyEnabled: boolean,
+): boolean {
+  if (model === undefined) return false;
+  return EXTERNAL_GPT_MODELS.some(m => m.id === model) && !proxyEnabled;
+}

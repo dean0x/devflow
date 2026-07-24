@@ -18,7 +18,7 @@
  */
 
 import { CLAUDE_MODEL_ALIASES, EFFORT_LEVELS } from '../../core/agent-models.js';
-import { externalModelIds } from '../../core/external-models.js';
+import { externalModelIds, isDormantGptModel } from '../../core/external-models.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -193,10 +193,7 @@ export interface InitRowInput {
  * configuredModel starts as 'default' and dormantModel holds the saved GPT name.
  */
 export function buildRow(input: InitRowInput): AgentRow {
-  const gptIds = externalModelIds();
-  const isGpt =
-    input.savedModel !== undefined && gptIds.includes(input.savedModel);
-  const dormant = isGpt && !input.proxyEnabled;
+  const dormant = isDormantGptModel(input.savedModel, input.proxyEnabled);
 
   const configuredModel = dormant ? 'default' : (input.savedModel ?? 'default');
   const configuredEffort = input.savedEffort ?? 'default';

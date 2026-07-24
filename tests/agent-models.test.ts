@@ -342,10 +342,21 @@ describe('reapplyAgentMapping', async () => {
   let reapplyAgentMapping: (typeof import('../src/core/agent-models.js'))['reapplyAgentMapping'];
   let revertExternalAgents: (typeof import('../src/core/agent-models.js'))['revertExternalAgents'];
 
+  // Read coder's shipped default live from source at test init time (TEST-7 fix).
+  // Avoids brittle hardcoding that breaks when model-strategy changes coder.md.
+  let coderShippedDefault = 'sonnet'; // conservative fallback; overridden below
+
   try {
     const mod = await import('../src/core/agent-models.js');
     reapplyAgentMapping = mod.reapplyAgentMapping;
     revertExternalAgents = mod.revertExternalAgents;
+
+    // loadShippedDefaults reads live from src/assets/agents/ — same source
+    // reapplyAgentMapping uses, so the assertion matches what the function writes.
+    const defaults = await mod.loadShippedDefaults();
+    if (defaults['coder']) {
+      coderShippedDefault = defaults['coder'];
+    }
   } catch {
     // Module not yet implemented — tests will be skipped
   }
@@ -438,7 +449,7 @@ describe('reapplyAgentMapping', async () => {
     // Installed file should have shipped default, not GPT model
     const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain('model: sonnet'); // shipped default
+    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
   });
 
   it('GPT model materializes when proxy ON', async () => {
@@ -504,6 +515,6 @@ describe('reapplyAgentMapping', async () => {
     // Coder should be back to shipped default
     const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain('model: sonnet');
+    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
   });
 });
