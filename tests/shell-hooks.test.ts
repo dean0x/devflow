@@ -1611,14 +1611,14 @@ describe('ensure-proxy behavioral tests', () => {
 
   function writeProxyJson(opts: {
     enabled: boolean;
-    port?: number;
+    port: number;
     binPath?: string | null;
     configPath?: string | null;
   }) {
     const state = {
       version: 1,
       enabled: opts.enabled,
-      port: opts.port ?? 49180,
+      port: opts.port,
       binPath: opts.binPath !== undefined ? opts.binPath : null,
       configPath: opts.configPath !== undefined ? opts.configPath : null,
       models: [],
@@ -1629,6 +1629,22 @@ describe('ensure-proxy behavioral tests', () => {
       path.join(homeDir, '.devflow', 'proxy.json'),
       JSON.stringify(state, null, 2),
     );
+  }
+
+  /** Bind an ephemeral listener (port 0), read the assigned port, close it, and return it. */
+  async function allocateFreePort(): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      const srv = net.createServer();
+      srv.listen(0, '127.0.0.1', () => {
+        const addr = srv.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
+        srv.close((err) => {
+          if (err) reject(err);
+          else resolve(port);
+        });
+      });
+      srv.on('error', reject);
+    });
   }
 
   const SESSION_INPUT = {
@@ -1670,15 +1686,15 @@ describe('ensure-proxy behavioral tests', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('exits 0 silently when proxy is disabled', () => {
-    writeProxyJson({ enabled: false });
+  it('exits 0 silently when proxy is disabled', async () => {
+    writeProxyJson({ enabled: false, port: await allocateFreePort() });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(exitCode).toBe(0);
     expect(stdout).toBe('');
   });
 
-  it('exits 0 silently when DEVFLOW_BG_UPDATER=1 (re-entrancy guard)', () => {
-    writeProxyJson({ enabled: true });
+  it('exits 0 silently when DEVFLOW_BG_UPDATER=1 (re-entrancy guard)', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort() });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
       DEVFLOW_BG_UPDATER: '1',
     });
@@ -1688,16 +1704,16 @@ describe('ensure-proxy behavioral tests', () => {
 
   // ── Always exits 0 (never blocks Claude Code) ────────────────────────────────
 
-  it('always exits with code 0 regardless of state', () => {
-    writeProxyJson({ enabled: true, port: 49181, binPath: null });
+  it('always exits with code 0 regardless of state', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
     const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(exitCode).toBe(0);
   });
 
   // ── Missing prerequisite paths ───────────────────────────────────────────────
 
-  it('emits SessionStart additionalContext warning when binPath is null', () => {
-    writeProxyJson({ enabled: true, port: 49182, binPath: null });
+  it('emits SessionStart additionalContext warning when binPath is null', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(exitCode).toBe(0);
     // Should emit JSON envelope for the model context
@@ -1708,8 +1724,8 @@ describe('ensure-proxy behavioral tests', () => {
     expect((output['additionalContext'] as string)).not.toContain('subswitch');
   });
 
-  it('emits SessionStart warning when binPath points to nonexistent file', () => {
-    writeProxyJson({ enabled: true, port: 49183, binPath: '/this/does/not/exist/relay.js' });
+  it('emits SessionStart warning when binPath points to nonexistent file', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: '/this/does/not/exist/relay.js' });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
@@ -1717,11 +1733,11 @@ describe('ensure-proxy behavioral tests', () => {
     expect(output['additionalContext'] as string).toContain('[Devflow proxy]');
   });
 
-  it('emits SessionStart warning when configPath is null (bin exists)', () => {
+  it('emits SessionStart warning when configPath is null (bin exists)', async () => {
     // Create a real file to act as the bin so the binPath check passes
     const fakeBin = path.join(tmpDir, 'fake-relay.js');
     fs.writeFileSync(fakeBin, '// fake relay');
-    writeProxyJson({ enabled: true, port: 49184, binPath: fakeBin, configPath: null });
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: fakeBin, configPath: null });
     const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
@@ -1729,12 +1745,12 @@ describe('ensure-proxy behavioral tests', () => {
     expect(output['additionalContext'] as string).toContain('[Devflow proxy]');
   });
 
-  it('emits SessionStart warning when configPath points to nonexistent file', () => {
+  it('emits SessionStart warning when configPath points to nonexistent file', async () => {
     const fakeBin = path.join(tmpDir, 'fake-relay.js');
     fs.writeFileSync(fakeBin, '// fake relay');
     writeProxyJson({
       enabled: true,
-      port: 49185,
+      port: await allocateFreePort(),
       binPath: fakeBin,
       configPath: '/this/config/does/not/exist.json',
     });
@@ -1746,26 +1762,26 @@ describe('ensure-proxy behavioral tests', () => {
 
   // ── UserPromptSubmit silent path ─────────────────────────────────────────────
 
-  it('exits 0 silently on UserPromptSubmit when port is down', () => {
-    writeProxyJson({ enabled: true, port: 49186 });
+  it('exits 0 silently on UserPromptSubmit when port is down', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort() });
     const { exitCode, stdout } = runHook(PROXY_HOOK, PROMPT_INPUT, homeDir);
     expect(exitCode).toBe(0);
     // Silent — no output; SessionStart already warned
     expect(stdout).toBe('');
   });
 
-  it('does not emit additionalContext on UserPromptSubmit regardless of state', () => {
-    writeProxyJson({ enabled: true, port: 49187, binPath: null });
+  it('does not emit additionalContext on UserPromptSubmit regardless of state', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
     const { stdout } = runHook(PROXY_HOOK, PROMPT_INPUT, homeDir);
     expect(stdout).toBe('');
   });
 
   // ── First-run: no proxy.log yet → no stderr ──────────────────────────────────
 
-  it('emits no stderr on first run when proxy.log does not exist', () => {
+  it('emits no stderr on first run when proxy.log does not exist', async () => {
     // Use spawnSync so we can capture stderr even when the hook exits 0.
     // execSync does not expose stderr for successful invocations.
-    writeProxyJson({ enabled: true, port: 49189, binPath: null });
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
     // Intentionally do NOT create $DEVFLOW_DIR/logs/proxy.log
     const result = spawnSync('bash', [PROXY_HOOK], {
       input: JSON.stringify(SESSION_INPUT),
@@ -1778,8 +1794,8 @@ describe('ensure-proxy behavioral tests', () => {
 
   // ── Warning strings must not contain "subswitch" ──────────────────────────────
 
-  it('warning messages never contain the internal package name "subswitch"', () => {
-    writeProxyJson({ enabled: true, port: 49188, binPath: null });
+  it('warning messages never contain the internal package name "subswitch"', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
     const { stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
     expect(stdout).not.toContain('subswitch');
   });
