@@ -1863,13 +1863,42 @@ describe('ensure-proxy behavioral tests', () => {
       // After the fix: "command -v curl" guards the health check; absent curl → assume ours,
       // exit 0 with no output.
       //
-      // We create a controlled shadow bin directory that contains all commands the hook
-      // needs for the SessionStart + port-UP path (dirname, node/jq) but deliberately
-      // omits curl. Using PATH=shadowBin:/bin ensures curl is not findable while keeping
-      // /bin builtins (cat, mkdir, date, mv, rm, sleep) available.
+      // We build a controlled shadow bin directory containing every external command
+      // the hook needs for the SessionStart + port-UP + curl-absent path, then set
+      // PATH=shadowBin ONLY (no /bin suffix). The PATH restriction is required because
+      // on Ubuntu (merged-usr) /bin is a symlink to /usr/bin which exposes /bin/curl;
+      // adding /bin would let "command -v curl" succeed on Linux, defeating the test.
+      //
+      // Binaries we must symlink (all needed for this path):
+      //   bash    — Node.js resolves 'bash' in spawnSync using the child's PATH (shadowBin);
+      //             without bash in shadowBin, spawnSync fails with ENOENT before the
+      //             hook even starts.
+      //   dirname — for SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+      //   node    — for json-parse / json_field_file calls (or jq if node absent)
+      //   cat     — for INPUT=$(cat); command substitution inherits stderr, so missing
+      //             cat leaks "bash: cat: command not found" into result.stderr
+      //   mkdir   — for "mkdir -p $LOG_DIR" (log directory creation); without it
+      //             log() tries to open a file in a missing directory. On macOS bash 3.2
+      //             a >> ENOENT on a missing parent terminates the process via signal
+      //             (status=null) instead of a clean non-zero that || true can handle.
+      //             On Linux bash 5.x it leaks to stderr.
+      //   date    — for log() timestamp; $(date ...) inherits stderr, same as cat above.
+      //
+      // Binaries we deliberately omit:
+      //   curl    — "command -v curl" must fail so the hook takes the "assume ours" path.
+      //   stat    — only reached when LOG_FILE already exists; it won't on first run.
+      //   tail/mv/rm — only in the log-truncation block (same gate as stat).
 
       const shadowBin = fs.mkdtempSync(path.join(os.tmpdir(), 'nocurl-bin-'));
       try {
+        // Symlink bash — Node.js resolves 'bash' in spawnSync via the child env PATH;
+        // with PATH=shadowBin, bash must be present or spawnSync itself fails with ENOENT.
+        const bashR = spawnSync('which', ['bash'], { encoding: 'utf-8' });
+        const bashPath = bashR.stdout.trim();
+        if (bashPath) {
+          try { fs.symlinkSync(bashPath, path.join(shadowBin, 'bash')); } catch { /* ok */ }
+        }
+
         // Symlink dirname — needed for SCRIPT_DIR resolution (may be in /usr/bin, not /bin)
         const dirnameR = spawnSync('which', ['dirname'], { encoding: 'utf-8' });
         const dirnamePath = dirnameR.stdout.trim();
@@ -1890,14 +1919,41 @@ describe('ensure-proxy behavioral tests', () => {
           }
         }
 
+        // Symlink cat — needed for INPUT=$(cat); command substitution inherits stderr so
+        // a missing cat would leak "bash: cat: command not found" into result.stderr
+        const catR = spawnSync('which', ['cat'], { encoding: 'utf-8' });
+        const catPath = catR.stdout.trim();
+        if (catPath) {
+          try { fs.symlinkSync(catPath, path.join(shadowBin, 'cat')); } catch { /* ok */ }
+        }
+
+        // Symlink date — needed for log(); $(date ...) in log() also inherits stderr
+        const dateR = spawnSync('which', ['date'], { encoding: 'utf-8' });
+        const datePath = dateR.stdout.trim();
+        if (datePath) {
+          try { fs.symlinkSync(datePath, path.join(shadowBin, 'date')); } catch { /* ok */ }
+        }
+
+        // Symlink mkdir — needed for "mkdir -p $LOG_DIR" at the top of log setup; without
+        // it the log directory is never created and the subsequent "echo >> $LOG_FILE" in
+        // log() fails with ENOENT. On macOS bash 3.2 that failure terminates the process
+        // via signal (status=null) rather than a clean non-zero exit that || true handles.
+        const mkdirR = spawnSync('which', ['mkdir'], { encoding: 'utf-8' });
+        const mkdirPath = mkdirR.stdout.trim();
+        if (mkdirPath) {
+          try { fs.symlinkSync(mkdirPath, path.join(shadowBin, 'mkdir')); } catch { /* ok */ }
+        }
+
         // Deliberately DO NOT symlink curl → "command -v curl" will fail inside the hook
 
         writeProxyJson({ enabled: true, port: listenPort });
 
         const result = spawnSync('bash', [PROXY_HOOK], {
           input: JSON.stringify(SESSION_INPUT),
-          // PATH: shadowBin first (has dirname, node, no curl), then /bin for cat/mkdir/date
-          env: { ...process.env, HOME: homeDir, PATH: `${shadowBin}:/bin` },
+          // PATH=shadowBin only: all needed binaries are symlinked above; curl deliberately
+          // omitted so "command -v curl" fails. No /bin suffix — on Linux merged-usr /bin
+          // is /usr/bin, which exposes /bin/curl and would defeat the test.
+          env: { ...process.env, HOME: homeDir, PATH: shadowBin },
           encoding: 'utf-8',
         });
         expect(result.status).toBe(0);

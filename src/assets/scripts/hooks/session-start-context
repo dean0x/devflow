@@ -17,6 +17,12 @@ dbg() { :; }
 
 # set -e intentionally omitted: a failure in this section must not crash the hook.
 
+# Drain stdin before any early exit — prevents EPIPE on Linux when the parent writes
+# the event JSON to the hook's stdin pipe before the child has started reading.
+# Must be the first I/O operation so all exit paths (re-entrancy guard below,
+# json-parse unavailable further down) find stdin already consumed.
+INPUT=$(cat)
+
 # Re-entrancy guard — before hook-bootstrap to minimize background session
 # overhead. The memory worker's own claude -p session fires SessionStart hooks;
 # without this guard the nested session would re-inject its own context (and
@@ -30,8 +36,6 @@ source "$SCRIPT_DIR/hook-bootstrap" "session-start-context"
 
 source "$SCRIPT_DIR/json-parse" || { echo "session-start-context: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
-
-INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
