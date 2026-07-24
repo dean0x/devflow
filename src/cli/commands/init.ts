@@ -264,7 +264,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [] },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false },
           installedAt: now,
           updatedAt: now,
         });
@@ -1518,6 +1518,8 @@ export const initCommand = new Command('init')
         knownFlags: FLAG_REGISTRY.map(f => f.id),
         viewMode,
         security: securityMode,
+        // Self-healed from existing manifest; Phase 2 proxy CLI owns toggling this value.
+        proxy: existingManifest?.features.proxy ?? false,
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
