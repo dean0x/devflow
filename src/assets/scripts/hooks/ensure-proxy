@@ -231,6 +231,12 @@ disown "$_RELAY_PID" 2>/dev/null || true
 
 log "relay spawned with pid $_RELAY_PID"
 
+# Best-effort pid record for `devflow proxy --status` — mirrors the CLI enable path.
+# Written unconditionally after spawn (like the CLI): a stale pid from a relay that
+# never came up is harmless, since --status liveness-checks it before display.
+printf '%s' "$_RELAY_PID" > "$DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
+  log "warn: could not write proxy.pid (non-fatal)"
+
 # Bounded wait: 80×0.1s = 8s maximum (well within 15s hook timeout)
 _i=0
 _RELAY_UP=false

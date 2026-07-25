@@ -1589,9 +1589,12 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 // =============================================================================
 //
 // Tests cover: disabled/absent proxy, re-entrancy guard, missing prerequisites,
-// UserPromptSubmit silent path, and port-up fast-exit (with ephemeral TCP server).
-// The relay-spawn path (80×0.1s wait) is not exercised in unit tests to avoid
-// unacceptable test duration — the docker-integration suite covers it.
+// UserPromptSubmit silent path, port-up fast-exit (with ephemeral TCP server),
+// and the relay-spawn path (stub relay that binds the port on startup, so the
+// bounded 80×0.1s wait resolves on the first probes instead of running to timeout).
+//
+// Not covered here: the spawn path's failure branch (relay binary that never binds),
+// which costs the full 8s wait and would dominate suite runtime.
 
 describe('ensure-proxy behavioral tests', () => {
   const PROXY_HOOK = path.join(HOOKS_DIR, 'ensure-proxy');
@@ -1962,6 +1965,110 @@ describe('ensure-proxy behavioral tests', () => {
       } finally {
         fs.rmSync(shadowBin, { recursive: true, force: true });
       }
+    });
+  });
+
+  // ── Relay spawn path (stub relay) ────────────────────────────────────────────
+
+  describe('relay spawn path (stub relay binds the port)', () => {
+    let spawnedPid: number | null = null;
+
+    afterEach(() => {
+      // The hook spawns a detached, disowned process — the test owns its teardown.
+      if (spawnedPid !== null) {
+        try { process.kill(spawnedPid, 'SIGKILL'); } catch { /* already gone */ }
+        spawnedPid = null;
+      }
+    });
+
+    /**
+     * Write a stub relay that mimics the one contract the spawn path depends on:
+     * read the port from $SUBSWITCH_CONFIG and accept TCP on it. Invoked by the
+     * hook as `node <binPath> serve`.
+     */
+    function writeStubRelay(): string {
+      const binPath = path.join(tmpDir, 'stub-relay.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          "const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, 'utf-8'));",
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+      return binPath;
+    }
+
+    function writeRoutingConfig(port: number): string {
+      const configPath = path.join(tmpDir, 'proxy-routing.json');
+      fs.writeFileSync(configPath, JSON.stringify({ port, codex: { models: [] } }));
+      return configPath;
+    }
+
+    it('spawns the relay on SessionStart when the port is down, and exits 0 silently', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      const { exitCode, stdout, stderr } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      // Relay came up within the bounded wait → no warning is emitted.
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr).toBe('');
+    });
+
+    it('writes proxy.pid with the live relay pid so --status can report the process', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      expect(fs.existsSync(pidFile)).toBe(true);
+
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      spawnedPid = pid;
+
+      expect(Number.isInteger(pid)).toBe(true);
+      expect(pid).toBeGreaterThan(0);
+      // The recorded pid must be the live relay — the same liveness probe --status uses.
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    });
+
+    it('releases the spawn lock after a successful start', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      // A retained lock would make every later session take the "starting elsewhere" path.
+      expect(fs.existsSync(path.join(homeDir, '.devflow', '.proxy-spawn.lock'))).toBe(false);
     });
   });
 });
