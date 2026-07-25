@@ -34,12 +34,13 @@ The routing runtime is an internal package (`subswitch@0.1.0`, exact-pinned in `
 
 1. Read `proxy.json` for the remembered port; `resolvePort(portOption, priorPort)` picks the effective port. `--port` has **no commander default** — omission leaves `portOption` as `undefined` and the remembered port from `proxy.json` wins (TS-1 fix).
 2. Write `proxy-routing.json` with all external model IDs.
-3. Run `runProxyPreflight()` (5 ordered checks — see Preflight section).
+3. Run `runProxyPreflight()` (4 ordered checks — ①–④: bin, codex auth, port probe/adoption, settings — see Preflight section). Doctor excluded: a pre-spawn gate is always unsatisfiable on a cold path (D-EFR-2; see Anti-Patterns).
 4. On success: write `proxy.json` `enabled:true`.
-5. Spawn relay via `spawnRelayAndWaitForPort()` (exported): bounded ≤50×100ms probe loop (5s max). If relay never accepts, write `proxy.json` `enabled:false` (rollback), return error.
-6. Settings pass via `applyEnableSettingsPass()` (internal named function, not exported): `removeProxyHooks` + `_stripProxyEnvFromObject(s, port)` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls, then one atomic write** to `~/.claude/settings.json`.
-7. Sync manifest.
-8. `reapplyAgentMapping({ proxyEnabled: true })` — materializes GPT model entries into agent frontmatter.
+5. Spawn relay via `spawnRelayAndWaitForPort()` (exported): bounded ≤50×100ms probe loop (5s max). `SpawnRelayResult.spawnedPid` is set when this process spawned the relay; absent on the adopted path. If relay never accepts, rollback `proxy.json` to `enabled:false` and return error.
+6. **Post-spawn doctor verification** via `runPostSpawnVerification()` (exported, D-EFR-2): runs `node <binPath> doctor` against the live relay. On failure: rollback `proxy.json` to `enabled:false`; SIGTERM then 2s SIGKILL escalation the relay — **only when `spawnedPid` is defined** (self-spawned). An adopted relay may be serving live sessions and must never be killed.
+7. Settings pass via `applyEnableSettingsPass()` (internal named function, not exported): `removeProxyHooks` + `_stripProxyEnvFromObject(s, port)` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls, then one atomic write** to `~/.claude/settings.json`.
+8. Sync manifest.
+9. `reapplyAgentMapping({ proxyEnabled: true })` — materializes GPT model entries into agent frontmatter.
 
 Hard failures at any step set `process.exitCode = 1` and return — never `process.exit()` (avoids PF-014).
 
@@ -68,7 +69,7 @@ export function applyDisableToSettings(settings: Settings, managedPort: number):
 
 The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvFromObject(s)` short-circuits when hooks are present — `_stripProxyEnvFromObject` never runs, leaving `ANTHROPIC_BASE_URL` pointing at a disabled relay in new sessions. Both calls must always evaluate regardless of the other's return value.
 
-### Preflight checks (5 in order, hard-gated)
+### Preflight checks (4 in order, hard-gated)
 
 ```
 ① resolveProxyBin()           — bin resolvable from devflow's node_modules
@@ -76,24 +77,28 @@ The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvF
 ③ tcpConnectable(port, 2000ms) — port free or our relay already running
    └── if accepting: health check → adopted=true | port-conflict Err
 ④ readSettingsJson parseable; ANTHROPIC_BASE_URL not 'foreign'; API key warn (non-fatal)
-⑤ spawnDoctor(binPath, SUBSWITCH_CONFIG=configPath, 10s) — doctor exits 0
-   └── timeout: SIGTERM → 2s grace → SIGKILL (grace timer unref'd)
 ```
 
-All five are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDeps(opts)`** (exported) builds the production implementation and is shared between `runEnable` and `init.ts` — inline copies were deleted. Key option: `swallowSettingsReadError: true` for init.ts (which writes `settings.json` itself); `false` for `runEnable` (propagates read errors to the user).
+Doctor (`spawnDoctor`) was check ⑤ in prior versions; it moved to `runPostSpawnVerification` (step 6 in the enable path). `spawnDoctor` remains on `ProxyPreflightDeps` for interface compatibility — `buildRealPreflightDeps` still builds it so `runEnable` can reuse the same deps instance for step 6 (`spawnDoctor: preflightDeps.spawnDoctor`). Preflight itself never calls `spawnDoctor`.
+
+**Init never runs doctor and never spawns.** `devflow init` calls `runProxyPreflight` (the same 4-check function) then writes `proxy.json enabled:true`. The relay is started by the first session's `ensure-proxy` hook. Deeper diagnostics (doctor, spawn) live in `devflow proxy --enable` and `devflow proxy --status`.
+
+All four checks are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDeps(opts)`** (exported) builds the production implementation and is shared between `runEnable` and `init.ts` — inline copies were deleted. Key option: `swallowSettingsReadError: true` for init.ts (which writes `settings.json` itself); `false` for `runEnable` (propagates read errors to the user).
 
 ### Exported seams in proxy.ts
 
 | Export | Purpose |
 |--------|---------|
 | `buildRealPreflightDeps(opts)` | Production `ProxyPreflightDeps` factory — shared by `runEnable` and `init.ts` |
-| `spawnRelayAndWaitForPort(...)` | Spawn relay + bounded 50×100ms TCP wait; injectable via `SpawnAndWaitDeps` |
+| `spawnRelayAndWaitForPort(...)` | Spawn relay + bounded 50×100ms TCP wait; injectable via `SpawnAndWaitDeps`. Success variant carries `spawnedPid?: number` (set when self-spawned; absent on adopted path) |
+| `runPostSpawnVerification(...)` | Doctor against the live relay post-spawn; injectable via `PostSpawnDoctorDeps`. Rollback + conditional kill on non-zero exit (D-EFR-2) |
 | `resolvePort(portOption, priorPort)` | Port resolution with remembered-port fallback |
 | `isOurRelayBody(body)` | Health-check identity check (`name === 'subswitch'`) |
 | `applyProxyEnv`, `stripProxyEnv` | Settings JSON string transforms (pure, no mutation) |
 | `applyDisableToSettings` | Unconditional hooks-remove + URL-strip on parsed Settings object |
 | `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks` | Hook mutation helpers |
-| `runProxyPreflight`, `ProxyPreflightDeps`, `PreflightResult` | Preflight contract |
+| `runProxyPreflight`, `ProxyPreflightDeps`, `PreflightResult` | Preflight contract (4 checks) |
+| `PostSpawnDoctorDeps` | Injectable interface for post-spawn doctor verification |
 | `SpawnAndWaitDeps`, `SpawnRelayResult`, `BuildRealPreflightDepsOptions` | Injectable interfaces |
 | `readProxyEnvState` | Returns `'ours'|'ours-other-port'|'foreign'|'absent'` for `--status` display |
 
@@ -116,7 +121,9 @@ esac
 | SessionStart | UP + correct identity | exit 0, no output |
 | SessionStart | UP + wrong identity | exit 0 + `json_session_output` warning ("port occupied by another application") |
 | SessionStart | DOWN + missing bin/config | exit 0 + `json_session_output` warning ("relay binary not found" / "routing config not found") |
-| SessionStart | DOWN + prerequisites ok | acquire spawn lock → nohup spawn → wait 80×0.1s = 8s → exit 0 [+warning if never up] |
+| SessionStart | DOWN + prerequisites ok | acquire spawn lock → nohup spawn → write `proxy.pid` (best-effort) → wait 80×0.1s = 8s → exit 0 [+warning if never up] |
+
+**`proxy.pid` is written immediately after spawn (best-effort)**, mirroring the CLI enable path. `devflow proxy --status` reads this file to display the process line for hook-started relays. A stale pid from a relay that never came up is harmless — `--status` liveness-checks it before display (`process.kill(pid, 0)`).
 
 **UserPromptSubmit fast exit happens before any TCP probe or log I/O** — enabled/port check from `proxy.json` is the only work done, then the hook exits. This keeps the hot path at near-zero subprocess cost.
 
@@ -131,6 +138,8 @@ esac
 The hook is **not git-gated** (unlike `preamble` and `session-start-orchestrator`). Proxy is a user-scope global feature.
 
 The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. This difference is intentional: the hook fires inside a 15-second platform timeout and needs a wider cold-start window; the CLI user is waiting interactively.
+
+**Hook spawn path is covered by tests** (tests/shell-hooks.test.ts): a stub relay reads `SUBSWITCH_CONFIG` and binds the port, asserting silent exit (exit 0, no stdout/stderr), a live pid recorded in `proxy.pid`, and spawn lock released. The failure branch (full 8s wait) is intentionally not unit-tested for duration reasons.
 
 ## Mapping Engine (agent-models.json)
 
@@ -224,11 +233,12 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Calling `process.exit()` inside a finally-guarded scope in the TUI**: cleanup must be wired via Promise `resolve()`. Any `process.exit()` inside `finally` terminates without running cleanup and causes event-loop issues (avoids PF-014).
 - **Using previousModel in agent-models.json**: The mapping has no `previousModel` field. Shipped defaults are always read live from `agentsDir()` source files. Caching a previousModel creates stale drift when source agent files are updated.
 - **Duplicating the dormancy predicate**: `isDormantGptModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `externalModelIds().includes(model) && !proxyEnabled` at call sites.
+- **Pre-spawn doctor gating (chicken-and-egg)**: The relay's `doctor` subcommand probes the relay port to confirm it is running — a not-yet-started relay makes that probe fail (exit 1). A pre-spawn gate is therefore always unsatisfiable on a cold path and invisible to unit tests that mock doctor exit 0 (found during the first live enable). Doctor must gate post-spawn only, after the relay is confirmed up (D-EFR-2).
 
 ## Gotchas
 
 - **`proxy.json` ENOENT is not an error**: `readProxyState()` returns a default disabled state when the file is missing. Callers that treat ENOENT as an error will get a false negative on fresh installs.
-- **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning.
+- **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning. `spawnedPid` will be absent from `SpawnRelayResult` on this path — `runPostSpawnVerification` must never kill an adopted relay.
 - **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
 - **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`. Prior to this fix, the commander default of `String(DEFAULT_PROXY_PORT)` made the remembered port dead code.
 - **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantGptModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
@@ -242,13 +252,13 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`
 - `src/core/agent-models.ts` — `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
-- `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`
+- `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `PostSpawnDoctorDeps`
 - `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()`, `applySetMapping()`, `buildListRows()`
 - `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `unsavedCount()`
 - `src/cli/agents-view/render.ts` — pure frame renderer; exports `FIXED_ROWS`, `computeViewportHeight`
 - `src/cli/agents-view/terminal.ts` — impure TUI shell, `runAgentsTui()`, `TuiIO`, `MAX_KEYPRESSES`
-- `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook
-- `src/cli/commands/init.ts` — proxy preflight block; `reapplyAgentMapping` guard after preflight
+- `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook; writes `proxy.pid` after spawn
+- `src/cli/commands/init.ts` — proxy preflight block (4-check, no doctor, no spawn); `reapplyAgentMapping` guard after preflight
 
 ## Related
 
