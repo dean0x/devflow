@@ -360,7 +360,11 @@ export interface PreflightResult {
  * ② ~/.codex/auth.json exists.
  * ③ Port probe: free → OK; accepting → health check → adopt or fail.
  * ④ settings.json parseable; ANTHROPIC_BASE_URL not pointing elsewhere; API key warn.
- * ⑤ Doctor: `node <bin> doctor` with SUBSWITCH_CONFIG env, 10s cap.
+ *
+ * Doctor (previously check ⑤) is deliberately excluded: the relay's doctor subcommand
+ * probes the relay port — a not-yet-started relay makes that probe fail (exit 1). A
+ * pre-spawn gate is therefore always unsatisfiable on a cold path. Doctor now runs in
+ * runPostSpawnVerification, after the relay is confirmed up. See D-EFR-2.
  *
  * Returns Ok(PreflightResult) on success, Err(message) on any check failure.
  */
@@ -433,16 +437,6 @@ export async function runProxyPreflight(
     deps.onWarn?.(
       'ANTHROPIC_API_KEY is set in settings.json — requests will use that key through the local relay',
     );
-  }
-
-  // ⑤ Doctor subprocess
-  const doctorEnv: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    SUBSWITCH_CONFIG: configPath,
-  };
-  const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, DOCTOR_TIMEOUT_MS, logPath);
-  if (doctorExit !== 0) {
-    return Err(`routing preflight failed — see ${logPath}`);
   }
 
   return Ok({ binPath, npxWarning, adopted: false });
@@ -625,7 +619,9 @@ export interface SpawnAndWaitDeps {
 }
 
 /** Result type for spawnRelayAndWaitForPort. */
-export type SpawnRelayResult = { ok: true } | { ok: false; reason: string };
+export type SpawnRelayResult =
+  | { ok: true; spawnedPid?: number } // spawnedPid present when self-spawned; absent on adopted path
+  | { ok: false; reason: string };
 
 /**
  * Spawn the relay (unless adopted) and wait up to 50×100ms for TCP accept.
@@ -707,7 +703,7 @@ export async function spawnRelayAndWaitForPort(
   if (!portUp) {
     return { ok: false, reason: 'relay-not-started' };
   }
-  return { ok: true };
+  return { ok: true, spawnedPid: pid };
 }
 
 /** Build the real (production) SpawnAndWaitDeps. Not exported — internal to runEnable. */
@@ -738,6 +734,80 @@ function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
     },
     tcpConnectable: realTcpConnectable,
   };
+}
+
+// ─── Atomic settings mutation for enable ─────────────────────────────────────
+
+// ─── Post-spawn doctor verification ──────────────────────────────────────────
+
+/**
+ * Injectable dependencies for runPostSpawnVerification.
+ * All I/O is behind this interface so every doctor-gate branch is unit-testable.
+ */
+export interface PostSpawnDoctorDeps {
+  /**
+   * Spawn `node <binPath> doctor` with the given env; append stdout+stderr to logFile.
+   * Resolves with the exit code (1 on timeout).
+   */
+  spawnDoctor: (
+    binPath: string,
+    env: Record<string, string>,
+    timeoutMs: number,
+    logFile: string,
+  ) => Promise<number>;
+  /**
+   * Kill the relay process by pid via SIGTERM. Must not throw — implementation wraps in try/catch.
+   * Called only when spawnedPid is defined and doctor exits non-zero (self-spawned rollback only).
+   */
+  killProcess: (pid: number) => void;
+  /**
+   * Write proxy.json with enabled:false for rollback. Called when doctor exits non-zero.
+   * Best-effort — a write failure is non-fatal (secondary to the verification failure).
+   */
+  writeDisabledProxyState: () => Promise<void>;
+}
+
+/**
+ * Run `node <binPath> doctor` against the live relay and handle failure.
+ *
+ * @D-EFR-2 Doctor gates post-spawn, not pre-spawn: the relay's doctor subcommand
+ *   probes the relay port to confirm it is running — a not-yet-started relay makes
+ *   that probe fail (exit 1), so a pre-spawn gate is always unsatisfiable on a cold
+ *   path (the port is down by definition before spawn). Moving the gate post-spawn
+ *   means doctor runs against an already-live relay, turning "running: NO" into
+ *   "running: YES" on the healthy path, validating codex auth and TLS reachability.
+ *
+ *   Kill-on-rollback is restricted to self-spawned relays (spawnedPid defined): an
+ *   adopted relay may be serving other live Claude Code sessions, so we must never
+ *   kill it. A just-spawned relay predates the settings pass, so no session is
+ *   routing through it — SIGTERM is safe (with a SIGKILL escalation in the caller).
+ *
+ * @param spawnedPid  Pid of the relay we spawned; undefined when the relay was adopted.
+ * @returns Ok(undefined) when doctor exits 0; Err(message) on failure. On failure the
+ *          rollback (writeDisabledProxyState) and conditional kill are applied before
+ *          returning — the caller does not need to do additional rollback.
+ */
+export async function runPostSpawnVerification(
+  binPath: string,
+  configPath: string,
+  logPath: string,
+  spawnedPid: number | undefined,
+  deps: PostSpawnDoctorDeps,
+): Promise<Result<undefined, string>> {
+  const doctorEnv: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    SUBSWITCH_CONFIG: configPath,
+  };
+  const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, DOCTOR_TIMEOUT_MS, logPath);
+  if (doctorExit === 0) return Ok(undefined);
+
+  // Doctor failed — rollback proxy state and conditionally kill the relay.
+  // Both are best-effort: write failure is secondary; kill failure means process already exited.
+  await deps.writeDisabledProxyState();
+  if (spawnedPid !== undefined) {
+    deps.killProcess(spawnedPid);
+  }
+  return Err(`Routing verification failed — see ${logPath}`);
 }
 
 // ─── Atomic settings mutation for enable ─────────────────────────────────────
@@ -1093,18 +1163,20 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     return;
   }
 
-  // Step 3: Preflight checks
+  // Step 3: Preflight checks (①–④: bin, codex auth, port probe, settings)
+  // preflightDeps is saved so spawnDoctor can be reused in step 6 (post-spawn verification).
+  const preflightDeps = buildRealPreflightDeps({
+    settingsPath,
+    // runEnable propagates settings read errors (init.ts swallows — see swallowSettingsReadError)
+    swallowSettingsReadError: false,
+    onWarn: (msg) => { s.stop(''); p.log.warn(msg); s.start(''); },
+  });
   const preflightResult = await runProxyPreflight(
     port,
     codexAuthPath,
     configPath,
     logPath,
-    buildRealPreflightDeps({
-      settingsPath,
-      // runEnable propagates settings read errors (init.ts swallows — see swallowSettingsReadError)
-      swallowSettingsReadError: false,
-      onWarn: (msg) => { s.stop(''); p.log.warn(msg); s.start(''); },
-    }),
+    preflightDeps,
   );
   if (!preflightResult.ok) {
     s.stop(color.red('Preflight failed'));
@@ -1163,10 +1235,52 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const { spawnedPid } = spawnResult;
+
+  // Step 6: Post-spawn doctor verification — runs against the live relay (see D-EFR-2).
+  // Relay is confirmed up before this runs, so "running: YES" is the expected outcome.
+  s.message('Verifying routing connection...');
+  const verifyResult = await runPostSpawnVerification(
+    binPath,
+    configPath,
+    logPath,
+    spawnedPid,
+    {
+      spawnDoctor: preflightDeps.spawnDoctor,
+      // Best-effort SIGTERM + SIGKILL escalation after 2s grace period.
+      // Only called when we spawned the relay (spawnedPid defined) — see D-EFR-2.
+      killProcess: (pid) => {
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already exited — ignore */ }
+        const sigkillTimer = setTimeout(() => {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already exited — ignore */ }
+        }, 2000);
+        sigkillTimer.unref();
+      },
+      writeDisabledProxyState: async () => {
+        const rollback = buildProxyState({
+          enabled: false,
+          port,
+          binPath,
+          configPath,
+          models: externalModelIds(),
+          devflowVersion: getDevflowVersion(),
+        });
+        // Best-effort — write failure here is secondary to the verification failure
+        await writeProxyState(devflowDir, rollback);
+      },
+    },
+  );
+  if (!verifyResult.ok) {
+    // Rollback and conditional kill already applied inside runPostSpawnVerification
+    s.stop(color.red('Routing verification failed'));
+    p.log.error(verifyResult.error);
+    process.exitCode = 1;
+    return;
+  }
 
   s.message('Updating settings...');
 
-  // Step 6: Atomic settings mutation
+  // Step 7: Atomic settings mutation
   const settingsResult = await applyEnableSettingsPass(settingsPath, devflowDir, port);
   if (!settingsResult.ok) {
     // Roll back to disabled state — settings write failed after relay started
@@ -1185,10 +1299,10 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     return;
   }
 
-  // Step 7: Sync manifest
+  // Step 8: Sync manifest
   await syncManifestFeature(devflowDir, 'proxy', true);
 
-  // Step 8: Reapply agent mapping
+  // Step 9: Reapply agent mapping
   const reapplyResult = await reapplyAgentMapping({
     proxyEnabled: true,
     installDir,

@@ -58,7 +58,9 @@ function makeFailingPreflightDeps(overrides: Partial<ProxyPreflightDeps> = {}): 
 }
 
 /**
- * Passing preflight deps — port not yet accepting (free), doctor exits 0 → Ok.
+ * Passing preflight deps — port not yet accepting (free) → Ok({adopted:false}).
+ * spawnDoctor is retained in the interface for backward compat but is no longer
+ * called by runProxyPreflight (doctor moved to runPostSpawnVerification post-spawn).
  */
 function makePassingPreflightDeps(): ProxyPreflightDeps {
   return {
@@ -68,7 +70,7 @@ function makePassingPreflightDeps(): ProxyPreflightDeps {
     tcpConnectable: () => Promise.resolve(false), // port free
     httpGet: () => Promise.resolve({ ok: false, error: 'not called when port free' }),
     readSettingsJson: () => Promise.resolve('{}'), // no foreign ANTHROPIC_BASE_URL
-    spawnDoctor: () => Promise.resolve(0),     // doctor passes
+    spawnDoctor: () => Promise.resolve(0),     // interface compat; not called by preflight
   };
 }
 

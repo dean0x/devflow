@@ -17,9 +17,11 @@ import {
   hasProxyHooks,
   applyDisableToSettings,
   runProxyPreflight,
+  runPostSpawnVerification,
   isOurRelayBody,
   resolvePort,
   type ProxyPreflightDeps,
+  type PostSpawnDoctorDeps,
 } from '../src/cli/commands/proxy.js';
 import type { Settings } from '../src/targets/claude-code/hooks.js';
 
@@ -503,13 +505,15 @@ describe('runProxyPreflight', () => {
 
   // ③ Port probe — free
   it('returns Ok when all checks pass with port free', async () => {
-    const deps = makeDeps(); // tcpConnectable=false, spawnDoctor=0
+    const deps = makeDeps(); // tcpConnectable=false
     const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.adopted).toBe(false);
       expect(result.value.binPath).toBe('/path/to/relay.js');
     }
+    // Doctor is no longer called by preflight — it moved to runPostSpawnVerification
+    expect(deps.spawnDoctor).not.toHaveBeenCalled();
   });
 
   // ③ Port probe — already ours (adopt)
@@ -602,19 +606,7 @@ describe('runProxyPreflight', () => {
     }
   });
 
-  // ⑤ Doctor
-  it('returns Err when doctor exits non-zero', async () => {
-    const deps = makeDeps({
-      spawnDoctor: vi.fn().mockResolvedValue(1),
-    });
-    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('preflight failed');
-    }
-  });
-
-  // ⑤ Doctor — npxWarning propagated
+  // npxWarning propagated (from check ①)
   it('propagates npxWarning from resolveProxyBin', async () => {
     const deps = makeDeps({
       resolveProxyBin: vi.fn().mockResolvedValue({ ok: true, value: { binPath: '/path/.../relay.js', npxWarning: true } }),
@@ -653,7 +645,16 @@ describe('runProxyPreflight', () => {
     expect(fileExists).not.toHaveBeenCalled();
   });
 
-  it('does not run doctor when port is squatted', async () => {
+  // Preflight never calls spawnDoctor — doctor runs post-spawn in runPostSpawnVerification
+  it('never calls spawnDoctor — doctor moved to post-spawn verification', async () => {
+    const spawnDoctor = vi.fn();
+    // Test across the non-adopt path (port free, all checks pass)
+    const deps = makeDeps({ spawnDoctor });
+    await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(spawnDoctor).not.toHaveBeenCalled();
+  });
+
+  it('never calls spawnDoctor even when port is squatted (early return path)', async () => {
     const spawnDoctor = vi.fn();
     const deps = makeDeps({
       tcpConnectable: vi.fn().mockResolvedValue(true),
@@ -662,6 +663,84 @@ describe('runProxyPreflight', () => {
     });
     await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(spawnDoctor).not.toHaveBeenCalled();
+  });
+});
+
+// ─── runPostSpawnVerification ─────────────────────────────────────────────────
+//
+// D-EFR-2: Doctor runs post-spawn against a live relay, not pre-spawn where the
+// relay port is always down on a cold path. Kill-on-rollback is restricted to
+// self-spawned relays (spawnedPid defined) — adopted relays must not be killed.
+
+/** Build a complete passing set of PostSpawnDoctorDeps for customisation. */
+function makePostSpawnDeps(overrides: Partial<PostSpawnDoctorDeps> = {}): PostSpawnDoctorDeps {
+  return {
+    spawnDoctor: vi.fn().mockResolvedValue(0),
+    killProcess: vi.fn(),
+    writeDisabledProxyState: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+describe('runPostSpawnVerification', () => {
+  const BIN = '/path/to/relay.js';
+  const CONFIG = '/home/test/.devflow/proxy-routing.json';
+  const LOG = '/home/test/.devflow/logs/proxy.log';
+
+  // (a) doctor runs after port is confirmed up (i.e. spawnDoctor is called by this function)
+  it('calls spawnDoctor — runs against the live relay, not during preflight', async () => {
+    const deps = makePostSpawnDeps();
+    await runPostSpawnVerification(BIN, CONFIG, LOG, undefined, deps);
+    expect(deps.spawnDoctor).toHaveBeenCalled();
+  });
+
+  // (d) doctor exits zero → Ok; no rollback, no kill
+  it('doctor exits zero — returns Ok (settings pass proceeds)', async () => {
+    const deps = makePostSpawnDeps({ spawnDoctor: vi.fn().mockResolvedValue(0) });
+    const result = await runPostSpawnVerification(BIN, CONFIG, LOG, 1234, deps);
+    expect(result.ok).toBe(true);
+    expect(deps.writeDisabledProxyState).not.toHaveBeenCalled();
+    expect(deps.killProcess).not.toHaveBeenCalled();
+  });
+
+  // (b) doctor non-zero + self-spawned → rollback AND kill
+  it('doctor non-zero with self-spawned relay — rolls back proxy state and kills spawned pid', async () => {
+    const deps = makePostSpawnDeps({ spawnDoctor: vi.fn().mockResolvedValue(1) });
+    const result = await runPostSpawnVerification(BIN, CONFIG, LOG, 1234, deps);
+    expect(result.ok).toBe(false);
+    expect(deps.writeDisabledProxyState).toHaveBeenCalled();
+    expect(deps.killProcess).toHaveBeenCalledWith(1234);
+  });
+
+  // (c) doctor non-zero + adopted (spawnedPid undefined) → rollback WITHOUT kill
+  it('doctor non-zero with adopted relay — rolls back proxy state without killing', async () => {
+    const deps = makePostSpawnDeps({ spawnDoctor: vi.fn().mockResolvedValue(1) });
+    const result = await runPostSpawnVerification(BIN, CONFIG, LOG, undefined, deps);
+    expect(result.ok).toBe(false);
+    expect(deps.writeDisabledProxyState).toHaveBeenCalled();
+    expect(deps.killProcess).not.toHaveBeenCalled();
+  });
+
+  // Branding constraint: error message must not expose internal relay package name
+  it('error message does not expose internal relay package name', async () => {
+    const deps = makePostSpawnDeps({ spawnDoctor: vi.fn().mockResolvedValue(1) });
+    const result = await runPostSpawnVerification(BIN, CONFIG, LOG, undefined, deps);
+    if (!result.ok) {
+      expect(result.error.toLowerCase()).not.toContain('subswitch');
+    } else {
+      throw new Error('Expected Err result');
+    }
+  });
+
+  // Error message references the log path for diagnostics
+  it('error message references the log path', async () => {
+    const deps = makePostSpawnDeps({ spawnDoctor: vi.fn().mockResolvedValue(1) });
+    const result = await runPostSpawnVerification(BIN, CONFIG, LOG, undefined, deps);
+    if (!result.ok) {
+      expect(result.error).toContain(LOG);
+    } else {
+      throw new Error('Expected Err result');
+    }
   });
 });
 

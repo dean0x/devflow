@@ -58,6 +58,13 @@ describe('spawnRelayAndWaitForPort', () => {
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
+  it('adopted=true — spawnedPid is absent (no relay was spawned by us)', async () => {
+    const deps = makeSpawnDeps();
+    const result = await spawnRelayAndWaitForPort(PORT, BIN, CONFIG, LOG, PID_PATH, true, deps);
+    assertOk(result);
+    expect(result.spawnedPid).toBeUndefined();
+  });
+
   // ─── relay-never-accepts path ─────────────────────────────────────────────
 
   it('relay never accepts (50-iteration timeout) — returns ok:false (rollback trigger)', async () => {
@@ -183,6 +190,19 @@ describe('spawnRelayAndWaitForPort', () => {
     const result = await spawnRelayAndWaitForPort(PORT, BIN, CONFIG, LOG, PID_PATH, false, deps);
 
     assertOk(result);
+  });
+
+  it('self-spawned success — spawnedPid matches pid returned by spawnProcess', async () => {
+    const deps = makeSpawnDeps({
+      spawnProcess: vi.fn().mockImplementation(() => ({ pid: 9999 })),
+      isProcessAlive: vi.fn().mockReturnValue(true),
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+    });
+
+    const result = await spawnRelayAndWaitForPort(PORT, BIN, CONFIG, LOG, PID_PATH, false, deps);
+
+    assertOk(result);
+    expect(result.spawnedPid).toBe(9999);
   });
 
   // ─── pid write ───────────────────────────────────────────────────────────
