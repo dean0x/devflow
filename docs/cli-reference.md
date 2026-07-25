@@ -188,7 +188,7 @@ npx devflow-kit proxy --enable --port <n>  # Enable on a specific port (default:
 
 | Option | Description |
 |--------|-------------|
-| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, injects `ANTHROPIC_BASE_URL` into `settings.json`, applies saved agent model mapping |
+| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` into `settings.json`, applies saved agent model mapping |
 | `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable; the relay process is left running for live sessions (a manual `kill <pid>` hint is shown) |
 | `--status` | Show enabled/disabled, port, relay PID (if running), and proxy log path |
 | `--port <n>` | Override the relay port (default 4141); takes effect on next enable |
