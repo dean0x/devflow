@@ -35,6 +35,7 @@ import {
 import { externalModelIds } from '../../core/external-models.js';
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { buildChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
 import {
   reapplyAgentMapping,
   revertExternalAgents,
@@ -493,7 +494,9 @@ async function realSpawnDoctor(
   timeoutMs: number,
   logFile: string,
 ): Promise<number> {
-  const logFd = await fs.open(logFile, 'a');
+  // openProxyLog: 0700 parent dir + 0600 file creation + best-effort chmod for
+  // pre-existing wider modes (SEC-2). Non-fatal on chmod failure per PF-009.
+  const logFd = await openProxyLog(logFile);
   try {
     return await new Promise<number>((resolve) => {
       const proc = cpSpawn(process.execPath, [binPath, 'doctor'], {
@@ -654,10 +657,10 @@ export async function spawnRelayAndWaitForPort(
   const logHandle = await deps.openLog(logPath);
 
   let spawnError: Error | undefined;
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    SUBSWITCH_CONFIG: configPath,
-  };
+  // SEC-2: use buildChildEnv to strip ANTHROPIC_API_KEY from the relay's env.
+  // The relay reads Codex credentials from ~/.codex/auth.json, not from env;
+  // the key provides no benefit and has credential value in any inherit-env leak path.
+  const env = buildChildEnv(configPath);
 
   const { pid } = deps.spawnProcess({
     execPath: process.execPath,
@@ -710,7 +713,8 @@ export async function spawnRelayAndWaitForPort(
 function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
   return {
     openLog: async (logPath) => {
-      const handle = await fs.open(logPath, 'a');
+      // openProxyLog: 0700 parent dir + 0600 file creation + best-effort chmod (SEC-2).
+      const handle = await openProxyLog(logPath);
       return { fd: handle.fd, close: () => handle.close() };
     },
     spawnProcess: ({ execPath, args, env, stdioFd, onError }) => {
@@ -794,10 +798,8 @@ export async function runPostSpawnVerification(
   spawnedPid: number | undefined,
   deps: PostSpawnDoctorDeps,
 ): Promise<Result<undefined, string>> {
-  const doctorEnv: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    SUBSWITCH_CONFIG: configPath,
-  };
+  // SEC-2: use buildChildEnv to strip ANTHROPIC_API_KEY from the doctor's env.
+  const doctorEnv = buildChildEnv(configPath);
   const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, DOCTOR_TIMEOUT_MS, logPath);
   if (doctorExit === 0) return Ok(undefined);
 
@@ -1153,7 +1155,15 @@ async function runEnable(portOption: string | undefined): Promise<void> {
 
   // Step 2: Write routing config
   await fs.mkdir(devflowDir, { recursive: true });
-  await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
+  // SEC-2: mode 0o700 for the logs directory (new directories only; pre-existing
+  // dirs are unaffected by mkdir). openProxyLog handles individual file mode.
+  await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
+
+  // SEC-2 pre-spawn rotation: rotate proxy.log before the relay opens an fd on it.
+  // MUST run before spawnRelayAndWaitForPort (Step 5) — a rename while the relay
+  // holds an append fd would orphan that fd. At this point no relay is running.
+  await rotateProxyLogIfLarge(logPath);
+
   try {
     await fs.writeFile(configPath, buildRoutingConfigJson(port, externalModelIds()), 'utf-8');
   } catch (err) {

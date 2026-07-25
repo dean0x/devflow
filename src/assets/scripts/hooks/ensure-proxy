@@ -98,6 +98,8 @@ fi
 # ── Log setup (SessionStart only) ──────────────────────────────────────────────
 LOG_DIR="$DEVFLOW_DIR/logs"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
+# SEC-2: harden log directory to 0700 (best-effort; pre-existing dirs may be wider).
+chmod 700 "$LOG_DIR" 2>/dev/null || true
 LOG_FILE="$LOG_DIR/proxy.log"
 
 # Size guard: 2MB max → truncate to 1MB tail (matches hook-log-init guard pattern).
@@ -117,7 +119,11 @@ fi
 _LOG_SIZE="${_LOG_SIZE:-0}"
 if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt "$_LOG_MAX_BYTES" ]; then
   _LTMP="$LOG_FILE.tmp.$$"
-  tail -c "$_LOG_TAIL_BYTES" "$LOG_FILE" > "$_LTMP" 2>/dev/null && \
+  # SEC-2: create rotation tmp under umask 077 so the post-mv inode carries 0600.
+  # mv replaces the inode, so the replacement inherits the tmp file's mode.
+  # chmod-after-mv would leave a window; setting mode at creation is the stronger
+  # guarantee. Mirrors the queue-append precedent (src/assets/scripts/hooks/queue-append).
+  (umask 077 && tail -c "$_LOG_TAIL_BYTES" "$LOG_FILE" > "$_LTMP") 2>/dev/null && \
     mv "$_LTMP" "$LOG_FILE" 2>/dev/null || \
     rm -f "$_LTMP" 2>/dev/null || true
 fi
@@ -224,8 +230,19 @@ fi
 # We hold the lock — spawn the relay
 log "spawning relay: $NODE_BIN $PROXY_BIN serve"
 
+# SEC-2: create proxy.log with 0600 before the append redirect so the file
+# lands at the correct mode on first creation. If the file already exists,
+# touch is a no-op for mode; the chmod below covers pre-existing wider modes.
+# Follows the queue-append precedent (src/assets/scripts/hooks/queue-append).
+(umask 077 && touch "$LOG_FILE") 2>/dev/null || true
+chmod 600 "$LOG_FILE" 2>/dev/null || true
+
 export SUBSWITCH_CONFIG="$PROXY_CONFIG"
-nohup "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
+# SEC-2: strip ANTHROPIC_API_KEY from the relay's env — it has credential value
+# and the subswitch relay reads Codex credentials from ~/.codex/auth.json, not env.
+# env(1) and nohup(1) both exec through, so $! still captures the relay PID.
+# env -u verified working on macOS /usr/bin/env (Bash 3.2 compatible).
+nohup env -u ANTHROPIC_API_KEY "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
 _RELAY_PID=$!
 disown "$_RELAY_PID" 2>/dev/null || true
 

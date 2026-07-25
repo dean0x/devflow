@@ -1239,7 +1239,8 @@ export const initCommand = new Command('init')
       // Write routing config (create logs dir non-fatally)
       let routingConfigWritten = false;
       try {
-        await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
+        // SEC-2: mode 0o700 for the logs directory (applies to new dirs only).
+        await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
         await fs.writeFile(configPath, buildRoutingConfigJson(DEFAULT_PROXY_PORT, models), 'utf-8');
         routingConfigWritten = true;
       } catch (err) {
