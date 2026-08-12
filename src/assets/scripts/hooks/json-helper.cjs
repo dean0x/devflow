@@ -111,7 +111,9 @@ function writeExclusive(tmp, content) {
 }
 
 function writeJsonlAtomic(file, entries) {
-  const tmp = file + '.tmp';
+  // PID-scope the tmp name so concurrent writers from different processes
+  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
+  const tmp = file + '.tmp.' + process.pid;
   const content = entries.length > 0
     ? entries.map(e => JSON.stringify(e)).join('\n') + '\n'
     : '';
@@ -121,7 +123,9 @@ function writeJsonlAtomic(file, entries) {
 
 /** Atomically write a text file via a .tmp sibling and rename. */
 function writeFileAtomic(file, content) {
-  const tmp = file + '.tmp';
+  // PID-scope the tmp name so concurrent writers from different processes
+  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
+  const tmp = file + '.tmp.' + process.pid;
   writeExclusive(tmp, content);
   fs.renameSync(tmp, file);
 }

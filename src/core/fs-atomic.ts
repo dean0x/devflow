@@ -33,7 +33,11 @@ import { promises as fs } from 'fs';
  * @param data - UTF-8 encoded content to write.
  */
 export async function writeFileAtomicExclusive(filePath: string, data: string): Promise<void> {
-  const tmp = `${filePath}.tmp`;
+  // PID-scope the tmp name so concurrent writers from different processes
+  // (e.g., two Claude Code sessions) never collide on the same .tmp path.
+  // mirrors proxy-log.ts rotation at src/core/proxy-log.ts which PID-scopes
+  // for the same reason.  avoids PF-011.
+  const tmp = `${filePath}.tmp.${process.pid}`;
   try {
     await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
   } catch (err: unknown) {

@@ -111,7 +111,9 @@ try {
   }
 
   if (changed) {
-    const tmp = usagePath + '.tmp';
+    // PID-scope the tmp name so concurrent writers from different processes
+    // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
+    const tmp = usagePath + '.tmp.' + process.pid;
     const content = JSON.stringify(data, null, 2) + '\n';
     // Use wx (O_EXCL) to reject any pre-existing file or symlink at the .tmp path,
     // preventing TOCTOU symlink-follow attacks. On EEXIST, unlink and retry once.

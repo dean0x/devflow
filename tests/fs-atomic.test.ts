@@ -52,15 +52,16 @@ describe('writeFileAtomicExclusive', () => {
   it('does not leave a .tmp file behind on success', async () => {
     const target = path.join(dir, 'settings.json');
     await writeFileAtomicExclusive(target, 'hello');
-    await expect(fs.access(`${target}.tmp`)).rejects.toThrow();
+    // PID-scoped tmp name — the tmp file is `<target>.tmp.<pid>`
+    await expect(fs.access(`${target}.tmp.${process.pid}`)).rejects.toThrow();
   });
 
   // ─── Stale .tmp recovery ──────────────────────────────────────────────────
 
-  it('recovers from a stale .tmp left by a prior crash', async () => {
+  it('recovers from a stale PID-scoped .tmp left by a prior crash', async () => {
     const target = path.join(dir, 'settings.json');
-    // Simulate a crashed prior run that left a stale .tmp
-    await fs.writeFile(`${target}.tmp`, 'stale content');
+    // Simulate a crashed prior run that left a stale PID-scoped .tmp
+    await fs.writeFile(`${target}.tmp.${process.pid}`, 'stale content');
     await writeFileAtomicExclusive(target, 'fresh content');
     const content = await fs.readFile(target, 'utf-8');
     expect(content).toBe('fresh content');

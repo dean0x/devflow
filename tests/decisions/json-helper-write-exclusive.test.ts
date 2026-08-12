@@ -41,13 +41,15 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
     expect(fs.readFileSync(targetFile, 'utf-8')).toBe('new-content');
   });
 
-  it('does not follow a symlink placed at the .tmp path (TOCTOU hardening)', () => {
-    // Arrange: place a symlink at the .tmp location pointing to a sentinel file.
-    // An attacker who can predict the .tmp path may pre-place a symlink to redirect
-    // the write to a sensitive file. writeExclusive's O_EXCL flag rejects such
-    // pre-existing paths, then unlinks and retries — the sentinel must remain intact.
+  it('does not follow a symlink placed at the PID-scoped .tmp path (TOCTOU hardening)', () => {
+    // Arrange: place a symlink at the PID-scoped .tmp location pointing to a sentinel
+    // file. An attacker who can predict both the target path AND the process PID may
+    // pre-place a symlink to redirect the write to a sensitive file. writeExclusive's
+    // O_EXCL flag rejects such pre-existing paths, then unlinks and retries — the
+    // sentinel must remain intact.
     const targetFile = path.join(tmpDir, 'target.json');
-    const tmpPath = targetFile + '.tmp';
+    // PID-scoped: mirrors json-helper.cjs writeFileAtomic behaviour
+    const tmpPath = targetFile + '.tmp.' + process.pid;
 
     const sentinelPath = path.join(tmpDir, 'attacker-controlled.txt');
     fs.writeFileSync(sentinelPath, 'original-content', 'utf-8');
@@ -62,14 +64,16 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
     // Assert 2: target file was written correctly.
     expect(fs.readFileSync(targetFile, 'utf-8')).toBe('{"written":true}\n');
 
-    // Assert 3: the .tmp file is cleaned up (renamed to target by renameSync).
+    // Assert 3: the PID-scoped .tmp file is cleaned up (renamed to target by renameSync).
     expect(fs.existsSync(tmpPath)).toBe(false);
   });
 
-  it('handles stale .tmp file left from a previous crashed write', () => {
-    // A stale .tmp (not a symlink) from a previous crash should be cleaned and retried.
+  it('handles stale PID-scoped .tmp file left from a previous crashed write', () => {
+    // A stale PID-scoped .tmp (not a symlink) from a previous crash should be
+    // cleaned and retried.
     const targetFile = path.join(tmpDir, 'target.json');
-    const tmpPath = targetFile + '.tmp';
+    // PID-scoped: mirrors json-helper.cjs writeFileAtomic behaviour
+    const tmpPath = targetFile + '.tmp.' + process.pid;
 
     fs.writeFileSync(tmpPath, 'stale-tmp-content', 'utf-8');
 
