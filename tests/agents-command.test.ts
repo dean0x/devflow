@@ -17,11 +17,10 @@ import {
   type ListRow,
 } from '../src/cli/commands/agents.js';
 import {
-  CLAUDE_MODEL_ALIASES,
   EFFORT_LEVELS,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
-import { externalModelIds } from '../src/core/external-models.js';
+import { CLAUDE_MODEL_ALIASES, externalModelIds } from '../src/core/external-models.js';
 
 // ---------------------------------------------------------------------------
 // validateSetArgs

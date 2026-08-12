@@ -22,7 +22,6 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
-  CLAUDE_MODEL_ALIASES,
   EFFORT_LEVELS,
   readAgentMapping,
   saveAgentMapping,
@@ -31,7 +30,7 @@ import {
   type AgentMappingFile,
   type AgentMapping,
 } from '../../core/agent-models.js';
-import { externalModelIds, isDormantGptModel } from '../../core/external-models.js';
+import { CLAUDE_MODEL_ALIASES, externalModelIds, isDormantExternalModel } from '../../core/external-models.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
 import {
@@ -198,7 +197,7 @@ export async function buildListRows(
       let state: RowState;
       if (!installed) {
         state = 'not-installed';
-      } else if (isDormantGptModel(configured, proxyEnabled)) {
+      } else if (isDormantExternalModel(configured, proxyEnabled)) {
         state = 'saved-inactive';
       } else {
         state = 'active';
@@ -527,7 +526,7 @@ export const agentsCommand = new Command('agents')
       });
 
       // Warn on GPT model while proxy off
-      if (isDormantGptModel(options.model, proxyEnabled)) {
+      if (isDormantExternalModel(options.model, proxyEnabled)) {
         p.log.warn(
           `GPT model saved — inactive until you run ${color.bold('devflow proxy --enable')}`
         );

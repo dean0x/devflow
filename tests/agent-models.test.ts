@@ -23,11 +23,11 @@ import {
   saveAgentMapping,
   resolveEffective,
   countExternalMappedAgents,
-  CLAUDE_MODEL_ALIASES,
   EFFORT_LEVELS,
   type AgentMapping,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
+import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

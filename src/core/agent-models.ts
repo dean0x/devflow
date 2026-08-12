@@ -25,8 +25,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { externalModelIds, isDormantGptModel } from './external-models.js';
-import { isProxyEnabled } from './proxy-state.js';
+import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
 import { rewriteAgentFrontmatter, readFrontmatterModel } from './agent-frontmatter.js';
 import { agentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
@@ -50,13 +49,6 @@ function Err<E>(error: E): Result<never, E> {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/**
- * Claude model short-alias identifiers.
- * A mapping entry with one of these model values applies unconditionally
- * (it is NOT a GPT model and is NOT subject to proxy dormancy).
- */
-export const CLAUDE_MODEL_ALIASES: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable'];
 
 /**
  * Valid effort level identifiers.
@@ -200,8 +192,8 @@ export function resolveEffective(
 
   let model: string | undefined;
   if (entry?.model !== undefined) {
-    // Dormant: GPT model configured but proxy is off → fall back to shipped default.
-    model = isDormantGptModel(entry.model, proxyEnabled)
+    // Dormant: external model configured but proxy is off → fall back to shipped default.
+    model = isDormantExternalModel(entry.model, proxyEnabled)
       ? shippedDefaults[agentName]
       : entry.model;
   } else {
@@ -432,15 +424,24 @@ export async function revertExternalAgents(opts: RevertOptions): Promise<Reapply
 // ---------------------------------------------------------------------------
 
 /**
- * Count the number of mapping entries whose model is an external GPT model.
+ * Count the number of mapping entries whose model requires the Devflow proxy
+ * (i.e., is not a Claude model name and not 'default').
+ *
+ * Uses the complement predicate (isClaudeModelName) rather than
+ * externalModelIds() so that alias-shaped names are correctly counted as
+ * external — preventing "External-mapped agents: none" when a user has
+ * pinned every agent to a non-Claude alias (avoids AC-C6 live-correctness
+ * bug where discovery-driven counting would miss such entries).
+ *
  * Used by: proxy --status display.
  * Pure function — no I/O.
  */
 export function countExternalMappedAgents(mapping: AgentMappingFile): number {
-  const gptIds = new Set(externalModelIds());
   let count = 0;
   for (const entry of Object.values(mapping.agents)) {
-    if (entry.model !== undefined && gptIds.has(entry.model)) {
+    if (entry.model !== undefined &&
+        entry.model !== 'default' &&
+        !isClaudeModelName(entry.model)) {
       count++;
     }
   }

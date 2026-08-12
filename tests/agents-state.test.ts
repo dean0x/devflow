@@ -29,7 +29,8 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from '../src/cli/agents-view/state.js';
-import { CLAUDE_MODEL_ALIASES, EFFORT_LEVELS } from '../src/core/agent-models.js';
+import { EFFORT_LEVELS } from '../src/core/agent-models.js';
+import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { externalModelIds } from '../src/core/external-models.js';
 
 // ---------------------------------------------------------------------------
