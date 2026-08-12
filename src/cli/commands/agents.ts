@@ -43,6 +43,7 @@ import {
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
+import { stripAnsi } from '../../hud/colors.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern)
@@ -252,12 +253,14 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
       }
     }
 
+    // S2 — strip escape sequences from all user-derived fields before column
+    // arithmetic and terminal output to prevent injection via model IDs.
     lines.push(
       [
-        row.name.padEnd(AGENT_W).slice(0, AGENT_W),
-        row.defaultModel.padEnd(DEFAULT_W).slice(0, DEFAULT_W),
-        row.configured.padEnd(CONFIGURED_W).slice(0, CONFIGURED_W),
-        row.effort.padEnd(EFFORT_W).slice(0, EFFORT_W),
+        stripAnsi(row.name).padEnd(AGENT_W).slice(0, AGENT_W),
+        stripAnsi(row.defaultModel).padEnd(DEFAULT_W).slice(0, DEFAULT_W),
+        stripAnsi(row.configured).padEnd(CONFIGURED_W).slice(0, CONFIGURED_W),
+        stripAnsi(row.effort).padEnd(EFFORT_W).slice(0, EFFORT_W),
         stateStr,
       ].join('  ')
     );

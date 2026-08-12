@@ -19,7 +19,35 @@
 // Result type (local; matches codebase per-module pattern)
 // ---------------------------------------------------------------------------
 
-export type FrontmatterError = 'no-frontmatter' | 'unterminated-frontmatter';
+export type FrontmatterError = 'no-frontmatter' | 'unterminated-frontmatter' | 'invalid-model';
+
+// ---------------------------------------------------------------------------
+// Model name validation — shared charset used at every write boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex that model names must satisfy before being written to any agent
+ * frontmatter. The same charset is used at the CLI entry point so injection
+ * payloads are rejected before they can propagate.
+ *
+ * Rules:
+ *  - Start with an alphanumeric character.
+ *  - Remaining characters: alphanumeric, dot, underscore, hyphen.
+ *  - Total length: 1–64 characters.
+ *
+ * Accepts all real Anthropic model IDs (e.g. "claude-3-5-sonnet-20241022"),
+ * devflow aliases ("sonnet", "opus", "haiku", "fable", "inherit"), and
+ * well-formed third-party IDs (e.g. "gpt-5.6-sol").
+ */
+export const MODEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * Returns true when `model` passes the MODEL_NAME_RE charset test.
+ * Use at every trust boundary before passing `model` to rewriteAgentFrontmatter.
+ */
+export function isValidModelName(model: string): boolean {
+  return MODEL_NAME_RE.test(model);
+}
 
 export type Result<T, E = FrontmatterError> =
   | { ok: true; value: T }
@@ -159,6 +187,17 @@ export function rewriteAgentFrontmatter(
   content: string,
   opts: RewriteOptions,
 ): Result<RewriteResult, FrontmatterError> {
+  // S1 — Frontmatter injection guard (CRITICAL, pre-existing defect).
+  //
+  // Without this check, a malicious model name such as
+  //   "gpt-4\ntools:\n  - bash"
+  // would be interpolated raw into `newBody.replace(MODEL_RE, ...)`, injecting
+  // arbitrary YAML into the frontmatter block.  Reject any name that does not
+  // satisfy the MODEL_NAME_RE charset before touching the file.
+  if (!isValidModelName(opts.model)) {
+    return Err('invalid-model');
+  }
+
   const partsResult = parseFrontmatter(content);
   if (!partsResult.ok) return Err(partsResult.error);
 
