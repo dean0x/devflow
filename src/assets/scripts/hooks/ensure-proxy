@@ -152,19 +152,20 @@ if proxy_tcp_up "$PROXY_PORT"; then
   if command -v curl >/dev/null 2>&1; then
     HEALTH_BODY=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_PORT}/__subswitch/health" 2>/dev/null || true)
     dbg "health_body=$HEALTH_BODY"
-    case "$HEALTH_BODY" in
-      # Internal check: 'subswitch' is the package name — acceptable in hook code and logs, not in user output
-      *'"name":"subswitch"'*)
-        log "SessionStart: port $PROXY_PORT healthy (correct identity)"
-        exit 0
-        ;;
-      *)
-        log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
-        CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
-        json_session_output "$CONTEXT"
-        exit 0
-        ;;
-    esac
+    # Parse the name field from the health body — key-order-independent.
+    # json_field is always available here: line 33 exits if _JSON_AVAILABLE=false.
+    # 'subswitch' is the internal package name — acceptable in hook code and logs,
+    # but must NEVER appear in user-visible strings or additionalContext messages.
+    HEALTH_NAME=$(printf '%s' "$HEALTH_BODY" | json_field "name" "" 2>/dev/null || true)
+    if [ "$HEALTH_NAME" = "subswitch" ]; then
+      log "SessionStart: port $PROXY_PORT healthy (correct identity)"
+      exit 0
+    else
+      log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
+      CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
+      json_session_output "$CONTEXT"
+      exit 0
+    fi
   fi
 
   # curl absent — assume the relay is ours (no warning; CLI --status is the authoritative check)

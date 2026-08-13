@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1966,6 +1966,75 @@ describe('ensure-proxy behavioral tests', () => {
         fs.rmSync(shadowBin, { recursive: true, force: true });
       }
     });
+  });
+
+  // ── HTTP health body identity check (key-order-independent parse) ────────────
+  //
+  // Regression: the old case *'"name":"subswitch"'* pattern required the "name"
+  // key to appear first in the JSON body. The fixed code uses json_field which
+  // parses key-order-independently via jq or node.
+  //
+  // CONS-5: health body with reordered fields must still match as "ours".
+  //
+  // Implementation note: runHook uses execSync, which blocks Node.js's event loop.
+  // An in-process http.createServer would be starved and unable to respond while
+  // execSync is running. The HTTP stub is spawned as a SEPARATE child process
+  // so it has its own event loop and can respond to curl independently.
+
+  it('CONS-5: recognizes relay identity when "name" field is not first in health body', async () => {
+    const port = await allocateFreePort();
+
+    // Write a minimal HTTP server that returns the health body with "name" LAST.
+    // Old pattern *'"name":"subswitch"'* fails this body; json_field parse succeeds.
+    const stubScript = path.join(tmpDir, 'http-health-stub.js');
+    fs.writeFileSync(
+      stubScript,
+      [
+        "const http = require('http');",
+        `http.createServer((_req, res) => {`,
+        // Deliberately put "version" and "providers" BEFORE "name" so the old
+        // *'"name":"subswitch"'* substring match would fail (key-order-dependent).
+        `  const body = JSON.stringify({version:'0.2.0',providers:[],name:'subswitch'});`,
+        `  res.writeHead(200, {'Content-Type':'application/json'});`,
+        `  res.end(body);`,
+        `}).listen(${port}, '127.0.0.1');`,
+      ].join('\n'),
+    );
+
+    // Spawn the stub in a separate process so it has its own event loop
+    // (execSync in runHook would starve an in-process http.Server).
+    const stubProc = spawn(process.execPath, [stubScript], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    stubProc.unref();
+    const stubPid = stubProc.pid ?? null;
+
+    try {
+      // Wait for the HTTP server to be up (TCP probe, max 3s)
+      const deadline = Date.now() + 3000;
+      let up = false;
+      while (Date.now() < deadline) {
+        try {
+          execSync(`bash -c '(echo > /dev/tcp/127.0.0.1/${port}) 2>/dev/null'`, { timeout: 500 });
+          up = true;
+          break;
+        } catch { /* not yet */ }
+        await new Promise<void>((r) => setTimeout(r, 50));
+      }
+      expect(up, `HTTP stub did not come up on port ${port}`).toBe(true);
+
+      writeProxyJson({ enabled: true, port });
+      const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+      expect(exitCode).toBe(0);
+      // No "port occupied" warning — relay identity correctly recognized via json_field parse
+      expect(stdout).toBe('');
+    } finally {
+      if (stubPid !== null) {
+        try { process.kill(stubPid, 'SIGTERM'); } catch { /* already gone */ }
+        try { process.kill(stubPid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    }
   });
 
   // ── Relay spawn path (stub relay) ────────────────────────────────────────────
