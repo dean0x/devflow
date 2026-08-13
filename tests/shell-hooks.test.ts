@@ -1975,9 +1975,23 @@ describe('ensure-proxy behavioral tests', () => {
 
     afterEach(() => {
       // The hook spawns a detached, disowned process — the test owns its teardown.
+      // SIGTERM → 200ms grace → SIGKILL to avoid leaving orphaned relay processes
+      // that corrupt subsequent test runs (observed: 3 leaked processes per suite).
       if (spawnedPid !== null) {
-        try { process.kill(spawnedPid, 'SIGKILL'); } catch { /* already gone */ }
+        const pid = spawnedPid;
         spawnedPid = null;
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+        // Give the process a brief window to exit cleanly before escalating.
+        const deadline = Date.now() + 200;
+        while (Date.now() < deadline) {
+          try { process.kill(pid, 0); } catch { break; } // exited
+        }
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+        // Verify termination — log a warning rather than throwing so afterEach always completes.
+        try {
+          process.kill(pid, 0);
+          console.warn(`[shell-hooks afterEach] relay PID ${pid} survived SIGKILL — may leak`);
+        } catch { /* expected: process is gone */ }
       }
     });
 
@@ -2039,16 +2053,21 @@ describe('ensure-proxy behavioral tests', () => {
 
       runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
 
+      // Read and register PID BEFORE any assertions so afterEach can always kill it.
+      // If we set spawnedPid after an assertion that throws, the relay leaks.
       const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      const rawPid = fs.existsSync(pidFile)
+        ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10)
+        : NaN;
+      if (!Number.isNaN(rawPid) && rawPid > 0) {
+        spawnedPid = rawPid; // registered before any assertions
+      }
+
       expect(fs.existsSync(pidFile)).toBe(true);
-
-      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      spawnedPid = pid;
-
-      expect(Number.isInteger(pid)).toBe(true);
-      expect(pid).toBeGreaterThan(0);
+      expect(Number.isInteger(rawPid)).toBe(true);
+      expect(rawPid).toBeGreaterThan(0);
       // The recorded pid must be the live relay — the same liveness probe --status uses.
-      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(() => process.kill(rawPid, 0)).not.toThrow();
     });
 
     it('releases the spawn lock after a successful start', async () => {

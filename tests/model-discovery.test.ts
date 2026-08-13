@@ -816,6 +816,87 @@ describe('T3: PF-013 — cwd is os.tmpdir(), not devflow dir', () => {
 });
 
 // ---------------------------------------------------------------------------
+// T2: Real-binary stub — hostile SUBSWITCH_CONFIG is stripped from child env
+// (applies PF-016; discrete test closing the gap noted in prior phase)
+// ---------------------------------------------------------------------------
+
+describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child env (PF-016)', () => {
+  it(
+    'SUBSWITCH_CONFIG is absent from the child env even when set in the parent process',
+    async () => {
+      if (process.platform === 'win32') return; // shell scripts not available on win32
+
+      // Shell script: exits 0 if SUBSWITCH_CONFIG is absent in env (stripping worked),
+      // exits 2 if it leaked through. Either way stdout is empty (not valid models JSON)
+      // so discoverExternalModels returns known:false regardless.
+      // applies PF-016: real binary — not a vitest mock returning a fixed exit code.
+      const stubContent = [
+        '#!/bin/sh',
+        '[ -z "$SUBSWITCH_CONFIG" ] && exit 0',
+        'exit 2',
+      ].join('\n') + '\n';
+      const stub = await writeStubScript(tmpDir, 'stub-t2-env-check.sh', stubContent);
+
+      // Write a plausible hostile legacy config to point SUBSWITCH_CONFIG at
+      const hostileConfigPath = path.join(tmpDir, 't2-legacy-config.json');
+      await fsAsync.writeFile(
+        hostileConfigPath,
+        JSON.stringify({ port: 4141, models: [] }),
+        'utf-8',
+      );
+
+      // Temporarily inject the hostile config into process.env so scrubChildEnv has
+      // something real to strip. If it fails to strip, the child will see it.
+      const origVal = process.env['SUBSWITCH_CONFIG'];
+      process.env['SUBSWITCH_CONFIG'] = hostileConfigPath;
+
+      let childExitCode: number | undefined;
+      try {
+        const deps: ModelDiscoveryDeps = {
+          resolveProxyBin: async () => ({
+            ok: true,
+            value: { binPath: stub, npxWarning: false, version: '0.2.0' },
+          }),
+          spawnAndCollect: async (opts) => {
+            // Run the real shell script with the scrubbed env (applies PF-016).
+            const { spawnSync } = await import('child_process');
+            const out = spawnSync('sh', [opts.binPath], {
+              encoding: 'utf-8',
+              timeout: SPAWN_TIMEOUT_MS + 1_000,
+              env: opts.env as Record<string, string>,
+              cwd: opts.cwd,
+            });
+            childExitCode = out.status ?? -1;
+            return {
+              exitCode: out.status ?? 1,
+              stdout: out.stdout ?? '',
+              timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
+            };
+          },
+        };
+
+        const result = await discoverExternalModels(cacheDir, logPath, deps);
+        // The stub exits 0 (absent) → empty stdout, JSON parse fails → known:false.
+        // The stub exits 2 (present) → exitCode != 0 → known:false.
+        // Either way known:false; the discriminator is childExitCode.
+        expect(result.known).toBe(false);
+      } finally {
+        if (origVal === undefined) {
+          delete process.env['SUBSWITCH_CONFIG'];
+        } else {
+          process.env['SUBSWITCH_CONFIG'] = origVal;
+        }
+      }
+
+      // Exit code 0 → SUBSWITCH_CONFIG was absent from child env (stripping worked).
+      // Exit code 2 → leaked through (test failure).
+      expect(childExitCode).toBe(0);
+    },
+    10_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // T4 & AC-P8: Real-binary stub tests (applies PF-016)
 // ---------------------------------------------------------------------------
 
