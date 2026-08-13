@@ -36,7 +36,6 @@ import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
 import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.js';
 import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
-import { externalModelIds } from '../../core/external-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
@@ -1234,14 +1233,13 @@ export const initCommand = new Command('init')
       const configPath = path.join(devflowDir, 'proxy-routing.json');
       const logPath = path.join(devflowDir, 'logs', 'proxy.log');
       const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
-      const models = externalModelIds();
 
       // Write routing config (create logs dir non-fatally)
       let routingConfigWritten = false;
       try {
         // SEC-2: mode 0o700 for the logs directory (applies to new dirs only).
         await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
-        await fs.writeFile(configPath, buildRoutingConfigJson(DEFAULT_PROXY_PORT, models), 'utf-8');
+        await fs.writeFile(configPath, buildRoutingConfigJson(DEFAULT_PROXY_PORT), 'utf-8');
         routingConfigWritten = true;
       } catch (err) {
         p.log.warn(
@@ -1280,7 +1278,6 @@ export const initCommand = new Command('init')
             port: DEFAULT_PROXY_PORT,
             binPath: preflightResult.value.binPath,
             configPath,
-            models,
             devflowVersion: version,
           }));
           if (!writeResult.ok) {
@@ -1298,7 +1295,6 @@ export const initCommand = new Command('init')
           port: existingProxyState.value.port,
           binPath: existingProxyState.value.binPath,
           configPath: existingProxyState.value.configPath,
-          models: existingProxyState.value.models,
           devflowVersion: existingProxyState.value.devflowVersion,
         })).catch(() => { /* non-fatal */ });
       }

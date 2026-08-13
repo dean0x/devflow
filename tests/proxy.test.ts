@@ -465,7 +465,7 @@ function makeDeps(overrides: Partial<ProxyPreflightDeps> = {}): ProxyPreflightDe
     resolveProxyBin: vi.fn().mockResolvedValue({ ok: true, value: { binPath: '/path/to/relay.js', npxWarning: false } }),
     fileExists: vi.fn().mockResolvedValue(true),
     tcpConnectable: vi.fn().mockResolvedValue(false), // port free by default
-    httpGet: vi.fn().mockResolvedValue({ ok: true, value: '{"name":"subswitch","version":"0.1.0"}' }),
+    httpGet: vi.fn().mockResolvedValue({ ok: true, value: '{"name":"subswitch","version":"0.2.0","providers":[{"id":"anthropic","configured":true,"modelCount":0}]}' }),
     readSettingsJson: vi.fn().mockResolvedValue('{}'),
     spawnDoctor: vi.fn().mockResolvedValue(0),
     onWarn: vi.fn(),
@@ -520,7 +520,7 @@ describe('runProxyPreflight', () => {
   it('returns Ok with adopted:true when port is up and health matches our relay', async () => {
     const deps = makeDeps({
       tcpConnectable: vi.fn().mockResolvedValue(true), // port up
-      httpGet: vi.fn().mockResolvedValue({ ok: true, value: '{"name":"subswitch","version":"0.1.0"}' }),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: '{"name":"subswitch","version":"0.2.0","providers":[{"id":"anthropic","configured":true,"modelCount":0}]}' }),
     });
     const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(result.ok).toBe(true);
@@ -750,8 +750,8 @@ describe('runPostSpawnVerification', () => {
 // to identify the relay without duplicating the parse/check logic.
 
 describe('isOurRelayBody', () => {
-  it('returns true for a valid relay health body with name=subswitch', () => {
-    expect(isOurRelayBody('{"name":"subswitch","version":"0.1.0"}')).toBe(true);
+  it('returns true for a valid relay health body with name=subswitch (0.2.0 shape with providers)', () => {
+    expect(isOurRelayBody('{"name":"subswitch","version":"0.2.0","providers":[{"id":"anthropic","configured":true,"modelCount":0}]}')).toBe(true);
   });
 
   it('returns false for a body with a different name field', () => {

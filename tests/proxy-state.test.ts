@@ -10,8 +10,9 @@
  *  - readProxyState: malformed JSON → tolerant default, no throw (TEST-2)
  *  - writeProxyState → readProxyState round-trip (TEST-2)
  *  - Tolerant field parsing: wrong-typed fields self-heal to defaults (TEST-2)
- *  - buildRoutingConfigJson: exact shape {port, codex:{models:[...]}} (DEP-4)
- *  - buildRoutingConfigJson: models array is copied, not aliased (DEP-4)
+ *  - buildRoutingConfigJson: exact {port} shape only — no codex key (AC-C4)
+ *  - Pre-existing proxy.json with models loads cleanly; key absent after write (AC-C5)
+ *  - RUNTIME_VERSION_RE: path-traversal and length-limit rejection (AC-S4)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -24,6 +25,7 @@ import {
   buildRoutingConfigJson,
   buildProxyState,
   DEFAULT_PROXY_PORT,
+  RUNTIME_VERSION_RE,
 } from '../src/core/proxy-state.js';
 
 // ---------------------------------------------------------------------------
@@ -67,7 +69,6 @@ describe('readProxyState — missing file', () => {
     expect(result.value.port).toBe(DEFAULT_PROXY_PORT);
     expect(result.value.binPath).toBeNull();
     expect(result.value.configPath).toBeNull();
-    expect(result.value.models).toEqual([]);
     expect(result.value.resolvedAt).toBeNull();
     expect(result.value.devflowVersion).toBeNull();
   });
@@ -103,13 +104,12 @@ describe('readProxyState — malformed JSON', () => {
 // ---------------------------------------------------------------------------
 
 describe('writeProxyState → readProxyState round-trip', () => {
-  it('preserves port, binPath, configPath, and models through a write-read cycle', async () => {
+  it('preserves port, binPath, and configPath through a write-read cycle', async () => {
     const written = buildProxyState({
       enabled: true,
       port: 9090,
       binPath: '/usr/local/lib/node_modules/subswitch/dist/cli.js',
       configPath: `${tmpDir}/proxy-routing.json`,
-      models: ['gpt-4.1', 'gpt-4.1-mini'],
       devflowVersion: '2.1.0',
     });
 
@@ -125,7 +125,6 @@ describe('writeProxyState → readProxyState round-trip', () => {
     expect(s.port).toBe(9090);
     expect(s.binPath).toBe('/usr/local/lib/node_modules/subswitch/dist/cli.js');
     expect(s.configPath).toBe(`${tmpDir}/proxy-routing.json`);
-    expect(s.models).toEqual(['gpt-4.1', 'gpt-4.1-mini']);
     expect(s.devflowVersion).toBe('2.1.0');
     expect(s.version).toBe(1);
     expect(typeof s.resolvedAt).toBe('string');
@@ -137,7 +136,6 @@ describe('writeProxyState → readProxyState round-trip', () => {
       port: 4141,
       binPath: null,
       configPath: null,
-      models: [],
       devflowVersion: null,
     });
 
@@ -146,7 +144,6 @@ describe('writeProxyState → readProxyState round-trip', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.enabled).toBe(false);
-    expect(result.value.models).toEqual([]);
     expect(result.value.binPath).toBeNull();
   });
 });
@@ -196,20 +193,12 @@ describe('readProxyState — wrong-typed fields self-heal to defaults', () => {
     expect(result.value.binPath).toBeNull();
   });
 
-  it('models: non-array defaults to empty array', async () => {
-    await writeRaw({ models: 'gpt-4.1' });
+  it('unknown fields in stored JSON are ignored on read (AC-C5 prerequisite)', async () => {
+    // A pre-existing proxy.json containing legacy fields (like models from the
+    // 0.1.0 era) must load cleanly without throwing or returning an error.
+    await writeRaw({ enabled: false, port: 4141, models: ['gpt-4.1', 'gpt-4.1-mini'] });
     const result = await readProxyState(tmpDir);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.models).toEqual([]);
-  });
-
-  it('models: array with non-string elements defaults to empty array', async () => {
-    await writeRaw({ models: [1, 2, 3] });
-    const result = await readProxyState(tmpDir);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.models).toEqual([]);
   });
 
   it('missing fields produce correct defaults', async () => {
@@ -221,67 +210,111 @@ describe('readProxyState — wrong-typed fields self-heal to defaults', () => {
     expect(result.value.port).toBe(DEFAULT_PROXY_PORT);
     expect(result.value.binPath).toBeNull();
     expect(result.value.configPath).toBeNull();
-    expect(result.value.models).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// buildRoutingConfigJson — exact shape and array copy semantics (DEP-4)
+// buildRoutingConfigJson — bare {port} shape (AC-C4)
 // ---------------------------------------------------------------------------
 
 describe('buildRoutingConfigJson', () => {
-  it('emits exactly {port, codex:{models:[...]}} shape', () => {
-    const json = buildRoutingConfigJson(4141, ['gpt-4.1', 'gpt-4.1-mini']);
-    const parsed: unknown = JSON.parse(json);
-
-    // Must be a plain object with exactly two top-level keys
-    expect(typeof parsed).toBe('object');
-    expect(parsed).not.toBeNull();
-    const obj = parsed as Record<string, unknown>;
-
-    expect(Object.keys(obj).sort()).toEqual(['codex', 'port']);
+  it('emits exactly {port} — Object.keys deep-equals [port] (AC-C4)', () => {
+    const json = buildRoutingConfigJson(4141);
+    const obj = JSON.parse(json) as Record<string, unknown>;
+    expect(Object.keys(obj)).toEqual(['port']);
     expect(obj.port).toBe(4141);
-    expect(typeof obj.codex).toBe('object');
-    expect(obj.codex).not.toBeNull();
+  });
 
-    const codex = obj.codex as Record<string, unknown>;
-    expect(Object.keys(codex)).toEqual(['models']);
-    expect(codex.models).toEqual(['gpt-4.1', 'gpt-4.1-mini']);
+  it('output ends with a trailing newline (AC-C4)', () => {
+    const json = buildRoutingConfigJson(4141);
+    expect(json.endsWith('\n')).toBe(true);
   });
 
   it('port is a number in the emitted JSON, not a string', () => {
-    const json = buildRoutingConfigJson(9090, []);
+    const json = buildRoutingConfigJson(9090);
     const obj = JSON.parse(json) as Record<string, unknown>;
     expect(typeof obj.port).toBe('number');
     expect(obj.port).toBe(9090);
   });
 
-  it('models array in output is a copy, not an alias of the input array', () => {
-    const models = ['gpt-4.1'];
-    const json = buildRoutingConfigJson(4141, models);
-    const obj = JSON.parse(json) as { port: number; codex: { models: string[] } };
-
-    // Mutate the original — output must be unaffected (we re-parse from the JSON string)
-    models.push('injected-after-call');
-    // The JSON string was already built — re-parse to verify it was frozen at call time
-    const reparsed = JSON.parse(json) as { codex: { models: string[] } };
-    expect(reparsed.codex.models).toEqual(['gpt-4.1']);
-    expect(reparsed.codex.models).not.toContain('injected-after-call');
-
-    // Also verify the in-memory parsed array does not alias the input
-    expect(obj.codex.models).not.toBe(models);
-  });
-
-  it('empty models array is preserved', () => {
-    const json = buildRoutingConfigJson(4141, []);
-    const obj = JSON.parse(json) as { codex: { models: string[] } };
-    expect(obj.codex.models).toEqual([]);
-    expect(Array.isArray(obj.codex.models)).toBe(true);
-  });
-
-  it('output is valid pretty-printed JSON ending with a newline', () => {
-    const json = buildRoutingConfigJson(4141, ['gpt-4.1']);
+  it('output is valid pretty-printed JSON', () => {
+    const json = buildRoutingConfigJson(4141);
     expect(() => JSON.parse(json)).not.toThrow();
-    expect(json.endsWith('\n')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-C5: pre-existing proxy.json with models loads cleanly; key absent after write
+// ---------------------------------------------------------------------------
+
+describe('AC-C5 — proxy.json with legacy models field', () => {
+  it('loads cleanly when proxy.json contains a models key from the 0.1.0 era', async () => {
+    // Simulate a proxy.json written by the old 0.1.0 code that included models:[].
+    await fs.writeFile(
+      path.join(tmpDir, 'proxy.json'),
+      JSON.stringify({
+        version: 1,
+        enabled: false,
+        port: 4141,
+        binPath: null,
+        configPath: null,
+        models: ['gpt-4.1', 'gpt-4.1-mini'],
+        resolvedAt: null,
+        devflowVersion: null,
+      }, null, 2) + '\n',
+      'utf-8',
+    );
+
+    const result = await readProxyState(tmpDir);
+    expect(result.ok, 'readProxyState must succeed even with legacy models key').toBe(true);
+  });
+
+  it('models key is absent from the next write (tolerant parse + clean write)', async () => {
+    // Write a legacy proxy.json with models
+    await fs.writeFile(
+      path.join(tmpDir, 'proxy.json'),
+      JSON.stringify({ version: 1, enabled: false, port: 4141, binPath: null,
+        configPath: null, models: ['gpt-4.1'], resolvedAt: null, devflowVersion: null }, null, 2) + '\n',
+      'utf-8',
+    );
+
+    // Read (tolerant), then write back via buildProxyState
+    const readResult = await readProxyState(tmpDir);
+    expect(readResult.ok).toBe(true);
+    if (!readResult.ok) return;
+
+    const newState = buildProxyState({
+      enabled: readResult.value.enabled,
+      port: readResult.value.port,
+      binPath: readResult.value.binPath,
+      configPath: readResult.value.configPath,
+      devflowVersion: readResult.value.devflowVersion,
+    });
+    await writeProxyState(tmpDir, newState);
+
+    // Re-read the raw JSON to confirm models is absent
+    const raw = JSON.parse(await fs.readFile(path.join(tmpDir, 'proxy.json'), 'utf-8')) as Record<string, unknown>;
+    expect('models' in raw).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-S4: RUNTIME_VERSION_RE rejects path-traversal and length-limit violators
+// ---------------------------------------------------------------------------
+
+describe('RUNTIME_VERSION_RE — version string validation (AC-S4)', () => {
+  it.each([
+    ['../../etc/x', false, 'path traversal attempt (slash not in charset)'],
+    ['a'.repeat(33), false, '33-char string exceeds 32-char limit'],
+    ['', false, 'empty string'],
+    ['version with space', false, 'space not in charset'],
+    ['v1.0@bad', false, '@ not in charset'],
+    ['0.2.0', true, 'plain semver'],
+    ['1.0.0-alpha', true, 'semver with hyphen'],
+    ['v1.2.3+build', true, 'semver with plus'],
+    ['a'.repeat(32), true, 'exactly 32 chars (at limit)'],
+    ['1', true, 'single digit'],
+  ])('RUNTIME_VERSION_RE.test("%s") === %s (%s)', (v, expected) => {
+    expect(RUNTIME_VERSION_RE.test(v)).toBe(expected);
   });
 });

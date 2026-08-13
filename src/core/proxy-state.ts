@@ -54,8 +54,6 @@ export interface ProxyState {
   readonly binPath: string | null;
   /** Absolute path to the routing config file, or null if not written yet. */
   readonly configPath: string | null;
-  /** GPT model IDs currently included in the routing config. */
-  readonly models: string[];
   /** ISO timestamp of last state resolution, or null. */
   readonly resolvedAt: string | null;
   /** Devflow version at time of last state write, or null. */
@@ -83,10 +81,6 @@ export async function readProxyState(devflowDir: string): Promise<Result<ProxySt
       port: typeof data.port === 'number' && data.port > 0 ? data.port : DEFAULT_PROXY_PORT,
       binPath: typeof data.binPath === 'string' ? data.binPath : null,
       configPath: typeof data.configPath === 'string' ? data.configPath : null,
-      models: Array.isArray(data.models) &&
-        (data.models as unknown[]).every(m => typeof m === 'string')
-        ? (data.models as string[])
-        : [],
       resolvedAt: typeof data.resolvedAt === 'string' ? data.resolvedAt : null,
       devflowVersion: typeof data.devflowVersion === 'string' ? data.devflowVersion : null,
     };
@@ -101,7 +95,6 @@ export async function readProxyState(devflowDir: string): Promise<Result<ProxySt
         port: DEFAULT_PROXY_PORT,
         binPath: null,
         configPath: null,
-        models: [],
         resolvedAt: null,
         devflowVersion: null,
       });
@@ -134,17 +127,16 @@ export async function writeProxyState(
 
 /**
  * Build the routing config JSON for ~/.devflow/proxy-routing.json.
- * Produces `{port, codex:{models:[...]}}` for the routing runtime config.
+ *
+ * Produces a bare `{port}` object — the only key the 0.2.0 routing runtime
+ * requires. `codex.*` keys were removed in 0.2.0; the runtime now rejects
+ * unrecognised keys rather than ignoring them.
+ *
+ * applies ADR-001: clean break for an unreleased surface — no migration needed.
  * Pure function — no I/O.
  */
-export function buildRoutingConfigJson(port: number, models: string[]): string {
-  const config = {
-    port,
-    codex: {
-      models: [...models],
-    },
-  };
-  return JSON.stringify(config, null, 2) + '\n';
+export function buildRoutingConfigJson(port: number): string {
+  return JSON.stringify({ port }, null, 2) + '\n';
 }
 
 /**
@@ -156,7 +148,6 @@ export function buildProxyState(opts: {
   port: number;
   binPath: string | null;
   configPath: string | null;
-  models: string[];
   devflowVersion: string | null;
 }): ProxyState {
   return {
@@ -165,7 +156,6 @@ export function buildProxyState(opts: {
     port: opts.port,
     binPath: opts.binPath,
     configPath: opts.configPath,
-    models: [...opts.models],
     resolvedAt: new Date().toISOString(),
     devflowVersion: opts.devflowVersion,
   };
@@ -201,6 +191,19 @@ export async function isProxyEnabled(devflowDir: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Regex for acceptable routing runtime version strings used as cache-key
+ * path components. Rejects path-traversal attempts (e.g. '../../etc/x'),
+ * excessively long strings, and empty strings.
+ *
+ * SECURITY: version is used as a path component in cache keys.
+ * path.join normalises '..', so an unvalidated version string is an
+ * arbitrary-file-overwrite primitive through writeFileAtomicExclusive.
+ * This is the second, independent layer; Phase A's path-containment
+ * assertion in cache.ts is the first.
+ */
+export const RUNTIME_VERSION_RE = /^[A-Za-z0-9.+-]{1,32}$/;
+
+/**
  * Resolve the routing runtime binary from devflow's own node_modules.
  *
  * Uses createRequire(import.meta.url).resolve('subswitch/package.json') to find
@@ -216,8 +219,12 @@ export async function isProxyEnabled(devflowDir: string): Promise<boolean> {
  *
  * Includes `npxWarning: true` when the resolved path contains `/_npx/` —
  * npx-cached installs are not guaranteed to persist across machine restarts.
+ *
+ * Includes `version` when the package.json version passes RUNTIME_VERSION_RE.
+ * When validation fails the field is absent — the bin is still usable but
+ * callers that need the version for cache keys must treat it as unavailable.
  */
-export async function resolveProxyBin(): Promise<Result<{ binPath: string; npxWarning: boolean }, string>> {
+export async function resolveProxyBin(): Promise<Result<{ binPath: string; npxWarning: boolean; version?: string }, string>> {
   // createRequire is the ESM-safe way to resolve CommonJS/package paths.
   const require = createRequire(import.meta.url);
   let pkgJsonPath: string;
@@ -255,7 +262,14 @@ export async function resolveProxyBin(): Promise<Result<{ binPath: string; npxWa
     const binPath = join(pkgDir, binRelPath);
     const npxWarning = binPath.includes('/_npx/');
 
-    return Ok({ binPath, npxWarning });
+    // Validate version for safe use as a cache-key path component (AC-S4).
+    const rawVersion = pkgJson.version;
+    const version =
+      typeof rawVersion === 'string' && RUNTIME_VERSION_RE.test(rawVersion)
+        ? rawVersion
+        : undefined;
+
+    return Ok({ binPath, npxWarning, version });
   } catch (err: unknown) {
     return Err(`Failed to read routing runtime package info: ${(err as Error).message}`);
   }

@@ -32,7 +32,6 @@ import {
   resolveProxyBin,
   DEFAULT_PROXY_PORT,
 } from '../../core/proxy-state.js';
-import { externalModelIds } from '../../core/external-models.js';
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
@@ -322,8 +321,8 @@ export function isOurRelayBody(body: string): boolean {
  * All I/O is behind this interface so every preflight branch is unit-testable.
  */
 export interface ProxyPreflightDeps {
-  /** Resolve the routing runtime bin path. */
-  resolveProxyBin: () => Promise<Result<{ binPath: string; npxWarning: boolean }, string>>;
+  /** Resolve the routing runtime bin path and (when validated) version. */
+  resolveProxyBin: () => Promise<Result<{ binPath: string; npxWarning: boolean; version?: string }, string>>;
   /** Check if a file exists at the given path. */
   fileExists: (p: string) => Promise<boolean>;
   /** Attempt a TCP connect to 127.0.0.1:port; true = accepted, false = refused/timeout. */
@@ -1164,7 +1163,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   await rotateProxyLogIfLarge(logPath);
 
   try {
-    await fs.writeFile(configPath, buildRoutingConfigJson(port, externalModelIds()), 'utf-8');
+    await fs.writeFile(configPath, buildRoutingConfigJson(port), 'utf-8');
   } catch (err) {
     s.stop(color.red('Failed to write routing config'));
     p.log.error(`Could not write routing config: ${err instanceof Error ? err.message : String(err)}`);
@@ -1203,7 +1202,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     port,
     binPath,
     configPath,
-    models: externalModelIds(),
     devflowVersion: getDevflowVersion(),
   });
   const writeStateResult = await writeProxyState(devflowDir, newState);
@@ -1234,7 +1232,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
       port,
       binPath,
       configPath,
-      models: externalModelIds(),
       devflowVersion: getDevflowVersion(),
     });
     // Best-effort rollback — a write failure here is secondary to the spawn failure
@@ -1271,7 +1268,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
           port,
           binPath,
           configPath,
-          models: externalModelIds(),
           devflowVersion: getDevflowVersion(),
         });
         // Best-effort — write failure here is secondary to the verification failure
@@ -1298,7 +1294,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
       port,
       binPath,
       configPath,
-      models: externalModelIds(),
       devflowVersion: getDevflowVersion(),
     });
     await writeProxyState(devflowDir, rollback);
@@ -1386,13 +1381,12 @@ async function runDisable(): Promise<void> {
     }
   }
 
-  // Step 2: Write proxy.json enabled:false (keep port/models/binPath)
+  // Step 2: Write proxy.json enabled:false (keep port/binPath/configPath)
   const disabledState = buildProxyState({
     enabled: false,
     port: priorState?.port ?? DEFAULT_PROXY_PORT,
     binPath: priorState?.binPath ?? null,
     configPath: priorState?.configPath ?? null,
-    models: priorState?.models ?? [],
     devflowVersion: getDevflowVersion(),
   });
   // REL-2: guard proxy state write

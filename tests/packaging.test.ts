@@ -21,6 +21,12 @@ import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
+/**
+ * Expected exact-pinned version of the routing runtime.
+ * Hoisted so the next bump is a one-line change.
+ */
+const SUBSWITCH_VERSION = '0.2.0';
+
 // ---------------------------------------------------------------------------
 // Guard 3: dependency pin integrity
 // ---------------------------------------------------------------------------
@@ -57,7 +63,7 @@ describe('Guard 3 (dependency pin): routing runtime pinned to exact version', ()
       version,
       `subswitch version "${version}" must be an exact pin (no ^ or ~). ` +
       `This prevents accidental upgrades to an incompatible routing runtime version.`,
-    ).toBe('0.1.0');
+    ).toBe(SUBSWITCH_VERSION);
 
     expect(
       version.startsWith('^') || version.startsWith('~'),
@@ -81,10 +87,10 @@ describe('Guard 3 (dependency pin): routing runtime pinned to exact version', ()
 
     expect(
       subswitchNode!.version,
-      `package-lock.json subswitch resolved version must be "0.1.0", ` +
+      `package-lock.json subswitch resolved version must be "${SUBSWITCH_VERSION}", ` +
       `got "${subswitchNode!.version}". ` +
       `The lockfile is out of sync with the exact pin in package.json.`,
-    ).toBe('0.1.0');
+    ).toBe(SUBSWITCH_VERSION);
 
     expect(
       subswitchNode!.integrity,
