@@ -423,19 +423,20 @@ describe('expected-command-set guard (C2)', () => {
 
 describe('dest safety negative (C3)', () => {
   it('exits 1 with "typo?" message when output-dir is not the expected dist/commands', async () => {
-    // Plant a temporary .mds host file in src/assets/commands/ pointing at the
-    // wrong output-dir. In the restructured layout every host must declare
-    // output-dir: dist/commands — any other value is a typo and must hard-fail.
-    // build-mds.ts walks from ROOT (derived from its own __filename, not cwd), so
-    // the test file must live in the real repo. Created and removed atomically —
-    // never staged, never shipped.
-    const tmpHostPath = path.join(ROOT, 'src', 'assets', 'commands', '_test-dest-safety.mds');
-    await fs.writeFile(
-      tmpHostPath,
-      '---\ndescription: dest safety test\noutput-dir: dist/wrong-dir\n---\n\n# Test\n',
-      'utf-8',
-    );
+    // The hazard: writing a temp .mds directly into the real src/assets/commands/
+    // races packaging.test.ts which also reads that directory (avoids PF-011).
+    // Fix: create an isolated temp tree and point build-mds.ts there via
+    // DEVFLOW_MDS_ROOT so the real command tree is never touched.
+    const fakeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-dest-test-'));
     try {
+      const cmdDir = path.join(fakeRoot, 'src', 'assets', 'commands');
+      await fs.mkdir(cmdDir, { recursive: true });
+      await fs.writeFile(
+        path.join(cmdDir, '_test-dest-safety.mds'),
+        '---\ndescription: dest safety test\noutput-dir: dist/wrong-dir\n---\n\n# Test\n',
+        'utf-8',
+      );
+
       const result = spawnSync(
         TSX_BIN,
         [path.join(ROOT, 'scripts', 'build-mds.ts')],
@@ -443,6 +444,7 @@ describe('dest safety negative (C3)', () => {
           cwd: ROOT,
           encoding: 'utf-8',
           timeout: 60_000,
+          env: { ...process.env, DEVFLOW_MDS_ROOT: fakeRoot },
         },
       );
 
@@ -459,25 +461,27 @@ describe('dest safety negative (C3)', () => {
         'Expected "typo?" in output for wrong output-dir',
       ).toMatch(/typo\?/i);
     } finally {
-      // Always clean up — ensure the temp file never gets staged
-      try { await fs.unlink(tmpHostPath); } catch { /* already gone */ }
+      await fs.rm(fakeRoot, { recursive: true, force: true });
     }
   });
 
   it('exits 1 with "empty" message when a host declares output-dir: with no value', async () => {
-    // A present-but-empty output-dir: key is a malformed host, not a partial, and
-    // must hard-fail per the discovery contract (distinct from a genuinely absent
-    // key, which is a legitimate partial). Regression guard: an earlier regex used
-    // (.+?), which required >=1 char and silently reclassified an empty key as a
-    // partial — dropping the command from the build. Same atomic-plant discipline
-    // as the dest-safety test above: created and removed, never staged.
-    const tmpHostPath = path.join(ROOT, 'src', 'assets', 'commands', '_test-empty-output-dir.mds');
-    await fs.writeFile(
-      tmpHostPath,
-      '---\ndescription: empty output-dir test\noutput-dir:\n---\n\n# Test\n',
-      'utf-8',
-    );
+    // Same isolation discipline as the dest-safety test above: isolated temp tree
+    // via DEVFLOW_MDS_ROOT so the real src/assets/commands/ is never touched and
+    // the packaging.test.ts read cannot observe a transient .mds file.
+    // Regression guard: an earlier regex used (.+?), which required >=1 char and
+    // silently reclassified an empty key as a partial — dropping the command from
+    // the build.
+    const fakeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-empty-test-'));
     try {
+      const cmdDir = path.join(fakeRoot, 'src', 'assets', 'commands');
+      await fs.mkdir(cmdDir, { recursive: true });
+      await fs.writeFile(
+        path.join(cmdDir, '_test-empty-output-dir.mds'),
+        '---\ndescription: empty output-dir test\noutput-dir:\n---\n\n# Test\n',
+        'utf-8',
+      );
+
       const result = spawnSync(
         TSX_BIN,
         [path.join(ROOT, 'scripts', 'build-mds.ts')],
@@ -485,6 +489,7 @@ describe('dest safety negative (C3)', () => {
           cwd: ROOT,
           encoding: 'utf-8',
           timeout: 60_000,
+          env: { ...process.env, DEVFLOW_MDS_ROOT: fakeRoot },
         },
       );
 
@@ -501,7 +506,7 @@ describe('dest safety negative (C3)', () => {
         'Expected an "empty" hard-fail message for a valueless output-dir:',
       ).toMatch(/empty/i);
     } finally {
-      try { await fs.unlink(tmpHostPath); } catch { /* already gone */ }
+      await fs.rm(fakeRoot, { recursive: true, force: true });
     }
   });
 });

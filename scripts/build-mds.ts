@@ -28,7 +28,13 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { init, compileFile, isMdsError } from "@mdscript/mds";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
+// temporary directory instead of the real src/assets/commands/ tree.
+// Tests that exercise build failure paths (wrong output-dir, empty output-dir)
+// must never write into the real tree — that would race against packaging tests.
+const ROOT = process.env['DEVFLOW_MDS_ROOT']
+  ? path.resolve(process.env['DEVFLOW_MDS_ROOT'])
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Directories skipped during the whole-repo walk. */
 const IGNORE_DIRS = new Set([
