@@ -223,22 +223,36 @@ describe('countExternalMappedAgents — complement predicate (AC-C6)', () => {
     expect(countExternalMappedAgents(mapping)).toBe(2);
   });
 
-  it('isDormantExternalModel is the single dormancy export used by all call sites', () => {
-    // Verify that isDormantExternalModel is exported and consistent with
-    // how buildRow (state.ts) and countExternalMappedAgents use dormancy.
-    // Both must agree that a non-Claude non-default model is dormant when proxy is off.
-    const externalModel = 'gpt-5.6-sol';
-    const aliasModel = 'sol';
+  it('no file outside src/core/external-models.ts inlines the dormancy predicate (!isClaudeModelName)', () => {
+    // AC-C6: isDormantExternalModel is the single dormancy export — no call site may
+    // inline its expansion (!isClaudeModelName(model)). If any file outside
+    // external-models.ts contains `!isClaudeModelName(`, it has re-implemented the
+    // check inline, creating a divergence risk. (avoids PF-015)
+    //
+    // This test will FAIL if countExternalMappedAgents (or any other call site) ever
+    // reverts to the inlined predicate instead of calling isDormantExternalModel.
+    const { execSync } = require('child_process') as typeof import('child_process');
+    const srcDir = new URL('../src/', import.meta.url).pathname;
 
-    // isDormantExternalModel: the predicate
-    expect(isDormantExternalModel(externalModel, false)).toBe(true);
-    expect(isDormantExternalModel(aliasModel, false)).toBe(true);
+    let output = '';
+    try {
+      output = execSync(
+        `grep -rn '!isClaudeModelName(' .`,
+        { cwd: srcDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      ) as string;
+    } catch (e: unknown) {
+      // grep exits non-zero when no matches found — that is the desired outcome.
+      output = '';
+    }
 
-    // countExternalMappedAgents: uses the complement (both must be counted)
-    const mapping: AgentMappingFile = {
-      version: 1,
-      agents: { a: { model: externalModel }, b: { model: aliasModel } },
-    };
-    expect(countExternalMappedAgents(mapping)).toBe(2);
+    const violations = (output as string)
+      .split('\n')
+      .filter(line => line.trim())
+      .filter(line => !line.includes('external-models.ts'));
+
+    expect(
+      violations,
+      `Found inline dormancy predicate (!isClaudeModelName) outside external-models.ts:\n${violations.join('\n')}\nFix: call isDormantExternalModel() instead (AC-C6).`,
+    ).toHaveLength(0);
   });
 });

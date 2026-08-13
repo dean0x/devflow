@@ -440,9 +440,7 @@ export async function revertExternalAgents(opts: RevertOptions): Promise<Reapply
 export function countExternalMappedAgents(mapping: AgentMappingFile): number {
   let count = 0;
   for (const entry of Object.values(mapping.agents)) {
-    if (entry.model !== undefined &&
-        entry.model !== 'default' &&
-        !isClaudeModelName(entry.model)) {
+    if (isDormantExternalModel(entry.model, false)) {
       count++;
     }
   }

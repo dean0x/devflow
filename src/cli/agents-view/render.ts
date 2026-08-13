@@ -18,7 +18,7 @@
  * Columns (chars):
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
  *   AGENT   : 20
- *   MODEL   : 24
+ *   MODEL   : 32
  *   EFFORT  : 14
  */
 
