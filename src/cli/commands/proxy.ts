@@ -42,6 +42,10 @@ import {
   readAgentMapping,
 } from '../../core/agent-models.js';
 import {
+  getExternalModelsCached,
+  discoverExternalModels,
+} from '../../core/model-discovery.js';
+import {
   getClaudeDirectory,
   getDevFlowDirectory,
   getHomeDirectory,
@@ -1105,6 +1109,15 @@ async function runStatus(): Promise<void> {
     }
   }
 
+  // External models registry (cache-only, zero spawns — avoids multi-second silent pause in --status)
+  const cacheDir = path.join(devflowDir, 'cache', 'models');
+  const catalog = getExternalModelsCached(cacheDir);
+  if (catalog.known) {
+    p.log.info(`External models: ${color.cyan(catalog.selectableNames.join(', '))}`);
+  } else {
+    p.log.info(`External models: ${color.dim('unavailable')} — see ${logPath}`);
+  }
+
   // Log path
   p.log.info(`Proxy log: ${color.dim(logPath)}`);
 
@@ -1135,6 +1148,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const configPath = path.join(devflowDir, 'proxy-routing.json');
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
+  const cacheDir = path.join(devflowDir, 'cache', 'models');
 
   // Step 1: Read prior proxy.json (remembered port); --port flag overrides
   const priorStateResult = await readProxyState(devflowDir);
@@ -1315,6 +1329,12 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const mappedCount = reapplyResult.updated.length;
 
   s.stop(color.green('External model routing enabled'));
+
+  // Cache warming: pre-populate the model cache so the next `devflow agents` /
+  // `devflow proxy --status` is instant. Strictly non-fatal — applies PF-009.
+  // Fire-and-forget after the spinner stops; a failure must never affect the enable
+  // result or block the user.
+  void discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
 
   if (adopted) {
     p.log.info(`Relay already running on port ${port} — adopted`);

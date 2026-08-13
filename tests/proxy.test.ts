@@ -834,3 +834,83 @@ describe('resolvePort', () => {
     if (result.ok) expect(result.value).toBe(65535);
   });
 });
+
+// ─── T7 / AC-F8: disable full post-state — PF-015 whole-end-state assertion ──
+//
+// PF-015: Toggle correctness is only proven by asserting the WHOLE end-state from
+// a fully-enabled starting state — not by checking individual artifacts per step.
+//
+// AC-F8: devflow proxy --disable reverts settings (hooks + ANTHROPIC_BASE_URL).
+// The reversion is independent of model discovery: applyDisableToSettings is a pure
+// Settings function that does not call discoverExternalModels or
+// getExternalModelsCached. All three discovery scenarios (cache hit, cache miss, no
+// binary) produce IDENTICAL Settings post-state.
+
+describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state assertion', () => {
+  /** Fully-enabled settings: proxy hooks on both event types + ANTHROPIC_BASE_URL set. */
+  function buildFullyEnabledSettings(extraEnv?: Record<string, string>): Settings {
+    const s: Settings = {};
+    addProxyHooks(s, DEVFLOW_DIR);
+    (s as Record<string, unknown>).env = {
+      ANTHROPIC_BASE_URL: OUR_URL,
+      ...extraEnv,
+    };
+    return s;
+  }
+
+  it('full post-state: hooks removed, relay URL removed, extra env vars preserved', () => {
+    const s = buildFullyEnabledSettings({ EXTRA: 'keep' });
+    const changed = applyDisableToSettings(s, DEFAULT_PORT);
+
+    // PF-015: assert the WHOLE final state, not per-step booleans
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(s)).toBe(false);
+    const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    // Unrelated env vars are not over-deleted
+    expect(env?.EXTRA).toBe('keep');
+    // No ensure-proxy hook entries survive on any event
+    const hooksBlock = s.hooks ?? {};
+    for (const eventMatchers of Object.values(hooksBlock)) {
+      for (const matcher of eventMatchers ?? []) {
+        for (const h of matcher.hooks ?? []) {
+          expect(h.command).not.toContain('ensure-proxy');
+        }
+      }
+    }
+  });
+
+  it('env block removed entirely when relay URL was the only env key', () => {
+    const s = buildFullyEnabledSettings(); // no extras
+    applyDisableToSettings(s, DEFAULT_PORT);
+
+    // Whole post-state: env gone entirely, no hooks
+    expect(hasProxyHooks(s)).toBe(false);
+    expect((s as Record<string, unknown>).env).toBeUndefined();
+  });
+
+  it('discovery independence — identical post-state across all three discovery scenarios', () => {
+    // applyDisableToSettings is a pure Settings function: it does NOT call
+    // discoverExternalModels or getExternalModelsCached. The same Settings
+    // transformations apply regardless of whether discovery previously succeeded,
+    // failed, or was never called. No mocking required — just verify consistent
+    // whole-end-state for all three scenarios (PF-015).
+
+    const scenarios = [
+      'cache-hit',   // discovery previously succeeded
+      'cache-miss',  // discovery not yet run / stale
+      'no-binary',   // discovery binary absent
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const s = buildFullyEnabledSettings({ SCENARIO: scenario });
+      const changed = applyDisableToSettings(s, DEFAULT_PORT);
+      const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
+
+      expect(changed, `[${scenario}] changed`).toBe(true);
+      expect(hasProxyHooks(s), `[${scenario}] no proxy hooks`).toBe(false);
+      expect(env?.ANTHROPIC_BASE_URL, `[${scenario}] relay URL removed`).toBeUndefined();
+      expect(env?.SCENARIO, `[${scenario}] extra env preserved`).toBe(scenario);
+    }
+  });
+});
