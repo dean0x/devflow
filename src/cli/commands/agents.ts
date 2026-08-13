@@ -30,7 +30,7 @@ import {
   type AgentMappingFile,
   type AgentMapping,
 } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, externalModelIds, isDormantExternalModel } from '../../core/external-models.js';
+import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
 import {
@@ -39,11 +39,17 @@ import {
 } from '../../targets/claude-code/claude-paths.js';
 import {
   buildRow,
+  buildModelCycle,
   computeViewportHeight,
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
 import { stripAnsi } from '../../hud/colors.js';
+import {
+  discoverExternalModels,
+  getExternalModelsCached,
+  type ExternalModelCatalog,
+} from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern)
@@ -69,13 +75,25 @@ export interface SetArgs {
 }
 
 /**
- * Validate --set arguments.
+ * Validate --set arguments against the given catalog.
+ *
+ * When catalog is known (live cache hit): reject models absent from
+ *   'default' ∪ CLAUDE_MODEL_ALIASES ∪ catalog.selectableNames.
+ *
+ * When catalog is unknown ({known:false}, cache miss): accept any model name —
+ *   the existing dormancy warning at the call site fires for non-Claude names.
+ *   This preserves the configure-first-then-enable provisioning flow and keeps
+ *   `--set` at zero subprocess cost (AC-P9: cache-only, 0 spawns).
+ *
  * Returns Err when:
  *  - neither model nor effort is provided
- *  - model is unknown (not in CLAUDE_MODEL_ALIASES ∪ externalModelIds() ∪ 'default')
+ *  - model is unknown AND catalog is known
  *  - effort is unknown (not in EFFORT_LEVELS ∪ 'default')
  */
-export function validateSetArgs(args: SetArgs): Result<SetArgs> {
+export function validateSetArgs(
+  args: SetArgs,
+  catalog: ExternalModelCatalog = { known: false },
+): Result<SetArgs> {
   const { model, effort } = args;
 
   if (model === undefined && effort === undefined) {
@@ -83,16 +101,21 @@ export function validateSetArgs(args: SetArgs): Result<SetArgs> {
   }
 
   if (model !== undefined) {
-    const valid = [
-      'default',
-      ...(CLAUDE_MODEL_ALIASES as readonly string[]),
-      ...externalModelIds(),
-    ];
-    if (!valid.includes(model)) {
-      return Err(
-        `Unknown model "${model}". Valid: ${valid.join(', ')}`
-      );
+    if (catalog.known) {
+      // Full validation against the discovered catalog.
+      const valid = [
+        'default',
+        ...(CLAUDE_MODEL_ALIASES as readonly string[]),
+        ...catalog.selectableNames,
+      ];
+      if (!valid.includes(model)) {
+        return Err(
+          `Unknown model "${model}". Valid: ${valid.join(', ')}`
+        );
+      }
     }
+    // else: catalog unknown (cache miss) → accept any model name; dormancy
+    // warning fires at agents.ts call site if the proxy is off.
   }
 
   if (effort !== undefined) {
@@ -281,12 +304,23 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
 // TUI state builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the initial AgentsViewState for the interactive TUI.
+ *
+ * Builds modelCycle ONCE from the catalog and stores it in state.
+ * The pure reducer reads state.modelCycle directly — never reallocates per
+ * keypress (AC-P6). The catalog is also stored startup-constant for rendering.
+ */
 async function buildTuiState(
   agentNames: string[],
   mapping: AgentMappingFile,
   shippedDefaults: Record<string, string>,
   proxyEnabled: boolean,
+  catalog: ExternalModelCatalog,
 ): Promise<AgentsViewState> {
+  // Build the cycle once — shared across all rows and all keypresses.
+  const modelCycle = buildModelCycle(proxyEnabled, catalog);
+
   const rows: AgentRow[] = agentNames.map(name => {
     const entry = mapping.agents[name];
     return buildRow({
@@ -295,6 +329,7 @@ async function buildTuiState(
       savedModel: entry?.model,
       savedEffort: entry?.effort,
       proxyEnabled,
+      modelCycle,
     });
   });
 
@@ -305,6 +340,8 @@ async function buildTuiState(
     viewportOffset: 0,
     viewportHeight: computeViewportHeight(process.stdout.rows ?? 24),
     proxyEnabled,
+    catalog,
+    modelCycle,
   };
 }
 
@@ -401,6 +438,10 @@ export const agentsCommand = new Command('agents')
     const claudeDir = getClaudeDirectory();
     const devflowDir = getDevFlowDirectory();
     const installDir = path.join(claudeDir, 'agents', 'devflow');
+    // Cache directory for model discovery (consistent with proxy feature's devflowDir).
+    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    // Log path mirrors proxy.ts for unified proxy diagnostics.
+    const logPath = path.join(devflowDir, 'logs', 'proxy.log');
 
     const mappingResult = await readAgentMapping(devflowDir, {
       onWarning: (msg) => p.log.warn(msg),
@@ -500,10 +541,16 @@ export const agentsCommand = new Command('agents')
         return;
       }
 
-      const validation = validateSetArgs({
-        model: options.model,
-        effort: options.effort,
-      });
+      // Cache-only discovery — 0 spawns (AC-P9). On cache miss, catalog is
+      // {known:false} and validateSetArgs accepts any non-Claude name (the
+      // dormancy warning below fires if needed). This preserves the
+      // configure-first-then-enable provisioning flow.
+      const setCatalog = getExternalModelsCached(cacheDir);
+
+      const validation = validateSetArgs(
+        { model: options.model, effort: options.effort },
+        setCatalog,
+      );
       if (!validation.ok) {
         p.log.error(validation.error);
         process.exitCode = 1;
@@ -570,14 +617,46 @@ export const agentsCommand = new Command('agents')
     }
 
     // Interactive TUI
+    //
+    // Start discovery without awaiting — overlaps with TUI initialization work.
+    // Only in the interactive path: --list, --set, --reset never discover (AC-P4).
+    // gated on proxyEnabled so proxy-off sessions pay 0 spawns.
+    const discoveryPromise: Promise<ExternalModelCatalog> = proxyEnabled
+      ? discoverExternalModels(cacheDir, logPath)
+      : Promise.resolve({ known: false } as ExternalModelCatalog);
+
     p.intro(color.bgCyan(color.black(' Devflow Agents ')));
 
     const agentNames = getAllAgentNames().sort();
+
+    // Await the catalog. Show a spinner only if discovery exceeds 250 ms so the
+    // TUI never sits silently. On fast cache hits (typical) no spinner appears.
+    const DISCOVERY_SPINNER_DELAY_MS = 250;
+    let catalog: ExternalModelCatalog;
+    type RaceResult =
+      | { kind: 'done'; catalog: ExternalModelCatalog }
+      | { kind: 'timeout' };
+    const raceOutcome = await Promise.race<RaceResult>([
+      discoveryPromise.then(c => ({ kind: 'done' as const, catalog: c })),
+      new Promise<RaceResult>(r =>
+        setTimeout(() => r({ kind: 'timeout' }), DISCOVERY_SPINNER_DELAY_MS),
+      ),
+    ]);
+    if (raceOutcome.kind === 'done') {
+      catalog = raceOutcome.catalog;
+    } else {
+      const spinner = p.spinner();
+      spinner.start('Discovering available GPT models…');
+      catalog = await discoveryPromise;
+      spinner.stop('');
+    }
+
     const tuiState = await buildTuiState(
       agentNames,
       mapping,
       shippedDefaults,
       proxyEnabled,
+      catalog,
     );
 
     // Lazy-import terminal to avoid loading readline/tty in non-TTY paths

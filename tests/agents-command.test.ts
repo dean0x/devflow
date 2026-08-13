@@ -20,7 +20,8 @@ import {
   EFFORT_LEVELS,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, externalModelIds } from '../src/core/external-models.js';
+import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
+import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // validateSetArgs
@@ -52,19 +53,50 @@ describe('validateSetArgs', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('accepts GPT model IDs', () => {
-    for (const id of externalModelIds()) {
-      const result = validateSetArgs({ model: id });
+  it('accepts GPT model IDs when catalog is known', () => {
+    // When the catalog is known, validateSetArgs validates against selectableNames.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      models: [
+        { id: 'gpt-5.6-sol', aliases: ['sol'] },
+        { id: 'gpt-5.5', aliases: [] },
+      ],
+      aliasToId: new Map([
+        ['sol', 'gpt-5.6-sol'],
+        ['gpt-5.6-sol', 'gpt-5.6-sol'],
+        ['gpt-5.5', 'gpt-5.5'],
+      ]),
+      selectableNames: ['sol', 'gpt-5.6-sol', 'gpt-5.5'],
+      source: 'cache',
+    };
+    for (const name of catalog.selectableNames) {
+      const result = validateSetArgs({ model: name }, catalog);
       expect(result.ok).toBe(true);
     }
   });
 
-  it('rejects unknown model', () => {
-    const result = validateSetArgs({ model: 'turbo-3000' });
+  it('rejects unknown model when catalog is known', () => {
+    // When catalog is known, models not in 'default' | CLAUDE_MODEL_ALIASES | selectableNames are rejected.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      models: [{ id: 'gpt-5.6-sol', aliases: ['sol'] }],
+      aliasToId: new Map([['sol', 'gpt-5.6-sol'], ['gpt-5.6-sol', 'gpt-5.6-sol']]),
+      selectableNames: ['sol', 'gpt-5.6-sol'],
+      source: 'cache',
+    };
+    const result = validateSetArgs({ model: 'turbo-3000' }, catalog);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('model');
     }
+  });
+
+  it('accepts unknown model when catalog is unknown (cache miss) — dormancy warning fires at call site', () => {
+    // AC-P9: --set is cache-only (0 spawns). If the cache is cold, catalog is {known:false}
+    // and any model is accepted. The dormancy warning fires at the agents.ts call site.
+    const result = validateSetArgs({ model: 'turbo-3000' });
+    // default catalog is {known:false} — no validation
+    expect(result.ok).toBe(true);
   });
 
   it('rejects unknown effort level', () => {

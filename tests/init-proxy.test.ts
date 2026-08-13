@@ -22,7 +22,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { runProxyPreflight, type ProxyPreflightDeps } from '../src/cli/commands/proxy.js';
 import { reapplyAgentMapping, saveAgentMapping, type AgentMappingFile } from '../src/core/agent-models.js';
-import { externalModelIds } from '../src/core/external-models.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -34,11 +33,16 @@ function makeAgentFrontmatter(model: string): string {
   return `---\nmodel: ${model}\ndescription: Test agent\n---\n\nAgent body.\n`;
 }
 
-/** All registered GPT model IDs. */
-const GPT_IDS = externalModelIds();
+/**
+ * Known GPT model IDs — literal list so this test file does not depend on the
+ * hardcoded registry in external-models.ts (which is deleted in Commit 9).
+ * These match the subswitch@0.2.0 catalog used throughout the Phase D tests.
+ * applies ADR-003: end-state only — no externalModelIds() import.
+ */
+const GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 
 /** Pick a known GPT model ID for the mapping. */
-const A_GPT_MODEL = GPT_IDS[0]!; // e.g. 'gpt-5.6-sol'
+const A_GPT_MODEL = GPT_IDS[0]!; // 'gpt-5.6-sol'
 
 /**
  * Failing preflight deps — resolveProxyBin returns an error so the preflight

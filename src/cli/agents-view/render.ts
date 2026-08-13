@@ -39,6 +39,7 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
+import { type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -81,12 +82,23 @@ function truncateVisible(s: string, maxWidth: number): string {
 
 /**
  * Render the model cell for a given row, considering cursor/active/dirty state.
+ *
+ * Alias resolution (AC-F2): when catalog is known and configuredModel is an alias
+ * (aliasToId maps it to a different canonical id), show "alias (canonical-id)".
+ * Canonical ids render bare. Neither exceeds COL_MODEL = 32.
+ *
+ * Off-cycle pin (AC-F4): when configuredModel is absent from modelCycle
+ * (retired/unavailable model), show "model (unavailable)".
+ *
+ * Dormant model: proxy off, saved external model → "default (hint) model saved".
  */
 function renderModelCell(
   row: AgentRow,
   isCursor: boolean,
   isActive: boolean,
   maxWidth: number,
+  catalog: ExternalModelCatalog,
+  modelCycle: readonly string[],
 ): string {
   const dirty = isDirtyModel(row);
 
@@ -96,8 +108,22 @@ function renderModelCell(
     const hint = dim(`(${row.shippedDefault})`);
     valueStr = `default ${hint}`;
     if (row.dormantModel !== null) {
-      // Dormant: show saved GPT name as dim annotation
+      // Dormant: show saved model name as dim annotation
       valueStr += ` ${dim(`${row.dormantModel} saved`)}`;
+    }
+  } else if (!modelCycle.includes(row.configuredModel)) {
+    // Off-cycle pin: model was saved but is no longer in the discovered catalog.
+    // The per-row effective cycle (state.ts cycleField) includes it for reachability,
+    // but it renders as unavailable to signal the user should update it.
+    valueStr = `${row.configuredModel} (unavailable)`;
+  } else if (catalog.known) {
+    const resolvedId = catalog.aliasToId.get(row.configuredModel);
+    if (resolvedId !== undefined && resolvedId !== row.configuredModel) {
+      // Alias: show "alias (canonical-id)" — e.g. "sol (gpt-5.6-sol)"
+      valueStr = `${row.configuredModel} (${resolvedId})`;
+    } else {
+      // Canonical id or no alias resolution: show bare
+      valueStr = row.configuredModel;
     }
   } else {
     valueStr = row.configuredModel;
@@ -165,6 +191,8 @@ export function renderFrame(
     activeField,
     viewportOffset,
     proxyEnabled,
+    catalog,
+    modelCycle,
   } = state;
 
   const viewportHeight = Math.max(
@@ -227,7 +255,7 @@ export function renderFrame(
       agentW,
     );
     const modelCell = padToVisible(
-      renderModelCell(row, isCursor, isCursor && activeField === 'model', modelW),
+      renderModelCell(row, isCursor, isCursor && activeField === 'model', modelW, catalog, modelCycle),
       modelW,
     );
     const effortCell = renderEffortCell(

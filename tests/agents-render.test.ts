@@ -7,13 +7,16 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderFrame } from '../src/cli/agents-view/render.js';
+import { renderFrame, buildModelCycle } from '../src/cli/agents-view/index.js';
 import { stripAnsi } from '../src/hud/colors.js';
 import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js';
+import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const UNKNOWN_CATALOG: ExternalModelCatalog = { known: false };
 
 function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
@@ -24,11 +27,19 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     configuredEffort: 'default',
     originalEffort: 'default',
     dormantModel: null,
+    offCyclePin: null,
     ...overrides,
   };
 }
 
 function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
+  const proxyEnabled = overrides.proxyEnabled ?? true;
+  const catalog: ExternalModelCatalog =
+    'catalog' in overrides ? (overrides.catalog as ExternalModelCatalog) : UNKNOWN_CATALOG;
+  const modelCycle: readonly string[] =
+    'modelCycle' in overrides
+      ? (overrides.modelCycle as readonly string[])
+      : buildModelCycle(proxyEnabled, catalog);
   const rows = overrides.rows ?? [
     makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
     makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
@@ -40,7 +51,9 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
     activeField: 'model',
     viewportOffset: 0,
     viewportHeight: 10,
-    proxyEnabled: true,
+    proxyEnabled,
+    catalog,
+    modelCycle,
     ...overrides,
   };
 }

@@ -5,7 +5,7 @@
  * avoids PF-014: pure functions only — no process.exit(), no I/O.
  *
  * Model cycle (proxy ON):  default → haiku → sonnet → opus → fable →
- *                          gpt-5.6-sol → gpt-5.6-terra → gpt-5.6-luna → gpt-5.5 → default
+ *                          <aliases in registry order> → <canonical ids> → default
  * Model cycle (proxy OFF): default → haiku → sonnet → opus → fable → default
  * Effort cycle:            default → low → medium → high → xhigh → max → default
  *
@@ -14,11 +14,22 @@
  *   starts as 'default' and the saved GPT name is kept in dormantModel for
  *   display annotation and untouched-preservation on save.
  *
+ * Off-cycle pin semantics (Phase D):
+ *   When proxy is on and a row's saved model is absent from the discovered
+ *   selectableNames (retired model), offCyclePin holds the saved model.
+ *   The per-row effective cycle is [...modelCycle, offCyclePin], so the
+ *   pin is always reachable after a full cycle without pressing 'd'.
+ *
  * Dirty detection: current !== original (touch-then-revert → not dirty).
+ *
+ * Performance (AC-P6): modelCycle is built ONCE in buildTuiState and stored
+ * on the state — never reallocated per keypress. The reducer receives it as
+ * state.modelCycle and threads it through without reconstructing.
  */
 
 import { EFFORT_LEVELS } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, externalModelIds, isDormantExternalModel } from '../../core/external-models.js';
+import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
+import { type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -38,11 +49,18 @@ export interface AgentRow {
   /** Effort value at state init — used for dirty detection. */
   readonly originalEffort: string;
   /**
-   * Non-null only when: savedModel is a GPT model AND proxy is off.
-   * Holds the saved GPT model name for display annotation and
+   * Non-null only when: savedModel is an external model AND proxy is off.
+   * Holds the saved model name for display annotation and
    * byte-identical preservation on save if the field was not touched.
    */
   readonly dormantModel: string | null;
+  /**
+   * Non-null only when: proxy is on AND the saved model is absent from the
+   * main modelCycle (e.g. a retired canonical id). The per-row effective
+   * cycle is always [...modelCycle, offCyclePin] so the pin stays reachable
+   * after a full forward+backward navigation. Render shows '(unavailable)'.
+   */
+  readonly offCyclePin: string | null;
 }
 
 /** Full TUI state — immutable by convention. */
@@ -55,6 +73,17 @@ export interface AgentsViewState {
   /** Number of rows the terminal viewport can display. */
   readonly viewportHeight: number;
   readonly proxyEnabled: boolean;
+  /**
+   * Discovered model catalog — built once at TUI startup, startup-constant.
+   * {known:false} when discovery is unavailable or proxy is off.
+   */
+  readonly catalog: ExternalModelCatalog;
+  /**
+   * Prebuilt flat cycle for all rows: ['default', ...claude, ...external].
+   * Built once in buildTuiState; never reallocated per keypress (AC-P6).
+   * Per-row effective cycle may splice in offCyclePin when non-null.
+   */
+  readonly modelCycle: readonly string[];
 }
 
 export type Intent = 'none' | 'save' | 'cancel';
@@ -65,12 +94,27 @@ export interface ReduceResult {
 }
 
 // ---------------------------------------------------------------------------
-// Cycle helpers (pure)
+// Cycle builders (pure)
 // ---------------------------------------------------------------------------
 
-function buildModelCycle(proxyEnabled: boolean): readonly string[] {
-  const base = ['default', ...(CLAUDE_MODEL_ALIASES as readonly string[])];
-  return proxyEnabled ? [...base, ...externalModelIds()] : base;
+/**
+ * Build the model cycle from a discovered catalog and proxy state.
+ * Exported so agents.ts can call it once and store the result in state.
+ *
+ * Cycle order (proxy ON, catalog known):
+ *   default → haiku → sonnet → opus → fable →
+ *   <aliases in registry order, all models> → <canonical ids> → (wraps)
+ *
+ * Cycle order (proxy OFF or catalog unknown):
+ *   default → haiku → sonnet → opus → fable → (wraps)
+ */
+export function buildModelCycle(
+  proxyEnabled: boolean,
+  catalog: ExternalModelCatalog,
+): readonly string[] {
+  const base: readonly string[] = ['default', ...(CLAUDE_MODEL_ALIASES as readonly string[])];
+  if (!proxyEnabled || !catalog.known) return base;
+  return [...base, ...catalog.selectableNames];
 }
 
 const EFFORT_CYCLE: readonly string[] = [
@@ -129,20 +173,35 @@ function replaceRow(
 
 /**
  * Return a new AgentRow with the named field cycled one step in the given direction.
- * Model cycle is proxy-aware (GPT models included only when proxy is on).
+ *
+ * Model cycle uses the prebuilt state.modelCycle (no allocation per call for normal
+ * rows). Off-cycle pin recovery: if row.offCyclePin is non-null, the effective cycle
+ * for this row is [...modelCycle, offCyclePin], keeping the retired model reachable
+ * after a full forward+backward navigation (AC-F4).
+ *
  * Pure: no I/O, no side effects.
  */
 function cycleField(
   row: AgentRow,
   field: 'model' | 'effort',
   dir: 'forward' | 'backward',
-  proxyEnabled: boolean,
+  modelCycle: readonly string[],
 ): AgentRow {
   if (field === 'model') {
-    const cycle = buildModelCycle(proxyEnabled);
-    // When current value is not in the cycle (dormant proxy-off case), start from 'default'.
-    const effective = cycle.includes(row.configuredModel) ? row.configuredModel : 'default';
-    const next = dir === 'forward' ? cycleNext(cycle, effective) : cyclePrev(cycle, effective);
+    // Build effective cycle: splice off-cycle pin at the end if present.
+    // This is the ≤ 1 array allocation case (AC-P6): only allocates when offCyclePin != null.
+    const effectiveCycle: readonly string[] =
+      row.offCyclePin !== null && !modelCycle.includes(row.offCyclePin)
+        ? [...modelCycle, row.offCyclePin]
+        : modelCycle;
+
+    // cycleNext/cyclePrev handle the case where configuredModel is not in effectiveCycle
+    // by falling back to cycle[0] / cycle[last]. This is correct for the off-cycle case
+    // where configuredModel IS in effectiveCycle (we splice it in above).
+    const next =
+      dir === 'forward'
+        ? cycleNext(effectiveCycle, row.configuredModel)
+        : cyclePrev(effectiveCycle, row.configuredModel);
     return { ...row, configuredModel: next };
   } else {
     const next =
@@ -185,18 +244,39 @@ export interface InitRowInput {
   /** Saved effort from mapping file (undefined = no entry). */
   savedEffort?: string;
   proxyEnabled: boolean;
+  /**
+   * Prebuilt model cycle for off-cycle pin detection.
+   * Optional: omit (or pass []) to disable off-cycle detection.
+   */
+  modelCycle?: readonly string[];
 }
 
 /**
  * Build an AgentRow from initial mapping state.
- * Handles dormancy: if savedModel is a GPT model and proxy is off,
- * configuredModel starts as 'default' and dormantModel holds the saved GPT name.
+ *
+ * Handles dormancy: if savedModel is an external model and proxy is off,
+ * configuredModel starts as 'default' and dormantModel holds the saved model.
+ *
+ * Handles off-cycle pin: if proxy is on, savedModel is configured, but is
+ * absent from modelCycle (retired/unavailable model), offCyclePin is set so
+ * the model remains reachable in the per-row effective cycle.
  */
 export function buildRow(input: InitRowInput): AgentRow {
   const dormant = isDormantExternalModel(input.savedModel, input.proxyEnabled);
+  const cycle = input.modelCycle ?? [];
 
   const configuredModel = dormant ? 'default' : (input.savedModel ?? 'default');
   const configuredEffort = input.savedEffort ?? 'default';
+
+  // Off-cycle pin detection: proxy on, model configured but absent from cycle.
+  const offCyclePin =
+    !dormant &&
+    input.savedModel !== undefined &&
+    input.savedModel !== 'default' &&
+    cycle.length > 0 &&
+    !cycle.includes(input.savedModel)
+      ? input.savedModel
+      : null;
 
   return {
     name: input.name,
@@ -206,6 +286,7 @@ export function buildRow(input: InitRowInput): AgentRow {
     configuredEffort,
     originalEffort: configuredEffort,
     dormantModel: dormant ? (input.savedModel ?? null) : null,
+    offCyclePin,
   };
 }
 
@@ -221,9 +302,13 @@ export function buildRow(input: InitRowInput): AgentRow {
  *   'd', 'enter', 'escape', 'q', 'ctrl-c'
  *
  * Unknown keys → intent 'none', state unchanged (same reference).
+ *
+ * Performance: modelCycle is read from state (prebuilt, startup-constant);
+ * catalog and modelCycle references are threaded unchanged through every
+ * non-cycle reduce path (AC-P6: Object.is(s1.modelCycle, s2.modelCycle)).
  */
 export function reduce(state: AgentsViewState, key: string): ReduceResult {
-  const { rows, cursor, activeField, viewportOffset, viewportHeight, proxyEnabled } =
+  const { rows, cursor, activeField, viewportOffset, viewportHeight, modelCycle } =
     state;
   const n = rows.length;
 
@@ -261,7 +346,7 @@ export function reduce(state: AgentsViewState, key: string): ReduceResult {
     case 'right':
     case 'space': {
       if (n === 0) return { state, intent: 'none' };
-      const newRow = cycleField(rows[cursor], activeField, 'forward', proxyEnabled);
+      const newRow = cycleField(rows[cursor], activeField, 'forward', modelCycle);
       return {
         state: { ...state, rows: replaceRow(rows, cursor, newRow) },
         intent: 'none',
@@ -270,7 +355,7 @@ export function reduce(state: AgentsViewState, key: string): ReduceResult {
 
     case 'left': {
       if (n === 0) return { state, intent: 'none' };
-      const newRow = cycleField(rows[cursor], activeField, 'backward', proxyEnabled);
+      const newRow = cycleField(rows[cursor], activeField, 'backward', modelCycle);
       return {
         state: { ...state, rows: replaceRow(rows, cursor, newRow) },
         intent: 'none',
