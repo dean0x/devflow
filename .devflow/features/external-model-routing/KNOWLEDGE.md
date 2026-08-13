@@ -18,7 +18,7 @@ Two authority sources govern the proxy at different points in its lifecycle. `ma
 
 ## System Context
 
-The routing runtime is an internal package (`subswitch@0.1.0`, exact-pinned in `package.json`). Its name is a **hard branding constraint** — it must never appear in user-visible strings, error messages, CLI output, or agent context injections. User-facing vocabulary is always "external model routing" / "Devflow proxy". The one exception is internal code: health-check body comparisons (`body['name'] === 'subswitch'`), `SUBSWITCH_CONFIG` env var, and hook log lines are fine.
+The routing runtime is an internal package (`subswitch@0.2.0`, exact-pinned in `package.json`). Its name is a **hard branding constraint** — it must never appear in user-visible strings, error messages, CLI output, or agent context injections. User-facing vocabulary is always "external model routing" / "Devflow proxy". The one exception is internal code: health-check body comparisons (`body['name'] === 'subswitch'`), `SUBSWITCH_CONFIG` env var, and hook log lines are fine.
 
 ## Proxy Lifecycle
 
@@ -41,8 +41,9 @@ The routing runtime is an internal package (`subswitch@0.1.0`, exact-pinned in `
 7. Settings pass via `applyEnableSettingsPass()` (internal named function, not exported): `removeProxyHooks` + `_stripProxyEnvFromObject(s, port)` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls, then one atomic write** to `~/.claude/settings.json`.
 8. Sync manifest.
 9. `reapplyAgentMapping({ proxyEnabled: true })` — materializes GPT model entries into agent frontmatter.
+10. **Cache warming (fire-and-forget)**: `void discoverExternalModels(cacheDir, logPath).catch(() => {})` — pre-populates the model cache so the next `--status` and agents TUI load instantly. Strictly non-fatal per PF-009 — a discovery failure must never block the enable result or surface an error to the user.
 
-Hard failures at any step set `process.exitCode = 1` and return — never `process.exit()` (avoids PF-014).
+Hard failures at any step (steps 1–9) set `process.exitCode = 1` and return — never `process.exit()` (avoids PF-014).
 
 ### Disable path (never kills relay)
 
@@ -131,6 +132,8 @@ esac
 
 **curl is guarded** with `command -v curl >/dev/null 2>&1` before the health-check identity call. When curl is absent, the hook assumes the relay is ours and exits 0 (no spurious warning). The CLI `--status` command is the authoritative identity check.
 
+**Health body parsed via `json_field`** — key-order-independent. The old substring match `*'"name":"subswitch"'*` was order-dependent; the current code pipes `$HEALTH_BODY` into `json_field "name" ""` (sourced from json-parse) and compares the extracted value. `json_field` is always available at this call site because line 33 exits the hook if `_JSON_AVAILABLE=false`.
+
 **json-parse source failure** emits a named stderr diagnostic (`echo "ensure-proxy: failed to source json-parse" >&2`) and exits 0 — previously silent.
 
 **Log guard literals are named**: `_LOG_MAX_BYTES=2097152` (2MB) and `_LOG_TAIL_BYTES=1048576` (1MB) are named variables, matching the hook-log-init guard pattern.
@@ -141,26 +144,51 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 
 **Hook spawn path is covered by tests** (tests/shell-hooks.test.ts): a stub relay reads `SUBSWITCH_CONFIG` and binds the port, asserting silent exit (exit 0, no stdout/stderr), a live pid recorded in `proxy.pid`, and spawn lock released. The failure branch (full 8s wait) is intentionally not unit-tested for duration reasons.
 
+## Model Discovery (model-discovery.ts)
+
+`src/core/model-discovery.ts` provides live model catalog access via the relay.
+
+| Function | Mode | Cost |
+|----------|------|------|
+| `discoverExternalModels(cacheDir, logPath, deps?)` | Async, spawns subprocess | Writes a versioned cache entry `external-models-v1-<version>.json` under `cacheDir` |
+| `getExternalModelsCached(cacheDir)` | Sync, zero spawns | Reads the freshest unexpired (≤24h) cache entry; returns `{known:false}` on miss |
+
+**Cache dir convention**: `path.join(devflowDir, 'cache', 'models')` — `cacheDir` in all callers.
+
+**`ExternalModelCatalog` discriminated union**:
+```typescript
+{ known: true; models; aliasToId; selectableNames; source }
+| { known: false }
+```
+
+**When to use which**:
+- `getExternalModelsCached` in `--status` (diagnostic command; silent multi-second spawn unacceptable)
+- `getExternalModelsCached` inside the agents TUI (avoids lag on every render)
+- `discoverExternalModels` in fire-and-forget mode after enable (pre-warms cache)
+
+**Uninstall**: `cache/models` is in `proxyArtifacts` in `uninstall.ts` — removed with `isDir:true` on `devflow uninstall`.
+
 ## Mapping Engine (agent-models.json)
 
 `~/.devflow/agent-models.json` is a **deviations-only** mapping: agents that use their shipped defaults are omitted entirely. There is **no `previousModel` field** — shipped defaults are read live from `src/assets/agents/` source files at convergence time via `loadShippedDefaults()`.
 
-### isDormantGptModel — single dormancy predicate
+### isDormantExternalModel — single dormancy predicate
 
-`isDormantGptModel(model, proxyEnabled)` is exported from `src/core/external-models.ts` (leaf module, no project imports — avoids cycles). It is the **single source of truth** for the dormancy predicate, consumed by:
+`isDormantExternalModel(model, proxyEnabled)` is exported from `src/core/external-models.ts` (leaf module, no project imports — avoids cycles). It is the **single source of truth** for the dormancy predicate, consumed by:
 - `resolveEffective()` in agent-models.ts
 - `buildRow()` in agents-view/state.ts
 - `buildListRows()` and the `--set` warning in agents.ts
 
 ```typescript
-// Returns true when model is a GPT ID AND proxy is disabled (entry is dormant).
-export function isDormantGptModel(model: string | undefined, proxyEnabled: boolean): boolean {
-  if (model === undefined) return false;
-  return EXTERNAL_GPT_MODELS.some(m => m.id === model) && !proxyEnabled;
+// Returns true when model is an external (non-Claude) model AND proxy is disabled.
+// Classification by COMPLEMENT: not Claude ↔ external. Discovery-independent.
+export function isDormantExternalModel(model: string | undefined, proxyEnabled: boolean): boolean {
+  if (model === undefined || proxyEnabled) return false;
+  return model !== 'default' && !isClaudeModelName(model);
 }
 ```
 
-Callers that previously duplicated this check inline have been replaced with this export.
+Callers that previously duplicated this check inline have been replaced with this export. The complement approach (`isClaudeModelName` as the gate) makes dormancy independent of runtime discovery — a discovery failure cannot degrade the safety property by returning an empty external set.
 
 ### Dormancy semantics
 
@@ -214,6 +242,8 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 **Lazy-import of `terminal.ts`** in `agents.ts`: `import('../agents-view/terminal.js')` is deferred until the interactive path runs. `--list`, `--set`, `--reset`, and non-TTY calls never load readline/tty machinery.
 
+**Model list source**: `buildRow()` uses `getExternalModelsCached(cacheDir)` (sync, zero spawns) to get the catalog. Off-cycle pins (aliases whose current generation is not in the live cycle) are appended at the end of the cycle with `(unavailable)` annotation.
+
 ## writeFileAtomicExclusive — Mode Preservation
 
 `writeFileAtomicExclusive` (in `src/core/fs-atomic.ts`) now preserves the target file's permission mode across atomic replace:
@@ -232,7 +262,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Running `reapplyAgentMapping` before proxy preflight completes**: preflight can force `proxyEnabled=false`, and the dormancy logic depends on the final resolved value. In init, the guard is placed immediately after the proxy preflight block.
 - **Calling `process.exit()` inside a finally-guarded scope in the TUI**: cleanup must be wired via Promise `resolve()`. Any `process.exit()` inside `finally` terminates without running cleanup and causes event-loop issues (avoids PF-014).
 - **Using previousModel in agent-models.json**: The mapping has no `previousModel` field. Shipped defaults are always read live from `agentsDir()` source files. Caching a previousModel creates stale drift when source agent files are updated.
-- **Duplicating the dormancy predicate**: `isDormantGptModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `externalModelIds().includes(model) && !proxyEnabled` at call sites.
+- **Duplicating the dormancy predicate**: `isDormantExternalModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `!isClaudeModelName(model) && !proxyEnabled` at call sites.
 - **Pre-spawn doctor gating (chicken-and-egg)**: The relay's `doctor` subcommand probes the relay port to confirm it is running — a not-yet-started relay makes that probe fail (exit 1). A pre-spawn gate is therefore always unsatisfiable on a cold path and invisible to unit tests that mock doctor exit 0 (found during the first live enable). Doctor must gate post-spawn only, after the relay is confirmed up (D-EFR-2).
 
 ## Gotchas

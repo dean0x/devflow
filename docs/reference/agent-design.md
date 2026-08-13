@@ -99,14 +99,14 @@ Devflow ships with explicit model assignments in agent frontmatter (Opus for ana
 ```bash
 npx devflow-kit agents               # Interactive TUI — navigate, cycle model, save
 npx devflow-kit agents --list        # Print all agents with current assignments
-npx devflow-kit agents --set reviewer --model gpt-5.5   # Assign one agent via CLI
+npx devflow-kit agents --set reviewer --model sol        # Assign one agent via CLI (alias auto-tracks current generation)
 npx devflow-kit agents --reset                          # Reset all agents to shipped defaults (prompts)
 npx devflow-kit agents --reset --yes                    # Skip confirmation prompt
 ```
 
 **Convergence:** `reapplyAgentMapping` runs after every `devflow init` (post-install). It reads `agent-models.json` and rewrites the matching agent frontmatter so your assignments survive reinstalls and plugin updates.
 
-**Dormancy:** GPT model assignments are dormant when external model routing is disabled. The TUI shows dormant assignments with a dim annotation (`gpt-5.5 saved`). Enabling routing via `devflow proxy --enable` applies the saved mapping; disabling reverts frontmatter to Claude defaults while preserving the mapping for re-enable.
+**Dormancy:** GPT model assignments are dormant when external model routing is disabled. The TUI shows dormant assignments with a dim annotation (`sol saved`). Enabling routing via `devflow proxy --enable` applies the saved mapping; disabling reverts frontmatter to Claude defaults while preserving the mapping for re-enable. Model aliases (e.g. `sol`, `terra`, `luna`) auto-track the current generation — no config edit needed when new models ship.
 
 **When adding a new agent:** the shipped model in frontmatter is the default; if users have overridden it via `agent-models.json`, `reapplyAgentMapping` will apply their override on the next `devflow init`.
 

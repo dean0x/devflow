@@ -5,11 +5,9 @@
  * complement (the static Claude passthrough set) without any discovery I/O.
  * This keeps the safety property correct even when discovery fails.
  *
- * The hardcoded GPT model registry (EXTERNAL_GPT_MODELS, externalModelIds,
- * ExternalModel) was deleted here. Discovery is now live via
- * src/core/model-discovery.ts (discoverExternalModels / getExternalModelsCached).
- * The TUI picker and --set validation use the ExternalModelCatalog returned by
- * those functions. applies ADR-003: end-state only — no compatibility re-exports.
+ * Live model discovery (discoverExternalModels / getExternalModelsCached) lives
+ * in src/core/model-discovery.ts. The TUI picker and --set validation use the
+ * ExternalModelCatalog returned by those functions.
  *
  * applies ADR-013: pure core-layer module, no Claude Code adapter concerns.
  *
@@ -20,9 +18,9 @@
  */
 
 // ---------------------------------------------------------------------------
-// Claude model alias set — moved here from agent-models.ts so external-models
-// remains a leaf module with no project imports (avoids cycles with callers in
-// agents-view/state.ts). Exported for TUI cycle builders and tests.
+// Claude model alias set — exported for TUI cycle builders and tests.
+// Lives in external-models (leaf module, no project imports) so callers in
+// agents-view/state.ts can import without cycles.
 // ---------------------------------------------------------------------------
 
 /**

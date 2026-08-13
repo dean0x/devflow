@@ -11,7 +11,7 @@
  *   Unknown agent names are tolerated and preserved on save (plugin may not be installed).
  *   Invalid effort values are dropped with a warning.
  *
- * Dormancy semantics (plan D5):
+ * Dormancy semantics:
  *   A mapping entry whose model is an external GPT model (classified via
  *   isDormantExternalModel — the complement of isClaudeModelName) materializes
  *   into frontmatter ONLY when proxyEnabled=true. When the proxy is disabled,
