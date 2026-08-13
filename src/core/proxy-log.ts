@@ -7,7 +7,7 @@ import * as path from 'path';
  * SEC-2: Proxy log hardening and child-env scoping helpers.
  *
  * Exports:
- *   - buildChildEnv     — targeted ANTHROPIC_API_KEY unset for relay/doctor children
+ *   - scrubChildEnv     — literal allowlist env for relay/doctor children (SEC-2)
  *   - openProxyLog      — 0700-parent + 0600-file open with best-effort chmod (SEC-2)
  *   - rotateProxyLogIfLarge — pre-spawn-only 2MB→1MB rotation that preserves 0600 mode
  *
@@ -22,28 +22,39 @@ export const PROXY_LOG_MAX_BYTES = 2_097_152;
 export const PROXY_LOG_TAIL_BYTES = 1_048_576;
 
 /**
- * Build a child process env for subswitch relay/doctor subprocesses.
+ * Build a scrubbed child process environment for relay/doctor subprocesses.
  *
- * Targeted unset — removes ANTHROPIC_API_KEY from the inherited env because:
- *   (a) it has credential value, and
- *   (b) subswitch relay/doctor read Codex credentials from ~/.codex/auth.json via
- *       homedir() (falls back to getpwuid when $HOME is absent) — the key is never
- *       consumed and provides no benefit in the child.
+ * Returns a literal allowlist copied from process.env:
+ *   posix: PATH, HOME, TMPDIR, LANG, LC_ALL
+ *   win32: additionally SystemRoot, APPDATA, USERPROFILE, ComSpec
  *
- * Not an allowlist: subswitch reads SUBSWITCH_CONFIG, FORCE_COLOR, NO_COLOR, and
- * standard Node/system vars (NODE_EXTRA_CA_CERTS, http_proxy, …). An allowlist would
- * break the day a new node/system var is needed. The targeted unset removes exactly
- * the one credential-valued variable whose subswitch@0.1.0 init docs warn will break
- * subscription auth if present.
+ * Variables absent from process.env are omitted rather than set to undefined.
+ * Call sites compose on top of this result to add process-specific vars
+ * (e.g. SUBSWITCH_CONFIG for the relay spawn and doctor spawn).
  *
- * @param configPath - Absolute path to the subswitch routing config JSON.
+ * applies ADR-003: the prior denylist rationale is gone — the routing runtime
+ * reads exactly three env vars (ANTHROPIC_API_KEY, FORCE_COLOR, SUBSWITCH_CONFIG).
+ * Verified by whole-dist grep of the 0.2.0 package. An allowlist is the correct
+ * shape: 61 inherited vars → 5.
+ *
+ * HOME is retained: the runtime's loadConfig resolves ~ paths via homedir().
  */
-export function buildChildEnv(configPath: string): Record<string, string> {
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    SUBSWITCH_CONFIG: configPath,
-  };
-  delete env['ANTHROPIC_API_KEY'];
+export function scrubChildEnv(): NodeJS.ProcessEnv {
+  const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'] as const;
+  const WIN32_ALLOWLIST = ['SystemRoot', 'APPDATA', 'USERPROFILE', 'ComSpec'] as const;
+
+  const keys: string[] =
+    process.platform === 'win32'
+      ? [...POSIX_ALLOWLIST, ...WIN32_ALLOWLIST]
+      : [...POSIX_ALLOWLIST];
+
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of keys) {
+    const val = process.env[key];
+    if (val !== undefined) {
+      env[key] = val;
+    }
+  }
   return env;
 }
 

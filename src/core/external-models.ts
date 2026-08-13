@@ -87,12 +87,6 @@ export function isClaudeModelName(model: string): boolean {
  * independent of runtime discovery — a discovery failure cannot degrade the
  * safety property by returning an empty external set.
  *
- * Documented behaviour change from isDormantGptModel: a hand-edited
- * agent-models.json entry with any non-Claude name (not just known GPT IDs)
- * is now dormant-when-off. The entry is NOT self-healing — existing on-disk
- * frontmatter retains the bad value until --set, a TUI save,
- * proxy --enable/--disable, or init fires reapplyAgentMapping.
- *
  * Single source of truth for dormancy — do NOT inline this predicate at call
  * sites. (anti-pattern, KNOWLEDGE.md:235)
  *

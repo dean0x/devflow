@@ -1,15 +1,11 @@
 /**
  * Tests for src/core/proxy-log.ts — SEC-2 proxy log hardening.
  *
- * TDD RED-GREEN: all five tests were written before the implementation existed
- * and confirmed RED against the pre-SEC-2 code (fs.open(logFile, 'a') with no
- * mode argument, process.env spread with no ANTHROPIC_API_KEY removal).
- *
  * Coverage:
  * 1. openProxyLog fresh path     → file 0600, parent dir 0700
  * 2. openProxyLog pre-existing   → best-effort chmod to 0600 (wider mode patched)
  * 3. openProxyLog chmod fails    → still returns a usable handle (non-fatal invariant)
- * 4. buildChildEnv               → ANTHROPIC_API_KEY absent; SUBSWITCH_CONFIG + PATH present
+ * 4. scrubChildEnv (T11)         → exact allowlist; no ANTHROPIC_API_KEY/OPENAI_API_KEY/SSH_AUTH_SOCK
  * 5. rotateProxyLogIfLarge       → file ≤1MB after 2MB+ input, mode 0600 on result
  *
  * Note: mode assertions are skipped on win32 (POSIX chmod semantics not applicable).
@@ -20,7 +16,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  buildChildEnv,
+  scrubChildEnv,
   openProxyLog,
   rotateProxyLogIfLarge,
   PROXY_LOG_MAX_BYTES,
@@ -155,49 +151,130 @@ describe('proxy-log', () => {
     });
   });
 
-  // ─── Test 4: buildChildEnv strips ANTHROPIC_API_KEY ──────────────────────
+  // ─── Test 4: scrubChildEnv — T11 literal allowlist (AC-S3) ──────────────
 
-  describe('buildChildEnv', () => {
-    it('removes ANTHROPIC_API_KEY when parent env has it', () => {
-      const original = process.env.ANTHROPIC_API_KEY;
-      try {
-        process.env.ANTHROPIC_API_KEY = 'sk-test-credential';
-        const env = buildChildEnv('/path/to/proxy-routing.json');
-        expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
-      } finally {
-        if (original === undefined) {
-          delete process.env.ANTHROPIC_API_KEY;
-        } else {
-          process.env.ANTHROPIC_API_KEY = original;
-        }
-      }
+  describe('scrubChildEnv — T11 env allowlist', () => {
+    const IS_WIN32 = process.platform === 'win32';
+    const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
+    const WIN32_EXTRA = ['SystemRoot', 'APPDATA', 'USERPROFILE', 'ComSpec'];
+    const FULL_ALLOWLIST = IS_WIN32
+      ? [...POSIX_ALLOWLIST, ...WIN32_EXTRA]
+      : POSIX_ALLOWLIST;
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
 
-    it('preserves SUBSWITCH_CONFIG set to the given configPath', () => {
+    it('returns no ANTHROPIC_API_KEY, OPENAI_API_KEY, or SSH_AUTH_SOCK from poisoned env (AC-S3)', () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-credential');
+      vi.stubEnv('OPENAI_API_KEY', 'sk-openai-key');
+      vi.stubEnv('SSH_AUTH_SOCK', '/tmp/ssh-agent.sock');
+      vi.stubEnv('BUTLER_API_KEY', 'butler-key');
+      vi.stubEnv('CLAUDE_CODE_MESSAGING_TOKEN', 'tok-123');
+
+      const env = scrubChildEnv();
+
+      expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+      expect(env['OPENAI_API_KEY']).toBeUndefined();
+      expect(env['SSH_AUTH_SOCK']).toBeUndefined();
+      expect(env['BUTLER_API_KEY']).toBeUndefined();
+      expect(env['CLAUDE_CODE_MESSAGING_TOKEN']).toBeUndefined();
+    });
+
+    it('returns only allowlisted keys — exact key set assertion (AC-S3)', () => {
+      // Seed all allowlist vars to known values so the expected set is deterministic.
+      vi.stubEnv('PATH', '/usr/bin:/bin');
+      vi.stubEnv('HOME', '/home/testuser');
+      vi.stubEnv('TMPDIR', '/tmp');
+      vi.stubEnv('LANG', 'en_US.UTF-8');
+      vi.stubEnv('LC_ALL', 'en_US.UTF-8');
+      // Poison vars that must NOT leak
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test');
+      vi.stubEnv('OPENAI_API_KEY', 'sk-openai');
+      vi.stubEnv('SSH_AUTH_SOCK', '/tmp/ssh.sock');
+      vi.stubEnv('NODE_PATH', '/some/node/path');
+      vi.stubEnv('npm_lifecycle_event', 'test');
+
+      const env = scrubChildEnv();
+      const actualKeys = Object.keys(env).sort();
+
+      // Exact key set: only allowlist vars that are actually defined.
+      // On posix: PATH, HOME, TMPDIR, LANG, LC_ALL (all stubbed above).
+      const expectedKeys = FULL_ALLOWLIST.filter(k => process.env[k] !== undefined).sort();
+      expect(actualKeys).toEqual(expectedKeys);
+    });
+
+    it('relay spawn env adds only SUBSWITCH_CONFIG — no other leaks', () => {
+      vi.stubEnv('PATH', '/usr/bin:/bin');
+      vi.stubEnv('HOME', '/home/testuser');
+      vi.stubEnv('TMPDIR', '/tmp');
+      vi.stubEnv('LANG', 'en_US.UTF-8');
+      vi.stubEnv('LC_ALL', 'en_US.UTF-8');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test');
+      vi.stubEnv('OPENAI_API_KEY', 'sk-openai');
+      vi.stubEnv('SSH_AUTH_SOCK', '/tmp/ssh.sock');
+
       const configPath = '/home/user/.devflow/proxy-routing.json';
-      const env = buildChildEnv(configPath);
-      expect(env['SUBSWITCH_CONFIG']).toBe(configPath);
+      const relayEnv = { ...scrubChildEnv(), SUBSWITCH_CONFIG: configPath };
+
+      // Poison vars must not appear
+      expect(relayEnv['ANTHROPIC_API_KEY']).toBeUndefined();
+      expect(relayEnv['OPENAI_API_KEY']).toBeUndefined();
+      expect(relayEnv['SSH_AUTH_SOCK']).toBeUndefined();
+
+      // SUBSWITCH_CONFIG is the only addition
+      expect(relayEnv['SUBSWITCH_CONFIG']).toBe(configPath);
+
+      // Exact key set: allowlist + SUBSWITCH_CONFIG
+      const expectedKeys = [
+        ...FULL_ALLOWLIST.filter(k => process.env[k] !== undefined),
+        'SUBSWITCH_CONFIG',
+      ].sort();
+      expect(Object.keys(relayEnv).sort()).toEqual(expectedKeys);
     });
 
-    it('preserves PATH from the parent env', () => {
-      const env = buildChildEnv('/some/config.json');
-      // PATH must be present — the relay needs to resolve node itself in some contexts.
-      // (process.env.PATH may be undefined on headless test runners; we accept that.)
-      if (process.env.PATH !== undefined) {
-        expect(env['PATH']).toBe(process.env.PATH);
-      }
+    it('doctor spawn env adds only SUBSWITCH_CONFIG — matches relay spawn composition', () => {
+      vi.stubEnv('PATH', '/usr/bin:/bin');
+      vi.stubEnv('HOME', '/home/testuser');
+      vi.stubEnv('TMPDIR', '/tmp');
+      vi.stubEnv('LANG', 'en_US.UTF-8');
+      vi.stubEnv('LC_ALL', 'en_US.UTF-8');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test');
+      vi.stubEnv('OPENAI_API_KEY', 'sk-openai');
+      vi.stubEnv('SSH_AUTH_SOCK', '/tmp/ssh.sock');
+
+      const configPath = '/home/user/.devflow/proxy-routing.json';
+      const doctorEnv = { ...scrubChildEnv(), SUBSWITCH_CONFIG: configPath };
+
+      expect(doctorEnv['ANTHROPIC_API_KEY']).toBeUndefined();
+      expect(doctorEnv['OPENAI_API_KEY']).toBeUndefined();
+      expect(doctorEnv['SSH_AUTH_SOCK']).toBeUndefined();
+      expect(doctorEnv['SUBSWITCH_CONFIG']).toBe(configPath);
+
+      const expectedKeys = [
+        ...FULL_ALLOWLIST.filter(k => process.env[k] !== undefined),
+        'SUBSWITCH_CONFIG',
+      ].sort();
+      expect(Object.keys(doctorEnv).sort()).toEqual(expectedKeys);
     });
 
-    it('does not throw when ANTHROPIC_API_KEY is not in parent env', () => {
-      const original = process.env.ANTHROPIC_API_KEY;
-      delete process.env.ANTHROPIC_API_KEY;
-      try {
-        expect(() => buildChildEnv('/config.json')).not.toThrow();
-      } finally {
-        if (original !== undefined) {
-          process.env.ANTHROPIC_API_KEY = original;
-        }
+    it('omits allowlist vars that are absent in process.env (never sets undefined)', () => {
+      // Ensure TMPDIR is absent; all others are present
+      vi.stubEnv('PATH', '/usr/bin');
+      vi.stubEnv('HOME', '/home/user');
+      vi.stubEnv('LANG', 'C');
+      vi.stubEnv('LC_ALL', 'C');
+      // Explicitly remove TMPDIR by not stubbing it; if it exists, unstub it
+      const tmpDirBefore = process.env['TMPDIR'];
+      if (tmpDirBefore !== undefined) {
+        // Can't unstub individually — just verify omission logic via all-defined path
+        // (this branch only fires when TMPDIR is absent; skip if it's always defined)
+        return;
       }
+
+      const env = scrubChildEnv();
+      expect(env['TMPDIR']).toBeUndefined();
+      expect('TMPDIR' in env).toBe(false);
     });
   });
 

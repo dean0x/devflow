@@ -35,7 +35,7 @@ import {
 import { externalModelIds } from '../../core/external-models.js';
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { buildChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
+import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
 import {
   reapplyAgentMapping,
   revertExternalAgents,
@@ -657,10 +657,9 @@ export async function spawnRelayAndWaitForPort(
   const logHandle = await deps.openLog(logPath);
 
   let spawnError: Error | undefined;
-  // SEC-2: use buildChildEnv to strip ANTHROPIC_API_KEY from the relay's env.
-  // The relay reads Codex credentials from ~/.codex/auth.json, not from env;
-  // the key provides no benefit and has credential value in any inherit-env leak path.
-  const env = buildChildEnv(configPath);
+  // SEC-2: allowlist env for the relay — only PATH/HOME/TMPDIR/LANG/LC_ALL are
+  // inherited; SUBSWITCH_CONFIG is the only process-specific addition here.
+  const env = { ...scrubChildEnv(), SUBSWITCH_CONFIG: configPath };
 
   const { pid } = deps.spawnProcess({
     execPath: process.execPath,
@@ -798,8 +797,8 @@ export async function runPostSpawnVerification(
   spawnedPid: number | undefined,
   deps: PostSpawnDoctorDeps,
 ): Promise<Result<undefined, string>> {
-  // SEC-2: use buildChildEnv to strip ANTHROPIC_API_KEY from the doctor's env.
-  const doctorEnv = buildChildEnv(configPath);
+  // SEC-2: allowlist env for doctor — matches the relay spawn composition.
+  const doctorEnv = { ...scrubChildEnv(), SUBSWITCH_CONFIG: configPath };
   const doctorExit = await deps.spawnDoctor(binPath, doctorEnv, DOCTOR_TIMEOUT_MS, logPath);
   if (doctorExit === 0) return Ok(undefined);
 
