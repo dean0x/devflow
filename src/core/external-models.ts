@@ -1,11 +1,15 @@
 /**
- * External GPT model registry — single source of truth for the TUI picker
- * and routing configuration.
+ * External model dormancy predicate and Claude model alias set.
  *
- * Also owns the dormancy predicate and the Claude model alias set.
  * Dormancy asks "does this model name need the proxy?" — answerable from the
  * complement (the static Claude passthrough set) without any discovery I/O.
  * This keeps the safety property correct even when discovery fails.
+ *
+ * The hardcoded GPT model registry (EXTERNAL_GPT_MODELS, externalModelIds,
+ * ExternalModel) was deleted here. Discovery is now live via
+ * src/core/model-discovery.ts (discoverExternalModels / getExternalModelsCached).
+ * The TUI picker and --set validation use the ExternalModelCatalog returned by
+ * those functions. applies ADR-003: end-state only — no compatibility re-exports.
  *
  * applies ADR-013: pure core-layer module, no Claude Code adapter concerns.
  *
@@ -14,30 +18,6 @@
  * "external model routing (GPT models via your OpenAI/Codex subscription)" /
  * "Devflow proxy".
  */
-
-export interface ExternalModel {
-  readonly id: string;
-  readonly label: string;
-}
-
-/**
- * Registry of external GPT models available via the Devflow proxy.
- * Order determines TUI picker display order — preserve it.
- */
-export const EXTERNAL_GPT_MODELS: readonly ExternalModel[] = [
-  { id: 'gpt-5.6-sol',   label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna',  label: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5',       label: 'GPT-5.5' },
-];
-
-/**
- * Returns the list of external GPT model IDs.
- * Consumed by: routing config generation (proxy-state), TUI picker (agents CLI).
- */
-export function externalModelIds(): string[] {
-  return EXTERNAL_GPT_MODELS.map(m => m.id);
-}
 
 // ---------------------------------------------------------------------------
 // Claude model alias set — moved here from agent-models.ts so external-models

@@ -12,9 +12,10 @@
  *   Invalid effort values are dropped with a warning.
  *
  * Dormancy semantics (plan D5):
- *   A mapping entry whose model is an external GPT model (per externalModelIds())
- *   materializes into frontmatter ONLY when proxyEnabled=true. When the proxy is
- *   disabled, the entry stays saved but the SHIPPED DEFAULT model is applied instead.
+ *   A mapping entry whose model is an external GPT model (classified via
+ *   isDormantExternalModel — the complement of isClaudeModelName) materializes
+ *   into frontmatter ONLY when proxyEnabled=true. When the proxy is disabled,
+ *   the entry stays saved but the SHIPPED DEFAULT model is applied instead.
  *   Effort is orthogonal — it ALWAYS applies regardless of proxy state.
  *
  * Dependency direction:
@@ -169,9 +170,9 @@ export interface EffectiveConfig {
  * Compute the effective model/effort for an agent, applying dormancy semantics.
  *
  * Dormancy rule (plan D5):
- *   If the mapping entry's model is an external GPT model (per externalModelIds())
- *   AND proxyEnabled is false → the entry is DORMANT. The shipped default model
- *   is used instead. The entry remains saved.
+ *   If the mapping entry's model is an external GPT model (classified via
+ *   isDormantExternalModel) AND proxyEnabled is false → the entry is DORMANT.
+ *   The shipped default model is used instead. The entry remains saved.
  *
  * Effort is ALWAYS applied regardless of proxy state.
  *
@@ -427,8 +428,8 @@ export async function revertExternalAgents(opts: RevertOptions): Promise<Reapply
  * Count the number of mapping entries whose model requires the Devflow proxy
  * (i.e., is not a Claude model name and not 'default').
  *
- * Uses the complement predicate (isClaudeModelName) rather than
- * externalModelIds() so that alias-shaped names are correctly counted as
+ * Uses the complement predicate (isClaudeModelName — isDormantExternalModel's
+ * building block) so that alias-shaped names are correctly counted as
  * external — preventing "External-mapped agents: none" when a user has
  * pinned every agent to a non-Claude alias (avoids AC-C6 live-correctness
  * bug where discovery-driven counting would miss such entries).

@@ -17,9 +17,12 @@ import {
   CLAUDE_MODEL_ALIASES,
   isClaudeModelName,
   isDormantExternalModel,
-  EXTERNAL_GPT_MODELS,
-  externalModelIds,
 } from '../src/core/external-models.js';
+
+// Literal GPT model IDs — independent of the deleted hardcoded registry.
+// These reflect the subswitch@0.2.0 catalog used throughout Phase D tests.
+// applies ADR-003: end-state only — no compatibility imports from deleted exports.
+const KNOWN_GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 import {
   countExternalMappedAgents,
   type AgentMappingFile,
@@ -112,7 +115,7 @@ describe('isClaudeModelName', () => {
   });
 
   it('returns false for external GPT model IDs', () => {
-    for (const id of externalModelIds()) {
+    for (const id of KNOWN_GPT_IDS) {
       expect(isClaudeModelName(id)).toBe(false);
     }
   });
@@ -161,7 +164,7 @@ describe('isDormantExternalModel — single dormancy predicate', () => {
   });
 
   it('returns true for a known GPT model ID when proxy is off', () => {
-    for (const { id } of EXTERNAL_GPT_MODELS) {
+    for (const id of KNOWN_GPT_IDS) {
       expect(isDormantExternalModel(id, false)).toBe(true);
     }
   });
