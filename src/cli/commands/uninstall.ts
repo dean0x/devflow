@@ -278,6 +278,9 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     { relPath: 'proxy.pid' },
     { relPath: '.proxy-spawn.lock', isDir: true },
     { relPath: path.join('logs', 'proxy.log') },
+    // Model-discovery cache — populated by discoverExternalModels during enable / agents TUI.
+    // isDir:true so rm recurses into external-models-v1-*.json cache entries.
+    { relPath: path.join('cache', 'models'), isDir: true },
   ];
   for (const artifact of proxyArtifacts) {
     const fullPath = path.join(devflowDir, artifact.relPath);

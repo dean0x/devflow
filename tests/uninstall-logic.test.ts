@@ -674,14 +674,38 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await expect(fs.access(path.join(devflowDir, 'proxy.pid'))).rejects.toThrow();
   });
 
-  it('removes all proxy artifacts in a single pass', async () => {
-    // Set up every proxy artifact.
+  it('removes cache/models directory when present (model-discovery cache)', async () => {
+    // Model-discovery cache written by discoverExternalModels during enable / agents TUI.
+    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(
+      path.join(cacheDir, 'external-models-v1-0.2.0.json'),
+      '{"models":[]}',
+      'utf-8',
+    );
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(cacheDir)).rejects.toThrow();
+  });
+
+  it('PF-009: missing cache/models does not prevent removal of other artifacts', async () => {
+    // cache/models is absent; only proxy.json is present.
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    // proxy.json is removed even though cache/models was never created.
+    await expect(fs.access(path.join(devflowDir, 'proxy.json'))).rejects.toThrow();
+  });
+
+  it('removes all proxy artifacts in a single pass (including model-discovery cache)', async () => {
+    // Set up every proxy artifact — including the model-discovery cache added in Phase E.
     await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'proxy-routing.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'proxy.pid'), '99999999', 'utf-8');
     await fs.mkdir(path.join(devflowDir, '.proxy-spawn.lock'), { recursive: true });
     await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'logs', 'proxy.log'), 'log', 'utf-8');
+    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(path.join(cacheDir, 'external-models-v1-0.2.0.json'), '{}', 'utf-8');
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
@@ -691,6 +715,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
       fs.access(path.join(devflowDir, 'proxy.pid')),
       fs.access(path.join(devflowDir, '.proxy-spawn.lock')),
       fs.access(path.join(devflowDir, 'logs', 'proxy.log')),
+      fs.access(cacheDir),
     ]);
     // Every artifact must be gone.
     for (const result of checks) {
