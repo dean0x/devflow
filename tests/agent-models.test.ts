@@ -342,9 +342,10 @@ describe('reapplyAgentMapping', async () => {
   let reapplyAgentMapping: (typeof import('../src/core/agent-models.js'))['reapplyAgentMapping'];
   let revertExternalAgents: (typeof import('../src/core/agent-models.js'))['revertExternalAgents'];
 
-  // Read coder's shipped default live from source at test init time (TEST-7 fix).
-  // Avoids brittle hardcoding that breaks when model-strategy changes coder.md.
+  // Read shipped defaults live from source at test init time (TEST-7 fix).
+  // Avoids brittle hardcoding that breaks when model-strategy changes agent files.
   let coderShippedDefault = 'sonnet'; // conservative fallback; overridden below
+  let reviewerShippedDefault = 'opus'; // conservative fallback; overridden below
 
   try {
     const mod = await import('../src/core/agent-models.js');
@@ -356,6 +357,9 @@ describe('reapplyAgentMapping', async () => {
     const defaults = await mod.loadShippedDefaults();
     if (defaults['coder']) {
       coderShippedDefault = defaults['coder'];
+    }
+    if (defaults['reviewer']) {
+      reviewerShippedDefault = defaults['reviewer'];
     }
   } catch {
     // Module not yet implemented — tests will be skipped
@@ -516,5 +520,91 @@ describe('reapplyAgentMapping', async () => {
     const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
     expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
+  });
+
+  it('T5: alias-shaped AND canonical-id external entries both stay dormant when proxy is OFF', async () => {
+    // Fail-safe materialization: the worst failure mode of the feature is writing an
+    // external model id into an installed agent file while the proxy is OFF — every
+    // request for that agent would then hard-fail (no ANTHROPIC_BASE_URL set).
+    //
+    // The alias-shaped case ('sol') is the real hole: canonical ids ('gpt-5.6-sol')
+    // are tested elsewhere, but aliases are a NEW shape introduced by Phase D.
+    //
+    // Proof method: seed both shapes, call reapplyAgentMapping({proxyEnabled:false}),
+    // assert installed files contain shipped defaults — no mocking of isDormantExternalModel
+    // or isClaudeModelName (per PF-016: mocking the predicate would test our assumption,
+    // not the production guard).
+    if (!reapplyAgentMapping) return;
+
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: {
+        coder: { model: 'sol' },          // alias-shaped — previously untested on reapply path
+        reviewer: { model: 'gpt-5.6-sol' }, // canonical-id — also covered here for completeness
+      },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    // Installed files start at their shipped defaults
+    await fs.writeFile(
+      path.join(tmpInstallDir, 'coder.md'),
+      `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`,
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(tmpInstallDir, 'reviewer.md'),
+      `---\nname: Reviewer\nmodel: ${reviewerShippedDefault}\n---\n\nbody\n`,
+      'utf-8',
+    );
+
+    await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: false,  // proxy OFF → both external entries must stay dormant
+    });
+
+    const coderFile = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    // Neither the alias nor the canonical id may appear in the installed file
+    expect(coderFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(coderFile).toContain(`model: ${coderShippedDefault}`);
+
+    const reviewerFile = await fs.readFile(path.join(tmpInstallDir, 'reviewer.md'), 'utf-8');
+    expect(reviewerFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(reviewerFile).toContain(`model: ${reviewerShippedDefault}`);
+  });
+
+  it('AC-S1: hostile model name in mapping is rejected — installed file unchanged, warning emitted', async () => {
+    // reapplyAgentMapping reads agent-models.json; rewriteAgentFrontmatter rejects
+    // invalid model names (invalid-model error). The installed file must be
+    // byte-identical to before and a warning must name 'invalid-model'.
+    if (!reapplyAgentMapping) return;
+
+    // Hostile mapping: model name containing a newline (YAML injection attempt)
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: {
+        coder: { model: 'gpt\ntools:\n  - bash' },
+      },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const originalContent = `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`;
+    const coderPath = path.join(tmpInstallDir, 'coder.md');
+    await fs.writeFile(coderPath, originalContent, 'utf-8');
+
+    const warnings: string[] = [];
+    await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: true, // proxy ON so dormancy doesn't suppress the write attempt
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // File must be byte-identical to before (rewrite was rejected)
+    const afterContent = await fs.readFile(coderPath, 'utf-8');
+    expect(afterContent).toBe(originalContent);
+
+    // A warning naming 'invalid-model' must have been emitted
+    expect(warnings.some(w => w.includes('invalid-model'))).toBe(true);
   });
 });
