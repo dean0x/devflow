@@ -3,7 +3,7 @@ feature: external-model-routing
 name: External Model Routing & Per-Agent Model Config
 description: "Use when working on the proxy lifecycle (enable/disable/status/preflight), the ensure-proxy hook, per-agent model mapping, agent frontmatter rewriting, or the agents TUI. Keywords: proxy, external-model-routing, GPT, agent-models, ensure-proxy, frontmatter, devflow proxy, devflow agents, subswitch, ANTHROPIC_BASE_URL, dormancy, reapplyAgentMapping."
 category: architecture
-directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
+directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
 updated: 2026-08-14
 ---
@@ -102,6 +102,7 @@ All four checks are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDe
 | `PostSpawnDoctorDeps` | Injectable interface for post-spawn doctor verification |
 | `SpawnAndWaitDeps`, `SpawnRelayResult`, `BuildRealPreflightDepsOptions` | Injectable interfaces |
 | `readProxyEnvState` | Returns `'ours'|'ours-other-port'|'foreign'|'absent'` for `--status` display |
+| `formatCodexAuthLine(state, path, now)` | Codex auth `--status` line; `unreadable` renders at warn level, expiry is informational only |
 
 Internal named functions (not exported): `applyEnableSettingsPass`, `resolveProcessState`, `formatProcessLine`, `readPidFile`, `PROBE_TIMEOUT_MS`, `DOCTOR_TIMEOUT_MS`, `RELAY_SPAWN_*` constants.
 
@@ -292,8 +293,9 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - `src/core/external-models.ts` — `CLAUDE_MODEL_ALIASES`, `isClaudeModelName()`, `isDormantExternalModel()` (leaf module, no project imports)
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`
 - `src/core/agent-models.ts` — `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
+- `src/core/codex-auth-inspect.ts` — `inspectCodexAuth()` — pure `absent | unreadable | present` verdict on `~/.codex/auth.json` for `--status`. Re-derived rather than imported from the routing runtime, which ships no `exports` map (importing would pin an internal dist path across a pinned-dependency bump). Decodes the JWT payload for display only — never signature-verified, no token material returned, account id truncated to a 6-char suffix
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
-- `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `PostSpawnDoctorDeps`
+- `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `formatCodexAuthLine`, `PostSpawnDoctorDeps`
 - `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()`, `applySetMapping()`, `buildListRows()`
 - `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `unsavedCount()`
 - `src/cli/agents-view/render.ts` — pure frame renderer; exports `FIXED_ROWS`, `computeViewportHeight`
