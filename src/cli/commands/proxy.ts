@@ -44,6 +44,7 @@ import {
 import {
   getExternalModelsCached,
   discoverExternalModels,
+  type ExternalModelCatalog,
 } from '../../core/model-discovery.js';
 import {
   getClaudeDirectory,
@@ -973,6 +974,18 @@ function formatProcessLine(
  * @param portOption  Commander --port value; undefined when flag not provided
  * @param priorPort   Last-used port from proxy.json (or DEFAULT_PROXY_PORT)
  */
+/**
+ * Pure formatter for the external models status line shown by `devflow proxy --status`.
+ *
+ * Extracted to enable isolated testing without clack I/O. (AC-F6)
+ */
+export function formatExternalModelsLine(catalog: ExternalModelCatalog, logPath: string): string {
+  if (catalog.known) {
+    return `External models: ${color.cyan(catalog.selectableNames.join(', '))}`;
+  }
+  return `External models: ${color.dim('unavailable')} — see ${logPath}`;
+}
+
 export function resolvePort(
   portOption: string | undefined,
   priorPort: number,
@@ -1112,11 +1125,7 @@ async function runStatus(): Promise<void> {
   // External models registry (cache-only, zero spawns — avoids multi-second silent pause in --status)
   const cacheDir = path.join(devflowDir, 'cache', 'models');
   const catalog = getExternalModelsCached(cacheDir);
-  if (catalog.known) {
-    p.log.info(`External models: ${color.cyan(catalog.selectableNames.join(', '))}`);
-  } else {
-    p.log.info(`External models: ${color.dim('unavailable')} — see ${logPath}`);
-  }
+  p.log.info(formatExternalModelsLine(catalog, logPath));
 
   // Log path
   p.log.info(`Proxy log: ${color.dim(logPath)}`);

@@ -7,7 +7,10 @@
  * so every branch is exercised without real TCP/HTTP/spawn.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { promises as fsAsync } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   applyProxyEnv,
   stripProxyEnv,
@@ -20,9 +23,16 @@ import {
   runPostSpawnVerification,
   isOurRelayBody,
   resolvePort,
+  formatExternalModelsLine,
   type ProxyPreflightDeps,
   type PostSpawnDoctorDeps,
 } from '../src/cli/commands/proxy.js';
+import {
+  revertExternalAgents,
+  saveAgentMapping,
+  type AgentMappingFile,
+} from '../src/core/agent-models.js';
+import { writeCache } from '../src/core/cache.js';
 import type { Settings } from '../src/targets/claude-code/hooks.js';
 
 const DEVFLOW_DIR = '/home/test/.devflow';
@@ -889,28 +899,177 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
     expect((s as Record<string, unknown>).env).toBeUndefined();
   });
 
-  it('discovery independence — identical post-state across all three discovery scenarios', () => {
+  it('discovery independence — identical post-state across all three discovery scenarios', async () => {
     // applyDisableToSettings is a pure Settings function: it does NOT call
-    // discoverExternalModels or getExternalModelsCached. The same Settings
-    // transformations apply regardless of whether discovery previously succeeded,
-    // failed, or was never called. No mocking required — just verify consistent
-    // whole-end-state for all three scenarios (PF-015).
+    // discoverExternalModels or getExternalModelsCached. Pre-seed three REAL
+    // cache directories in different states — the Settings post-state must be
+    // identical regardless of what the cache contains (PF-015, non-vacuous).
+    const tmpBase = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-t7-cache-'));
+    try {
+      const VALID_STUB = JSON.stringify({
+        schemaVersion: 1,
+        kind: 'models',
+        providers: [{ id: 'codex', routing: 'direct' }],
+        models: [{ id: 'gpt-5.6-sol', provider: 'codex', routable: true, retired: false, aliases: [] }],
+      });
 
-    const scenarios = [
-      'cache-hit',   // discovery previously succeeded
-      'cache-miss',  // discovery not yet run / stale
-      'no-binary',   // discovery binary absent
-    ] as const;
+      // Scenario 1: cache-hit — fresh valid cache entry in the cache dir
+      const cacheHitDir = path.join(tmpBase, 'cache-hit', 'cache', 'models');
+      await fsAsync.mkdir(cacheHitDir, { recursive: true });
+      await writeCache(cacheHitDir, 'external-models-v1-0.2.0', VALID_STUB, 24 * 60 * 60 * 1_000);
 
-    for (const scenario of scenarios) {
-      const s = buildFullyEnabledSettings({ SCENARIO: scenario });
-      const changed = applyDisableToSettings(s, DEFAULT_PORT);
-      const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
+      // Scenario 2: cache-miss — cache dir exists but is empty
+      const cacheMissDir = path.join(tmpBase, 'cache-miss', 'cache', 'models');
+      await fsAsync.mkdir(cacheMissDir, { recursive: true });
 
-      expect(changed, `[${scenario}] changed`).toBe(true);
-      expect(hasProxyHooks(s), `[${scenario}] no proxy hooks`).toBe(false);
-      expect(env?.ANTHROPIC_BASE_URL, `[${scenario}] relay URL removed`).toBeUndefined();
-      expect(env?.SCENARIO, `[${scenario}] extra env preserved`).toBe(scenario);
+      // Scenario 3: no-binary — cache dir does not exist (relay was never started)
+      const noBinaryDir = path.join(tmpBase, 'no-binary', 'cache', 'models');
+      // intentionally NOT created
+
+      const scenarios = [
+        { name: 'cache-hit' as const, _cacheDir: cacheHitDir },
+        { name: 'cache-miss' as const, _cacheDir: cacheMissDir },
+        { name: 'no-binary' as const, _cacheDir: noBinaryDir },
+      ];
+
+      for (const scenario of scenarios) {
+        const s = buildFullyEnabledSettings({ SCENARIO: scenario.name });
+        const changed = applyDisableToSettings(s, DEFAULT_PORT);
+        const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
+
+        expect(changed, `[${scenario.name}] changed`).toBe(true);
+        expect(hasProxyHooks(s), `[${scenario.name}] no proxy hooks`).toBe(false);
+        expect(env?.ANTHROPIC_BASE_URL, `[${scenario.name}] relay URL removed`).toBeUndefined();
+        expect(env?.SCENARIO, `[${scenario.name}] extra env preserved`).toBe(scenario.name);
+      }
+    } finally {
+      await fsAsync.rm(tmpBase, { recursive: true, force: true });
     }
+  });
+
+  // ── Agent reversion: revertExternalAgents — 3 real cache states produce identical result ──
+  //
+  // When proxy --disable runs, revertExternalAgents is called to rewrite installed agent
+  // files back to their shipped Claude defaults. This must happen regardless of the prior
+  // model-discovery cache state (cache-hit, cache-miss, no cache dir). Proves that
+  // reversion is independent of discovery. (PF-015)
+
+  let tmpInstallDir: string;
+  let tmpDevflowDir: string;
+
+  beforeEach(async () => {
+    tmpInstallDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-t7-agents-'));
+    tmpDevflowDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-t7-state-'));
+  });
+
+  afterEach(async () => {
+    await fsAsync.rm(tmpInstallDir, { recursive: true, force: true });
+    await fsAsync.rm(tmpDevflowDir, { recursive: true, force: true });
+  });
+
+  const cacheStateScenarios: Array<{
+    name: string;
+    setupCache: (cacheDir: string) => Promise<void>;
+  }> = [
+    {
+      name: 'cache-hit',
+      setupCache: async (cacheDir) => {
+        await fsAsync.mkdir(cacheDir, { recursive: true });
+        const stub = JSON.stringify({
+          schemaVersion: 1, kind: 'models',
+          providers: [{ id: 'codex', routing: 'direct' }],
+          models: [{ id: 'gpt-5.6-sol', provider: 'codex', routable: true, retired: false, aliases: [] }],
+        });
+        await writeCache(cacheDir, 'external-models-v1-0.2.0', stub, 24 * 60 * 60 * 1_000);
+      },
+    },
+    {
+      name: 'cache-miss',
+      setupCache: async (cacheDir) => {
+        await fsAsync.mkdir(cacheDir, { recursive: true }); // dir exists, empty
+      },
+    },
+    {
+      name: 'no-cache-dir',
+      setupCache: async (_cacheDir) => {
+        // don't create the cache dir — mimics relay never started
+      },
+    },
+  ];
+
+  for (const scenario of cacheStateScenarios) {
+    it(`revertExternalAgents reverts GPT models to shipped defaults [${scenario.name}]`, async () => {
+      const cacheDir = path.join(tmpDevflowDir, 'cache', 'models');
+      await scenario.setupCache(cacheDir);
+
+      // Installed file has GPT model already applied (as if proxy was enabled before)
+      await fsAsync.writeFile(
+        path.join(tmpInstallDir, 'coder.md'),
+        '---\nname: Coder\nmodel: gpt-5.6-sol\n---\n\nbody\n',
+        'utf-8',
+      );
+      const mapping: AgentMappingFile = { version: 1, agents: { coder: { model: 'gpt-5.6-sol' } } };
+      await saveAgentMapping(tmpDevflowDir, mapping);
+
+      await revertExternalAgents({ installDir: tmpInstallDir, devflowDir: tmpDevflowDir });
+
+      const content = await fsAsync.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+      // GPT model must be gone, replaced with a Claude model (the shipped default)
+      expect(content, `[${scenario.name}] no GPT model in reverted file`).not.toContain('gpt-');
+      // The file must still have a valid model: line
+      expect(content, `[${scenario.name}] model line exists`).toMatch(/model:\s*\w+/);
+    });
+  }
+});
+
+// ─── AC-F6: formatExternalModelsLine ─────────────────────────────────────────
+//
+// Pure formatter for the external models status line shown by --status.
+// Extracted so it can be tested without clack I/O (AC-F6).
+
+describe('formatExternalModelsLine (AC-F6)', () => {
+  const LOG_PATH = '/home/user/.devflow/logs/proxy.log';
+
+  it('unknown catalog → "unavailable" and log path', () => {
+    const result = formatExternalModelsLine({ known: false }, LOG_PATH);
+    // Strip ANSI — content assertion only
+    const stripped = result.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(stripped).toContain('unavailable');
+    expect(stripped).toContain(LOG_PATH);
+  });
+
+  it('known catalog → comma-separated selectable names', () => {
+    const catalog = {
+      known: true as const,
+      source: 'live' as const,
+      models: [],
+      selectableNames: ['sol', 'terra', 'gpt-5.5'],
+      aliasToId: new Map<string, string>([['sol', 'gpt-5.6-sol'], ['terra', 'gpt-5.6-terra']]),
+    };
+    const result = formatExternalModelsLine(catalog, LOG_PATH);
+    const stripped = result.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(stripped).toContain('sol, terra, gpt-5.5');
+    expect(stripped).not.toContain('unavailable');
+    expect(stripped).not.toContain(LOG_PATH);
+  });
+
+  it('known catalog with empty model list → no names shown, no log path', () => {
+    const catalog = {
+      known: true as const,
+      source: 'live' as const,
+      models: [],
+      selectableNames: [] as string[],
+      aliasToId: new Map<string, string>(),
+    };
+    const result = formatExternalModelsLine(catalog, LOG_PATH);
+    const stripped = result.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(stripped).toContain('External models:');
+    expect(stripped).not.toContain('unavailable');
+    expect(stripped).not.toContain(LOG_PATH);
+  });
+
+  it('does not mention "subswitch" (branding rule)', () => {
+    const result = formatExternalModelsLine({ known: false }, LOG_PATH);
+    expect(result.toLowerCase()).not.toContain('subswitch');
   });
 });

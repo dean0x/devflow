@@ -435,3 +435,157 @@ describe('minimal state', () => {
     expect(() => renderFrame(state, { rows: 24, cols: 80 })).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Alias rendering (AC-F2)
+// ---------------------------------------------------------------------------
+
+describe('alias rendering', () => {
+  it('renders alias with canonical-id annotation: "sol (gpt-5.6-sol)"', () => {
+    // When catalog.known and aliasToId maps 'sol' → 'gpt-5.6-sol', the model
+    // cell must show "sol (gpt-5.6-sol)" — AC-F2.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      source: 'live',
+      models: [],
+      selectableNames: ['sol', 'gpt-5.6-sol'],
+      aliasToId: new Map([['sol', 'gpt-5.6-sol'], ['gpt-5.6-sol', 'gpt-5.6-sol']]),
+    };
+    const state = makeState({
+      proxyEnabled: true,
+      catalog,
+      modelCycle: buildModelCycle(true, catalog),
+      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
+      cursor: 0,
+      activeField: 'effort', // model field not active — show bare value
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('sol (gpt-5.6-sol)');
+  });
+
+  it('renders canonical id bare (no annotation when alias === id)', () => {
+    // A canonical id has aliasToId entry that maps to itself — render bare.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      source: 'live',
+      models: [],
+      selectableNames: ['gpt-5.6-sol'],
+      aliasToId: new Map([['gpt-5.6-sol', 'gpt-5.6-sol']]),
+    };
+    const state = makeState({
+      proxyEnabled: true,
+      catalog,
+      modelCycle: buildModelCycle(true, catalog),
+      rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.6-sol', originalModel: 'gpt-5.6-sol' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    // Must show the id; must NOT show a secondary annotation in parens
+    expect(rowLine).toContain('gpt-5.6-sol');
+    // Should NOT contain double annotation like 'gpt-5.6-sol (gpt-5.6-sol)'
+    expect(rowLine).not.toContain('gpt-5.6-sol (gpt-5.6-sol)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (unavailable) — off-cycle pin (AC-F4)
+// ---------------------------------------------------------------------------
+
+describe('(unavailable) off-cycle pin', () => {
+  it('renders "model (unavailable)" when configuredModel is absent from modelCycle', () => {
+    // A previously saved model that has since been retired is not in the current
+    // modelCycle. The cell must show "<model> (unavailable)" so the user notices.
+    const state = makeState({
+      proxyEnabled: true,
+      catalog: UNKNOWN_CATALOG,
+      // modelCycle does NOT include 'retired-model'
+      modelCycle: ['default', 'sonnet', 'opus'],
+      rows: [makeRow({
+        name: 'coder',
+        configuredModel: 'retired-model',
+        originalModel: 'retired-model',
+        offCyclePin: 'retired-model',
+      })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('retired-model (unavailable)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Column bounds — visible width does not exceed cols
+// ---------------------------------------------------------------------------
+
+describe('column bounds', () => {
+  it('visible length of each row line does not exceed declared cols at 80', () => {
+    // Each rendered line's VISIBLE length (after stripping ANSI) must not exceed
+    // the declared terminal width. Overflow causes visual corruption in the TUI.
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'bug-analyzer-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
+        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'default' }),
+      ],
+      cursor: 0,
+    });
+    const COLS = 80;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    for (const line of lines) {
+      // stripAnsi already applied by renderStripped — line IS the visible text
+      expect(line.length, `line wider than ${COLS}: ${JSON.stringify(line)}`).toBeLessThanOrEqual(COLS);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Escape sequence injection safety
+// ---------------------------------------------------------------------------
+
+describe('escape sequence injection safety', () => {
+  it('ANSI escape code in agent name does not expand visible column width', () => {
+    // An agent name containing ANSI codes must still be padded by VISIBLE width.
+    // padToVisible uses stripAnsi before measuring, so the column width is correct.
+    const ansiName = '\x1b[31mcoder\x1b[0m'; // red "coder"
+    const state = makeState({
+      rows: [makeRow({ name: ansiName, shippedDefault: 'sonnet' })],
+      cursor: 0,
+    });
+    const COLS = 80;
+    // renderStripped strips ANSI — the visible line width must be ≤ COLS
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    if (rowLine !== undefined) {
+      expect(rowLine.length).toBeLessThanOrEqual(COLS);
+    }
+  });
+
+  it('NUL byte in model name does not cause the row line to grow unbounded', () => {
+    // NUL bytes in rendered names: renderModelCell uses truncateVisible which
+    // measures by stripAnsi result. The rendered line should remain ≤ COLS.
+    const nulModel = 'sol\x00evil';
+    const state = makeState({
+      rows: [makeRow({ name: 'coder', configuredModel: nulModel, originalModel: nulModel })],
+      // Put nulModel in modelCycle so it doesn't trigger (unavailable) path
+      modelCycle: ['default', nulModel],
+      catalog: UNKNOWN_CATALOG,
+      cursor: 0,
+    });
+    const COLS = 80;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    // Must not throw and must not produce a line wider than COLS
+    if (rowLine !== undefined) {
+      expect(rowLine.length).toBeLessThanOrEqual(COLS);
+    }
+  });
+});

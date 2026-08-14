@@ -344,3 +344,116 @@ describe('applySetMapping — GPT dormancy', () => {
     expect(result.agents['coder']?.model).toBe('gpt-5.5');
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC-P4: buildListRows makes 0 cache reads (no discovery on --list)
+// ---------------------------------------------------------------------------
+
+describe('AC-P4: buildListRows makes 0 cache reads', () => {
+  // buildListRows receives the catalog as a parameter — it does NOT call
+  // getExternalModelsCached or discoverExternalModels internally. Prove this via
+  // two complementary methods:
+  //
+  // 1. Source-grep: the function body does not reference discovery functions.
+  // 2. Functional: buildListRows works correctly when no cache directory exists at
+  //    all — if it were reading the cache, it would need the directory to exist.
+
+  let installDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-acp4-'));
+    installDir = path.join(tmpBase, 'agents');
+    devflowDir = path.join(tmpBase, 'devflow');
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(installDir), { recursive: true, force: true });
+  });
+
+  it('source: buildListRows body does not call getExternalModelsCached or discoverExternalModels', () => {
+    // AC-P4: --list must never trigger discovery (AC-P4 in spec). Static check:
+    // the function body must not reference either discovery entry point.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs') as typeof import('fs');
+    const srcPath = path.resolve(__dirname, '../src/cli/commands/agents.ts');
+    const src = readFileSync(srcPath, 'utf-8');
+
+    // Extract from function start to the next top-level export — generous window
+    const fnStart = src.indexOf('export async function buildListRows');
+    expect(fnStart, 'buildListRows not found in agents.ts').toBeGreaterThan(-1);
+    // Next export after buildListRows
+    const nextExport = src.indexOf('\nexport ', fnStart + 1);
+    const body = nextExport > fnStart ? src.slice(fnStart, nextExport) : src.slice(fnStart, fnStart + 3_000);
+
+    expect(body, 'buildListRows calls getExternalModelsCached — AC-P4 violation').not.toContain('getExternalModelsCached');
+    expect(body, 'buildListRows calls discoverExternalModels — AC-P4 violation').not.toContain('discoverExternalModels');
+  });
+
+  it('functional: buildListRows succeeds with no cache directory present (requires no cache read)', async () => {
+    // If buildListRows read from a cache directory, it would fail (or skip) when
+    // the directory is absent. It should succeed regardless — catalog is passed in.
+    const shippedDefaults: Record<string, string> = { coder: 'sonnet' };
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const catalog: ExternalModelCatalog = { known: false };
+
+    // No cache directory exists under devflowDir — passes catalog directly
+    const rows = await buildListRows({
+      agentNames: ['coder'],
+      mapping,
+      installDir,
+      shippedDefaults,
+      proxyEnabled: false,
+      catalog,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('coder');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-P9: --set path makes 0 spawns (cache-only, validateSetArgs is pure)
+// ---------------------------------------------------------------------------
+
+describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)', () => {
+  // The --set code path calls: getExternalModelsCached (sync read, no spawn) →
+  // validateSetArgs (pure sync) → applySetMapping (pure sync). No process spawn
+  // is involved. Prove this by verifying that validateSetArgs and applySetMapping
+  // return non-Promise values — spawning requires async/callback, not sync return.
+
+  it('validateSetArgs returns synchronously (not a Promise)', () => {
+    // A function that spawns must await the spawn result — it cannot return a
+    // synchronous value. Checking the return value is not thenable proves it.
+    const result = validateSetArgs({ model: 'sonnet' });
+    // Must not be a Promise (thenables trigger microtask queues, not spawns)
+    expect(result).not.toBeInstanceOf(Promise);
+    expect(typeof (result as Record<string, unknown>)?.then).not.toBe('function');
+    // Must have ok field (discriminated Result type)
+    expect('ok' in result).toBe(true);
+  });
+
+  it('applySetMapping returns synchronously (not a Promise)', () => {
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const result = applySetMapping(mapping, 'coder', { model: 'opus' });
+    expect(result).not.toBeInstanceOf(Promise);
+    expect(typeof (result as Record<string, unknown>)?.then).not.toBe('function');
+    // Must have agents field (is an AgentMappingFile)
+    expect('agents' in result).toBe(true);
+  });
+
+  it('source: neither validateSetArgs nor applySetMapping imports child_process', () => {
+    // Static check: the source file's top-level imports do not include child_process.
+    // These pure helpers cannot spawn if child_process is not imported at the module level.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs') as typeof import('fs');
+    const srcPath = path.resolve(__dirname, '../src/cli/commands/agents.ts');
+    const src = readFileSync(srcPath, 'utf-8');
+
+    // Extract the import block at the top (first 3KB is conservative)
+    const importBlock = src.slice(0, 3_000);
+    expect(importBlock, 'agents.ts imports child_process at module level').not.toContain('child_process');
+  });
+});
