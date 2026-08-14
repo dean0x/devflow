@@ -4,7 +4,6 @@
  * Coverage:
  *   - Basic read/write round-trip with validator
  *   - TTL expiry (returns null when expired)
- *   - Stale read returns value regardless of TTL
  *   - Path containment: key with ".." escapes are rejected (AC-S4)
  *   - Corrupt JSON rejected by validator path
  *   - Future timestamp rejected even in stale mode
@@ -14,13 +13,14 @@
  *   - Entries created at 0600 (AC-S5)
  *   - Validator called on every read (AC-S6)
  *   - Validator returning null treated as miss
+ *   - parseRawEnvelope: shared envelope parser for raw-file readers
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readCache, readCacheStale, writeCache, MAX_TTL_MS } from '../src/core/cache.js';
+import { readCache, writeCache, MAX_TTL_MS, parseRawEnvelope } from '../src/core/cache.js';
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -102,17 +102,6 @@ describe('readCache — TTL expiry', () => {
 // Stale reads
 // ---------------------------------------------------------------------------
 
-describe('readCacheStale — ignores TTL', () => {
-  it('returns expired entry that readCache would reject', async () => {
-    await writeCache(cacheDir, 'stale-key', { value: 'stale' }, 1);
-    await new Promise(r => setTimeout(r, 5));
-    // readCache rejects
-    expect(readCache<TestData>(cacheDir, 'stale-key', validateTestData)).toBeNull();
-    // readCacheStale accepts
-    const result = readCacheStale<TestData>(cacheDir, 'stale-key', validateTestData);
-    expect(result).toEqual({ value: 'stale' });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Path containment — AC-S4
@@ -189,16 +178,6 @@ describe('readCache — envelope validation', () => {
     expect(readCache<TestData>(cacheDir, 'future', validateTestData)).toBeNull();
   });
 
-  it('rejects a future-timestamped entry in readCacheStale', async () => {
-    const filePath = path.join(cacheDir, 'future-stale.json');
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(
-      filePath,
-      JSON.stringify({ data: { value: 'x' }, timestamp: Date.now() + 3_600_000, ttl: 86_400_000 })
-    );
-    // Even stale reads must reject future timestamps
-    expect(readCacheStale<TestData>(cacheDir, 'future-stale', validateTestData)).toBeNull();
-  });
 
   it('treats a validator-rejected entry as a miss (AC-S6)', async () => {
     // Write raw JSON that looks like a valid envelope but fails our validator
@@ -247,5 +226,87 @@ describe.skipIf(IS_WIN32)('writeCache — permissions (AC-S5)', () => {
     const filePath = path.join(cacheDir, 'perm-key.json');
     const stat = await fs.stat(filePath);
     expect(stat.mode & 0o777).toBe(0o600);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseRawEnvelope — shared envelope parser
+// ---------------------------------------------------------------------------
+
+describe('parseRawEnvelope', () => {
+  it('returns null for malformed JSON', () => {
+    expect(parseRawEnvelope('not-json')).toBeNull();
+    expect(parseRawEnvelope('{broken')).toBeNull();
+    expect(parseRawEnvelope('')).toBeNull();
+  });
+
+  it('returns null for non-object JSON (array, null, string)', () => {
+    expect(parseRawEnvelope('[]')).toBeNull();
+    expect(parseRawEnvelope('null')).toBeNull();
+    expect(parseRawEnvelope('"string"')).toBeNull();
+  });
+
+  it('returns null when timestamp is missing or non-finite', () => {
+    expect(parseRawEnvelope(JSON.stringify({ ttl: 60_000 }))).toBeNull();
+    expect(parseRawEnvelope(JSON.stringify({ timestamp: 'not-a-number', ttl: 60_000 }))).toBeNull();
+    expect(parseRawEnvelope(JSON.stringify({ timestamp: Infinity, ttl: 60_000 }))).toBeNull();
+    expect(parseRawEnvelope(JSON.stringify({ timestamp: NaN, ttl: 60_000 }))).toBeNull();
+  });
+
+  it('returns null for a future timestamp (poisoned entry)', () => {
+    const future = Date.now() + 3_600_000;
+    expect(parseRawEnvelope(JSON.stringify({ timestamp: future, ttl: 60_000, data: 'x' }))).toBeNull();
+  });
+
+  it('returns envelope fields for a valid entry', () => {
+    const ts = Date.now() - 100;
+    const raw = JSON.stringify({ timestamp: ts, ttl: 86_400_000, data: 'payload' });
+    const result = parseRawEnvelope(raw);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.timestamp).toBe(ts);
+      expect(result.ttl).toBe(86_400_000);
+      expect(result.data).toBe('payload');
+    }
+  });
+
+  it('ttl defaults to 0 when absent', () => {
+    const ts = Date.now() - 100;
+    const raw = JSON.stringify({ timestamp: ts, data: 'payload' }); // no ttl field
+    const result = parseRawEnvelope(raw);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.ttl).toBe(0);
+    }
+  });
+
+  it('ttl defaults to 0 when non-finite', () => {
+    const ts = Date.now() - 100;
+    const raw = JSON.stringify({ timestamp: ts, ttl: NaN, data: 'payload' });
+    const result = parseRawEnvelope(raw);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.ttl).toBe(0);
+    }
+  });
+
+  it('data can be any JSON value (object, string, null, number)', () => {
+    const ts = Date.now() - 100;
+    for (const data of [{ models: [] }, 'raw-string', null, 42]) {
+      const result = parseRawEnvelope(JSON.stringify({ timestamp: ts, ttl: 0, data }));
+      expect(result).not.toBeNull();
+      if (result !== null) {
+        expect(result.data).toEqual(data);
+      }
+    }
+  });
+
+  it('data field absent → data is undefined (not null)', () => {
+    const ts = Date.now() - 100;
+    const result = parseRawEnvelope(JSON.stringify({ timestamp: ts, ttl: 60_000 }));
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.data).toBeUndefined();
+    }
   });
 });

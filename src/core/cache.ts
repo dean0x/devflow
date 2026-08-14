@@ -156,16 +156,36 @@ export function readCache<T>(
 }
 
 /**
- * Read a cached value regardless of TTL (stale data).
- * Returns null only on a missing entry, invalid envelope, or future timestamp.
- * Used as a fallback when a fresh fetch fails and any cached value is useful.
+ * Parse and validate a raw JSON string as a cache envelope.
+ *
+ * Returns null when:
+ *   - JSON is malformed
+ *   - timestamp is not a finite number
+ *   - timestamp is in the future (poisoned entry; rejected even in stale mode)
+ *
+ * ttl defaults to 0 when absent or not a finite number — callers that do not
+ * need TTL-gated freshness (stale readers, prune sorters) can ignore it.
+ *
+ * Exported so model-discovery.ts can share one envelope parser instead of
+ * four separate inline re-implementations that may drift from each other.
  */
-export function readCacheStale<T>(
-  cacheDir: string,
-  key: string,
-  validate: (data: unknown) => T | null,
-): T | null {
-  return readCacheEntry(cacheDir, key, true, validate);
+export function parseRawEnvelope(
+  raw: string,
+): { data: unknown; timestamp: number; ttl: number } | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+
+  const obj = parsed as Record<string, unknown>;
+  const ts = obj['timestamp'];
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return null;
+  // Reject future timestamps in all modes (poisoned entry — matches writer policy).
+  if (ts > Date.now()) return null;
+
+  const rawTtl = obj['ttl'];
+  const ttl = (typeof rawTtl === 'number' && Number.isFinite(rawTtl)) ? rawTtl : 0;
+
+  return { data: obj['data'], timestamp: ts, ttl };
 }
 
 /**

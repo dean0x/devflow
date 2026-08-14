@@ -26,7 +26,7 @@ import * as os from 'node:os';
 import { spawn as cpSpawn } from 'node:child_process';
 import { MODEL_NAME_RE } from './agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from './external-models.js';
-import { readCache, writeCache } from './cache.js';
+import { readCache, writeCache, parseRawEnvelope } from './cache.js';
 import { resolveProxyBin } from './proxy-state.js';
 import { openProxyLog } from './proxy-log.js';
 
@@ -385,14 +385,11 @@ async function findStaleFallback(
 
     try {
       const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-      const envelope = JSON.parse(raw) as Record<string, unknown>;
-      const ts = envelope['timestamp'];
-      // Reject future timestamps (poisoned entry — matches cache.ts policy)
-      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts > Date.now()) continue;
-      if (typeof envelope['data'] !== 'string') continue;
-      if (ts > bestTimestamp) {
-        bestTimestamp = ts;
-        bestRaw = envelope['data'] as string;
+      const envelope = parseRawEnvelope(raw);
+      if (envelope === null || typeof envelope.data !== 'string') continue;
+      if (envelope.timestamp > bestTimestamp) {
+        bestTimestamp = envelope.timestamp;
+        bestRaw = envelope.data;
       }
     } catch {
       // Skip corrupt entries — they do not prevent other entries from being used
@@ -416,10 +413,9 @@ async function pruneOldEntries(cacheDir: string): Promise<void> {
       if (!entry.startsWith(CACHE_KEY_PREFIX) || !entry.endsWith('.json')) continue;
       try {
         const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-        const envelope = JSON.parse(raw) as Record<string, unknown>;
-        const ts = envelope['timestamp'];
-        if (typeof ts === 'number' && Number.isFinite(ts)) {
-          candidates.push({ filename: entry, timestamp: ts });
+        const envelope = parseRawEnvelope(raw);
+        if (envelope !== null) {
+          candidates.push({ filename: entry, timestamp: envelope.timestamp });
         }
       } catch {
         // Skip unreadable entries
@@ -728,15 +724,10 @@ export function getExternalModelsCached(cacheDir: string): ExternalModelCatalog 
     if (!entry.startsWith(CACHE_KEY_PREFIX) || !entry.endsWith('.json')) continue;
     try {
       const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-      const envelope = JSON.parse(raw) as Record<string, unknown>;
-      const ts = envelope['timestamp'];
-      const ttl = envelope['ttl'];
-      // Reject future timestamps (poisoned entry)
-      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts > Date.now()) continue;
-      if (typeof ttl !== 'number' || !Number.isFinite(ttl)) continue;
-      if (typeof envelope['data'] !== 'string') continue;
-      if (best === null || ts > best.timestamp) {
-        best = { raw: envelope['data'] as string, timestamp: ts, ttl };
+      const envelope = parseRawEnvelope(raw);
+      if (envelope === null || typeof envelope.data !== 'string') continue;
+      if (best === null || envelope.timestamp > best.timestamp) {
+        best = { raw: envelope.data, timestamp: envelope.timestamp, ttl: envelope.ttl };
       }
     } catch {
       // Skip corrupt entries
