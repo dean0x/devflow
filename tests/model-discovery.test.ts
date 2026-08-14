@@ -795,21 +795,85 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
 
 describe('T3: PF-013 — cwd is os.tmpdir(), not devflow dir', () => {
   it(
-    'spawn cwd is os.tmpdir() even when devflow dir contains a legacy config file',
+    'spawn cwd is os.tmpdir() even when process cwd contains a legacy config file',
     async () => {
+      // Same skip discipline as T1/T2: skip ONLY on MODULE_NOT_FOUND.
       const binResult = await resolveProxyBin();
       if (!binResult.ok) {
         if (binResult.error.includes('MODULE_NOT_FOUND') || binResult.error.includes('routing runtime')) {
-          return; // skip
+          return; // skip — runtime not installed
         }
         throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
       }
 
-      // The cwd assertion is covered by the T6 injectable test above.
-      // This test verifies the real spawn path does not blow up when invoked.
-      const result = await discoverExternalModels(cacheDir, logPath);
-      // Must not throw regardless of result
-      expect(typeof result.known).toBe('boolean');
+      if (process.platform === 'win32') return; // shell scripts not available on win32
+
+      // Create a temp dir with a pre-0.2.0 legacy config (the format 0.2.0 hard-fails on
+      // when it finds it in the spawn cwd). If production incorrectly used process.cwd()
+      // for the spawn, this stub would see the file and exit non-zero → result.known:false.
+      // Because production uses os.tmpdir(), the stub sees no config and returns valid JSON.
+      const legacyConfigDir = await fsAsync.mkdtemp(
+        path.join(os.tmpdir(), 'devflow-t3-legacy-'),
+      );
+      const originalCwd = process.cwd();
+
+      try {
+        await fsAsync.writeFile(
+          path.join(legacyConfigDir, 'subswitch.config.json'),
+          JSON.stringify({ codex: { apiKey: 'legacy-key' } }),
+          'utf-8',
+        );
+
+        // Stub: exits 1 if subswitch.config.json exists in cwd (simulates 0.2.0 hard-fail
+        // on legacy config), exits 0 and emits valid JSON otherwise (spawn cwd was clean).
+        const stubContent = [
+          '#!/bin/sh',
+          '[ -f "subswitch.config.json" ] && exit 1',
+          `echo '${VALID_PAYLOAD}'`,
+          'exit 0',
+        ].join('\n') + '\n';
+        const stub = await writeStubScript(tmpDir, 'stub-t3-cwd-check.sh', stubContent);
+
+        // Change process cwd to the legacy config dir — if the spawn uses process.cwd()
+        // instead of os.tmpdir(), the stub would detect the config and exit 1 → known:false.
+        process.chdir(legacyConfigDir);
+
+        const deps: ModelDiscoveryDeps = {
+          resolveProxyBin: async () => ({
+            ok: true,
+            value: { binPath: stub, npxWarning: false, version: '0.2.0' },
+          }),
+          spawnAndCollect: async (opts) => {
+            // Run the shell stub with the cwd that production passes (os.tmpdir()).
+            // If opts.cwd were the process cwd (legacyConfigDir), the stub would see
+            // subswitch.config.json and exit 1.
+            const { spawnSync } = await import('child_process');
+            const out = spawnSync('sh', [opts.binPath], {
+              encoding: 'utf-8',
+              timeout: SPAWN_TIMEOUT_MS + 1_000,
+              env: opts.env as Record<string, string>,
+              cwd: opts.cwd,
+            });
+            return {
+              exitCode: out.status ?? 1,
+              stdout: out.stdout ?? '',
+              timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
+            };
+          },
+        };
+
+        const result = await discoverExternalModels(cacheDir, logPath, deps);
+
+        // The stub ran with cwd = os.tmpdir() (no legacy config) → exited 0 → known:true.
+        // If production had used process.cwd() (= legacyConfigDir), stub would exit 1 → known:false.
+        expect(result.known).toBe(true);
+        if (result.known) {
+          expect(result.source).toBe('live');
+        }
+      } finally {
+        process.chdir(originalCwd);
+        await fsAsync.rm(legacyConfigDir, { recursive: true, force: true });
+      }
     },
     10_000,
   );
@@ -915,162 +979,222 @@ async function writeStubScript(tmpDir: string, name: string, content: string): P
 }
 
 describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applies PF-016)', () => {
-  it(
-    'falls back to stale-cache when a real stub binary exits non-zero',
-    async () => {
-      if (process.platform === 'win32') return; // shell scripts not available on win32
+  // Pre-seed a stale cache entry so the stale-cache outcome is deterministic.
+  // Uses a different version key from the stubs (0.2.0) so it is skipped by the
+  // fresh-cache check but found by findStaleFallback. findStaleFallback ignores TTL
+  // (ignoreExpiry semantics) so any non-future-timestamped entry is eligible.
+  beforeEach(async () => {
+    await writeCache(cacheDir, `${CACHE_KEY_PREFIX}stale`, VALID_PAYLOAD, CACHE_TTL_MS);
+  });
 
-      // Write a stale cache entry (version 0.1.0, expired TTL)
-      await writeCache(cacheDir, `${CACHE_KEY_PREFIX}0.1.0`, VALID_PAYLOAD, 1);
-      await new Promise((r) => setTimeout(r, 10)); // ensure expired
+  // Helper: run a real shell stub via injectable spawnAndCollect.
+  // Applies PF-016: real spawned process, not a vitest mock.
+  async function runShellStub(
+    stubPath: string,
+    deps: ModelDiscoveryDeps,
+  ): ReturnType<typeof discoverExternalModels> {
+    return discoverExternalModels(cacheDir, logPath, deps);
+  }
 
-      // Real stub that always exits 1 (applies PF-016: real binary, not mock)
-      const stub = await writeStubScript(tmpDir, 'stub-fail.js', `#!/bin/sh\nexit 1\n`);
+  function shellDeps(stubPath: string): ModelDiscoveryDeps {
+    return {
+      resolveProxyBin: async () => ({
+        ok: true,
+        value: { binPath: stubPath, npxWarning: false, version: '0.2.0' },
+      }),
+      spawnAndCollect: async (opts) => {
+        const { spawnSync } = await import('child_process');
+        const out = spawnSync('sh', [opts.binPath], {
+          encoding: 'utf-8',
+          timeout: SPAWN_TIMEOUT_MS + 1_000,
+          env: opts.env as Record<string, string>,
+          cwd: opts.cwd,
+        });
+        return {
+          exitCode: out.status ?? 1,
+          stdout: out.stdout ?? '',
+          timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
+        };
+      },
+    };
+  }
 
-      const deps: ModelDiscoveryDeps = {
-        resolveProxyBin: async () => ({
-          ok: true,
-          value: {
-            binPath: stub,
-            npxWarning: false,
-            version: '0.2.0', // different from stale 0.1.0, so no fresh cache hit
-          },
-        }),
-        // Use the real spawnAndCollect by omitting the field — but inject the bin path
-        // so we can use a real stub binary
-      };
+  it('exit-1 → stale-cache (unconditional)', async () => {
+    if (process.platform === 'win32') return;
 
-      // Run with real spawn using the stub as binPath.
-      // We wire this through injectable spawnAndCollect to avoid needing real node bin.
-      const deps2: ModelDiscoveryDeps = {
-        resolveProxyBin: async () => ({
-          ok: true,
-          value: { binPath: stub, npxWarning: false, version: '0.2.0' },
-        }),
-        spawnAndCollect: async (opts) => {
-          // Forward to real child_process.spawn using the stub as the JS "bin" file
-          // Since the stub is a shell script, run it as `sh stub-fail.js`
-          const { spawnSync } = await import('child_process');
-          const out = spawnSync('sh', [opts.binPath], {
-            encoding: 'utf-8',
-            timeout: SPAWN_TIMEOUT_MS + 1000,
-            env: opts.env as Record<string, string>,
-            cwd: opts.cwd,
-          });
-          return {
-            exitCode: out.status ?? 1,
-            stdout: out.stdout ?? '',
-            timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
-          };
-        },
-      };
+    const stub = await writeStubScript(tmpDir, 'stub-t4-exit1.sh', '#!/bin/sh\nexit 1\n');
+    const result = await runShellStub(stub, shellDeps(stub));
 
-      const result = await discoverExternalModels(cacheDir, logPath, deps2);
+    // Stale pre-seeded and valid → must return known:true, source:'stale-cache'
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+  });
 
-      // The stub exits 1 → live fetch fails → should try stale cache
-      // The stale 0.1.0 entry has a different version key, so it's a stale-cache candidate
-      if (result.known) {
-        expect(result.source).toBe('stale-cache');
-      } else {
-        // known:false is acceptable if stale data cannot be parsed (near-zero TTL edge)
-      }
-    },
-    15_000,
-  );
+  it('garbage stdout (binary noise) with exit-0 → stale-cache (unconditional)', async () => {
+    if (process.platform === 'win32') return;
+
+    // Emit null bytes + non-UTF-8 noise — parseModelsJson rejects it
+    const stub = await writeStubScript(
+      tmpDir,
+      'stub-t4-garbage.sh',
+      '#!/bin/sh\nprintf "\\x00\\xff\\xfe garbage\\n"\nexit 0\n',
+    );
+    const result = await runShellStub(stub, shellDeps(stub));
+
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+  });
+
+  it('schemaVersion:2 (unsupported) → stale-cache (unconditional)', async () => {
+    if (process.platform === 'win32') return;
+
+    const badPayload = JSON.stringify({
+      schemaVersion: 2,  // parseModelsJson hard-gates on schemaVersion !== 1
+      kind: 'models',
+      providers: [],
+      models: [],
+    });
+    const stub = await writeStubScript(
+      tmpDir,
+      'stub-t4-schema2.sh',
+      `#!/bin/sh\necho '${badPayload}'\nexit 0\n`,
+    );
+    const result = await runShellStub(stub, shellDeps(stub));
+
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+  });
+
+  it('{} payload (missing required fields) → stale-cache (unconditional)', async () => {
+    if (process.platform === 'win32') return;
+
+    const stub = await writeStubScript(
+      tmpDir,
+      'stub-t4-empty.sh',
+      `#!/bin/sh\necho '{}'\nexit 0\n`,
+    );
+    const result = await runShellStub(stub, shellDeps(stub));
+
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+  });
+
+  it('SIGTERM-ignoring child killed by SIGKILL → stale-cache (production spawn path)', async () => {
+    // This case uses the PRODUCTION buildRealSpawnAndCollect (no spawnAndCollect injection)
+    // so the actual SIGTERM→SIGKILL escalation logic in model-discovery.ts is exercised.
+    // Stub is a .js file so production can run it as: process.execPath [stub, 'models', '--json'].
+    const stubContent = [
+      '// SIGTERM-ignoring stub (T4)',
+      'process.on("SIGTERM", () => {});  // ignore SIGTERM — must be killed by SIGKILL',
+      'setInterval(() => {}, 100000);    // hold event loop open',
+    ].join('\n') + '\n';
+    const stub = await writeStubScript(tmpDir, 'stub-t4-sigterm.js', stubContent);
+
+    const deps: ModelDiscoveryDeps = {
+      resolveProxyBin: async () => ({
+        ok: true,
+        value: { binPath: stub, npxWarning: false, version: '0.2.0' },
+      }),
+      // No spawnAndCollect — production buildRealSpawnAndCollect runs
+    };
+
+    const before = Date.now();
+    const result = await discoverExternalModels(cacheDir, logPath, deps);
+    const elapsed = Date.now() - before;
+
+    // Stale pre-seeded and valid → must return known:true, source:'stale-cache'
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+    // Must return within: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom
+    const upperBound = SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2_000;
+    expect(elapsed).toBeLessThan(upperBound);
+  }, SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000);
+
+  it('300KB payload exceeds STDOUT_CAP → overflow kill → stale-cache (production path)', async () => {
+    // Tests the STDOUT_CAP (262144) overflow path in buildRealSpawnAndCollect.
+    // The production data handler kills the child when stdout > STDOUT_CAP.
+    // Result: exitCode:1, stdout:'', timedOut:false → stale-cache fallback.
+    // Applies PF-016: real .js process writing real bytes, not a mock that pretends.
+    const stubContent = [
+      '// 300KB overflow stub (T4)',
+      '// Write > STDOUT_CAP (262144) bytes. Hold alive for SIGTERM after overflow kill.',
+      'process.stdout.write("A".repeat(263000));',
+      'process.on("SIGTERM", () => process.exit(1));',
+      'setInterval(() => {}, 1000);',
+    ].join('\n') + '\n';
+    const stub = await writeStubScript(tmpDir, 'stub-t4-overflow.js', stubContent);
+
+    const deps: ModelDiscoveryDeps = {
+      resolveProxyBin: async () => ({
+        ok: true,
+        value: { binPath: stub, npxWarning: false, version: '0.2.0' },
+      }),
+      // No spawnAndCollect — production path exercises STDOUT_CAP handling
+    };
+
+    const result = await discoverExternalModels(cacheDir, logPath, deps);
+
+    expect(result.known).toBe(true);
+    if (result.known) {
+      expect(result.source).toBe('stale-cache');
+    }
+  }, SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000);
 });
 
 describe('AC-P8: SIGTERM + SIGKILL escalation on timeout (applies PF-016)', () => {
   it(
     'discoverExternalModels returns known:false (not hang) when process ignores SIGTERM',
     async () => {
-      if (process.platform === 'win32') return; // shell scripts not available on win32
+      if (process.platform === 'win32') return;
 
-      // Write a stub that traps SIGTERM and just sleeps for 10s.
-      // After SPAWN_TIMEOUT_MS the production code sends SIGTERM, waits SIGKILL_GRACE_MS,
-      // then sends SIGKILL. The total function return time must be < 2×SPAWN_TIMEOUT_MS.
+      // .js stub: production spawns it as `process.execPath [stub] models --json`.
+      // It writes its own PID, ignores SIGTERM, and hangs. Production must SIGKILL it.
+      // No spawnAndCollect injection — the real buildRealSpawnAndCollect path runs.
+      const pidFile = path.join(tmpDir, 'stub-p8.pid');
       const stubContent = [
-        '#!/bin/sh',
-        'trap "" TERM',   // ignore SIGTERM
-        'sleep 10',       // sleep long enough to be killed by SIGKILL
+        '// AC-P8 stub: ignore SIGTERM, write PID, hang',
+        `const fs = require('fs');`,
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+        `process.on('SIGTERM', () => {});  // ignore SIGTERM — must be SIGKILL'd`,
+        `setInterval(() => {}, 100000);    // hold event loop open indefinitely`,
       ].join('\n') + '\n';
-      const stub = await writeStubScript(tmpDir, 'stub-sigterm.sh', stubContent);
-
-      // Write the stub PID to a file so we can verify it's dead after the call
-      const pidFile = path.join(tmpDir, 'stub.pid');
-      const stubWithPid = [
-        '#!/bin/sh',
-        `echo $$ > "${pidFile}"`,
-        'trap "" TERM',
-        'sleep 10',
-      ].join('\n') + '\n';
-      await fsAsync.writeFile(stub, stubWithPid, { mode: 0o755 });
+      const stub = await writeStubScript(tmpDir, 'stub-p8-sigterm.js', stubContent);
 
       const deps: ModelDiscoveryDeps = {
         resolveProxyBin: async () => ({
           ok: true,
           value: { binPath: stub, npxWarning: false, version: 'test-only' },
         }),
-        spawnAndCollect: async (opts) => {
-          // Use a real spawn to exercise the SIGKILL escalation path
-          const { spawn: cpSpawn2 } = await import('child_process');
-          return new Promise<{ exitCode: number; stdout: string; timedOut: boolean }>((resolve) => {
-            const proc = cpSpawn2('sh', [opts.binPath], {
-              env: opts.env as Record<string, string>,
-              cwd: opts.cwd,
-              stdio: ['ignore', 'pipe', 'pipe'],
-            });
-
-            let stdout = '';
-            proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-
-            let resolved = false;
-            const timer = setTimeout(() => {
-              if (!resolved) {
-                resolved = true;
-                try { proc.kill(); } catch { /* dead */ }
-                const sigkill = setTimeout(() => {
-                  try { proc.kill('SIGKILL'); } catch { /* dead */ }
-                }, SIGKILL_GRACE_MS);
-                sigkill.unref();
-                resolve({ exitCode: 1, stdout: '', timedOut: true });
-              }
-            }, SPAWN_TIMEOUT_MS);
-
-            proc.on('close', (code) => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
-                resolve({ exitCode: code ?? 1, stdout, timedOut: false });
-              }
-            });
-            proc.on('error', () => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
-                resolve({ exitCode: -1, stdout: '', timedOut: false });
-              }
-            });
-          });
-        },
+        // No spawnAndCollect — production buildRealSpawnAndCollect runs SIGTERM→SIGKILL
       };
 
       const before = Date.now();
       const result = await discoverExternalModels(cacheDir, logPath, deps);
       const elapsed = Date.now() - before;
 
-      // Must return known:false (no catalog from a timed-out spawn)
+      // Must return known:false (timed-out spawn, no stale cache pre-seeded in this describe)
       expect(result.known).toBe(false);
 
-      // Must return within a bounded time: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom
+      // Must return within: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom
       const upperBound = SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2_000;
       expect(elapsed).toBeLessThan(upperBound);
 
-      // Wait briefly for SIGKILL to land, then verify the process is dead
+      // Wait for SIGKILL to land (unreffed timer in production fires SIGKILL_GRACE_MS
+      // after discoverExternalModels returns; add 500ms margin).
       await new Promise((r) => setTimeout(r, SIGKILL_GRACE_MS + 500));
       if (fs.existsSync(pidFile)) {
         const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
         if (Number.isFinite(pid) && pid > 0) {
-          // Check if the process is still running: kill -0 succeeds if alive
           let stillAlive = false;
           try {
             process.kill(pid, 0); // throws ESRCH if dead
