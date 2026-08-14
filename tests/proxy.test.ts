@@ -24,6 +24,7 @@ import {
   isOurRelayBody,
   resolvePort,
   formatExternalModelsLine,
+  formatCodexAuthLine,
   type ProxyPreflightDeps,
   type PostSpawnDoctorDeps,
 } from '../src/cli/commands/proxy.js';
@@ -1066,6 +1067,95 @@ describe('formatExternalModelsLine (AC-F6)', () => {
     expect(stripped).toContain('External models:');
     expect(stripped).not.toContain('unavailable');
     expect(stripped).not.toContain(LOG_PATH);
+  });
+
+  // ─── formatCodexAuthLine ───────────────────────────────────────────────────
+  //
+  // Pure formatter for the Codex auth status line. Expiry must read as
+  // information; only `unreadable` may read as a problem the user must fix.
+
+  describe('formatCodexAuthLine', () => {
+    const AUTH_PATH = '/home/user/.codex/auth.json';
+    const NOW = new Date('2026-08-14T00:00:00Z');
+    const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+    it('absent → actionable codex login hint', () => {
+      const out = strip(formatCodexAuthLine({ kind: 'absent' }, AUTH_PATH, NOW));
+      expect(out).toContain('absent');
+      expect(out).toContain('codex login');
+    });
+
+    it('unreadable → surfaces the reason, the path, and the remedy', () => {
+      const out = strip(
+        formatCodexAuthLine({ kind: 'unreadable', reason: 'not valid JSON' }, AUTH_PATH, NOW),
+      );
+      expect(out).toContain('unreadable');
+      expect(out).toContain('not valid JSON');
+      expect(out).toContain(AUTH_PATH);
+      expect(out).toContain('codex login');
+    });
+
+    it('present + future expiry → validity stated, no remedy suggested', () => {
+      const out = strip(
+        formatCodexAuthLine(
+          {
+            kind: 'present',
+            authMode: 'chatgpt',
+            accountSuffix: '…d8e65c',
+            expiresAt: new Date('2026-08-17T18:24:42Z'),
+          },
+          AUTH_PATH,
+          NOW,
+        ),
+      );
+      expect(out).toContain('present');
+      expect(out).toContain('chatgpt, …d8e65c');
+      expect(out).toContain('valid through 2026-08-17');
+      expect(out).not.toContain('codex login');
+    });
+
+    it('present + past expiry → informational, never told to re-login', () => {
+      const out = strip(
+        formatCodexAuthLine(
+          {
+            kind: 'present',
+            authMode: 'chatgpt',
+            accountSuffix: '…d8e65c',
+            expiresAt: new Date('2026-08-01T00:00:00Z'),
+          },
+          AUTH_PATH,
+          NOW,
+        ),
+      );
+      expect(out).toContain('expired 2026-08-01');
+      expect(out).toContain('refreshes on next request');
+      expect(out).not.toContain('codex login');
+    });
+
+    it('present without decodable expiry → no expiry claim either way', () => {
+      const out = strip(
+        formatCodexAuthLine(
+          { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: undefined },
+          AUTH_PATH,
+          NOW,
+        ),
+      );
+      expect(out).toContain('present');
+      expect(out).not.toContain('valid through');
+      expect(out).not.toContain('expired');
+    });
+
+    it('expiry exactly at now counts as expired (boundary)', () => {
+      const out = strip(
+        formatCodexAuthLine(
+          { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: NOW },
+          AUTH_PATH,
+          NOW,
+        ),
+      );
+      expect(out).toContain('expired');
+      expect(out).not.toContain('valid through');
+    });
   });
 
   it('does not mention "subswitch" (branding rule)', () => {

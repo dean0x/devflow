@@ -35,6 +35,7 @@ import {
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
+import { inspectCodexAuth, type CodexAuthState } from '../../core/codex-auth-inspect.js';
 import {
   reapplyAgentMapping,
   revertExternalAgents,
@@ -986,6 +987,42 @@ export function formatExternalModelsLine(catalog: ExternalModelCatalog, logPath:
   return `External models: ${color.dim('unavailable')} — see ${logPath}`;
 }
 
+/**
+ * Pure formatter for the Codex auth status line shown by `devflow proxy --status`.
+ *
+ * Expiry is deliberately phrased as information rather than a problem: the relay
+ * refreshes the access token on its own, so an expired stamp on a healthy install
+ * is normal. Only `unreadable` is a state the user must act on — it is the one the
+ * relay would reject at request time while a bare existence check reported success.
+ *
+ * @param now  Injected for deterministic tests; pass `new Date()` in production.
+ */
+export function formatCodexAuthLine(
+  state: CodexAuthState,
+  authPath: string,
+  now: Date,
+): string {
+  switch (state.kind) {
+    case 'absent':
+      return `Codex auth: ${color.dim('absent')} — run codex login`;
+    case 'unreadable':
+      return `Codex auth: ${color.red(`unreadable (${state.reason})`)} at ${authPath} — run codex login`;
+    case 'present': {
+      const identity = `${state.authMode}, ${state.accountSuffix}`;
+      const present = `Codex auth: ${color.green('present')} (${identity})`;
+      if (state.expiresAt === undefined) return present;
+      const stamp = state.expiresAt.toISOString().slice(0, 10);
+      return state.expiresAt.getTime() <= now.getTime()
+        ? `${present} — access token expired ${stamp}, refreshes on next request`
+        : `${present} — access token valid through ${stamp}`;
+    }
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
+}
+
 export function resolvePort(
   portOption: string | undefined,
   priorPort: number,
@@ -1103,12 +1140,25 @@ async function runStatus(): Promise<void> {
   };
   p.log.info(`ANTHROPIC_BASE_URL: ${envStateLabels[envState]}`);
 
-  // Codex auth
+  // Codex auth — inspect contents, not just existence. A file the relay would
+  // reject (bad JSON, no account id) 401s every request while an existence check
+  // still reports "present"; that gap is what this check closes.
+  let codexAuth: CodexAuthState;
   try {
-    await fs.access(codexAuthPath);
-    p.log.info(`Codex auth: ${color.green('present')} (${codexAuthPath})`);
-  } catch {
-    p.log.info(`Codex auth: ${color.dim('absent')} — run codex login`);
+    codexAuth = inspectCodexAuth(await fs.readFile(codexAuthPath, 'utf-8'));
+  } catch (err) {
+    // Missing file is the ordinary "not signed in" case; anything else (EACCES,
+    // EISDIR) is a real fault the user must resolve, so it must not read as absent.
+    codexAuth =
+      (err as NodeJS.ErrnoException)?.code === 'ENOENT'
+        ? { kind: 'absent' }
+        : { kind: 'unreadable', reason: 'cannot read file' };
+  }
+  const codexAuthLine = formatCodexAuthLine(codexAuth, codexAuthPath, new Date());
+  if (codexAuth.kind === 'unreadable') {
+    p.log.warn(codexAuthLine);
+  } else {
+    p.log.info(codexAuthLine);
   }
 
   // Agent mapping count
