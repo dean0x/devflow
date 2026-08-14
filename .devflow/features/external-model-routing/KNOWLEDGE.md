@@ -5,7 +5,7 @@ description: "Use when working on the proxy lifecycle (enable/disable/status/pre
 category: architecture
 directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-08-14
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -26,14 +26,14 @@ The routing runtime is an internal package (`subswitch@0.2.0`, exact-pinned in `
 
 | File | Role |
 |------|------|
-| `~/.devflow/proxy.json` | Runtime authority. Tolerant-parsed by `readProxyState()`. ENOENT → default disabled state (not an error). Fields: `enabled`, `port`, `binPath`, `configPath`, `models[]`, `resolvedAt`, `devflowVersion`. |
-| `~/.devflow/proxy-routing.json` | Routing config written by `buildRoutingConfigJson(port, models)`. Shape: `{port, codex:{models:[]}}`. Written before preflight runs on enable. |
+| `~/.devflow/proxy.json` | Runtime authority. Tolerant-parsed by `readProxyState()`. ENOENT → default disabled state (not an error). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
+| `~/.devflow/proxy-routing.json` | Routing config written by `buildRoutingConfigJson(port)`. Shape: bare `{port}` plus trailing newline. 0.2.0 rejects unrecognised keys — including a `codex` block breaks the runtime. Written before preflight runs on enable. |
 | `manifest.features.proxy` | Init/uninstall authority. Seeds from prior manifest on re-init (ADR-014). Never in `config.json` — manifest-group by design, same as `ambient`/`hud`/`rules`. |
 
 ### Enable path (crash-safe)
 
 1. Read `proxy.json` for the remembered port; `resolvePort(portOption, priorPort)` picks the effective port. `--port` has **no commander default** — omission leaves `portOption` as `undefined` and the remembered port from `proxy.json` wins (TS-1 fix).
-2. Write `proxy-routing.json` with all external model IDs.
+2. Write `proxy-routing.json` with the effective port (bare `{port}` JSON, no model list).
 3. Run `runProxyPreflight()` (4 ordered checks — ①–④: bin, codex auth, port probe/adoption, settings — see Preflight section). Doctor excluded: a pre-spawn gate is always unsatisfiable on a cold path (D-EFR-2; see Anti-Patterns).
 4. On success: write `proxy.json` `enabled:true`.
 5. Spawn relay via `spawnRelayAndWaitForPort()` (exported): bounded ≤50×100ms probe loop (5s max). `SpawnRelayResult.spawnedPid` is set when this process spawned the relay; absent on the adopted path. If relay never accepts, rollback `proxy.json` to `enabled:false` and return error.
@@ -155,6 +155,14 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 
 **Cache dir convention**: `path.join(devflowDir, 'cache', 'models')` — `cacheDir` in all callers.
 
+**Cache key format**: `external-models-v1-<runtimeVersion>`. `resolveProxyBin()` validates the version string against `RUNTIME_VERSION_RE = /^[A-Za-z0-9.+-]{1,32}$/` before it becomes a path component (path-traversal prevention). When validation fails, the version field is absent from the result and callers must treat the cache as unavailable.
+
+**Cache permissions**: directory created at mode 0700 (owner-only); each entry hardened to 0600 after atomic write. Both enforced in `src/core/cache.ts`.
+
+**Stale-cache fallback**: when a live spawn fails, `findStaleFallback()` scans for the newest existing entry by embedded envelope timestamp (not file mtime — mtime is trivially spoofable). Stale entries serve as the fallback; `source` field of `ExternalModelCatalog` is `'stale-cache'` in that case.
+
+**Cache prune**: after each successful live write, `pruneOldEntries()` keeps at most 3 entries (`CACHE_PRUNE_KEEP`) by embedded timestamp, deleting older ones. Non-fatal.
+
 **`ExternalModelCatalog` discriminated union**:
 ```typescript
 { known: true; models; aliasToId; selectableNames; source }
@@ -162,11 +170,12 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 ```
 
 **When to use which**:
-- `getExternalModelsCached` in `--status` (diagnostic command; silent multi-second spawn unacceptable)
-- `getExternalModelsCached` inside the agents TUI (avoids lag on every render)
-- `discoverExternalModels` in fire-and-forget mode after enable (pre-warms cache)
+- `discoverExternalModels` in the interactive TUI — async, spawns the runtime, gated on `proxyEnabled` (proxy-off sessions resolve immediately to `{ known: false }`); shows a spinner when catalog takes more than 250 ms.
+- `getExternalModelsCached` in `--set` — sync, zero spawns; accepts any model name on cache miss (configure-first-then-enable flow preserved).
+- `discoverExternalModels` fire-and-forget after enable (cache warming, strict non-fatal per PF-009).
+- `--status`, `--list`, `--reset` — never touch model discovery.
 
-**Uninstall**: `cache/models` is in `proxyArtifacts` in `uninstall.ts` — removed with `isDir:true` on `devflow uninstall`.
+**Uninstall**: `cache/models` is in `proxyArtifacts` in `uninstall.ts` — removed with `isDir:true` on `devflow uninstall`. The `cache/` parent directory is not removed (the HUD shares it).
 
 ## Mapping Engine (agent-models.json)
 
@@ -228,7 +237,7 @@ This prevents silent corruption of multi-line YAML values that legitimately cont
 
 The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (applies ADR-013):
 
-- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantGptModel()` (from external-models) to initialize dormancy state. All types and dirty helpers exported. No I/O.
+- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to initialize dormancy state. All types and dirty helpers exported. No I/O.
 - **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants).
 - **`terminal.ts`** — impure shell. Manages alt-screen, raw mode, SIGINT/SIGTERM handlers, SIGWINCH resize. All cleanup wired via `resolve()` inside the Promise constructor — never `process.exit()` inside a finally-guarded scope (avoids PF-014).
 
@@ -242,7 +251,7 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 **Lazy-import of `terminal.ts`** in `agents.ts`: `import('../agents-view/terminal.js')` is deferred until the interactive path runs. `--list`, `--set`, `--reset`, and non-TTY calls never load readline/tty machinery.
 
-**Model list source**: `buildRow()` uses `getExternalModelsCached(cacheDir)` (sync, zero spawns) to get the catalog. Off-cycle pins (aliases whose current generation is not in the live cycle) are appended at the end of the cycle with `(unavailable)` annotation.
+**Model list source**: `buildTuiState()` calls `discoverExternalModels` (async, spawns, gated on `proxyEnabled`) to get the catalog, then calls `buildModelCycle(proxyEnabled, catalog)` once to build the picker cycle. `buildRow()` receives the pre-built `modelCycle` as a parameter — it performs no discovery I/O. Off-cycle pins (aliases whose current generation is not in the live cycle) are appended at the end of the cycle with `(unavailable)` annotation.
 
 ## writeFileAtomicExclusive — Mode Preservation
 
@@ -264,6 +273,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Using previousModel in agent-models.json**: The mapping has no `previousModel` field. Shipped defaults are always read live from `agentsDir()` source files. Caching a previousModel creates stale drift when source agent files are updated.
 - **Duplicating the dormancy predicate**: `isDormantExternalModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `!isClaudeModelName(model) && !proxyEnabled` at call sites.
 - **Pre-spawn doctor gating (chicken-and-egg)**: The relay's `doctor` subcommand probes the relay port to confirm it is running — a not-yet-started relay makes that probe fail (exit 1). A pre-spawn gate is therefore always unsatisfiable on a cold path and invisible to unit tests that mock doctor exit 0 (found during the first live enable). Doctor must gate post-spawn only, after the relay is confirmed up (D-EFR-2).
+- **D-EFR-3: Never mock the routing-runtime subprocess without a paired real-binary test**: any test that mocks the routing-runtime subprocess must be paired with at least one CI-executed test that does not. The specific trap (PF-016 reproduced exactly): `tests/integration/**` is excluded from `npm test` by `vitest.config.ts` while CI runs only `npm run build && npm test` — a real-binary test placed in `tests/integration/` would never execute in CI. Place real-binary tests in `tests/` (not `tests/integration/`).
 
 ## Gotchas
 
@@ -271,14 +281,15 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning. `spawnedPid` will be absent from `SpawnRelayResult` on this path — `runPostSpawnVerification` must never kill an adopted relay.
 - **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
 - **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`. Prior to this fix, the commander default of `String(DEFAULT_PROXY_PORT)` made the remembered port dead code.
-- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantGptModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
+- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantExternalModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
 - **`binPath` must be spawned with `node <path>`**: npm does not guarantee executable bits on installed package binaries. Always spawn as `node <binPath>`, never `<binPath>` directly.
+- **Leaked stub relays**: proxy tests that spawn stub relays must reap them on the failure path too — not only the happy path. Use `afterEach`/`onTestFinished` with SIGTERM→SIGKILL escalation and confirm death via `process.kill(pid, 0)`. Real incident: three orphaned stub relays accumulated over ~3 weeks; a full run stretched from ~24 seconds to 40+ minutes and produced 13–21 spurious failures in unrelated files (memory pipeline, capture hooks) that were repeatedly misdiagnosed as product defects.
 - **`resolveProxyBin()` uses `createRequire(import.meta.url)`**: ESM-safe way to resolve CommonJS package paths. The `require.resolve('subswitch/package.json')` approach finds the package relative to devflow's own `node_modules`, not the user's project.
 
 ## Key Files
 
 - `src/core/proxy-state.ts` — ProxyState schema, read/write, `isProxyEnabled()`, `resolveProxyBin()`, `buildRoutingConfigJson()`
-- `src/core/external-models.ts` — `EXTERNAL_GPT_MODELS` registry, `externalModelIds()`, `isDormantGptModel()` (leaf module, no project imports)
+- `src/core/external-models.ts` — `CLAUDE_MODEL_ALIASES`, `isClaudeModelName()`, `isDormantExternalModel()` (leaf module, no project imports)
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`
 - `src/core/agent-models.ts` — `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write

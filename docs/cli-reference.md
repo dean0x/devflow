@@ -202,7 +202,7 @@ Configure which AI model each Devflow agent uses. Changes persist across reinsta
 ```bash
 npx devflow-kit agents                                      # Open interactive TUI (requires TTY)
 npx devflow-kit agents --list                               # List all agents with current model assignment
-npx devflow-kit agents --set <agent> --model <model>        # Assign a model to one agent
+npx devflow-kit agents --set <agent> --model sol            # Assign a model to one agent (alias e.g. sol, terra, luna)
 npx devflow-kit agents --set <agent> --effort <level>       # Assign an effort level to one agent
 npx devflow-kit agents --set <agent> --model default        # Clear model override (restores shipped default)
 npx devflow-kit agents --reset                              # Clear all agent customisations (prompts for confirmation)
