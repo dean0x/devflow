@@ -34,7 +34,7 @@ import { openProxyLog, scrubChildEnv } from './proxy-log.js';
 // Result type (local pattern, mirrors proxy-state.ts)
 // ---------------------------------------------------------------------------
 
-type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
+export type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
 
 function Ok<T>(value: T): Result<T, never> {
   return { ok: true, value };
@@ -75,14 +75,18 @@ const STDOUT_CAP = 262_144;
  * Discovery spawn timeout (ms). A child that does not close its stdout pipe
  * within this window receives SIGTERM followed by a SIGKILL escalation after
  * SIGKILL_GRACE_MS. Zero retries — the stale cache is the retry.
+ *
+ * Exported so tests can derive timing bounds without mirroring the literal.
  */
-const SPAWN_TIMEOUT_MS = 2_000;
+export const SPAWN_TIMEOUT_MS = 2_000;
 
 /**
  * Grace period (ms) between SIGTERM and SIGKILL escalation. Unreffed so the
  * timer never prevents the Node.js event loop from exiting on its own.
+ *
+ * Exported so tests can derive timing bounds without mirroring the literal.
  */
-const SIGKILL_GRACE_MS = 2_000;
+export const SIGKILL_GRACE_MS = 2_000;
 
 /**
  * Maximum bytes written per log failure message. Prevents a single log write
@@ -157,8 +161,8 @@ export type ExternalModelCatalog =
 // Injectable dependencies (for testing without real processes)
 // ---------------------------------------------------------------------------
 
-/** Return type of resolveProxyBin — kept in sync with proxy-state.ts. */
-type ResolveProxyBinResult = Result<{ binPath: string; npxWarning: boolean; version?: string }, string>;
+/** Return type of resolveProxyBin — derived rather than duplicated (applies ADR-003). */
+type ResolveProxyBinResult = Awaited<ReturnType<typeof resolveProxyBin>>;
 
 /**
  * Injectable seam for discoverExternalModels.
@@ -201,7 +205,7 @@ export interface ModelDiscoveryDeps {
 // Parsed-catalog internal type (source is added by callers)
 // ---------------------------------------------------------------------------
 
-interface ParsedCatalog {
+export interface ParsedCatalog {
   readonly models: readonly ExternalModel[];
   readonly aliasToId: ReadonlyMap<string, string>;
   readonly selectableNames: readonly string[];
@@ -258,7 +262,10 @@ export function parseModelsJson(raw: string): Result<ParsedCatalog, string> {
     return Err('models is not an array');
   }
 
-  // --- Build passthrough-provider set (data-driven safety for future rows) ---
+  // --- Check whether the codex provider is marked passthrough ---
+  // Row selection hard-gates on provider === 'codex', so only codex entries ever
+  // reach the passthrough filter. Compute once before the per-row loop instead of
+  // re-evaluating passthroughProviders.has('codex') identically on every row.
   const passthroughProviders = new Set<string>();
   if (Array.isArray(root['providers'])) {
     for (const p of root['providers'] as unknown[]) {
@@ -269,6 +276,7 @@ export function parseModelsJson(raw: string): Result<ParsedCatalog, string> {
       }
     }
   }
+  const codexIsPassthrough = passthroughProviders.has('codex');
 
   // --- First pass: collect canonical ids of qualifying rows ---
   // Pre-collecting canonical ids allows the alias-dedup check ("drop alias
@@ -283,7 +291,7 @@ export function parseModelsJson(raw: string): Result<ParsedCatalog, string> {
     if (typeof m['id'] !== 'string') continue;
     if (!MODEL_NAME_RE.test(m['id'] as string)) continue;
     if (m['provider'] !== 'codex') continue;
-    if (passthroughProviders.has(m['provider'] as string)) continue;
+    if (codexIsPassthrough) continue;
     if (m['routable'] !== true) continue;
     if (m['retired'] !== false) continue;
     canonicalIds.add(m['id'] as string);
@@ -545,7 +553,7 @@ function buildRealSpawnAndCollect(
             opts.execPath,
             [opts.binPath, ...opts.argv],
             {
-              env: opts.env as Record<string, string>,
+              env: opts.env,
               // stderr goes to proxy.log fd; stdout is piped for collection
               stdio: ['ignore', 'pipe', logHandle ? logHandle.fd : 'pipe'],
               cwd: opts.cwd,
@@ -686,8 +694,11 @@ async function _discoverInternal(
     }
   }
 
-  // --- Collect stale-cache fallback (selected before live fetch, used on failure) ---
-  const staleRaw = await findStaleFallback(cacheDir, currentKey);
+  // --- Stale-cache fallback — started concurrently with spawn, awaited only on failure ---
+  // C2-PERF-3: happy path returns before the await below; running the lookup concurrently
+  // with the spawn means the failure path incurs no extra latency (findStaleFallback
+  // completes during the spawn's SPAWN_TIMEOUT_MS window).
+  const staleRawP = findStaleFallback(cacheDir, currentKey);
 
   // --- Live spawn ---
   // C2-ARCH-7: scrubChildEnv is already statically imported from './proxy-log.js' (line 31).
@@ -718,11 +729,13 @@ async function _discoverInternal(
       }
       return { known: true, ...parsed.value, source: 'live' };
     }
-    // Parse failed even though spawn succeeded
-    await appendToLog(
-      logPath,
-      `[model-discovery] parse failed: ${parsed.error}`,
-    );
+    // Parse failed even though spawn succeeded.
+    // C2-SEC-5: strip control characters (including \n, \r) from untrusted runtime
+    // output before embedding in the log line to prevent log-line injection.
+    // LOG_WRITE_CAP bounds total length but not embedded newlines.
+    // eslint-disable-next-line no-control-regex
+    const safeError = parsed.error.replace(/[\x00-\x1f\x7f]/g, ' ');
+    await appendToLog(logPath, `[model-discovery] parse failed: ${safeError}`);
   } else {
     const reason = spawnResult.timedOut
       ? 'spawn timed out'
@@ -730,7 +743,8 @@ async function _discoverInternal(
     await appendToLog(logPath, `[model-discovery] ${reason}`);
   }
 
-  // --- Stale-cache fallback ---
+  // --- Stale-cache fallback (only reached on failure path) ---
+  const staleRaw = await staleRawP;
   if (staleRaw !== null) {
     const parsed = parseModelsJson(staleRaw);
     if (parsed.ok) {

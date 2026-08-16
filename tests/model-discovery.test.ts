@@ -55,6 +55,8 @@ import {
   parseModelsJson,
   discoverExternalModels,
   getExternalModelsCached,
+  SPAWN_TIMEOUT_MS,
+  SIGKILL_GRACE_MS,
   type ExternalModelCatalog,
   type ModelDiscoveryDeps,
 } from '../src/core/model-discovery.js';
@@ -67,8 +69,7 @@ import { writeCache } from '../src/core/cache.js';
 
 const CACHE_KEY_PREFIX = 'external-models-v1-';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
-const SPAWN_TIMEOUT_MS = 2_000;
-const SIGKILL_GRACE_MS = 2_000;
+// SPAWN_TIMEOUT_MS and SIGKILL_GRACE_MS are imported from model-discovery.ts (C2-CPLX-8)
 
 // ---------------------------------------------------------------------------
 // Minimal valid payload for parser tests
