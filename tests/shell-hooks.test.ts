@@ -2217,5 +2217,112 @@ describe('ensure-proxy behavioral tests', () => {
         'OPENAI_API_KEY must be absent from relay env (allowlist enforced)',
       ).toBe(false);
     });
+
+    // NODE_EXTRA_CA_CERTS corporate-TLS pass-through: the bash hook's _RELAY_ENV
+    // must forward this var to the relay when set so corporate-TLS deployments can
+    // supply a CA bundle.
+    //
+    // Prove this test can fail: before adding the conditional _RELAY_ENV append to
+    // ensure-proxy, the relay env does not contain NODE_EXTRA_CA_CERTS → the
+    // expect(relayEnv['NODE_EXTRA_CA_CERTS']).toBe(expectedBundle) assertion fails.
+    it('NODE_EXTRA_CA_CERTS is forwarded to spawned relay when set in hook env', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env-ca.json');
+      const expectedBundle = '/tmp/devflow-test-ca-bundle.crt';
+
+      // Stub relay: capture env to file synchronously, then bind.
+      // File is written before listen() so it exists when the hook's TCP probe sees the port up.
+      const binPath = path.join(tmpDir, 'env-capture-relay-ca.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass NODE_EXTRA_CA_CERTS into the hook's environment — must reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        NODE_EXTRA_CA_CERTS: expectedBundle,
+      });
+
+      // Register pid for afterEach cleanup before any assertions.
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(
+        fs.existsSync(envCapturePath),
+        'relay env capture file must exist',
+      ).toBe(true);
+
+      const relayEnv = JSON.parse(
+        fs.readFileSync(envCapturePath, 'utf-8'),
+      ) as Record<string, string>;
+      expect(
+        relayEnv['NODE_EXTRA_CA_CERTS'],
+        'NODE_EXTRA_CA_CERTS must be forwarded to relay env (corporate TLS)',
+      ).toBe(expectedBundle);
+    });
+
+    it('NODE_OPTIONS is excluded from spawned relay env even when set in hook env', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env-nodeopt.json');
+
+      const binPath = path.join(tmpDir, 'env-capture-relay-nodeopt.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass NODE_OPTIONS into the hook's env — must NOT reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        NODE_OPTIONS: '--require /tmp/evil.js',
+      });
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(
+        fs.existsSync(envCapturePath),
+        'relay env capture file must exist',
+      ).toBe(true);
+
+      const relayEnv = JSON.parse(
+        fs.readFileSync(envCapturePath, 'utf-8'),
+      ) as Record<string, string>;
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'NODE_OPTIONS'),
+        'NODE_OPTIONS must be absent from relay env (prevents arbitrary code execution via --require/--import)',
+      ).toBe(false);
+    });
   });
 });

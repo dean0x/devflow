@@ -6,6 +6,9 @@
  * 2. openProxyLog pre-existing   → best-effort chmod to 0600 (wider mode patched)
  * 3. openProxyLog chmod fails    → still returns a usable handle (non-fatal invariant)
  * 4. scrubChildEnv (T11)         → exact allowlist; no ANTHROPIC_API_KEY/OPENAI_API_KEY/SSH_AUTH_SOCK
+ *    4a. NODE_EXTRA_CA_CERTS passes through when set (corporate-TLS)
+ *    4b. NODE_OPTIONS is excluded (arbitrary code execution risk)
+ *    4c. DRIFT-GUARD: ensure-proxy bash hook allowlist mirrors scrubChildEnv
  * 5. rotateProxyLogIfLarge       → file ≤1MB after 2MB+ input, mode 0600 on result
  *
  * Note: mode assertions are skipped on win32 (POSIX chmod semantics not applicable).
@@ -13,6 +16,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
@@ -155,7 +159,10 @@ describe('proxy-log', () => {
 
   describe('scrubChildEnv — T11 env allowlist', () => {
     const IS_WIN32 = process.platform === 'win32';
-    const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
+    // Must mirror the POSIX_ALLOWLIST in src/core/proxy-log.ts scrubChildEnv().
+    // Also mirrored in src/assets/scripts/hooks/ensure-proxy _RELAY_ENV array.
+    // Update all three locations together when this list changes (avoids PF-017).
+    const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'NODE_EXTRA_CA_CERTS'];
     const WIN32_EXTRA = ['SystemRoot', 'APPDATA', 'USERPROFILE', 'ComSpec'];
     const FULL_ALLOWLIST = IS_WIN32
       ? [...POSIX_ALLOWLIST, ...WIN32_EXTRA]
@@ -275,6 +282,75 @@ describe('proxy-log', () => {
       const env = scrubChildEnv();
       expect(env['TMPDIR']).toBeUndefined();
       expect('TMPDIR' in env).toBe(false);
+    });
+
+    // ── NODE_EXTRA_CA_CERTS corporate-TLS pass-through ──────────────────────
+
+    it('NODE_EXTRA_CA_CERTS passes through to relay env when set — corporate TLS', () => {
+      // Prove this test can fail: before adding NODE_EXTRA_CA_CERTS to POSIX_ALLOWLIST
+      // in scrubChildEnv(), the stubbed value was not copied into the result.
+      // The test would fail with: Expected: '/etc/ssl/corporate-ca-bundle.crt'
+      //                           Received: undefined
+      vi.stubEnv('NODE_EXTRA_CA_CERTS', '/etc/ssl/corporate-ca-bundle.crt');
+
+      const env = scrubChildEnv();
+
+      expect(env['NODE_EXTRA_CA_CERTS']).toBe('/etc/ssl/corporate-ca-bundle.crt');
+    });
+
+    it('NODE_EXTRA_CA_CERTS is absent from result when not set in process.env', () => {
+      // NODE_EXTRA_CA_CERTS absent → omit, never inject empty string
+      // The absent-→-omit loop handles this; no special code required.
+      vi.stubEnv('PATH', '/usr/bin:/bin');
+      vi.stubEnv('HOME', '/home/testuser');
+      // Do not stub NODE_EXTRA_CA_CERTS — simulates a non-corporate-TLS host
+
+      const env = scrubChildEnv();
+
+      // Must be absent, not set to '' or undefined-as-key
+      expect('NODE_EXTRA_CA_CERTS' in env).toBe(false);
+    });
+
+    it('NODE_OPTIONS is not allowlisted — must not reach relay even when set (prevents arbitrary code exec)', () => {
+      // NODE_OPTIONS (--require, --import) permits arbitrary code execution.
+      // It must never appear in scrubChildEnv() output regardless of parent env.
+      vi.stubEnv('NODE_OPTIONS', '--require /tmp/evil.js');
+
+      const env = scrubChildEnv();
+
+      expect(env['NODE_OPTIONS']).toBeUndefined();
+      expect('NODE_OPTIONS' in env).toBe(false);
+    });
+
+    // ── DRIFT-GUARD: bash hook allowlist mirrors scrubChildEnv ──────────────
+
+    it('DRIFT-GUARD: ensure-proxy _RELAY_ENV conditionally appends NODE_EXTRA_CA_CERTS', () => {
+      // Both relay spawn paths (TS CLI via scrubChildEnv and bash hook via _RELAY_ENV)
+      // must allow the same base vars. This test reads ensure-proxy source and verifies
+      // the conditional NODE_EXTRA_CA_CERTS append exists, catching future one-sided
+      // additions that silently break one spawn path (the exact failure mode of PF-017).
+      //
+      // The check targets the `if` guard that gates the conditional append — a non-comment
+      // line that is structurally absent before the fix. Searching only for the array
+      // append string would also match a comment line, making the test vacuous.
+      //
+      // Prove this test can fail: before adding the conditional block to ensure-proxy,
+      // the `if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]` line is absent → expect(false).toBe(true).
+      const hookPath = path.join(
+        path.dirname(new URL(import.meta.url).pathname),
+        '../src/assets/scripts/hooks/ensure-proxy',
+      );
+      const hookSource = fsSync.readFileSync(hookPath, 'utf-8');
+
+      // The unconditional if-guard must be present (not just in a comment).
+      // Pattern chosen to be unambiguously a code line: the test/conditional itself.
+      const hasConditional = hookSource.includes('if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]');
+      expect(
+        hasConditional,
+        'ensure-proxy must contain `if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]` to conditionally ' +
+          'append NODE_EXTRA_CA_CERTS to _RELAY_ENV (drift from scrubChildEnv detected — ' +
+          'update both allowlists together)',
+      ).toBe(true);
     });
   });
 

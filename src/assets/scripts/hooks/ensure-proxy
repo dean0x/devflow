@@ -236,22 +236,26 @@ log "spawning relay: $NODE_BIN $PROXY_BIN serve"
 chmod 600 "$LOG_FILE" 2>/dev/null || true
 
 # SEC-2 (allowlist): scope the relay's env to exactly what it needs — avoids PF-017.
-# env -i starts with an empty environment; only the listed vars reach the relay.
-# SUBSWITCH_CONFIG is passed explicitly (was previously exported to the parent shell
-# so the denylist form could inherit it; under env -i it must be listed directly).
-# NODE_OPTIONS and NODE_EXTRA_CA_CERTS are intentionally omitted, consistent with
-# the TypeScript allowlist in proxy-log.ts scrubChildEnv(). Corporate-TLS users
-# who need those vars should add them to BOTH allowlists.
-# Bash 3.2-safe: env -i with inline VAR=value assignments is POSIX-standard.
+# NODE_EXTRA_CA_CERTS is included when non-empty so corporate-TLS deployments can
+# supply a CA bundle; an unset/empty value is not injected (an empty path causes
+# TLS errors rather than being a no-op). NODE_OPTIONS is deliberately excluded:
+# it permits arbitrary code execution via --require/--import.
+# Mirrored in scrubChildEnv() in proxy-log.ts; both allowlists must stay in sync.
+# Bash 3.2-safe: bash arrays and array append (+=) are supported since bash 2.0.
 # nohup + env -i chain: nohup inherits the parent env (irrelevant — env -i clears
 # it for the relay); $! still captures the relay PID correctly.
-nohup env -i \
-  PATH="$PATH" \
-  HOME="$HOME" \
-  TMPDIR="${TMPDIR:-}" \
-  LANG="${LANG:-}" \
-  LC_ALL="${LC_ALL:-}" \
-  SUBSWITCH_CONFIG="$PROXY_CONFIG" \
+_RELAY_ENV=(
+  "PATH=$PATH"
+  "HOME=$HOME"
+  "TMPDIR=${TMPDIR:-}"
+  "LANG=${LANG:-}"
+  "LC_ALL=${LC_ALL:-}"
+  "SUBSWITCH_CONFIG=$PROXY_CONFIG"
+)
+if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]; then
+  _RELAY_ENV+=("NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS")
+fi
+nohup env -i "${_RELAY_ENV[@]}" \
   "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
 _RELAY_PID=$!
 disown "$_RELAY_PID" 2>/dev/null || true

@@ -25,7 +25,7 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * Build a scrubbed child process environment for relay/doctor subprocesses.
  *
  * Returns a literal allowlist copied from process.env:
- *   posix: PATH, HOME, TMPDIR, LANG, LC_ALL
+ *   posix: PATH, HOME, TMPDIR, LANG, LC_ALL, NODE_EXTRA_CA_CERTS (when set)
  *   win32: additionally SystemRoot, APPDATA, USERPROFILE, ComSpec
  *
  * Variables absent from process.env are omitted rather than set to undefined.
@@ -35,12 +35,18 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * applies ADR-003: the prior denylist rationale is gone — the routing runtime
  * reads exactly three env vars (ANTHROPIC_API_KEY, FORCE_COLOR, SUBSWITCH_CONFIG).
  * Verified by whole-dist grep of the 0.2.0 package. An allowlist is the correct
- * shape: 61 inherited vars → 5.
+ * shape: 61 inherited vars → 6.
  *
  * HOME is retained: the runtime's loadConfig resolves ~ paths via homedir().
+ *
+ * NODE_EXTRA_CA_CERTS is included so corporate-TLS deployments can supply a CA
+ * bundle; it is omitted when unset (the absent-→-omit loop handles this).
+ * NODE_OPTIONS is deliberately excluded: it permits arbitrary code execution via
+ * --require/--import. Mirrored in the ensure-proxy bash hook's _RELAY_ENV array
+ * (avoids PF-017); both allowlists must be kept in sync.
  */
 export function scrubChildEnv(): NodeJS.ProcessEnv {
-  const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'] as const;
+  const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'NODE_EXTRA_CA_CERTS'] as const;
   const WIN32_ALLOWLIST = ['SystemRoot', 'APPDATA', 'USERPROFILE', 'ComSpec'] as const;
 
   const keys: string[] =
