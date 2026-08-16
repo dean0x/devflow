@@ -1178,6 +1178,47 @@ describe('formatExternalModelsLine (AC-F6)', () => {
       );
       expect(result.level).toBe('info');
     });
+
+    // C2-SEC-3: authMode comes from a third-party file (~/.codex/auth.json) and was
+    // printed verbatim. An OSC-8 hyperlink or other escape sequence in the field
+    // would render directly in the user's terminal.
+    it('C2-SEC-3: OSC-8 hyperlink in authMode is stripped from the rendered msg', () => {
+      // OSC-8 hyperlink: \x1b]8;;<url>\x07<text>\x1b]8;;\x07
+      const osc8Mode = '\x1b]8;;https://evil.com\x07chatgpt\x1b]8;;\x07';
+      const { msg } = formatCodexAuthLine(
+        { kind: 'present', authMode: osc8Mode, accountSuffix: '…d8e65c', expiresAt: undefined },
+        AUTH_PATH,
+        NOW,
+      );
+      // The raw rendered msg must not contain the OSC-8 opener
+      expect(msg).not.toContain('\x1b]8;');
+      // The visible text (chatgpt) must still appear after stripping
+      const visibleMsg = msg.replace(/\x1b(?:\[[0-9;?]*[ -\/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g, '');
+      expect(visibleMsg).toContain('chatgpt');
+    });
+
+    it('C2-SEC-3: SGR escape sequence in authMode is stripped from the rendered msg', () => {
+      const ansiMode = '\x1b[31mapikey\x1b[0m'; // red "apikey"
+      const { msg } = formatCodexAuthLine(
+        { kind: 'present', authMode: ansiMode, accountSuffix: '…d8e65c', expiresAt: undefined },
+        AUTH_PATH,
+        NOW,
+      );
+      // Raw msg must not contain the injected SGR sequence
+      expect(msg).not.toContain('\x1b[31m');
+    });
+
+    it('C2-SEC-3: authMode is capped to prevent unbounded terminal output', () => {
+      const longMode = 'x'.repeat(500);
+      const { msg } = formatCodexAuthLine(
+        { kind: 'present', authMode: longMode, accountSuffix: '…d8e65c', expiresAt: undefined },
+        AUTH_PATH,
+        NOW,
+      );
+      // The rendered msg should not carry 500 'x' characters — it must be capped
+      // 400 is a generous upper bound that still proves the cap fires for 500-char input
+      expect(msg.length).toBeLessThan(400);
+    });
   });
 
   it('does not mention "subswitch" (branding rule)', () => {

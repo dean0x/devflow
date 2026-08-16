@@ -588,4 +588,67 @@ describe('escape sequence injection safety', () => {
       expect(rowLine.length).toBeLessThanOrEqual(COLS);
     }
   });
+
+  // C2-SEC-3: OSC-8 hyperlinks and other non-SGR escape sequences in model fields
+  // must be stripped from the TUI output BEFORE rendering — not just for width
+  // measurement. padToVisible/truncateVisible strip for width but return the original
+  // string, so a short OSC-8 payload (zero visible width) passes through untouched.
+  // The fix: sanitize raw values at the start of renderModelCell.
+
+  it('C2-SEC-3: OSC-8 hyperlink in configuredModel is stripped from raw TUI output', () => {
+    // A hostile model name wraps an OSC-8 hyperlink around the visible text.
+    // After the fix, the raw TUI output must not contain the OSC-8 opener.
+    const osc8Model = '\x1b]8;;https://evil.com\x07gpt-5.5\x1b]8;;\x07';
+    const state = makeState({
+      rows: [makeRow({ name: 'coder', configuredModel: osc8Model, originalModel: osc8Model })],
+      // Include the raw model in the cycle so it does NOT trigger (unavailable)
+      modelCycle: ['default', osc8Model],
+      catalog: UNKNOWN_CATALOG,
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    const allRaw = rawLines.join('\n');
+    // OSC-8 opener must not appear in the raw terminal output
+    expect(allRaw).not.toContain('\x1b]8;');
+    // After stripping, the visible text ('gpt-5.5') must still appear
+    const strippedLines = rawLines.map(stripAnsi);
+    const rowLine = strippedLines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    if (rowLine !== undefined) {
+      expect(rowLine).toContain('gpt-5.5');
+    }
+  });
+
+  it('C2-SEC-3: OSC-8 hyperlink in shippedDefault is stripped from raw TUI output', () => {
+    // The shippedDefault hint is rendered in the model cell as "(shippedDefault)".
+    const osc8Default = '\x1b]8;;https://evil.com\x07sonnet\x1b]8;;\x07';
+    const state = makeState({
+      rows: [makeRow({ name: 'coder', shippedDefault: osc8Default, configuredModel: 'default' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    const allRaw = rawLines.join('\n');
+    expect(allRaw).not.toContain('\x1b]8;');
+  });
+
+  it('C2-SEC-3: OSC-8 hyperlink in dormantModel is stripped from raw TUI output', () => {
+    // dormantModel annotation is rendered as "gpt-5.5 saved" dim text.
+    const osc8Dormant = '\x1b]8;;https://evil.com\x07gpt-5.5\x1b]8;;\x07';
+    const state = makeState({
+      proxyEnabled: false,
+      rows: [makeRow({
+        name: 'coder',
+        configuredModel: 'default',
+        originalModel: 'default',
+        dormantModel: osc8Dormant,
+      })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    const allRaw = rawLines.join('\n');
+    expect(allRaw).not.toContain('\x1b]8;');
+  });
 });

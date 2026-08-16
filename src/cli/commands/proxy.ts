@@ -35,7 +35,8 @@ import {
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
-import { inspectCodexAuth, type CodexAuthState } from '../../core/codex-auth-inspect.js';
+import { inspectCodexAuth, classifyCodexAuthReadError, type CodexAuthState } from '../../core/codex-auth-inspect.js';
+import { stripAnsi } from '../../hud/colors.js';
 import {
   reapplyAgentMapping,
   revertExternalAgents,
@@ -76,6 +77,15 @@ const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
 
 /** Timeout for individual TCP connect probes and HTTP health checks (ms). */
 const PROBE_TIMEOUT_MS = 2000;
+/**
+ * Maximum length of the authMode field rendered by formatCodexAuthLine.
+ *
+ * Known values are 'chatgpt', 'apikey', 'unknown' (≤7 chars). A generous cap
+ * of 32 accommodates any future mode strings while bounding hostile input from
+ * the third-party ~/.codex/auth.json file. Matches the screenshot/bug-report
+ * hygiene rationale applied to accountSuffix (6-char cap).
+ */
+const AUTH_MODE_MAX_LEN = 32;
 /**
  * Maximum response body accepted by realHttpGet before aborting (64 KB).
  * Prevents unbounded memory growth on slow-trickle or misconfigured endpoints
@@ -1046,7 +1056,10 @@ export function formatCodexAuthLine(
         msg: `Codex auth: ${color.red(`unreadable (${state.reason})`)} at ${authPath} — run codex login`,
       };
     case 'present': {
-      const identity = `${state.authMode}, ${state.accountSuffix}`;
+      // C2-SEC-3: authMode comes from the third-party ~/.codex/auth.json; strip
+      // ANSI escapes and cap length before embedding in terminal output.
+      const safeAuthMode = stripAnsi(state.authMode).slice(0, AUTH_MODE_MAX_LEN);
+      const identity = `${safeAuthMode}, ${state.accountSuffix}`;
       const present = `Codex auth: ${color.green('present')} (${identity})`;
       if (state.expiresAt === undefined) return { level: 'info', msg: present };
       const stamp = state.expiresAt.toISOString().slice(0, 10);
@@ -1202,12 +1215,7 @@ async function runStatus(): Promise<void> {
   try {
     codexAuth = inspectCodexAuth(await fs.readFile(codexAuthPath, 'utf-8'));
   } catch (err) {
-    // Missing file is the ordinary "not signed in" case; anything else (EACCES,
-    // EISDIR) is a real fault the user must resolve, so it must not read as absent.
-    codexAuth =
-      (err as NodeJS.ErrnoException)?.code === 'ENOENT'
-        ? { kind: 'absent' }
-        : { kind: 'unreadable', reason: 'cannot read file' };
+    codexAuth = classifyCodexAuthReadError(err);
   }
   const codexAuthLine = formatCodexAuthLine(codexAuth, codexAuthPath, new Date());
   if (codexAuthLine.level === 'warn') {
@@ -1430,13 +1438,14 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   });
   const mappedCount = reapplyResult.updated.length;
 
-  s.stop(color.green('External model routing enabled'));
+  // C2-PERF-2: warm the model cache UNDER the spinner so the wait is visible
+  // and attributed. Strictly non-fatal — applies PF-009; a cache failure must
+  // never affect the enable result. The promise is awaited so Node can exit
+  // cleanly immediately after s.stop, instead of being held open ~200-600ms.
+  s.message('Warming model cache...');
+  await discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
 
-  // Cache warming: pre-populate the model cache so the next `devflow agents` /
-  // `devflow proxy --status` is instant. Strictly non-fatal — applies PF-009.
-  // Fire-and-forget after the spinner stops; a failure must never affect the enable
-  // result or block the user.
-  void discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
+  s.stop(color.green('External model routing enabled'));
 
   if (adopted) {
     p.log.info(`Relay already running on port ${port} — adopted`);

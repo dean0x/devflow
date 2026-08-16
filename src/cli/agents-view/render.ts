@@ -114,31 +114,39 @@ function renderModelCell({
 }: RenderModelCellOptions): string {
   const dirty = isDirtyModel(row);
 
+  // C2-SEC-3: model names come from user-controlled config and the third-party
+  // external model catalog. Strip ANSI escapes at the display boundary so
+  // hostile sequences cannot reach the terminal. Original values are used for
+  // map lookups and cycle checks (logic), safe copies only for display strings.
+  const safeConfiguredModel = stripAnsi(row.configuredModel);
+  const safeShippedDefault = stripAnsi(row.shippedDefault);
+  const safeDormantModel = row.dormantModel !== null ? stripAnsi(row.dormantModel) : null;
+
   let valueStr: string;
 
   if (row.configuredModel === 'default') {
-    const hint = dim(`(${row.shippedDefault})`);
+    const hint = dim(`(${safeShippedDefault})`);
     valueStr = `default ${hint}`;
-    if (row.dormantModel !== null) {
+    if (safeDormantModel !== null) {
       // Dormant: show saved model name as dim annotation
-      valueStr += ` ${dim(`${row.dormantModel} saved`)}`;
+      valueStr += ` ${dim(`${safeDormantModel} saved`)}`;
     }
   } else if (isOffCycle(modelCycle, row.configuredModel)) {
     // Off-cycle pin: model was saved but is no longer in the discovered catalog.
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.
-    valueStr = `${row.configuredModel} (unavailable)`;
+    valueStr = `${safeConfiguredModel} (unavailable)`;
   } else if (catalog.known) {
     const resolvedId = catalog.aliasToId.get(row.configuredModel);
     if (resolvedId !== undefined && resolvedId !== row.configuredModel) {
       // Alias: show "alias (canonical-id)" — e.g. "sol (gpt-5.6-sol)"
-      valueStr = `${row.configuredModel} (${resolvedId})`;
+      valueStr = `${safeConfiguredModel} (${stripAnsi(resolvedId)})`;
     } else {
       // Canonical id or no alias resolution: show bare
-      valueStr = row.configuredModel;
+      valueStr = safeConfiguredModel;
     }
   } else {
-    valueStr = row.configuredModel;
+    valueStr = safeConfiguredModel;
   }
 
   let cell: string;

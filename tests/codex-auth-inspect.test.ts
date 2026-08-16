@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { inspectCodexAuth } from '../src/core/codex-auth-inspect.js';
+import { inspectCodexAuth, classifyCodexAuthReadError } from '../src/core/codex-auth-inspect.js';
 
 /** Build a display-decodable JWT. Signature is irrelevant — we never verify it. */
 const jwt = (payload: Record<string, unknown>): string =>
@@ -194,5 +194,43 @@ describe('inspectCodexAuth — states the relay would reject', () => {
   it('empty account_id falls through to the claim, then fails', () => {
     const raw = authFile({ tokens: { access_token: jwt({ exp: EXP_SECONDS }), account_id: '' } });
     expect(inspectCodexAuth(raw)).toEqual({ kind: 'unreadable', reason: 'no account id' });
+  });
+});
+
+// ─── C2-TEST-8: classifyCodexAuthReadError ────────────────────────────────────
+//
+// The ENOENT vs else classification was previously inlined in runStatus (proxy.ts)
+// with no unit test — inverting the ternary would ship green. Extracted to core
+// so both branches can be exercised directly.
+//
+// To PROVE these tests exercise real logic and are not vacuous:
+//   temporarily invert the ternary in classifyCodexAuthReadError:
+//     ENOENT → unreadable   instead of absent
+//     else   → absent       instead of unreadable
+//   confirm RED on tests 1 and 2, then restore.
+
+describe('classifyCodexAuthReadError (C2-TEST-8)', () => {
+  it('ENOENT → absent (missing file is the ordinary not-signed-in case)', () => {
+    const err = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    expect(classifyCodexAuthReadError(err)).toEqual({ kind: 'absent' });
+  });
+
+  it('EACCES → unreadable (permission denied is a real fault the user must resolve)', () => {
+    const err = Object.assign(new Error('EACCES: permission denied, open ~/.codex/auth.json'), { code: 'EACCES' });
+    expect(classifyCodexAuthReadError(err)).toEqual({ kind: 'unreadable', reason: 'cannot read file' });
+  });
+
+  it('generic Error (no .code) → unreadable', () => {
+    expect(classifyCodexAuthReadError(new Error('unexpected I/O error'))).toEqual({
+      kind: 'unreadable',
+      reason: 'cannot read file',
+    });
+  });
+
+  it('non-Error value → unreadable', () => {
+    expect(classifyCodexAuthReadError('oops')).toEqual({
+      kind: 'unreadable',
+      reason: 'cannot read file',
+    });
   });
 });

@@ -82,6 +82,24 @@ function jwtAccountId(token: string): string | undefined {
 }
 
 /**
+ * Classify an I/O error from reading ~/.codex/auth.json into a CodexAuthState.
+ *
+ * applies ADR-013: pure classification logic belongs in src/core/, not in the
+ *   CLI presentation layer that calls it.
+ *
+ * ENOENT is the ordinary "not signed in" case: the file has never been written
+ * by `codex login`. Every other error (EACCES, EISDIR, EMFILE, …) is a real
+ * fault the user must act on — reporting it as `absent` would silently hide it.
+ *
+ * @param err  The caught exception from `fs.readFile(codexAuthPath)`.
+ */
+export function classifyCodexAuthReadError(err: unknown): CodexAuthState {
+  return (err as NodeJS.ErrnoException)?.code === 'ENOENT'
+    ? { kind: 'absent' }
+    : { kind: 'unreadable', reason: 'cannot read file' };
+}
+
+/**
  * Inspect the raw contents of `~/.codex/auth.json`.
  *
  * Every failure mode the relay would reject at request time is surfaced here as
