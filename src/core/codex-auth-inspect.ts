@@ -33,7 +33,13 @@ export type CodexAuthState =
       kind: 'present';
       /** `chatgpt`, `apikey`, or `unknown` when the file omits it. */
       authMode: string;
-      /** Last 6 characters of the account id, prefixed with an ellipsis. Never the full id. */
+      /**
+       * Trailing up-to-6 characters of the account id.
+       * Prefixed with '…' only when the id was longer than 6 characters (i.e. characters
+       * were actually elided). For ids of 6 characters or fewer the value is returned
+       * as-is without a prefix — an ellipsis on a non-truncated id would falsely imply
+       * more characters were hidden.
+       */
       accountSuffix: string;
       /** Access-token expiry, or undefined when the token carries no decodable `exp`. */
       expiresAt: Date | undefined;
@@ -124,7 +130,10 @@ export function inspectCodexAuth(raw: string): CodexAuthState {
   return {
     kind: 'present',
     authMode,
-    accountSuffix: `…${accountId.slice(-ACCOUNT_SUFFIX_LENGTH)}`,
+    accountSuffix:
+      accountId.length > ACCOUNT_SUFFIX_LENGTH
+        ? `…${accountId.slice(-ACCOUNT_SUFFIX_LENGTH)}`
+        : accountId,
     expiresAt: jwtExpiry(accessToken),
   };
 }

@@ -33,6 +33,7 @@ function makeRow(name = 'coder'): AgentRow {
     configuredEffort: 'default',
     originalEffort: 'default',
     dormantModel: null,
+    offCyclePin: null,
   };
 }
 
@@ -44,6 +45,8 @@ function makeInitialState(): AgentsViewState {
     viewportOffset: 0,
     viewportHeight: 10,
     proxyEnabled: false,
+    catalog: { known: false },
+    modelCycle: [],
   };
 }
 

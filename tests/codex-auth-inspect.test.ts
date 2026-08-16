@@ -110,6 +110,35 @@ describe('inspectCodexAuth — expiry edge cases', () => {
   });
 });
 
+describe('inspectCodexAuth — accountSuffix ellipsis is conditional', () => {
+  it('prefixes ellipsis when account id is longer than 6 characters (normal UUID)', () => {
+    const state = inspectCodexAuth(authFile());
+    expect(state.kind).toBe('present');
+    if (state.kind !== 'present') return;
+    // ACCOUNT_ID is a 36-char UUID — last 6 chars are 'd8e65c', prefixed with '…'
+    expect(state.accountSuffix).toBe('…d8e65c');
+  });
+
+  it('no ellipsis when account id is exactly 6 characters — no characters were elided', () => {
+    const shortId = 'abc123';
+    const raw = authFile({ tokens: { access_token: jwt({ exp: EXP_SECONDS }), account_id: shortId } });
+    const state = inspectCodexAuth(raw);
+    expect(state.kind).toBe('present');
+    if (state.kind !== 'present') return;
+    // 6 chars ≤ ACCOUNT_SUFFIX_LENGTH — returned as-is, no false-truncation prefix
+    expect(state.accountSuffix).toBe('abc123');
+  });
+
+  it('no ellipsis when account id is fewer than 6 characters', () => {
+    const shortId = 'abc';
+    const raw = authFile({ tokens: { access_token: jwt({ exp: EXP_SECONDS }), account_id: shortId } });
+    const state = inspectCodexAuth(raw);
+    expect(state.kind).toBe('present');
+    if (state.kind !== 'present') return;
+    expect(state.accountSuffix).toBe('abc');
+  });
+});
+
 describe('inspectCodexAuth — states the relay would reject', () => {
   it('non-JSON input', () => {
     const state = inspectCodexAuth('not json at all');

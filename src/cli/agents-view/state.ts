@@ -134,6 +134,17 @@ function cyclePrev(cycle: readonly string[], current: string): string {
   return cycle[(idx - 1 + cycle.length) % cycle.length];
 }
 
+/**
+ * True when `model` is not present in `cycle`.
+ *
+ * Single predicate for the off-cycle membership test — three sites previously
+ * used inline `!cycle.includes(model)` with three different phrasings.
+ * Centralised here so intent is visible at every call site. applies ADR-003.
+ */
+export function isOffCycle(cycle: readonly string[], model: string): boolean {
+  return !cycle.includes(model);
+}
+
 // ---------------------------------------------------------------------------
 // Dirty helpers (pure, exported for render and tests)
 // ---------------------------------------------------------------------------
@@ -191,7 +202,7 @@ function cycleField(
     // Build effective cycle: splice off-cycle pin at the end if present.
     // This is the ≤ 1 array allocation case (AC-P6): only allocates when offCyclePin != null.
     const effectiveCycle: readonly string[] =
-      row.offCyclePin !== null && !modelCycle.includes(row.offCyclePin)
+      row.offCyclePin !== null && isOffCycle(modelCycle, row.offCyclePin)
         ? [...modelCycle, row.offCyclePin]
         : modelCycle;
 
@@ -274,7 +285,7 @@ export function buildRow(input: InitRowInput): AgentRow {
     input.savedModel !== undefined &&
     input.savedModel !== 'default' &&
     cycle.length > 0 &&
-    !cycle.includes(input.savedModel)
+    isOffCycle(cycle, input.savedModel)
       ? input.savedModel
       : null;
 

@@ -72,13 +72,15 @@ function normalizeKey(str: string, key: ReadlineKey | null | undefined): string 
 /**
  * Minimal stdin/stdout surface required by the TUI shell.
  * Default values are process.stdin/stdout. Exposed so tests can pass fake streams.
+ *
+ * `stdin` is typed as `NodeJS.ReadableStream` (which extends `NodeJS.EventEmitter`)
+ * so `readline.emitKeypressEvents` accepts it directly — no bridging cast needed.
+ * `PassThrough` and other `Readable` subclasses satisfy this interface.
  */
 export interface TuiIO {
-  stdin: NodeJS.EventEmitter & {
+  stdin: NodeJS.ReadableStream & {
     isTTY?: boolean;
     setRawMode?: (mode: boolean) => void;
-    resume(): void;
-    pause(): void;
   };
   stdout: NodeJS.EventEmitter & {
     rows?: number;
@@ -143,9 +145,9 @@ export async function runAgentsTui(
   const stdout: TuiIO['stdout'] = (io?.stdout ?? process.stdout) as TuiIO['stdout'];
 
   // ── Enable readline keypress events ─────────────────────────────────────
-  // Cast required: readline expects NodeJS.ReadableStream; real stdin and test
-  // PassThrough streams both satisfy it at runtime.
-  readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadableStream);
+  // TuiIO.stdin is NodeJS.ReadableStream, which readline.emitKeypressEvents expects
+  // directly. PassThrough (tests) and process.stdin (production) both satisfy it.
+  readline.emitKeypressEvents(stdin);
 
   // ── Enter alt-screen, hide cursor ───────────────────────────────────────
   stdout.write(ENTER_ALT + HIDE_CURSOR);

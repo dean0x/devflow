@@ -36,6 +36,7 @@ import {
   isDirtyModel,
   isDirtyEffort,
   unsavedCount,
+  isOffCycle,
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
@@ -80,6 +81,17 @@ function truncateVisible(s: string, maxWidth: number): string {
   return truncate(raw, maxWidth);
 }
 
+/** Options for renderModelCell — named to prevent silent argument transposition. */
+interface RenderModelCellOptions {
+  readonly row: AgentRow;
+  readonly isCursor: boolean;
+  /** Whether the model field is the currently active field on the cursor row. */
+  readonly isActive: boolean;
+  readonly maxWidth: number;
+  readonly catalog: ExternalModelCatalog;
+  readonly modelCycle: readonly string[];
+}
+
 /**
  * Render the model cell for a given row, considering cursor/active/dirty state.
  *
@@ -92,14 +104,14 @@ function truncateVisible(s: string, maxWidth: number): string {
  *
  * Dormant model: proxy off, saved external model → "default (hint) model saved".
  */
-function renderModelCell(
-  row: AgentRow,
-  isCursor: boolean,
-  isActive: boolean,
-  maxWidth: number,
-  catalog: ExternalModelCatalog,
-  modelCycle: readonly string[],
-): string {
+function renderModelCell({
+  row,
+  isCursor,
+  isActive,
+  maxWidth,
+  catalog,
+  modelCycle,
+}: RenderModelCellOptions): string {
   const dirty = isDirtyModel(row);
 
   let valueStr: string;
@@ -111,7 +123,7 @@ function renderModelCell(
       // Dormant: show saved model name as dim annotation
       valueStr += ` ${dim(`${row.dormantModel} saved`)}`;
     }
-  } else if (!modelCycle.includes(row.configuredModel)) {
+  } else if (isOffCycle(modelCycle, row.configuredModel)) {
     // Off-cycle pin: model was saved but is no longer in the discovered catalog.
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.
@@ -255,7 +267,14 @@ export function renderFrame(
       agentW,
     );
     const modelCell = padToVisible(
-      renderModelCell(row, isCursor, isCursor && activeField === 'model', modelW, catalog, modelCycle),
+      renderModelCell({
+        row,
+        isCursor,
+        isActive: isCursor && activeField === 'model',
+        maxWidth: modelW,
+        catalog,
+        modelCycle,
+      }),
       modelW,
     );
     const effortCell = renderEffortCell(
