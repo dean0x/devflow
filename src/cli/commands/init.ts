@@ -1230,10 +1230,9 @@ export const initCommand = new Command('init')
     // Runs before the settings mutation pass so that proxyEnabled reflects reality
     // (preflight failure forces it off without aborting init — avoids PF-009).
     //
-    // REG-2: Read existing proxy state once to recover the remembered port.
-    // Init has no --port option; the remembered port from proxy.json always wins
-    // over DEFAULT_PROXY_PORT, mirroring the resolvePort(undefined, priorPort)
-    // semantics established by the TS-1 remembered-port contract in proxy.ts.
+    // Read existing proxy state once to recover the remembered port.
+    // Init has no --port option; the remembered port from proxy.json always
+    // wins over DEFAULT_PROXY_PORT (matching proxy.ts enable semantics).
     const priorProxyStateResult = await readProxyState(devflowDir);
     const effectivePort = priorProxyStateResult.ok
       ? priorProxyStateResult.value.port
@@ -1281,13 +1280,11 @@ export const initCommand = new Command('init')
             'Routing disabled for this init — run `devflow proxy --enable` after signing in.',
           );
           proxyEnabled = false;
-          // REG-1: Write proxy.json disabled so runtime authority converges with the
-          // failed preflight outcome (avoids PF-015 — toggle fan-out convergence).
-          // Without this write, proxy.json stays enabled:true from the prior run;
-          // isProxyEnabled() reads only that file, so the next TUI save would call
-          // reapplyAgentMapping({proxyEnabled:true}) and write GPT model IDs into
-          // agent frontmatter with no relay and no hook — the exact dormancy inversion
-          // commit 42e6f29 was written to prevent.
+          // Write proxy.json disabled so runtime authority converges with the
+          // failed preflight outcome (avoids PF-015). Without this write,
+          // proxy.json stays enabled:true from the prior run, causing
+          // reapplyAgentMapping to write GPT model IDs into agent frontmatter
+          // with no relay — a dormancy inversion.
           if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
             const disableResult = await writeProxyState(devflowDir, buildProxyState({
               enabled: false,
@@ -1318,9 +1315,8 @@ export const initCommand = new Command('init')
     } else {
       // Proxy disabled at entry: if proxy.json exists and is enabled, mark it disabled.
       // avoids PF-015: runtime authority (proxy.json) must converge with proxyEnabled=false.
-      // REL-2: check the Result — the enable branch above checks !writeResult.ok;
-      // this path must be consistent (the discarded .catch() left proxy.json enabled:true
-      // on write failure, with no relay or hook to match — dormancy violation).
+      // Check the Result — write errors are surfaced rather than silently ignored
+      // (consistent with the enable branch above).
       if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
         const disableResult = await writeProxyState(devflowDir, buildProxyState({
           enabled: false,

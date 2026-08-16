@@ -119,10 +119,10 @@ export async function readAgentMapping(
       const mapping: AgentMapping = {};
 
       if (typeof raw.model === 'string') {
-        // C2-SEC-2: tighten to the same charset used by rewriteAgentFrontmatter.
-        // The effort field is enum-validated three lines below; model must be
-        // equally strict. An invalid entry is dropped with a warning rather than
-        // silently persisting and permanently poisoning that agent on every reapply.
+        // Tighten to the same charset used by rewriteAgentFrontmatter.
+        // The effort field is enum-validated below; model must be equally strict.
+        // An invalid entry is dropped with a warning rather than silently
+        // persisting and permanently poisoning that agent on every reapply.
         if (isValidModelName(raw.model)) {
           mapping.model = raw.model;
         } else {
@@ -297,7 +297,7 @@ export interface ReapplyResult {
   skippedMissing: string[];
   /**
    * Agent names skipped because their model name in agent-models.json is invalid.
-   * C2-REG-3: distinct bucket so callers can point the user at the right artifact
+   * Distinct bucket so callers can point the user at the right artifact
    * (agent-models.json, not the installed .md file).
    */
   invalidMapping: string[];
@@ -339,7 +339,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const allNames = new Set([...registryNames, ...mappingNames]);
 
   // 'write-error' = warning emitted but agent placed in no bucket (original semantics).
-  // 'invalid-mapping' = model name in agent-models.json was invalid (C2-REG-3).
+  // 'invalid-mapping' = model name in agent-models.json was invalid.
   type AgentBucket = 'updated' | 'unchanged' | 'skipped' | 'write-error' | 'invalid-mapping';
   type AgentOutcome = { bucket: AgentBucket; localWarnings: string[] };
 
@@ -382,7 +382,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
 
       if (!rewriteResult.ok) {
         if (rewriteResult.error === 'invalid-model') {
-          // C2-REG-3: the invalid model came from agent-models.json (the mapping),
+          // The invalid model came from agent-models.json (the mapping),
           // not from the installed .md file. Name the real artifact so the user
           // knows where to look; file under invalidMapping (not skippedMissing).
           localWarn(

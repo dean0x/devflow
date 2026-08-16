@@ -114,10 +114,10 @@ function renderModelCell({
 }: RenderModelCellOptions): string {
   const dirty = isDirtyModel(row);
 
-  // C2-SEC-3: model names come from user-controlled config and the third-party
-  // external model catalog. Strip ANSI escapes at the display boundary so
-  // hostile sequences cannot reach the terminal. Original values are used for
-  // map lookups and cycle checks (logic), safe copies only for display strings.
+  // Model names come from user-controlled config and the third-party external
+  // model catalog. Strip ANSI escapes at the display boundary so hostile
+  // sequences cannot reach the terminal. Original values are used for map
+  // lookups and cycle checks; safe copies for display strings only.
   const safeConfiguredModel = stripAnsi(row.configuredModel);
   const safeShippedDefault = stripAnsi(row.shippedDefault);
   const safeDormantModel = row.dormantModel !== null ? stripAnsi(row.dormantModel) : null;

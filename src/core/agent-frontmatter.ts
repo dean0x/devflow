@@ -187,13 +187,11 @@ export function rewriteAgentFrontmatter(
   content: string,
   opts: RewriteOptions,
 ): Result<RewriteResult, FrontmatterError> {
-  // S1 — Frontmatter injection guard (CRITICAL, pre-existing defect).
-  //
-  // Without this check, a malicious model name such as
+  // Frontmatter injection guard: reject model names that do not satisfy
+  // MODEL_NAME_RE before touching the file. Without this check, a name such as
   //   "gpt-4\ntools:\n  - bash"
   // would be interpolated raw into `newBody.replace(MODEL_RE, ...)`, injecting
-  // arbitrary YAML into the frontmatter block.  Reject any name that does not
-  // satisfy the MODEL_NAME_RE charset before touching the file.
+  // arbitrary YAML into the frontmatter block.
   if (!isValidModelName(opts.model)) {
     return Err('invalid-model');
   }
@@ -236,7 +234,7 @@ export function rewriteAgentFrontmatter(
       if (currentEffort !== opts.effort) {
         // Use a replacement function — NOT a string — so that $&, $`, $',
         // and $1 in opts.effort are written verbatim rather than expanded as
-        // replacement patterns (S1 defence-in-depth; avoids PF-018).
+        // replacement patterns (avoids PF-018).
         newBody = newBody.replace(EFFORT_RE, () => `effort: ${opts.effort}`);
       }
     } else {

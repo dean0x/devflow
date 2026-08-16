@@ -99,7 +99,7 @@ const LOG_WRITE_CAP = 2_048;
  * Maximum bytes for a single cache-entry read in the discovery scanner.
  * The live payload is ~1 KB; 64 KB is 64× headroom. Entries exceeding this
  * cap are treated as corrupt and skipped. Enforced via parseDiscoveryFileContent,
- * the shared helper used by all three enumeration sites (C2-REL-4).
+ * the shared helper used by all three enumeration sites.
  */
 const MAX_ENTRY_BYTES = 65_536;
 
@@ -375,12 +375,9 @@ function validateCachedString(data: unknown): string | null {
 /**
  * Parse raw bytes from a discovery cache file.
  *
- * Single shared helper for all three enumeration sites (C2-ARCH-3): eliminates
- * the three previously separate readFileSync→parseRawEnvelope→validate-string
- * re-implementations that each independently re-derived the on-disk layout.
- *
- * Enforces MAX_ENTRY_BYTES to bound memory allocation on corrupt or oversized
- * entries (C2-REL-4). Pure: no I/O. Callers own the read (sync or async).
+ * Single shared helper for all three enumeration sites. Enforces MAX_ENTRY_BYTES
+ * to bound memory allocation on corrupt or oversized entries. Pure: no I/O.
+ * Callers own the read (sync or async).
  *
  * Returns null when the entry exceeds the size cap, fails JSON/envelope
  * parsing, or contains a non-string data field.
@@ -422,7 +419,6 @@ async function findStaleFallback(
     if (skipKey !== null && key === skipKey) continue;
 
     try {
-      // C2-REL-5: async read inside async function; size guard + parse via shared helper.
       const buf = await fsAsync.readFile(path.join(cacheDir, entry));
       const parsed = parseDiscoveryFileContent(buf);
       if (parsed === null) continue;
@@ -451,9 +447,9 @@ async function pruneOldEntries(cacheDir: string): Promise<void> {
     for (const entry of entries) {
       if (!entry.startsWith(CACHE_KEY_PREFIX)) continue;
 
-      // C2-REL-3: reap orphaned atomic-write temp files (<key>.json.tmp.<pid>).
-      // These accumulate when the writer process is interrupted after the tmp write
-      // but before the rename completes (e.g., Ctrl-C after the enable outro prints).
+      // Reap orphaned atomic-write temp files (<key>.json.tmp.<pid>).
+      // These accumulate when the writer is interrupted between the tmp write
+      // and the rename (e.g., Ctrl-C during enable).
       if (entry.includes('.json.tmp.')) {
         try { await fsAsync.unlink(path.join(cacheDir, entry)); } catch { /* non-fatal */ }
         continue;
@@ -462,7 +458,6 @@ async function pruneOldEntries(cacheDir: string): Promise<void> {
       if (!entry.endsWith('.json')) continue;
 
       try {
-        // C2-REL-5: async read inside async function; size guard + parse via shared helper.
         const buf = await fsAsync.readFile(path.join(cacheDir, entry));
         const parsed = parseDiscoveryFileContent(buf);
         if (parsed !== null) {
@@ -507,8 +502,8 @@ async function appendToLog(logPath: string, msg: string): Promise<void> {
     const handle = await openProxyLog(logPath);
     try {
       const line = `${msg}\n`;
-      // C2-REL-6: encode first, then slice bytes — slicing the JS string first
-      // slices UTF-16 code units before encoding, allowing up to ~4× the intended
+      // Encode first, then slice bytes — slicing the JS string first would
+      // slice UTF-16 code units before encoding, allowing up to ~4× the intended
       // byte cap for non-ASCII content.
       await handle.write(Buffer.from(line).subarray(0, LOG_WRITE_CAP));
     } finally {
@@ -695,13 +690,12 @@ async function _discoverInternal(
   }
 
   // --- Stale-cache fallback — started concurrently with spawn, awaited only on failure ---
-  // C2-PERF-3: happy path returns before the await below; running the lookup concurrently
+  // Happy path returns before the await below; running the lookup concurrently
   // with the spawn means the failure path incurs no extra latency (findStaleFallback
   // completes during the spawn's SPAWN_TIMEOUT_MS window).
   const staleRawP = findStaleFallback(cacheDir, currentKey);
 
   // --- Live spawn ---
-  // C2-ARCH-7: scrubChildEnv is already statically imported from './proxy-log.js' (line 31).
   const env: NodeJS.ProcessEnv = { ...scrubChildEnv(), NO_COLOR: '1' };
   const spawnFn = deps?.spawnAndCollect ?? buildRealSpawnAndCollect(logPath);
 
@@ -730,9 +724,9 @@ async function _discoverInternal(
       return { known: true, ...parsed.value, source: 'live' };
     }
     // Parse failed even though spawn succeeded.
-    // C2-SEC-5: strip control characters (including \n, \r) from untrusted runtime
-    // output before embedding in the log line to prevent log-line injection.
-    // LOG_WRITE_CAP bounds total length but not embedded newlines.
+    // Strip control characters from untrusted runtime output before embedding
+    // in the log line to prevent log-line injection (LOG_WRITE_CAP bounds total
+    // length but not embedded newlines).
     // eslint-disable-next-line no-control-regex
     const safeError = parsed.error.replace(/[\x00-\x1f\x7f]/g, ' ');
     await appendToLog(logPath, `[model-discovery] parse failed: ${safeError}`);
@@ -783,9 +777,7 @@ export function getExternalModelsCached(cacheDir: string): ExternalModelCatalog 
   for (const entry of entries) {
     if (!entry.startsWith(CACHE_KEY_PREFIX) || !entry.endsWith('.json')) continue;
     try {
-      // C2-ARCH-3: route through shared helper for consistent size guard and parsing.
-      // C2-REL-4: size guard enforced in parseDiscoveryFileContent (MAX_ENTRY_BYTES).
-      // Sync read is correct here — getExternalModelsCached is intentionally synchronous.
+      // Sync read is intentional; size guard and parsing via the shared helper.
       const buf = fs.readFileSync(path.join(cacheDir, entry));
       const result = parseDiscoveryFileContent(buf);
       if (result === null) continue;
@@ -803,7 +795,6 @@ export function getExternalModelsCached(cacheDir: string): ExternalModelCatalog 
   if (!parsed.ok) return { known: false };
 
   const age = Date.now() - best.timestamp;
-  // C2-ARCH-1: use exported MAX_TTL_MS from cache.ts — a comment is not a constraint.
   const ttlClamped = Math.min(Math.abs(best.ttl), MAX_TTL_MS);
   const source: 'cache' | 'stale-cache' = age < ttlClamped ? 'cache' : 'stale-cache';
 

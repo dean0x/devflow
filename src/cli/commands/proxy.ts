@@ -151,7 +151,7 @@ function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
  * Mutate a parsed Settings object in place: remove ANTHROPIC_BASE_URL only when
  * its value exactly matches our relay on the given managed port.
  *
- * REG-1: scoped to `managedPort` so a user's own localhost gateway (LiteLLM,
+ * Scoped to `managedPort` so a user's own localhost gateway (LiteLLM,
  * local Ollama proxy, etc.) on ANY other port is never clobbered.
  * The caller is responsible for passing the port Devflow currently owns:
  *   - disable path  → proxy.json.port (or DEFAULT_PROXY_PORT)
@@ -216,8 +216,8 @@ export function applyProxyEnv(settingsJson: string, port: number): string {
  * Remove ANTHROPIC_BASE_URL from settings JSON, but ONLY when its value exactly
  * matches our relay on `managedPort`.
  *
- * REG-1: `managedPort` scopes the strip to the port Devflow owns — a user's own
- * localhost gateway on any other port is never touched.  Pass `proxy.json.port`
+ * `managedPort` scopes the strip to the port Devflow owns — a user's own
+ * localhost gateway on any other port is never touched. Pass `proxy.json.port`
  * (or `DEFAULT_PROXY_PORT` when the file is absent) at every call site.
  *
  * Returns new serialized settings string. Does not mutate input.
@@ -289,7 +289,7 @@ export function removeProxyHooks(settings: Settings): boolean {
  * settings when hooks were present, keeping new sessions pointed at a disabled
  * relay.
  *
- * REG-1: `managedPort` scopes the URL strip to the port Devflow owns — pass
+ * `managedPort` scopes the URL strip to the port Devflow owns — pass
  * `proxy.json.port` (or `DEFAULT_PROXY_PORT`) at the call site.
  *
  * Mutates settings in place. Returns true when any change was made.
@@ -384,7 +384,7 @@ export interface PreflightResult {
  * ③ Port probe: free → OK; accepting → health check → adopt or fail.
  * ④ settings.json parseable; ANTHROPIC_BASE_URL not pointing elsewhere; API key warn.
  *
- * Doctor (previously check ⑤) is deliberately excluded: the relay's doctor subcommand
+ * Doctor is deliberately excluded from preflight: the relay's doctor subcommand
  * probes the relay port — a not-yet-started relay makes that probe fail (exit 1). A
  * pre-spawn gate is therefore always unsatisfiable on a cold path. Doctor now runs in
  * runPostSpawnVerification, after the relay is confirmed up. See D-EFR-2.
@@ -489,14 +489,14 @@ async function realTcpConnectable(port: number, timeoutMs: number): Promise<bool
 /**
  * Production HTTP/HTTPS GET implementation — selects module from URL scheme.
  *
- * Three resource bounds (avoids the reliability pitfall in C2-REL-1):
+ * Three resource bounds:
  *   • Wall-clock total deadline: fires when 'end' never arrives (SSE / trickle server).
  *     `--disable` probes precisely the port Devflow no longer owns, so any local
  *     service that trickles bytes could pin the CLI forever without this bound.
  *   • 64 KB body cap: aborts before accumulating unbounded memory.
  *   • res.on('error') listener: response-stream errors are caught, not ignored.
  *
- * Exported for reliability tests (C2-REL-1).
+ * Exported for reliability tests.
  */
 export async function realHttpGet(url: string, timeoutMs: number): Promise<Result<string, string>> {
   const mod = url.startsWith('https://') ? https : http;
@@ -802,8 +802,6 @@ function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
   };
 }
 
-// ─── Atomic settings mutation for enable ─────────────────────────────────────
-
 // ─── Post-spawn doctor verification ──────────────────────────────────────────
 
 /**
@@ -906,7 +904,7 @@ async function applyEnableSettingsPass(
   }
 
   // Atomic 4-call settings mutation: strip stale entries, then apply fresh ones.
-  // REG-1: strip is scoped to `port` (the new port being applied). The apply
+  // Strip is scoped to `port` (the new port being applied). The apply
   // call below always overwrites ANTHROPIC_BASE_URL regardless, so the strip
   // here primarily removes any exact-port match before the write-set cycle.
   removeProxyHooks(parsedSettings);
@@ -1057,7 +1055,7 @@ export function formatCodexAuthLine(
         msg: `Codex auth: ${color.red(`unreadable (${state.reason})`)} at ${authPath} — run codex login`,
       };
     case 'present': {
-      // C2-SEC-3: authMode comes from the third-party ~/.codex/auth.json; strip
+      // authMode comes from the third-party ~/.codex/auth.json; strip
       // ANSI escapes and cap length before embedding in terminal output.
       const safeAuthMode = stripAnsi(state.authMode).slice(0, AUTH_MODE_MAX_LEN);
       const identity = `${safeAuthMode}, ${state.accountSuffix}`;
@@ -1085,9 +1083,6 @@ export function formatCodexAuthLine(
  * When portOption is undefined (--port flag not provided by the user), falls back to
  * priorPort from proxy.json. This is the remembered-port path: a user who enabled on
  * port 5000, disabled, then re-enables without --port correctly reuses 5000.
- *
- * Previously the commander option carried a String(DEFAULT_PROXY_PORT) default so
- * portOption was never undefined — the fallback was dead code (TS-1 regression).
  *
  * @param portOption  Commander --port value; undefined when flag not provided
  * @param priorPort   Last-used port from proxy.json (or DEFAULT_PROXY_PORT)
@@ -1439,10 +1434,10 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   });
   const mappedCount = reapplyResult.updated.length;
 
-  // C2-PERF-2: warm the model cache UNDER the spinner so the wait is visible
-  // and attributed. Strictly non-fatal — applies PF-009; a cache failure must
-  // never affect the enable result. The promise is awaited so Node can exit
-  // cleanly immediately after s.stop, instead of being held open ~200-600ms.
+  // Warm the model cache UNDER the spinner so the wait is visible and
+  // attributed. Strictly non-fatal — a cache failure must never affect the
+  // enable result. The promise is awaited so Node can exit cleanly after
+  // s.stop, instead of being held open ~200-600ms.
   s.message('Warming model cache...');
   await discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
 
@@ -1475,8 +1470,8 @@ async function runDisable(): Promise<void> {
   const pidPath = path.join(devflowDir, 'proxy.pid');
 
   // Read prior state FIRST (before settings pass) to determine managed port.
-  // REG-1: applyDisableToSettings strips ANTHROPIC_BASE_URL only when the URL
-  // port matches the port Devflow manages — callers must supply it.  Reading
+  // applyDisableToSettings strips ANTHROPIC_BASE_URL only when the URL
+  // port matches the port Devflow manages — callers must supply it. Reading
   // proxy.json here also consolidates state for Step 2 below.
   const priorStateResult = await readProxyState(devflowDir);
   const priorState = priorStateResult.ok ? priorStateResult.value : null;
@@ -1521,7 +1516,6 @@ async function runDisable(): Promise<void> {
     configPath: priorState?.configPath ?? null,
     devflowVersion: getDevflowVersion(),
   });
-  // REL-2: guard proxy state write
   const writeDisabledResult = await writeProxyState(devflowDir, disabledState);
   if (!writeDisabledResult.ok) {
     p.log.error(`Could not write proxy state: ${writeDisabledResult.error}`);
@@ -1538,7 +1532,6 @@ async function runDisable(): Promise<void> {
   p.log.success('External model routing disabled — takes effect in new Claude Code sessions');
 
   // Step 5: Note about running relay (plan D3: leave it running for live sessions)
-  // CPLX-7: readPidFile replaces the inline read/parse/validate idiom
   const pidFromFile = await readPidFile(pidPath);
   if (pidFromFile !== null) {
     try {

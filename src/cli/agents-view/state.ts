@@ -133,10 +133,7 @@ function cyclePrev(cycle: readonly string[], current: string): string {
 
 /**
  * True when `model` is not present in `cycle`.
- *
- * Single predicate for the off-cycle membership test — three sites previously
- * used inline `!cycle.includes(model)` with three different phrasings.
- * Centralised here so intent is visible at every call site. applies ADR-003.
+ * Named predicate for intent visibility at every call site.
  */
 export function isOffCycle(cycle: readonly string[], model: string): boolean {
   return !cycle.includes(model);

@@ -289,7 +289,7 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
       }
     }
 
-    // S2 — strip escape sequences from all user-derived fields before column
+    // Strip escape sequences from all user-derived fields before column
     // arithmetic and terminal output to prevent injection via model IDs.
     lines.push(
       [
@@ -661,10 +661,9 @@ export const agentsCommand = new Command('agents')
     type RaceResult =
       | { kind: 'done'; catalog: ExternalModelCatalog }
       | { kind: 'timeout' };
-    // C2-CPLX-4: capture the timer so we can clear it on the fast path.
-    // Without clearTimeout, a fast cache hit leaves a 250ms handle pending and
-    // keeps the event loop alive after the TUI resolves (sibling pattern: proxy.ts,
-    // model-discovery.ts both clear/unref their timer handles).
+    // Capture the timer so we can clear it on the fast path. Without
+    // clearTimeout, a fast cache hit leaves a 250ms handle pending and keeps
+    // the event loop alive after the TUI resolves.
     let spinnerTimer: ReturnType<typeof setTimeout> | undefined;
     const raceOutcome = await Promise.race<RaceResult>([
       discoveryPromise.then(c => ({ kind: 'done' as const, catalog: c })),
