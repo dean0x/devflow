@@ -100,6 +100,19 @@ describe('validateSetArgs', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('rejects hostile model string on cache miss (charset validation — avoids PF-017)', () => {
+    // C2-SEC-2: A string containing injection characters (newlines, YAML metacharacters)
+    // must be rejected even when the catalog is unknown (cache miss). Charset validation
+    // must apply at the CLI boundary regardless of catalog state — avoids PF-017 gap
+    // where only a subset of paths was defended.
+    const hostile = 'gpt\ntools:\n  - bash';
+    const result = validateSetArgs({ model: hostile });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('model');
+    }
+  });
+
   it('rejects unknown effort level', () => {
     const result = validateSetArgs({ effort: 'turbo' });
     expect(result.ok).toBe(false);

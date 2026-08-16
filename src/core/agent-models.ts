@@ -27,7 +27,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
-import { rewriteAgentFrontmatter, readFrontmatterModel } from './agent-frontmatter.js';
+import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
 import { agentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 
@@ -109,7 +109,15 @@ export async function readAgentMapping(
       const mapping: AgentMapping = {};
 
       if (typeof raw.model === 'string') {
-        mapping.model = raw.model;
+        // C2-SEC-2: tighten to the same charset used by rewriteAgentFrontmatter.
+        // The effort field is enum-validated three lines below; model must be
+        // equally strict. An invalid entry is dropped with a warning rather than
+        // silently persisting and permanently poisoning that agent on every reapply.
+        if (isValidModelName(raw.model)) {
+          mapping.model = raw.model;
+        } else {
+          warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
+        }
       }
 
       if (typeof raw.effort === 'string') {
@@ -275,6 +283,12 @@ export interface ReapplyResult {
   unchanged: string[];
   /** Agent names whose installed files were not found (skipped silently). */
   skippedMissing: string[];
+  /**
+   * Agent names skipped because their model name in agent-models.json is invalid.
+   * C2-REG-3: distinct bucket so callers can point the user at the right artifact
+   * (agent-models.json, not the installed .md file).
+   */
+  invalidMapping: string[];
   /** Warning messages emitted during processing. */
   warnings: string[];
 }
@@ -300,7 +314,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const mappingResult = await readAgentMapping(opts.devflowDir, { onWarning: warn });
   if (!mappingResult.ok) {
     warn(`reapplyAgentMapping: failed to read mapping — ${mappingResult.error}`);
-    return { updated: [], unchanged: [], skippedMissing: [], warnings };
+    return { updated: [], unchanged: [], skippedMissing: [], invalidMapping: [], warnings };
   }
   const mapping = mappingResult.value;
 
@@ -313,7 +327,8 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const allNames = new Set([...registryNames, ...mappingNames]);
 
   // 'write-error' = warning emitted but agent placed in no bucket (original semantics).
-  type AgentBucket = 'updated' | 'unchanged' | 'skipped' | 'write-error';
+  // 'invalid-mapping' = model name in agent-models.json was invalid (C2-REG-3).
+  type AgentBucket = 'updated' | 'unchanged' | 'skipped' | 'write-error' | 'invalid-mapping';
   type AgentOutcome = { bucket: AgentBucket; localWarnings: string[] };
 
   // Stable iteration order — Set preserves insertion order, array fixes it for the map.
@@ -354,7 +369,18 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
       });
 
       if (!rewriteResult.ok) {
-        localWarn(`reapplyAgentMapping: malformed frontmatter in ${agentName}.md (${rewriteResult.error}) — skipping`);
+        if (rewriteResult.error === 'invalid-model') {
+          // C2-REG-3: the invalid model came from agent-models.json (the mapping),
+          // not from the installed .md file. Name the real artifact so the user
+          // knows where to look; file under invalidMapping (not skippedMissing).
+          localWarn(
+            `reapplyAgentMapping: invalid-model name in agent-models.json for "${agentName}" — skipping`
+          );
+          return { bucket: 'invalid-mapping', localWarnings };
+        }
+        localWarn(
+          `reapplyAgentMapping: malformed frontmatter in ${agentName}.md (${rewriteResult.error}) — skipping`
+        );
         return { bucket: 'skipped', localWarnings }; // treated as unprocessable
       }
 
@@ -376,20 +402,22 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const updated: string[] = [];
   const unchanged: string[] = [];
   const skippedMissing: string[] = [];
+  const invalidMapping: string[] = [];
 
   for (let i = 0; i < allNamesList.length; i++) {
     const agentName = allNamesList[i];
     const { bucket, localWarnings } = perResults[i];
     warnings.push(...localWarnings);
     switch (bucket) {
-      case 'updated':    updated.push(agentName); break;
-      case 'unchanged':  unchanged.push(agentName); break;
-      case 'skipped':    skippedMissing.push(agentName); break;
-      case 'write-error': break; // warning already emitted; no bucket (original semantics)
+      case 'updated':         updated.push(agentName); break;
+      case 'unchanged':       unchanged.push(agentName); break;
+      case 'skipped':         skippedMissing.push(agentName); break;
+      case 'invalid-mapping': invalidMapping.push(agentName); break;
+      case 'write-error':     break; // warning already emitted; no bucket (original semantics)
     }
   }
 
-  return { updated, unchanged, skippedMissing, warnings };
+  return { updated, unchanged, skippedMissing, invalidMapping, warnings };
 }
 
 // ---------------------------------------------------------------------------

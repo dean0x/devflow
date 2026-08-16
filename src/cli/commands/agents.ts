@@ -31,6 +31,7 @@ import {
   type AgentMapping,
 } from '../../core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
+import { isValidModelName } from '../../core/agent-frontmatter.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
 import {
@@ -101,6 +102,17 @@ export function validateSetArgs(
   }
 
   if (model !== undefined) {
+    // Charset gate: applied at every trust boundary regardless of catalog state.
+    // Rejects injection payloads (newlines, YAML metacharacters) before they can
+    // propagate to agent-models.json or agent frontmatter. avoids PF-017: allowlist
+    // what the callee actually consumes rather than denylist individual bad chars.
+    if (!isValidModelName(model)) {
+      return Err(
+        `Invalid model name "${model}". Model names must start with an alphanumeric character ` +
+        `and contain only alphanumeric, dot, underscore, or hyphen characters (max 64 chars).`
+      );
+    }
+
     if (catalog.known) {
       // Full validation against the discovered catalog.
       const valid = [
@@ -114,7 +126,7 @@ export function validateSetArgs(
         );
       }
     }
-    // else: catalog unknown (cache miss) → accept any model name; dormancy
+    // else: catalog unknown (cache miss) → charset-valid name accepted; dormancy
     // warning fires at agents.ts call site if the proxy is off.
   }
 
@@ -575,11 +587,23 @@ export const agentsCommand = new Command('agents')
         proxyEnabled,
       });
 
-      // Warn on GPT model while proxy off
+      // Warn on non-Claude model while proxy off.
+      // Distinguish: catalog-known (verified dormant) vs cache-miss (unverified).
+      // On a cache miss "dormant" implies the model will work when the proxy is
+      // enabled — that is actively wrong for a typo or misremembered model ID.
       if (isDormantExternalModel(options.model, proxyEnabled)) {
-        p.log.warn(
-          `GPT model saved — inactive until you run ${color.bold('devflow proxy --enable')}`
-        );
+        if (setCatalog.known) {
+          p.log.warn(
+            `GPT model saved — inactive until you run ${color.bold('devflow proxy --enable')}`
+          );
+        } else {
+          // Cache miss: model name was not verified against the live catalog.
+          p.log.warn(
+            `Model saved but not yet verified against the external catalog (cache cold or proxy off). ` +
+            `Run ${color.bold('devflow proxy --enable')} then ` +
+            `${color.bold('devflow agents --list')} to confirm the model is recognised.`
+          );
+        }
       }
 
       for (const warn of reapplyResult.warnings) {
@@ -636,19 +660,31 @@ export const agentsCommand = new Command('agents')
     type RaceResult =
       | { kind: 'done'; catalog: ExternalModelCatalog }
       | { kind: 'timeout' };
+    // C2-CPLX-4: capture the timer so we can clear it on the fast path.
+    // Without clearTimeout, a fast cache hit leaves a 250ms handle pending and
+    // keeps the event loop alive after the TUI resolves (sibling pattern: proxy.ts,
+    // model-discovery.ts both clear/unref their timer handles).
+    let spinnerTimer: ReturnType<typeof setTimeout> | undefined;
     const raceOutcome = await Promise.race<RaceResult>([
       discoveryPromise.then(c => ({ kind: 'done' as const, catalog: c })),
-      new Promise<RaceResult>(r =>
-        setTimeout(() => r({ kind: 'timeout' }), DISCOVERY_SPINNER_DELAY_MS),
-      ),
+      new Promise<RaceResult>(r => {
+        spinnerTimer = setTimeout(() => r({ kind: 'timeout' }), DISCOVERY_SPINNER_DELAY_MS);
+      }),
     ]);
     if (raceOutcome.kind === 'done') {
+      // Fast path: disarm the pending timer so it does not hold the event loop.
+      clearTimeout(spinnerTimer);
       catalog = raceOutcome.catalog;
     } else {
+      // Slow path: timer has already fired; show a spinner for the remaining wait.
+      // try/finally ensures spinner.stop() runs even if discoveryPromise rejects.
       const spinner = p.spinner();
       spinner.start('Discovering available GPT models…');
-      catalog = await discoveryPromise;
-      spinner.stop('');
+      try {
+        catalog = await discoveryPromise;
+      } finally {
+        spinner.stop('');
+      }
     }
 
     const tuiState = await buildTuiState(
