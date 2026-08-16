@@ -22,7 +22,7 @@
  *  - AC-F1: cycle order with full catalog
  *  - AC-F2: alias renders "sol (gpt-5.6-sol)", canonical renders bare
  *  - AC-F4: retired pin stays selected, survives full forward+backward cycle
- *  - AC-F5: proxy off → no external models in cycle
+ *  - AC-F5: proxy off + known catalog → external models ARE present (dormant-mapping design)
  *  - AC-P6: ≤ 1 cycle array allocated per keypress (Object.is check)
  */
 
@@ -104,7 +104,7 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
   const modelCycle: readonly string[] =
     'modelCycle' in overrides
       ? (overrides.modelCycle as readonly string[])
-      : buildModelCycle(proxyEnabled, catalog);
+      : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
     makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
     makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
@@ -166,7 +166,7 @@ describe('buildRow', () => {
   });
 
   it('builds a non-dormant row — external model + proxy ON → configuredModel is the model', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
       name: 'coder',
       shippedDefault: 'sonnet',
@@ -192,7 +192,7 @@ describe('buildRow', () => {
   });
 
   it('detects off-cycle pin when proxy is on and model absent from cycle', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     // 'gpt-4.2-legacy' is not in the catalog
     const row = buildRow({
       name: 'coder',
@@ -219,7 +219,7 @@ describe('buildRow', () => {
   });
 
   it('alias model in cycle is not an off-cycle pin', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
       name: 'coder',
       shippedDefault: 'sonnet',
@@ -238,7 +238,7 @@ describe('buildRow', () => {
 
 describe('T8: alias round-trip', () => {
   it('a mapping of {coder:{model:"sol"}} shows no dirty marker on load', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
       name: 'coder',
       shippedDefault: 'sonnet',
@@ -255,7 +255,7 @@ describe('T8: alias round-trip', () => {
   it('saving without edits leaves the alias unchanged (byte-identical preservation)', () => {
     // Simulate the TUI save path: only dirty rows modify the mapping.
     // If isDirtyModel(row) is false, the original mapping entry is untouched.
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
       name: 'coder',
       shippedDefault: 'sonnet',
@@ -278,7 +278,7 @@ describe('T8: alias round-trip', () => {
 
 describe('AC-F1: cycle order', () => {
   it('with proxy enabled and known catalog, cycle matches expected order', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const expected = [
       'default',
       'haiku', 'sonnet', 'opus', 'fable',  // CLAUDE_MODEL_ALIASES
@@ -295,7 +295,7 @@ describe('AC-F1: cycle order', () => {
 
 describe('AC-F4: off-cycle pin recovery', () => {
   it('off-cycle pin survives a full forward cycle and is still reachable', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const pinRow = makeRow({
       configuredModel: 'gpt-4.2-legacy',
       originalModel: 'gpt-4.2-legacy',
@@ -329,7 +329,7 @@ describe('AC-F4: off-cycle pin recovery', () => {
   });
 
   it('pin is reachable by pressing backward from default', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const pinRow = makeRow({
       configuredModel: 'gpt-4.2-legacy',
       originalModel: 'gpt-4.2-legacy',
@@ -349,13 +349,13 @@ describe('AC-F4: off-cycle pin recovery', () => {
   });
 
   it('pin renders as off-cycle (model not in main cycle)', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     expect(cycle.includes('gpt-4.2-legacy')).toBe(false);
     // This confirms the pin is NOT in the main cycle — render.ts shows (unavailable)
   });
 
   it('pin does not affect dirty flag when it equals original', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_KNOWN);
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const pinRow = makeRow({
       configuredModel: 'gpt-4.2-legacy',
       originalModel: 'gpt-4.2-legacy',
@@ -366,22 +366,24 @@ describe('AC-F4: off-cycle pin recovery', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-F5: proxy off → no external models in cycle
+// AC-F5: catalog drives cycle — proxy state does not suppress external models
 // ---------------------------------------------------------------------------
 
-describe('AC-F5: proxy off — no external models', () => {
-  it('with proxy off, cycle contains only Claude aliases', () => {
-    const cycle = buildModelCycle(false, MOCK_CATALOG_KNOWN);
+describe('AC-F5: known catalog drives model cycle regardless of proxy state', () => {
+  it('with proxy off and known catalog, external models are present in the cycle', () => {
+    // Dormant-mapping design: the TUI must show GPT models even when proxy is off
+    // so users can inspect and adjust dormant mappings before enabling the proxy.
+    const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
+    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES, ...MOCK_CATALOG_KNOWN.selectableNames]);
+  });
+
+  it('with unknown catalog, cycle is claude-only (catalog-known gate holds)', () => {
+    const cycle = buildModelCycle(MOCK_CATALOG_UNKNOWN);
     expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES]);
   });
 
-  it('with proxy off and unknown catalog, cycle is claude-only', () => {
-    const cycle = buildModelCycle(false, MOCK_CATALOG_UNKNOWN);
-    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES]);
-  });
-
-  it('with proxy on and unknown catalog, cycle is claude-only', () => {
-    const cycle = buildModelCycle(true, MOCK_CATALOG_UNKNOWN);
+  it('with unknown catalog and proxy on, cycle is claude-only', () => {
+    const cycle = buildModelCycle(MOCK_CATALOG_UNKNOWN);
     expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES]);
   });
 });
@@ -468,6 +470,35 @@ describe('isDirtyModel / isDirtyEffort / unsavedCount', () => {
   it('unsavedCount is 0 when no dirty rows', () => {
     const rows = [makeRow(), makeRow({ name: 'other' })];
     expect(unsavedCount(rows)).toBe(0);
+  });
+
+  it('not dirty when configuredModel equals dormantModel — cycling to saved GPT value is not a change', () => {
+    // Dormant row: savedModel was 'gpt-5.5', proxy is off → configuredModel starts
+    // at 'default'. User cycles to 'gpt-5.5' — that equals dormantModel so the
+    // persisted mapping entry is unchanged; dirty must be suppressed.
+    const row = makeRow({
+      configuredModel: 'gpt-5.5',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(false);
+  });
+
+  it('dirty when configuredModel differs from both originalModel and dormantModel', () => {
+    // User cycled from 'default' (originalModel) past 'gpt-5.5' (dormantModel) to
+    // something else — that IS a genuine change.
+    const row = makeRow({
+      configuredModel: 'sonnet',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(true);
+  });
+
+  it('dirty when dormantModel is null and configuredModel differs from originalModel', () => {
+    // Non-dormant row: no dormantModel suppression applies.
+    const row = makeRow({ configuredModel: 'opus', originalModel: 'default', dormantModel: null });
+    expect(isDirtyModel(row)).toBe(true);
   });
 });
 

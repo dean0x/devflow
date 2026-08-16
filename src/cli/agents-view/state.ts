@@ -75,7 +75,8 @@ export interface AgentsViewState {
   readonly proxyEnabled: boolean;
   /**
    * Discovered model catalog — built once at TUI startup, startup-constant.
-   * {known:false} when discovery is unavailable or proxy is off.
+   * {known:false} when the cache is empty or discovery was unavailable.
+   * On the proxy-off path the cache-based catalog is used; see selectCatalog().
    */
   readonly catalog: ExternalModelCatalog;
   /**
@@ -98,22 +99,26 @@ export interface ReduceResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the model cycle from a discovered catalog and proxy state.
+ * Build the model cycle from a discovered catalog.
  * Exported so agents.ts can call it once and store the result in state.
  *
- * Cycle order (proxy ON, catalog known):
+ * Cycle order (catalog known):
  *   default → haiku → sonnet → opus → fable →
  *   <aliases in registry order, all models> → <canonical ids> → (wraps)
  *
- * Cycle order (proxy OFF or catalog unknown):
+ * Cycle order (catalog unknown):
  *   default → haiku → sonnet → opus → fable → (wraps)
+ *
+ * Dormancy (proxy off + GPT model saved) does not shrink the cycle — external
+ * models remain selectable so users can inspect and change dormant mappings.
+ * The catalog itself controls what is in the cycle; see selectCatalog() in
+ * agents.ts for how the proxy-off path supplies the cache-based catalog.
  */
 export function buildModelCycle(
-  proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
 ): readonly string[] {
   const base: readonly string[] = ['default', ...CLAUDE_MODEL_ALIASES];
-  if (!proxyEnabled || !catalog.known) return base;
+  if (!catalog.known) return base;
   return [...base, ...catalog.selectableNames];
 }
 
@@ -144,6 +149,9 @@ export function isOffCycle(cycle: readonly string[], model: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function isDirtyModel(row: AgentRow): boolean {
+  // Suppress dirty when the selected model matches the saved dormant GPT model —
+  // cycling back to that value is not a change from the persisted mapping entry.
+  if (row.dormantModel !== null && row.configuredModel === row.dormantModel) return false;
   return row.configuredModel !== row.originalModel;
 }
 

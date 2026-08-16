@@ -14,8 +14,10 @@ import {
   validateSetArgs,
   applySetMapping,
   buildListRows,
+  selectCatalog,
   type ListRow,
 } from '../src/cli/commands/agents.js';
+import { buildModelCycle } from '../src/cli/agents-view/index.js';
 import {
   EFFORT_LEVELS,
   type AgentMappingFile,
@@ -23,6 +25,7 @@ import {
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import * as modelDiscovery from '../src/core/model-discovery.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
+import { MAX_TTL_MS } from '../src/core/cache.js';
 
 // ---------------------------------------------------------------------------
 // validateSetArgs
@@ -344,6 +347,84 @@ describe('buildListRows', () => {
       proxyEnabled: false,
     });
     expect(rows[0].defaultModel).toBe('sonnet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectCatalog — proxy-off catalog source wiring
+// ---------------------------------------------------------------------------
+
+describe('selectCatalog — proxy-off reads from cache, not hard-coded {known:false}', () => {
+  // Raw JSON that parseModelsJson accepts: schemaVersion=1, kind="models",
+  // one routable non-retired codex model with a short alias.
+  const STUB_MODELS_JSON = JSON.stringify({
+    schemaVersion: 1,
+    kind: 'models',
+    models: [
+      {
+        id: 'gpt-test-1',
+        provider: 'codex',
+        aliases: [{ name: 'test1' }],
+        routable: true,
+        retired: false,
+      },
+    ],
+    providers: [{ id: 'codex', routing: 'direct' }],
+  });
+
+  let cacheDir: string;
+
+  beforeEach(async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'df-select-catalog-'));
+    cacheDir = path.join(tmpBase, 'models');
+    await fs.mkdir(cacheDir, { recursive: true });
+
+    // Write a valid cache entry — key must start with "external-models-v1-"
+    const envelope = JSON.stringify({
+      data: STUB_MODELS_JSON,
+      timestamp: Date.now(),
+      ttl: MAX_TTL_MS,
+    });
+    await fs.writeFile(path.join(cacheDir, 'external-models-v1-test.json'), envelope, 'utf-8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(cacheDir), { recursive: true, force: true });
+  });
+
+  it('proxy off + populated cache → catalog is known and contains cached external model names', () => {
+    const catalog = selectCatalog(false, cacheDir);
+    expect(catalog.known).toBe(true);
+    if (!catalog.known) return; // never reached — type narrowing
+    expect(catalog.selectableNames).toContain('test1');
+    expect(catalog.selectableNames).toContain('gpt-test-1');
+  });
+
+  it('proxy off + populated cache → buildModelCycle includes the external model names', () => {
+    const catalog = selectCatalog(false, cacheDir);
+    const cycle = buildModelCycle(catalog);
+    expect(cycle).toContain('test1');
+    expect(cycle).toContain('gpt-test-1');
+    // Claude aliases still present
+    for (const alias of CLAUDE_MODEL_ALIASES) {
+      expect(cycle).toContain(alias);
+    }
+  });
+
+  it('proxy on → selectCatalog returns {known:false} (async discovery is the on-path)', () => {
+    // The proxy-on TUI path starts discoverExternalModels async; selectCatalog
+    // returns {known:false} as the synchronous placeholder.
+    const catalog = selectCatalog(true, cacheDir);
+    expect(catalog.known).toBe(false);
+  });
+
+  it('proxy off + empty cache → catalog is {known:false}', async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'df-select-catalog-empty-'));
+    const emptyDir = path.join(tmpBase, 'models');
+    await fs.mkdir(emptyDir, { recursive: true });
+    const catalog = selectCatalog(false, emptyDir);
+    expect(catalog.known).toBe(false);
+    await fs.rm(tmpBase, { recursive: true, force: true });
   });
 });
 

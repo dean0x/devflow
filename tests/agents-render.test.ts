@@ -39,7 +39,7 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
   const modelCycle: readonly string[] =
     'modelCycle' in overrides
       ? (overrides.modelCycle as readonly string[])
-      : buildModelCycle(proxyEnabled, catalog);
+      : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
     makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
     makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
@@ -454,7 +454,7 @@ describe('alias rendering', () => {
     const state = makeState({
       proxyEnabled: true,
       catalog,
-      modelCycle: buildModelCycle(true, catalog),
+      modelCycle: buildModelCycle(catalog),
       rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
       cursor: 0,
       activeField: 'effort', // model field not active — show bare value
@@ -477,7 +477,7 @@ describe('alias rendering', () => {
     const state = makeState({
       proxyEnabled: true,
       catalog,
-      modelCycle: buildModelCycle(true, catalog),
+      modelCycle: buildModelCycle(catalog),
       rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.6-sol', originalModel: 'gpt-5.6-sol' })],
       cursor: 0,
       activeField: 'effort',

@@ -314,6 +314,27 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
+// Catalog source selector
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the synchronous model catalog for the interactive TUI.
+ *
+ * Proxy-off path: cache-only, zero spawns (getExternalModelsCached).
+ *   This is the same source as --set, preserving the
+ *   configure-first-then-enable flow for dormant GPT mappings.
+ * Proxy-on path: returns {known:false}; the caller starts async discovery
+ *   via discoverExternalModels so the spinner can overlap TUI init.
+ *
+ * Exported as a testable seam: allows tests to assert that the proxy-off
+ * path reads from the cache rather than returning a hard-coded {known:false}.
+ */
+export function selectCatalog(proxyEnabled: boolean, cacheDir: string): ExternalModelCatalog {
+  if (proxyEnabled) return { known: false };
+  return getExternalModelsCached(cacheDir);
+}
+
+// ---------------------------------------------------------------------------
 // TUI state builder
 // ---------------------------------------------------------------------------
 
@@ -332,7 +353,7 @@ async function buildTuiState(
   catalog: ExternalModelCatalog,
 ): Promise<AgentsViewState> {
   // Build the cycle once — shared across all rows and all keypresses.
-  const modelCycle = buildModelCycle(proxyEnabled, catalog);
+  const modelCycle = buildModelCycle(catalog);
 
   const rows: AgentRow[] = agentNames.map(name => {
     const entry = mapping.agents[name];
@@ -645,10 +666,11 @@ export const agentsCommand = new Command('agents')
     //
     // Start discovery without awaiting — overlaps with TUI initialization work.
     // Only in the interactive path: --list, --set, --reset never discover (AC-P4).
-    // gated on proxyEnabled so proxy-off sessions pay 0 spawns.
+    // Proxy-off: cache-only via selectCatalog (0 spawns, same source as --set).
+    // Proxy-on: live async discovery via discoverExternalModels.
     const discoveryPromise: Promise<ExternalModelCatalog> = proxyEnabled
       ? discoverExternalModels(cacheDir, logPath)
-      : Promise.resolve({ known: false } as ExternalModelCatalog);
+      : Promise.resolve(selectCatalog(false, cacheDir));
 
     p.intro(color.bgCyan(color.black(' Devflow Agents ')));
 
