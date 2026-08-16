@@ -48,6 +48,7 @@ import {
   discoverExternalModels,
   type ExternalModelCatalog,
 } from '../../core/model-discovery.js';
+import { modelCacheDir } from '../../core/cache.js';
 import {
   getClaudeDirectory,
   getDevFlowDirectory,
@@ -1236,7 +1237,7 @@ async function runStatus(): Promise<void> {
   }
 
   // External models registry (cache-only, zero spawns — avoids multi-second silent pause in --status)
-  const cacheDir = path.join(devflowDir, 'cache', 'models');
+  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts (avoids PF-013)
   const catalog = getExternalModelsCached(cacheDir);
   p.log.info(formatExternalModelsLine(catalog, logPath));
 
@@ -1270,7 +1271,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const configPath = path.join(devflowDir, 'proxy-routing.json');
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
-  const cacheDir = path.join(devflowDir, 'cache', 'models');
+  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts (avoids PF-013)
 
   // Step 1: Read prior proxy.json (remembered port); --port flag overrides
   const priorStateResult = await readProxyState(devflowDir);

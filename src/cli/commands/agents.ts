@@ -51,6 +51,7 @@ import {
   getExternalModelsCached,
   type ExternalModelCatalog,
 } from '../../core/model-discovery.js';
+import { modelCacheDir } from '../../core/cache.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern)
@@ -450,8 +451,8 @@ export const agentsCommand = new Command('agents')
     const claudeDir = getClaudeDirectory();
     const devflowDir = getDevFlowDirectory();
     const installDir = path.join(claudeDir, 'agents', 'devflow');
-    // Cache directory for model discovery (consistent with proxy feature's devflowDir).
-    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    // Cache directory for model discovery — authoritative path from cache.ts (avoids PF-013).
+    const cacheDir = modelCacheDir(devflowDir);
     // Log path mirrors proxy.ts for unified proxy diagnostics.
     const logPath = path.join(devflowDir, 'logs', 'proxy.log');
 

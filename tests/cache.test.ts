@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readCache, writeCache, MAX_TTL_MS, parseRawEnvelope } from '../src/core/cache.js';
+import { readCache, writeCache, MAX_TTL_MS, parseRawEnvelope, modelCacheDir, hudCacheDir } from '../src/core/cache.js';
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -304,5 +304,42 @@ describe('parseRawEnvelope', () => {
     if (result !== null) {
       expect(result.data).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Path accessors — avoids PF-013 (hardcoded path residue surviving a relocation)
+// ---------------------------------------------------------------------------
+//
+// These tests pin the authoritative cache-directory paths exported from cache.ts.
+// If any caller replaces an accessor with a new hardcoded literal the accessor
+// value diverges from the caller and one of the integration tests below fails,
+// making the drift compile-time and runtime visible.
+//
+// applies ADR-013: path layout owned by the core module (cache.ts), not
+// scattered across callers in src/cli/ or src/hud/.
+
+describe('modelCacheDir — path accessor (avoids PF-013)', () => {
+  it('returns path.join(devflowDir, "cache", "models")', () => {
+    const base = '/tmp/test-devflow';
+    expect(modelCacheDir(base)).toBe(path.join(base, 'cache', 'models'));
+  });
+
+  it('varies with devflowDir — not a global constant', () => {
+    expect(modelCacheDir('/a')).not.toBe(modelCacheDir('/b'));
+    expect(modelCacheDir('/a')).toBe(path.join('/a', 'cache', 'models'));
+    expect(modelCacheDir('/b')).toBe(path.join('/b', 'cache', 'models'));
+  });
+});
+
+describe('hudCacheDir — path accessor (avoids PF-013)', () => {
+  it('returns path.join(devflowDir, "cache") — parent of model cache', () => {
+    const base = '/tmp/test-devflow';
+    expect(hudCacheDir(base)).toBe(path.join(base, 'cache'));
+  });
+
+  it('hudCacheDir is the parent directory of modelCacheDir', () => {
+    const base = '/tmp/test-devflow';
+    expect(path.dirname(modelCacheDir(base))).toBe(hudCacheDir(base));
   });
 });

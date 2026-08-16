@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ComponentResult, GatherContext } from '../types.js';
 import { yellow } from '../colors.js';
-import { readCache, writeCache } from '../../core/cache.js';
+import { readCache, writeCache, hudCacheDir } from '../../core/cache.js';
 import { getPackageRoot } from '../../core/paths.js';
 
 const VERSION_CACHE_KEY = 'version-check';
@@ -81,7 +81,7 @@ export default async function versionBadge(
   const current = getCurrentVersion(ctx.devflowDir);
   if (!current) return null;
 
-  const cacheDir = path.join(ctx.devflowDir, 'cache');
+  const cacheDir = hudCacheDir(ctx.devflowDir); // authoritative path from cache.ts (avoids PF-013)
 
   // Cache only the npm registry result (expensive); current is always live
   let info = readCache<VersionInfo>(cacheDir, VERSION_CACHE_KEY, validateVersionInfo);
@@ -94,7 +94,7 @@ export default async function versionBadge(
   }
 
   if (info && compareVersions(current, info.latest) < 0) {
-    const badge = `✦ Devflow v${info.latest} · update: npx devflow-kit init`;
+    const badge = `\u2726 Devflow v${info.latest} \u00B7 update: npx devflow-kit init`;
     return { text: yellow(badge), raw: badge };
   }
 

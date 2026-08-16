@@ -16,6 +16,7 @@ import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { applyDisableToSettings } from './proxy.js';
 import { readProxyState, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
+import { modelCacheDir } from '../../core/cache.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -280,7 +281,8 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     { relPath: path.join('logs', 'proxy.log') },
     // Model-discovery cache — populated by discoverExternalModels during enable / agents TUI.
     // isDir:true so rm recurses into external-models-v1-*.json cache entries.
-    { relPath: path.join('cache', 'models'), isDir: true },
+    // relPath derived from modelCacheDir to stay byte-locked to write sites (avoids PF-013).
+    { relPath: path.relative(devflowDir, modelCacheDir(devflowDir)), isDir: true },
   ];
   for (const artifact of proxyArtifacts) {
     const fullPath = path.join(devflowDir, artifact.relPath);

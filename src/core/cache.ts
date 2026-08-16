@@ -36,6 +36,41 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
 export const MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
+// Path accessors — single source of truth for cache directory layout
+// ---------------------------------------------------------------------------
+//
+// All callers that write or read the model-discovery catalog AND the uninstall
+// removal target derive their directory paths from these functions. Keeping
+// write-site and removal-site in the same module prevents silent orphaning of
+// cache data on future relocations (avoids PF-013).
+//
+// applies ADR-013: path layout owned by the core module, not scattered across
+// callers in src/cli/ or src/hud/.
+
+/**
+ * Returns the model-discovery cache directory for the given devflowDir.
+ *
+ * This is the single authoritative path for the external-models cache written
+ * by discoverExternalModels and read by getExternalModelsCached. The uninstall
+ * removal target in removeDevFlowInstallArtifacts MUST derive its path from
+ * this function so that write-site and removal-site cannot drift independently.
+ */
+export function modelCacheDir(devflowDir: string): string {
+  return path.join(devflowDir, 'cache', 'models');
+}
+
+/**
+ * Returns the HUD component cache directory for the given devflowDir.
+ *
+ * Used by version-badge.ts for the npm registry version-check cache.
+ * Separate from modelCacheDir because the version-check and model-discovery
+ * caches live in different subdirectories under devflowDir/cache/.
+ */
+export function hudCacheDir(devflowDir: string): string {
+  return path.join(devflowDir, 'cache');
+}
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 

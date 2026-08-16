@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { modelCacheDir } from '../src/core/cache.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
@@ -721,5 +722,25 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     for (const result of checks) {
       expect(result.status).toBe('rejected');
     }
+  });
+
+  // ─── PF-013 linkage: removal target == write target via modelCacheDir accessor ───
+  //
+  // This test pins the uninstall removal path to modelCacheDir — the single
+  // authoritative path accessor from src/core/cache.ts. If uninstall.ts reverts
+  // to an independent hardcoded literal that diverges from modelCacheDir, this
+  // test fails: the directory written via the accessor survives uninstall.
+  //
+  // avoids PF-013 (hardcoded path residue surviving a module relocation)
+  it('PF-013: removal target byte-matches modelCacheDir — write-site and removal-site cannot drift', async () => {
+    // Write a sentinel into the path that model-discovery callers use.
+    const writePath = modelCacheDir(devflowDir);
+    await fs.mkdir(writePath, { recursive: true });
+    await fs.writeFile(path.join(writePath, 'sentinel.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    // If uninstall drifts to a different path, writePath still exists → this fails.
+    await expect(fs.access(writePath)).rejects.toThrow();
   });
 });
