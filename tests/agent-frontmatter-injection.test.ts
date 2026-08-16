@@ -154,12 +154,16 @@ describe('AC-S1 — rewriteAgentFrontmatter rejects injection payloads', () => {
       // The original content must be unchanged (no partial write).
       const original = makeAgent('sonnet');
       const result = rewriteAgentFrontmatter(original, { ...opts, model: payload });
-      // Guard: if result were ok (a bug), the model must not contain the payload.
-      if (result.ok) {
-        const modelInFile = readFrontmatterModel(result.value.content);
-        expect(modelInFile.ok && modelInFile.value).not.toContain('\n');
-        expect(modelInFile.ok && modelInFile.value).not.toContain('\r');
-      }
+      // Unconditional assertion 1: injection gate must always reject (avoids PF-018 —
+      // a conditional guard on result.ok here was the original defect: result.ok is
+      // always false for these payloads, so the old assertions NEVER ran).
+      expect(result.ok).toBe(false);
+      // Unconditional assertion 2: no modified content was produced.
+      // Pure-function guarantee: an Err result produces no output content. If a
+      // regression causes ok:true, the output must still be byte-identical to the
+      // original (no injection reached the file).
+      const writtenContent = result.ok ? result.value.content : original;
+      expect(writtenContent).toBe(original);
     });
   }
 
@@ -171,6 +175,69 @@ describe('AC-S1 — rewriteAgentFrontmatter rejects injection payloads', () => {
       const readBack = readFrontmatterModel(result.value.content);
       expect(readBack.ok && readBack.value).toBe('gpt-5.6-sol');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-S1b — rewriteAgentFrontmatter effort injection guard (C2-SEC-4)
+//
+// String.prototype.replace() with a string replacement expands $&, $`, $',
+// and $1 as special patterns.  The effort rewrite path must use a replacement
+// FUNCTION so these characters are written verbatim (defence-in-depth).
+//
+// Note: callers (agents.ts) enum-validate effort against EFFORT_LEVELS before
+// reaching this module, so hostile effort values are not reachable in production.
+// These tests guard the module boundary independently (belt-and-braces).
+// ---------------------------------------------------------------------------
+
+describe('AC-S1b — effort field safe replacement (no $-pattern expansion)', () => {
+  // Base fixture with an existing effort line to exercise the replace path.
+  const withEffort = '---\nmodel: sonnet\neffort: low\n---\ndescription: test agent\n';
+  // Base fixture WITHOUT an effort line to exercise the insert path.
+  const noEffort = '---\nmodel: sonnet\n---\ndescription: test agent\n';
+
+  it('writes $& literally on effort replace (not the full-match expansion)', () => {
+    // Without a replacement function, "$&" expands to the entire EFFORT_RE match
+    // (e.g. "effort: low"), yielding "effort: loweffort: lowhigh" — a corruption.
+    const result = rewriteAgentFrontmatter(withEffort, { model: 'sonnet', effort: 'low$&high' });
+    expect(result.ok).toBe(true);
+    const content = result.ok ? result.value.content : withEffort;
+    expect(content).toContain('effort: low$&high');
+    // Regression guard: the $& expansion artefact must not appear.
+    expect(content).not.toContain('effort: loweffort:');
+  });
+
+  it('writes $` literally on effort replace (pre-match expansion pattern)', () => {
+    const result = rewriteAgentFrontmatter(withEffort, { model: 'sonnet', effort: 'a$`b' });
+    expect(result.ok).toBe(true);
+    const content = result.ok ? result.value.content : withEffort;
+    expect(content).toContain('effort: a$`b');
+  });
+
+  it("writes $' literally on effort replace (post-match expansion pattern)", () => {
+    const result = rewriteAgentFrontmatter(withEffort, { model: 'sonnet', effort: "a$'b" });
+    expect(result.ok).toBe(true);
+    const content = result.ok ? result.value.content : withEffort;
+    expect(content).toContain("effort: a$'b");
+  });
+
+  it('writes $1 literally on effort replace (capture-group expansion pattern)', () => {
+    // $1 expands to the first capture group of EFFORT_RE (the current effort value).
+    // Without a replacement function, "prefix$1suffix" would expand the captured
+    // group rather than write the literal dollar-one.
+    const result = rewriteAgentFrontmatter(withEffort, { model: 'sonnet', effort: 'pre$1suf' });
+    expect(result.ok).toBe(true);
+    const content = result.ok ? result.value.content : withEffort;
+    expect(content).toContain('effort: pre$1suf');
+  });
+
+  it('writes $& literally on effort INSERT (fresh line, already uses fn replacement)', () => {
+    // The insert path (no existing effort line) already uses a function replacement.
+    // This test locks that behaviour so it cannot regress to a string replacement.
+    const result = rewriteAgentFrontmatter(noEffort, { model: 'sonnet', effort: 'low$&high' });
+    expect(result.ok).toBe(true);
+    const content = result.ok ? result.value.content : noEffort;
+    expect(content).toContain('effort: low$&high');
   });
 });
 

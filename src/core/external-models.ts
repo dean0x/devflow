@@ -66,7 +66,7 @@ export function isClaudeModelName(model: string): boolean {
  * safety property by returning an empty external set.
  *
  * Single source of truth for dormancy — do NOT inline this predicate at call
- * sites. (anti-pattern, KNOWLEDGE.md:235)
+ * sites. (anti-pattern, KNOWLEDGE.md § Anti-Patterns — "Duplicating the dormancy predicate")
  *
  * Pure function, no I/O. Lives in external-models (leaf module, no project
  * imports) so callers in agents-view/state.ts can import without cycles.

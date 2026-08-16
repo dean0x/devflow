@@ -234,7 +234,10 @@ export function rewriteAgentFrontmatter(
     // Add or replace
     if (effortMatch) {
       if (currentEffort !== opts.effort) {
-        newBody = newBody.replace(EFFORT_RE, `effort: ${opts.effort}`);
+        // Use a replacement function — NOT a string — so that $&, $`, $',
+        // and $1 in opts.effort are written verbatim rather than expanded as
+        // replacement patterns (S1 defence-in-depth; avoids PF-018).
+        newBody = newBody.replace(EFFORT_RE, () => `effort: ${opts.effort}`);
       }
     } else {
       // Insert immediately after the model line
