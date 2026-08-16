@@ -1229,6 +1229,16 @@ export const initCommand = new Command('init')
     // === Proxy preflight (when enabled) ===
     // Runs before the settings mutation pass so that proxyEnabled reflects reality
     // (preflight failure forces it off without aborting init — avoids PF-009).
+    //
+    // REG-2: Read existing proxy state once to recover the remembered port.
+    // Init has no --port option; the remembered port from proxy.json always wins
+    // over DEFAULT_PROXY_PORT, mirroring the resolvePort(undefined, priorPort)
+    // semantics established by the TS-1 remembered-port contract in proxy.ts.
+    const priorProxyStateResult = await readProxyState(devflowDir);
+    const effectivePort = priorProxyStateResult.ok
+      ? priorProxyStateResult.value.port
+      : DEFAULT_PROXY_PORT;
+
     if (proxyEnabled) {
       const configPath = path.join(devflowDir, 'proxy-routing.json');
       const logPath = path.join(devflowDir, 'logs', 'proxy.log');
@@ -1239,7 +1249,7 @@ export const initCommand = new Command('init')
       try {
         // SEC-2: mode 0o700 for the logs directory (applies to new dirs only).
         await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
-        await fs.writeFile(configPath, buildRoutingConfigJson(DEFAULT_PROXY_PORT), 'utf-8');
+        await fs.writeFile(configPath, buildRoutingConfigJson(effectivePort), 'utf-8');
         routingConfigWritten = true;
       } catch (err) {
         p.log.warn(
@@ -1254,7 +1264,7 @@ export const initCommand = new Command('init')
         // (swallowSettingsReadError: true) because init creates settings.json itself
         // and must tolerate an absent file; runEnable propagates read errors to the user.
         const preflightResult = await runProxyPreflight(
-          DEFAULT_PROXY_PORT,
+          effectivePort,
           codexAuthPath,
           configPath,
           logPath,
@@ -1271,11 +1281,30 @@ export const initCommand = new Command('init')
             'Routing disabled for this init — run `devflow proxy --enable` after signing in.',
           );
           proxyEnabled = false;
+          // REG-1: Write proxy.json disabled so runtime authority converges with the
+          // failed preflight outcome (avoids PF-015 — toggle fan-out convergence).
+          // Without this write, proxy.json stays enabled:true from the prior run;
+          // isProxyEnabled() reads only that file, so the next TUI save would call
+          // reapplyAgentMapping({proxyEnabled:true}) and write GPT model IDs into
+          // agent frontmatter with no relay and no hook — the exact dormancy inversion
+          // commit 42e6f29 was written to prevent.
+          if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
+            const disableResult = await writeProxyState(devflowDir, buildProxyState({
+              enabled: false,
+              port: priorProxyStateResult.value.port,
+              binPath: priorProxyStateResult.value.binPath,
+              configPath: priorProxyStateResult.value.configPath,
+              devflowVersion: priorProxyStateResult.value.devflowVersion,
+            }));
+            if (!disableResult.ok) {
+              p.log.warn(`Could not persist proxy disabled state: ${disableResult.error}.`);
+            }
+          }
         } else {
           // Write proxy.json enabled:true with freshly resolved binPath (heal path for upgrades)
           const writeResult = await writeProxyState(devflowDir, buildProxyState({
             enabled: true,
-            port: DEFAULT_PROXY_PORT,
+            port: effectivePort,
             binPath: preflightResult.value.binPath,
             configPath,
             devflowVersion: version,
@@ -1287,16 +1316,22 @@ export const initCommand = new Command('init')
         }
       }
     } else {
-      // Proxy disabled: if proxy.json exists and is enabled, mark it disabled
-      const existingProxyState = await readProxyState(devflowDir);
-      if (existingProxyState.ok && existingProxyState.value.enabled) {
-        await writeProxyState(devflowDir, buildProxyState({
+      // Proxy disabled at entry: if proxy.json exists and is enabled, mark it disabled.
+      // avoids PF-015: runtime authority (proxy.json) must converge with proxyEnabled=false.
+      // REL-2: check the Result — the enable branch above checks !writeResult.ok;
+      // this path must be consistent (the discarded .catch() left proxy.json enabled:true
+      // on write failure, with no relay or hook to match — dormancy violation).
+      if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
+        const disableResult = await writeProxyState(devflowDir, buildProxyState({
           enabled: false,
-          port: existingProxyState.value.port,
-          binPath: existingProxyState.value.binPath,
-          configPath: existingProxyState.value.configPath,
-          devflowVersion: existingProxyState.value.devflowVersion,
-        })).catch(() => { /* non-fatal */ });
+          port: priorProxyStateResult.value.port,
+          binPath: priorProxyStateResult.value.binPath,
+          configPath: priorProxyStateResult.value.configPath,
+          devflowVersion: priorProxyStateResult.value.devflowVersion,
+        }));
+        if (!disableResult.ok) {
+          p.log.warn(`Could not persist proxy disabled state: ${disableResult.error}.`);
+        }
       }
     }
 
@@ -1395,13 +1430,15 @@ export const initCommand = new Command('init')
         content = JSON.stringify(parsedSettings, null, 2) + '\n';
       }
       // Proxy env: ANTHROPIC_BASE_URL strip-then-add, scoped to managed port.
-      // REG-1: read proxy.json to learn which port we own — only that URL is
-      // stripped.  A user's own localhost gateway on any other port is preserved.
-      // proxy.json reflects the final settled state after the preflight block above.
+      // Read proxy.json to learn which port we own — only that URL is stripped.
+      // A user's own localhost gateway on any other port is preserved.
+      // Invariant: proxy.json always reflects the final settled state after the
+      // preflight block above — all paths that force proxyEnabled=false also write
+      // proxy.json enabled:false (avoids PF-015), so managedPort == effectivePort.
       const proxyStateForStrip = await readProxyState(devflowDir);
       const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
       content = stripProxyEnv(content, managedPort);
-      if (proxyEnabled) content = applyProxyEnv(content, DEFAULT_PROXY_PORT);
+      if (proxyEnabled) content = applyProxyEnv(content, effectivePort);
 
       if (content !== original) {
         await fs.writeFile(settingsPath, content, 'utf-8');
