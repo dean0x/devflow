@@ -34,7 +34,10 @@
  * correctly. Excluding 'fable' here would misclassify it as external and
  * silently revert it to the shipped default when the proxy is off.
  */
-export const CLAUDE_MODEL_ALIASES: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable'];
+export const CLAUDE_MODEL_ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const;
+
+/** Literal union of Claude model short-aliases. */
+export type ClaudeModelAlias = typeof CLAUDE_MODEL_ALIASES[number];
 
 const CLAUDE_EXACT: ReadonlySet<string> = new Set([...CLAUDE_MODEL_ALIASES, 'inherit']);
 

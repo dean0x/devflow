@@ -55,7 +55,17 @@ function Err<E>(error: E): Result<never, E> {
  * Valid effort level identifiers.
  * Invalid values are dropped with a warning on mapping read.
  */
-export const EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/** Literal union of valid effort level identifiers. */
+export type EffortLevel = typeof EFFORT_LEVELS[number];
+
+/**
+ * Membership set typed as ReadonlySet<string> so .has() accepts a plain
+ * string argument without a cast — TypeScript's Set<T>.has() requires T, and
+ * EFFORT_LEVELS[number] is a literal union, not string (applies ADR-003).
+ */
+const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -64,7 +74,7 @@ export const EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh
 /** Per-agent mapping entry. All fields optional — omit to inherit defaults. */
 export interface AgentMapping {
   model?: string;
-  effort?: string;
+  effort?: EffortLevel;
 }
 
 /** The agent-models.json file schema. */
@@ -121,8 +131,10 @@ export async function readAgentMapping(
       }
 
       if (typeof raw.effort === 'string') {
-        if ((EFFORT_LEVELS as readonly string[]).includes(raw.effort)) {
-          mapping.effort = raw.effort;
+        if (EFFORT_LEVELS_SET.has(raw.effort)) {
+          // Sound narrowing: has() proved membership; EffortLevel is a literal
+          // subtype of string so the assertion is not a compensating cast.
+          mapping.effort = raw.effort as EffortLevel;
         } else {
           warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
         }
@@ -170,8 +182,8 @@ export async function saveAgentMapping(
 export interface EffectiveConfig {
   /** The model to write to frontmatter. Undefined when no default is available. */
   model: string | undefined;
-  /** The effort to write (or null/undefined to remove). */
-  effort: string | undefined;
+  /** The effort to write (or undefined to remove). */
+  effort: EffortLevel | undefined;
 }
 
 /**

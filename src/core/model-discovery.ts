@@ -299,7 +299,7 @@ export function parseModelsJson(raw: string): Result<ParsedCatalog, string> {
   }
 
   // --- Second pass: build ExternalModel with validated aliases ---
-  const CLAUDE_ALIAS_SET = new Set<string>(CLAUDE_MODEL_ALIASES as string[]);
+  const CLAUDE_ALIAS_SET = new Set<string>(CLAUDE_MODEL_ALIASES);
   const models: ExternalModel[] = [];
 
   for (const m of qualifyingRows) {

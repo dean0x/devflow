@@ -29,6 +29,7 @@ import {
   loadShippedDefaults,
   type AgentMappingFile,
   type AgentMapping,
+  type EffortLevel,
 } from '../../core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
 import { isValidModelName } from '../../core/agent-frontmatter.js';
@@ -116,11 +117,7 @@ export function validateSetArgs(
 
     if (catalog.known) {
       // Full validation against the discovered catalog.
-      const valid = [
-        'default',
-        ...(CLAUDE_MODEL_ALIASES as readonly string[]),
-        ...catalog.selectableNames,
-      ];
+      const valid: string[] = ['default', ...CLAUDE_MODEL_ALIASES, ...catalog.selectableNames];
       if (!valid.includes(model)) {
         return Err(
           `Unknown model "${model}". Valid: ${valid.join(', ')}`
@@ -132,7 +129,7 @@ export function validateSetArgs(
   }
 
   if (effort !== undefined) {
-    const valid = ['default', ...(EFFORT_LEVELS as readonly string[])];
+    const valid: string[] = ['default', ...EFFORT_LEVELS];
     if (!valid.includes(effort)) {
       return Err(
         `Unknown effort "${effort}". Valid: ${valid.join(', ')}`
@@ -171,7 +168,10 @@ export function applySetMapping(
     if (args.effort === 'default') {
       delete existing.effort;
     } else {
-      existing.effort = args.effort;
+      // Sound narrowing: validateSetArgs already confirmed args.effort is a valid
+      // EffortLevel before this function is called. SetArgs.effort is string to keep
+      // the CLI entry type permissive; the assertion here is not a compensating cast.
+      existing.effort = args.effort as EffortLevel;
     }
   }
 

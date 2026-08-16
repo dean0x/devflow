@@ -27,7 +27,7 @@
  * state.modelCycle and threads it through without reconstructing.
  */
 
-import { EFFORT_LEVELS } from '../../core/agent-models.js';
+import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
 import { type ExternalModelCatalog } from '../../core/model-discovery.js';
 
@@ -45,9 +45,9 @@ export interface AgentRow {
   /** Model value at state init — used for dirty detection. */
   readonly originalModel: string;
   /** Current session effort value: 'default' | effort level. */
-  readonly configuredEffort: string;
+  readonly configuredEffort: EffortLevel | 'default';
   /** Effort value at state init — used for dirty detection. */
-  readonly originalEffort: string;
+  readonly originalEffort: EffortLevel | 'default';
   /**
    * Non-null only when: savedModel is an external model AND proxy is off.
    * Holds the saved model name for display annotation and
@@ -112,15 +112,12 @@ export function buildModelCycle(
   proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
 ): readonly string[] {
-  const base: readonly string[] = ['default', ...(CLAUDE_MODEL_ALIASES as readonly string[])];
+  const base: readonly string[] = ['default', ...CLAUDE_MODEL_ALIASES];
   if (!proxyEnabled || !catalog.known) return base;
   return [...base, ...catalog.selectableNames];
 }
 
-const EFFORT_CYCLE: readonly string[] = [
-  'default',
-  ...(EFFORT_LEVELS as readonly string[]),
-];
+const EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS];
 
 function cycleNext(cycle: readonly string[], current: string): string {
   const idx = cycle.indexOf(current);
@@ -219,7 +216,10 @@ function cycleField(
       dir === 'forward'
         ? cycleNext(EFFORT_CYCLE, row.configuredEffort)
         : cyclePrev(EFFORT_CYCLE, row.configuredEffort);
-    return { ...row, configuredEffort: next };
+    // Sound narrowing: EFFORT_CYCLE is ['default', ...EFFORT_LEVELS], so next
+    // is always EffortLevel | 'default'. cycleNext/cyclePrev return string
+    // because their signature is intentionally generic (also used for model cycles).
+    return { ...row, configuredEffort: next as EffortLevel | 'default' };
   }
 }
 
@@ -253,7 +253,7 @@ export interface InitRowInput {
   /** Saved model from mapping file (undefined = no entry). */
   savedModel?: string;
   /** Saved effort from mapping file (undefined = no entry). */
-  savedEffort?: string;
+  savedEffort?: EffortLevel;
   proxyEnabled: boolean;
   /**
    * Prebuilt model cycle for off-cycle pin detection.
