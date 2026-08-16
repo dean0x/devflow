@@ -69,54 +69,12 @@ function safeEntryPath(cacheDir: string, key: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Envelope validation
-// ---------------------------------------------------------------------------
-
-/**
- * Parse and validate a raw cache file's envelope.
- *
- * Returns null when:
- *   - JSON is malformed
- *   - timestamp or ttl are not finite numbers
- *   - age is negative (future timestamp — poisoned entry; rejected even in stale mode)
- *   - ignoreExpiry=false and age >= clamped TTL (expired)
- *
- * The validator function is threaded to callers rather than called here; this
- * function handles only envelope integrity.
- */
-function parseEnvelope(raw: string, ignoreExpiry: boolean): CacheEnvelope | null {
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return null; }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-
-  const obj = parsed as Record<string, unknown>;
-  const { timestamp, ttl, data } = obj;
-
-  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return null;
-  if (typeof ttl !== 'number' || !Number.isFinite(ttl)) return null;
-
-  const age = Date.now() - timestamp;
-  // Reject future timestamps in both modes: a hostile entry with timestamp far
-  // in the future would otherwise be permanently fresh and never re-fetch.
-  if (age < 0) return null;
-
-  if (!ignoreExpiry) {
-    // Clamp TTL so an inflated value does not make the entry perpetually fresh.
-    const clampedTtl = Math.min(Math.abs(ttl), MAX_TTL_MS);
-    if (age >= clampedTtl) return null;
-  }
-
-  return { data, timestamp, ttl };
-}
-
-// ---------------------------------------------------------------------------
 // Private read helper
 // ---------------------------------------------------------------------------
 
 function readCacheEntry<T>(
   cacheDir: string,
   key: string,
-  ignoreExpiry: boolean,
   validate: (data: unknown) => T | null,
 ): T | null {
   const filePath = safeEntryPath(cacheDir, key);
@@ -124,8 +82,13 @@ function readCacheEntry<T>(
 
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    const envelope = parseEnvelope(raw, ignoreExpiry);
+    const envelope = parseRawEnvelope(raw);
     if (envelope === null) return null;
+    // parseRawEnvelope guarantees timestamp is not in the future, so age >= 0.
+    // Clamp TTL so an inflated value does not make the entry perpetually fresh.
+    const age = Date.now() - envelope.timestamp;
+    const clampedTtl = Math.min(Math.abs(envelope.ttl), MAX_TTL_MS);
+    if (age >= clampedTtl) return null;
     return validate(envelope.data);
   } catch {
     return null;
@@ -152,7 +115,7 @@ export function readCache<T>(
   key: string,
   validate: (data: unknown) => T | null,
 ): T | null {
-  return readCacheEntry(cacheDir, key, false, validate);
+  return readCacheEntry(cacheDir, key, validate);
 }
 
 /**
@@ -161,13 +124,14 @@ export function readCache<T>(
  * Returns null when:
  *   - JSON is malformed
  *   - timestamp is not a finite number
- *   - timestamp is in the future (poisoned entry; rejected even in stale mode)
+ *   - timestamp is in the future (poisoned entry)
+ *   - ttl is absent or not a finite number
  *
- * ttl defaults to 0 when absent or not a finite number — callers that do not
- * need TTL-gated freshness (stale readers, prune sorters) can ignore it.
+ * The single canonical envelope parser — used by readCacheEntry (which adds
+ * the expiry check on top) and exported for model-discovery.ts (stale-fallback
+ * and prune sorters) so all callers share one parser and cannot drift.
  *
- * Exported so model-discovery.ts can share one envelope parser instead of
- * four separate inline re-implementations that may drift from each other.
+ * applies ADR-003: eliminated private parseEnvelope duplicate; one parser, one truth.
  */
 export function parseRawEnvelope(
   raw: string,
@@ -179,13 +143,13 @@ export function parseRawEnvelope(
   const obj = parsed as Record<string, unknown>;
   const ts = obj['timestamp'];
   if (typeof ts !== 'number' || !Number.isFinite(ts)) return null;
-  // Reject future timestamps in all modes (poisoned entry — matches writer policy).
+  // Reject future timestamps (poisoned entry — matches writer policy).
   if (ts > Date.now()) return null;
 
   const rawTtl = obj['ttl'];
-  const ttl = (typeof rawTtl === 'number' && Number.isFinite(rawTtl)) ? rawTtl : 0;
+  if (typeof rawTtl !== 'number' || !Number.isFinite(rawTtl)) return null;
 
-  return { data: obj['data'], timestamp: ts, ttl };
+  return { data: obj['data'], timestamp: ts, ttl: rawTtl };
 }
 
 /**

@@ -6,7 +6,7 @@
  *   - TTL expiry (returns null when expired)
  *   - Path containment: key with ".." escapes are rejected (AC-S4)
  *   - Corrupt JSON rejected by validator path
- *   - Future timestamp rejected even in stale mode
+ *   - Future timestamp rejected
  *   - Non-finite timestamp/ttl rejected
  *   - MAX_TTL_MS clamping on write
  *   - Directory created at 0700 (AC-S5)
@@ -99,26 +99,27 @@ describe('readCache — TTL expiry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stale reads
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
 // Path containment — AC-S4
 // ---------------------------------------------------------------------------
 
 describe('safeEntryPath — path containment guard', () => {
-  it('returns null for keys with ".." path traversal (no write)', async () => {
-    // A key component that tries to escape cacheDir must be silently rejected
-    await writeCache(cacheDir, '../../etc/passwd', { value: 'x' }, 60_000);
-    // The file must NOT have been written to ../../etc/passwd
-    const escaped = path.resolve(path.join(cacheDir, '../../etc/passwd.json'));
+  it('rejects traversal keys — write cannot escape cacheDir', async () => {
+    // Create a sibling directory reachable via path traversal so the test
+    // genuinely proves the guard, not an incidentally-missing parent directory.
+    // If safeEntryPath() were removed, writeCache would succeed here and write
+    // to sibling/payload.json (avoids PF-018: non-empty target).
+    const sibling = path.join(path.dirname(cacheDir), 'escape-sibling');
+    await fs.mkdir(sibling, { recursive: true });
     try {
-      await fs.access(escaped);
-      // If this succeeds, the guard failed
-      expect.fail('Path traversal guard failed — file was written outside cacheDir');
-    } catch {
-      // Expected: file does not exist (guard worked)
+      await writeCache(cacheDir, '../escape-sibling/payload', { value: 'x' }, 60_000);
+      // Assert the file was NOT written outside cacheDir.
+      // fileExists is a boolean resolved OUTSIDE any try/catch — a guard
+      // regression propagates as a real test failure (avoids PF-018).
+      const escapedFile = path.join(sibling, 'payload.json');
+      const fileExists = await fs.access(escapedFile).then(() => true, () => false);
+      expect(fileExists, 'Path traversal guard failed — file was written outside cacheDir').toBe(false);
+    } finally {
+      await fs.rm(sibling, { recursive: true, force: true });
     }
   });
 
@@ -270,24 +271,19 @@ describe('parseRawEnvelope', () => {
     }
   });
 
-  it('ttl defaults to 0 when absent', () => {
+  it('returns null when ttl is absent (strict semantics)', () => {
     const ts = Date.now() - 100;
     const raw = JSON.stringify({ timestamp: ts, data: 'payload' }); // no ttl field
-    const result = parseRawEnvelope(raw);
-    expect(result).not.toBeNull();
-    if (result !== null) {
-      expect(result.ttl).toBe(0);
-    }
+    // Strict semantics: absent ttl → null. writeCache always writes a finite ttl,
+    // so real entries are unaffected; only crafted/corrupt entries hit this path.
+    expect(parseRawEnvelope(raw)).toBeNull();
   });
 
-  it('ttl defaults to 0 when non-finite', () => {
+  it('returns null when ttl is non-finite (strict semantics)', () => {
     const ts = Date.now() - 100;
     const raw = JSON.stringify({ timestamp: ts, ttl: NaN, data: 'payload' });
-    const result = parseRawEnvelope(raw);
-    expect(result).not.toBeNull();
-    if (result !== null) {
-      expect(result.ttl).toBe(0);
-    }
+    // Strict semantics: non-finite ttl → null (same gate applied to timestamp).
+    expect(parseRawEnvelope(raw)).toBeNull();
   });
 
   it('data can be any JSON value (object, string, null, number)', () => {
