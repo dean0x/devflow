@@ -190,10 +190,10 @@ npx devflow-kit proxy --enable --port <n>  # Enable on a specific port (default:
 |--------|-------------|
 | `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` into `settings.json`, applies saved agent model mapping |
 | `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable; the relay process is left running for live sessions (a manual `kill <pid>` hint is shown) |
-| `--status` | Show enabled/disabled, port, relay PID (if running), and proxy log path |
+| `--status` | Show feature state (enabled/disabled, port), relay process and PID, `ANTHROPIC_BASE_URL` env state, Codex auth content (not just existence), external-mapped agent count, cached model registry, and proxy log path |
 | `--port <n>` | Override the relay port (default 4141); takes effect on next enable |
 
-Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts on `SessionStart` and `UserPromptSubmit` via the `ensure-proxy` hook. Routing state is stored in `~/.devflow/proxy.json`; per-agent model mapping in `~/.devflow/agent-models.json`.
+Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts on `SessionStart` via the `ensure-proxy` hook; `UserPromptSubmit` exits immediately with no action (SessionStart handles all relay-start and warning logic). Routing state is stored in `~/.devflow/proxy.json`; per-agent model mapping in `~/.devflow/agent-models.json`.
 
 ## Per-Agent Model Configuration (devflow agents)
 
@@ -202,7 +202,7 @@ Configure which AI model each Devflow agent uses. Changes persist across reinsta
 ```bash
 npx devflow-kit agents                                      # Open interactive TUI (requires TTY)
 npx devflow-kit agents --list                               # List all agents with current model assignment
-npx devflow-kit agents --set <agent> --model sol            # Assign a model to one agent (alias e.g. sol, terra, luna)
+npx devflow-kit agents --set <agent> --model <model>        # Assign a model to one agent (alias e.g. sol, terra, luna)
 npx devflow-kit agents --set <agent> --effort <level>       # Assign an effort level to one agent
 npx devflow-kit agents --set <agent> --model default        # Clear model override (restores shipped default)
 npx devflow-kit agents --reset                              # Clear all agent customisations (prompts for confirmation)

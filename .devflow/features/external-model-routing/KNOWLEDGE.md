@@ -3,7 +3,7 @@ feature: external-model-routing
 name: External Model Routing & Per-Agent Model Config
 description: "Use when working on the proxy lifecycle (enable/disable/status/preflight), the ensure-proxy hook, per-agent model mapping, agent frontmatter rewriting, or the agents TUI. Keywords: proxy, external-model-routing, GPT, agent-models, ensure-proxy, frontmatter, devflow proxy, devflow agents, subswitch, ANTHROPIC_BASE_URL, dormancy, reapplyAgentMapping."
 category: architecture
-directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
+directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
 updated: 2026-08-14
 ---
@@ -50,7 +50,7 @@ Hard failures at any step (steps 1–9) set `process.exitCode = 1` and return �
 The relay process is intentionally left running on `--disable` for any live Claude Code sessions. The disable path:
 1. Read `proxy.json` first to determine `managedPort` for the URL strip.
 2. `applyDisableToSettings(parsedSettings, managedPort)` — removes hooks AND strips `ANTHROPIC_BASE_URL` (see invariant below).
-3. Writes `proxy.json` `enabled:false` — **keeps** `port`, `binPath`, `configPath`, `models` for the next enable.
+3. Writes `proxy.json` `enabled:false` — **keeps** `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion` for the next enable.
 4. Syncs manifest to `proxy: false`.
 5. `revertExternalAgents()` — rewrites installed agent files to shipped default models.
 6. Emits relay PID info with kill hint **only after cross-checking relay identity** (TCP probe + health check confirms `isOurRelayBody` before printing). Never calls `kill` programmatically.
@@ -80,11 +80,11 @@ The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvF
 ④ readSettingsJson parseable; ANTHROPIC_BASE_URL not 'foreign'; API key warn (non-fatal)
 ```
 
-Doctor (`spawnDoctor`) was check ⑤ in prior versions; it moved to `runPostSpawnVerification` (step 6 in the enable path). `spawnDoctor` remains on `ProxyPreflightDeps` for interface compatibility — `buildRealPreflightDeps` still builds it so `runEnable` can reuse the same deps instance for step 6 (`spawnDoctor: preflightDeps.spawnDoctor`). Preflight itself never calls `spawnDoctor`.
+`spawnDoctor` is on `ProxyPreflightDeps` and built by `buildRealPreflightDeps` so `runEnable` can pass it into `runPostSpawnVerification` (step 6) via the same deps instance (`spawnDoctor: preflightDeps.spawnDoctor`). Preflight itself never calls `spawnDoctor`.
 
 **Init never runs doctor and never spawns.** `devflow init` calls `runProxyPreflight` (the same 4-check function) then writes `proxy.json enabled:true`. The relay is started by the first session's `ensure-proxy` hook. Deeper diagnostics (doctor, spawn) live in `devflow proxy --enable` and `devflow proxy --status`.
 
-All four checks are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDeps(opts)`** (exported) builds the production implementation and is shared between `runEnable` and `init.ts` — inline copies were deleted. Key option: `swallowSettingsReadError: true` for init.ts (which writes `settings.json` itself); `false` for `runEnable` (propagates read errors to the user).
+All four checks are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDeps(opts)`** (exported) builds the production implementation and is shared between `runEnable` and `init.ts`. Key option: `swallowSettingsReadError: true` for init.ts (which writes `settings.json` itself); `false` for `runEnable` (propagates read errors to the user).
 
 ### Exported seams in proxy.ts
 
@@ -103,6 +103,7 @@ All four checks are injectable via `ProxyPreflightDeps`. **`buildRealPreflightDe
 | `SpawnAndWaitDeps`, `SpawnRelayResult`, `BuildRealPreflightDepsOptions` | Injectable interfaces |
 | `readProxyEnvState` | Returns `'ours'|'ours-other-port'|'foreign'|'absent'` for `--status` display |
 | `formatCodexAuthLine(state, path, now)` | Codex auth `--status` line; `unreadable` renders at warn level, expiry is informational only |
+| `formatExternalModelsLine(catalog, logPath)` | External models `--status` line; renders selectable model names or `unavailable` with the log path |
 
 Internal named functions (not exported): `applyEnableSettingsPass`, `resolveProcessState`, `formatProcessLine`, `readPidFile`, `PROBE_TIMEOUT_MS`, `DOCTOR_TIMEOUT_MS`, `RELAY_SPAWN_*` constants.
 
@@ -135,7 +136,7 @@ esac
 
 **Health body parsed via `json_field`** — key-order-independent. The old substring match `*'"name":"subswitch"'*` was order-dependent; the current code pipes `$HEALTH_BODY` into `json_field "name" ""` (sourced from json-parse) and compares the extracted value. `json_field` is always available at this call site because line 33 exits the hook if `_JSON_AVAILABLE=false`.
 
-**json-parse source failure** emits a named stderr diagnostic (`echo "ensure-proxy: failed to source json-parse" >&2`) and exits 0 — previously silent.
+**json-parse source failure** emits a named stderr diagnostic (`echo "ensure-proxy: failed to source json-parse" >&2`) and exits 0.
 
 **Log guard literals are named**: `_LOG_MAX_BYTES=2097152` (2MB) and `_LOG_TAIL_BYTES=1048576` (1MB) are named variables, matching the hook-log-init guard pattern.
 
@@ -152,7 +153,7 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 | Function | Mode | Cost |
 |----------|------|------|
 | `discoverExternalModels(cacheDir, logPath, deps?)` | Async, spawns subprocess | Writes a versioned cache entry `external-models-v1-<version>.json` under `cacheDir` |
-| `getExternalModelsCached(cacheDir)` | Sync, zero spawns | Reads the freshest unexpired (≤24h) cache entry; returns `{known:false}` on miss |
+| `getExternalModelsCached(cacheDir)` | Sync, zero spawns | Reads the newest cache entry regardless of TTL; returns `{ known: false }` on miss. Sets `source: 'cache'` when within TTL, `'stale-cache'` when expired. |
 
 **Cache dir convention**: `path.join(devflowDir, 'cache', 'models')` — `cacheDir` in all callers.
 
@@ -174,7 +175,7 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 - `discoverExternalModels` in the interactive TUI — async, spawns the runtime, gated on `proxyEnabled` (proxy-off sessions resolve immediately to `{ known: false }`); shows a spinner when catalog takes more than 250 ms.
 - `getExternalModelsCached` in `--set` — sync, zero spawns; accepts any model name on cache miss (configure-first-then-enable flow preserved).
 - `discoverExternalModels` fire-and-forget after enable (cache warming, strict non-fatal per PF-009).
-- `--status`, `--list`, `--reset` — never touch model discovery.
+- `--list`, `--reset` — never touch model discovery. `--status` reads the cached model registry via `getExternalModelsCached` (sync, zero spawns — no live fetch).
 
 **Uninstall**: `cache/models` is in `proxyArtifacts` in `uninstall.ts` — removed with `isDir:true` on `devflow uninstall`. The `cache/` parent directory is not removed (the HUD shares it).
 
@@ -208,7 +209,7 @@ Effort is orthogonal to dormancy — it always applies regardless of proxy state
 
 ### `loadShippedDefaults` and `reapplyAgentMapping` — parallel execution
 
-Both now use `Promise.all` for parallel I/O:
+Both use `Promise.all` for parallel I/O:
 - `loadShippedDefaults()` reads all agent `.md` files from `agentsDir()` concurrently.
 - `reapplyAgentMapping()` processes all agent files concurrently via `Promise.all` over the agent name list.
 
@@ -281,7 +282,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **`proxy.json` ENOENT is not an error**: `readProxyState()` returns a default disabled state when the file is missing. Callers that treat ENOENT as an error will get a false negative on fresh installs.
 - **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning. `spawnedPid` will be absent from `SpawnRelayResult` on this path — `runPostSpawnVerification` must never kill an adopted relay.
 - **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
-- **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`. Prior to this fix, the commander default of `String(DEFAULT_PROXY_PORT)` made the remembered port dead code.
+- **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`.
 - **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantExternalModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
 - **`binPath` must be spawned with `node <path>`**: npm does not guarantee executable bits on installed package binaries. Always spawn as `node <binPath>`, never `<binPath>` directly.
 - **Leaked stub relays**: proxy tests that spawn stub relays must reap them on the failure path too — not only the happy path. Use `afterEach`/`onTestFinished` with SIGTERM→SIGKILL escalation and confirm death via `process.kill(pid, 0)`. Real incident: three orphaned stub relays accumulated over ~3 weeks; a full run stretched from ~24 seconds to 40+ minutes and produced 13–21 spurious failures in unrelated files (memory pipeline, capture hooks) that were repeatedly misdiagnosed as product defects.
@@ -294,6 +295,9 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`
 - `src/core/agent-models.ts` — `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
 - `src/core/codex-auth-inspect.ts` — `inspectCodexAuth()` — pure `absent | unreadable | present` verdict on `~/.codex/auth.json` for `--status`. Re-derived rather than imported from the routing runtime, which ships no `exports` map (importing would pin an internal dist path across a pinned-dependency bump). Decodes the JWT payload for display only — never signature-verified, no token material returned, account id truncated to a 6-char suffix
+- `src/core/model-discovery.ts` — `discoverExternalModels(cacheDir, logPath, deps?)` (async, spawns runtime, cache-warming after enable), `getExternalModelsCached(cacheDir)` (sync, reads newest cache entry regardless of TTL)
+- `src/core/cache.ts` — cache read/write with 0700/0600 permissions, `parseRawEnvelope()`, `pruneOldEntries()` (keeps 3 entries by timestamp)
+- `src/core/proxy-log.ts` — `scrubChildEnv()` (allowlist-based env for relay spawn), `openProxyLog()`, `rotateProxyLogIfLarge()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
 - `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `formatCodexAuthLine`, `PostSpawnDoctorDeps`
 - `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()`, `applySetMapping()`, `buildListRows()`
