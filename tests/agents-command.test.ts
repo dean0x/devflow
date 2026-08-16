@@ -6,7 +6,7 @@
  * All tests use injected dir paths (temp dirs) — no real devflow/agent dirs.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -21,6 +21,7 @@ import {
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
+import * as modelDiscovery from '../src/core/model-discovery.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
@@ -373,23 +374,29 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
     await fs.rm(path.dirname(installDir), { recursive: true, force: true });
   });
 
-  it('source: buildListRows body does not call getExternalModelsCached or discoverExternalModels', () => {
-    // AC-P4: --list must never trigger discovery (AC-P4 in spec). Static check:
-    // the function body must not reference either discovery entry point.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { readFileSync } = require('fs') as typeof import('fs');
-    const srcPath = path.resolve(__dirname, '../src/cli/commands/agents.ts');
-    const src = readFileSync(srcPath, 'utf-8');
-
-    // Extract from function start to the next top-level export — generous window
-    const fnStart = src.indexOf('export async function buildListRows');
-    expect(fnStart, 'buildListRows not found in agents.ts').toBeGreaterThan(-1);
-    // Next export after buildListRows
-    const nextExport = src.indexOf('\nexport ', fnStart + 1);
-    const body = nextExport > fnStart ? src.slice(fnStart, nextExport) : src.slice(fnStart, fnStart + 3_000);
-
-    expect(body, 'buildListRows calls getExternalModelsCached — AC-P4 violation').not.toContain('getExternalModelsCached');
-    expect(body, 'buildListRows calls discoverExternalModels — AC-P4 violation').not.toContain('discoverExternalModels');
+  it('spy: buildListRows does not invoke getExternalModelsCached or discoverExternalModels', async () => {
+    // AC-P4: --list must never trigger discovery. A source-grep passes even when
+    // a discovery call is hidden one helper deep — a module-level spy catches that.
+    const discoverSpy = vi.spyOn(modelDiscovery, 'discoverExternalModels');
+    const getCachedSpy = vi.spyOn(modelDiscovery, 'getExternalModelsCached');
+    try {
+      const shippedDefaults: Record<string, string> = { coder: 'sonnet' };
+      const mapping: AgentMappingFile = { version: 1, agents: {} };
+      const catalog: ExternalModelCatalog = { known: false };
+      await buildListRows({
+        agentNames: ['coder'],
+        mapping,
+        installDir,
+        shippedDefaults,
+        proxyEnabled: false,
+        catalog,
+      });
+      expect(discoverSpy, 'buildListRows called discoverExternalModels — AC-P4 violation').not.toHaveBeenCalled();
+      expect(getCachedSpy, 'buildListRows called getExternalModelsCached — AC-P4 violation').not.toHaveBeenCalled();
+    } finally {
+      discoverSpy.mockRestore();
+      getCachedSpy.mockRestore();
+    }
   });
 
   it('functional: buildListRows succeeds with no cache directory present (requires no cache read)', async () => {
@@ -444,16 +451,27 @@ describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)'
     expect('agents' in result).toBe(true);
   });
 
-  it('source: neither validateSetArgs nor applySetMapping imports child_process', () => {
-    // Static check: the source file's top-level imports do not include child_process.
-    // These pure helpers cannot spawn if child_process is not imported at the module level.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { readFileSync } = require('fs') as typeof import('fs');
-    const srcPath = path.resolve(__dirname, '../src/cli/commands/agents.ts');
-    const src = readFileSync(srcPath, 'utf-8');
-
-    // Extract the import block at the top (first 3KB is conservative)
-    const importBlock = src.slice(0, 3_000);
-    expect(importBlock, 'agents.ts imports child_process at module level').not.toContain('child_process');
+  it('spy: validateSetArgs and applySetMapping do not invoke discovery functions (0 spawns)', () => {
+    // AC-P9: --set must make 0 spawns. A source import-grep can be evaded if child_process
+    // is imported conditionally or spawning is wrapped in a helper. A module-level spy on
+    // the discovery entry points (which are the only spawn paths in agents.ts) catches that.
+    const discoverSpy = vi.spyOn(modelDiscovery, 'discoverExternalModels');
+    const getCachedSpy = vi.spyOn(modelDiscovery, 'getExternalModelsCached');
+    try {
+      validateSetArgs({ model: 'sonnet' });
+      const mapping: AgentMappingFile = { version: 1, agents: {} };
+      applySetMapping(mapping, 'coder', { model: 'opus' });
+      expect(
+        discoverSpy,
+        'validateSetArgs or applySetMapping called discoverExternalModels — AC-P9 violation',
+      ).not.toHaveBeenCalled();
+      expect(
+        getCachedSpy,
+        'validateSetArgs or applySetMapping called getExternalModelsCached — AC-P9 violation',
+      ).not.toHaveBeenCalled();
+    } finally {
+      discoverSpy.mockRestore();
+      getCachedSpy.mockRestore();
+    }
   });
 });

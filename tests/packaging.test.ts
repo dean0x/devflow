@@ -71,7 +71,7 @@ describe('Guard 3 (dependency pin): routing runtime pinned to exact version', ()
     ).toBe(false);
   });
 
-  it('package-lock.json resolves subswitch to version 0.2.0 with a sha512 integrity field (DEP-3)', async () => {
+  it(`package-lock.json resolves subswitch to version ${SUBSWITCH_VERSION} with a sha512 integrity field (DEP-3)`, async () => {
     const lockJson = JSON.parse(
       await fs.readFile(path.join(ROOT, 'package-lock.json'), 'utf-8'),
     ) as {

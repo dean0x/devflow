@@ -900,51 +900,53 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
     expect((s as Record<string, unknown>).env).toBeUndefined();
   });
 
-  it('discovery independence — identical post-state across all three discovery scenarios', async () => {
-    // applyDisableToSettings is a pure Settings function: it does NOT call
-    // discoverExternalModels or getExternalModelsCached. Pre-seed three REAL
-    // cache directories in different states — the Settings post-state must be
-    // identical regardless of what the cache contains (PF-015, non-vacuous).
-    const tmpBase = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-t7-cache-'));
-    try {
-      const VALID_STUB = JSON.stringify({
-        schemaVersion: 1,
-        kind: 'models',
-        providers: [{ id: 'codex', routing: 'direct' }],
-        models: [{ id: 'gpt-5.6-sol', provider: 'codex', routable: true, retired: false, aliases: [] }],
-      });
+  it('unconditional both-operations invariant: all three settings states produce a clean post-state', () => {
+    // PF-015: applyDisableToSettings MUST call removeProxyHooks AND _stripProxyEnvFromObject
+    // unconditionally — regardless of each other's return value.
+    //
+    // The guarded bug: "removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)" short-circuits
+    // when hooks are present (removeProxyHooks returns true), leaving ANTHROPIC_BASE_URL set.
+    //
+    // Three scenarios that differ in REAL settings state (not in a label string).
+    // The "both-hooks-and-URL" case is the critical one: it goes RED when || is used
+    // because removeProxyHooks(s) returns true → _stripProxyEnvFromObject never runs →
+    // ANTHROPIC_BASE_URL survives → expect(env?.ANTHROPIC_BASE_URL).toBeUndefined() fails.
+    const scenarios = [
+      {
+        name: 'only-URL (no hooks)',
+        build: (): Settings => {
+          const s: Settings = {};
+          (s as Record<string, unknown>).env = { ANTHROPIC_BASE_URL: OUR_URL };
+          return s;
+        },
+      },
+      {
+        name: 'only-hooks (no URL)',
+        build: (): Settings => {
+          const s: Settings = {};
+          addProxyHooks(s, DEVFLOW_DIR);
+          return s;
+        },
+      },
+      {
+        name: 'both-hooks-and-URL (critical: proves unconditional evaluation)',
+        build: (): Settings => {
+          const s: Settings = {};
+          addProxyHooks(s, DEVFLOW_DIR);
+          (s as Record<string, unknown>).env = { ANTHROPIC_BASE_URL: OUR_URL };
+          return s;
+        },
+      },
+    ] as const;
 
-      // Scenario 1: cache-hit — fresh valid cache entry in the cache dir
-      const cacheHitDir = path.join(tmpBase, 'cache-hit', 'cache', 'models');
-      await fsAsync.mkdir(cacheHitDir, { recursive: true });
-      await writeCache(cacheHitDir, 'external-models-v1-0.2.0', VALID_STUB, 24 * 60 * 60 * 1_000);
+    for (const { name, build } of scenarios) {
+      const s = build();
+      const changed = applyDisableToSettings(s, DEFAULT_PORT);
+      const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
 
-      // Scenario 2: cache-miss — cache dir exists but is empty
-      const cacheMissDir = path.join(tmpBase, 'cache-miss', 'cache', 'models');
-      await fsAsync.mkdir(cacheMissDir, { recursive: true });
-
-      // Scenario 3: no-binary — cache dir does not exist (relay was never started)
-      const noBinaryDir = path.join(tmpBase, 'no-binary', 'cache', 'models');
-      // intentionally NOT created
-
-      const scenarios = [
-        { name: 'cache-hit' as const, _cacheDir: cacheHitDir },
-        { name: 'cache-miss' as const, _cacheDir: cacheMissDir },
-        { name: 'no-binary' as const, _cacheDir: noBinaryDir },
-      ];
-
-      for (const scenario of scenarios) {
-        const s = buildFullyEnabledSettings({ SCENARIO: scenario.name });
-        const changed = applyDisableToSettings(s, DEFAULT_PORT);
-        const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
-
-        expect(changed, `[${scenario.name}] changed`).toBe(true);
-        expect(hasProxyHooks(s), `[${scenario.name}] no proxy hooks`).toBe(false);
-        expect(env?.ANTHROPIC_BASE_URL, `[${scenario.name}] relay URL removed`).toBeUndefined();
-        expect(env?.SCENARIO, `[${scenario.name}] extra env preserved`).toBe(scenario.name);
-      }
-    } finally {
-      await fsAsync.rm(tmpBase, { recursive: true, force: true });
+      expect(changed, `[${name}] changed`).toBe(true);
+      expect(hasProxyHooks(s), `[${name}] no proxy hooks`).toBe(false);
+      expect(env?.ANTHROPIC_BASE_URL, `[${name}] relay URL removed`).toBeUndefined();
     }
   });
 
