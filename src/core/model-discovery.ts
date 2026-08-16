@@ -26,9 +26,9 @@ import * as os from 'node:os';
 import { spawn as cpSpawn } from 'node:child_process';
 import { MODEL_NAME_RE } from './agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from './external-models.js';
-import { readCache, writeCache, parseRawEnvelope } from './cache.js';
+import { readCache, writeCache, parseRawEnvelope, MAX_TTL_MS } from './cache.js';
 import { resolveProxyBin } from './proxy-state.js';
-import { openProxyLog } from './proxy-log.js';
+import { openProxyLog, scrubChildEnv } from './proxy-log.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local pattern, mirrors proxy-state.ts)
@@ -90,6 +90,14 @@ const SIGKILL_GRACE_MS = 2_000;
  * so rotateProxyLogIfLarge MUST NOT be called here (PRE-SPAWN ONLY invariant).
  */
 const LOG_WRITE_CAP = 2_048;
+
+/**
+ * Maximum bytes for a single cache-entry read in the discovery scanner.
+ * The live payload is ~1 KB; 64 KB is 64× headroom. Entries exceeding this
+ * cap are treated as corrupt and skipped. Enforced via parseDiscoveryFileContent,
+ * the shared helper used by all three enumeration sites (C2-REL-4).
+ */
+const MAX_ENTRY_BYTES = 65_536;
 
 /** The exact argv passed to the routing runtime for model discovery.
  *  Must be ['models', '--json'], always, unconditionally.
@@ -357,6 +365,28 @@ function validateCachedString(data: unknown): string | null {
 }
 
 /**
+ * Parse raw bytes from a discovery cache file.
+ *
+ * Single shared helper for all three enumeration sites (C2-ARCH-3): eliminates
+ * the three previously separate readFileSync→parseRawEnvelope→validate-string
+ * re-implementations that each independently re-derived the on-disk layout.
+ *
+ * Enforces MAX_ENTRY_BYTES to bound memory allocation on corrupt or oversized
+ * entries (C2-REL-4). Pure: no I/O. Callers own the read (sync or async).
+ *
+ * Returns null when the entry exceeds the size cap, fails JSON/envelope
+ * parsing, or contains a non-string data field.
+ */
+function parseDiscoveryFileContent(
+  buf: Buffer,
+): { data: string; timestamp: number; ttl: number } | null {
+  if (buf.length > MAX_ENTRY_BYTES) return null;
+  const envelope = parseRawEnvelope(buf.toString('utf-8'));
+  if (envelope === null || typeof envelope.data !== 'string') return null;
+  return { data: envelope.data, timestamp: envelope.timestamp, ttl: envelope.ttl };
+}
+
+/**
  * Scan cacheDir for the newest external-models-v1-* entry (by embedded
  * envelope timestamp, not file mtime) that is not skipKey and whose data is
  * a parseable string. Returns the raw stdout string or null.
@@ -384,15 +414,16 @@ async function findStaleFallback(
     if (skipKey !== null && key === skipKey) continue;
 
     try {
-      const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-      const envelope = parseRawEnvelope(raw);
-      if (envelope === null || typeof envelope.data !== 'string') continue;
-      if (envelope.timestamp > bestTimestamp) {
-        bestTimestamp = envelope.timestamp;
-        bestRaw = envelope.data;
+      // C2-REL-5: async read inside async function; size guard + parse via shared helper.
+      const buf = await fsAsync.readFile(path.join(cacheDir, entry));
+      const parsed = parseDiscoveryFileContent(buf);
+      if (parsed === null) continue;
+      if (parsed.timestamp > bestTimestamp) {
+        bestTimestamp = parsed.timestamp;
+        bestRaw = parsed.data;
       }
     } catch {
-      // Skip corrupt entries — they do not prevent other entries from being used
+      // Skip unreadable entries — they do not prevent other entries from being used
     }
   }
 
@@ -410,12 +441,24 @@ async function pruneOldEntries(cacheDir: string): Promise<void> {
     const candidates: Array<{ filename: string; timestamp: number }> = [];
 
     for (const entry of entries) {
-      if (!entry.startsWith(CACHE_KEY_PREFIX) || !entry.endsWith('.json')) continue;
+      if (!entry.startsWith(CACHE_KEY_PREFIX)) continue;
+
+      // C2-REL-3: reap orphaned atomic-write temp files (<key>.json.tmp.<pid>).
+      // These accumulate when the writer process is interrupted after the tmp write
+      // but before the rename completes (e.g., Ctrl-C after the enable outro prints).
+      if (entry.includes('.json.tmp.')) {
+        try { await fsAsync.unlink(path.join(cacheDir, entry)); } catch { /* non-fatal */ }
+        continue;
+      }
+
+      if (!entry.endsWith('.json')) continue;
+
       try {
-        const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-        const envelope = parseRawEnvelope(raw);
-        if (envelope !== null) {
-          candidates.push({ filename: entry, timestamp: envelope.timestamp });
+        // C2-REL-5: async read inside async function; size guard + parse via shared helper.
+        const buf = await fsAsync.readFile(path.join(cacheDir, entry));
+        const parsed = parseDiscoveryFileContent(buf);
+        if (parsed !== null) {
+          candidates.push({ filename: entry, timestamp: parsed.timestamp });
         }
       } catch {
         // Skip unreadable entries
@@ -456,7 +499,10 @@ async function appendToLog(logPath: string, msg: string): Promise<void> {
     const handle = await openProxyLog(logPath);
     try {
       const line = `${msg}\n`;
-      await handle.write(Buffer.from(line.slice(0, LOG_WRITE_CAP)));
+      // C2-REL-6: encode first, then slice bytes — slicing the JS string first
+      // slices UTF-16 code units before encoding, allowing up to ~4× the intended
+      // byte cap for non-ASCII content.
+      await handle.write(Buffer.from(line).subarray(0, LOG_WRITE_CAP));
     } finally {
       await handle.close();
     }
@@ -644,7 +690,7 @@ async function _discoverInternal(
   const staleRaw = await findStaleFallback(cacheDir, currentKey);
 
   // --- Live spawn ---
-  const { scrubChildEnv } = await import('./proxy-log.js');
+  // C2-ARCH-7: scrubChildEnv is already statically imported from './proxy-log.js' (line 31).
   const env: NodeJS.ProcessEnv = { ...scrubChildEnv(), NO_COLOR: '1' };
   const spawnFn = deps?.spawnAndCollect ?? buildRealSpawnAndCollect(logPath);
 
@@ -723,14 +769,17 @@ export function getExternalModelsCached(cacheDir: string): ExternalModelCatalog 
   for (const entry of entries) {
     if (!entry.startsWith(CACHE_KEY_PREFIX) || !entry.endsWith('.json')) continue;
     try {
-      const raw = fs.readFileSync(path.join(cacheDir, entry), 'utf-8');
-      const envelope = parseRawEnvelope(raw);
-      if (envelope === null || typeof envelope.data !== 'string') continue;
-      if (best === null || envelope.timestamp > best.timestamp) {
-        best = { raw: envelope.data, timestamp: envelope.timestamp, ttl: envelope.ttl };
+      // C2-ARCH-3: route through shared helper for consistent size guard and parsing.
+      // C2-REL-4: size guard enforced in parseDiscoveryFileContent (MAX_ENTRY_BYTES).
+      // Sync read is correct here — getExternalModelsCached is intentionally synchronous.
+      const buf = fs.readFileSync(path.join(cacheDir, entry));
+      const result = parseDiscoveryFileContent(buf);
+      if (result === null) continue;
+      if (best === null || result.timestamp > best.timestamp) {
+        best = { raw: result.data, timestamp: result.timestamp, ttl: result.ttl };
       }
     } catch {
-      // Skip corrupt entries
+      // Skip unreadable entries
     }
   }
 
@@ -740,7 +789,8 @@ export function getExternalModelsCached(cacheDir: string): ExternalModelCatalog 
   if (!parsed.ok) return { known: false };
 
   const age = Date.now() - best.timestamp;
-  const ttlClamped = Math.min(Math.abs(best.ttl), 7 * 24 * 60 * 60 * 1_000); // mirrors MAX_TTL_MS
+  // C2-ARCH-1: use exported MAX_TTL_MS from cache.ts — a comment is not a constraint.
+  const ttlClamped = Math.min(Math.abs(best.ttl), MAX_TTL_MS);
   const source: 'cache' | 'stale-cache' = age < ttlClamped ? 'cache' : 'stale-cache';
 
   return { known: true, ...parsed.value, source };
