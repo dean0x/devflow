@@ -8,9 +8,9 @@
 # SessionStart:  probe port → if DOWN attempt spawn → inject additionalContext warning if still down
 # UserPromptSubmit: fast exit (both port-up and port-down) — silent; SessionStart handles all warnings
 #
-# Performance: binPath/configPath reads, log mkdir/stat, and CWD extraction are all deferred
-# to SessionStart-only branches so the UserPromptSubmit hot path pays zero subprocess cost
-# beyond reading enabled+port from proxy.json (already done for the enabled guard).
+# Performance: UserPromptSubmit exits immediately after event detection — before any
+# proxy-state reads. All json_field_file calls, log mkdir/stat, and CWD extraction
+# run on SessionStart only. binPath/configPath reads are deferred to the port-down branch.
 #
 # Branding: "subswitch" is an internal identifier (health check body match, SUBSWITCH_CONFIG env var,
 # spawn args); it MUST NOT appear in user-visible strings or additionalContext messages.
@@ -44,6 +44,16 @@ case "$INPUT" in
 esac
 dbg "HOOK_EVENT=$HOOK_EVENT"
 
+# ── UserPromptSubmit fast path ─────────────────────────────────────────────────
+# Exit immediately before any proxy-state reads. On UserPromptSubmit the hook is
+# always silent — SessionStart handles all relay-start and warning logic. Exiting
+# here saves two json_field_file subprocess calls (~76ms on jq-less hosts, ~85%
+# of hook wall time) on every prompt when the proxy is enabled.
+if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
+  dbg "UserPromptSubmit: fast exit (SessionStart handles all state changes)"
+  exit 0
+fi
+
 # ── Proxy state ────────────────────────────────────────────────────────────────
 # Proxy is user-scope (global), not project-scoped. Use $DEVFLOW_DIR (env) or default.
 DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
@@ -72,19 +82,6 @@ case "$PROXY_PORT_RAW" in
     PROXY_PORT="$PROXY_PORT_RAW"
     ;;
 esac
-
-# ── UserPromptSubmit fast path ─────────────────────────────────────────────────
-# Both port-up and port-down exits are silent on UserPromptSubmit — the TCP probe
-# itself is skipped because neither branch produces any output. SessionStart already
-# warned the model if the relay was down; spamming additionalContext every prompt
-# would pollute context with identical warnings.
-# binPath/configPath reads, log mkdir/stat, and CWD extraction are deferred to
-# SessionStart-only branches below — keeping them here costs two json_field_file
-# subprocesses + mkdir + stat on EVERY prompt when the proxy is enabled.
-if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
-  dbg "UserPromptSubmit: fast exit (SessionStart handles all state changes)"
-  exit 0
-fi
 
 # ── CWD for debug tracing (SessionStart only, gated behind debug flag) ─────────
 # json_field spawns a subprocess — only worthwhile when debug tracing is active.
@@ -238,12 +235,24 @@ log "spawning relay: $NODE_BIN $PROXY_BIN serve"
 (umask 077 && touch "$LOG_FILE") 2>/dev/null || true
 chmod 600 "$LOG_FILE" 2>/dev/null || true
 
-export SUBSWITCH_CONFIG="$PROXY_CONFIG"
-# SEC-2: strip ANTHROPIC_API_KEY from the relay's env — it has credential value
-# and the subswitch relay reads Codex credentials from ~/.codex/auth.json, not env.
-# env(1) and nohup(1) both exec through, so $! still captures the relay PID.
-# env -u verified working on macOS /usr/bin/env (Bash 3.2 compatible).
-nohup env -u ANTHROPIC_API_KEY "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
+# SEC-2 (allowlist): scope the relay's env to exactly what it needs — avoids PF-017.
+# env -i starts with an empty environment; only the listed vars reach the relay.
+# SUBSWITCH_CONFIG is passed explicitly (was previously exported to the parent shell
+# so the denylist form could inherit it; under env -i it must be listed directly).
+# NODE_OPTIONS and NODE_EXTRA_CA_CERTS are intentionally omitted, consistent with
+# the TypeScript allowlist in proxy-log.ts scrubChildEnv(). Corporate-TLS users
+# who need those vars should add them to BOTH allowlists.
+# Bash 3.2-safe: env -i with inline VAR=value assignments is POSIX-standard.
+# nohup + env -i chain: nohup inherits the parent env (irrelevant — env -i clears
+# it for the relay); $! still captures the relay PID correctly.
+nohup env -i \
+  PATH="$PATH" \
+  HOME="$HOME" \
+  TMPDIR="${TMPDIR:-}" \
+  LANG="${LANG:-}" \
+  LC_ALL="${LC_ALL:-}" \
+  SUBSWITCH_CONFIG="$PROXY_CONFIG" \
+  "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
 _RELAY_PID=$!
 disown "$_RELAY_PID" 2>/dev/null || true
 

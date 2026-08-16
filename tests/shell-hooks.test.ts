@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
+import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -1624,7 +1625,6 @@ describe('ensure-proxy behavioral tests', () => {
       port: opts.port,
       binPath: opts.binPath !== undefined ? opts.binPath : null,
       configPath: opts.configPath !== undefined ? opts.configPath : null,
-      models: [],
       resolvedAt: new Date().toISOString(),
       devflowVersion: null,
     };
@@ -1841,7 +1841,6 @@ describe('ensure-proxy behavioral tests', () => {
         port: listenPort,
         binPath: null,
         configPath: null,
-        models: [],
         resolvedAt: new Date().toISOString(),
         devflowVersion: null,
       };
@@ -2042,19 +2041,16 @@ describe('ensure-proxy behavioral tests', () => {
   describe('relay spawn path (stub relay binds the port)', () => {
     let spawnedPid: number | null = null;
 
-    afterEach(() => {
+    afterEach(async () => {
       // The hook spawns a detached, disowned process — the test owns its teardown.
-      // SIGTERM → 200ms grace → SIGKILL to avoid leaving orphaned relay processes
+      // SIGTERM → 200ms async sleep → SIGKILL to avoid leaving orphaned relay processes
       // that corrupt subsequent test runs (observed: 3 leaked processes per suite).
       if (spawnedPid !== null) {
         const pid = spawnedPid;
         spawnedPid = null;
         try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-        // Give the process a brief window to exit cleanly before escalating.
-        const deadline = Date.now() + 200;
-        while (Date.now() < deadline) {
-          try { process.kill(pid, 0); } catch { break; } // exited
-        }
+        // Yield to the event loop while waiting for the process to exit cleanly.
+        await new Promise<void>((r) => setTimeout(r, 200));
         try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
         // Verify termination — log a warning rather than throwing so afterEach always completes.
         try {
@@ -2085,7 +2081,7 @@ describe('ensure-proxy behavioral tests', () => {
 
     function writeRoutingConfig(port: number): string {
       const configPath = path.join(tmpDir, 'proxy-routing.json');
-      fs.writeFileSync(configPath, JSON.stringify({ port, codex: { models: [] } }));
+      fs.writeFileSync(configPath, buildRoutingConfigJson(port));
       return configPath;
     }
 
@@ -2157,6 +2153,69 @@ describe('ensure-proxy behavioral tests', () => {
 
       // A retained lock would make every later session take the "starting elsewhere" path.
       expect(fs.existsSync(path.join(homeDir, '.devflow', '.proxy-spawn.lock'))).toBe(false);
+    });
+
+    // C2-SEC-1 regression: the relay spawn must use an env allowlist, not a denylist.
+    // Before the fix, `nohup env -u ANTHROPIC_API_KEY` spread the full parent env so
+    // every secret the shell had exported (SSH_AUTH_SOCK, OPENAI_API_KEY, etc.) reached
+    // the third-party routing runtime. The fix converts to `env -i` with 5+1 explicit
+    // vars (PATH, HOME, TMPDIR, LANG, LC_ALL, SUBSWITCH_CONFIG). avoids PF-017.
+    //
+    // Strategy: pass canary vars via extraEnv to the hook process, then have a
+    // custom stub relay capture its own process.env to a file BEFORE binding the
+    // port (so the file is written by the time the hook's TCP probe succeeds).
+    // Assert both canary vars are absent from the relay's captured environment.
+    it('C2-SEC-1: spawned relay does not receive canary env vars (SSH_AUTH_SOCK, OPENAI_API_KEY)', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env.json');
+
+      // Stub relay: capture env to file synchronously, then bind.
+      // Writing env before listen() guarantees the file exists by the time the
+      // hook's TCP probe sees the port as up (probe only succeeds after listen()).
+      const binPath = path.join(tmpDir, 'env-capture-relay.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass canary vars into the hook's environment — they must NOT reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        SSH_AUTH_SOCK: '/tmp/test-canary-ssh-auth.sock',
+        OPENAI_API_KEY: 'sk-test-canary-0000',
+      });
+
+      // Register pid for afterEach cleanup before any assertions.
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(envCapturePath), 'relay env capture file must exist').toBe(true);
+
+      const relayEnv = JSON.parse(fs.readFileSync(envCapturePath, 'utf-8')) as Record<string, string>;
+      // Both canary vars must be absent — the allowlist does not include them.
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'SSH_AUTH_SOCK'),
+        'SSH_AUTH_SOCK must be absent from relay env (allowlist enforced)',
+      ).toBe(false);
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'OPENAI_API_KEY'),
+        'OPENAI_API_KEY must be absent from relay env (allowlist enforced)',
+      ).toBe(false);
     });
   });
 });
