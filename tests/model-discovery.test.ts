@@ -403,23 +403,22 @@ describe('getExternalModelsCached', () => {
     expect(result.known).toBe(true);
     if (!result.known) return;
     expect(result.models.length).toBe(2);
-    expect(result.source).toMatch(/^(cache|stale-cache)$/);
+    // Fresh entry with full 24h TTL must yield 'cache', not 'stale-cache'.
+    // Deleting the cache read path would make this fail (avoids PF-018).
+    expect(result.source).toBe('cache');
   });
 
-  it('returns source:cache for a fresh entry, stale-cache for an expired one', async () => {
-    // Write an expired entry (timestamp in the past, TTL = 1ms)
+  it('returns source:stale-cache for an expired entry', async () => {
+    // Write an expired entry (1ms TTL) and wait for expiry.
+    // getExternalModelsCached never deletes on expiry — findStaleFallback still finds
+    // the file and returns it as 'stale-cache'. Removing findStaleFallback would cause
+    // result.known to be false, making the hard assert below fail (avoids PF-018).
     await writeCache(cacheDir, `${CACHE_KEY_PREFIX}0.1.0`, VALID_PAYLOAD, 1);
-    // Small delay to ensure expiry
     await new Promise((r) => setTimeout(r, 10));
     const result = getExternalModelsCached(cacheDir);
-    // getExternalModelsCached ignores TTL and always returns the best entry,
-    // so this should still succeed — source will be 'stale-cache'
-    if (result.known) {
-      expect(result.source).toBe('stale-cache');
-    } else {
-      // Some implementations may clamp at ENOENT on zero-TTL; either is acceptable
-      // as long as the test completes without throwing.
-    }
+    expect(result.known).toBe(true);
+    if (!result.known) return;
+    expect(result.source).toBe('stale-cache');
   });
 
   it('picks the newest entry by embedded timestamp across multiple versions', async () => {
@@ -510,7 +509,9 @@ describe('discoverExternalModels — injectable deps (no real binary)', () => {
   });
 
   it('falls back to stale-cache when live spawn fails', async () => {
-    // Write an expired entry
+    // Write an expired entry (1ms TTL) — findStaleFallback finds it regardless of TTL.
+    // Removing findStaleFallback would make result.known false, failing the hard assert
+    // below and proving the test is no longer vacuous (avoids PF-018).
     await writeCache(cacheDir, `${CACHE_KEY_PREFIX}0.1.0`, VALID_PAYLOAD, 1);
     await new Promise((r) => setTimeout(r, 10));
 
@@ -522,11 +523,9 @@ describe('discoverExternalModels — injectable deps (no real binary)', () => {
       spawnAndCollect: async () => ({ exitCode: 1, stdout: '', timedOut: false }),
     };
     const result = await discoverExternalModels(cacheDir, logPath, deps);
-    // Should use the stale 0.1.0 entry
-    if (result.known) {
-      expect(result.source).toBe('stale-cache');
-    }
-    // If stale-cache is rejected by the implementation for near-zero TTL, known:false is also acceptable
+    expect(result.known).toBe(true);
+    if (!result.known) return;
+    expect(result.source).toBe('stale-cache');
   });
 
   it('writes to cache on successful live spawn', async () => {
@@ -719,11 +718,14 @@ describe('T12: pruneOldEntries after live write', () => {
     };
     await discoverExternalModels(cacheDir, logPath, deps);
 
-    // After pruning: at most 3 entries remain
+    // After pruning: exactly 3 entries remain (5 pre-seeded + 1 live write = 6 total;
+    // pruneOldEntries keeps the 3 newest). toBeLessThanOrEqual(3) would pass even if
+    // pruning deleted everything — toBe(3) proves pruning ran and kept the right count
+    // (avoids PF-018).
     const after = fs.readdirSync(cacheDir).filter(
       (e) => e.startsWith(CACHE_KEY_PREFIX) && e.endsWith('.json'),
     );
-    expect(after.length).toBeLessThanOrEqual(3);
+    expect(after.length).toBe(3);
   });
 
   it('keeps the 3 newest entries by embedded timestamp, not alphabetical order', async () => {
@@ -757,13 +759,15 @@ describe('T12: pruneOldEntries after live write', () => {
 // ---------------------------------------------------------------------------
 
 describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
-  it('returns known:true with live data when routing runtime is installed', async () => {
-    // Resolve the real bin first — skip if not available
+  it('returns known:true with live data when routing runtime is installed', async (ctx) => {
+    // Resolve the real bin first — use vitest's ctx.skip() so the test reports SKIPPED
+    // (not PASSED) when the runtime is absent. A bare `return` masks the skip as PASSED
+    // and is a PF-018 vacuous-green mechanism.
     const binResult = await resolveProxyBin();
     if (!binResult.ok) {
-      // Skip only when the error indicates the runtime is not installed
       if (binResult.error.includes('MODULE_NOT_FOUND') || binResult.error.includes('routing runtime')) {
-        return; // skip
+        ctx.skip();
+        return;
       }
       // Unexpected error — fail the test
       throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
@@ -771,21 +775,22 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
 
     const result = await discoverExternalModels(cacheDir, logPath);
 
-    // The result must be deterministic — either live or cache (not known:false when bin is present)
-    // Note: the routing runtime may still return known:false if the live fetch fails
-    // (e.g. auth not configured). We assert the function does not throw.
-    if (result.known) {
-      expect(result.models.length).toBeGreaterThan(0);
-      expect(result.source).toMatch(/^(live|cache|stale-cache)$/);
-      // selectableNames must be non-empty and duplicate-free (PF-016 guard)
-      expect(result.selectableNames.length).toBeGreaterThan(0);
-      expect(new Set(result.selectableNames).size).toBe(result.selectableNames.length);
-      // aliasToId must cover all selectableNames
-      for (const name of result.selectableNames) {
-        expect(result.aliasToId.has(name)).toBe(true);
-      }
+    // subswitch models --json (0.2.0) is a static registry dump: no auth, no relay,
+    // no config file required (verified: exit 0, configFileFound:false). The per-test
+    // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
+    // must be 'live'. Guarding these behind `if (result.known)` would let the test
+    // pass vacuously when the live call incorrectly returns known:false (avoids PF-018).
+    expect(result.known).toBe(true);
+    if (!result.known) return; // TypeScript narrowing only
+    expect(result.source).toBe('live');
+    expect(result.models.length).toBeGreaterThan(0);
+    // selectableNames must be non-empty and duplicate-free
+    expect(result.selectableNames.length).toBeGreaterThan(0);
+    expect(new Set(result.selectableNames).size).toBe(result.selectableNames.length);
+    // aliasToId must cover all selectableNames
+    for (const name of result.selectableNames) {
+      expect(result.aliasToId.has(name)).toBe(true);
     }
-    // known:false is acceptable here — the runtime may require auth
   }, 10_000); // 10s timeout for live spawn
 });
 
@@ -838,29 +843,10 @@ describe('T3: PF-013 — cwd is os.tmpdir(), not devflow dir', () => {
         // instead of os.tmpdir(), the stub would detect the config and exit 1 → known:false.
         process.chdir(legacyConfigDir);
 
-        const deps: ModelDiscoveryDeps = {
-          resolveProxyBin: async () => ({
-            ok: true,
-            value: { binPath: stub, npxWarning: false, version: '0.2.0' },
-          }),
-          spawnAndCollect: async (opts) => {
-            // Run the shell stub with the cwd that production passes (os.tmpdir()).
-            // If opts.cwd were the process cwd (legacyConfigDir), the stub would see
-            // subswitch.config.json and exit 1.
-            const { spawnSync } = await import('child_process');
-            const out = spawnSync('sh', [opts.binPath], {
-              encoding: 'utf-8',
-              timeout: SPAWN_TIMEOUT_MS + 1_000,
-              env: opts.env as Record<string, string>,
-              cwd: opts.cwd,
-            });
-            return {
-              exitCode: out.status ?? 1,
-              stdout: out.stdout ?? '',
-              timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
-            };
-          },
-        };
+        // shellDeps runs the real shell stub (applies PF-016) — cwd comes from opts.cwd,
+        // which production sets to os.tmpdir(). If production used process.cwd() the stub
+        // would find subswitch.config.json and exit 1 → known:false (test would catch it).
+        const deps = shellDeps(stub);
 
         const result = await discoverExternalModels(cacheDir, logPath, deps);
 
@@ -916,28 +902,9 @@ describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child 
 
       let childExitCode: number | undefined;
       try {
-        const deps: ModelDiscoveryDeps = {
-          resolveProxyBin: async () => ({
-            ok: true,
-            value: { binPath: stub, npxWarning: false, version: '0.2.0' },
-          }),
-          spawnAndCollect: async (opts) => {
-            // Run the real shell script with the scrubbed env (applies PF-016).
-            const { spawnSync } = await import('child_process');
-            const out = spawnSync('sh', [opts.binPath], {
-              encoding: 'utf-8',
-              timeout: SPAWN_TIMEOUT_MS + 1_000,
-              env: opts.env as Record<string, string>,
-              cwd: opts.cwd,
-            });
-            childExitCode = out.status ?? -1;
-            return {
-              exitCode: out.status ?? 1,
-              stdout: out.stdout ?? '',
-              timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
-            };
-          },
-        };
+        // onExitCode callback captures the raw child exit code so we can distinguish
+        // exit 0 (SUBSWITCH_CONFIG absent → stripping worked) from exit 2 (leaked).
+        const deps = shellDeps(stub, (code) => { childExitCode = code; });
 
         const result = await discoverExternalModels(cacheDir, logPath, deps);
         // The stub exits 0 (absent) → empty stdout, JSON parse fails → known:false.
@@ -961,21 +928,54 @@ describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child 
 });
 
 // ---------------------------------------------------------------------------
-// T4 & AC-P8: Real-binary stub tests (applies PF-016)
+// Shared utilities for real-binary shell-stub tests (T2, T3, T4, AC-P8)
+// Applies PF-016: real spawned processes, not vitest mocks.
 // ---------------------------------------------------------------------------
 
 /**
  * Write a short shell script to a temp path and make it executable.
  * Returns the path to the script.
- *
- * applies PF-016: these tests use a REAL binary (shell script) that actually
- * exits with the target code. A vitest mock returning exitCode: 1 would never
- * exercise the OS-level spawn path, the pipe plumbing, or the timeout logic.
  */
 async function writeStubScript(tmpDir: string, name: string, content: string): Promise<string> {
   const scriptPath = path.join(tmpDir, name);
   await fsAsync.writeFile(scriptPath, content, { mode: 0o755 });
   return scriptPath;
+}
+
+/**
+ * Build ModelDiscoveryDeps that runs a real shell script via spawnSync.
+ * Applies PF-016: a real spawned process is used — not a vitest mock that
+ * always returns a fixed exit code without touching OS spawn or pipe plumbing.
+ *
+ * Previously defined inside the T4 describe block (unreachable from T2/T3).
+ * Hoisted to module scope so all shell-stub suites share one definition.
+ *
+ * @param stubPath Path to the shell script stub to execute
+ * @param onExitCode Optional callback receiving the raw child exit code.
+ *   Used by T2 to distinguish exit 0 (env stripped) from exit 2 (env leaked).
+ */
+function shellDeps(stubPath: string, onExitCode?: (code: number) => void): ModelDiscoveryDeps {
+  return {
+    resolveProxyBin: async () => ({
+      ok: true,
+      value: { binPath: stubPath, npxWarning: false, version: '0.2.0' },
+    }),
+    spawnAndCollect: async (opts) => {
+      const { spawnSync } = await import('child_process');
+      const out = spawnSync('sh', [opts.binPath], {
+        encoding: 'utf-8',
+        timeout: SPAWN_TIMEOUT_MS + 1_000,
+        env: opts.env as Record<string, string>,
+        cwd: opts.cwd,
+      });
+      onExitCode?.(out.status ?? -1);
+      return {
+        exitCode: out.status ?? 1,
+        stdout: out.stdout ?? '',
+        timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
+      };
+    },
+  };
 }
 
 describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applies PF-016)', () => {
@@ -987,43 +987,19 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
     await writeCache(cacheDir, `${CACHE_KEY_PREFIX}stale`, VALID_PAYLOAD, CACHE_TTL_MS);
   });
 
-  // Helper: run a real shell stub via injectable spawnAndCollect.
-  // Applies PF-016: real spawned process, not a vitest mock.
+  // Thin wrapper so T4 tests read as runShellStub(shellDeps(stub)) rather than
+  // repeating discoverExternalModels(cacheDir, logPath, deps) at every call site.
   async function runShellStub(
-    stubPath: string,
     deps: ModelDiscoveryDeps,
   ): ReturnType<typeof discoverExternalModels> {
     return discoverExternalModels(cacheDir, logPath, deps);
-  }
-
-  function shellDeps(stubPath: string): ModelDiscoveryDeps {
-    return {
-      resolveProxyBin: async () => ({
-        ok: true,
-        value: { binPath: stubPath, npxWarning: false, version: '0.2.0' },
-      }),
-      spawnAndCollect: async (opts) => {
-        const { spawnSync } = await import('child_process');
-        const out = spawnSync('sh', [opts.binPath], {
-          encoding: 'utf-8',
-          timeout: SPAWN_TIMEOUT_MS + 1_000,
-          env: opts.env as Record<string, string>,
-          cwd: opts.cwd,
-        });
-        return {
-          exitCode: out.status ?? 1,
-          stdout: out.stdout ?? '',
-          timedOut: out.signal === 'SIGTERM' || out.signal === 'SIGKILL',
-        };
-      },
-    };
   }
 
   it('exit-1 → stale-cache (unconditional)', async () => {
     if (process.platform === 'win32') return;
 
     const stub = await writeStubScript(tmpDir, 'stub-t4-exit1.sh', '#!/bin/sh\nexit 1\n');
-    const result = await runShellStub(stub, shellDeps(stub));
+    const result = await runShellStub(shellDeps(stub));
 
     // Stale pre-seeded and valid → must return known:true, source:'stale-cache'
     expect(result.known).toBe(true);
@@ -1041,7 +1017,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
       'stub-t4-garbage.sh',
       '#!/bin/sh\nprintf "\\x00\\xff\\xfe garbage\\n"\nexit 0\n',
     );
-    const result = await runShellStub(stub, shellDeps(stub));
+    const result = await runShellStub(shellDeps(stub));
 
     expect(result.known).toBe(true);
     if (result.known) {
@@ -1063,7 +1039,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
       'stub-t4-schema2.sh',
       `#!/bin/sh\necho '${badPayload}'\nexit 0\n`,
     );
-    const result = await runShellStub(stub, shellDeps(stub));
+    const result = await runShellStub(shellDeps(stub));
 
     expect(result.known).toBe(true);
     if (result.known) {
@@ -1079,7 +1055,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
       'stub-t4-empty.sh',
       `#!/bin/sh\necho '{}'\nexit 0\n`,
     );
-    const result = await runShellStub(stub, shellDeps(stub));
+    const result = await runShellStub(shellDeps(stub));
 
     expect(result.known).toBe(true);
     if (result.known) {
@@ -1091,8 +1067,17 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
     // This case uses the PRODUCTION buildRealSpawnAndCollect (no spawnAndCollect injection)
     // so the actual SIGTERM→SIGKILL escalation logic in model-discovery.ts is exercised.
     // Stub is a .js file so production can run it as: process.execPath [stub, 'models', '--json'].
+    //
+    // The stub writes its own PID so we can verify it is genuinely dead after the test.
+    // Production's SIGKILL fires on an unref()'d timer that runs SIGKILL_GRACE_MS after
+    // discoverExternalModels returns. Without this check a leaked stub could accumulate
+    // over multiple runs and stretch the suite from ~24s to 40+ minutes (real incident,
+    // feature KB 'Leaked stub relays' gotcha).
+    const pidFile = path.join(tmpDir, 'stub-t4-sigterm.pid');
     const stubContent = [
       '// SIGTERM-ignoring stub (T4)',
+      `const fs = require('fs');`,
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
       'process.on("SIGTERM", () => {});  // ignore SIGTERM — must be killed by SIGKILL',
       'setInterval(() => {}, 100000);    // hold event loop open',
     ].join('\n') + '\n';
@@ -1118,6 +1103,24 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure (applie
     // Must return within: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom
     const upperBound = SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2_000;
     expect(elapsed).toBeLessThan(upperBound);
+
+    // Verify the child is genuinely dead. Production fires SIGKILL on an unref()'d
+    // timer SIGKILL_GRACE_MS after discoverExternalModels returns — wait for it to land,
+    // then probe with signal 0 (throws ESRCH when the process is gone). Mirrors AC-P8.
+    await new Promise((r) => setTimeout(r, SIGKILL_GRACE_MS + 500));
+    if (fs.existsSync(pidFile)) {
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      if (Number.isFinite(pid) && pid > 0) {
+        let stillAlive = false;
+        try {
+          process.kill(pid, 0); // throws ESRCH if dead
+          stillAlive = true;
+        } catch {
+          // ESRCH — expected: process is dead
+        }
+        expect(stillAlive).toBe(false);
+      }
+    }
   }, SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000);
 
   it('300KB payload exceeds STDOUT_CAP → overflow kill → stale-cache (production path)', async () => {
