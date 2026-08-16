@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fsAsync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as net from 'net';
+import * as http from 'http';
 import {
   applyProxyEnv,
   stripProxyEnv,
@@ -25,6 +27,7 @@ import {
   resolvePort,
   formatExternalModelsLine,
   formatCodexAuthLine,
+  realHttpGet,
   type ProxyPreflightDeps,
   type PostSpawnDoctorDeps,
 } from '../src/cli/commands/proxy.js';
@@ -1082,15 +1085,15 @@ describe('formatExternalModelsLine (AC-F6)', () => {
     const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
     it('absent → actionable codex login hint', () => {
-      const out = strip(formatCodexAuthLine({ kind: 'absent' }, AUTH_PATH, NOW));
+      const { msg } = formatCodexAuthLine({ kind: 'absent' }, AUTH_PATH, NOW);
+      const out = strip(msg);
       expect(out).toContain('absent');
       expect(out).toContain('codex login');
     });
 
     it('unreadable → surfaces the reason, the path, and the remedy', () => {
-      const out = strip(
-        formatCodexAuthLine({ kind: 'unreadable', reason: 'not valid JSON' }, AUTH_PATH, NOW),
-      );
+      const { msg } = formatCodexAuthLine({ kind: 'unreadable', reason: 'not valid JSON' }, AUTH_PATH, NOW);
+      const out = strip(msg);
       expect(out).toContain('unreadable');
       expect(out).toContain('not valid JSON');
       expect(out).toContain(AUTH_PATH);
@@ -1098,18 +1101,17 @@ describe('formatExternalModelsLine (AC-F6)', () => {
     });
 
     it('present + future expiry → validity stated, no remedy suggested', () => {
-      const out = strip(
-        formatCodexAuthLine(
-          {
-            kind: 'present',
-            authMode: 'chatgpt',
-            accountSuffix: '…d8e65c',
-            expiresAt: new Date('2026-08-17T18:24:42Z'),
-          },
-          AUTH_PATH,
-          NOW,
-        ),
+      const { msg } = formatCodexAuthLine(
+        {
+          kind: 'present',
+          authMode: 'chatgpt',
+          accountSuffix: '…d8e65c',
+          expiresAt: new Date('2026-08-17T18:24:42Z'),
+        },
+        AUTH_PATH,
+        NOW,
       );
+      const out = strip(msg);
       expect(out).toContain('present');
       expect(out).toContain('chatgpt, …d8e65c');
       expect(out).toContain('valid through 2026-08-17');
@@ -1117,51 +1119,151 @@ describe('formatExternalModelsLine (AC-F6)', () => {
     });
 
     it('present + past expiry → informational, never told to re-login', () => {
-      const out = strip(
-        formatCodexAuthLine(
-          {
-            kind: 'present',
-            authMode: 'chatgpt',
-            accountSuffix: '…d8e65c',
-            expiresAt: new Date('2026-08-01T00:00:00Z'),
-          },
-          AUTH_PATH,
-          NOW,
-        ),
+      const { msg } = formatCodexAuthLine(
+        {
+          kind: 'present',
+          authMode: 'chatgpt',
+          accountSuffix: '…d8e65c',
+          expiresAt: new Date('2026-08-01T00:00:00Z'),
+        },
+        AUTH_PATH,
+        NOW,
       );
+      const out = strip(msg);
       expect(out).toContain('expired 2026-08-01');
       expect(out).toContain('refreshes on next request');
       expect(out).not.toContain('codex login');
     });
 
     it('present without decodable expiry → no expiry claim either way', () => {
-      const out = strip(
-        formatCodexAuthLine(
-          { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: undefined },
-          AUTH_PATH,
-          NOW,
-        ),
+      const { msg } = formatCodexAuthLine(
+        { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: undefined },
+        AUTH_PATH,
+        NOW,
       );
+      const out = strip(msg);
       expect(out).toContain('present');
       expect(out).not.toContain('valid through');
       expect(out).not.toContain('expired');
     });
 
     it('expiry exactly at now counts as expired (boundary)', () => {
-      const out = strip(
-        formatCodexAuthLine(
-          { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: NOW },
-          AUTH_PATH,
-          NOW,
-        ),
+      const { msg } = formatCodexAuthLine(
+        { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: NOW },
+        AUTH_PATH,
+        NOW,
       );
+      const out = strip(msg);
       expect(out).toContain('expired');
       expect(out).not.toContain('valid through');
+    });
+
+    // C2-CONS-10: formatCodexAuthLine returns {level, msg} — level encodes the
+    // "unreadable warns" rule so callers don't re-derive it from state.kind.
+    it('C2-CONS-10: unreadable → level=warn (caller must not re-derive)', () => {
+      const result = formatCodexAuthLine({ kind: 'unreadable', reason: 'bad JSON' }, AUTH_PATH, NOW);
+      expect(result.level).toBe('warn');
+    });
+
+    it('C2-CONS-10: absent → level=info', () => {
+      const result = formatCodexAuthLine({ kind: 'absent' }, AUTH_PATH, NOW);
+      expect(result.level).toBe('info');
+    });
+
+    it('C2-CONS-10: present → level=info', () => {
+      const result = formatCodexAuthLine(
+        { kind: 'present', authMode: 'chatgpt', accountSuffix: '…d8e65c', expiresAt: undefined },
+        AUTH_PATH,
+        NOW,
+      );
+      expect(result.level).toBe('info');
     });
   });
 
   it('does not mention "subswitch" (branding rule)', () => {
     const result = formatExternalModelsLine({ known: false }, LOG_PATH);
     expect(result.toLowerCase()).not.toContain('subswitch');
+  });
+});
+
+// ─── C2-REL-1: realHttpGet reliability ────────────────────────────────────────
+//
+// realHttpGet is the production HTTP implementation used by resolveProcessState
+// (health check in --status) and runDisable (identity cross-check, SEC-3).
+// The disable path fires precisely when the port is NOT confirmed as our relay,
+// so any local service that trickles bytes can pin --disable forever with growing
+// memory.  Three bounded-resource invariants must hold:
+//   1. Wall-clock total deadline — `end` never fires on SSE / trickle endpoints
+//   2. 64KB body cap — rejects oversized responses before accumulating them
+//   3. res.on('error') listener — response stream errors must not become unhandled
+//
+// These tests run real local HTTP servers — no mocking of the function under test.
+
+describe('realHttpGet (C2-REL-1 reliability)', () => {
+  it('slow-trickle server: wall-clock deadline fires, returns Err (RED: hangs without it)', async () => {
+    // Server sends one byte every 30ms but never closes the response — simulates
+    // an SSE endpoint or a log tailer that keeps a connection alive indefinitely.
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      const iv = setInterval(() => { res.write('x'); }, 30);
+      res.on('close', () => clearInterval(iv));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/`;
+    try {
+      const result = await realHttpGet(url, 200); // 200ms wall-clock deadline
+      expect(result.ok).toBe(false); // must not succeed — 'end' never fires
+      if (!result.ok) {
+        expect(result.error).toMatch(/deadline|timeout/);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 3000 /* test timeout: 3s, must complete well before this */);
+
+  it('oversized body (>64KB): returns Err before buffering full response (RED: returns Ok without cap)', async () => {
+    const BIG = Buffer.alloc(70 * 1024, 0x41); // 70KB of 'A'
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end(BIG);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/`;
+    try {
+      const result = await realHttpGet(url, 5000);
+      expect(result.ok).toBe(false); // must be rejected before buffering 70KB
+      if (!result.ok) {
+        expect(result.error).toMatch(/too large|body/i);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('normal response: returns Ok with body under cap', async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200);
+      res.end('{"name":"subswitch"}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/`;
+    try {
+      const result = await realHttpGet(url, 2000);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toContain('subswitch');
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('connection error: returns Err (no unhandled rejection)', async () => {
+    // Port 1 is privileged and will refuse the connection immediately
+    const result = await realHttpGet('http://127.0.0.1:1/', 2000);
+    expect(result.ok).toBe(false);
   });
 });

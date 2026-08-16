@@ -76,6 +76,12 @@ const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
 
 /** Timeout for individual TCP connect probes and HTTP health checks (ms). */
 const PROBE_TIMEOUT_MS = 2000;
+/**
+ * Maximum response body accepted by realHttpGet before aborting (64 KB).
+ * Prevents unbounded memory growth on slow-trickle or misconfigured endpoints
+ * (e.g. an SSE stream on the same port that --disable probes).
+ */
+const BODY_CAP_BYTES = 64 * 1024;
 /** Timeout for the relay doctor subprocess (ms). */
 const DOCTOR_TIMEOUT_MS = 10_000;
 /**
@@ -469,25 +475,66 @@ async function realTcpConnectable(port: number, timeoutMs: number): Promise<bool
   });
 }
 
-/** Production HTTP/HTTPS GET implementation — selects module from URL scheme. */
-async function realHttpGet(url: string, timeoutMs: number): Promise<Result<string, string>> {
+/**
+ * Production HTTP/HTTPS GET implementation — selects module from URL scheme.
+ *
+ * Three resource bounds (avoids the reliability pitfall in C2-REL-1):
+ *   • Wall-clock total deadline: fires when 'end' never arrives (SSE / trickle server).
+ *     `--disable` probes precisely the port Devflow no longer owns, so any local
+ *     service that trickles bytes could pin the CLI forever without this bound.
+ *   • 64 KB body cap: aborts before accumulating unbounded memory.
+ *   • res.on('error') listener: response-stream errors are caught, not ignored.
+ *
+ * Exported for reliability tests (C2-REL-1).
+ */
+export async function realHttpGet(url: string, timeoutMs: number): Promise<Result<string, string>> {
   const mod = url.startsWith('https://') ? https : http;
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (r: Result<string, string>): void => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+
+    // Wall-clock deadline — independent of the per-chunk socket idle timeout below.
+    const wallClock = setTimeout(() => {
+      req.destroy();
+      settle(Err('deadline exceeded'));
+    }, timeoutMs);
+    wallClock.unref();
+
     const req = mod.get(url, { timeout: timeoutMs }, (res) => {
+      let bodyBytes = 0;
       let body = '';
       res.on('data', (chunk: Buffer) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes > BODY_CAP_BYTES) {
+          res.destroy();
+          req.destroy();
+          clearTimeout(wallClock);
+          settle(Err('response too large'));
+          return;
+        }
         body += chunk.toString();
       });
       res.on('end', () => {
-        resolve(Ok(body));
+        clearTimeout(wallClock);
+        settle(Ok(body));
+      });
+      res.on('error', (err: Error) => {
+        clearTimeout(wallClock);
+        settle(Err(err.message));
       });
     });
-    req.on('error', (err) => {
-      resolve(Err(err.message));
+    req.on('error', (err: Error) => {
+      clearTimeout(wallClock);
+      settle(Err(err.message));
     });
     req.on('timeout', () => {
       req.destroy();
-      resolve(Err('timeout'));
+      clearTimeout(wallClock);
+      settle(Err('timeout'));
     });
   });
 }
@@ -960,21 +1007,8 @@ function formatProcessLine(
   }
 }
 
-// ─── Port resolution ──────────────────────────────────────────────────────────
+// ─── Status formatters ────────────────────────────────────────────────────────
 
-/**
- * Resolve the effective port for enable.
- *
- * When portOption is undefined (--port flag not provided by the user), falls back to
- * priorPort from proxy.json. This is the remembered-port path: a user who enabled on
- * port 5000, disabled, then re-enables without --port correctly reuses 5000.
- *
- * Previously the commander option carried a String(DEFAULT_PROXY_PORT) default so
- * portOption was never undefined — the fallback was dead code (TS-1 regression).
- *
- * @param portOption  Commander --port value; undefined when flag not provided
- * @param priorPort   Last-used port from proxy.json (or DEFAULT_PROXY_PORT)
- */
 /**
  * Pure formatter for the external models status line shown by `devflow proxy --status`.
  *
@@ -990,10 +1024,11 @@ export function formatExternalModelsLine(catalog: ExternalModelCatalog, logPath:
 /**
  * Pure formatter for the Codex auth status line shown by `devflow proxy --status`.
  *
- * Expiry is deliberately phrased as information rather than a problem: the relay
- * refreshes the access token on its own, so an expired stamp on a healthy install
- * is normal. Only `unreadable` is a state the user must act on — it is the one the
- * relay would reject at request time while a bare existence check reported success.
+ * Returns `{level, msg}` — level encodes the warn-on-unreadable rule so callers
+ * need not re-derive it from `state.kind`. `unreadable` is the only state the user
+ * must act on (the relay rejects requests at that point while a bare file-existence
+ * check still reported success). Expiry is informational: the relay refreshes the
+ * access token on its own, so an expired stamp on a healthy install is normal.
  *
  * @param now  Injected for deterministic tests; pass `new Date()` in production.
  */
@@ -1001,28 +1036,48 @@ export function formatCodexAuthLine(
   state: CodexAuthState,
   authPath: string,
   now: Date,
-): string {
+): { level: 'info' | 'warn'; msg: string } {
   switch (state.kind) {
     case 'absent':
-      return `Codex auth: ${color.dim('absent')} — run codex login`;
+      return { level: 'info', msg: `Codex auth: ${color.dim('absent')} — run codex login` };
     case 'unreadable':
-      return `Codex auth: ${color.red(`unreadable (${state.reason})`)} at ${authPath} — run codex login`;
+      return {
+        level: 'warn',
+        msg: `Codex auth: ${color.red(`unreadable (${state.reason})`)} at ${authPath} — run codex login`,
+      };
     case 'present': {
       const identity = `${state.authMode}, ${state.accountSuffix}`;
       const present = `Codex auth: ${color.green('present')} (${identity})`;
-      if (state.expiresAt === undefined) return present;
+      if (state.expiresAt === undefined) return { level: 'info', msg: present };
       const stamp = state.expiresAt.toISOString().slice(0, 10);
-      return state.expiresAt.getTime() <= now.getTime()
+      const msg = state.expiresAt.getTime() <= now.getTime()
         ? `${present} — access token expired ${stamp}, refreshes on next request`
         : `${present} — access token valid through ${stamp}`;
+      return { level: 'info', msg };
     }
     default: {
       const exhaustive: never = state;
-      return exhaustive;
+      void exhaustive;
+      return { level: 'info', msg: '' };
     }
   }
 }
 
+// ─── Port resolution ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve the effective port for enable.
+ *
+ * When portOption is undefined (--port flag not provided by the user), falls back to
+ * priorPort from proxy.json. This is the remembered-port path: a user who enabled on
+ * port 5000, disabled, then re-enables without --port correctly reuses 5000.
+ *
+ * Previously the commander option carried a String(DEFAULT_PROXY_PORT) default so
+ * portOption was never undefined — the fallback was dead code (TS-1 regression).
+ *
+ * @param portOption  Commander --port value; undefined when flag not provided
+ * @param priorPort   Last-used port from proxy.json (or DEFAULT_PROXY_PORT)
+ */
 export function resolvePort(
   portOption: string | undefined,
   priorPort: number,
@@ -1155,10 +1210,10 @@ async function runStatus(): Promise<void> {
         : { kind: 'unreadable', reason: 'cannot read file' };
   }
   const codexAuthLine = formatCodexAuthLine(codexAuth, codexAuthPath, new Date());
-  if (codexAuth.kind === 'unreadable') {
-    p.log.warn(codexAuthLine);
+  if (codexAuthLine.level === 'warn') {
+    p.log.warn(codexAuthLine.msg);
   } else {
-    p.log.info(codexAuthLine);
+    p.log.info(codexAuthLine.msg);
   }
 
   // Agent mapping count
@@ -1267,6 +1322,21 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   }
   const { binPath, npxWarning, adopted } = preflightResult.value;
 
+  // Shared best-effort rollback for steps 5–7: write proxy.json enabled:false so a
+  // subsequent --enable attempt does not believe the relay is running. A write failure
+  // here is always secondary to the primary failure — never surfaced to the user.
+  // All captured variables (binPath, configPath, port, devflowDir) are resolved by
+  // this point.
+  const rollbackProxyState = async (): Promise<void> => {
+    await writeProxyState(devflowDir, buildProxyState({
+      enabled: false,
+      port,
+      binPath,
+      configPath,
+      devflowVersion: getDevflowVersion(),
+    }));
+  };
+
   s.message('Writing proxy state...');
 
   // Step 4: Write proxy.json enabled:true
@@ -1299,16 +1369,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     buildRealSpawnAndWaitDeps(),
   );
   if (!spawnResult.ok) {
-    // Rollback: write proxy.json enabled:false, keep port/binPath for next attempt
-    const rollback = buildProxyState({
-      enabled: false,
-      port,
-      binPath,
-      configPath,
-      devflowVersion: getDevflowVersion(),
-    });
-    // Best-effort rollback — a write failure here is secondary to the spawn failure
-    await writeProxyState(devflowDir, rollback);
+    await rollbackProxyState();
     s.stop(color.red('Relay failed to start'));
     p.log.error(`Proxy failed to start — check ${logPath}`);
     process.exitCode = 1;
@@ -1335,17 +1396,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
         }, 2000);
         sigkillTimer.unref();
       },
-      writeDisabledProxyState: async () => {
-        const rollback = buildProxyState({
-          enabled: false,
-          port,
-          binPath,
-          configPath,
-          devflowVersion: getDevflowVersion(),
-        });
-        // Best-effort — write failure here is secondary to the verification failure
-        await writeProxyState(devflowDir, rollback);
-      },
+      writeDisabledProxyState: rollbackProxyState,
     },
   );
   if (!verifyResult.ok) {
@@ -1361,15 +1412,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   // Step 7: Atomic settings mutation
   const settingsResult = await applyEnableSettingsPass(settingsPath, devflowDir, port);
   if (!settingsResult.ok) {
-    // Roll back to disabled state — settings write failed after relay started
-    const rollback = buildProxyState({
-      enabled: false,
-      port,
-      binPath,
-      configPath,
-      devflowVersion: getDevflowVersion(),
-    });
-    await writeProxyState(devflowDir, rollback);
+    await rollbackProxyState();
     s.stop(color.red('Cannot update settings'));
     p.log.error(settingsResult.error);
     process.exitCode = 1;
