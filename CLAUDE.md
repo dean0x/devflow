@@ -200,10 +200,10 @@ Per-project runtime files live under `.devflow/`:
 ├── .proxy-spawn.lock/                 # Hook spawn lock dir — prevents concurrent session double-spawn (transient)
 ├── agent-models.json                  # Per-agent model overrides (deviations only; absent = shipped default)
 ├── cache/models/                      # External model catalog cache (0700/0600) — populated by discoverExternalModels; removed on uninstall
+├── logs/proxy.log                     # Proxy relay stdout/stderr — global path (single relay serves all projects)
 └── logs/{project-slug}/
     ├── .capture-turn.log              # capture-turn (Stop hook) log
-    ├── .background-memory-update.log  # background-memory-update worker log
-    └── proxy.log                      # Proxy relay stdout/stderr (appended by ensure-proxy)
+    └── .background-memory-update.log  # background-memory-update worker log
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
