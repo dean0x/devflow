@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { LEGACY_PLUGIN_NAMES } from './plugins.js';
+import { LEGACY_PLUGIN_NAMES, DELETED_PLUGIN_NAMES } from './plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
 
 /**
@@ -228,7 +228,10 @@ export function resolvePluginList(
   isPartialInstall: boolean,
 ): string[] {
   if (existingManifest && isPartialInstall) {
-    const cleaned = existingManifest.plugins.map(p => LEGACY_PLUGIN_NAMES[p] ?? p);
+    const deletedSet = new Set(DELETED_PLUGIN_NAMES);
+    const cleaned = existingManifest.plugins
+      .filter(p => !deletedSet.has(p))
+      .map(p => LEGACY_PLUGIN_NAMES[p] ?? p);
     return mergeManifestPlugins(cleaned, installedPluginNames);
   }
   return installedPluginNames;

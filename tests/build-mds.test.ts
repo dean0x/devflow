@@ -406,14 +406,14 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('dist/commands/ contains exactly 16 .md files (14 compiled + 2 hand-authored)', async () => {
-    // The 2 hand-authored files are audit-claude.md and release.md, copied verbatim by build-mds.ts.
+  it('dist/commands/ contains exactly 15 .md files (14 compiled + 1 hand-authored)', async () => {
+    // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
     const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
     const mdFiles = files.filter(f => f.endsWith('.md'));
     expect(
       mdFiles.length,
-      `Expected 16 .md files in dist/commands/ (14 compiled + 2 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
-    ).toBe(16);
+      `Expected 15 .md files in dist/commands/ (14 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+    ).toBe(15);
   });
 });
 

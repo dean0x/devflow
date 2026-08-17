@@ -5,7 +5,7 @@
  * Protocol: RED → GREEN → REFACTOR.
  *
  * Coverage:
- *  - All 17 real shipped agent files (verbatim round-trips)
+ *  - All 16 real shipped agent files (verbatim round-trips)
  *  - Synthetic edge cases: CRLF, missing frontmatter, unterminated frontmatter,
  *    model: in body, duplicate model lines, effort add/replace/remove
  */
@@ -32,10 +32,9 @@ async function readAgent(name: string): Promise<string> {
 // Real agent files — verbatim round-trips
 // ---------------------------------------------------------------------------
 
-describe('rewriteAgentFrontmatter — all 17 real agent files', () => {
+describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
   const AGENTS = [
     'bug-analyzer.md',
-    'claude-md-auditor.md',
     'coder.md',
     'designer.md',
     'evaluator.md',

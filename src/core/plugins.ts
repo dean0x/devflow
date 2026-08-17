@@ -182,15 +182,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     rules: [],
   },
   {
-    name: 'devflow-audit-claude',
-    description: 'Audit CLAUDE.md files against Anthropic best practices',
-    commands: ['/audit-claude'],
-    agents: ['claude-md-auditor'],
-    skills: [],
-    optional: true,
-    rules: [],
-  },
-  {
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
@@ -291,6 +282,16 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
   'devflow-frontend-design': 'devflow-ui-design',
   'devflow-specify': 'devflow-plan',
 };
+
+/**
+ * Plugin names that have been deleted from the registry.
+ * Used during init to prune stale entries from users' manifests on partial
+ * reinstalls — the full-reinstall path writes installedPluginNames directly
+ * and cannot carry a deleted name. Entries can be removed after 2 major versions.
+ */
+export const DELETED_PLUGIN_NAMES: string[] = [
+  'devflow-audit-claude',
+];
 
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.
@@ -462,16 +463,28 @@ export const LEGACY_RULE_NAMES: string[] = [];
 /**
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
- * code-review → resolve → self-review → bug-analysis → debug → release → audit-claude →
+ * code-review → resolve → self-review → bug-analysis → debug → release →
  * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-wave → dynamic-profile).
  * Export so init.ts can import it rather than keeping a local copy.
  */
 export const WORKFLOW_ORDER: string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
-  '/debug', '/release', '/audit-claude',
+  '/debug', '/release',
   '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
 ];
+
+/**
+ * Plugin names excluded from the init multiselect buckets.
+ * These are always installed regardless of user selection:
+ *   - devflow-core-skills  (always installed, non-optional)
+ *   - devflow-ambient      (always installed, non-optional)
+ *
+ * Invariant: EXCLUDED ∩ optional === ∅ — no optional plugin may be excluded from
+ * the init UI without a re-init carry mechanism to preserve it across full reinstalls.
+ * Guarded by the structural invariant test in tests/plugins.test.ts.
+ */
+export const EXCLUDED: ReadonlySet<string> = new Set(['devflow-core-skills', 'devflow-ambient']);
 
 /**
  * Partition the selectable plugins into workflow (command-bearing) and language
@@ -480,7 +493,6 @@ export const WORKFLOW_ORDER: string[] = [
  * Excluded from both buckets (not selectable at init):
  *   - devflow-core-skills  (always installed)
  *   - devflow-ambient      (always installed)
- *   - devflow-audit-claude (installable via --plugin only)
  *
  * Pure function — does not mutate the input array; preserves DEVFLOW_PLUGINS
  * ordering within each bucket; deterministic; no I/O.
@@ -489,7 +501,6 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
   workflow: PluginDefinition[];
   language: PluginDefinition[];
 } {
-  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
   const workflow: PluginDefinition[] = [];
   const language: PluginDefinition[] = [];
 

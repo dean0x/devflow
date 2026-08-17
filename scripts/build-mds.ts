@@ -257,9 +257,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Copy 2 hand-authored command files verbatim into dist/commands/
+  // Copy 1 hand-authored command file verbatim into dist/commands/
   const handAuthored = [
-    path.join(ROOT, 'src', 'assets', 'commands', 'audit-claude.md'),
     path.join(ROOT, 'src', 'assets', 'commands', 'release.md'),
   ];
   const commandsDest = path.join(ROOT, 'dist', 'commands');

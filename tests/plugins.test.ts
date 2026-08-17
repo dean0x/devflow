@@ -8,6 +8,7 @@ import {
   partitionSelectablePlugins,
   prefixSkillName,
   WORKFLOW_ORDER,
+  EXCLUDED,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import {
@@ -177,8 +178,8 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('non-language plugins do not have optional: true (except audit-claude, dynamic, compliance)', () => {
-    const allowedOptional = new Set([...languagePluginNames, 'devflow-audit-claude', 'devflow-dynamic', 'devflow-compliance']);
+  it('non-language plugins do not have optional: true (except dynamic, compliance)', () => {
+    const allowedOptional = new Set([...languagePluginNames, 'devflow-dynamic', 'devflow-compliance']);
     for (const plugin of DEVFLOW_PLUGINS) {
       if (!allowedOptional.has(plugin.name)) {
         expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();
@@ -191,15 +192,6 @@ describe('optional plugin flag', () => {
     for (const lang of ['go', 'java', 'python', 'rust']) {
       expect(skills, `skill '${lang}' should exist`).toContain(lang);
     }
-  });
-
-  it('audit-claude is excluded from init multiselect choices', () => {
-    // partitionSelectablePlugins excludes devflow-audit-claude from both buckets
-    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
-    const selectableNames = [...workflow, ...language].map(pl => pl.name);
-    expect(selectableNames).not.toContain('devflow-audit-claude');
-    // But it still exists in the registry (installable via --plugin=audit-claude)
-    expect(DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')).toBeDefined();
   });
 
   it('devflow-ambient declares review/resolve skill dependencies', () => {
@@ -334,7 +326,14 @@ describe('LEGACY_SKILL_NAMES consistency', () => {
 });
 
 describe('partitionSelectablePlugins', () => {
-  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
+  it('EXCLUDED ∩ optional === ∅ — no optional plugin is non-selectable (structural invariant)', () => {
+    // This invariant ensures that every optional plugin is reachable via the init UI.
+    // Adding an optional plugin to EXCLUDED would silently drop it on full re-inits
+    // without a carry mechanism. Guards the structural requirement.
+    const optionalNames = new Set(DEVFLOW_PLUGINS.filter(p => p.optional).map(p => p.name));
+    const intersection = [...EXCLUDED].filter(name => optionalNames.has(name));
+    expect(intersection, 'EXCLUDED contains an optional plugin — add a re-init carry mechanism to preserve it across full reinstalls').toEqual([]);
+  });
 
   it('command-bearing plugins land in workflow bucket', () => {
     const { workflow } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
@@ -439,8 +438,7 @@ describe('WORKFLOW_ORDER', () => {
   });
 
   it('every WORKFLOW_ORDER entry corresponds to a real command in the registry (reverse regression guard)', () => {
-    // Build the full set of all commands across ALL plugins (including excluded ones like
-    // devflow-audit-claude, which owns /audit-claude and is intentionally in WORKFLOW_ORDER).
+    // Build the full set of all commands across ALL plugins.
     const allCommands = new Set(DEVFLOW_PLUGINS.flatMap(pl => pl.commands));
     for (const cmd of WORKFLOW_ORDER) {
       expect(

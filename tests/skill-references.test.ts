@@ -135,7 +135,6 @@ const COMMAND_REFS = new Set([
   'debug',
   'implement',
   'self-review',
-  'audit-claude',
   'plan',
   'review',
   'pipeline',
@@ -184,16 +183,11 @@ describe('Format 2: Agent frontmatter skills', () => {
   });
 
   it('every shared agent declares at least one skill in frontmatter', () => {
-    // Agents from plugins with skills: [] legitimately have no skills to declare.
-    // These are simple, fully self-contained agents whose logic is inline.
-    const AGENTS_WITHOUT_SKILLS = new Set(['claude-md-auditor']);
-
     const agentFiles = readdirSync(path.join(ROOT, 'src', 'assets', 'agents')).filter(f => f.endsWith('.md'));
 
-    for (const file of agentFiles) {
-      const name = file.replace(/\.md$/, '');
-      if (AGENTS_WITHOUT_SKILLS.has(name)) continue;
+    expect(agentFiles.length, 'agent corpus must be non-empty — a rename emptying the directory would pass vacuously').toBeGreaterThan(0);
 
+    for (const file of agentFiles) {
       const filePath = path.join(ROOT, 'src', 'assets', 'agents', file);
       const content = readFileSync(filePath, 'utf-8');
       const skillNames = parseFrontmatterSkills(content);
