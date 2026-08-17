@@ -9,6 +9,8 @@ import {
   prefixSkillName,
   WORKFLOW_ORDER,
   EXCLUDED,
+  DELETED_PLUGIN_NAMES,
+  LEGACY_PLUGIN_NAMES,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import {
@@ -279,6 +281,37 @@ describe('optional plugin flag', () => {
   });
 });
 
+describe('DELETED_PLUGIN_NAMES consistency', () => {
+  // DELETED_PLUGIN_NAMES is a PRUNING manifest, not an install-naming list:
+  // resolvePluginList drops every listed name from the user's manifest.plugins on
+  // partial reinstall. A LIVE plugin name listed here is therefore silently erased
+  // from the user's recorded selection, and resolveSeedPlugins then omits it from
+  // the next re-init seed — a plugin the user chose disappears with no error.
+  // Same misread class as PF-012 (deletion manifest that reads like a naming list);
+  // guarded here because the state-aware-init contract forbids it. applies ADR-014
+  it('contains no name that is still a live plugin in the registry', () => {
+    const liveNames = new Set(DEVFLOW_PLUGINS.map(p => p.name));
+    expect(liveNames.size, 'registry must be non-empty or this guard is vacuous').toBeGreaterThan(0);
+
+    const stillLive = DELETED_PLUGIN_NAMES.filter(name => liveNames.has(name));
+    expect(
+      stillLive,
+      'DELETED_PLUGIN_NAMES lists a plugin that still exists in DEVFLOW_PLUGINS — ' +
+      'it would be pruned from every user manifest on partial reinstall and dropped from the re-init seed',
+    ).toEqual([]);
+  });
+
+  it('does not overlap LEGACY_PLUGIN_NAMES keys (deletion would pre-empt the rename)', () => {
+    // resolvePluginList filters deleted names BEFORE applying the rename map, so a
+    // name in both lists is dropped rather than migrated to its new name.
+    const overlap = DELETED_PLUGIN_NAMES.filter(name => name in LEGACY_PLUGIN_NAMES);
+    expect(
+      overlap,
+      'a name cannot be both renamed and deleted — the delete filter runs first and the rename would never apply',
+    ).toEqual([]);
+  });
+});
+
 describe('LEGACY_AGENT_NAMES consistency', () => {
   it('no legacy agent name appears in any current plugin agents array', () => {
     const currentAgents = getAllAgentNames();
@@ -326,6 +359,16 @@ describe('LEGACY_SKILL_NAMES consistency', () => {
 });
 
 describe('partitionSelectablePlugins', () => {
+  // Independent oracle. Every other test in this describe derives its expectation
+  // from the imported EXCLUDED, so they move with production and cannot detect a
+  // change to the excluded set itself (dropping devflow-ambient leaves them green
+  // while exposing an always-installed plugin as an uncheckable-by-accident entry
+  // in the init language multiselect). This literal is the only assertion that
+  // pins WHICH plugins are excluded, so a deliberate change must land here. avoids PF-018
+  it('EXCLUDED pins exactly the always-installed plugins (independent oracle)', () => {
+    expect([...EXCLUDED].sort()).toEqual(['devflow-ambient', 'devflow-core-skills']);
+  });
+
   it('EXCLUDED ∩ optional === ∅ — no optional plugin is non-selectable (structural invariant)', () => {
     // This invariant ensures that every optional plugin is reachable via the init UI.
     // Adding an optional plugin to EXCLUDED would silently drop it on full re-inits
