@@ -5,6 +5,7 @@ import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames } from '../../core/plugins.js';
 import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
+import { sweepOrphanedAssets } from '../../core/orphan-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -236,53 +237,6 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
       await fs.chmod(fullPath, mode);
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Orphan sweep helper
-// ---------------------------------------------------------------------------
-
-/**
- * Sweep an install directory, removing every entry whose registry name (derived via
- * extractRegistryName) is absent from knownNames.
- *
- * Design constraints:
- * - knownNames MUST span ALL plugins, never just the selected subset — assets from
- *   uninstalled plugins must survive a partial install. If you intersect with the
- *   selected-plugin set here you have introduced a bug.
- * - A missing or unreadable directory is a no-op (avoids PF-009).
- * - Per-item removal failures are swallowed (avoids PF-009 blast-radius).
- * - Only removes entries; never writes (avoids PF-011).
- * - Returns the count of entries matched by the predicate. A count of 0 means the
- *   directory was absent or contained no predicate-matching entries; callers can use
- *   this to detect vacuous sweeps in tests.
- *
- * @param dir - The install directory to sweep.
- * @param knownNames - Full registry set spanning ALL plugins.
- * @param extractRegistryName - Maps a directory entry name to a registry key (the
- *   name to look up in knownNames), or null to skip this entry entirely. For agents
- *   and commands: strip the .md extension. For skills: strip the devflow: prefix.
- */
-async function sweepOrphanedAssets(
-  dir: string,
-  knownNames: ReadonlySet<string>,
-  extractRegistryName: (entry: string) => string | null,
-): Promise<number> {
-  let scanned = 0;
-  try {
-    const entries = await fs.readdir(dir);
-    for (const entry of entries) {
-      const registryName = extractRegistryName(entry);
-      if (registryName === null) continue;
-      scanned++;
-      if (!knownNames.has(registryName)) {
-        try {
-          await fs.rm(path.join(dir, entry), { recursive: true, force: true });
-        } catch { /* ignore per-item removal errors */ }
-      }
-    }
-  } catch { /* directory absent or unreadable — not an error */ }
-  return scanned;
 }
 
 // ---------------------------------------------------------------------------
