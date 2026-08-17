@@ -26,7 +26,7 @@ import {
   ensureDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 
 describe('parsePluginSelection', () => {
@@ -835,7 +835,9 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
   });
 
-  it('partial install (isPartialInstall=true) preserves existing commands and agents', async () => {
+  it('partial install (isPartialInstall=true) removes stale commands and agents via registry-diff sweep', async () => {
+    // 'stale' is absent from getAllCommandNames() and getAllAgentNames() — the
+    // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
       plugins: [],
       claudeDir,
@@ -846,11 +848,91 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       spinner: noopSpinner,
     });
 
-    // Stale files should still exist
-    const staleCommand = await fs.readFile(path.join(claudeDir, 'commands', 'devflow', 'stale.md'), 'utf-8');
-    expect(staleCommand).toBe('# stale');
-    const staleAgent = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', 'stale.md'), 'utf-8');
-    expect(staleAgent).toBe('# stale');
+    // Stale files (names absent from registry) should be removed by the sweep
+    await expect(fs.access(path.join(claudeDir, 'commands', 'devflow', 'stale.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
+  });
+});
+
+describe('partial install registry-diff sweep correctness', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  let devflowDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sweep-test-'));
+    claudeDir = path.join(tmpDir, 'claude');
+    devflowDir = path.join(tmpDir, 'devflow');
+
+    // Pre-create the agents and commands directories so they exist before install.
+    await fs.mkdir(path.join(claudeDir, 'agents', 'devflow'), { recursive: true });
+    await fs.mkdir(path.join(claudeDir, 'commands', 'devflow'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('removes retired assets but preserves assets from uninstalled plugins on partial install', async () => {
+    // --- Arrange ---
+
+    // (b) A retired agent: 'shepherd' is listed in LEGACY_AGENT_NAMES and is NOT in
+    // getAllAgentNames(). The sweep must remove it.
+    const retiredAgentPath = path.join(claudeDir, 'agents', 'devflow', 'shepherd.md');
+    await fs.writeFile(retiredAgentPath, '# retired agent');
+
+    // (b) A retired command: 'review' is listed in LEGACY_COMMAND_NAMES and is NOT in
+    // getAllCommandNames(). The sweep must remove it.
+    const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
+    await fs.writeFile(retiredCommandPath, '# retired command');
+
+    // (c) An agent from a plugin NOT selected for this partial run. 'coder' IS in
+    // getAllAgentNames() (covers all plugins) even though plugins: [] installs nothing.
+    // The sweep must preserve it — removing it would break a partial reinstall that
+    // leaves other plugins' assets untouched.
+    const knownAgents = getAllAgentNames();
+    expect(knownAgents.length).toBeGreaterThan(0); // (d) corpus non-empty guard
+    const survivingAgentName = knownAgents[0]!;
+    const survivingAgentPath = path.join(claudeDir, 'agents', 'devflow', `${survivingAgentName}.md`);
+    await fs.writeFile(survivingAgentPath, `# ${survivingAgentName} from uninstalled plugin`);
+
+    // Similarly for commands
+    const knownCommands = getAllCommandNames();
+    expect(knownCommands.length).toBeGreaterThan(0); // (d) corpus non-empty guard
+    const survivingCommandName = knownCommands[0]!;
+    const survivingCommandPath = path.join(claudeDir, 'commands', 'devflow', `${survivingCommandName}.md`);
+    await fs.writeFile(survivingCommandPath, `# ${survivingCommandName} from uninstalled plugin`);
+
+    // --- Act ---
+    await installViaFileCopy({
+      plugins: [],          // no plugins selected — pure partial install
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: true,
+      spinner: noopSpinner,
+    });
+
+    // --- Assert ---
+
+    // (b) Retired assets are gone — names absent from the full registry
+    await expect(fs.access(retiredAgentPath)).rejects.toThrow();
+    await expect(fs.access(retiredCommandPath)).rejects.toThrow();
+
+    // (c) Assets from uninstalled plugins survive — names present in the full registry
+    const agentContent = await fs.readFile(survivingAgentPath, 'utf-8');
+    expect(agentContent).toBe(`# ${survivingAgentName} from uninstalled plugin`);
+    const commandContent = await fs.readFile(survivingCommandPath, 'utf-8');
+    expect(commandContent).toBe(`# ${survivingCommandName} from uninstalled plugin`);
+
+    // (d) The directories are non-empty after the sweep — proves the sweep ran on a
+    // non-empty corpus and did not vacuously pass by finding nothing to examine.
+    const agentsAfter = await fs.readdir(path.join(claudeDir, 'agents', 'devflow'));
+    expect(agentsAfter.length).toBeGreaterThan(0);
+    const commandsAfter = await fs.readdir(path.join(claudeDir, 'commands', 'devflow'));
+    expect(commandsAfter.length).toBeGreaterThan(0);
   });
 });
 

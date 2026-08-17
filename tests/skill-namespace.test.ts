@@ -354,16 +354,18 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(stat.isFile()).toBe(true);
   });
 
-  it('partial install preserves commands and agents dirs', async () => {
-    // Seed existing command dir
+  it('partial install preserves commands from the full registry (dir is not wholesale-wiped)', async () => {
+    // 'implement' is in getAllCommandNames() — the registry-diff sweep must not remove it.
+    // This verifies both that the commands dir is not wholesale-wiped on partial install
+    // AND that the sweep correctly uses the full registry (not the selected-plugin subset).
     const commandsDir = path.join(claudeDir, 'commands', 'devflow');
     await fs.mkdir(commandsDir, { recursive: true });
-    await fs.writeFile(path.join(commandsDir, 'existing.md'), 'keep me');
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), 'keep me');
 
     await runInstall({ isPartialInstall: true });
 
-    // Commands dir should still exist (only wiped on full install)
-    const content = await fs.readFile(path.join(commandsDir, 'existing.md'), 'utf-8');
+    // 'implement' is in the registry → survives the sweep
+    const content = await fs.readFile(path.join(commandsDir, 'implement.md'), 'utf-8');
     expect(content).toBe('keep me');
   });
 

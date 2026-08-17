@@ -216,7 +216,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     ).rejects.toThrow();
   });
 
-  it('leaves a stale devflow:* dir on partial (--plugin) install (isPartialInstall=true)', async () => {
+  it('removes a stale devflow:* dir on partial (--plugin) install — sweep is now ungated', async () => {
     const claudeDir = path.join(tmpDir, 'claude');
     const devflowDir = path.join(tmpDir, 'devflow');
     const skillsDir = path.join(claudeDir, 'skills');
@@ -233,14 +233,15 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
       devflowDir,
       skillsMap,
       agentsMap,
-      isPartialInstall: true, // partial install — sweep does NOT run
+      isPartialInstall: true, // partial install — sweep now runs on every shape
       spinner,
     });
 
+    // The sweep is now ungated: stale prefixed dirs are removed on partial install too
     await expect(
       fs.access(orphanDir),
-      'stale prefixed dir must NOT be removed on partial install',
-    ).resolves.toBeUndefined();
+      'stale prefixed dir must be removed even on partial install',
+    ).rejects.toThrow();
   });
 
   it('leaves a bare (non-prefixed) dir untouched on full install (avoids PF-012)', async () => {
