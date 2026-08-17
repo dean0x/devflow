@@ -1243,12 +1243,16 @@ export const initCommand = new Command('init')
       const logPath = path.join(devflowDir, 'logs', 'proxy.log');
       const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
 
-      // Write routing config (create logs dir non-fatally)
+      // Write routing config (create logs dir non-fatally).
+      // Read existing config first so user-added anthropic/limits/logLevel/providers
+      // blocks are preserved; a missing file falls back cleanly inside buildRoutingConfigJson.
       let routingConfigWritten = false;
       try {
         // SEC-2: mode 0o700 for the logs directory (applies to new dirs only).
         await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
-        await fs.writeFile(configPath, buildRoutingConfigJson(effectivePort), 'utf-8');
+        let existingRoutingContent: string | undefined;
+        try { existingRoutingContent = await fs.readFile(configPath, 'utf-8'); } catch { /* absent — fine */ }
+        await fs.writeFile(configPath, buildRoutingConfigJson(effectivePort, existingRoutingContent), 'utf-8');
         routingConfigWritten = true;
       } catch (err) {
         p.log.warn(

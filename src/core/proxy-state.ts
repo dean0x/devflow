@@ -126,17 +126,111 @@ export async function writeProxyState(
 // ---------------------------------------------------------------------------
 
 /**
+ * Accepted top-level keys for the subswitch 0.2.0 FileConfigSchema (z.strictObject).
+ * Unknown top-level keys cause a hard relay startup error — never emit them.
+ *
+ * @D-EFR-4 Subswitch 0.2.0 routing config contract:
+ *   FileConfigSchema is a z.strictObject with exactly 5 accepted top-level keys:
+ *   port, logLevel, anthropic, providers, limits. Unknown keys cause a hard startup
+ *   error — the relay refuses to start. anthropic and limits are themselves
+ *   strictObject + prefault({}), so they may be partially specified.
+ *
+ *   connectTimeoutMs default: subswitch 0.2.0 applies anthropic.connectTimeoutMs
+ *   as upstream.setTimeout() at anthropic-passthrough.js:86 — a socket *inactivity*
+ *   timeout, not a connect timeout. The 10s default kills any Anthropic request
+ *   whose upstream takes >10s to emit the first response byte — routine for long
+ *   opus requests (confirmed: 99 spurious 504s clustered at 10004-10098ms while
+ *   successful requests ran 25s-99s). Default overridden to 120 000ms; a
+ *   user-specified value always wins.
+ *
+ *   limits.connectTimeoutMs is a registered LEGACY KEY that causes a hard startup
+ *   error. Strip it from the limits block when preserving existing config.
+ */
+const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
+  'port', 'logLevel', 'anthropic', 'providers', 'limits',
+]);
+
+/** Default anthropic.connectTimeoutMs injected when not specified by the user (ms). */
+export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000;
+
+/**
  * Build the routing config JSON for ~/.devflow/proxy-routing.json.
  *
- * Produces a bare `{port}` object — the only key the 0.2.0 routing runtime
- * requires. `codex.*` keys were removed in 0.2.0; the runtime now rejects
- * unrecognised keys rather than ignoring them.
+ * Authoritatively sets `port`. Preserves any existing valid `anthropic`,
+ * `limits`, `logLevel`, and `providers` blocks from `existingContent`,
+ * filtering out unknown top-level keys and the legacy `limits.connectTimeoutMs`
+ * field (which causes a hard relay startup error in 0.2.0).
  *
- * applies ADR-001: clean break for an unreleased surface — no migration needed.
- * Pure function — no I/O.
+ * Injects a default `anthropic.connectTimeoutMs` of 120 000ms when the user
+ * has not set one — see @D-EFR-4 for the rationale.
+ *
+ * If `existingContent` is missing or malformed, falls back to a clean config
+ * with only `port` and `anthropic.connectTimeoutMs`.
+ *
+ * applies ADR-013: pure core-layer function — no I/O.
+ * @D-EFR-4: see note above for the strict top-key constraint and timeout rationale.
  */
-export function buildRoutingConfigJson(port: number): string {
-  return JSON.stringify({ port }, null, 2) + '\n';
+export function buildRoutingConfigJson(port: number, existingContent?: string): string {
+  // Parse existing config tolerantly; a malformed file falls back to clean defaults.
+  const preserved: Record<string, unknown> = {};
+  if (existingContent !== undefined) {
+    try {
+      const parsed = JSON.parse(existingContent) as unknown;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          // Only preserve the 5 accepted top-level keys; port is always ours.
+          if (ROUTING_CONFIG_ALLOWED_TOP_KEYS.has(k) && k !== 'port') {
+            preserved[k] = v;
+          }
+        }
+      }
+    } catch {
+      // Malformed existing config — fall through to clean defaults.
+    }
+  }
+
+  const config: Record<string, unknown> = { port };
+
+  // Preserve logLevel if present in existing config.
+  if (preserved.logLevel !== undefined) {
+    config.logLevel = preserved.logLevel;
+  }
+
+  // Anthropic block: preserve user settings; inject connectTimeoutMs default when absent.
+  // @D-EFR-4: the 10s upstream inactivity timeout kills long opus requests.
+  const existingAnthropic =
+    typeof preserved.anthropic === 'object' &&
+    preserved.anthropic !== null &&
+    !Array.isArray(preserved.anthropic)
+      ? { ...(preserved.anthropic as Record<string, unknown>) }
+      : {};
+  if (!Object.prototype.hasOwnProperty.call(existingAnthropic, 'connectTimeoutMs')) {
+    existingAnthropic.connectTimeoutMs = DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS;
+  }
+  config.anthropic = existingAnthropic;
+
+  // Preserve providers block if present.
+  if (preserved.providers !== undefined) {
+    config.providers = preserved.providers;
+  }
+
+  // Preserve limits block if present; strip legacy limits.connectTimeoutMs that
+  // causes a hard startup error in 0.2.0 (use anthropic.connectTimeoutMs instead).
+  if (preserved.limits !== undefined) {
+    if (
+      typeof preserved.limits === 'object' &&
+      preserved.limits !== null &&
+      !Array.isArray(preserved.limits)
+    ) {
+      const limitsObj = { ...(preserved.limits as Record<string, unknown>) };
+      delete limitsObj['connectTimeoutMs'];
+      config.limits = limitsObj;
+    } else {
+      config.limits = preserved.limits;
+    }
+  }
+
+  return JSON.stringify(config, null, 2) + '\n';
 }
 
 /**

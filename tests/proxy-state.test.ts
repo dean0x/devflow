@@ -26,6 +26,7 @@ import {
   buildProxyState,
   DEFAULT_PROXY_PORT,
   RUNTIME_VERSION_RE,
+  DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS,
 } from '../src/core/proxy-state.js';
 
 // ---------------------------------------------------------------------------
@@ -214,18 +215,17 @@ describe('readProxyState — wrong-typed fields self-heal to defaults', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildRoutingConfigJson — bare {port} shape (AC-C4)
+// buildRoutingConfigJson — port + anthropic.connectTimeoutMs default (AC-C4 / D-EFR-4)
 // ---------------------------------------------------------------------------
 
-describe('buildRoutingConfigJson', () => {
-  it('emits exactly {port} — Object.keys deep-equals [port] (AC-C4)', () => {
+describe('buildRoutingConfigJson — base behavior', () => {
+  it('emits port with the correct value', () => {
     const json = buildRoutingConfigJson(4141);
     const obj = JSON.parse(json) as Record<string, unknown>;
-    expect(Object.keys(obj)).toEqual(['port']);
     expect(obj.port).toBe(4141);
   });
 
-  it('output ends with a trailing newline (AC-C4)', () => {
+  it('output ends with a trailing newline', () => {
     const json = buildRoutingConfigJson(4141);
     expect(json.endsWith('\n')).toBe(true);
   });
@@ -240,6 +240,94 @@ describe('buildRoutingConfigJson', () => {
   it('output is valid pretty-printed JSON', () => {
     const json = buildRoutingConfigJson(4141);
     expect(() => JSON.parse(json)).not.toThrow();
+  });
+
+  it('injects default anthropic.connectTimeoutMs when no existing config supplied (D-EFR-4)', () => {
+    const json = buildRoutingConfigJson(4141);
+    const obj = JSON.parse(json) as Record<string, unknown>;
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(anthropic).toBeDefined();
+    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+  });
+
+  it('only emits allowed top-level keys (strictObject constraint D-EFR-4)', () => {
+    const allowed = new Set(['port', 'logLevel', 'anthropic', 'providers', 'limits']);
+    const obj = JSON.parse(buildRoutingConfigJson(4141)) as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      expect(allowed.has(key), `unexpected top-level key: ${key}`).toBe(true);
+    }
+  });
+});
+
+describe('buildRoutingConfigJson — existing config preservation', () => {
+  it('user-specified anthropic.connectTimeoutMs wins over default', () => {
+    const existing = JSON.stringify({ port: 4141, anthropic: { connectTimeoutMs: 30_000 } });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(anthropic.connectTimeoutMs).toBe(30_000);
+  });
+
+  it('preserves other anthropic fields alongside injected default', () => {
+    const existing = JSON.stringify({ port: 4141, anthropic: { streamIdleTimeoutMs: 60_000 } });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(anthropic.streamIdleTimeoutMs).toBe(60_000);
+    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+  });
+
+  it('preserves logLevel from existing config', () => {
+    const existing = JSON.stringify({ port: 4141, logLevel: 'debug' });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(obj.logLevel).toBe('debug');
+  });
+
+  it('preserves limits block from existing config', () => {
+    const existing = JSON.stringify({ port: 4141, limits: { maxConcurrent: 10 } });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('strips legacy limits.connectTimeoutMs to prevent hard startup error (D-EFR-4)', () => {
+    const existing = JSON.stringify({ port: 4141, limits: { connectTimeoutMs: 5_000, maxConcurrent: 10 } });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'connectTimeoutMs')).toBe(false);
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('preserves providers block from existing config', () => {
+    const existing = JSON.stringify({ port: 4141, providers: { openai: { baseUrl: 'https://api.openai.com' } } });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(obj.providers).toBeDefined();
+  });
+
+  it('strips unknown top-level keys not in the allowed set (strictObject constraint)', () => {
+    const existing = JSON.stringify({ port: 4141, codex: { apiKey: 'x' }, logLevel: 'info' });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(obj, 'codex')).toBe(false);
+    expect(obj.logLevel).toBe('info');
+  });
+
+  it('port in output always reflects the authoritative devflow port, not the existing file', () => {
+    const existing = JSON.stringify({ port: 9999, logLevel: 'warn' });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(obj.port).toBe(4141);
+  });
+
+  it('malformed existing content falls back cleanly — no throw, port + anthropic default emitted', () => {
+    expect(() => buildRoutingConfigJson(4141, '{ bad json !!!')).not.toThrow();
+    const obj = JSON.parse(buildRoutingConfigJson(4141, '{ bad json !!!')) as Record<string, unknown>;
+    expect(obj.port).toBe(4141);
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+  });
+
+  it('undefined existingContent falls back to clean defaults', () => {
+    const obj = JSON.parse(buildRoutingConfigJson(4141, undefined)) as Record<string, unknown>;
+    expect(obj.port).toBe(4141);
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
   });
 });
 
