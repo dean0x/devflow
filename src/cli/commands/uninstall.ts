@@ -6,7 +6,8 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { sweepOrphanedAssets } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -148,6 +149,9 @@ export function resolveSecurityRemovalDecision(opts: {
  * @D6 avoids PF-014: the caller must NOT process.exit() after a cancel/decline response;
  * removeAllDevFlow has already run by the time the prompt fires, so removeDevFlowInstallArtifacts
  * must execute on every non-confirm path to leave a clean end-state (applies ADR-003).
+ * @D7 keepDocs gate: when the caller passes --keep-docs, the entire ~/.devflow dir cleanup
+ * prompt is suppressed — artifacts-only regardless of isTTY or userContent. This prevents
+ * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
 export function resolveDevflowDirCleanup(opts: {
   scope: 'user' | 'local';
@@ -155,9 +159,13 @@ export function resolveDevflowDirCleanup(opts: {
   userContent: string[];
   devflowDir: string;
   homeDir: string;
+  keepDocs?: boolean;
 }): 'artifacts-only' | 'prompt' {
   // Local scope never removes project data — only install artifacts.
   if (opts.scope !== 'user') return 'artifacts-only';
+
+  // --keep-docs: suppress the full cleanup prompt entirely; artifacts-only.
+  if (opts.keepDocs) return 'artifacts-only';
 
   // Precondition guard: devflowDir must be a well-known, safe-to-rm path.
   // Any anomalous value (DEVFLOW_DIR override, bare homedir, filesystem root)
@@ -234,6 +242,12 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
     items.push('agent-models.json (agent model assignments)');
   } catch { /* absent */ }
 
+  // hud.json — user HUD enable/disable preference and display config
+  try {
+    await fs.access(path.join(devflowDir, 'hud.json'));
+    items.push('hud.json (HUD configuration)');
+  } catch { /* absent */ }
+
   return items;
 }
 
@@ -273,18 +287,35 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     }
   } catch { /* proxy.pid absent or unreadable — non-fatal */ }
 
-  const proxyArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
+  // All install artifacts removed non-fatally (avoids PF-009).
+  // isDir MUST be marked true for directories — fs.rm throws a TypeError for
+  // directories without recursive:true, which the per-item catch swallows
+  // silently, leaving the directory on disk (avoids the isDir===true gotcha).
+  const installArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
+    // per-agent model overrides — removed so reinstall starts with shipped defaults
+    { relPath: 'agent-models.json' },
+    // migration run-state — removed so migrations re-run cleanly on reinstall
+    { relPath: 'migrations.json' },
+    // HUD configuration (enabled/disabled preference)
+    { relPath: 'hud.json' },
+    // cost history — auto-generated; not user-authored
+    { relPath: path.join('costs', 'sessions'), isDir: true },
+    { relPath: path.join('costs', 'archive.jsonl') },
+    // proxy artifacts
     { relPath: 'proxy.json' },
     { relPath: 'proxy-routing.json' },
     { relPath: 'proxy.pid' },
     { relPath: '.proxy-spawn.lock', isDir: true },
-    { relPath: path.join('logs', 'proxy.log') },
-    // Model-discovery cache — populated by discoverExternalModels during enable / agents TUI.
-    // isDir:true so rm recurses into external-models-v1-*.json cache entries.
-    // relPath derived from modelCacheDir to stay byte-locked to write sites (avoids PF-013).
-    { relPath: path.relative(devflowDir, modelCacheDir(devflowDir)), isDir: true },
+    // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
+    // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
+    { relPath: 'logs', isDir: true },
+    // Model-discovery cache — the cache/ parent is removed (not just cache/models)
+    // so any future sub-directories are also cleaned up.
+    // relPath derived from modelCacheDir's parent to stay byte-locked to write
+    // sites (avoids PF-013); removing the parent also removes cache/models.
+    { relPath: path.relative(devflowDir, path.dirname(modelCacheDir(devflowDir))), isDir: true },
   ];
-  for (const artifact of proxyArtifacts) {
+  for (const artifact of installArtifacts) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     try {
       await fs.rm(fullPath, { force: true, recursive: artifact.isDir === true });
@@ -294,15 +325,33 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
 }
 
 /**
- * Check if Devflow is installed at the given paths
+ * Check if Devflow is installed at the given claudeDir by detecting any
+ * owned namespace: commands/devflow/, agents/devflow/, or any skill dir
+ * whose name starts with the devflow: namespace prefix.
+ *
+ * Keying off commands/devflow/ alone misses installs where the user selected
+ * a commandless plugin set — agents and skills may still be present.
  */
-async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
+export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
+  // Check commands namespace
   try {
     await fs.access(path.join(claudeDir, 'commands', 'devflow'));
     return true;
-  } catch {
-    return false;
-  }
+  } catch { /* not present */ }
+
+  // Check agents namespace
+  try {
+    await fs.access(path.join(claudeDir, 'agents', 'devflow'));
+    return true;
+  } catch { /* not present */ }
+
+  // Check for any installed skill under the devflow: namespace
+  try {
+    const entries = await fs.readdir(path.join(claudeDir, 'skills'));
+    if (entries.some(e => e.startsWith('devflow:'))) return true;
+  } catch { /* skills dir absent or unreadable */ }
+
+  return false;
 }
 
 export const uninstallCommand = new Command('uninstall')
@@ -391,21 +440,54 @@ export const uninstallCommand = new Command('uninstall')
     if (dryRun) {
       p.log.info(`Scope(s): ${scopesToUninstall.join(', ')} (dry-run shows all detected scopes)`);
 
-      const assets = isSelectiveUninstall
-        ? computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS)
-        : computeAssetsToRemove(DEVFLOW_PLUGINS, DEVFLOW_PLUGINS);
-
-      // Detect extras that would be cleaned up (full uninstall only)
-      const extras: string[] = [];
-      if (!isSelectiveUninstall) {
+      if (isSelectiveUninstall) {
+        // Selective: compute from registry — this accurately reflects what would be removed.
+        const assets = computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS);
+        const plan = formatDryRunPlan(assets);
+        for (const line of plan.split('\n')) {
+          p.log.info(line);
+        }
+      } else {
+        // Full uninstall: the real path does rm -rf on entire directories plus a
+        // skills sweep. Enumerate what is actually on disk for each detected scope
+        // rather than computing from the registry (which misses legacy/orphaned assets).
+        const extras: string[] = [];
+        for (const scope of scopesToUninstall) {
+          try {
+            const paths = await getInstallationPaths(scope);
+            const { claudeDir: cd, devflowDir: dd } = paths;
+            // Whole directories removed by removeAllDevFlow
+            for (const dir of [
+              path.join(cd, 'commands', 'devflow'),
+              path.join(cd, 'agents', 'devflow'),
+              path.join(cd, 'rules', 'devflow'),
+              path.join(dd, 'scripts'),
+            ]) {
+              try { await fs.access(dir); extras.push(dir); } catch { /* absent */ }
+            }
+            // Skills: list every devflow:* directory actually on disk
+            try {
+              const skillEntries = await fs.readdir(path.join(cd, 'skills'));
+              for (const e of skillEntries) {
+                if (e.startsWith('devflow:')) extras.push(path.join(cd, 'skills', e));
+              }
+            } catch { /* skills dir absent */ }
+            // ~/.devflow install artifacts
+            extras.push(`${dd} install artifacts (manifest.json, agent-models.json, migrations.json, hud.json, logs/, costs/, cache/, proxy artifacts)`);
+          } catch { /* scope path resolution failed */ }
+        }
+        // Project .devflow/ data dir
         const devflowDataDir = path.join(process.cwd(), '.devflow');
-        try { await fs.access(devflowDataDir); extras.push('.devflow/'); } catch { /* noop */ }
-        extras.push('hooks in settings.json', 'scripts in ~/.devflow/');
-      }
+        try { await fs.access(devflowDataDir); extras.push(`${devflowDataDir} (if confirmed)`); } catch { /* noop */ }
+        extras.push('hooks removed from settings.json');
 
-      const plan = formatDryRunPlan(assets, extras.length > 0 ? extras : undefined);
-      for (const line of plan.split('\n')) {
-        p.log.info(line);
+        if (extras.length === 0) {
+          p.log.info('Nothing to remove.');
+        } else {
+          for (const line of extras) {
+            p.log.info(`  ${line}`);
+          }
+        }
       }
 
       p.outro(color.dim('No changes made (dry run)'));
@@ -435,6 +517,21 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (isSelectiveUninstall) {
+        // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
+        // lines from installed agent frontmatter while the files are still present.
+        // Non-fatal: tolerate missing agents dir or revert errors.
+        {
+          const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
+          try {
+            await fs.access(agentsInstallDir);
+            await revertExternalAgents({
+              installDir: agentsInstallDir,
+              devflowDir,
+              onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+            });
+          } catch { /* agents dir absent or revert failed — non-fatal */ }
+        }
+
         await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
 
         // Clean up ambient hook if ambient plugin is being removed
@@ -488,6 +585,7 @@ export const uninstallCommand = new Command('uninstall')
             userContent,
             devflowDir,
             homeDir: os.homedir(),
+            keepDocs: !!options.keepDocs,
           });
 
           if (cleanupDecision === 'artifacts-only') {
@@ -768,7 +866,7 @@ export const uninstallCommand = new Command('uninstall')
 /**
  * Remove all Devflow assets (full uninstall).
  */
-async function removeAllDevFlow(
+export async function removeAllDevFlow(
   claudeDir: string,
   devflowScriptsDir: string,
   verbose: boolean,
@@ -827,10 +925,12 @@ async function removeAllDevFlow(
 
 /**
  * Remove only specific plugin assets (selective uninstall).
- * For commands and agents: remove files belonging to selected plugins.
+ * For commands and agents: remove files belonging to selected plugins, then
+ * sweep the install directory for any orphaned assets whose names left the
+ * registry (retired agents/commands survive indefinitely without the sweep).
  * For skills: only remove skills that are NOT used by any remaining plugin.
  */
-async function removeSelectedPlugins(
+export async function removeSelectedPlugins(
   claudeDir: string,
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
@@ -889,4 +989,22 @@ async function removeSelectedPlugins(
       }
     } catch { /* Rule file might not exist */ }
   }
+
+  // Registry-diff sweep: remove any agents or commands that were retired from
+  // the registry (their names no longer appear in getAllAgentNames / getAllCommandNames).
+  // Without this sweep, a plugin removal followed by a renamed or deleted agent
+  // leaves the old .md file on disk permanently.
+  //
+  // knownNames spans ALL plugins so assets belonging to OTHER (non-selected) plugins
+  // are never swept — only truly orphaned names are removed (avoids PF-012).
+  await sweepOrphanedAssets(
+    agentsDir,
+    new Set(getAllAgentNames()),
+    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+  );
+  await sweepOrphanedAssets(
+    commandsDir,
+    new Set(getAllCommandNames()),
+    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+  );
 }
