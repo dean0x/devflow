@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { modelCacheDir } from '../src/core/cache.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
@@ -580,5 +581,166 @@ describe('resolveDevflowDirCleanup', () => {
     });
     expect(artifactsOnly).toBe('artifacts-only');
     expect(prompt).toBe('prompt');
+  });
+});
+
+// ─── TEST-4: removeDevFlowInstallArtifacts proxy artifact coverage ────────────
+//
+// Ordering invariant (documented here, enforced in uninstall.ts action):
+//   revertExternalAgents MUST run before removeAllDevFlow so that agent files
+//   are still present when we attempt to revert their frontmatter.  If
+//   removeAllDevFlow runs first, revertExternalAgents silently skips the files
+//   (skippedMissing path) and leaves the user's install in an inconsistent
+//   state where ~/.claude/agents/devflow/coder.md still has a GPT model line.
+
+describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', () => {
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-'));
+    await fs.mkdir(devflowDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('removes proxy.json when present', async () => {
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{"enabled":true}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(path.join(devflowDir, 'proxy.json'))).rejects.toThrow();
+  });
+
+  it('removes proxy-routing.json when present', async () => {
+    await fs.writeFile(path.join(devflowDir, 'proxy-routing.json'), '{}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(path.join(devflowDir, 'proxy-routing.json'))).rejects.toThrow();
+  });
+
+  it('removes proxy.pid when present (stale/dead PID — no live process)', async () => {
+    // Write a PID that is guaranteed not to exist (high number, well above system max).
+    // process.kill(pid, 0) throws ESRCH for non-existent PIDs → caught by inner try/catch.
+    const deadPid = 99999999;
+    await fs.writeFile(path.join(devflowDir, 'proxy.pid'), String(deadPid), 'utf-8');
+    // Must complete without throwing even though the PID doesn't exist.
+    await expect(removeDevFlowInstallArtifacts(devflowDir, false)).resolves.not.toThrow();
+    await expect(fs.access(path.join(devflowDir, 'proxy.pid'))).rejects.toThrow();
+  });
+
+  it('removes .proxy-spawn.lock directory when present', async () => {
+    const lockDir = path.join(devflowDir, '.proxy-spawn.lock');
+    await fs.mkdir(lockDir, { recursive: true });
+    await fs.writeFile(path.join(lockDir, 'pid'), '42', 'utf-8'); // file inside the dir
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(lockDir)).rejects.toThrow();
+  });
+
+  it('removes logs/proxy.log when present', async () => {
+    const logsDir = path.join(devflowDir, 'logs');
+    await fs.mkdir(logsDir, { recursive: true });
+    await fs.writeFile(path.join(logsDir, 'proxy.log'), 'log output', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(path.join(logsDir, 'proxy.log'))).rejects.toThrow();
+  });
+
+  it('PF-009: each missing artifact is non-fatal — all absent, function completes cleanly', async () => {
+    // Empty devflowDir — none of the proxy artifacts exist.
+    // Must complete without throwing.
+    await expect(removeDevFlowInstallArtifacts(devflowDir, false)).resolves.not.toThrow();
+  });
+
+  it('PF-009: missing proxy.json does not prevent removal of other artifacts', async () => {
+    // Only proxy-routing.json is present; proxy.json is absent.
+    await fs.writeFile(path.join(devflowDir, 'proxy-routing.json'), '{}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    // proxy-routing.json removed despite proxy.json being absent.
+    await expect(fs.access(path.join(devflowDir, 'proxy-routing.json'))).rejects.toThrow();
+  });
+
+  it('PF-009: missing logs/proxy.log does not prevent removal of other artifacts', async () => {
+    // Only proxy.json present; logs/ dir absent entirely.
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{"enabled":false}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(path.join(devflowDir, 'proxy.json'))).rejects.toThrow();
+  });
+
+  it('live PID: warns but does NOT kill the process (current process remains alive)', async () => {
+    // Use our own process.pid — it definitely exists.
+    await fs.writeFile(path.join(devflowDir, 'proxy.pid'), String(process.pid), 'utf-8');
+    // Function must complete without throwing.
+    await expect(removeDevFlowInstallArtifacts(devflowDir, false)).resolves.not.toThrow();
+    // Our process is still alive (if it had been killed we wouldn't reach this line).
+    expect(process.pid).toBeGreaterThan(0);
+    // proxy.pid is removed even when the process is live.
+    await expect(fs.access(path.join(devflowDir, 'proxy.pid'))).rejects.toThrow();
+  });
+
+  it('removes cache/models directory when present (model-discovery cache)', async () => {
+    // Model-discovery cache written by discoverExternalModels during enable / agents TUI.
+    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(
+      path.join(cacheDir, 'external-models-v1-0.2.0.json'),
+      '{"models":[]}',
+      'utf-8',
+    );
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    await expect(fs.access(cacheDir)).rejects.toThrow();
+  });
+
+  it('PF-009: missing cache/models does not prevent removal of other artifacts', async () => {
+    // cache/models is absent; only proxy.json is present.
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+    // proxy.json is removed even though cache/models was never created.
+    await expect(fs.access(path.join(devflowDir, 'proxy.json'))).rejects.toThrow();
+  });
+
+  it('removes all proxy artifacts in a single pass (including model-discovery cache)', async () => {
+    // Set up every proxy artifact — including the model-discovery cache added in Phase E.
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'proxy-routing.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'proxy.pid'), '99999999', 'utf-8');
+    await fs.mkdir(path.join(devflowDir, '.proxy-spawn.lock'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'logs', 'proxy.log'), 'log', 'utf-8');
+    const cacheDir = path.join(devflowDir, 'cache', 'models');
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(path.join(cacheDir, 'external-models-v1-0.2.0.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    const checks = await Promise.allSettled([
+      fs.access(path.join(devflowDir, 'proxy.json')),
+      fs.access(path.join(devflowDir, 'proxy-routing.json')),
+      fs.access(path.join(devflowDir, 'proxy.pid')),
+      fs.access(path.join(devflowDir, '.proxy-spawn.lock')),
+      fs.access(path.join(devflowDir, 'logs', 'proxy.log')),
+      fs.access(cacheDir),
+    ]);
+    // Every artifact must be gone.
+    for (const result of checks) {
+      expect(result.status).toBe('rejected');
+    }
+  });
+
+  // ─── PF-013 linkage: removal target == write target via modelCacheDir accessor ───
+  //
+  // This test pins the uninstall removal path to modelCacheDir — the single
+  // authoritative path accessor from src/core/cache.ts. If uninstall.ts reverts
+  // to an independent hardcoded literal that diverges from modelCacheDir, this
+  // test fails: the directory written via the accessor survives uninstall.
+  //
+  // avoids PF-013 (hardcoded path residue surviving a module relocation)
+  it('PF-013: removal target byte-matches modelCacheDir — write-site and removal-site cannot drift', async () => {
+    // Write a sentinel into the path that model-discovery callers use.
+    const writePath = modelCacheDir(devflowDir);
+    await fs.mkdir(writePath, { recursive: true });
+    await fs.writeFile(path.join(writePath, 'sentinel.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    // If uninstall drifts to a different path, writePath still exists → this fails.
+    await expect(fs.access(writePath)).rejects.toThrow();
   });
 });

@@ -59,8 +59,22 @@ export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '\u2026' : s;
 }
 
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+// S2 — Terminal-escape and control-character sanitization (HIGH, pre-existing defect).
+//
+// The prior pattern (/\x1b\[[0-9;]*m/g) matched only SGR sequences (colour).
+// The broadened ANSI_PATTERN also covers:
+//   CSI sequences  — \x1b[ ... with intermediate bytes, any final byte
+//   OSC sequences  — \x1b] ... terminated by BEL (\x07) or ST (\x1b\\)
+//   Two-byte C1    — \x1b followed by any single character in the C1 range
+// CTRL_PATTERN removes non-printable C0 control chars that are not TAB (\x09)
+// or standard newlines (\x0a, \x0d).  Together they prevent agent names
+// embedded in model IDs from injecting escape sequences into --list output.
+
+const ANSI_PATTERN =
+  /\x1b(?:\[[0-9;?]*[ -\/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
+
+const CTRL_PATTERN = /[\x00-\x08\x0b-\x1f\x7f]/g;
 
 export function stripAnsi(s: string): string {
-  return s.replace(ANSI_PATTERN, '');
+  return s.replace(ANSI_PATTERN, '').replace(CTRL_PATTERN, '');
 }

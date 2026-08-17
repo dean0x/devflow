@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'child_process';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
+import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -35,6 +37,7 @@ const HOOK_SCRIPTS = [
   'capture-turn',
   'capture-question',
   'memory-worker',
+  'ensure-proxy',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1581,3 +1584,745 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
   });
 });
 
+
+// =============================================================================
+// ensure-proxy behavioral tests
+// =============================================================================
+//
+// Tests cover: disabled/absent proxy, re-entrancy guard, missing prerequisites,
+// UserPromptSubmit silent path, port-up fast-exit (with ephemeral TCP server),
+// and the relay-spawn path (stub relay that binds the port on startup, so the
+// bounded 80×0.1s wait resolves on the first probes instead of running to timeout).
+//
+// Not covered here: the spawn path's failure branch (relay binary that never binds),
+// which costs the full 8s wait and would dominate suite runtime.
+
+describe('ensure-proxy behavioral tests', () => {
+  const PROXY_HOOK = path.join(HOOKS_DIR, 'ensure-proxy');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-proxy-test-'));
+    homeDir = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeProxyJson(opts: {
+    enabled: boolean;
+    port: number;
+    binPath?: string | null;
+    configPath?: string | null;
+  }) {
+    const state = {
+      version: 1,
+      enabled: opts.enabled,
+      port: opts.port,
+      binPath: opts.binPath !== undefined ? opts.binPath : null,
+      configPath: opts.configPath !== undefined ? opts.configPath : null,
+      resolvedAt: new Date().toISOString(),
+      devflowVersion: null,
+    };
+    fs.writeFileSync(
+      path.join(homeDir, '.devflow', 'proxy.json'),
+      JSON.stringify(state, null, 2),
+    );
+  }
+
+  /** Bind an ephemeral listener (port 0), read the assigned port, close it, and return it. */
+  async function allocateFreePort(): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      const srv = net.createServer();
+      srv.listen(0, '127.0.0.1', () => {
+        const addr = srv.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
+        srv.close((err) => {
+          if (err) reject(err);
+          else resolve(port);
+        });
+      });
+      srv.on('error', reject);
+    });
+  }
+
+  const SESSION_INPUT = {
+    session_id: 'aa-bb-cc',
+    cwd: os.tmpdir(),
+    hooks_base_url: 'http://127.0.0.1:7777',
+  };
+  const PROMPT_INPUT = {
+    session_id: 'aa-bb-cc',
+    cwd: os.tmpdir(),
+    hooks_base_url: 'http://127.0.0.1:7777',
+    prompt: 'hello world',
+  };
+
+  // ── No-op paths ─────────────────────────────────────────────────────────────
+
+  it('exits 0 silently when proxy.json is absent', () => {
+    // No proxy.json written at all
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe('');
+  });
+
+  it('exits 0 silently when proxy.json contains malformed JSON (TEST-6)', () => {
+    // Regression: a corrupted proxy.json (partial write, manual edit) must never
+    // crash the hook or emit any output. json_field_file returns the default value
+    // ("false") when parsing fails, so PROXY_ENABLED!="true" → early silent exit.
+    fs.writeFileSync(
+      path.join(homeDir, '.devflow', 'proxy.json'),
+      'not-json{{{',
+    );
+    const result = spawnSync('bash', [PROXY_HOOK], {
+      input: JSON.stringify(SESSION_INPUT),
+      env: { ...process.env, HOME: homeDir },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+  });
+
+  it('exits 0 silently when proxy is disabled', async () => {
+    writeProxyJson({ enabled: false, port: await allocateFreePort() });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe('');
+  });
+
+  it('exits 0 silently when DEVFLOW_BG_UPDATER=1 (re-entrancy guard)', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort() });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+      DEVFLOW_BG_UPDATER: '1',
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe('');
+  });
+
+  // ── Always exits 0 (never blocks Claude Code) ────────────────────────────────
+
+  it('always exits with code 0 regardless of state', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
+    const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  // ── Missing prerequisite paths ───────────────────────────────────────────────
+
+  it('emits SessionStart additionalContext warning when binPath is null', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    // Should emit JSON envelope for the model context
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('hookSpecificOutput');
+    const output = parsed['hookSpecificOutput'] as Record<string, unknown>;
+    expect((output['additionalContext'] as string)).toContain('[Devflow proxy]');
+    expect((output['additionalContext'] as string)).not.toContain('subswitch');
+  });
+
+  it('emits SessionStart warning when binPath points to nonexistent file', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: '/this/does/not/exist/relay.js' });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const output = parsed['hookSpecificOutput'] as Record<string, unknown>;
+    expect(output['additionalContext'] as string).toContain('[Devflow proxy]');
+  });
+
+  it('emits SessionStart warning when configPath is null (bin exists)', async () => {
+    // Create a real file to act as the bin so the binPath check passes
+    const fakeBin = path.join(tmpDir, 'fake-relay.js');
+    fs.writeFileSync(fakeBin, '// fake relay');
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: fakeBin, configPath: null });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const output = parsed['hookSpecificOutput'] as Record<string, unknown>;
+    expect(output['additionalContext'] as string).toContain('[Devflow proxy]');
+  });
+
+  it('emits SessionStart warning when configPath points to nonexistent file', async () => {
+    const fakeBin = path.join(tmpDir, 'fake-relay.js');
+    fs.writeFileSync(fakeBin, '// fake relay');
+    writeProxyJson({
+      enabled: true,
+      port: await allocateFreePort(),
+      binPath: fakeBin,
+      configPath: '/this/config/does/not/exist.json',
+    });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('hookSpecificOutput');
+  });
+
+  // ── UserPromptSubmit silent path ─────────────────────────────────────────────
+
+  it('exits 0 silently on UserPromptSubmit when port is down', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort() });
+    const { exitCode, stdout } = runHook(PROXY_HOOK, PROMPT_INPUT, homeDir);
+    expect(exitCode).toBe(0);
+    // Silent — no output; SessionStart already warned
+    expect(stdout).toBe('');
+  });
+
+  it('does not emit additionalContext on UserPromptSubmit regardless of state', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
+    const { stdout } = runHook(PROXY_HOOK, PROMPT_INPUT, homeDir);
+    expect(stdout).toBe('');
+  });
+
+  // ── First-run: no proxy.log yet → no stderr ──────────────────────────────────
+
+  it('emits no stderr on first run when proxy.log does not exist', async () => {
+    // Use spawnSync so we can capture stderr even when the hook exits 0.
+    // execSync does not expose stderr for successful invocations.
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
+    // Intentionally do NOT create $DEVFLOW_DIR/logs/proxy.log
+    const result = spawnSync('bash', [PROXY_HOOK], {
+      input: JSON.stringify(SESSION_INPUT),
+      env: { ...process.env, HOME: homeDir },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  // ── Warning strings must not contain "subswitch" ──────────────────────────────
+
+  it('warning messages never contain the internal package name "subswitch"', async () => {
+    writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
+    const { stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    expect(stdout).not.toContain('subswitch');
+  });
+
+  // ── Port-up fast-exit (ephemeral TCP server) ─────────────────────────────────
+
+  describe('port-up paths (ephemeral TCP server)', () => {
+    let server: net.Server;
+    let listenPort: number;
+
+    beforeAll(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server = net.createServer((socket) => {
+          // Accept and immediately close — we just need TCP accept for the probe
+          socket.end();
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const addr = server.address();
+          listenPort = typeof addr === 'object' && addr ? addr.port : 0;
+          resolve();
+        });
+        server.on('error', reject);
+      });
+    });
+
+    afterAll(async () => {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    });
+
+    it('exits 0 silently on UserPromptSubmit when port is UP', () => {
+      // This describes the fast-exit path: port up + event=UserPromptSubmit → exit 0, no output
+      let epTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-proxy-ep-'));
+      const epHomeDir = path.join(epTmpDir, 'home');
+      fs.mkdirSync(path.join(epHomeDir, '.devflow'), { recursive: true });
+      const state = {
+        version: 1,
+        enabled: true,
+        port: listenPort,
+        binPath: null,
+        configPath: null,
+        resolvedAt: new Date().toISOString(),
+        devflowVersion: null,
+      };
+      fs.writeFileSync(
+        path.join(epHomeDir, '.devflow', 'proxy.json'),
+        JSON.stringify(state),
+      );
+      try {
+        const portInput = { ...PROMPT_INPUT };
+        const { exitCode, stdout } = runHook(PROXY_HOOK, portInput, epHomeDir);
+        expect(exitCode).toBe(0);
+        expect(stdout).toBe('');
+      } finally {
+        fs.rmSync(epTmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('exits 0 silently on SessionStart when port is UP and curl is absent — no spurious warning (CONS-4)', () => {
+      // Regression test: before the fix, the hook called curl unconditionally; if curl was
+      // absent from PATH, HEALTH_BODY="" fell through to the "*)" branch and emitted
+      // a spurious "port occupied by another application" warning even when the relay was ours.
+      // After the fix: "command -v curl" guards the health check; absent curl → assume ours,
+      // exit 0 with no output.
+      //
+      // We build a controlled shadow bin directory containing every external command
+      // the hook needs for the SessionStart + port-UP + curl-absent path, then set
+      // PATH=shadowBin ONLY (no /bin suffix). The PATH restriction is required because
+      // on Ubuntu (merged-usr) /bin is a symlink to /usr/bin which exposes /bin/curl;
+      // adding /bin would let "command -v curl" succeed on Linux, defeating the test.
+      //
+      // Binaries we must symlink (all needed for this path):
+      //   bash    — Node.js resolves 'bash' in spawnSync using the child's PATH (shadowBin);
+      //             without bash in shadowBin, spawnSync fails with ENOENT before the
+      //             hook even starts.
+      //   dirname — for SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+      //   node    — for json-parse / json_field_file calls (or jq if node absent)
+      //   cat     — for INPUT=$(cat); command substitution inherits stderr, so missing
+      //             cat leaks "bash: cat: command not found" into result.stderr
+      //   mkdir   — for "mkdir -p $LOG_DIR" (log directory creation); without it
+      //             log() tries to open a file in a missing directory. On macOS bash 3.2
+      //             a >> ENOENT on a missing parent terminates the process via signal
+      //             (status=null) instead of a clean non-zero that || true can handle.
+      //             On Linux bash 5.x it leaks to stderr.
+      //   date    — for log() timestamp; $(date ...) inherits stderr, same as cat above.
+      //
+      // Binaries we deliberately omit:
+      //   curl    — "command -v curl" must fail so the hook takes the "assume ours" path.
+      //   stat    — only reached when LOG_FILE already exists; it won't on first run.
+      //   tail/mv/rm — only in the log-truncation block (same gate as stat).
+
+      const shadowBin = fs.mkdtempSync(path.join(os.tmpdir(), 'nocurl-bin-'));
+      try {
+        // Symlink bash — Node.js resolves 'bash' in spawnSync via the child env PATH;
+        // with PATH=shadowBin, bash must be present or spawnSync itself fails with ENOENT.
+        const bashR = spawnSync('which', ['bash'], { encoding: 'utf-8' });
+        const bashPath = bashR.stdout.trim();
+        if (bashPath) {
+          try { fs.symlinkSync(bashPath, path.join(shadowBin, 'bash')); } catch { /* ok */ }
+        }
+
+        // Symlink dirname — needed for SCRIPT_DIR resolution (may be in /usr/bin, not /bin)
+        const dirnameR = spawnSync('which', ['dirname'], { encoding: 'utf-8' });
+        const dirnamePath = dirnameR.stdout.trim();
+        if (dirnamePath) {
+          try { fs.symlinkSync(dirnamePath, path.join(shadowBin, 'dirname')); } catch { /* ok */ }
+        }
+
+        // Symlink node or jq — needed for json-parse to be available (one is sufficient)
+        const nodeR = spawnSync('which', ['node'], { encoding: 'utf-8' });
+        const nodePath = nodeR.stdout.trim();
+        if (nodePath) {
+          try { fs.symlinkSync(nodePath, path.join(shadowBin, 'node')); } catch { /* ok */ }
+        } else {
+          const jqR = spawnSync('which', ['jq'], { encoding: 'utf-8' });
+          const jqPath = jqR.stdout.trim();
+          if (jqPath) {
+            try { fs.symlinkSync(jqPath, path.join(shadowBin, 'jq')); } catch { /* ok */ }
+          }
+        }
+
+        // Symlink cat — needed for INPUT=$(cat); command substitution inherits stderr so
+        // a missing cat would leak "bash: cat: command not found" into result.stderr
+        const catR = spawnSync('which', ['cat'], { encoding: 'utf-8' });
+        const catPath = catR.stdout.trim();
+        if (catPath) {
+          try { fs.symlinkSync(catPath, path.join(shadowBin, 'cat')); } catch { /* ok */ }
+        }
+
+        // Symlink date — needed for log(); $(date ...) in log() also inherits stderr
+        const dateR = spawnSync('which', ['date'], { encoding: 'utf-8' });
+        const datePath = dateR.stdout.trim();
+        if (datePath) {
+          try { fs.symlinkSync(datePath, path.join(shadowBin, 'date')); } catch { /* ok */ }
+        }
+
+        // Symlink mkdir — needed for "mkdir -p $LOG_DIR" at the top of log setup; without
+        // it the log directory is never created and the subsequent "echo >> $LOG_FILE" in
+        // log() fails with ENOENT. On macOS bash 3.2 that failure terminates the process
+        // via signal (status=null) rather than a clean non-zero exit that || true handles.
+        const mkdirR = spawnSync('which', ['mkdir'], { encoding: 'utf-8' });
+        const mkdirPath = mkdirR.stdout.trim();
+        if (mkdirPath) {
+          try { fs.symlinkSync(mkdirPath, path.join(shadowBin, 'mkdir')); } catch { /* ok */ }
+        }
+
+        // Deliberately DO NOT symlink curl → "command -v curl" will fail inside the hook
+
+        writeProxyJson({ enabled: true, port: listenPort });
+
+        const result = spawnSync('bash', [PROXY_HOOK], {
+          input: JSON.stringify(SESSION_INPUT),
+          // PATH=shadowBin only: all needed binaries are symlinked above; curl deliberately
+          // omitted so "command -v curl" fails. No /bin suffix — on Linux merged-usr /bin
+          // is /usr/bin, which exposes /bin/curl and would defeat the test.
+          env: { ...process.env, HOME: homeDir, PATH: shadowBin },
+          encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(''); // no spurious "port occupied" warning
+        expect(result.stderr).toBe('');
+      } finally {
+        fs.rmSync(shadowBin, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── HTTP health body identity check (key-order-independent parse) ────────────
+  //
+  // Regression: the old case *'"name":"subswitch"'* pattern required the "name"
+  // key to appear first in the JSON body. The fixed code uses json_field which
+  // parses key-order-independently via jq or node.
+  //
+  // CONS-5: health body with reordered fields must still match as "ours".
+  //
+  // Implementation note: runHook uses execSync, which blocks Node.js's event loop.
+  // An in-process http.createServer would be starved and unable to respond while
+  // execSync is running. The HTTP stub is spawned as a SEPARATE child process
+  // so it has its own event loop and can respond to curl independently.
+
+  it('CONS-5: recognizes relay identity when "name" field is not first in health body', async () => {
+    const port = await allocateFreePort();
+
+    // Write a minimal HTTP server that returns the health body with "name" LAST.
+    // Old pattern *'"name":"subswitch"'* fails this body; json_field parse succeeds.
+    const stubScript = path.join(tmpDir, 'http-health-stub.js');
+    fs.writeFileSync(
+      stubScript,
+      [
+        "const http = require('http');",
+        `http.createServer((_req, res) => {`,
+        // Deliberately put "version" and "providers" BEFORE "name" so the old
+        // *'"name":"subswitch"'* substring match would fail (key-order-dependent).
+        `  const body = JSON.stringify({version:'0.2.0',providers:[],name:'subswitch'});`,
+        `  res.writeHead(200, {'Content-Type':'application/json'});`,
+        `  res.end(body);`,
+        `}).listen(${port}, '127.0.0.1');`,
+      ].join('\n'),
+    );
+
+    // Spawn the stub in a separate process so it has its own event loop
+    // (execSync in runHook would starve an in-process http.Server).
+    const stubProc = spawn(process.execPath, [stubScript], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    stubProc.unref();
+    const stubPid = stubProc.pid ?? null;
+
+    try {
+      // Wait for the HTTP server to be up (TCP probe, max 3s)
+      const deadline = Date.now() + 3000;
+      let up = false;
+      while (Date.now() < deadline) {
+        try {
+          execSync(`bash -c '(echo > /dev/tcp/127.0.0.1/${port}) 2>/dev/null'`, { timeout: 500 });
+          up = true;
+          break;
+        } catch { /* not yet */ }
+        await new Promise<void>((r) => setTimeout(r, 50));
+      }
+      expect(up, `HTTP stub did not come up on port ${port}`).toBe(true);
+
+      writeProxyJson({ enabled: true, port });
+      const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+      expect(exitCode).toBe(0);
+      // No "port occupied" warning — relay identity correctly recognized via json_field parse
+      expect(stdout).toBe('');
+    } finally {
+      if (stubPid !== null) {
+        try { process.kill(stubPid, 'SIGTERM'); } catch { /* already gone */ }
+        try { process.kill(stubPid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+  });
+
+  // ── Relay spawn path (stub relay) ────────────────────────────────────────────
+
+  describe('relay spawn path (stub relay binds the port)', () => {
+    let spawnedPid: number | null = null;
+
+    afterEach(async () => {
+      // The hook spawns a detached, disowned process — the test owns its teardown.
+      // SIGTERM → 200ms async sleep → SIGKILL to avoid leaving orphaned relay processes
+      // that corrupt subsequent test runs (observed: 3 leaked processes per suite).
+      if (spawnedPid !== null) {
+        const pid = spawnedPid;
+        spawnedPid = null;
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+        // Yield to the event loop while waiting for the process to exit cleanly.
+        await new Promise<void>((r) => setTimeout(r, 200));
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+        // Verify termination — log a warning rather than throwing so afterEach always completes.
+        try {
+          process.kill(pid, 0);
+          console.warn(`[shell-hooks afterEach] relay PID ${pid} survived SIGKILL — may leak`);
+        } catch { /* expected: process is gone */ }
+      }
+    });
+
+    /**
+     * Write a stub relay that mimics the one contract the spawn path depends on:
+     * read the port from $SUBSWITCH_CONFIG and accept TCP on it. Invoked by the
+     * hook as `node <binPath> serve`.
+     */
+    function writeStubRelay(): string {
+      const binPath = path.join(tmpDir, 'stub-relay.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          "const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, 'utf-8'));",
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+      return binPath;
+    }
+
+    function writeRoutingConfig(port: number): string {
+      const configPath = path.join(tmpDir, 'proxy-routing.json');
+      fs.writeFileSync(configPath, buildRoutingConfigJson(port));
+      return configPath;
+    }
+
+    it('spawns the relay on SessionStart when the port is down, and exits 0 silently', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      const { exitCode, stdout, stderr } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      // Relay came up within the bounded wait → no warning is emitted.
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr).toBe('');
+    });
+
+    it('writes proxy.pid with the live relay pid so --status can report the process', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      // Read and register PID BEFORE any assertions so afterEach can always kill it.
+      // If we set spawnedPid after an assertion that throws, the relay leaks.
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      const rawPid = fs.existsSync(pidFile)
+        ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10)
+        : NaN;
+      if (!Number.isNaN(rawPid) && rawPid > 0) {
+        spawnedPid = rawPid; // registered before any assertions
+      }
+
+      expect(fs.existsSync(pidFile)).toBe(true);
+      expect(Number.isInteger(rawPid)).toBe(true);
+      expect(rawPid).toBeGreaterThan(0);
+      // The recorded pid must be the live relay — the same liveness probe --status uses.
+      expect(() => process.kill(rawPid, 0)).not.toThrow();
+    });
+
+    it('releases the spawn lock after a successful start', async () => {
+      const port = await allocateFreePort();
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath: writeStubRelay(),
+        configPath: writeRoutingConfig(port),
+      });
+
+      runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      // A retained lock would make every later session take the "starting elsewhere" path.
+      expect(fs.existsSync(path.join(homeDir, '.devflow', '.proxy-spawn.lock'))).toBe(false);
+    });
+
+    // C2-SEC-1 regression: the relay spawn must use an env allowlist, not a denylist.
+    // Before the fix, `nohup env -u ANTHROPIC_API_KEY` spread the full parent env so
+    // every secret the shell had exported (SSH_AUTH_SOCK, OPENAI_API_KEY, etc.) reached
+    // the third-party routing runtime. The fix converts to `env -i` with 5+1 explicit
+    // vars (PATH, HOME, TMPDIR, LANG, LC_ALL, SUBSWITCH_CONFIG). avoids PF-017.
+    //
+    // Strategy: pass canary vars via extraEnv to the hook process, then have a
+    // custom stub relay capture its own process.env to a file BEFORE binding the
+    // port (so the file is written by the time the hook's TCP probe succeeds).
+    // Assert both canary vars are absent from the relay's captured environment.
+    it('C2-SEC-1: spawned relay does not receive canary env vars (SSH_AUTH_SOCK, OPENAI_API_KEY)', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env.json');
+
+      // Stub relay: capture env to file synchronously, then bind.
+      // Writing env before listen() guarantees the file exists by the time the
+      // hook's TCP probe sees the port as up (probe only succeeds after listen()).
+      const binPath = path.join(tmpDir, 'env-capture-relay.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass canary vars into the hook's environment — they must NOT reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        SSH_AUTH_SOCK: '/tmp/test-canary-ssh-auth.sock',
+        OPENAI_API_KEY: 'sk-test-canary-0000',
+      });
+
+      // Register pid for afterEach cleanup before any assertions.
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(envCapturePath), 'relay env capture file must exist').toBe(true);
+
+      const relayEnv = JSON.parse(fs.readFileSync(envCapturePath, 'utf-8')) as Record<string, string>;
+      // Both canary vars must be absent — the allowlist does not include them.
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'SSH_AUTH_SOCK'),
+        'SSH_AUTH_SOCK must be absent from relay env (allowlist enforced)',
+      ).toBe(false);
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'OPENAI_API_KEY'),
+        'OPENAI_API_KEY must be absent from relay env (allowlist enforced)',
+      ).toBe(false);
+    });
+
+    // NODE_EXTRA_CA_CERTS corporate-TLS pass-through: the bash hook's _RELAY_ENV
+    // must forward this var to the relay when set so corporate-TLS deployments can
+    // supply a CA bundle.
+    //
+    // Prove this test can fail: before adding the conditional _RELAY_ENV append to
+    // ensure-proxy, the relay env does not contain NODE_EXTRA_CA_CERTS → the
+    // expect(relayEnv['NODE_EXTRA_CA_CERTS']).toBe(expectedBundle) assertion fails.
+    it('NODE_EXTRA_CA_CERTS is forwarded to spawned relay when set in hook env', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env-ca.json');
+      const expectedBundle = '/tmp/devflow-test-ca-bundle.crt';
+
+      // Stub relay: capture env to file synchronously, then bind.
+      // File is written before listen() so it exists when the hook's TCP probe sees the port up.
+      const binPath = path.join(tmpDir, 'env-capture-relay-ca.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass NODE_EXTRA_CA_CERTS into the hook's environment — must reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        NODE_EXTRA_CA_CERTS: expectedBundle,
+      });
+
+      // Register pid for afterEach cleanup before any assertions.
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(
+        fs.existsSync(envCapturePath),
+        'relay env capture file must exist',
+      ).toBe(true);
+
+      const relayEnv = JSON.parse(
+        fs.readFileSync(envCapturePath, 'utf-8'),
+      ) as Record<string, string>;
+      expect(
+        relayEnv['NODE_EXTRA_CA_CERTS'],
+        'NODE_EXTRA_CA_CERTS must be forwarded to relay env (corporate TLS)',
+      ).toBe(expectedBundle);
+    });
+
+    it('NODE_OPTIONS is excluded from spawned relay env even when set in hook env', async () => {
+      const port = await allocateFreePort();
+      const envCapturePath = path.join(tmpDir, 'relay-env-nodeopt.json');
+
+      const binPath = path.join(tmpDir, 'env-capture-relay-nodeopt.js');
+      fs.writeFileSync(
+        binPath,
+        [
+          "const net = require('net');",
+          "const fs = require('fs');",
+          'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
+          `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
+          'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
+        ].join('\n'),
+      );
+
+      writeProxyJson({
+        enabled: true,
+        port,
+        binPath,
+        configPath: writeRoutingConfig(port),
+      });
+
+      // Pass NODE_OPTIONS into the hook's env — must NOT reach the relay.
+      const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, {
+        NODE_OPTIONS: '--require /tmp/evil.js',
+      });
+
+      const pidFile = path.join(homeDir, '.devflow', 'proxy.pid');
+      if (fs.existsSync(pidFile)) {
+        spawnedPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      }
+
+      expect(exitCode).toBe(0);
+      expect(
+        fs.existsSync(envCapturePath),
+        'relay env capture file must exist',
+      ).toBe(true);
+
+      const relayEnv = JSON.parse(
+        fs.readFileSync(envCapturePath, 'utf-8'),
+      ) as Record<string, string>;
+      expect(
+        Object.prototype.hasOwnProperty.call(relayEnv, 'NODE_OPTIONS'),
+        'NODE_OPTIONS must be absent from relay env (prevents arbitrary code execution via --require/--import)',
+      ).toBe(false);
+    });
+  });
+});

@@ -50,6 +50,11 @@ export interface ManifestData {
      * Absent in pre-Phase-F manifests — readManifest defaults to undefined (unknown).
      */
     security?: SecurityMode;
+    /**
+     * External model routing (Devflow proxy) feature flag.
+     * Absent in pre-proxy manifests — readManifest self-heals to false.
+     */
+    proxy: boolean;
   };
   installedAt: string;
   updatedAt: string;
@@ -118,6 +123,8 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
           ? features.security as SecurityMode
           : undefined,
+        // Self-heal: absent proxy field defaults to false (applies ADR-014 self-heal idiom)
+        proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

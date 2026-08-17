@@ -77,7 +77,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose' },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose', proxy: false },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -691,6 +691,109 @@ describe('syncManifestFeature', () => {
     const updated = await readManifest(tmpDir);
     expect(updated).not.toBeNull();
     expect(updated!.features.security).toBe('user');
+  });
+});
+
+describe('proxy feature field', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-proxy-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('self-heals absent proxy field to false', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(false);
+  });
+
+  it('preserves proxy: true', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: true },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(true);
+  });
+
+  it('preserves proxy: false', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(false);
+  });
+
+  it('self-heals non-boolean proxy to false', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: 'yes' },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(false);
+  });
+
+  it('proxy field round-trips through write/read', async () => {
+    const data: ManifestData = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: true },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(true);
+  });
+
+  it('syncManifestFeature can toggle proxy', async () => {
+    const data: ManifestData = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    await syncManifestFeature(tmpDir, 'proxy', true);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.proxy).toBe(true);
   });
 });
 

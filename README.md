@@ -138,6 +138,10 @@ npx devflow-kit learning --enable       # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit security --status       # Show / manage the security deny list
 npx devflow-kit safe-delete --enable    # Install rm -> trash safe-delete
+npx devflow-kit proxy --enable          # Enable external model routing (GPT via Codex)
+npx devflow-kit proxy --disable         # Disable and revert agents to Claude defaults
+npx devflow-kit agents                  # Configure per-agent model assignments (TUI)
+npx devflow-kit agents --list           # List agents with current model assignments
 npx devflow-kit uninstall               # Remove Devflow
 ```
 

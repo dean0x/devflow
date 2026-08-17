@@ -33,6 +33,10 @@ import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
+import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
+import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.js';
+import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
+import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
@@ -151,6 +155,8 @@ interface InitOptions {
   knowledge?: boolean;
   learning?: boolean;
   rules?: boolean;
+  /** External model routing. Advanced-only; never part of Recommended defaults. */
+  proxy?: boolean;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -175,6 +181,8 @@ export const initCommand = new Command('init')
   .option('--no-learning', 'Disable learning (decision/pitfall tracking)')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
+  .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
+  .option('--no-proxy', 'Disable external model routing')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -264,7 +272,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [] },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false },
           installedAt: now,
           updatedAt: now,
         });
@@ -468,6 +476,10 @@ export const initCommand = new Command('init')
     let knowledgeEnabled = seed.features.knowledge;
     let learningEnabled = seed.features.learning;
     let rulesEnabled = seed.features.rules;
+    // proxy: Advanced-only; Recommended path carries seed value unchanged.
+    // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
+    // --reset → false (resolveResetGatedInputs null-seeds the manifest).
+    let proxyEnabled = seed.features.proxy;
     let enabledFlags = seed.flags;
     let viewMode: ViewMode = seed.viewMode;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
@@ -496,6 +508,7 @@ export const initCommand = new Command('init')
 
       // Apply explicit CLI toggles on top of the seed.
       // Precedence: explicit CLI flag > seed value (which already encodes: prior state > registry default).
+      // proxy is included: --proxy/--no-proxy CLI flags override the seed in non-interactive mode.
       const effectiveFeatures = applyCliToggles(seed.features, {
         ambient: options.ambient,
         memory: options.memory,
@@ -503,6 +516,7 @@ export const initCommand = new Command('init')
         knowledge: options.knowledge,
         learning: options.learning,
         rules: options.rules,
+        proxy: options.proxy,
       });
       ambientEnabled = effectiveFeatures.ambient;
       memoryEnabled = effectiveFeatures.memory;
@@ -510,6 +524,7 @@ export const initCommand = new Command('init')
       knowledgeEnabled = effectiveFeatures.knowledge;
       learningEnabled = effectiveFeatures.learning;
       rulesEnabled = effectiveFeatures.rules;
+      proxyEnabled = effectiveFeatures.proxy;
       // enabledFlags and viewMode are already initialised to seed values above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -545,6 +560,7 @@ export const initCommand = new Command('init')
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
+        `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
         `View mode:       ${viewMode}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -688,6 +704,30 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         rulesEnabled = rulesChoice;
+      }
+
+      // External model routing (Advanced-only; default OFF; never part of Recommended)
+      if (options.proxy !== undefined) {
+        proxyEnabled = options.proxy;
+      } else {
+        p.note(
+          'Routes compatible agents through a local relay that forwards requests to\n' +
+          'GPT models via your OpenAI/Codex subscription.\n\n' +
+          'Requires the Codex CLI signed in (`codex login`). Takes effect in new\n' +
+          'Claude Code sessions. Disable leaves a running relay alone until reboot.\n\n' +
+          'GPT model assignments are preserved (dormant) while routing is off and\n' +
+          're-activate when you re-enable routing. Use `devflow agents` to configure.',
+          'External Model Routing',
+        );
+        const proxyChoice = await p.confirm({
+          message: 'Enable external model routing (GPT models via your OpenAI/Codex subscription)?',
+          initialValue: seed.features.proxy,
+        });
+        if (p.isCancel(proxyChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        proxyEnabled = proxyChoice;
       }
 
       // Claude Code flags multiselect (advanced only)
@@ -1186,6 +1226,145 @@ export const initCommand = new Command('init')
 
     const settingsPath = path.join(claudeDir, 'settings.json');
 
+    // === Proxy preflight (when enabled) ===
+    // Runs before the settings mutation pass so that proxyEnabled reflects reality
+    // (preflight failure forces it off without aborting init — avoids PF-009).
+    //
+    // Read existing proxy state once to recover the remembered port.
+    // Init has no --port option; the remembered port from proxy.json always
+    // wins over DEFAULT_PROXY_PORT (matching proxy.ts enable semantics).
+    const priorProxyStateResult = await readProxyState(devflowDir);
+    const effectivePort = priorProxyStateResult.ok
+      ? priorProxyStateResult.value.port
+      : DEFAULT_PROXY_PORT;
+
+    if (proxyEnabled) {
+      const configPath = path.join(devflowDir, 'proxy-routing.json');
+      const logPath = path.join(devflowDir, 'logs', 'proxy.log');
+      const codexAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
+
+      // Write routing config (create logs dir non-fatally).
+      // Read existing config first so user-added anthropic/limits/logLevel/providers
+      // blocks are preserved; a missing file falls back cleanly inside buildRoutingConfigJson.
+      let routingConfigWritten = false;
+      try {
+        // SEC-2: mode 0o700 for the logs directory (applies to new dirs only).
+        await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
+        let existingRoutingContent: string | undefined;
+        try { existingRoutingContent = await fs.readFile(configPath, 'utf-8'); } catch { /* absent — fine */ }
+        await fs.writeFile(configPath, buildRoutingConfigJson(effectivePort, existingRoutingContent), 'utf-8');
+        routingConfigWritten = true;
+      } catch (err) {
+        p.log.warn(
+          `External model routing: could not write routing config: ` +
+          `${err instanceof Error ? err.message : err}. Routing disabled for this init.`,
+        );
+        proxyEnabled = false;
+      }
+
+      if (routingConfigWritten) {
+        // Deliberate difference from runEnable: init swallows settings.json read errors
+        // (swallowSettingsReadError: true) because init creates settings.json itself
+        // and must tolerate an absent file; runEnable propagates read errors to the user.
+        const preflightResult = await runProxyPreflight(
+          effectivePort,
+          codexAuthPath,
+          configPath,
+          logPath,
+          buildRealPreflightDeps({
+            settingsPath,
+            onWarn: (msg) => p.log.warn(msg),
+            swallowSettingsReadError: true,
+          }),
+        );
+
+        if (!preflightResult.ok) {
+          p.log.warn(
+            `External model routing preflight failed: ${preflightResult.error}. ` +
+            'Routing disabled for this init — run `devflow proxy --enable` after signing in.',
+          );
+          proxyEnabled = false;
+          // Write proxy.json disabled so runtime authority converges with the
+          // failed preflight outcome (avoids PF-015). Without this write,
+          // proxy.json stays enabled:true from the prior run, causing
+          // reapplyAgentMapping to write GPT model IDs into agent frontmatter
+          // with no relay — a dormancy inversion.
+          if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
+            const disableResult = await writeProxyState(devflowDir, buildProxyState({
+              enabled: false,
+              port: priorProxyStateResult.value.port,
+              binPath: priorProxyStateResult.value.binPath,
+              configPath: priorProxyStateResult.value.configPath,
+              devflowVersion: priorProxyStateResult.value.devflowVersion,
+            }));
+            if (!disableResult.ok) {
+              p.log.warn(`Could not persist proxy disabled state: ${disableResult.error}.`);
+            }
+          }
+        } else {
+          // Write proxy.json enabled:true with freshly resolved binPath (heal path for upgrades)
+          const writeResult = await writeProxyState(devflowDir, buildProxyState({
+            enabled: true,
+            port: effectivePort,
+            binPath: preflightResult.value.binPath,
+            configPath,
+            devflowVersion: version,
+          }));
+          if (!writeResult.ok) {
+            p.log.warn(`Could not persist proxy state: ${writeResult.error}. Routing disabled for this init.`);
+            proxyEnabled = false;
+          }
+        }
+      }
+    } else {
+      // Proxy disabled at entry: if proxy.json exists and is enabled, mark it disabled.
+      // avoids PF-015: runtime authority (proxy.json) must converge with proxyEnabled=false.
+      // Check the Result — write errors are surfaced rather than silently ignored
+      // (consistent with the enable branch above).
+      if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
+        const disableResult = await writeProxyState(devflowDir, buildProxyState({
+          enabled: false,
+          port: priorProxyStateResult.value.port,
+          binPath: priorProxyStateResult.value.binPath,
+          configPath: priorProxyStateResult.value.configPath,
+          devflowVersion: priorProxyStateResult.value.devflowVersion,
+        }));
+        if (!disableResult.ok) {
+          p.log.warn(`Could not persist proxy disabled state: ${disableResult.error}.`);
+        }
+      }
+    }
+
+    // Reapply agent model mapping after fresh file copy — installViaFileCopy writes shipped
+    // defaults; this converges them back to the user's saved model/effort assignments.
+    // MUST run AFTER the proxy preflight block above: preflight can force proxyEnabled=false
+    // on failure, and reapply's dormancy (GPT models materialize only while proxy enabled)
+    // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
+    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal (avoids PF-009).
+    //
+    // Init-only optimization: skip reapply when mapping is empty AND proxy is off.
+    // An empty mapping means every agent uses its shipped default; the file copy already
+    // wrote those defaults, so reapply would read ~34 files and write zero. The
+    // disable/revert paths call reapplyAgentMapping directly and always need the full walk.
+    {
+      const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
+      const preCheckMapping = await readAgentMapping(devflowDir);
+      const hasMappingEntries = preCheckMapping.ok && Object.keys(preCheckMapping.value.agents).length > 0;
+      if (hasMappingEntries || proxyEnabled) {
+        const reapplyResult = await reapplyAgentMapping({
+          proxyEnabled,
+          installDir: agentInstallDir,
+          devflowDir,
+          onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+        });
+        if (reapplyResult.updated.length > 0) {
+          if (verbose) {
+            p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
+          }
+        }
+      }
+    }
+
     // Configure ambient hook, memory hooks, and HUD statusLine in a single read-modify-write pass
     try {
       let content = await fs.readFile(settingsPath, 'utf-8');
@@ -1241,6 +1420,25 @@ export const initCommand = new Command('init')
       // View mode — strip then apply for upgrade safety
       content = stripViewMode(content);
       content = applyViewMode(content, viewMode);
+
+      // Proxy hooks (SessionStart + UserPromptSubmit) — strip-then-add, idempotent.
+      // Parse Settings once for the hook mutation; env mutation stays in string space.
+      {
+        const parsedSettings = JSON.parse(content) as Settings;
+        removeProxyHooks(parsedSettings);
+        if (proxyEnabled) addProxyHooks(parsedSettings, devflowDir);
+        content = JSON.stringify(parsedSettings, null, 2) + '\n';
+      }
+      // Proxy env: ANTHROPIC_BASE_URL strip-then-add, scoped to managed port.
+      // Read proxy.json to learn which port we own — only that URL is stripped.
+      // A user's own localhost gateway on any other port is preserved.
+      // Invariant: proxy.json always reflects the final settled state after the
+      // preflight block above — all paths that force proxyEnabled=false also write
+      // proxy.json enabled:false (avoids PF-015), so managedPort == effectivePort.
+      const proxyStateForStrip = await readProxyState(devflowDir);
+      const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+      content = stripProxyEnv(content, managedPort);
+      if (proxyEnabled) content = applyProxyEnv(content, effectivePort);
 
       if (content !== original) {
         await fs.writeFile(settingsPath, content, 'utf-8');
@@ -1518,6 +1716,8 @@ export const initCommand = new Command('init')
         knownFlags: FLAG_REGISTRY.map(f => f.id),
         viewMode,
         security: securityMode,
+        // Final resolved value — may be forced off by preflight failure.
+        proxy: proxyEnabled,
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
@@ -1526,6 +1726,11 @@ export const initCommand = new Command('init')
       await writeManifest(devflowDir, manifestData);
     } catch (error) {
       p.log.warn(`Failed to write installation manifest (install succeeded): ${error instanceof Error ? error.message : error}`);
+    }
+
+    // External model routing status line (Advanced path / explicit --proxy flag only)
+    if (proxyEnabled) {
+      p.log.info(`External model routing: ${color.green('enabled')} — takes effect in new Claude Code sessions`);
     }
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));

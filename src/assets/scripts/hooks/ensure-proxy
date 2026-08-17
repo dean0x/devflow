@@ -1,0 +1,294 @@
+#!/bin/bash
+
+# ensure-proxy — SessionStart + UserPromptSubmit hook
+# Ensures the Devflow proxy relay is running when external model routing is enabled.
+# NOT git-gated (proxy is a global user-scope feature, not per-project).
+# NOT project-scoped: proxy state lives at $DEVFLOW_DIR/proxy.json (user-scope).
+#
+# SessionStart:  probe port → if DOWN attempt spawn → inject additionalContext warning if still down
+# UserPromptSubmit: fast exit (both port-up and port-down) — silent; SessionStart handles all warnings
+#
+# Performance: UserPromptSubmit exits immediately after event detection — before any
+# proxy-state reads. All json_field_file calls, log mkdir/stat, and CWD extraction
+# run on SessionStart only. binPath/configPath reads are deferred to the port-down branch.
+#
+# Branding: "subswitch" is an internal identifier (health check body match, SUBSWITCH_CONFIG env var,
+# spawn args); it MUST NOT appear in user-visible strings or additionalContext messages.
+#
+# avoids PF-001: port is digit-validated before interpolation into /dev/tcp and context strings.
+# avoids PF-014: hook always exits 0; no fd held across exit.
+
+# Safe no-op fallback — must exist before hook-bootstrap is sourced
+dbg() { :; }
+
+# Re-entrancy guard — must come before hook-bootstrap to minimize overhead
+# in background worker sessions (claude -p for memory / learning workers fire hooks too)
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/hook-bootstrap" "ensure-proxy"
+
+source "$SCRIPT_DIR/json-parse" || { echo "ensure-proxy: failed to source json-parse" >&2; exit 0; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+# ── Event detection ────────────────────────────────────────────────────────────
+# Distinguish SessionStart vs UserPromptSubmit by presence of the "prompt" key.
+# Session IDs are UUIDs — they cannot contain the literal string '"prompt"'.
+# CWD paths that contain "prompt" still won't match '"prompt"' (with both quotes).
+HOOK_EVENT="SessionStart"
+case "$INPUT" in
+  *'"prompt"'*) HOOK_EVENT="UserPromptSubmit" ;;
+esac
+dbg "HOOK_EVENT=$HOOK_EVENT"
+
+# ── UserPromptSubmit fast path ─────────────────────────────────────────────────
+# Exit immediately before any proxy-state reads. On UserPromptSubmit the hook is
+# always silent — SessionStart handles all relay-start and warning logic. Exiting
+# here saves two json_field_file subprocess calls (~76ms on jq-less hosts, ~85%
+# of hook wall time) on every prompt when the proxy is enabled.
+if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
+  dbg "UserPromptSubmit: fast exit (SessionStart handles all state changes)"
+  exit 0
+fi
+
+# ── Proxy state ────────────────────────────────────────────────────────────────
+# Proxy is user-scope (global), not project-scoped. Use $DEVFLOW_DIR (env) or default.
+DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
+PROXY_STATE_FILE="$DEVFLOW_DIR/proxy.json"
+
+if [ ! -f "$PROXY_STATE_FILE" ]; then
+  dbg "EXIT: no proxy state file"
+  exit 0
+fi
+
+PROXY_ENABLED=$(json_field_file "$PROXY_STATE_FILE" "enabled" "false")
+if [ "$PROXY_ENABLED" != "true" ]; then
+  dbg "EXIT: proxy disabled"
+  exit 0
+fi
+
+# Digit-validate port before use in /dev/tcp and string interpolation (avoids PF-001)
+PROXY_PORT_RAW=$(json_field_file "$PROXY_STATE_FILE" "port" "4141")
+PROXY_PORT="4141"
+case "$PROXY_PORT_RAW" in
+  [0-9]|\
+  [0-9][0-9]|\
+  [0-9][0-9][0-9]|\
+  [0-9][0-9][0-9][0-9]|\
+  [0-9][0-9][0-9][0-9][0-9])
+    PROXY_PORT="$PROXY_PORT_RAW"
+    ;;
+esac
+
+# ── CWD for debug tracing (SessionStart only, gated behind debug flag) ─────────
+# json_field spawns a subprocess — only worthwhile when debug tracing is active.
+if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then
+  _CWD=$(printf '%s' "$INPUT" | json_field "cwd" "" 2>/dev/null || true)
+  if [ -n "$_CWD" ]; then
+    devflow_debug_set_cwd "$_CWD" 2>/dev/null || true
+  fi
+fi
+
+# ── Log setup (SessionStart only) ──────────────────────────────────────────────
+LOG_DIR="$DEVFLOW_DIR/logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+# SEC-2: harden log directory to 0700 (best-effort; pre-existing dirs may be wider).
+chmod 700 "$LOG_DIR" 2>/dev/null || true
+LOG_FILE="$LOG_DIR/proxy.log"
+
+# Size guard: 2MB max → truncate to 1MB tail (matches hook-log-init guard pattern).
+# Sharing hook-log-init is not feasible here: hook-log-init requires $CWD and targets
+# the per-project log path; ensure-proxy uses the user-scope $DEVFLOW_DIR/logs path.
+# The existence guard is required: wc -c uses a shell redirect whose failure is emitted
+# by bash itself (before wc starts), bypassing 2>/dev/null.
+_LOG_MAX_BYTES=2097152
+_LOG_TAIL_BYTES=1048576
+_LOG_SIZE=0
+if [ -f "$LOG_FILE" ]; then
+  _LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) || \
+  _LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) || \
+  _LOG_SIZE=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ') || \
+  _LOG_SIZE=0
+fi
+_LOG_SIZE="${_LOG_SIZE:-0}"
+if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt "$_LOG_MAX_BYTES" ]; then
+  _LTMP="$LOG_FILE.tmp.$$"
+  # SEC-2: create rotation tmp under umask 077 so the post-mv inode carries 0600.
+  # mv replaces the inode, so the replacement inherits the tmp file's mode.
+  # chmod-after-mv would leave a window; setting mode at creation is the stronger
+  # guarantee. Mirrors the queue-append precedent (src/assets/scripts/hooks/queue-append).
+  (umask 077 && tail -c "$_LOG_TAIL_BYTES" "$LOG_FILE" > "$_LTMP") 2>/dev/null && \
+    mv "$_LTMP" "$LOG_FILE" 2>/dev/null || \
+    rm -f "$_LTMP" 2>/dev/null || true
+fi
+
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [ensure-proxy] $1" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+# ── TCP probe (bash built-in, no nc/curl, Bash 3.2-safe) ──────────────────────
+# /dev/tcp is a bash built-in; the exec runs in a subshell so failures don't
+# affect the parent. bash 3.2 on macOS supports /dev/tcp.
+# Port value is digit-validated above — safe to interpolate.
+proxy_tcp_up() {
+  local _p="$1"
+  ( exec 3<>/dev/tcp/127.0.0.1/"$_p" ) 2>/dev/null
+  return $?
+}
+
+# ── Main logic: SessionStart ───────────────────────────────────────────────────
+if proxy_tcp_up "$PROXY_PORT"; then
+  dbg "port $PROXY_PORT up"
+
+  # SessionStart: verify identity to avoid adopting a foreign service on this port.
+  # Guard: curl may be absent on minimal hosts; when absent, assume the relay is ours
+  # (the CLI --status provides the authoritative identity check; this hook is advisory).
+  if command -v curl >/dev/null 2>&1; then
+    HEALTH_BODY=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_PORT}/__subswitch/health" 2>/dev/null || true)
+    dbg "health_body=$HEALTH_BODY"
+    # Parse the name field from the health body — key-order-independent.
+    # json_field is always available here: line 33 exits if _JSON_AVAILABLE=false.
+    # 'subswitch' is the internal package name — acceptable in hook code and logs,
+    # but must NEVER appear in user-visible strings or additionalContext messages.
+    HEALTH_NAME=$(printf '%s' "$HEALTH_BODY" | json_field "name" "" 2>/dev/null || true)
+    if [ "$HEALTH_NAME" = "subswitch" ]; then
+      log "SessionStart: port $PROXY_PORT healthy (correct identity)"
+      exit 0
+    else
+      log "SessionStart: port $PROXY_PORT accepting but identity mismatch — possible squatting"
+      CONTEXT="[Devflow proxy] Warning: port ${PROXY_PORT} is occupied by another application. External model routing may be unavailable. Run devflow proxy --status for details."
+      json_session_output "$CONTEXT"
+      exit 0
+    fi
+  fi
+
+  # curl absent — assume the relay is ours (no warning; CLI --status is the authoritative check)
+  log "SessionStart: port $PROXY_PORT up (curl absent — assuming ours)"
+  exit 0
+fi
+
+# Port NOT accepting connections
+
+# ── SessionStart: attempt to start the relay ───────────────────────────────────
+log "SessionStart: port $PROXY_PORT down — attempting start"
+
+# Read binPath and configPath only here — deferred from the top-level block so that
+# UserPromptSubmit and SessionStart-port-up paths pay zero json_field_file cost.
+PROXY_BIN=$(json_field_file "$PROXY_STATE_FILE" "binPath" "")
+PROXY_CONFIG=$(json_field_file "$PROXY_STATE_FILE" "configPath" "")
+dbg "PROXY_BIN=$PROXY_BIN PROXY_CONFIG=$PROXY_CONFIG"
+
+# Validate prerequisites before spawning
+if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
+  log "prereq fail: binPath missing or not a file: $PROXY_BIN"
+  CONTEXT="[Devflow proxy] Warning: relay binary not found. Run 'devflow proxy --enable' to restore external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+NODE_BIN=$(command -v node 2>/dev/null || true)
+if [ -z "$NODE_BIN" ]; then
+  log "prereq fail: node not found in PATH"
+  CONTEXT="[Devflow proxy] Warning: Node.js not found in PATH. Install Node.js to enable external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+if [ -z "$PROXY_CONFIG" ] || [ ! -f "$PROXY_CONFIG" ]; then
+  log "prereq fail: configPath missing or not a file: $PROXY_CONFIG"
+  CONTEXT="[Devflow proxy] Warning: routing config not found. Run 'devflow proxy --enable' to restore external model routing."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+# Acquire spawn lock — prevents concurrent sessions from double-spawning the relay
+# Stale break: 30s (lock abandoned by crashed hook)
+source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+source "$SCRIPT_DIR/learning-lock" 2>/dev/null || true
+
+SPAWN_LOCK="$DEVFLOW_DIR/.proxy-spawn.lock"
+
+if ! learning_lock_acquire "$SPAWN_LOCK" 2 2>/dev/null; then
+  # Another session is racing to start the proxy — give it a moment then re-probe
+  log "spawn lock busy — another session may be starting proxy"
+  sleep 1
+  if proxy_tcp_up "$PROXY_PORT"; then
+    log "proxy started by another session — ok"
+    exit 0
+  fi
+  log "still down after lock wait"
+  CONTEXT="[Devflow proxy] Note: relay is starting in another session. If models are unavailable, retry your prompt."
+  json_session_output "$CONTEXT"
+  exit 0
+fi
+
+# We hold the lock — spawn the relay
+log "spawning relay: $NODE_BIN $PROXY_BIN serve"
+
+# SEC-2: create proxy.log with 0600 before the append redirect so the file
+# lands at the correct mode on first creation. If the file already exists,
+# touch is a no-op for mode; the chmod below covers pre-existing wider modes.
+# Follows the queue-append precedent (src/assets/scripts/hooks/queue-append).
+(umask 077 && touch "$LOG_FILE") 2>/dev/null || true
+chmod 600 "$LOG_FILE" 2>/dev/null || true
+
+# SEC-2 (allowlist): scope the relay's env to exactly what it needs — avoids PF-017.
+# NODE_EXTRA_CA_CERTS is included when non-empty so corporate-TLS deployments can
+# supply a CA bundle; an unset/empty value is not injected (an empty path causes
+# TLS errors rather than being a no-op). NODE_OPTIONS is deliberately excluded:
+# it permits arbitrary code execution via --require/--import.
+# Mirrored in scrubChildEnv() in proxy-log.ts; both allowlists must stay in sync.
+# Bash 3.2-safe: bash arrays and array append (+=) are supported since bash 2.0.
+# nohup + env -i chain: nohup inherits the parent env (irrelevant — env -i clears
+# it for the relay); $! still captures the relay PID correctly.
+_RELAY_ENV=(
+  "PATH=$PATH"
+  "HOME=$HOME"
+  "TMPDIR=${TMPDIR:-}"
+  "LANG=${LANG:-}"
+  "LC_ALL=${LC_ALL:-}"
+  "SUBSWITCH_CONFIG=$PROXY_CONFIG"
+)
+if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]; then
+  _RELAY_ENV+=("NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS")
+fi
+nohup env -i "${_RELAY_ENV[@]}" \
+  "$NODE_BIN" "$PROXY_BIN" serve </dev/null >>"$LOG_FILE" 2>&1 &
+_RELAY_PID=$!
+disown "$_RELAY_PID" 2>/dev/null || true
+
+log "relay spawned with pid $_RELAY_PID"
+
+# Best-effort pid record for `devflow proxy --status` — mirrors the CLI enable path.
+# Written unconditionally after spawn (like the CLI): a stale pid from a relay that
+# never came up is harmless, since --status liveness-checks it before display.
+printf '%s' "$_RELAY_PID" > "$DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
+  log "warn: could not write proxy.pid (non-fatal)"
+
+# Bounded wait: 80×0.1s = 8s maximum (well within 15s hook timeout)
+_i=0
+_RELAY_UP=false
+while [ "$_i" -lt 80 ]; do
+  sleep 0.1
+  if proxy_tcp_up "$PROXY_PORT"; then
+    _RELAY_UP=true
+    break
+  fi
+  _i=$(( _i + 1 ))
+done
+
+learning_lock_release "$SPAWN_LOCK"
+
+if [ "$_RELAY_UP" = "true" ]; then
+  log "relay ready after $(( _i + 1 )) probe(s)"
+  exit 0
+fi
+
+# Relay did not accept connections within the bounded wait
+log "relay not ready after 80 probes — emitting warning"
+CONTEXT="[Devflow proxy] Warning: relay failed to start on port ${PROXY_PORT}. External model routing unavailable this session. See ${LOG_FILE} for details."
+json_session_output "$CONTEXT"
+exit 0
