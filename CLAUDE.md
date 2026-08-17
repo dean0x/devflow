@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Registry-driven CLI tool with 23 plugins (12 core + 10 optional language/ecosystem + 1 optional workflow). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/` and install directly; the only compile step is `.mds` command sources → `dist/commands/` via `npm run build:mds`.
+Registry-driven CLI tool with 22 plugins (12 core + 10 optional). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/` and install directly; the only compile step is `.mds` command sources → `dist/commands/` via `npm run build:mds`.
 
 | Plugin | Purpose |
 |--------|---------|
@@ -28,7 +28,6 @@ Registry-driven CLI tool with 23 plugins (12 core + 10 optional language/ecosyst
 | `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis |
 | `devflow-ambient` | Ambient mode — orchestrator charter + plan handoff |
 | `devflow-core-skills` | Auto-activating quality enforcement |
-| `devflow-audit-claude` | Audit CLAUDE.md files (optional) |
 | `devflow-dynamic` | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline (optional) |
 | `devflow-typescript` | TypeScript language patterns (optional) |
 | `devflow-react` | React framework patterns (optional) |
@@ -84,9 +83,9 @@ devflow/
 │   ├── targets/claude-code/ # Claude Code install target (installer, hooks.ts, post-install, claude-paths, legacy, templates/)
 │   └── assets/             # All installable assets (single source of truth)
 │       ├── skills/         # 41 skills
-│       ├── agents/         # 17 agents (16 shared + 1 plugin-specific claude-md-auditor)
+│       ├── agents/         # 16 agents
 │       ├── rules/          # 13 rules (flat .md files)
-│       ├── commands/       # MDS command sources (14 hosts + 10 partials in _partials/; 2 static .md)
+│       ├── commands/       # MDS command sources (14 hosts + 10 partials in _partials/; 1 static .md)
 │       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts)
@@ -231,11 +230,8 @@ Per-project runtime files live under `.devflow/`:
 - `/research` — Researcher agents + Skimmer + Synthesizer + Knowledge; multi-type research with trust-aware synthesis
 - `/release` — Git agent + Validator + Synthesizer; adaptive release with learned configuration
 - `/bug-analysis` — BugAnalyzer agents + Git + Synthesizer; proactive bug finding with static and semantic analysis, incremental by default
-- `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (16): git, synthesizer, skimmer, simplifier, coder, reviewer, triager, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer, learning
-
-**Plugin-specific agents** (1): claude-md-auditor
 
 ## Key Conventions
 

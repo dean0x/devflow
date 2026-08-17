@@ -44,7 +44,7 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 17 agents (16 shared + claude-md-auditor)
+│       ├── agents/                   # 16 agents
 │       │   ├── git.md
 │       │   ├── synthesizer.md
 │       │   ├── coder.md
@@ -55,7 +55,7 @@ devflow/
 │       │   └── ...
 │       ├── commands/                 # Command sources
 │       │   ├── *.mds                 # 14 MDS host files (compiled to dist/commands/ by build:mds)
-│       │   ├── *.md                  # 2 static command files
+│       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # 10 MDS partial files (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
@@ -151,10 +151,9 @@ Assets live once in `src/assets/` and install directly to the user's `~/.claude/
 2. Add agent name to the plugin entry's `agents` array in DEVFLOW_PLUGINS
 3. Run `node dist/cli.js init` to install
 
-### Shared vs Plugin-Specific Agents
+### Agents
 
-- **Shared** (16): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `triager`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `learning`
-- **Plugin-specific** (1): `claude-md-auditor` — committed directly in `src/assets/agents/`
+All 16 agents (`git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `triager`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `learning`) are shared — committed directly in `src/assets/agents/`.
 
 ## Settings Override
 

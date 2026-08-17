@@ -1,11 +1,11 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, applyNonSelectableCarry, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, resolveNonSelectableOptionalCarry, applyNonSelectableCarry, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, LEGACY_AGENT_NAMES, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps."
 category: architecture
-directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts]
+directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts]
 created: 2026-07-13
-updated: 2026-07-25
+updated: 2026-08-18
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -57,11 +57,15 @@ All four asset types now **throw** when a declared source is absent — there ar
 
 Shadow paths remain tolerant: invalid/missing shadows warn-and-install-source (applies ADR-010). The hard-error policy applies only to declared Devflow sources.
 
-### Orphan Sweep (full install only)
+### Orphan Sweep
 
-On full (non-partial) install, `installViaFileCopy` reads `~/.claude/skills/` and removes any `devflow:*` directory whose bare name is absent from `getAllSkillNames()` (the live registry). This is the mechanism for cleaning up renamed or deleted skills across upgrades without requiring manual removal.
+`installViaFileCopy` runs three ungated registry-diff sweeps — all run on every install shape, including partial installs:
 
-Bare (pre-namespace) dirs are **not touched** by the sweep — they are handled exclusively by the frozen `LEGACY_SKILLS_*` lists in `legacy.ts` (avoids PF-012). Shadow dirs (`~/.devflow/skills/`) are keyed by bare registry name and are unaffected.
+- **Skills**: reads `~/.claude/skills/` and removes any `devflow:*` directory whose bare name is absent from `getAllSkillNames()`. Bare (pre-namespace) dirs are **not touched** — handled exclusively by the frozen `LEGACY_SKILLS_*` lists in `legacy.ts` (avoids PF-012). Shadow dirs (`~/.devflow/skills/`) are keyed by bare registry name and are unaffected.
+- **Commands**: reads `~/.claude/commands/devflow/` and removes any `.md` file whose command name is absent from `getAllCommandNames()`.
+- **Agents**: reads `~/.claude/agents/devflow/` and removes any `.md` file whose agent name is absent from `getAllAgentNames()`.
+
+All three `knownNames` sets span ALL plugins — not just the selected subset — so assets from uninstalled plugins survive a partial run; only assets that are completely absent from the registry are removed. Separate from the sweeps, `installViaFileCopy` still performs a **full directory wipe** of `commands/devflow/`, `agents/devflow/`, and `rules/devflow/` before reinstalling on full (non-partial) installs. The sweeps handle partial installs cleanly without that wipe.
 
 ### InstallReport
 
@@ -154,16 +158,17 @@ Skills install under `~/.claude/skills/devflow:{name}` (prefixed). The `devflow:
 
 All skills from ALL plugins install regardless of plugin selection. `skillsMap` passed to `installViaFileCopy` is built by `buildFullSkillsMap` which covers every `DEVFLOW_PLUGINS` entry — not just the selected subset. Rules, by contrast, are plugin-scoped (only selected plugins' rules install).
 
-### LEGACY_* Symbol Split
+### LEGACY_* and DELETED_* Symbol Split
 
-Legacy cleanup lists are split across two files:
+Legacy cleanup lists and deleted-plugin tracking are split across two files:
 
 | Symbol | File |
 |--------|------|
 | `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (+ `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`) | `src/targets/claude-code/legacy.ts` |
 | `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES` | `src/core/plugins.ts` |
+| `DELETED_PLUGIN_NAMES` | `src/core/plugins.ts` |
 
-The split keeps target-specific delete lists separate from the plugin registry consumed by cross-cutting CLI commands. (avoids PF-012)
+`DELETED_PLUGIN_NAMES` is a separate array (not a rename map) for plugins that have been removed entirely with no successor. `resolvePluginList` in `manifest.ts` filters deleted plugin names from prior manifest entries on partial reinstalls — stale entries are silently dropped. The split keeps target-specific delete lists separate from the plugin registry consumed by cross-cutting CLI commands. (avoids PF-012)
 
 ## Component Interactions
 
@@ -218,9 +223,9 @@ Returns `'artifacts-only'` or `'prompt'`:
 - `'artifacts-only'` — non-interactive session, no user content, or precondition guard failure; runs `removeDevFlowInstallArtifacts` only.
 - `'prompt'` — interactive session with user content present; prompt states full scope (listed user-authored items, plus logs and install metadata). Confirm → `fs.rm(devflowDir, {recursive: true, force: true})`; decline OR cancel → falls through to `removeDevFlowInstallArtifacts` (clean end-state — never `process.exit()` here; applies ADR-003, avoids PF-014).
 
-`enumerateUserDevFlowContent(devflowDir)` checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, `devflowDir/learning.json`, and `devflowDir/agent-models.json` (agent model assignments). Returns a human-readable label for each that exists. Pure I/O — no side effects.
+`enumerateUserDevFlowContent(devflowDir)` checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, and `devflowDir/learning.json`. Returns a human-readable label for each that exists. Pure I/O — no side effects.
 
-`removeDevFlowInstallArtifacts(devflowDir, verbose)` removes `manifest.json` (install state) plus proxy install artifacts non-fatally: `proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` (directory), `logs/proxy.log`, and `cache/models/` (directory — external model catalog cache entries). Before removing `proxy.pid`, it reads the PID and checks process existence via `process.kill(pid, 0)` — if the relay is still running, a warning is emitted with a manual kill hint. **The relay is never killed by uninstall** — informational only. Scripts are already gone via `removeAllDevFlow`. Per-artifact failures are silently ignored (avoids PF-009).
+`removeDevFlowInstallArtifacts(devflowDir, verbose)` removes `manifest.json` (install state), `agent-models.json` (per-agent model overrides — reclassified as an install artifact so stale overrides are cleaned on uninstall without prompting the user), plus proxy install artifacts non-fatally: `proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` (directory), `logs/proxy.log`, and `cache/models/` (directory — external model catalog cache entries). Before removing `proxy.pid`, it reads the PID and checks process existence via `process.kill(pid, 0)` — if the relay is still running, a warning is emitted with a manual kill hint. **The relay is never killed by uninstall** — informational only. Scripts are already gone via `removeAllDevFlow`. Per-artifact failures are silently ignored (avoids PF-009).
 
 Settings cleanup in uninstall (the settings read-modify-write pass) calls `applyDisableToSettings(parsedSettings, managedPort)` in a single parse-mutate-serialize pass — the same helper `runDisable` uses — instead of separate `removeProxyHooks` + `stripProxyEnv` calls. `managedPort` is read from `proxy.json` (falling back to `DEFAULT_PROXY_PORT`) so only the `ANTHROPIC_BASE_URL` for Devflow's managed port is stripped; a user's own localhost URL on any other port is left untouched.
 
@@ -246,7 +251,6 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 - Old manifest (no `knownPlugins`): split existing into workflow/language buckets, adopt nothing.
 - Re-init with `knownPlugins`: split + adopt newly-added non-optional selectable plugins ∉ knownPlugins.
 
-**Non-selectable optional carry**: `resolveNonSelectableOptionalCarry(manifestPlugins, allPlugins)` identifies optional plugins from the prior manifest (e.g. `devflow-audit-claude`) that are excluded from the selectable buckets by `partitionSelectablePlugins`. Internally uses a name→plugin `Map` for O(1) lookup (was a `.find()`-in-`.filter()` O(n·m) scan). `applyNonSelectableCarry(isPartialInstall, manifestPlugins, pluginsToInstall, allPlugins)` (pure exported helper) encapsulates the `!options.plugin` gate + carry call + dedup-merge loop; `init.ts` delegates to it. Without the carry, a full re-init would silently drop non-selectable optional plugins.
 
 **Reset gate** (`resolveResetGatedInputs`): `--reset` zeroes seedManifest, seedConfig, AND settingsSnapshot (the empty settings string prevents `resolveExistingViewMode` from surfacing an externally-set viewMode and defeating the factory reset). The real manifest/settings are still used for security deny-state detection and `installedAt` preservation.
 
@@ -316,7 +320,7 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 - **Skills are cleaned before install on every run.** `installViaFileCopy` removes both the legacy unprefixed and current prefixed skill directories for all known skills before reinstalling. Partial installs (via `--plugin`) still clean all skills universally.
 
-- **Orphan sweep runs only on full installs.** The `devflow:*` stale-dir sweep in `~/.claude/skills/` is skipped on partial installs (`isPartialInstall === true`). A partial reinstall does not prune orphaned skills from the registry.
+- **Orphan sweeps (skills, commands, agents) run on every install shape.** All three registry-diff sweeps are ungated — they run on full and partial installs alike. A partial reinstall still prunes assets absent from the full registry. The `knownNames` sets span ALL plugins so assets from plugins not included in the current run are preserved.
 
 - **`seedRuleShadow` tier 2 requires a built package root.** `rulesDir()` calls `getPackageRoot()`, which resolves from `dist/core/paths.js` depth and throws loudly if `package.json` is absent at the resolved root. Running `devflow rules shadow` without a built `dist/` causes a loud throw on tier-2 fallback.
 
@@ -338,12 +342,12 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 
 ## Key Files
 
-- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; orphan sweep on full install
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills (`getAllSkillNames`), commands (`getAllCommandNames`), and agents (`getAllAgentNames`) run on every install shape
 - `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`
 - `src/targets/claude-code/legacy.ts` — `LEGACY_AGENT_NAMES`, `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
 - `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; calls `installViaFileCopy`; proxy preflight block using `buildRealPreflightDeps` factory from `proxy.ts` (`swallowSettingsReadError: true`); `reapplyAgentMapping` call (ordering load-bearing, guarded when mapping is empty AND proxy is off); proxy hooks + env in settings mutation pass; exhaustive `ShadowSkipReason` switch with `never` guard
-- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures` (proxy in manifest group), `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `resolveNonSelectableOptionalCarry`, `applyNonSelectableCarry`, `applyCliToggles` (proxy toggle), `FEATURE_DEFAULTS` (proxy: false)
+- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures` (proxy in manifest group), `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `applyCliToggles` (proxy toggle), `FEATURE_DEFAULTS` (proxy: false)
 - `src/cli/commands/uninstall.ts` — `removeAllDevFlow` (internal), `enumerateUserDevFlowContent` (includes agent-models.json), `removeDevFlowInstallArtifacts` (proxy artifacts + relay PID check; `isDir === true` strict equality), `revertExternalAgents` (before removeAllDevFlow), `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup`; settings cleanup calls `applyDisableToSettings(settings, managedPort)` (port-scoped, single-pass)
 - `src/cli/commands/proxy.ts` — `applyDisableToSettings` (single-pass hook+env strip used by both runDisable and uninstall), `buildRealPreflightDeps` (factory for init and runEnable preflight deps), `ProxyPreflightDeps`, `addProxyHooks`, `removeProxyHooks`, `applyProxyEnv`, `stripProxyEnv`
 - `src/cli/commands/rules.ts` — `rulesCommand` positional dispatch, `seedRuleShadow` (3-tier), `handleRuleShadow`, `handleRuleUnshadow`, `buildRuleShadowTag`, `printRulesList`, `hasRuleShadow`, `listShadowedRules`
@@ -351,7 +355,7 @@ Exports: `hasRuleShadow(ruleName, devflowDir?)`, `listShadowedRules(devflowDir?)
 - `src/core/manifest.ts` — `ManifestData` (with `knownPlugins`, `features.knownFlags`, `features.proxy`), `readManifest` (self-heals snapshots via `asStringArray`; proxy absent→false), `writeManifest`, `syncManifestFeature`, `resolvePluginList`
 - `src/core/flags.ts` — `FLAG_REGISTRY`, `resolveExistingViewMode`, `resolveFinalViewMode`, `applyFlags`, `stripFlags`, `getDefaultFlags`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
-- `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `partitionSelectablePlugins`, `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`
+- `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS`, `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `getAllAgentNames`, `partitionSelectablePlugins`, `EXCLUDED`, `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`, `DELETED_PLUGIN_NAMES`
 - `tests/init-proxy.test.ts` — pins the reapply-after-preflight ordering invariant and the empty-mapping guard
 - `tests/uninstall-logic.test.ts` — pins proxy artifact removal, `isDir === true` correctness, live-PID warn-never-kill, stale PID, and per-item non-fatal behavior
 

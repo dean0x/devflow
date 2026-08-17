@@ -60,7 +60,6 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
 | `devflow-ambient` | Core | Ambient mode (orchestrator charter + plan handoff) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
-| `devflow-audit-claude` | Optional | CLAUDE.md file audit |
 | `devflow-typescript` | Language | TypeScript patterns |
 | `devflow-react` | Language | React patterns |
 | `devflow-accessibility` | Language | Web accessibility patterns |
