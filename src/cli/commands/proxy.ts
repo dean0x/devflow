@@ -923,6 +923,78 @@ async function applyEnableSettingsPass(
   return Ok(undefined);
 }
 
+// ─── PID-to-port identity binding ─────────────────────────────────────────────
+
+/**
+ * Resolve the PID of the process currently listening on the given TCP port.
+ *
+ * @D-EFR-5 PID-port identity gate: signal 0 proves a PID exists; a health
+ *   check proves some process on the port is our relay. Neither alone proves
+ *   the pid-file PID *is* the listening process. A recycled PID can fool both
+ *   checks simultaneously. The fix: use lsof to resolve the listening PID
+ *   directly and require it to equal the pid-file PID before any signal.
+ *
+ *   lsof is the canonical tool on darwin and is commonly available on linux.
+ *   On unsupported platforms or when lsof is absent/restricted, returns null
+ *   so the caller fails safe (identity-unconfirmed) rather than throwing.
+ *
+ * On darwin and linux: `lsof -nP -iTCP:<port> -sTCP:LISTEN -t`
+ *   -n  no host-name resolution  -P  no port-name resolution
+ *   -sTCP:LISTEN  only LISTEN-state sockets  -t  PIDs only
+ *
+ * avoids PF-001: fixed argument array — port is validated as a safe integer
+ *   by the caller before this function is invoked; it is never interpolated
+ *   into a shell string.
+ *
+ * Returns null when:
+ *   • Platform is not darwin or linux
+ *   • lsof is not on PATH or returns a non-zero exit code (EPERM, etc.)
+ *   • Zero processes are listening on the port
+ *   • More than one PID is returned (ambiguous — fail safe)
+ *   • The single returned value is not a valid positive integer
+ */
+async function realResolveListeningPid(port: number): Promise<number | null> {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    return null;
+  }
+  return new Promise<number | null>((resolve) => {
+    // SEC: fixed argument list — port is a validated integer (1-65535).
+    const proc = cpSpawn('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout = '';
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    // Spawn failure (ENOENT = lsof absent, EPERM = restricted) → degrade to null
+    proc.on('error', () => resolve(null));
+    proc.on('close', () => {
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      // Zero or more-than-one result: ambiguous → fail safe
+      if (lines.length !== 1) {
+        resolve(null);
+        return;
+      }
+      const parsed = parseInt(lines[0].trim(), 10);
+      resolve(Number.isInteger(parsed) && parsed > 0 ? parsed : null);
+    });
+  });
+}
+
+/**
+ * Injectable dependencies for terminateRelay.
+ * Separates the platform I/O (lsof) from the decision logic so tests can
+ * exercise every branch without requiring a real lsof binary.
+ */
+export interface TerminateRelayDeps {
+  /**
+   * Return the PID of the process listening on the given TCP port, or null
+   * when the platform is unsupported, lsof is absent, or the result is
+   * ambiguous. Caller treats null as "identity cannot be confirmed".
+   */
+  resolveListeningPid: (port: number) => Promise<number | null>;
+}
+
 // ─── Shared status/disable helpers ───────────────────────────────────────────
 
 /** Relay process state as observed by TCP probe + health check. */
@@ -948,25 +1020,36 @@ async function readPidFile(pidPath: string): Promise<number | null> {
  * Protocol:
  *   1. Read the pid file — skip silently if absent.
  *   2. Check liveness (signal 0).
- *   3. Confirm identity: TCP probe + health check (`isOurRelayBody`). A recycled
- *      PID that belongs to an unrelated process must never be signalled.
+ *   3. Confirm identity — three signals, ALL must pass before signalling:
+ *      a. TCP probe: port is accepting connections.
+ *      b. Health check: the process on the port is our relay (`isOurRelayBody`).
+ *      c. PID-port binding (D-EFR-5): lsof confirms the pid-file PID is the
+ *         process listening on the port. If lsof is unavailable or ambiguous,
+ *         fail safe — return 'identity-unconfirmed' without signalling.
  *   4. SIGTERM → poll for death every 250 ms for up to 2 s (8 checks).
  *   5. SIGKILL → poll for death every 250 ms for up to 2 s (8 checks).
  *   6. Remove the pid file when the process is gone.
  *   7. Best-effort rmdir of .proxy-spawn.lock when stale.
  *
+ * applies D-EFR-5: signal 0 and health check are independent facts; lsof
+ *   binds the pid-file PID to the port owner before any signal is sent.
  * avoids PF-009: all sub-operations are non-fatal; a kill failure never aborts disable.
  * avoids PF-014: never process.exit() inside a finally-guarded scope.
  *
+ * @param deps  Optional injectable dependencies (default: real lsof implementation).
+ *              Provide a stub in tests to exercise every branch without a real binary.
+ *
  * @returns 'killed'     — relay stopped successfully.
  *          'not-running' — pid file absent or process already dead.
- *          'identity-unconfirmed' — pid alive but relay not confirmed on port; skipped.
+ *          'identity-unconfirmed' — pid alive but identity not positively established
+ *                                   (health or lsof mismatch); no signal sent.
  *          'kill-failed' — SIGTERM + SIGKILL sent but process still alive after grace.
  */
 export async function terminateRelay(
   pidPath: string,
   spawnLockPath: string,
   port: number,
+  deps: TerminateRelayDeps = { resolveListeningPid: realResolveListeningPid },
 ): Promise<'killed' | 'not-running' | 'identity-unconfirmed' | 'kill-failed'> {
   // Step 1: read pid file
   const pid = await readPidFile(pidPath);
@@ -981,16 +1064,25 @@ export async function terminateRelay(
     return 'not-running';
   }
 
-  // Step 3: confirm identity via TCP + health check
-  // A recycled PID could belong to any process — only signal when confirmed ours.
+  // Step 3: confirm identity — all three signals must pass (D-EFR-5)
+  //
+  // Signal (a): TCP probe — confirms the port is accepting connections at all.
   const portUp = await realTcpConnectable(port, PROBE_TIMEOUT_MS);
   let identityConfirmed = false;
   if (portUp) {
+    // Signal (b): health check — confirms the process on the port is our relay.
     const healthResult = await realHttpGet(
       `${proxyBaseUrl(port)}/__subswitch/health`,
       PROBE_TIMEOUT_MS,
     );
-    identityConfirmed = healthResult.ok && isOurRelayBody(healthResult.value);
+    const healthOk = healthResult.ok && isOurRelayBody(healthResult.value);
+    if (healthOk) {
+      // Signal (c): PID-port binding — lsof confirms the pid-file PID owns the port.
+      // If lsof is absent, returns null → null !== pid → identityConfirmed stays false.
+      // Failing safe is strictly better than signalling the wrong process.
+      const listeningPid = await deps.resolveListeningPid(port);
+      identityConfirmed = listeningPid === pid;
+    }
   }
   if (!identityConfirmed) {
     return 'identity-unconfirmed';

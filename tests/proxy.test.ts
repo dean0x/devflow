@@ -32,6 +32,7 @@ import {
   terminateRelay,
   type ProxyPreflightDeps,
   type PostSpawnDoctorDeps,
+  type TerminateRelayDeps,
 } from '../src/cli/commands/proxy.js';
 import {
   revertExternalAgents,
@@ -1377,39 +1378,152 @@ describe('terminateRelay — identity-unconfirmed case', () => {
   });
 });
 
-describe('terminateRelay — kill path (integration)', () => {
+// ─── terminateRelay — PID-port identity gate (D-EFR-5) ───────────────────────
+//
+// These tests directly exercise the new lsof-based PID-port binding gate added
+// by D-EFR-5. They use injected TerminateRelayDeps to avoid requiring a real
+// lsof binary and to precisely control what the binding check returns.
+
+describe('terminateRelay — PID-port identity gate (D-EFR-5)', () => {
   let tmpDir: string;
-  let server: http.Server | null = null;
 
   beforeEach(async () => {
-    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-kill-test-'));
+    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-id-gate-'));
   });
 
   afterEach(async () => {
-    if (server) {
-      await new Promise<void>((resolve) => { server!.close(() => resolve()); });
-      server = null;
-    }
     await fsAsync.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('kills the relay process and removes pid file when identity is confirmed', async () => {
-    // Spin up a real HTTP server that impersonates the relay health endpoint.
-    server = http.createServer((_req, res) => {
+  it('returns identity-unconfirmed and does NOT signal when lsof returns a different PID', async () => {
+    // Spin up an HTTP server that passes the health check.
+    const server = http.createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));
     });
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const addr = server.address() as net.AddressInfo;
     const port = addr.port;
 
-    // Spawn a long-running child process whose PID we control.
+    // Spawn a separate child process — this is the PID we put in the pid file.
+    // Its PID is different from what lsof would return (the HTTP server's process PID).
     const child = cpSpawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
       detached: false,
       stdio: 'ignore',
     });
     await new Promise<void>((resolve) => child.on('spawn', resolve));
     const childPid = child.pid!;
+
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
+
+    // Inject a deps that returns a different PID than childPid — simulating the
+    // lsof result that would be returned by the HTTP server's process.
+    const differentPid = childPid + 1;
+    const deps: TerminateRelayDeps = {
+      resolveListeningPid: async () => differentPid,
+    };
+
+    const result = await terminateRelay(pidPath, lockPath, port, deps);
+    expect(result).toBe('identity-unconfirmed');
+
+    // The child must NOT have been signalled — this is the critical safety assertion.
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+
+    // Clean up
+    child.kill();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
+
+  it('returns identity-unconfirmed and does NOT signal when lsof is unavailable (null)', async () => {
+    // Health server is up, but lsof returns null (e.g. absent binary or EPERM).
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const port = addr.port;
+
+    const child = cpSpawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      detached: false,
+      stdio: 'ignore',
+    });
+    await new Promise<void>((resolve) => child.on('spawn', resolve));
+    const childPid = child.pid!;
+
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
+
+    // lsof returns null — simulates absent binary or restricted execution.
+    const deps: TerminateRelayDeps = {
+      resolveListeningPid: async () => null,
+    };
+
+    const result = await terminateRelay(pidPath, lockPath, port, deps);
+    expect(result).toBe('identity-unconfirmed');
+
+    // Child must NOT have been signalled.
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+
+    // Clean up
+    child.kill();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
+});
+
+describe('terminateRelay — kill path (integration)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-kill-test-'));
+  });
+
+  afterEach(async () => {
+    await fsAsync.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('kills the relay process and removes pid file when identity is confirmed', async () => {
+    // Spin up a child process that serves the relay health endpoint on its own port.
+    // This ensures child PID === lsof-returned listening PID (both are the same process).
+    const childScript = [
+      "const http = require('http');",
+      'const server = http.createServer((_req, res) => {',
+      "  res.writeHead(200, { 'Content-Type': 'application/json' });",
+      "  res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));",
+      '});',
+      "server.listen(0, '127.0.0.1', () => {",
+      '  process.stdout.write(JSON.stringify({ port: server.address().port }) + "\\n");',
+      '});',
+      'setInterval(() => {}, 1000);',
+    ].join('\n');
+
+    const child = cpSpawn(process.execPath, ['-e', childScript], {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    await new Promise<void>((resolve) => child.on('spawn', resolve));
+    const childPid = child.pid!;
+
+    // Read the port from the child's stdout
+    const port = await new Promise<number>((resolve, reject) => {
+      let buf = '';
+      child.stdout!.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const nl = buf.indexOf('\n');
+        if (nl !== -1) {
+          try {
+            const parsed = JSON.parse(buf.slice(0, nl)) as { port: number };
+            resolve(parsed.port);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      });
+      child.on('error', reject);
+    });
 
     // Confirm the child is alive before we call terminateRelay
     expect(() => process.kill(childPid, 0)).not.toThrow();
@@ -1418,7 +1532,12 @@ describe('terminateRelay — kill path (integration)', () => {
     const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
     await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
 
-    const result = await terminateRelay(pidPath, lockPath, port);
+    // Inject a deps that returns the child's own PID — the child owns the port.
+    const deps: TerminateRelayDeps = {
+      resolveListeningPid: async () => childPid,
+    };
+
+    const result = await terminateRelay(pidPath, lockPath, port, deps);
     expect(result).toBe('killed');
 
     // Process must be gone
@@ -1426,30 +1545,55 @@ describe('terminateRelay — kill path (integration)', () => {
 
     // Pid file must be removed
     await expect(fsAsync.access(pidPath)).rejects.toThrow();
-  }, 15_000 /* 15s: SIGTERM+SIGKILL poll at most ~4s, plus HTTP server startup */);
+  }, 15_000 /* 15s: SIGTERM+SIGKILL poll at most ~4s, plus child startup */);
 
   it('cleans up a stale spawn lock directory when the relay is killed', async () => {
-    server = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));
-    });
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
-    const addr = server.address() as net.AddressInfo;
-    const port = addr.port;
+    const childScript = [
+      "const http = require('http');",
+      'const server = http.createServer((_req, res) => {',
+      "  res.writeHead(200, { 'Content-Type': 'application/json' });",
+      "  res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));",
+      '});',
+      "server.listen(0, '127.0.0.1', () => {",
+      '  process.stdout.write(JSON.stringify({ port: server.address().port }) + "\\n");',
+      '});',
+      'setInterval(() => {}, 1000);',
+    ].join('\n');
 
-    const child = cpSpawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+    const child = cpSpawn(process.execPath, ['-e', childScript], {
       detached: false,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
     await new Promise<void>((resolve) => child.on('spawn', resolve));
     const childPid = child.pid!;
+
+    const port = await new Promise<number>((resolve, reject) => {
+      let buf = '';
+      child.stdout!.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const nl = buf.indexOf('\n');
+        if (nl !== -1) {
+          try {
+            const parsed = JSON.parse(buf.slice(0, nl)) as { port: number };
+            resolve(parsed.port);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      });
+      child.on('error', reject);
+    });
 
     const pidPath = path.join(tmpDir, 'proxy.pid');
     const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
     await fsAsync.mkdir(lockPath); // simulate a stale lock
     await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
 
-    const result = await terminateRelay(pidPath, lockPath, port);
+    const deps: TerminateRelayDeps = {
+      resolveListeningPid: async () => childPid,
+    };
+
+    const result = await terminateRelay(pidPath, lockPath, port, deps);
     expect(result).toBe('killed');
     // Lock directory cleaned up
     await expect(fsAsync.access(lockPath)).rejects.toThrow();
