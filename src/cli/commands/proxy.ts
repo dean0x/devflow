@@ -943,14 +943,99 @@ async function readPidFile(pidPath: string): Promise<number | null> {
 }
 
 /**
- * Probe relay process state via TCP connect + health identity check.
- * Returns 'down' when featureEnabled is false or the port is not accepting.
+ * Terminate the relay process recorded in the pid file, with identity confirmation.
+ *
+ * Protocol:
+ *   1. Read the pid file — skip silently if absent.
+ *   2. Check liveness (signal 0).
+ *   3. Confirm identity: TCP probe + health check (`isOurRelayBody`). A recycled
+ *      PID that belongs to an unrelated process must never be signalled.
+ *   4. SIGTERM → poll for death every 250 ms for up to 2 s (8 checks).
+ *   5. SIGKILL → poll for death every 250 ms for up to 2 s (8 checks).
+ *   6. Remove the pid file when the process is gone.
+ *   7. Best-effort rmdir of .proxy-spawn.lock when stale.
+ *
+ * avoids PF-009: all sub-operations are non-fatal; a kill failure never aborts disable.
+ * avoids PF-014: never process.exit() inside a finally-guarded scope.
+ *
+ * @returns 'killed'     — relay stopped successfully.
+ *          'not-running' — pid file absent or process already dead.
+ *          'identity-unconfirmed' — pid alive but relay not confirmed on port; skipped.
+ *          'kill-failed' — SIGTERM + SIGKILL sent but process still alive after grace.
  */
-async function resolveProcessState(
-  featureEnabled: boolean,
+export async function terminateRelay(
+  pidPath: string,
+  spawnLockPath: string,
   port: number,
-): Promise<ProcessState> {
-  if (!featureEnabled) return 'down';
+): Promise<'killed' | 'not-running' | 'identity-unconfirmed' | 'kill-failed'> {
+  // Step 1: read pid file
+  const pid = await readPidFile(pidPath);
+  if (pid === null) return 'not-running';
+
+  // Step 2: check liveness
+  try {
+    process.kill(pid, 0);
+  } catch {
+    // Process already dead
+    try { await fs.unlink(pidPath); } catch { /* best-effort */ }
+    return 'not-running';
+  }
+
+  // Step 3: confirm identity via TCP + health check
+  // A recycled PID could belong to any process — only signal when confirmed ours.
+  const portUp = await realTcpConnectable(port, PROBE_TIMEOUT_MS);
+  let identityConfirmed = false;
+  if (portUp) {
+    const healthResult = await realHttpGet(
+      `${proxyBaseUrl(port)}/__subswitch/health`,
+      PROBE_TIMEOUT_MS,
+    );
+    identityConfirmed = healthResult.ok && isOurRelayBody(healthResult.value);
+  }
+  if (!identityConfirmed) {
+    return 'identity-unconfirmed';
+  }
+
+  // Bounded poll helper: check if PID is alive every 250 ms, up to maxChecks iterations.
+  // Returns true when the process is gone within the polling window.
+  const pollDead = async (maxChecks: number): Promise<boolean> => {
+    for (let i = 0; i < maxChecks; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+      try { process.kill(pid, 0); } catch { return true; }
+    }
+    return false;
+  };
+
+  // Step 4: SIGTERM → bounded 2 s wait (8 × 250 ms)
+  try { process.kill(pid, 'SIGTERM'); } catch { /* already exited — race */ }
+  const deadAfterTerm = await pollDead(8);
+
+  if (!deadAfterTerm) {
+    // Step 5: SIGKILL → bounded 2 s wait (8 × 250 ms)
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already exited — race */ }
+    const deadAfterKill = await pollDead(8);
+    if (!deadAfterKill) {
+      return 'kill-failed';
+    }
+  }
+
+  // Step 6: remove pid file
+  try { await fs.unlink(pidPath); } catch { /* best-effort */ }
+
+  // Step 7: best-effort rmdir of spawn lock when stale
+  try { await fs.rmdir(spawnLockPath); } catch { /* held by another session or absent — ignore */ }
+
+  return 'killed';
+}
+
+/**
+ * Probe relay process state via TCP connect + health identity check.
+ * Always probes — does not short-circuit when the feature is disabled.
+ * This ensures `--status` surfaces the divergence case where the feature is
+ * disabled but the relay process is still listening (the relay is not killed on
+ * `--disable` for live-session continuity; it may outlive the disable operation).
+ */
+async function resolveProcessState(port: number): Promise<ProcessState> {
   const portUp = await realTcpConnectable(port, PROBE_TIMEOUT_MS);
   if (!portUp) return 'down';
   const healthResult = await realHttpGet(
@@ -1172,9 +1257,22 @@ async function runStatus(): Promise<void> {
     (proxyState?.port ? ` (port ${proxyState.port})` : ''),
   );
 
-  // Process state
+  // Process state — always probe regardless of featureEnabled so that the
+  // divergence case (feature disabled but relay still running) is visible.
   const port = proxyState?.port ?? DEFAULT_PROXY_PORT;
-  const processState = await resolveProcessState(featureEnabled, port);
+  const processState = await resolveProcessState(port);
+
+  // Divergence: feature is disabled but the relay is still responding.
+  // This is the expected state immediately after `--disable` — the relay
+  // keeps serving any live Claude Code sessions whose env captured the URL.
+  if (!stateEnabled && processState === 'running-ours') {
+    p.log.warn(
+      `Relay is still running on port ${port} even though external model routing is disabled. ` +
+      `Live Claude Code sessions whose env captured the relay URL continue routing through it. ` +
+      `Run ${color.cyan('devflow proxy --disable')} again to stop the relay, ` +
+      `or restart Claude Code to clear the routed session.`,
+    );
+  }
   const pidFromFile = await readPidFile(pidPath);
   let pidAlive = false;
   if (pidFromFile !== null) {
@@ -1294,8 +1392,16 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   // holds an append fd would orphan that fd. At this point no relay is running.
   await rotateProxyLogIfLarge(logPath);
 
+  // Read existing routing config to preserve user-added anthropic/limits/logLevel/providers
+  // blocks. A missing or malformed file falls back to clean defaults inside
+  // buildRoutingConfigJson (non-fatal; avoids PF-009).
+  let existingRoutingContent: string | undefined;
   try {
-    await fs.writeFile(configPath, buildRoutingConfigJson(port), 'utf-8');
+    existingRoutingContent = await fs.readFile(configPath, 'utf-8');
+  } catch { /* ENOENT or EACCES — fall through to clean defaults */ }
+
+  try {
+    await fs.writeFile(configPath, buildRoutingConfigJson(port, existingRoutingContent), 'utf-8');
   } catch (err) {
     s.stop(color.red('Failed to write routing config'));
     p.log.error(`Could not write routing config: ${err instanceof Error ? err.message : String(err)}`);
@@ -1529,43 +1635,41 @@ async function runDisable(): Promise<void> {
   // Step 4: Revert external agents to shipped defaults
   await revertExternalAgents({ installDir, devflowDir });
 
-  p.log.success('External model routing disabled — takes effect in new Claude Code sessions');
+  p.log.success('External model routing disabled');
 
-  // Step 5: Note about running relay (plan D3: leave it running for live sessions)
-  const pidFromFile = await readPidFile(pidPath);
-  if (pidFromFile !== null) {
-    try {
-      process.kill(pidFromFile, 0);
-      // Cross-check relay identity before emitting the kill hint. A stale or
-      // recycled PID that passes signal 0 may belong to an unrelated process. We
-      // confirm identity via a port health check — the relay is ours only if the health
-      // endpoint returns isOurRelayBody. Non-blocking: we never kill programmatically.
-      const disablePort = priorState?.port ?? DEFAULT_PROXY_PORT;
-      const portUp = await realTcpConnectable(disablePort, PROBE_TIMEOUT_MS);
-      let identityConfirmed = false;
-      if (portUp) {
-        const healthResult = await realHttpGet(
-          `${proxyBaseUrl(disablePort)}/__subswitch/health`,
-          PROBE_TIMEOUT_MS,
-        );
-        identityConfirmed = healthResult.ok && isOurRelayBody(healthResult.value);
-      }
-      if (identityConfirmed) {
-        p.log.info(
-          color.dim(
-            `Relay process (pid ${pidFromFile}) is still running for any live sessions and will stop at reboot. ` +
-            `Manual stop: kill ${pidFromFile}`,
-          ),
-        );
-      } else {
-        p.log.info(
-          color.dim(
-            `A process with pid ${pidFromFile} from proxy.pid appears alive — ` +
-            `identity could not be confirmed (port not responding as our relay). ` +
-            `Verify it is the relay before stopping it manually.`,
-          ),
-        );
-      }
-    } catch { /* process not running */ }
+  // Step 5: Terminate the relay process.
+  // Identity is confirmed via TCP + health before signalling — a recycled PID
+  // must never be killed. avoids PF-009: all sub-operations are non-fatal.
+  const spawnLockPath = path.join(devflowDir, '.proxy-spawn.lock');
+  const terminateResult = await terminateRelay(pidPath, spawnLockPath, managedPort);
+  switch (terminateResult) {
+    case 'killed':
+      p.log.info('Relay process stopped.');
+      break;
+    case 'not-running':
+      p.log.info(color.dim('Relay process was not running.'));
+      break;
+    case 'identity-unconfirmed':
+      p.log.warn(
+        `PID from proxy.pid is alive but the relay identity could not be confirmed ` +
+        `(port ${managedPort} is not responding as our relay). ` +
+        `Inspect the process before stopping it manually.`,
+      );
+      break;
+    case 'kill-failed':
+      p.log.warn(
+        `Relay process (pid recorded in proxy.pid) did not stop after SIGTERM + SIGKILL. ` +
+        `It may still be running — check with: kill -0 <pid>`,
+      );
+      break;
   }
+
+  // Always-print warning: already-running Claude Code sessions captured
+  // ANTHROPIC_BASE_URL in their process env before the disable. The env var
+  // is now stripped from settings.json so NEW sessions will not route, but
+  // any session that was open during enable continues routing until restarted.
+  p.log.warn(
+    'Already-running Claude Code sessions remain routed through the relay until they are restarted. ' +
+    'Restart Claude Code to fully stop routing in those sessions.',
+  );
 }

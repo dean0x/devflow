@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
 import * as http from 'http';
+import { spawn as cpSpawn } from 'child_process';
 import {
   applyProxyEnv,
   stripProxyEnv,
@@ -28,6 +29,7 @@ import {
   formatExternalModelsLine,
   formatCodexAuthLine,
   realHttpGet,
+  terminateRelay,
   type ProxyPreflightDeps,
   type PostSpawnDoctorDeps,
 } from '../src/cli/commands/proxy.js';
@@ -1307,4 +1309,149 @@ describe('realHttpGet (C2-REL-1 reliability)', () => {
     const result = await realHttpGet('http://127.0.0.1:1/', 2000);
     expect(result.ok).toBe(false);
   });
+});
+
+// ─── terminateRelay ──────────────────────────────────────────────────────────
+//
+// Tests for the relay-termination helper used by `devflow proxy --disable`.
+// Strategy: real temp dirs and processes; no mocking of network or signals.
+
+describe('terminateRelay — not-running cases', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-test-'));
+  });
+
+  afterEach(async () => {
+    await fsAsync.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns not-running when pid file is absent', async () => {
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    const result = await terminateRelay(pidPath, lockPath, 65000);
+    expect(result).toBe('not-running');
+  });
+
+  it('returns not-running when pid file contains an implausibly large PID', async () => {
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    // PID 999999999 will not be alive on any real system
+    await fsAsync.writeFile(pidPath, '999999999', 'utf-8');
+    const result = await terminateRelay(pidPath, lockPath, 65000);
+    expect(result).toBe('not-running');
+  });
+
+  it('removes the pid file when the recorded process is already dead', async () => {
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.writeFile(pidPath, '999999999', 'utf-8');
+    await terminateRelay(pidPath, lockPath, 65000);
+    // Pid file should be cleaned up
+    await expect(fsAsync.access(pidPath)).rejects.toThrow();
+  });
+});
+
+describe('terminateRelay — identity-unconfirmed case', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-id-test-'));
+  });
+
+  afterEach(async () => {
+    await fsAsync.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns identity-unconfirmed when process is alive but port is not our relay', async () => {
+    // Write our own PID — current process is definitely alive.
+    // Use port 1 (privileged, always refused) to ensure TCP probe fails → identity unconfirmed.
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.writeFile(pidPath, String(process.pid), 'utf-8');
+    const result = await terminateRelay(pidPath, lockPath, 1);
+    expect(result).toBe('identity-unconfirmed');
+    // Pid file must NOT be removed — we did not kill it
+    await expect(fsAsync.access(pidPath)).resolves.toBeUndefined();
+  });
+});
+
+describe('terminateRelay — kill path (integration)', () => {
+  let tmpDir: string;
+  let server: http.Server | null = null;
+
+  beforeEach(async () => {
+    tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-terminate-relay-kill-test-'));
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve) => { server!.close(() => resolve()); });
+      server = null;
+    }
+    await fsAsync.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('kills the relay process and removes pid file when identity is confirmed', async () => {
+    // Spin up a real HTTP server that impersonates the relay health endpoint.
+    server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const port = addr.port;
+
+    // Spawn a long-running child process whose PID we control.
+    const child = cpSpawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      detached: false,
+      stdio: 'ignore',
+    });
+    await new Promise<void>((resolve) => child.on('spawn', resolve));
+    const childPid = child.pid!;
+
+    // Confirm the child is alive before we call terminateRelay
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
+
+    const result = await terminateRelay(pidPath, lockPath, port);
+    expect(result).toBe('killed');
+
+    // Process must be gone
+    expect(() => process.kill(childPid, 0)).toThrow();
+
+    // Pid file must be removed
+    await expect(fsAsync.access(pidPath)).rejects.toThrow();
+  }, 15_000 /* 15s: SIGTERM+SIGKILL poll at most ~4s, plus HTTP server startup */);
+
+  it('cleans up a stale spawn lock directory when the relay is killed', async () => {
+    server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ name: 'subswitch', status: 'ok', running: true }));
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as net.AddressInfo;
+    const port = addr.port;
+
+    const child = cpSpawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      detached: false,
+      stdio: 'ignore',
+    });
+    await new Promise<void>((resolve) => child.on('spawn', resolve));
+    const childPid = child.pid!;
+
+    const pidPath = path.join(tmpDir, 'proxy.pid');
+    const lockPath = path.join(tmpDir, '.proxy-spawn.lock');
+    await fsAsync.mkdir(lockPath); // simulate a stale lock
+    await fsAsync.writeFile(pidPath, String(childPid), 'utf-8');
+
+    const result = await terminateRelay(pidPath, lockPath, port);
+    expect(result).toBe('killed');
+    // Lock directory cleaned up
+    await expect(fsAsync.access(lockPath)).rejects.toThrow();
+  }, 15_000);
 });
