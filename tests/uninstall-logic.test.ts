@@ -805,6 +805,9 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.mkdir(path.join(devflowDir, 'cache', 'models'), { recursive: true });
     await fs.mkdir(path.join(devflowDir, 'costs', 'sessions'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'costs', 'archive.jsonl'), '{}\n', 'utf-8');
+    // agent-models.json is an install artifact (stale keys silently re-apply to
+    // renamed/deleted agents on reinstall — AC-P1-F4), NOT user-authored content.
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
 
     // ── User-authored files (must survive) ───────────────────────────────────
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
@@ -813,27 +816,27 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
-    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
     // ── Equality assertion: only user-authored entries may remain ─────────────
     const remaining = new Set(await fs.readdir(devflowDir));
-    // Install artifacts must be gone
-    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs']) {
+    // Install artifacts must be gone (including agent-models.json — reclassified as artifact)
+    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json']) {
       expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
     }
     // Exact equality: nothing but user-authored state remains, and every enumerated
     // user item survives an artifact-only pass. This is the executable form of the
     // rule that removeDevFlowInstallArtifacts and enumerateUserDevFlowContent must
     // never overlap — the artifact pass also runs on decline/cancel/--keep-docs.
+    // agent-models.json is intentionally ABSENT: it is an install artifact (AC-P1-F4),
+    // not user-authored content, so it does not appear in enumerateUserDevFlowContent.
     expect(remaining).toEqual(new Set([
       'skills',
       'rules',
       'preference-profile.md',
       'learning.json',
-      'agent-models.json',
       'hud.json',
     ]));
   });
@@ -851,12 +854,17 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
+    // agent-models.json is an INSTALL ARTIFACT (AC-P1-F4), not user content — it is
+    // present on disk here to prove the artifact pass removes it (does not survive),
+    // and it must NOT appear in the before/after enumeration.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
 
     const before = await enumerateUserDevFlowContent(devflowDir);
-    // Non-vacuity: the enumeration actually found every category on disk.
-    expect(before.length).toBe(6);
+    // Non-vacuity: the enumeration found every USER-AUTHORED category on disk.
+    // Count is 5: skill shadows, rule shadows, preference-profile.md, learning.json, hud.json.
+    // agent-models.json is absent from the count — it is an artifact, not user content.
+    expect(before.length).toBe(5);
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 

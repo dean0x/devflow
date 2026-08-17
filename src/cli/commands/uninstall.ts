@@ -192,10 +192,15 @@ export function resolveDevflowDirCleanup(opts: {
  * full cleanup of the directory.
  *
  * Checks for items that exist on disk and are worth backing up:
- *   devflowDir/skills/   — skill shadow overrides (user-maintained)
- *   devflowDir/rules/    — rule shadow overrides (user-maintained)
+ *   devflowDir/skills/              — skill shadow overrides (user-maintained)
+ *   devflowDir/rules/               — rule shadow overrides (user-maintained)
  *   devflowDir/preference-profile.md — dynamic-plan preference profile
  *   devflowDir/learning.json         — global learning agent tuning config
+ *   devflowDir/hud.json              — HUD enable/disable preference and display config
+ *
+ * NOT listed here: agent-models.json — reclassified as an INSTALL ARTIFACT (AC-P1-F4).
+ * Stale per-agent model overrides silently re-apply to renamed/deleted agents on reinstall,
+ * so it must be cleaned up by removeDevFlowInstallArtifacts, not preserved behind a confirm gate.
  *
  * Returns labels for each item that actually exists. Empty array means nothing
  * user-authored is present in the directory.
@@ -236,12 +241,6 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
     items.push('learning.json');
   } catch { /* absent */ }
 
-  // agent-models.json — user model/effort assignments for agents
-  try {
-    await fs.access(path.join(devflowDir, 'agent-models.json'));
-    items.push('agent-models.json (agent model assignments)');
-  } catch { /* absent */ }
-
   // hud.json — user HUD enable/disable preference and display config
   try {
     await fs.access(path.join(devflowDir, 'hud.json'));
@@ -264,7 +263,10 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (skill/rule shadows, preference-profile.md, learning.json,
- * agent-models.json, hud.json) is removed only by the confirmed full-dir rm.
+ * hud.json) is removed only by the confirmed full-dir rm.
+ * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
+ * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
+ * belongs in this list, not in enumerateUserDevFlowContent.
  */
 export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
@@ -300,6 +302,9 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
   const installArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
     // migration run-state — removed so migrations re-run cleanly on reinstall
     { relPath: 'migrations.json' },
+    // per-agent model overrides — removed so stale keys (keyed to renamed/deleted agents
+    // from the wave-4 agent roster rename) cannot silently re-apply on reinstall (AC-P1-F4)
+    { relPath: 'agent-models.json' },
     // cost history — auto-generated session telemetry, not user-authored.
     // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
     // drift from their write sites in src/hud/cost-history.ts (avoids PF-013).

@@ -225,7 +225,10 @@ describe('optional plugin flag', () => {
     expect(resolve!.agents).toContain('validator');
     // resolver has been retired — should not appear in registry
     expect(resolve!.agents).not.toContain('resolver');
-    // retired agents must be in LEGACY_AGENT_NAMES so devflow init cleans up stale files
+    // resolver is in LEGACY_AGENT_NAMES for pre-registry-diff-sweep era cleanup; new
+    // retirements no longer require a manual list entry — the registry-diff sweep in
+    // the installer (sweepOrphanedAssets) removes any installed file whose name is
+    // absent from getAllAgentNames(), making LEGACY_AGENT_NAMES a historical deletion manifest
     expect(LEGACY_AGENT_NAMES).toContain('resolver');
     // apply-decisions skill declared so Triager can cite ADR/PF entries
     expect(resolve!.skills).toContain('apply-decisions');
