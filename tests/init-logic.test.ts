@@ -877,13 +877,13 @@ describe('partial install registry-diff sweep correctness', () => {
   it('removes retired assets but preserves assets from uninstalled plugins on partial install', async () => {
     // --- Arrange ---
 
-    // (b) A retired agent: 'shepherd' is listed in LEGACY_AGENT_NAMES and is NOT in
-    // getAllAgentNames(). The sweep must remove it.
+    // (b) A retired agent: 'shepherd' is absent from getAllAgentNames().
+    // The sweep must remove it.
     const retiredAgentPath = path.join(claudeDir, 'agents', 'devflow', 'shepherd.md');
     await fs.writeFile(retiredAgentPath, '# retired agent');
 
-    // (b) A retired command: 'review' is listed in LEGACY_COMMAND_NAMES and is NOT in
-    // getAllCommandNames(). The sweep must remove it.
+    // (b) A retired command: 'review' is absent from getAllCommandNames().
+    // The sweep must remove it.
     const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
     await fs.writeFile(retiredCommandPath, '# retired command');
 

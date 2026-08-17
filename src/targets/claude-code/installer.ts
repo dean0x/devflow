@@ -488,8 +488,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Sweep stale agent files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllAgentNames) so agents from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
-  // This supersedes the former LEGACY_AGENT_NAMES deletion loop — any name that leaves
-  // the registry is caught automatically without requiring manual list maintenance.
   await sweepOrphanedAssets(
     agentsTarget,
     new Set(getAllAgentNames()),

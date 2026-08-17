@@ -798,32 +798,70 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
   it('(9c) residue after artifact-only removal exactly matches user-authored allow-list', async () => {
     // ── Install artifacts (must be removed) ──────────────────────────────────
     await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
-    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'migrations.json'), '{}', 'utf-8');
-    await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
     await fs.mkdir(path.join(devflowDir, 'logs', 'project-slug'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'logs', 'project-slug', '.hook-debug.log'), 'debug', 'utf-8');
     await fs.mkdir(path.join(devflowDir, 'cache', 'models'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'costs', 'sessions'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'costs', 'archive.jsonl'), '{}\n', 'utf-8');
 
     // ── User-authored files (must survive) ───────────────────────────────────
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'), '# Skill', 'utf-8');
+    await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
     // ── Equality assertion: only user-authored entries may remain ─────────────
     const remaining = new Set(await fs.readdir(devflowDir));
     // Install artifacts must be gone
-    for (const artifact of ['manifest.json', 'agent-models.json', 'migrations.json', 'hud.json', 'proxy.json', 'logs', 'cache']) {
+    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs']) {
       expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
     }
-    // User-authored files must survive
-    expect(remaining.has('skills')).toBe(true);
-    expect(remaining.has('preference-profile.md')).toBe(true);
-    // Exact equality: no unexpected entries remain
-    expect(remaining).toEqual(new Set(['skills', 'preference-profile.md']));
+    // Exact equality: nothing but user-authored state remains, and every enumerated
+    // user item survives an artifact-only pass. This is the executable form of the
+    // rule that removeDevFlowInstallArtifacts and enumerateUserDevFlowContent must
+    // never overlap — the artifact pass also runs on decline/cancel/--keep-docs.
+    expect(remaining).toEqual(new Set([
+      'skills',
+      'rules',
+      'preference-profile.md',
+      'learning.json',
+      'agent-models.json',
+      'hud.json',
+    ]));
+  });
+
+  // ─── TEST-9f: the two lists must be disjoint ────────────────────────────────
+  //
+  // enumerateUserDevFlowContent names what the confirm prompt says it is about to
+  // delete. removeDevFlowInstallArtifacts runs on the decline, cancel, non-interactive
+  // AND --keep-docs paths. An item on both lists is therefore deleted no matter what
+  // the user answers, which makes the prompt a lie and loses user config silently.
+
+  it('(9f) every item enumerated as user content survives an artifact-only removal', async () => {
+    await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+
+    const before = await enumerateUserDevFlowContent(devflowDir);
+    // Non-vacuity: the enumeration actually found every category on disk.
+    expect(before.length).toBe(6);
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    const after = await enumerateUserDevFlowContent(devflowDir);
+    expect(after).toEqual(before);
   });
 });
 
@@ -832,7 +870,6 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
 //   retired and user-dropped files.
 // ---------------------------------------------------------------------------
 //
-// Now testable because removeAllDevFlow is exported (phase 2 step 1).
 // PF-018: these tests call the exported function directly — no CLI spawn, so
 // no ~/.claude guard is needed.
 
@@ -957,10 +994,9 @@ describe('removeSelectedPlugins — selective uninstall sweep (TEST-9b)', () => 
 // TEST-9e: isDevFlowInstalled — detects via any owned namespace (not just commands)
 // ---------------------------------------------------------------------------
 //
-// Previously keyed off commands/devflow only, so a commandless plugin install
-// (agents + skills, no commands) returned false and the uninstall flow exited
-// with "No Devflow installation found". Now checks agents/devflow and any
-// devflow:* skill directory in addition to commands/devflow.
+// Commandless plugin installs (agents + skills, no commands) must still be
+// detected. Checks all three namespaces: commands/devflow/, agents/devflow/,
+// and any devflow:* skill directory.
 
 describe('isDevFlowInstalled — multi-namespace detection (TEST-9e)', () => {
   let claudeDir: string;

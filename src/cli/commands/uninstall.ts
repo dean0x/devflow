@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { sweepOrphanedAssets } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -17,7 +17,7 @@ import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { applyDisableToSettings } from './proxy.js';
 import { readProxyState, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
-import { modelCacheDir } from '../../core/cache.js';
+import { hudCacheDir } from '../../core/cache.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -252,13 +252,19 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
 }
 
 /**
- * Remove only Devflow install artifacts from devflowDir: manifest.json.
- * The scripts/ directory is already removed by removeAllDevFlow; this handles
- * the remaining install state so the manifest does not outlive the assets.
+ * Remove Devflow install artifacts from devflowDir: manifest.json, migrations.json,
+ * proxy artifacts, logs/, costs/, and cache/.
+ * The scripts/ directory is already removed by removeAllDevFlow.
  *
  * Used for:
  *   - Local scope (always — never removes project data under .devflow/)
  *   - User scope when full-dir confirm is declined or session is non-interactive
+ *
+ * @D8 Nothing enumerated by enumerateUserDevFlowContent may appear in this list.
+ * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
+ * so an entry here is deleted even when the user answers "no" to the full wipe.
+ * User-authored state (skill/rule shadows, preference-profile.md, learning.json,
+ * agent-models.json, hud.json) is removed only by the confirmed full-dir rm.
  */
 export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
@@ -292,15 +298,12 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
   // directories without recursive:true, which the per-item catch swallows
   // silently, leaving the directory on disk (avoids the isDir===true gotcha).
   const installArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
-    // per-agent model overrides — removed so reinstall starts with shipped defaults
-    { relPath: 'agent-models.json' },
     // migration run-state — removed so migrations re-run cleanly on reinstall
     { relPath: 'migrations.json' },
-    // HUD configuration (enabled/disabled preference)
-    { relPath: 'hud.json' },
-    // cost history — auto-generated; not user-authored
-    { relPath: path.join('costs', 'sessions'), isDir: true },
-    { relPath: path.join('costs', 'archive.jsonl') },
+    // cost history — auto-generated session telemetry, not user-authored.
+    // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
+    // drift from their write sites in src/hud/cost-history.ts (avoids PF-013).
+    { relPath: 'costs', isDir: true },
     // proxy artifacts
     { relPath: 'proxy.json' },
     { relPath: 'proxy-routing.json' },
@@ -309,14 +312,22 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
-    // Model-discovery cache — the cache/ parent is removed (not just cache/models)
-    // so any future sub-directories are also cleaned up.
-    // relPath derived from modelCacheDir's parent to stay byte-locked to write
-    // sites (avoids PF-013); removing the parent also removes cache/models.
-    { relPath: path.relative(devflowDir, path.dirname(modelCacheDir(devflowDir))), isDir: true },
+    // Model-discovery + HUD component caches. hudCacheDir() is the authoritative
+    // accessor for the cache/ parent (modelCacheDir() resolves beneath it), so the
+    // removal site stays byte-locked to the write sites (avoids PF-013).
+    { relPath: path.relative(devflowDir, hudCacheDir(devflowDir)), isDir: true },
   ];
   for (const artifact of installArtifacts) {
     const fullPath = path.join(devflowDir, artifact.relPath);
+    // Containment invariant: every artifact must resolve to a path STRICTLY inside
+    // devflowDir. A derived relPath that ever collapsed to '' or '..' would turn the
+    // recursive rm below into a wipe of devflowDir itself (or an ancestor). Asserting
+    // it in production code — not only in tests — keeps the invariant load-bearing
+    // (reliability rule) and never throws (engineering rule).
+    const containment = path.relative(devflowDir, fullPath);
+    if (containment === '' || containment.startsWith('..') || path.isAbsolute(containment)) {
+      continue;
+    }
     try {
       await fs.rm(fullPath, { force: true, recursive: artifact.isDir === true });
       if (verbose) p.log.success(`Removed ${artifact.relPath}`);
@@ -348,7 +359,7 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
   // Check for any installed skill under the devflow: namespace
   try {
     const entries = await fs.readdir(path.join(claudeDir, 'skills'));
-    if (entries.some(e => e.startsWith('devflow:'))) return true;
+    if (entries.some(e => e.startsWith(SKILL_NAMESPACE))) return true;
   } catch { /* skills dir absent or unreadable */ }
 
   return false;
@@ -469,11 +480,11 @@ export const uninstallCommand = new Command('uninstall')
             try {
               const skillEntries = await fs.readdir(path.join(cd, 'skills'));
               for (const e of skillEntries) {
-                if (e.startsWith('devflow:')) extras.push(path.join(cd, 'skills', e));
+                if (e.startsWith(SKILL_NAMESPACE)) extras.push(path.join(cd, 'skills', e));
               }
             } catch { /* skills dir absent */ }
             // ~/.devflow install artifacts
-            extras.push(`${dd} install artifacts (manifest.json, agent-models.json, migrations.json, hud.json, logs/, costs/, cache/, proxy artifacts)`);
+            extras.push(`${dd} install artifacts (manifest.json, migrations.json, logs/, costs/, cache/, proxy artifacts)`);
           } catch { /* scope path resolution failed */ }
         }
         // Project .devflow/ data dir
@@ -481,12 +492,8 @@ export const uninstallCommand = new Command('uninstall')
         try { await fs.access(devflowDataDir); extras.push(`${devflowDataDir} (if confirmed)`); } catch { /* noop */ }
         extras.push('hooks removed from settings.json');
 
-        if (extras.length === 0) {
-          p.log.info('Nothing to remove.');
-        } else {
-          for (const line of extras) {
-            p.log.info(`  ${line}`);
-          }
+        for (const line of extras) {
+          p.log.info(`  ${line}`);
         }
       }
 
@@ -571,7 +578,8 @@ export const uninstallCommand = new Command('uninstall')
         if (scope === 'local') {
           // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
           // (memory, learning, features, docs, config.json). Never remove those —
-          // only remove install artifacts: scripts/ (done above) + manifest.json.
+          // only remove install artifacts: scripts/ (done above) + manifest.json and
+          // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
           await removeDevFlowInstallArtifacts(devflowDir, verbose);
           p.log.info('Local project data (memory, learning, features, docs) preserved');
         } else {
@@ -591,7 +599,7 @@ export const uninstallCommand = new Command('uninstall')
           if (cleanupDecision === 'artifacts-only') {
             await removeDevFlowInstallArtifacts(devflowDir, verbose);
             if (!process.stdin.isTTY && userContent.length > 0) {
-              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and manifest only)`);
+              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and install artifacts only)`);
             }
           } else {
             // cleanupDecision === 'prompt': interactive session with user-authored content present.
@@ -610,13 +618,13 @@ export const uninstallCommand = new Command('uninstall')
               // state. avoids PF-014: process.exit() here would skip removeDevFlowInstallArtifacts,
               // leaving a stale manifest.json that points to assets no longer on disk.
               await removeDevFlowInstallArtifacts(devflowDir, verbose);
-              p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and manifest only)`);
+              p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and install artifacts only)`);
             } else if (confirmFullCleanup) {
               await fs.rm(devflowDir, { recursive: true, force: true });
               p.log.success(`${devflowDir} removed`);
             } else {
               await removeDevFlowInstallArtifacts(devflowDir, verbose);
-              p.log.info(`${devflowDir} preserved (removing scripts and manifest only)`);
+              p.log.info(`${devflowDir} preserved (removing scripts and install artifacts only)`);
             }
           }
         }
