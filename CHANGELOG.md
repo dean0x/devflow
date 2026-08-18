@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING CHANGES
+
+#### Agent rename — 13 agents renamed to action-verb form
+
+All 13 non-immutable devflow agents have been renamed from noun form to
+action-verb form. The three unchanged agents are `git`, `knowledge`, and
+`learning`.
+
+| Old name (Form A slug) | New name (Form A slug) | Old Form B (`name:`) | New Form B (`name:`) |
+|------------------------|------------------------|----------------------|----------------------|
+| `coder`       | `code`      | `Coder`       | `Code`      |
+| `designer`    | `design`    | `Designer`    | `Design`    |
+| `evaluator`   | `evaluate`  | `Evaluator`   | `Evaluate`  |
+| `researcher`  | `research`  | `Researcher`  | `Research`  |
+| `reviewer`    | `review`    | `Reviewer`    | `Review`    |
+| `scrutinizer` | `scrutinize`| `Scrutinizer` | `Scrutinize`|
+| `simplifier`  | `simplify`  | `Simplifier`  | `Simplify`  |
+| `skimmer`     | `skim`      | `Skimmer`     | `Skim`      |
+| `synthesizer` | `synthesize`| `Synthesizer` | `Synthesize`|
+| `tester`      | `test`      | `Tester`      | `Test`      |
+| `triager`     | `triage`    | `Triager`     | `Triage`    |
+| `validator`   | `validate`  | `Validator`   | `Validate`  |
+| `bug-analyzer`| `diagnose`  | `BugAnalyzer` | `Diagnose`  |
+
+**What devflow migrates automatically:**
+- All devflow-owned agent files (`~/.claude/agents/devflow/`), command
+  sources (`dist/commands/`), skill files, and `CLAUDE.md` prose are
+  updated on `devflow init`. No manual action needed for devflow's own
+  files.
+- `agent-models.json` key migration: old slug keys in
+  `~/.devflow/agent-models.json` (e.g. `coder`, `reviewer`) are
+  rewritten to their canonical new form (e.g. `code`, `review`) both on
+  read by `readAgentMapping` and by the one-time global migration
+  `canonicalise-agent-keys-v1` that runs on the first `devflow init`
+  after this upgrade.
+
+**What you must migrate by hand:**
+- Any `subagent_type` values in your **own** custom commands or agents
+  that reference the old Form B names (`Coder`, `Reviewer`, etc.) must
+  be updated by you — devflow cannot migrate files it does not own. For
+  example: `agentType: "Coder"` → `agentType: "Code"`.
+
+**Downgrade warning — per-agent model overrides stop silently:**
+If you upgrade to this version and then **downgrade** to a prior devflow
+version, any per-agent model overrides saved under the new canonical key
+names (e.g. `code`, `review`) will silently stop applying — the older
+version does not know the new names and will not find the override
+entries. Retroactive version-detection is impossible: `readAgentMapping`
+never reads the `version` field from `agent-models.json`, and a test
+pins that behaviour. There is no mechanism that could warn you. If you
+downgrade, verify your overrides with `devflow agents --list`.
+
+**Open-session warning:**
+A Claude Code session left **open across the upgrade** holds a stale
+orchestrator charter that still names the old agents. Restart any open
+session after running `devflow init` so the new charter is injected.
+
+**Claude Code built-in name collision check:**
+The new agent names were verified against the Claude Code built-in
+`subagent_type` registry. Verified clear against Claude Code build
+`claude-sonnet-4-6` (checked 2026-08-18). The built-in types known at
+that build include: `BugAnalyzer`, `Coder`, `Designer`, `Evaluator`,
+`Explore`, `Git`, `Knowledge`, `Learning`, `Plan`, `Researcher`,
+`Reviewer`, `Scrutinizer`, `Simplifier`, `Skimmer`, `Synthesizer`,
+`Tester`, `Triager`, `Validator` (plus non-devflow types). None of the
+13 new devflow names (`code`, `design`, `evaluate`, `research`, `review`,
+`scrutinize`, `simplify`, `skim`, `synthesize`, `test`, `triage`,
+`validate`, `diagnose`) collide with that set. Note: `Plan` is a
+built-in; devflow has no `plan` agent (only a `/plan` command).
+**Re-check this table on every major Claude Code upgrade** — a future
+built-in could silently shadow a devflow agent and no in-repo guard can
+detect that.
+
 ### Fixed
 - **`devflow agents` TUI — four defects fixed** (`fix/agents-tui` wave, PR 3 of 4):
   - **Fix 1 (alias rendering)**: GPT model aliases (`sol`, `terra`, `luna`) previously rendered with a parenthetical canonical-id annotation (`sol (gpt-5.6-sol)`). The picker cycle is now built from `pickerNames(catalog.models)` — aliases only; canonical id only when a model has no aliases. Aliases render bare. Stored canonical ids (e.g. `gpt-5.6-sol` saved via `--set`) are normalized to their alias on read by `buildPickerNameMap` — no disk write. `catalog.aliasToId` is no longer referenced in `render.ts`.
