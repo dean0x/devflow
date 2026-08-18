@@ -166,7 +166,7 @@ On completion:
 │  └─ Write .release/RELEASE-FLOW.md
 │
 ├─ Phase 4: Pre-release Checks
-│  ├─ Validator agent (build + test)
+│  ├─ Validate agent (build + test)
 │  └─ Write progress checkpoint
 │
 ├─ Phase 5: Build Release Plan
@@ -189,7 +189,7 @@ On completion:
 
 ## Error Handling
 
-- Validator fails (build/test): halt, report failures, do not proceed
+- Validate agent fails (build/test): halt, report failures, do not proceed
 - User declines release plan: halt gracefully
 - Git agent fails (tag/release): halt, report error, suggest manual steps
 - Mid-release failure: progress checkpoint enables resume on next run

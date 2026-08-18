@@ -7,7 +7,7 @@ This is the shared shape produced by `/devflow:dynamic-plan`'s plan-challenge st
 
 A structured document (written as part of the per-ticket plan) containing:
 
-**Acceptance criteria (numbered, for the Evaluator)**
+**Acceptance criteria (numbered, for the Evaluate agent)**
 
 Criteria must cover:
 - Functionality: what the feature does, including all stated use cases
@@ -20,7 +20,7 @@ Each criterion is either:
 
 At least one negative criterion is required per ticket (e.g., "must not break existing behavior X", "must not expose Y to unauthenticated callers", "must not regress test suite Z").
 
-**Test plan (structured, for the Tester)**
+**Test plan (structured, for the Test agent)**
 
 For each acceptance criterion:
 - Test scenario: a concrete, runnable scenario description
@@ -28,13 +28,13 @@ For each acceptance criterion:
 - Expected outcome: the specific observable result that confirms the criterion
 - Verification method: unit test / integration test / manual step / load test
 
-The test plan must be executable by the Tester agent without further clarification — it is a complete specification, not notes.
+The test plan must be executable by the Test agent without further clarification — it is a complete specification, not notes.
 
 #### Consumption by Gate 2
 
-The Evaluator panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
+The Evaluate agent panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
 
-The Tester receives: the test plan (all scenarios and expected outcomes).
+The Test agent receives: the test plan (all scenarios and expected outcomes).
 
 If either document is absent (no plan from `/devflow:dynamic-plan`, or criteria not written), the corresponding Gate 2 agent is skipped silently — build proceeds Gate-1-only. Never fabricate criteria.
 

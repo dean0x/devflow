@@ -188,7 +188,7 @@ Determine which focus analyzers to run using `CHANGED_FILES` (already computed i
 **Produces:** ANALYZER_OUTPUTS
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Spawn ALL active BugAnalyzer agents **in a single message** (parallel, NOT background):
+Spawn ALL active Diagnose agents **in a single message** (parallel, NOT background):
 
 For each active focus, spawn:
 ```
@@ -218,7 +218,7 @@ Notes:
 **Produces:** BUG_ANALYSIS_SUMMARY
 **Requires:** ANALYZER_OUTPUTS, ANALYSIS_DIR, BRANCH_INFO
 
-Spawn Synthesizer:
+Spawn Synthesize agent:
 
 ```
 Agent(subagent_type="Synthesize", run_in_background=false):
@@ -290,13 +290,13 @@ Run `/resolve` to process and fix these findings.
 │  └─ Detect active focuses (security + functional always; integration + usability conditional)
 │
 ├─ Phase 5: Bug Analysis (PARALLEL)
-│  ├─ BugAnalyzer: security (+ STATIC_FINDINGS)
-│  ├─ BugAnalyzer: functional
-│  ├─ BugAnalyzer: integration (conditional)
-│  └─ BugAnalyzer: usability (conditional)
+│  ├─ Diagnose agent: security (+ STATIC_FINDINGS)
+│  ├─ Diagnose agent: functional
+│  ├─ Diagnose agent: integration (conditional)
+│  └─ Diagnose agent: usability (conditional)
 │
 ├─ Phase 6: Synthesis
-│  └─ Synthesizer agent (mode: bug-analysis)
+│  └─ Synthesize agent (mode: bug-analysis)
 │
 └─ Phase 7: Finalize
    ├─ Write .last-analysis-head
@@ -330,7 +330,7 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 2. **Parallel, not background** — Analyzers spawn in one message with `run_in_background=false`
 3. **Static + semantic** — Two complementary tracks, each validates the other
 4. **Incremental by default** — Only analyze new changes unless `--full` specified
-5. **Verify before reporting** — BugAnalyzer agents self-verify every finding
+5. **Verify before reporting** — Diagnose agents self-verify every finding
 6. **Honest reporting** — Display risk level and counts directly from synthesis
 
 ## Phase Completion Checklist

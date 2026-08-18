@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 # Self-Review Framework
 
-Systematic self-review for the Scrutinizer agent. Evaluate implementation against 9 pillars. **Fix issues, don't just report them.**
+Systematic self-review for the Scrutinize agent. Evaluate implementation against 9 pillars. **Fix issues, don't just report them.**
 
 Based on [Google Engineering Practices](https://google.github.io/eng-practices/review/reviewer/looking-for.html).
 
@@ -147,6 +147,6 @@ For complete report templates and examples:
 ## Integration
 
 Used by:
-- **Scrutinizer agent**: Dedicated self-review in fresh context after Coder completes
+- **Scrutinize agent**: Dedicated self-review in fresh context after the Code agent completes
 
 The self-review ensures implementations meet quality standards before external review, catching issues early.

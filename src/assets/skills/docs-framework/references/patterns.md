@@ -13,8 +13,8 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ├── reviews/{branch-slug}/          # Code review reports per branch
 │   ├── .last-review-head           # HEAD SHA of last completed review
 │   ├── {timestamp}/                # Timestamped review directory
-│   │   ├── {focus}.md              # Reviewer reports (security.md, architecture.md, etc.)
-│   │   ├── review-summary.md       # Synthesizer output
+│   │   ├── {focus}.md              # Review agent reports (security.md, architecture.md, etc.)
+│   │   ├── review-summary.md       # Synthesize agent output
 │   │   └── resolution-summary.md   # Written by /resolve (if run)
 │   └── {timestamp}/                # Incremental review
 │       └── ...

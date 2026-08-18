@@ -1,5 +1,5 @@
 ---
-description: Self-review workflow - Simplifier (code clarity) then Scrutinizer (9-pillar quality gate)
+description: Self-review workflow - Simplify agent (code clarity) then Scrutinize agent (9-pillar quality gate)
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
@@ -7,7 +7,7 @@ output-dir: dist/commands
 
 # Self-Review Command
 
-Run Simplifier and Scrutinizer sequentially on changed files for post-implementation quality refinement.
+Run Simplify agent and Scrutinize agent sequentially on changed files for post-implementation quality refinement.
 
 ## Usage
 
@@ -28,34 +28,34 @@ Detect changed files and build context:
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
 {decisions_load()}
 
-Pass `DECISIONS_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume decisions — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
+Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active ADR/PF entries; Scrutinize agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplify agent does not consume decisions — it operates at code-shape level and Scrutinize agent runs after to catch any architectural drift.)
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` to Scrutinizer.
+Pass `FEATURE_KNOWLEDGE` to Scrutinize agent.
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)
 
-### Phase 1: Simplifier (Code Refinement)
+### Phase 1: Simplify agent (Code Refinement)
 
 **Produces:** SIMPLIFY_COMMITS
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION
 
-Spawn Simplifier agent to refine code for clarity and consistency:
+Spawn Simplify agent to refine code for clarity and consistency:
 
 Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: \{task_description\}
 FILES_CHANGED: \{files_changed\}
 Simplify and refine the code for clarity and consistency while preserving functionality."
 
-**Wait for completion.** Simplifier commits changes directly.
+**Wait for completion.** Simplify agent commits changes directly.
 
-### Phase 2: Scrutinizer (9-Pillar Quality Gate)
+### Phase 2: Scrutinize agent (9-Pillar Quality Gate)
 
 **Produces:** SCRUTINIZER_STATUS, SCRUTINIZER_CHANGES
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
 
-Spawn Scrutinizer agent for quality evaluation and fixing:
+Spawn Scrutinize agent for quality evaluation and fixing:
 
 Agent(subagent_type="Scrutinize", run_in_background=false):
 "TASK_DESCRIPTION: \{task_description\}
@@ -73,7 +73,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 **Produces:** VALIDATION_RESULT
 **Requires:** SCRUTINIZER_CHANGES
 
-If Scrutinizer made changes (STATUS == FIXED):
+If Scrutinize agent made changes (STATUS == FIXED):
 
 Agent(subagent_type="Validate", run_in_background=false):
 "FILES_CHANGED: \{scrutinizer_modified_files\}
@@ -94,10 +94,10 @@ Display summary:
 **Files Reviewed**: \{n\}
 **Status**: \{PASS|FIXED|BLOCKED\}
 
-### Simplifier
+### Simplify agent
 - \{n\} files refined for clarity
 
-### Scrutinizer (9-Pillar Evaluation)
+### Scrutinize agent (9-Pillar Evaluation)
 | Pillar | Status |
 |--------|--------|
 | Design | \{status\} |
@@ -125,14 +125,14 @@ Display summary:
 │  ├─ Git diff for changed files
 │  └─ Read index.md → DECISIONS_CONTEXT
 │
-├─ Phase 1: Simplifier
+├─ Phase 1: Simplify agent
 │  └─ Code refinement (commits directly)
 │
-├─ Phase 2: Scrutinizer
+├─ Phase 2: Scrutinize agent
 │  └─ 9-pillar quality gate (may fix and commit)
 │
-├─ Phase 3: Validator (conditional)
-│  └─ If Scrutinizer made changes, verify tests pass
+├─ Phase 3: Validate agent (conditional)
+│  └─ If Scrutinize agent made changes, verify tests pass
 │
 └─ Phase 4: Report
    └─ Display summary with pillar status
@@ -142,15 +142,15 @@ Display summary:
 | Case | Handling |
 |------|----------|
 | No changes | Report "No changes to review" and exit |
-| Simplifier finds nothing | Normal, continue to Scrutinizer |
-| Scrutinizer BLOCKED | Report blocking issue, halt workflow |
+| Simplify agent finds nothing | Normal, continue to Scrutinize agent |
+| Scrutinize agent BLOCKED | Report blocking issue, halt workflow |
 | Validation fails | Report failures, halt (don't create broken state) |
 | Not in git repo | Report error, suggest running in git repo |
 
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do the work
-2. **Sequential execution** - Simplifier must complete before Scrutinizer
-3. **Validation gate** - If Scrutinizer changes code, must pass validation
+2. **Sequential execution** - Simplify agent must complete before Scrutinize agent
+3. **Validation gate** - If Scrutinize agent changes code, must pass validation
 4. **Honest reporting** - Display actual agent outputs
 5. **Fail fast** - Stop on BLOCKED or validation failure

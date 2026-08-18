@@ -36,7 +36,7 @@ Orchestrate a single task through implementation by spawning specialized agents.
 When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes:
 
 1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
-2. **Skip Phase 2** — no Coder needed, user already made changes.
+2. **Skip Phase 2** — no Code agent needed, user already made changes.
 3. **Detect FILES_CHANGED**: `git diff --name-only \{base_branch\}...HEAD`
 4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
 5. **Proceed to Phase 10** (Create PR) / **Phase 11** (Report).
@@ -75,7 +75,7 @@ Return the branch setup summary."
 2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
 3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
 4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
-5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
+5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
 7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
 
@@ -83,7 +83,7 @@ If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or t
 
 {decisions_load()}
 
-Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
+Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 
 {knowledge_load()}
 
@@ -129,9 +129,9 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 **SEQUENTIAL_CODE_AGENTS** (for HIGH/CRITICAL context risk):
 
-Spawn Coders one at a time, passing handoff summaries between phases:
+Spawn Code agents one at a time, passing handoff summaries between phases:
 
-**Phase 1 Coder:**
+**Phase 1 Code agent:**
 ```
 Agent(subagent_type="Code"):
 "TASK_ID: {task-id}
@@ -149,7 +149,7 @@ HANDOFF_REQUIRED: true
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Phase 2+ Coders** (after prior phase completes):
+**Phase 2+ Code agents** (after prior phase completes):
 ```
 Agent(subagent_type="Code"):
 "TASK_ID: {task-id}
@@ -159,7 +159,7 @@ EXECUTION_PLAN: {phase N steps}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: {true if last phase, false otherwise}
 DOMAIN: {phase N domain, e.g., 'frontend'}
-PRIOR_PHASE_SUMMARY: {summary from previous Coder}
+PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
@@ -169,16 +169,16 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-\{branch_slug\}.md` after the final Coder completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-\{branch_slug\}.md` after the final Code agent completes (cleanup).
 
 ---
 
 **PARALLEL_CODE_AGENTS** (rare - truly independent artifacts):
 
-Spawn multiple Coders **in a single message**, each with independent subtask:
+Spawn multiple Code agents **in a single message**, each with independent subtask:
 
 ```
-Agent(subagent_type="Code"):  # Coder 1
+Agent(subagent_type="Code"):  # Code agent 1
 "TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
@@ -191,7 +191,7 @@ DECISIONS_CONTEXT: {decisions_context}
 COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
-Agent(subagent_type="Code"):  # Coder 2 (same message)
+Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
@@ -216,26 +216,26 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 **Produces:** VALIDATION_RESULT
 **Requires:** FILES_CHANGED
 
-After Coder completes, spawn Validator to verify correctness:
+After Code agent completes, spawn Validate agent to verify correctness:
 
 ```
 Agent(subagent_type="Validate", model="haiku"):
-"FILES_CHANGED: {list of files from Coder output}
+"FILES_CHANGED: {list of files from Code agent output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
 
 **If FAIL:**
-1. Extract failure details from Validator output
+1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Coder with fix context:
+   - Spawn Code agent with fix context:
    ```
    Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix validation failures
    OPERATION: validation-fix
-   VALIDATION_FAILURES: \{parsed failures from Validator\}
+   VALIDATION_FAILURES: \{parsed failures from Validate agent\}
    SCOPE: Fix only the listed failures, no other changes
    COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
@@ -250,14 +250,14 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 **Produces:** SIMPLIFIER_OUTPUT
 **Requires:** FILES_CHANGED
 
-After validation passes, spawn Simplifier to polish the code:
+After validation passes, spawn Simplify agent to polish the code:
 
 ```
 Agent(subagent_type="Simplify"):
 "Simplify recently implemented code
 Task: {task description}
-FILES_CHANGED: {list of files from Coder output}
-Focus on code modified by Coder, apply project standards, enhance clarity"
+FILES_CHANGED: {list of files from Code agent output}
+Focus on code modified by Code agent, apply project standards, enhance clarity"
 ```
 
 ### Phase 5: Self-Review
@@ -265,34 +265,34 @@ Focus on code modified by Coder, apply project standards, enhance clarity"
 **Produces:** SCRUTINIZE_OUTPUT
 **Requires:** FILES_CHANGED
 
-After Simplifier completes, spawn Scrutinizer as final quality gate:
+After Simplify agent completes, spawn Scrutinize agent as final quality gate:
 
 ```
 Agent(subagent_type="Scrutinize"):
 "TASK_DESCRIPTION: {task description}
-FILES_CHANGED: {list of files from Coder output}
+FILES_CHANGED: {list of files from Code agent output}
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
-If Scrutinizer returns BLOCKED, report to user and halt.
+If Scrutinize agent returns BLOCKED, report to user and halt.
 
-### Phase 6: Re-Validate (if Scrutinizer made changes)
+### Phase 6: Re-Validate (if Scrutinize agent made changes)
 
 **Produces:** REVALIDATION_RESULT
 **Requires:** SCRUTINIZE_OUTPUT
 
-If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
+If Scrutinize agent made code changes (status: FIXED), spawn Validate agent to verify:
 
 ```
 Agent(subagent_type="Validate", model="haiku"):
-"FILES_CHANGED: {files modified by Scrutinizer}
+"FILES_CHANGED: {files modified by Scrutinize agent}
 VALIDATION_SCOPE: changed-only
-Verify Scrutinizer's fixes didn't break anything."
+Verify Scrutinize agent's fixes didn't break anything."
 ```
 
-**If FAIL:** Report to user - Scrutinizer broke tests, needs manual intervention.
+**If FAIL:** Report to user - Scrutinize agent broke tests, needs manual intervention.
 
 **If PASS:** Continue to Phase 7
 
@@ -301,13 +301,13 @@ Verify Scrutinizer's fixes didn't break anything."
 **Produces:** ALIGNMENT_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Scrutinizer passes (and re-validation if needed), spawn Evaluator to validate alignment:
+After Scrutinize agent passes (and re-validation if needed), spawn Evaluate agent to validate alignment:
 
 ```
 Agent(subagent_type="Evaluate"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Coder output}
+FILES_CHANGED: {list of files from Code agent output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
@@ -316,28 +316,28 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **If ALIGNED:** Continue to Phase 8
 
 **If MISALIGNED:**
-1. Extract misalignment details from Evaluator output
+1. Extract misalignment details from Evaluate agent output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
-   - Spawn Coder to fix misalignments:
+   - Spawn Code agent to fix misalignments:
    ```
    Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
-   MISALIGNMENTS: \{structured misalignments from Evaluator\}
+   MISALIGNMENTS: \{structured misalignments from Evaluate agent\}
    SCOPE: Fix only the listed misalignments, no other changes
    COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
    ```
-   - Spawn Validator to verify fix didn't break tests:
+   - Spawn Validate agent to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validate", model="haiku"):
-   "FILES_CHANGED: \{files modified by fix Coder\}
+   "FILES_CHANGED: \{files modified by fix Code agent\}
    VALIDATION_SCOPE: changed-only"
    ```
-   - If Validator FAIL: Report to user
-   - If Validator PASS: Loop back to Phase 7 (re-check alignment)
+   - If Validate agent FAIL: Report to user
+   - If Validate agent PASS: Loop back to Phase 7 (re-check alignment)
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
 ### Phase 8: QA Testing
@@ -345,13 +345,13 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** QA_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Evaluator passes, spawn Tester for scenario-based acceptance testing:
+After Evaluate agent passes, spawn Test agent for scenario-based acceptance testing:
 
 ```
 Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Coder output}
+FILES_CHANGED: {list of files from Code agent output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
@@ -359,28 +359,28 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 **If PASS:** Continue to Phase 9
 
 **If FAIL:**
-1. Extract failure details from Tester output
+1. Extract failure details from Test agent output
 2. Increment `qa_retry_count`
 3. If `qa_retry_count <= 2`:
-   - Spawn Coder to fix QA failures:
+   - Spawn Code agent to fix QA failures:
    ```
    Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix QA test failures
    OPERATION: qa-fix
-   QA_FAILURES: \{structured failures from Tester\}
+   QA_FAILURES: \{structured failures from Test agent\}
    SCOPE: Fix only the listed failures, no other changes
    COMPLIANCE: \{enabled|(none)\}
    CREATE_PR: false"
    ```
-   - Spawn Validator to verify fix didn't break tests:
+   - Spawn Validate agent to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validate", model="haiku"):
-   "FILES_CHANGED: \{files modified by fix Coder\}
+   "FILES_CHANGED: \{files modified by fix Code agent\}
    VALIDATION_SCOPE: changed-only"
    ```
-   - If Validator FAIL: Report to user
-   - If Validator PASS: Loop back to Phase 8 (re-run Tester)
+   - If Validate agent FAIL: Report to user
+   - If Validate agent PASS: Loop back to Phase 8 (re-run Test agent)
 4. If `qa_retry_count > 2`: Report QA failures to user for decision
 
 ### Phase 9: CI Status Gate
@@ -404,11 +404,11 @@ Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), sk
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
 
-**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with CREATE_PR: true) handles PR creation. For parallel Code agents, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
-If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Coder agent Responsibility 7 for field-to-section mapping).
+If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Code agent Responsibility 7 for field-to-section mapping).
 
-**For SINGLE_CODE_AGENT**: PR is created by the Coder agent (CREATE_PR: true).
+**For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true).
 
 ### Phase 11: Report
 
@@ -431,37 +431,37 @@ Display completion summary with phase status, PR info, and next steps.
 │  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy
 │
 ├─ Phase 2: Implement (3-strategy framework)
-│  ├─ SINGLE_CODE_AGENT (80%): One Coder, full plan, CREATE_PR: true
-│  ├─ SEQUENTIAL_CODE_AGENTS (15%): N Coders with handoff summaries
-│  └─ PARALLEL_CODE_AGENTS (5%): N Coders in single message (rare)
+│  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan, CREATE_PR: true
+│  ├─ SEQUENTIAL_CODE_AGENTS (15%): N Code agents with handoff summaries
+│  └─ PARALLEL_CODE_AGENTS (5%): N Code agents in single message (rare)
 │
 ├─ Phase 3: Validate
-│  └─ Validator agent (build, typecheck, lint, test)
-│  └─ If FAIL: Coder fix loop (max 2 retries) → re-validate
+│  └─ Validate agent (build, typecheck, lint, test)
+│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-validate
 │
 ├─ Phase 4: Simplify
-│  └─ Simplifier agent (refines code clarity and consistency)
+│  └─ Simplify agent (refines code clarity and consistency)
 │
 ├─ Phase 5: Self-Review
-│  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
+│  └─ Scrutinize agent (final quality gate, fixes P0/P1)
 │
-├─ Phase 6: Re-Validate (if Scrutinizer made changes)
-│  └─ Validator agent (verify Scrutinizer fixes)
+├─ Phase 6: Re-Validate (if Scrutinize agent made changes)
+│  └─ Validate agent (verify Scrutinize agent fixes)
 │
 ├─ Phase 7: Alignment Check
-│  └─ Evaluator agent (validates alignment - reports only, no fixes)
-│  └─ If MISALIGNED: Coder fix loop (max 2 iterations) → Validator → re-check
+│  └─ Evaluate agent (validates alignment - reports only, no fixes)
+│  └─ If MISALIGNED: Code agent fix loop (max 2 iterations) → Validate agent → re-check
 │
 ├─ Phase 8: QA Testing
-│  └─ Tester agent (scenario-based acceptance tests)
-│  └─ If FAIL: Coder fix loop (max 2 retries) → Validator → re-test
+│  └─ Test agent (scenario-based acceptance tests)
+│  └─ If FAIL: Code agent fix loop (max 2 retries) → Validate agent → re-test
 │
 ├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT only)
 │  └─ Git agent (check-ci-status) → poll/fix cycle (10 polls + 2 fix budget)
 │
 ├─ Phase 10: Create PR (if needed)
-│  └─ SINGLE_CODE_AGENT: handled by Coder
-│  └─ SEQUENTIAL: handled by last Coder
+│  └─ SINGLE_CODE_AGENT: handled by Code agent
+│  └─ SEQUENTIAL: handled by last Code agent
 │  └─ PARALLEL: orchestrator creates unified PR
 │
 ├─ Phase 11: Report
@@ -474,14 +474,14 @@ Display completion summary with phase status, PR info, and next steps.
 
 1. **Orchestration only** - Command spawns agents, never does work itself
 2. **Plan-first** - Plan documents from `/plan` skip exploration/planning overhead entirely
-3. **Coherence-first** - Single Coder produces more consistent code (default ~80% of tasks)
+3. **Coherence-first** - Single Code agent produces more consistent code (default ~80% of tasks)
 4. **Agent ownership** - Each agent owns its output completely
-5. **Clean handoffs** - Each phase passes structured data to next; sequential Coders pass implementation summaries
+5. **Clean handoffs** - Each phase passes structured data to next; sequential Code agents pass implementation summaries
 6. **Honest reporting** - Display agent outputs directly
 7. **Simplification pass** - Code refined for clarity before PR
 8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
-9. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
-10. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
+9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
+10. **Code agent owns fixes** - Never implement fixes in main session; spawn Code agent for validation failures and alignment fixes
 11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
 12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT strategy
 

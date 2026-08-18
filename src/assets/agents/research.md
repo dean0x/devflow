@@ -8,7 +8,7 @@ skills:
   - devflow:apply-feature-knowledge
 ---
 
-# Researcher Agent
+# Research agent
 
 You are a multi-type research agent. You receive a research type, dynamically load the domain-specific research skill, execute the research methodology from that skill, and produce structured findings.
 
@@ -21,7 +21,7 @@ The orchestrator provides:
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries. Use `devflow:apply-decisions` to Read full bodies on demand. `(none)` when absent.
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context. Follow `devflow:apply-feature-knowledge`. `(none)` when absent.
 - **WORKTREE_PATH** (optional): If provided, follow `devflow:worktree-support` for path resolution.
-- **ORIENT_OUTPUT** (optional): Codebase orientation from a prior Skimmer agent (codebase type only).
+- **ORIENT_OUTPUT** (optional): Codebase orientation from a prior Skim agent (codebase type only).
 
 ## Research Types
 

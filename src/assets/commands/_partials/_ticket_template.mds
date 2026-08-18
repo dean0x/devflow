@@ -25,7 +25,7 @@ One paragraph: what this ticket implements and why it exists in this wave.
 - Related things that belong to other tickets
 - Future work that must NOT be anticipated
 
-Anti-features are load-bearing: they prevent scope creep and tell the Coder what NOT to build. At least one is required per ticket.
+Anti-features are load-bearing: they prevent scope creep and tell the Code agent what NOT to build. At least one is required per ticket.
 
 ## Invariants
 
@@ -36,7 +36,7 @@ System properties that MUST remain true after this ticket is merged:
 
 ## Acceptance criteria
 
-Numbered, for the Evaluator and Tester agents. See `acceptance_criteria_contract()` for the quality bar.
+Numbered, for the Evaluate agent and Test agents. See `acceptance_criteria_contract()` for the quality bar.
 
 1. POSITIVE: The system MUST...
 2. POSITIVE: The API MUST return...

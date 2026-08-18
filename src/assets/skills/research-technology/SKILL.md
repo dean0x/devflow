@@ -24,7 +24,7 @@ Structured evaluation of libraries, frameworks, and tools against explicit proje
 
 ## When This Activates
 
-Loaded by Researcher agent when `RESEARCH_TYPE` is `technology`. Covers:
+Loaded by Research agent when `RESEARCH_TYPE` is `technology`. Covers:
 - Evaluating libraries before adding a new dependency
 - Comparing frameworks for a new project area
 - Assessing tools for build, testing, or CI needs

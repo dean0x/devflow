@@ -15,7 +15,7 @@ Spawn a `agentType: "Design"` agent (opus) to:
 
 This is LLM judgment — the agent reads like a person would, not a graph algorithm.
 
-**Rationale for Designer tier:** use opus — dependency reasoning requires high-level judgment, not a fast-read pass.
+**Rationale for Design agent tier:** use opus — dependency reasoning requires high-level judgment, not a fast-read pass.
 
 **Vacuous-truth rule — a ticket with no unmet dependencies is ALWAYS ready:**
 - Empty `Depends on:` = ready now, regardless of the wave's integration state.
@@ -38,11 +38,11 @@ Reader return shape:
 For each ready ticket (sequentially by default; parallel only past the §7.1 bar):
 - Branch setup: `ticket/<slug>` off integration HEAD at ready-time (so it already contains merged deps)
 - Run the single-ticket engine inside a try/catch — one ticket's crash/stall never kills the wave; catch the exception, quarantine that ticket, and continue with the remaining ready set
-- On engine PASS: merge to integration branch, run Validator (build + test)
+- On engine PASS: merge to integration branch, run Validate agent (build + test)
   - Merge FAIL (build red after merge): quarantine ticket, mark as escalated, continue
 - On engine FAIL or ESCALATED: quarantine ticket, do not block independent siblings
 
-**Cascade quarantine:** when a ticket is quarantined for any reason (Gate-1 exhausted, engine crash/stall, build-red after merge, review coverage incomplete after retry), the quarantine cascades to its direct and transitive dependents — each is marked blocked with the named reason (e.g., "blocked: depends on #X which failed Gate-1"). Independent siblings are never affected. The quarantined list is injected into every subsequent Designer reader prompt so the reader never schedules dependents of failed tickets.
+**Cascade quarantine:** when a ticket is quarantined for any reason (Gate-1 exhausted, engine crash/stall, build-red after merge, review coverage incomplete after retry), the quarantine cascades to its direct and transitive dependents — each is marked blocked with the named reason (e.g., "blocked: depends on #X which failed Gate-1"). Independent siblings are never affected. The quarantined list is injected into every subsequent Design agent reader prompt so the reader never schedules dependents of failed tickets.
 
 **Step 3 — What's ready now?**
 
@@ -50,7 +50,7 @@ After the round's merges, spawn the reader agent again with updated issue states
 
 **Termination conditions (checked each round):**
 - All tickets processed: done, write final report
-- Nothing ready but tickets remain: before declaring a deadlock, re-ask the Designer reader once with the vacuous-truth rule quoted verbatim. Only a second read that names a SPECIFIC blocking ticket ID per remaining ticket may end the wave as deadlocked. If the re-read produces a ready set, continue from Step 2.
+- Nothing ready but tickets remain: before declaring a deadlock, re-ask the Design agent reader once with the vacuous-truth rule quoted verbatim. Only a second read that names a SPECIFIC blocking ticket ID per remaining ticket may end the wave as deadlocked. If the re-read produces a ready set, continue from Step 2.
 - After re-ask confirms nothing ready: end with an escalation report that, for EACH remaining ticket, names the specific unmet dependency or unresolved decision blocking it (with the named ticket IDs from the blocked list)
 - MAX_ROUNDS exceeded: end with partial-progress report (safeguard — never infinite)
 
@@ -66,7 +66,7 @@ MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5
 
 **Parallel independent tickets:** each gets its own `git worktree add` + durable branch managed by the Git agent. Use explicit `git worktree add` — NOT the Workflow tool's ephemeral `isolation:'worktree'`. The branch must persist across implement → review → resolve → merge stages; ephemeral worktrees are gone when the agent call ends.
 
-**Post-merge validation:** after EVERY merge into the integration branch, run Validator (build + test). A red build immediately after merge is the cheapest possible conflict detector. Red → quarantine the merged result + escalate.
+**Post-merge validation:** after EVERY merge into the integration branch, run Validate agent (build + test). A red build immediately after merge is the cheapest possible conflict detector. Red → quarantine the merged result + escalate.
 
 **Commit discipline:** Git agent creates atomic commits per logical change, conventional-commit format, on the ticket branch before merge.
 @end
@@ -79,13 +79,13 @@ Two parallel sibling tickets can produce real git conflicts. The resolution is *
 **Resolution procedure:**
 
 1. Git agent detects the conflict and reports the conflicting files + sections
-2. Spawn a Coder with FULL intent context:
+2. Spawn a Code agent with FULL intent context:
    - Both ticket descriptions and plans
    - The conflicting diff sections (both sides)
    - Relevant ADRs from DECISIONS_CONTEXT (loaded by main model before authoring)
-3. Coder resolves to PRESERVE BOTH INTENTS — the resolution must honor what both tickets were trying to achieve
+3. Code agent resolves to PRESERVE BOTH INTENTS — the resolution must honor what both tickets were trying to achieve
 4. If the correct resolution is NOT UNAMBIGUOUS from the intent context: **do NOT guess** → quarantine + escalate
-5. After any resolution: Validator (build + test) immediately
+5. After any resolution: Validate agent (build + test) immediately
 
 **Conservative-or-escalate is absolute.** An LLM silently guessing a wrong merge is the highest-danger failure mode in the whole design. When in doubt: quarantine + surface in report. The user re-runs (resume) with the escalated context.
 
@@ -100,10 +100,10 @@ A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue 
 **Escalation triggers:**
 - Git conflict that cannot be unambiguously resolved from intent context
 - Ticket engine FAIL after max retries (Gate 1 exhausted)
-- Gate 2 FAIL after max retries (Evaluator/Tester not satisfied)
+- Gate 2 FAIL after max retries (Evaluate agent/Test agent not satisfied)
 - Circular dependency detected (all remaining tickets blocked on each other)
-- Build red after merge (Validator fails post-merge)
-- Review coverage incomplete after retry (a focus area failed to produce a live reviewer result after the retry)
+- Build red after merge (Validate agent fails post-merge)
+- Review coverage incomplete after retry (a focus area failed to produce a live Review agent result after the retry)
 - Ticket engine crash/stall (unrecoverable exception or watchdog kill — quarantine cascades to dependents)
 - Any situation requiring a human decision mid-run
 

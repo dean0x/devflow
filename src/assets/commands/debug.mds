@@ -119,7 +119,7 @@ Evaluate investigation verdicts before synthesis:
 **Produces:** ROOT_CAUSE_SYNTHESIS
 **Requires:** INVESTIGATION_RESULTS, CONVERGENCE_DECISION
 
-Once all investigators return, spawn a Synthesizer agent to aggregate findings:
+Once all investigators return, spawn a Synthesize agent to aggregate findings:
 
 ```
 Agent(subagent_type="Synthesize"):
@@ -195,12 +195,12 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 │  └─ Validate confirmed hypotheses, unify partials, or generate second-round
 │
 ├─ Phase 5: Synthesize
-│  └─ Synthesizer aggregates and compares findings
+│  └─ Synthesize agent aggregates and compares findings
 │
 ├─ Phase 6: Root cause report with confidence level
 │
 ├─ Phase 7: Offer Fix
-│  └─ AskUserQuestion → implement fix + Simplifier, or done
+│  └─ AskUserQuestion → implement fix + Simplify agent, or done
 │
 └─ Feature Knowledge Write-Back (Conditional)
    └─ Knowledge agent (if investigation surfaced durable cross-cutting knowledge)

@@ -265,8 +265,8 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 
   /**
    * Normalize an agent name for comparison across naming conventions:
-   *   - Registry uses filenames:   bug-analyzer, coder
-   *   - subagent_type uses frontmatter name field: BugAnalyzer, Coder
+   *   - Registry uses filenames:   diagnose, code
+   *   - subagent_type uses frontmatter name field: Diagnose, Code
    * Strip hyphens and lowercase so both representations collapse to the same key.
    */
   const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();

@@ -41,7 +41,7 @@ Before authoring, verify:
 
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Designer and Evaluator agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Design agent and Evaluate agent prompts.
 
 **2. Read the preference profile**
 
@@ -104,14 +104,14 @@ If the source is a directory, read all .md files. If the source is GitHub issues
 Return: array of ticket objects with all fields.`, { agentType: "Git" })
 );
 
-// Phase 2: Plan all tickets in parallel — one Designer per ticket
+// Phase 2: Plan all tickets in parallel — one Design agent per ticket
 const plans = await phase("plan-parallel", () =>
   parallel((tickets || []).map(ticket => () =>
     agent(`Write an implementation plan for this ticket.
 Ticket: ${JSON.stringify(ticket)}
 Decisions context (apply devflow:apply-decisions; cite ADR/PF IDs): ${DECISIONS_CONTEXT}
 The plan must cover: approach overview, affected files and modules, key design decisions, implementation sequence (what to build first), risks and mitigations, and any open questions you cannot resolve from the ticket alone.
-Write a thorough but tight plan — every section must earn its place for a Coder who has no other context.
+Write a thorough but tight plan — every section must earn its place for a Code agent who has no other context.
 Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Design" })
   ))
 );
@@ -121,7 +121,7 @@ Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns re
 const challenged = await phase("plan-challenge", () =>
   parallel((plans || []).map((plan, i) => () =>
     agent(`Challenge this implementation plan. Verbatim challenge intent:
-"Anything we can improve in this plan? Any gaps? Edge cases we did not address, changes or side-effects we did not consider? And make sure we have well-structured acceptance criteria and a test plan for our Evaluator and Tester agents. We need to verify functionality, API contracts, performance. If there are any design decisions to be taken, loop me in."
+"Anything we can improve in this plan? Any gaps? Edge cases we did not address, changes or side-effects we did not consider? And make sure we have well-structured acceptance criteria and a test plan for our Evaluate agent and Test agents. We need to verify functionality, API contracts, performance. If there are any design decisions to be taken, loop me in."
 
 Plan under review: ${JSON.stringify(plan)}
 Ticket: ${JSON.stringify((tickets || [])[i])}
@@ -130,7 +130,7 @@ Decisions context: ${DECISIONS_CONTEXT}
 Produce:
 1. List of improvements / gaps / edge cases / side-effects identified.
 2. Well-structured acceptance criteria (numbered, positive + negative, at least one negative per ticket). See the acceptance criteria contract below.
-3. A test plan for the Tester agent: for each criterion, scenario + setup + expected outcome + verification method.
+3. A test plan for the Test agent: for each criterion, scenario + setup + expected outcome + verification method.
 4. A list of genuine design decisions that require user input (not settled by the plan, the preference profile, or existing ADRs).
 
 Acceptance criteria quality bar (apply strictly):
@@ -142,7 +142,7 @@ Return: { ticketTitle, improvements (array), acceptanceCriteria (array of number
   ))
 );
 
-// Phase 4: Cross-plan conflict critic — single Designer sees all plans
+// Phase 4: Cross-plan conflict critic — single Design agent sees all plans
 const crossCritic = await phase("cross-plan-critic", () =>
   agent(`Cross-plan conflict audit.
 All ticket plans + challenged criteria: ${JSON.stringify(challenged)}

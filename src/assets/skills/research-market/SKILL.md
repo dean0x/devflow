@@ -24,7 +24,7 @@ Market landscape analysis for understanding user needs, industry trends, market 
 
 ## When This Activates
 
-Loaded by Researcher agent when `RESEARCH_TYPE` is `market`. Covers:
+Loaded by Research agent when `RESEARCH_TYPE` is `market`. Covers:
 - Understanding market size and growth trends
 - Identifying user segments and their needs
 - Mapping the competitive landscape at a high level

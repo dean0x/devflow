@@ -44,7 +44,7 @@ Before you write the workflow script:
 
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Designer and Reviewer agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Design agent and Review agent prompts.
 
 **2. Read and distill the initiative**
 
@@ -86,7 +86,7 @@ const slug = args.slug || initiative.toLowerCase().replace(/[^a-z0-9]+/g, '-').s
 const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
 const OUTDIR = `.devflow/docs/tickets/${slug}/${ts}`;
 
-// Phase 1: Draft — one Designer per ticket, all in parallel
+// Phase 1: Draft — one Design agent per ticket, all in parallel
 const drafts = await phase("draft", () =>
   parallel(candidates.map(c => () =>
     agent(`Draft ticket for initiative: "${initiative}"
@@ -117,7 +117,7 @@ Return: verdict ("ready" or "needs-work") + findings array with severity/issue/s
   ))
 );
 
-// Phase 3: Revise — one Synthesizer per ticket applying both review lenses
+// Phase 3: Revise — one Synthesize agent per ticket applying both review lenses
 const revised = await phase("revise", () =>
   parallel(drafts.map((draft, i) => () =>
     agent(`Revise ticket per two independent review lenses.
@@ -128,7 +128,7 @@ Return: title (string), changesMade (array), remainingConcerns (array), revisedB
   ))
 );
 
-// Phase 4: Cross-critic — single Designer sees the whole set
+// Phase 4: Cross-critic — single Design agent sees the whole set
 const critic = await phase("cross-critic", () =>
   agent(`Whole-set completeness and coherence audit.
 Initiative: ${initiative}
@@ -149,7 +149,7 @@ Write the amended ticket file to ${OUTDIR}/${a.title.toLowerCase().replace(/[^a-
   ));
 });
 
-// Phase 6: Tracking issue — Synthesizer assembles the full artifact set
+// Phase 6: Tracking issue — Synthesize agent assembles the full artifact set
 return phase("tracking-issue", () =>
   agent(`Write ticket files and a tracking-issue document for initiative: "${initiative}"
 

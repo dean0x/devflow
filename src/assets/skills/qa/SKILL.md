@@ -111,7 +111,7 @@ When implementation includes web-facing changes (.tsx, .jsx, .html, routes, page
 
 | Level | Meaning | Action |
 |-------|---------|--------|
-| **BLOCKING** | Acceptance criterion violated — feature does not work as requested | Report FAIL — Coder must fix |
+| **BLOCKING** | Acceptance criterion violated — feature does not work as requested | Report FAIL — Code agent must fix |
 | **WARNING** | Edge case concern — feature works but edge behavior is unexpected | Report PASS with warnings — note for improvement |
 
 ---

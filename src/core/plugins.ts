@@ -90,7 +90,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-resolve',
-    description: 'Process and fix code review issues with blast-radius triage, Coder fixes, and Validator verification',
+    description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
     agents: ['git', 'triage', 'code', 'simplify', 'validate', 'knowledge'],
     skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
@@ -114,7 +114,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-research',
-    description: 'Multi-type research with parallel researchers and trust-aware synthesis',
+    description: 'Multi-type research with parallel Research agents and trust-aware synthesis',
     commands: ['/research'],
     agents: ['research', 'skim', 'synthesize', 'knowledge'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
@@ -130,7 +130,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-self-review',
-    description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
+    description: 'Self-review workflow: Simplify agent + Scrutinize agent for code quality',
     commands: ['/self-review'],
     agents: ['simplify', 'scrutinize', 'validate', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],

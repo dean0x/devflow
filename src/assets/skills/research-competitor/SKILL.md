@@ -24,7 +24,7 @@ Structured competitor research for feature comparison, positioning analysis, and
 
 ## When This Activates
 
-Loaded by Researcher agent when `RESEARCH_TYPE` is `competitor`. Covers:
+Loaded by Research agent when `RESEARCH_TYPE` is `competitor`. Covers:
 - Comparing feature sets across competing tools
 - Understanding how competitors position themselves
 - Identifying gaps competitors have not addressed

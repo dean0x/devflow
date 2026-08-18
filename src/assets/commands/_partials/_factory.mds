@@ -9,7 +9,7 @@ The candidate ticket slate is **proposed by the model** (you, reading the initia
 
 #### Stage 1 — Draft (one agent per ticket, parallelisable)
 
-Spawn one Designer or Synthesizer agent per candidate ticket:
+Spawn one Design agent or Synthesize agent per candidate ticket:
 
 ```js
 // Parallel per-ticket drafters — each is fully independent at draft time
@@ -45,14 +45,14 @@ DRAFT_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 2 — Two-lens review (parallel per ticket)
 
-For each draft, run TWO independent Reviewer agents **in parallel** — one per lens:
+For each draft, run TWO independent Review agents **in parallel** — one per lens:
 
 **Lens A — Planner-readiness (cold read):** Could a planner build from this ticket alone, with no other context? Hunt: missing information; untestable or missing negative acceptance criteria; ambiguous constraints; scope holes (things the feature obviously needs that neither In nor Out mentions); undefined terms a cold reader cannot resolve. Severity: critical = planner would be blocked or misled; major = planner would guess; minor = polish.
 
 **Lens B — Accuracy / scope-discipline audit:** Every claim is sourced from the initiative or spec. No smuggled anti-features (scope items the initiative explicitly excludes). Constraints are honored. Dependency placeholders are consistent with the candidate slate. Severity: critical = invented fact / anti-feature / leak; major = unsourced claim or stance contradiction; minor = citation polish.
 
 ```js
-// Two reviewers per ticket, parallel across both lens and all tickets
+// Two Review agents per ticket, parallel across both lens and all tickets
 const reviews = await parallel(drafts.map((draft, i) => () =>
   parallel([
     () => agent(`Planner-readiness cold read of ticket: ${JSON.stringify(draft)}`, {
@@ -92,7 +92,7 @@ REVIEW_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 3 — Revise (one agent per ticket, per review findings)
 
-For each ticket, spawn one Synthesizer or Designer agent to apply review findings:
+For each ticket, spawn one Synthesize agent or Design agent to apply review findings:
 
 ```js
 // Sequential per ticket (shared file state); parallelisable across tickets only if separate files
@@ -125,7 +125,7 @@ REVISE_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 4 — Whole-set cross-critic (single agent, sees all revised tickets)
 
-One Designer agent reviews the FULL revised set for set-level issues — not individual prose quality:
+One Design agent reviews the FULL revised set for set-level issues — not individual prose quality:
 
 1. **Coverage:** does the union of tickets cover every item the initiative mandates? Anything the initiative mandates that no ticket owns?
 2. **Overlaps / contradictions:** same responsibility claimed by two tickets; contradictory constraints between tickets; inconsistent terminology for the same concept.
@@ -187,7 +187,7 @@ Rules: same as revise — never invent; unresolvable items go to Open Questions;
 
 #### Stage 6 — Assemble tracking issue
 
-One Synthesizer agent writes the tracking-issue document from the final ticket set + critic guidance:
+One Synthesize agent writes the tracking-issue document from the final ticket set + critic guidance:
 
 ```js
 const tracker = await agent(`Write a tracking-issue document for the initiative.

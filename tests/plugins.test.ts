@@ -210,10 +210,10 @@ describe('optional plugin flag', () => {
     expect(ambient!.agents).toContain('triage');
   });
 
-  it('devflow-resolve declares triager, coder, and validator agents (no resolver)', () => {
+  it('devflow-resolve declares triage, code, and validate agents (no resolver)', () => {
     const resolve = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-resolve');
     expect(resolve).toBeDefined();
-    // Triager validates issues; coder fixes them; validator runs the verification gate
+    // Triage agent validates issues; Code agent fixes them; Validate agent runs the verification gate
     expect(resolve!.agents).toContain('triage');
     expect(resolve!.agents).toContain('code');
     expect(resolve!.agents).toContain('validate');
@@ -224,27 +224,27 @@ describe('optional plugin flag', () => {
     // the installer (sweepOrphanedAssets) removes any installed file whose name is
     // absent from getAllAgentNames(), making LEGACY_AGENT_NAMES a historical deletion manifest
     expect(LEGACY_AGENT_NAMES).toContain('resolver');
-    // apply-decisions skill declared so Triager can cite ADR/PF entries
+    // apply-decisions skill declared so Triage agent can cite ADR/PF entries
     expect(resolve!.skills).toContain('apply-decisions');
   });
 
-  it('devflow-implement declares evaluator and tester agents and qa skill', () => {
+  it('devflow-implement declares evaluate and test agents and qa skill', () => {
     const implement = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-implement');
     expect(implement).toBeDefined();
-    // evaluator and tester are declared so uninstalling ambient doesn't break implement
+    // evaluate and test agents are declared so uninstalling ambient doesn't break implement
     expect(implement!.agents).toContain('evaluate');
     expect(implement!.agents).toContain('test');
-    // qa skill is required for the tester agent
+    // qa skill is required for the test agent
     expect(implement!.skills).toContain('qa');
   });
 
-  it('devflow-ambient declares evaluator, tester agents and qa skill', () => {
+  it('devflow-ambient declares evaluate, test agents and qa skill', () => {
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     expect(ambient).toBeDefined();
-    // Ambient orchestrates the full implement pipeline, so evaluator and tester must be declared
+    // Ambient orchestrates the full implement pipeline, so evaluate and test agents must be declared
     expect(ambient!.agents).toContain('evaluate');
     expect(ambient!.agents).toContain('test');
-    // qa skill is required for the tester agent
+    // qa skill is required for the test agent
     expect(ambient!.skills).toContain('qa');
   });
 
@@ -260,14 +260,14 @@ describe('optional plugin flag', () => {
   it('devflow-bug-analysis declares correct agents, skills, and command', () => {
     const bugAnalysis = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis');
     expect(bugAnalysis, 'devflow-bug-analysis should exist in registry').toBeDefined();
-    // Core orchestration agents: git (pre-flight), bug-analyzer (semantic analysis), synthesizer (reporting)
+    // Core orchestration agents: git (pre-flight), diagnose (semantic analysis), synthesize (reporting)
     expect(bugAnalysis!.agents).toContain('git');
     expect(bugAnalysis!.agents).toContain('diagnose');
     expect(bugAnalysis!.agents).toContain('synthesize');
     // Skills: worktree-support for discovery, apply-feature-knowledge for context
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
-    // Skills added in batch-2: apply-decisions + the 5 bug-analyzer category skills
+    // Skills added in batch-2: apply-decisions + the 5 diagnose-agent category skills
     expect(bugAnalysis!.skills).toContain('apply-decisions');
     expect(bugAnalysis!.skills).toContain('security');
     expect(bugAnalysis!.skills).toContain('reliability');
