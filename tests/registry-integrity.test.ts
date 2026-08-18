@@ -14,7 +14,7 @@
  *   dist/commands/ file is declared in the owning plugin's agents array, AND every
  *   declared agent is actually spawned in at least one of the plugin's compiled commands
  *   (bidirectional; skips commands that use no subagent_type syntax).
- *   Skipped entirely when dist/commands/ is absent.
+ *   Fails LOUD when dist/commands/ is absent (was previously a silent skip).
  *
  * These guards replace the plugin.json manifest checks that were removed in the
  * src/ restructure. The DEVFLOW_PLUGINS registry in src/core/plugins.ts is now the
@@ -252,7 +252,7 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 // checks (they use a different spawn syntax, e.g. agentType in dynamic-*).
 //
 // Built-in Explore agent (not a registered agent file) is excluded from both checks.
-// Skipped entirely when dist/commands/ is absent.
+// Fails LOUD when dist/commands/ is absent — a silent skip is not a guard.
 
 describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', () => {
   const distCommandsDir = path.join(ROOT, 'dist', 'commands');
@@ -271,9 +271,14 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
    */
   const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
 
-  it('spawned subagent_types are declared, and declared agents are spawned (skipped when dist absent)', async () => {
+  it('spawned subagent_types are declared, and declared agents are spawned (fail-loud when dist absent)', async () => {
     const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
-    if (!distExists) return; // not a failure — dist may not be built
+    // FAIL-LOUD: a guard that silently skips on a missing build artifact is not a guard.
+    // This was previously a silent `return` — now it fails visibly so the developer knows to build.
+    expect(
+      distExists,
+      'dist/commands/ is absent — run `npm run build` first (Guard 5 cannot verify without compiled files)',
+    ).toBe(true);
 
     // Build: command name → owning plugin
     const commandOwner = new Map<string, typeof DEVFLOW_PLUGINS[number]>();

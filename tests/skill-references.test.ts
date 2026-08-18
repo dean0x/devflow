@@ -862,7 +862,12 @@ describe('Cross-component runtime alignment', () => {
         try {
           cmdContent = readFileSync(cmdPath, 'utf-8');
         } catch {
-          continue; // dist/commands/ not yet built — skip gracefully
+          // FAIL-LOUD: a guard that silently skips on a missing dist file is not a guard.
+          // This was previously a `continue` — now it throws so the developer knows to build.
+          throw new Error(
+            `${cmdRelPath} is absent — run \`npm run build\` first ` +
+            '(companion skill verification cannot be skipped)',
+          );
         }
         const cmdSkills = parseCompanionLine(cmdContent);
         expect(
