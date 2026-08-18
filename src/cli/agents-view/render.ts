@@ -70,7 +70,10 @@ const COL_STATE = 13;
 // ---------------------------------------------------------------------------
 
 /**
- * Capitalize the first character of the agent name for TUI display.
+ * Title-case each hyphen-separated segment of the agent name for TUI display.
+ *
+ * Examples: 'bug-analyzer' → 'Bug-Analyzer', 'coder' → 'Coder',
+ *           'claude-md-auditor' → 'Claude-Md-Auditor'
  *
  * TUI-only — `--list` output uses the raw lowercase name from the registry.
  * Exactly ONE call site: the name cell in the row renderer below.
@@ -79,7 +82,10 @@ const COL_STATE = 13;
  */
 export function formatAgentName(name: string): string {
   if (name.length === 0) return name;
-  return name[0].toUpperCase() + name.slice(1);
+  return name
+    .split('-')
+    .map(seg => (seg.length === 0 ? seg : seg[0].toUpperCase() + seg.slice(1)))
+    .join('-');
 }
 
 // ---------------------------------------------------------------------------

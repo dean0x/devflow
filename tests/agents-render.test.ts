@@ -115,8 +115,8 @@ describe('renderFrame — structure', () => {
   it('shows all three agents by name (capitalized for TUI — Fix 4)', () => {
     const lines = renderStripped(makeState());
     const text = lines.join('\n');
-    // Fix 4: formatAgentName capitalizes the first letter in the TUI
-    expect(text).toContain('Bug-analyzer');
+    // Fix 4: formatAgentName title-cases each hyphen-separated segment
+    expect(text).toContain('Bug-Analyzer');
     expect(text).toContain('Coder');
     expect(text).toContain('Designer');
     // Original lowercase names must NOT appear (they are transformed)
@@ -139,7 +139,7 @@ describe('cursor row marker', () => {
 
   it('non-cursor rows do not have ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Bug-analyzer'));
+    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Bug-Analyzer'));
     expect(nonCursorWithMarker).toHaveLength(0);
   });
 });
@@ -253,7 +253,7 @@ describe('active field brackets ‹ ›', () => {
     const state = makeState({ cursor: 1 });
     const lines = renderStripped(state);
     const nonCursorLines = lines.filter(
-      l => (l.includes('Bug-analyzer') || l.includes('Designer')) && !l.includes('❯')
+      l => (l.includes('Bug-Analyzer') || l.includes('Designer')) && !l.includes('❯')
     );
     for (const line of nonCursorLines) {
       expect(line).not.toContain('‹');
@@ -641,7 +641,7 @@ describe('STATE column (Fix 3)', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Old-custom-agent'));
+    const rowLine = lines.find(l => l.includes('Old-Custom-Agent'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('unknown');
     // Must not show 'not installed' — 'unknown' takes priority (inRegistry check first)
@@ -664,9 +664,9 @@ describe('STATE column (Fix 3)', () => {
     // (render.ts colors STATE column, so some \x1b[ will appear — but not from the name)
     // Check specifically for the red color code that was in the name:
     expect(allRaw).not.toContain('\x1b[31mevil-agent');
-    // The visible text 'evil-agent' must still appear (stripped, capitalized as 'Evil-agent')
+    // The visible text 'evil-agent' must still appear (stripped, title-cased as 'Evil-Agent')
     const strippedLines = rawLines.map(stripAnsi);
-    const rowLine = strippedLines.find(l => l.includes('Evil-agent'));
+    const rowLine = strippedLines.find(l => l.includes('Evil-Agent'));
     expect(rowLine).toBeDefined();
   });
 
@@ -894,16 +894,20 @@ describe('T5: render.ts source does not reference aliasToId', () => {
 });
 
 // ---------------------------------------------------------------------------
-// T13: formatAgentName — capitalized in TUI, --list stays lowercase (Fix 4)
+// T13: formatAgentName — hyphen-aware title-case in TUI, --list stays lowercase (Fix 4)
 // ---------------------------------------------------------------------------
 
 describe('T13: formatAgentName (Fix 4)', () => {
-  it('capitalizes the first character only', () => {
+  it('title-cases each hyphen-separated segment', () => {
     expect(formatAgentName('coder')).toBe('Coder');
-    expect(formatAgentName('bug-analyzer')).toBe('Bug-analyzer');
+    expect(formatAgentName('bug-analyzer')).toBe('Bug-Analyzer');
     expect(formatAgentName('designer')).toBe('Designer');
-    // Multi-word/compound: only first character is uppercased
-    expect(formatAgentName('my-custom-agent')).toBe('My-custom-agent');
+    // Multi-segment: each part is capitalized independently
+    expect(formatAgentName('my-custom-agent')).toBe('My-Custom-Agent');
+    // Single-segment name: unchanged behavior, safe for next-PR renames
+    expect(formatAgentName('code')).toBe('Code');
+    // Three-segment name: all segments capitalized
+    expect(formatAgentName('claude-md-auditor')).toBe('Claude-Md-Auditor');
   });
 
   it('empty string is returned unchanged', () => {
@@ -924,8 +928,8 @@ describe('T13: formatAgentName (Fix 4)', () => {
     });
     const lines = renderStripped(state);
     const text = lines.join('\n');
-    // TUI must show capitalized names
-    expect(text).toContain('Bug-analyzer');
+    // TUI must show hyphen-aware title-cased names
+    expect(text).toContain('Bug-Analyzer');
     expect(text).toContain('Coder');
     // Lowercase originals must NOT appear — they are transformed
     expect(text).not.toContain('\nbug-analyzer');
