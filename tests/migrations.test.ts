@@ -524,16 +524,26 @@ describe('reportMigrationResult', () => {
 describe('canonicalise-agent-keys-v1 migration', () => {
   let tmpDir: string;
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-cak-migration-test-'));
-  });
+  // Snapshot the shipped entries at describe-eval time so they can be
+  // restored after each test. Each test starts from a known-empty map.
+  const SHIPPED_ENTRIES: Record<string, string> = { ...LEGACY_AGENT_KEYS };
 
-  afterEach(async () => {
-    // Clear any LEGACY_AGENT_KEYS entries added by tests
+  beforeEach(async () => {
+    // Clear the map so each test starts from a known-empty state.
     for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
     }
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-cak-migration-test-'));
+  });
+
+  afterEach(async () => {
+    // Clear any entries added by the test body, then restore shipped state.
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+    Object.assign(LEGACY_AGENT_KEYS, SHIPPED_ENTRIES);
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 

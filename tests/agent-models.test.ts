@@ -619,19 +619,31 @@ describe('reapplyAgentMapping', async () => {
  * Tests for canonicaliseAgentKeys() and LEGACY_AGENT_KEYS.
  *
  * We temporarily populate LEGACY_AGENT_KEYS in each test to exercise the
- * migration logic without modifying the shipped (empty) map.
- * Cleanup is handled in afterEach to ensure map stays empty for other tests.
+ * migration logic without disturbing the shipped map or other tests.
+ * Cleanup is handled by beforeEach/afterEach: clear → test body → restore.
  */
 describe('canonicaliseAgentKeys', () => {
-  // Save and restore LEGACY_AGENT_KEYS around each test.
-  // We mutate the exported object directly (it is Object.create(null),
-  // so Object.assign and delete work correctly).
-  afterEach(() => {
-    // Clear all entries added by tests
+  // Snapshot the shipped entries at describe-eval time so they can be
+  // restored after each test. Tests that need specific entries add them
+  // themselves; tests that need an empty map rely on the clear in beforeEach.
+  const SHIPPED_ENTRIES: Record<string, string> = { ...LEGACY_AGENT_KEYS };
+
+  beforeEach(() => {
+    // Clear the map so each test starts from a known-empty state.
+    // Tests that need entries add them in their bodies.
     for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
     }
+  });
+
+  afterEach(() => {
+    // Clear any entries added by the test body, then restore shipped state.
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+    Object.assign(LEGACY_AGENT_KEYS, SHIPPED_ENTRIES);
   });
 
   it('is a no-op when LEGACY_AGENT_KEYS is empty (fast path)', () => {

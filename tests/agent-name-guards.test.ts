@@ -59,17 +59,255 @@ const SLUG_TO_NAME_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze(
 
 /**
  * Form B names (frontmatter name:) that once existed but have been renamed.
- * Ships EMPTY — populated in phase 4 when agents are renamed.
+ * Populated in phase 4 of the agent-action-verbs rename wave.
  *
- * Derive form B by READING each agent's frontmatter name:, never by Capitalize(slug).
+ * Derived from the actual frontmatter name: values that agents carried before
+ * the rename (reading them directly, not inferring from Capitalize(slug)).
  *
  * Each name is searched with MAXIMAL RECALL: case-insensitive, NO trailing boundary.
  * This catches Coders, Coder's, coderPath, and ANSI-embedded 31mcoder.
  * Over-match + allowlist is safe; under-match is not.
  *
- * When populated in phase 4, extend RETIRED_ALLOWLIST below if needed.
+ * Legitimate collateral hits are covered by RETIRED_ALLOWLIST below.
  */
-const RETIRED_AGENT_FORM_B: readonly string[] = []
+const RETIRED_AGENT_FORM_B: readonly string[] = [
+  // 13 agents renamed noun→action-verb (phase 4 of agent-action-verbs wave)
+  'Coder',        // → Code
+  'Designer',     // → Design
+  'Evaluator',    // → Evaluate
+  'Researcher',   // → Research
+  'Reviewer',     // → Review
+  'Scrutinizer',  // → Scrutinize
+  'Simplifier',   // → Simplify
+  'Skimmer',      // → Skim
+  'Synthesizer',  // → Synthesize
+  'Tester',       // → Test
+  'Triager',      // → Triage
+  'Validator',    // → Validate
+  'BugAnalyzer',  // → Diagnose
+]
+
+// ---------------------------------------------------------------------------
+// GAP-5 — allowlist for legitimate collateral hits
+// ---------------------------------------------------------------------------
+
+/**
+ * Entries that cover expected GAP-5 false positives.
+ *
+ * An entry MUST satisfy both directions:
+ *   (a) Forward  — the corpus file at entry.path contains entry.name (case-insensitive).
+ *   (b) Backward — a new `it` block asserts every entry has at least one live hit.
+ *
+ * Entry.path is the full display path as it appears in violation messages:
+ *   "src/assets/<rel>" for assets corpus
+ *   "dist/commands/<rel>" for compiled dist corpus
+ *
+ * Allowed categories (in priority order):
+ *   URL_LINK     — entry.name appears only as a URL or link text
+ *   DATA_FIELD   — entry.name appears as a data-model field name
+ *   CONTRACT     — entry.name is part of a protected cross-file protocol heading
+ *   CONCEPT      — entry.name describes a pattern concept, not an agent type
+ *   THIRD_PARTY  — entry.name is a third-party library or tool name
+ *   EXAMPLE_CODE — entry.name appears only in code-example/violation samples
+ */
+interface AllowlistEntry {
+  path: string
+  name: string
+  reason: string
+}
+
+const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
+  // -----------------------------------------------------------------------
+  // Coder — URL_LINK
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/skills/go/references/sources.md',
+    name: 'Coder',
+    reason:
+      'URL_LINK: "CodeReviewComments" — link text for the Go wiki page; ' +
+      'no agent spawn reference',
+  },
+
+  // -----------------------------------------------------------------------
+  // Evaluator — CONCEPT (MDS function name + inline prompt role descriptors)
+  // The actual Evaluate agent is spawned via agentType: "Evaluate".
+  // evaluator_panel() is an MDS function; "Acceptance-criteria evaluator:"
+  // is an inline agent-prompt label, not a Form-B spawn key.
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/commands/dynamic-build.mds',
+    name: 'Evaluator',
+    reason:
+      'CONCEPT: evaluator_panel MDS function import/call; inline prompt role labels ' +
+      '("Acceptance-criteria evaluator:", etc.) — not Form-B spawn keys; ' +
+      'actual spawn uses agentType: "Evaluate"',
+  },
+  {
+    path: 'src/assets/commands/_partials/_engine.mds',
+    name: 'Evaluator',
+    reason:
+      'CONCEPT: @define evaluator_panel() MDS function body; inline prompt descriptors ' +
+      '— not Form-B spawn keys',
+  },
+  {
+    path: 'dist/commands/dynamic-build.md',
+    name: 'Evaluator',
+    reason:
+      'CONCEPT: compiled output of dynamic-build.mds; evaluator_panel function + prompt labels ' +
+      '— not Form-B spawn keys',
+  },
+
+  // -----------------------------------------------------------------------
+  // Reviewer — DATA_FIELD, CONTRACT, CONCEPT, THIRD_PARTY (generic term)
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/agents/triage.md',
+    name: 'Reviewer',
+    reason:
+      'DATA_FIELD: reviewer_confidence — issue contract field carrying a confidence ' +
+      'percentage; not an agent spawn',
+  },
+  {
+    path: 'src/assets/agents/code.md',
+    name: 'Reviewer',
+    reason:
+      'CONTRACT: "Reviewer Focus Areas" — protected PR description contract heading ' +
+      '(plan.mds emits; code.md maps the PR table to it); 5 sites, 3 files',
+  },
+  {
+    path: 'src/assets/commands/plan.mds',
+    name: 'Reviewer',
+    reason:
+      'CONTRACT: "Reviewer Focus Areas" heading emitted in PR Description Guidance output ' +
+      '— protected cross-file contract; not an agent spawn',
+  },
+  {
+    path: 'src/assets/commands/resolve.mds',
+    name: 'Reviewer',
+    reason:
+      'DATA_FIELD: reviewer_confidence — issue input data field; not an agent spawn',
+  },
+  {
+    path: 'src/assets/commands/dynamic-build.mds',
+    name: 'Reviewer',
+    reason:
+      'CONCEPT: "dead-reviewer detection" — detection concept in comment; not an agent spawn',
+  },
+  {
+    path: 'src/assets/commands/_partials/_engine.mds',
+    name: 'Reviewer',
+    reason:
+      'CONCEPT: "clean reviewer" — generic prose in Review agent result contract description; ' +
+      'not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/quality-gates/SKILL.md',
+    name: 'Reviewer',
+    reason:
+      'URL_LINK: "reviewer/" — URL path segment in Google Engineering Practices link; ' +
+      'not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/compliance/references/sox.md',
+    name: 'Reviewer',
+    reason:
+      '"reviewer" — generic human code-review role in SOX control description; ' +
+      'not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/git/references/violations.md',
+    name: 'Reviewer',
+    reason:
+      '"Reviewers" — plural generic human code-review participants in violation example; ' +
+      'not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/git/references/patterns.md',
+    name: 'Reviewer',
+    reason:
+      'CONTRACT: "## Reviewer Focus Areas" section heading — protected PR description ' +
+      'contract site in git skill reference patterns',
+  },
+  {
+    path: 'dist/commands/resolve.md',
+    name: 'Reviewer',
+    reason:
+      'DATA_FIELD: compiled resolve.mds; reviewer_confidence field — not an agent spawn',
+  },
+  {
+    path: 'dist/commands/dynamic-build.md',
+    name: 'Reviewer',
+    reason:
+      'CONCEPT: compiled dynamic-build.mds; "dead-reviewer" concept + "clean reviewer" prose ' +
+      '— not agent spawns',
+  },
+  {
+    path: 'dist/commands/plan.md',
+    name: 'Reviewer',
+    reason:
+      'CONTRACT: compiled plan.mds; "Reviewer Focus Areas" protected contract heading',
+  },
+
+  // -----------------------------------------------------------------------
+  // Tester — CONCEPT (temp file path pattern)
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/skills/qa/references/browser-testing.md',
+    name: 'Tester',
+    reason:
+      'CONCEPT: "devflow-tester-" — temp file path pattern in browser test scaffolding ' +
+      '(mktemp /tmp/devflow-tester-XXXXXX.log); not an agent spawn',
+  },
+
+  // -----------------------------------------------------------------------
+  // Validator — THIRD_PARTY + EXAMPLE_CODE
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/skills/boundary-validation/SKILL.md',
+    name: 'Validator',
+    reason:
+      'THIRD_PARTY: go-playground/validator, serde+validator — third-party library names ' +
+      'in skills table; not agent spawns',
+  },
+  {
+    path: 'src/assets/skills/boundary-validation/references/sources.md',
+    name: 'Validator',
+    reason:
+      'THIRD_PARTY: go-playground/validator, validator Rust crate — source bibliography ' +
+      'entries; not agent spawns',
+  },
+  {
+    path: 'src/assets/skills/python/references/sources.md',
+    name: 'Validator',
+    reason:
+      'THIRD_PARTY: "field validators" — Pydantic validation terminology in source entry; ' +
+      'not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/complexity/references/violations.md',
+    name: 'Validator',
+    reason:
+      'EXAMPLE_CODE: UserValidator — code identifier in violation sample; not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/testing/references/violations.md',
+    name: 'Validator',
+    reason:
+      'EXAMPLE_CODE: mockValidator — test variable in violation sample; not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/architecture/SKILL.md',
+    name: 'Validator',
+    reason:
+      'EXAMPLE_CODE: UserValidator — class name in dependency-injection example; not an agent spawn',
+  },
+  {
+    path: 'src/assets/skills/architecture/references/patterns.md',
+    name: 'Validator',
+    reason:
+      'EXAMPLE_CODE: UserValidator — class in DI pattern example code; not an agent spawn',
+  },
+]
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,6 +464,21 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
       }
     }
     expect(violations, `Form A↔B mismatches:\n${violations.join('\n')}`).toHaveLength(0)
+  })
+
+  it('SLUG_TO_NAME_EXCEPTIONS is empty — phase 4 wave acceptance criterion (D-RI-1)', () => {
+    /**
+     * D-RI-1: by phase 4, every renamed agent MUST use capitalizeFirst(slug)
+     * as its frontmatter name:, so no slug→name exceptions are needed.
+     * Phase 2 emptied this map. This assertion proves it stayed empty.
+     */
+    expect(
+      Object.keys(SLUG_TO_NAME_EXCEPTIONS),
+      'SLUG_TO_NAME_EXCEPTIONS must be empty (D-RI-1). Found:\n' +
+        Object.entries(SLUG_TO_NAME_EXCEPTIONS)
+          .map(([k, v]) => `  ${k} → ${v}`)
+          .join('\n'),
+    ).toHaveLength(0)
   })
 })
 
@@ -417,10 +670,14 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
 
+    // Build O(1) lookup set from the allowlist: "displayPath\0name" → allowed
+    const allowedHits = new Set(RETIRED_ALLOWLIST.map(e => `${e.path}\0${e.name}`))
+
     const violations: string[] = []
 
     const scan = (files: string[], baseDir: string, prefix: string) => {
       for (const filePath of files) {
+        const displayPath = `${prefix}${path.relative(baseDir, filePath)}`
         let content: string
         try {
           content = readFileSync(filePath, 'utf-8')
@@ -433,8 +690,10 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
           // Catches Coders, Coder's, coderPath, ANSI-embedded 31mcoder.
           const re = new RegExp(retiredName, 'i')
           if (re.test(content)) {
+            // Skip if this (displayPath, name) pair is explicitly allowlisted.
+            if (allowedHits.has(`${displayPath}\0${retiredName}`)) continue
             violations.push(
-              `  ${prefix}${path.relative(baseDir, filePath)}: references retired name '${retiredName}'`,
+              `  ${displayPath}: references retired name '${retiredName}'`,
             )
           }
         }
@@ -449,5 +708,56 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     )
 
     expect(violations, `Retired agent names found in shipped artifacts:\n${violations.join('\n')}`).toHaveLength(0)
+  })
+
+  it('RETIRED_ALLOWLIST is bidirectional — every entry matches at least one live corpus hit', () => {
+    /**
+     * Bidirectional invariant:
+     *   (a) Every live hit is covered by an allowlist entry (forward — checked above).
+     *   (b) Every allowlist entry covers at least one live hit (backward — this test).
+     *
+     * A stale allowlist entry (no hit in corpus) must be removed. Stale entries mask
+     * future genuine regressions — they falsely suppress violations that no longer exist.
+     */
+    if (RETIRED_AGENT_FORM_B.length === 0 || RETIRED_ALLOWLIST.length === 0) return
+
+    const distFiles = requireDistFiles()
+    const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
+
+    // Build corpus with display paths matching what the scan uses.
+    const corpus: Array<{ displayPath: string; content: string }> = []
+    for (const filePath of assetsFiles) {
+      try {
+        corpus.push({
+          displayPath: `src/assets/${path.relative(ASSETS_DIR, filePath)}`,
+          content: readFileSync(filePath, 'utf-8'),
+        })
+      } catch { /* skip unreadable files — scan handles them the same way */ }
+    }
+    for (const f of distFiles) {
+      try {
+        corpus.push({
+          displayPath: `dist/commands/${f}`,
+          content: readFileSync(path.join(DIST_COMMANDS_DIR, f), 'utf-8'),
+        })
+      } catch { /* skip */ }
+    }
+
+    const staleEntries: string[] = []
+    for (const entry of RETIRED_ALLOWLIST) {
+      const re = new RegExp(entry.name, 'i')
+      const hasHit = corpus.some(({ displayPath, content }) =>
+        displayPath === entry.path && re.test(content),
+      )
+      if (!hasHit) {
+        staleEntries.push(
+          `  { path: '${entry.path}', name: '${entry.name}' } — no hit in corpus; stale entry must be removed`,
+        )
+      }
+    }
+    expect(
+      staleEntries,
+      `Stale RETIRED_ALLOWLIST entries (no corpus hit found):\n${staleEntries.join('\n')}`,
+    ).toHaveLength(0)
   })
 })

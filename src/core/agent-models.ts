@@ -74,23 +74,41 @@ const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 /**
  * Maps old agent keys (form A slugs) to their canonical replacement keys.
  *
- * Ships EMPTY — populated in phase 4 when agents are renamed.
+ * Populated in phase 4 of the agent-action-verbs rename wave.
+ * 13 agents renamed from noun form (coder, reviewer, …) to action-verb form
+ * (code, review, …). The canonicalise-agent-keys-v1 migration in migrations.ts
+ * calls canonicaliseAgentKeys() to rewrite ~/.devflow/agent-models.json on the
+ * user's first init after upgrading.
  *
  * PROTOTYPE SAFETY: Object.create(null) prevents prototype-pollution.
  * Every lookup MUST use Object.hasOwn — never key in LEGACY_AGENT_KEYS or
  * direct bracket access. `--set constructor` would otherwise return a function
  * that flows into path.join (the object-literal lookup on argv trap).
  *
- * DORMANCY: entries are stored here whether or not the key rename has been
- * applied to the file yet. canonicaliseAgentKeys() is a no-op when the map is
- * empty (the common case today), so zero overhead until phase 4.
- *
- * NOTE on concurrent execution: runMigrations() takes no lock and two
- * worktrees share one ~/.devflow. canonicaliseAgentKeys is idempotent, so
+ * DORMANCY: entries here are stored whether or not the key rename has been
+ * applied to the file yet. canonicaliseAgentKeys() is idempotent, so
  * double-execution from concurrent sessions is a harmless no-op — the second
  * run finds the file already migrated and makes zero writes.
  */
-export const LEGACY_AGENT_KEYS: Record<string, string> = Object.create(null) as Record<string, string>;
+export const LEGACY_AGENT_KEYS: Record<string, string> = Object.assign(
+  Object.create(null) as Record<string, string>,
+  {
+    // Phase 4 — agent-action-verbs rename (old slug → new slug)
+    'coder':        'code',
+    'designer':     'design',
+    'evaluator':    'evaluate',
+    'researcher':   'research',
+    'reviewer':     'review',
+    'scrutinizer':  'scrutinize',
+    'simplifier':   'simplify',
+    'skimmer':      'skim',
+    'synthesizer':  'synthesize',
+    'tester':       'test',
+    'triager':      'triage',
+    'validator':    'validate',
+    'bug-analyzer': 'diagnose',
+  },
+);
 
 /**
  * Canonicalise agent keys in a raw agents map by applying LEGACY_AGENT_KEYS.

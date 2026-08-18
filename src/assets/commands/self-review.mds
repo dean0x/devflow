@@ -52,7 +52,7 @@ Simplify and refine the code for clarity and consistency while preserving functi
 
 ### Phase 2: Scrutinize agent (9-Pillar Quality Gate)
 
-**Produces:** SCRUTINIZER_STATUS, SCRUTINIZER_CHANGES
+**Produces:** SCRUTINIZE_STATUS, SCRUTINIZE_CHANGES
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
 
 Spawn Scrutinize agent for quality evaluation and fixing:
@@ -71,12 +71,12 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 ### Phase 3: Conditional Validation
 
 **Produces:** VALIDATION_RESULT
-**Requires:** SCRUTINIZER_CHANGES
+**Requires:** SCRUTINIZE_CHANGES
 
 If Scrutinize agent made changes (STATUS == FIXED):
 
 Agent(subagent_type="Validate", run_in_background=false):
-"FILES_CHANGED: \{scrutinizer_modified_files\}
+"FILES_CHANGED: \{scrutinize_modified_files\}
 VALIDATION_SCOPE: changed-only
 Run build, typecheck, lint, test on modified files"
 
@@ -85,7 +85,7 @@ Run build, typecheck, lint, test on modified files"
 
 ### Phase 4: Report
 
-**Requires:** SCRUTINIZER_STATUS, VALIDATION_RESULT
+**Requires:** SCRUTINIZE_STATUS, VALIDATION_RESULT
 
 Display summary:
 

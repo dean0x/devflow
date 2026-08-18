@@ -247,7 +247,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 ### Phase 4: Simplify
 
-**Produces:** SIMPLIFIER_OUTPUT
+**Produces:** SIMPLIFY_OUTPUT
 **Requires:** FILES_CHANGED
 
 After validation passes, spawn Simplify agent to polish the code:
