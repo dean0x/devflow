@@ -437,17 +437,28 @@ describe('minimal state', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Alias rendering (AC-F2)
+// Alias rendering (Fix 1 — bare alias, no canonical-id annotation)
 // ---------------------------------------------------------------------------
 
 describe('alias rendering', () => {
-  it('renders alias with canonical-id annotation: "sol (gpt-5.6-sol)"', () => {
-    // When catalog.known and aliasToId maps 'sol' → 'gpt-5.6-sol', the model
-    // cell must show "sol (gpt-5.6-sol)" — AC-F2.
+  // T4 / T14-MANDATORY-REWRITE: alias renders BARE, not as "sol (gpt-5.6-sol)".
+  //
+  // The OLD behavior (pre-Fix 1) annotated alias models as "sol (gpt-5.6-sol)".
+  // Fix 1 removes the annotation branch. Aliases now render bare.
+  //
+  // Falsification record (T14):
+  //   GREEN before Fix 1: renderModelCell showed "sol (gpt-5.6-sol)" via aliasToId.
+  //   RED  after rewrite, before code fix: catalog has populated models, buildModelCycle
+  //        puts 'sol' in cycle; old render code showed "(gpt-5.6-sol)" annotation.
+  //        New assertion `not.toContain('(gpt-5.6-sol)')` → FAIL (exit code 1).
+  //   GREEN after code fix: annotation branch deleted; row renders bare "sol" → PASS.
+  it('T14/T4: alias renders bare — no canonical-id annotation (sol not "sol (gpt-5.6-sol)")', () => {
+    // Populated catalog — models array is non-empty so pickerNames returns ['sol'].
+    // buildModelCycle puts 'sol' in the cycle; renderModelCell renders it bare.
     const catalog: ExternalModelCatalog = {
       known: true,
       source: 'live',
-      models: [],
+      models: [{ id: 'gpt-5.6-sol', aliases: ['sol'] }],
       selectableNames: ['sol', 'gpt-5.6-sol'],
       aliasToId: new Map([['sol', 'gpt-5.6-sol'], ['gpt-5.6-sol', 'gpt-5.6-sol']]),
     };
@@ -457,38 +468,81 @@ describe('alias rendering', () => {
       modelCycle: buildModelCycle(catalog),
       rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
       cursor: 0,
-      activeField: 'effort', // model field not active — show bare value
+      activeField: 'effort', // model not active — no ‹ › brackets
     });
     const lines = renderStripped(state);
     const rowLine = lines.find(l => l.includes('coder'));
     expect(rowLine).toBeDefined();
-    expect(rowLine).toContain('sol (gpt-5.6-sol)');
+    // T4 core assertion: alias renders bare
+    expect(rowLine).toContain('sol');
+    expect(rowLine).not.toContain('sol (gpt-5.6-sol)');
+    // No canonical-id in parens at all
+    expect(rowLine).not.toMatch(/\(gpt-/);
   });
 
-  it('renders canonical id bare (no annotation when alias === id)', () => {
-    // A canonical id has aliasToId entry that maps to itself — render bare.
-    const catalog: ExternalModelCatalog = {
-      known: true,
-      source: 'live',
-      models: [],
-      selectableNames: ['gpt-5.6-sol'],
-      aliasToId: new Map([['gpt-5.6-sol', 'gpt-5.6-sol']]),
-    };
+  it('T4: "default (opus)" parenthetical SURVIVES alias-annotation removal', () => {
+    // The shipped-default hint "(opus)" must not be stripped by Fix 1.
+    // This parenthetical answers a DIFFERENT question: "what model is the default?",
+    // not "what is the canonical id of this alias?".
     const state = makeState({
       proxyEnabled: true,
-      catalog,
-      modelCycle: buildModelCycle(catalog),
-      rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.6-sol', originalModel: 'gpt-5.6-sol' })],
+      catalog: UNKNOWN_CATALOG,
+      modelCycle: buildModelCycle(UNKNOWN_CATALOG),
+      rows: [makeRow({ name: 'reviewer', shippedDefault: 'opus', configuredModel: 'default' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('reviewer'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('default (opus)');
+  });
+
+  it('T4: "(unavailable)" parenthetical SURVIVES alias-annotation removal', () => {
+    // Off-cycle pins still render as "model (unavailable)".
+    const state = makeState({
+      proxyEnabled: true,
+      catalog: UNKNOWN_CATALOG,
+      modelCycle: ['default', 'sonnet', 'opus'],
+      rows: [makeRow({
+        name: 'coder',
+        configuredModel: 'retired-model',
+        originalModel: 'retired-model',
+        offCyclePin: 'retired-model',
+      })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
     const rowLine = lines.find(l => l.includes('coder'));
     expect(rowLine).toBeDefined();
-    // Must show the id; must NOT show a secondary annotation in parens
-    expect(rowLine).toContain('gpt-5.6-sol');
-    // Should NOT contain double annotation like 'gpt-5.6-sol (gpt-5.6-sol)'
-    expect(rowLine).not.toContain('gpt-5.6-sol (gpt-5.6-sol)');
+    expect(rowLine).toContain('retired-model (unavailable)');
+  });
+
+  it('in-cycle canonical id (no alias) renders bare', () => {
+    // A canonical id that IS in the picker cycle (because it has no aliases)
+    // renders bare. 'gpt-5.5' has no aliases → it IS the picker name.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      source: 'live',
+      models: [{ id: 'gpt-5.5', aliases: [] }],
+      selectableNames: ['gpt-5.5'],
+      aliasToId: new Map([['gpt-5.5', 'gpt-5.5']]),
+    };
+    const state = makeState({
+      proxyEnabled: true,
+      catalog,
+      modelCycle: buildModelCycle(catalog), // includes 'gpt-5.5'
+      rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.5', originalModel: 'gpt-5.5' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('gpt-5.5');
+    expect(rowLine).not.toContain('gpt-5.5 (gpt-5.5)');
+    expect(rowLine).not.toContain('(unavailable)');
   });
 });
 
@@ -650,5 +704,24 @@ describe('escape sequence injection safety', () => {
     const rawLines = renderFrame(state, { rows: 24, cols: 80 });
     const allRaw = rawLines.join('\n');
     expect(allRaw).not.toContain('\x1b]8;');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T5: static guard — aliasToId not referenced in render.ts (Fix 1)
+// ---------------------------------------------------------------------------
+
+describe('T5: render.ts source does not reference aliasToId', () => {
+  it('aliasToId identifier absent from render.ts — annotation branch fully deleted', async () => {
+    // Fix 1 deleted the alias→canonical-id annotation branch from renderModelCell.
+    // The render module must no longer import or read catalog.aliasToId.
+    // This test guards against accidental re-introduction.
+    const { readFileSync } = await import('fs');
+    const { fileURLToPath } = await import('url');
+    const renderPath = fileURLToPath(
+      new URL('../src/cli/agents-view/render.ts', import.meta.url),
+    );
+    const src = readFileSync(renderPath, 'utf-8');
+    expect(src, 'render.ts must not reference aliasToId after Fix 1').not.toContain('aliasToId');
   });
 });

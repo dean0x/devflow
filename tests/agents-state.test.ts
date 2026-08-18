@@ -31,6 +31,7 @@ import {
   reduce,
   buildRow,
   buildModelCycle,
+  pickerNames,
   isDirtyModel,
   isDirtyEffort,
   unsavedCount,
@@ -42,9 +43,15 @@ import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
-// Mock catalog — represents a realistic discovered catalog for tests
-// Cycle order (proxy ON): default → haiku → sonnet → opus → fable →
-//   sol → terra → luna → gpt-5.6-sol → gpt-5.6-terra → gpt-5.6-luna → gpt-5.5
+// Mock catalog — represents a realistic discovered catalog for tests.
+// Cycle order (proxy ON, Fix 1 — alias-only picker):
+//   default → haiku → sonnet → opus → fable →
+//   sol → terra → luna → gpt-5.5
+// (9 stops total; canonical ids gpt-5.6-* are NOT in the cycle since each has
+//  an alias; gpt-5.5 keeps its stop because its aliases[] is empty)
+//
+// catalog.selectableNames is NOT used to build the cycle — it doubles as the
+// --set validation allowlist and includes both aliases and canonical ids.
 // ---------------------------------------------------------------------------
 
 const MOCK_CATALOG_KNOWN: ExternalModelCatalog = {
@@ -70,11 +77,12 @@ const MOCK_CATALOG_KNOWN: ExternalModelCatalog = {
 
 const MOCK_CATALOG_UNKNOWN: ExternalModelCatalog = { known: false };
 
-// Full cycle when proxy is on with MOCK_CATALOG_KNOWN
+// Full cycle when proxy is on with MOCK_CATALOG_KNOWN (Fix 1: alias-only picker).
+// 9 elements: default + 4 claude aliases + 4 picker names (sol/terra/luna/gpt-5.5).
 const FULL_CYCLE = [
   'default',
   ...CLAUDE_MODEL_ALIASES,
-  ...MOCK_CATALOG_KNOWN.selectableNames,
+  'sol', 'terra', 'luna', 'gpt-5.5', // pickerNames(MOCK_CATALOG_KNOWN.models)
 ] as readonly string[];
 
 // ---------------------------------------------------------------------------
@@ -277,15 +285,19 @@ describe('T8: alias round-trip', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-F1: cycle order', () => {
-  it('with proxy enabled and known catalog, cycle matches expected order', () => {
+  it('with proxy enabled and known catalog, cycle matches expected order (alias-only, Fix 1)', () => {
+    // Fix 1: cycle uses pickerNames(catalog.models), NOT catalog.selectableNames.
+    // Result: aliases only; canonical ID only when a model has no aliases.
+    // gpt-5.5 has no aliases → contributes itself. gpt-5.6-* have aliases → alias only.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const expected = [
       'default',
-      'haiku', 'sonnet', 'opus', 'fable',  // CLAUDE_MODEL_ALIASES
-      'sol', 'terra', 'luna',               // aliases in registry order
-      'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', // canonical ids
+      'haiku', 'sonnet', 'opus', 'fable', // CLAUDE_MODEL_ALIASES
+      'sol', 'terra', 'luna',              // aliases (registry order, one per model)
+      'gpt-5.5',                           // no aliases → canonical id
     ];
     expect([...cycle]).toEqual(expected);
+    expect(cycle.length).toBe(9);
   });
 });
 
@@ -307,20 +319,19 @@ describe('AC-F4: off-cycle pin recovery', () => {
     const { state: s1 } = reduce(state, 'right');
     expect(s1.rows[0].configuredModel).toBe('default');
 
-    // The effective cycle for this row is [...mainCycle, pin], 13 elements.
-    // From 'default' (index 0), pressing right cycle.length (12) times reaches the pin
-    // (index 12 = last element of effective cycle). One more press wraps to 'default'.
+    // The effective cycle for this row is [...mainCycle, pin], 10 elements (Fix 1: 9+1).
+    // From 'default' (index 0), pressing right cycle.length (9) times reaches the pin
+    // (index 9 = last element of effective cycle). One more press wraps to 'default'.
     //
     // Trace from 'default': press 1→haiku, 2→sonnet, 3→opus, 4→fable,
-    //   5→sol, 6→terra, 7→luna, 8→gpt-5.6-sol, 9→gpt-5.6-terra,
-    //   10→gpt-5.6-luna, 11→gpt-5.5, 12→gpt-4.2-legacy (pin!), 13→default
-    const mainLen = cycle.length; // 12
+    //   5→sol, 6→terra, 7→luna, 8→gpt-5.5, 9→gpt-4.2-legacy (pin!), 10→default
+    const mainLen = cycle.length; // 9 (Fix 1)
     let s = s1;
     for (let i = 0; i < mainLen; i++) {
       const { state: next } = reduce(s, 'right');
       s = next;
     }
-    // After 12 presses from 'default', effective cycle puts us at pin (index 12)
+    // After 9 presses from 'default', effective cycle puts us at pin (index 9)
     expect(s.rows[0].configuredModel).toBe('gpt-4.2-legacy');
 
     // One more press wraps back to 'default' — confirming full cycle completes
@@ -370,11 +381,15 @@ describe('AC-F4: off-cycle pin recovery', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-F5: known catalog drives model cycle regardless of proxy state', () => {
-  it('with proxy off and known catalog, external models are present in the cycle', () => {
+  it('with proxy off and known catalog, external picker names are present in the cycle', () => {
     // Dormant-mapping design: the TUI must show GPT models even when proxy is off
     // so users can inspect and adjust dormant mappings before enabling the proxy.
+    // Fix 1: cycle uses pickerNames(catalog.models), not catalog.selectableNames.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
-    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES, ...MOCK_CATALOG_KNOWN.selectableNames]);
+    expect([...cycle]).toEqual([
+      'default', ...CLAUDE_MODEL_ALIASES,
+      ...pickerNames(MOCK_CATALOG_KNOWN.models), // ['sol','terra','luna','gpt-5.5']
+    ]);
   });
 
   it('with unknown catalog, cycle is claude-only (catalog-known gate holds)', () => {
@@ -385,6 +400,54 @@ describe('AC-F5: known catalog drives model cycle regardless of proxy state', ()
   it('with unknown catalog and proxy on, cycle is claude-only', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_UNKNOWN);
     expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T1-T3: pickerNames unit tests (Fix 1 — alias-only picker)
+// ---------------------------------------------------------------------------
+
+describe('pickerNames (Fix 1)', () => {
+  it('T1: returns all aliases per model — live-cache-style fixture matches expected picker names', () => {
+    // Using MOCK_CATALOG_KNOWN which mirrors the real 4-model warm cache.
+    // gpt-5.6-sol → ['sol'], gpt-5.6-terra → ['terra'], gpt-5.6-luna → ['luna'],
+    // gpt-5.5 → [] (no aliases → contributes canonical id).
+    const result = pickerNames(MOCK_CATALOG_KNOWN.models);
+    expect(result).toEqual(['sol', 'terra', 'luna', 'gpt-5.5']);
+  });
+
+  it('T2: model with TWO aliases contributes BOTH to the picker (not just first)', () => {
+    // Regression guard: a naive first-alias-only implementation would return ['sol']
+    // but a model with 2 aliases must return all of them so the user can pick either.
+    const result = pickerNames([
+      { id: 'gpt-5.6-sol', aliases: ['sol', 'sol-preview'] },
+    ]);
+    expect(result).toEqual(['sol', 'sol-preview']);
+    expect(result).toHaveLength(2);
+  });
+
+  it('T3: zero-maintenance — completely custom catalog requires no code changes', () => {
+    // If a new model family "foo" is added to the catalog, buildModelCycle just works.
+    // No hardcoded model names anywhere — the cycle is catalog-driven.
+    const customCatalog: ExternalModelCatalog = {
+      known: true,
+      models: [
+        { id: 'foo-turbo',  aliases: ['foo'] },
+        { id: 'foo-mini',   aliases: [] },     // no alias → contributes canonical id
+      ],
+      selectableNames: ['foo', 'foo-turbo', 'foo-mini'],
+      aliasToId: new Map([
+        ['foo',       'foo-turbo'],
+        ['foo-turbo', 'foo-turbo'],
+        ['foo-mini',  'foo-mini'],
+      ]),
+      source: 'live',
+    };
+    const cycle = buildModelCycle(customCatalog);
+    // Cycle: default + claude aliases + foo + foo-mini (derived from catalog alone)
+    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES, 'foo', 'foo-mini']);
+    // Importantly: no 'foo-turbo' in the cycle (it has an alias 'foo' that takes its slot)
+    expect([...cycle]).not.toContain('foo-turbo');
   });
 });
 

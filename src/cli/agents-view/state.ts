@@ -5,7 +5,9 @@
  * avoids PF-014: pure functions only — no process.exit(), no I/O.
  *
  * Model cycle (proxy ON):  default → haiku → sonnet → opus → fable →
- *                          <aliases in registry order> → <canonical ids> → default
+ *                          <picker names in registry order> → default
+ *                          Picker names: all aliases for each model; canonical id iff
+ *                          the model has no aliases (zero-maintenance, catalog-driven).
  * Model cycle (proxy OFF): default → haiku → sonnet → opus → fable → default
  * Effort cycle:            default → low → medium → high → xhigh → max → default
  *
@@ -29,7 +31,7 @@
 
 import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
-import { type ExternalModelCatalog } from '../../core/model-discovery.js';
+import { type ExternalModel, type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -99,12 +101,85 @@ export interface ReduceResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * Extract the picker name list from a model list.
+ *
+ * Zero-maintenance rule (Fix 1):
+ *   - For each model IN REGISTRY ORDER: contribute ALL of its aliases.
+ *   - Contribute the canonical ID if and only if the model has NO aliases.
+ *
+ * This means:
+ *   gpt-5.6-sol  [aliases: ['sol']]   → 'sol'
+ *   gpt-5.5      [aliases: []]        → 'gpt-5.5'
+ *   gpt-x        [aliases: ['a','b']] → 'a', 'b'
+ *
+ * When a currently-alias-less model gains an alias in a future subswitch
+ * release, it automatically renders as that alias with no code change.
+ *
+ * NOTE: catalog.selectableNames is NOT used here — it doubles as the --set
+ * validation allowlist (includes both aliases and canonical ids). Narrowing
+ * it would reject `devflow agents --set coder --model gpt-5.6-sol`.
+ *
+ * Pure function, no I/O.
+ */
+export function pickerNames(models: readonly ExternalModel[]): readonly string[] {
+  const names: string[] = [];
+  for (const model of models) {
+    if (model.aliases.length > 0) {
+      for (const alias of model.aliases) {
+        names.push(alias);
+      }
+    } else {
+      names.push(model.id);
+    }
+  }
+  return names;
+}
+
+/**
+ * Build a map from every stored identifier (alias or canonical id) to the
+ * picker name that represents it in the TUI cycle.
+ *
+ * Used by buildRow to normalize a stored canonical id to its alias on read,
+ * e.g. 'gpt-5.6-sol' → 'sol', so the value stays in-cycle and does not
+ * appear as an off-cycle pin. NEVER rewrites the value on disk — only for
+ * display.
+ *
+ * Returns an empty map when the catalog is unknown.
+ *
+ * Pure function, no I/O.
+ */
+export function buildPickerNameMap(
+  catalog: ExternalModelCatalog,
+): ReadonlyMap<string, string> {
+  if (!catalog.known) return new Map<string, string>();
+  const map = new Map<string, string>();
+  for (const model of catalog.models) {
+    if (model.aliases.length > 0) {
+      // Canonical id → first alias (the picker representative)
+      map.set(model.id, model.aliases[0]);
+      // Each alias → itself (identity, already a picker name)
+      for (const alias of model.aliases) {
+        map.set(alias, alias);
+      }
+    } else {
+      // No aliases: canonical id IS the picker name
+      map.set(model.id, model.id);
+    }
+  }
+  return map;
+}
+
+/**
  * Build the model cycle from a discovered catalog.
  * Exported so agents.ts can call it once and store the result in state.
  *
  * Cycle order (catalog known):
  *   default → haiku → sonnet → opus → fable →
- *   <aliases in registry order, all models> → <canonical ids> → (wraps)
+ *   <picker names in registry order> → (wraps)
+ *
+ * Picker names are alias-only (canonical id only when no aliases exist),
+ * produced by pickerNames(). catalog.selectableNames is NOT used here —
+ * it is the --set validation allowlist, not the TUI picker subset.
  *
  * Cycle order (catalog unknown):
  *   default → haiku → sonnet → opus → fable → (wraps)
@@ -119,7 +194,7 @@ export function buildModelCycle(
 ): readonly string[] {
   const base: readonly string[] = ['default', ...CLAUDE_MODEL_ALIASES];
   if (!catalog.known) return base;
-  return [...base, ...catalog.selectableNames];
+  return [...base, ...pickerNames(catalog.models)];
 }
 
 const EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS];
@@ -265,6 +340,17 @@ export interface InitRowInput {
    * Optional: omit (or pass []) to disable off-cycle detection.
    */
   modelCycle?: readonly string[];
+  /**
+   * Map from stored identifier (alias or canonical id) to picker name.
+   * Built by buildPickerNameMap(catalog). When provided, normalizes a stored
+   * canonical id (e.g. 'gpt-5.6-sol') to its alias ('sol') so the configured
+   * model stays in-cycle and does not appear as an off-cycle pin.
+   * NEVER writes the normalized value back to disk.
+   * Optional: omit on the proxy-off / cache-miss path where normalization
+   * has no effect (canonical ids not in the picker cycle become off-cycle pins
+   * which is the correct behavior when the catalog is unknown).
+   */
+  pickerNameMap?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -281,17 +367,27 @@ export function buildRow(input: InitRowInput): AgentRow {
   const dormant = isDormantExternalModel(input.savedModel, input.proxyEnabled);
   const cycle = input.modelCycle ?? [];
 
-  const configuredModel = dormant ? 'default' : (input.savedModel ?? 'default');
+  // Normalize stored canonical id to picker name (Fix 1: in-memory only, never
+  // written back to disk). E.g. 'gpt-5.6-sol' → 'sol' when pickerNameMap is known.
+  // This keeps the value in-cycle so it does not become a spurious off-cycle pin.
+  const normalizedSavedModel =
+    input.savedModel !== undefined && input.pickerNameMap !== undefined
+      ? (input.pickerNameMap.get(input.savedModel) ?? input.savedModel)
+      : input.savedModel;
+
+  const configuredModel = dormant ? 'default' : (normalizedSavedModel ?? 'default');
   const configuredEffort = input.savedEffort ?? 'default';
 
   // Off-cycle pin detection: proxy on, model configured but absent from cycle.
+  // Use the normalized model for cycle lookup — the saved model (pre-norm) for
+  // the pin value so the original identifier is preserved on display.
   const offCyclePin =
     !dormant &&
-    input.savedModel !== undefined &&
-    input.savedModel !== 'default' &&
+    normalizedSavedModel !== undefined &&
+    normalizedSavedModel !== 'default' &&
     cycle.length > 0 &&
-    isOffCycle(cycle, input.savedModel)
-      ? input.savedModel
+    isOffCycle(cycle, normalizedSavedModel)
+      ? normalizedSavedModel
       : null;
 
   return {

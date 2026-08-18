@@ -154,6 +154,39 @@ export async function readAgentMapping(
 }
 
 // ---------------------------------------------------------------------------
+// readInstalledAgentNames
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the set of agent names currently installed in `installDir`.
+ *
+ * Uses a single fs.readdir call — O(dir) not O(agents) — replacing the
+ * previous per-name fs.access loop (T8 assertion: exactly ONE readdir,
+ * ZERO fs.access calls).
+ *
+ * A missing directory returns an empty set rather than throwing (ENOENT is
+ * not an error — the install dir may not exist on a fresh machine before
+ * `devflow init` runs). Any other OS error is re-thrown.
+ *
+ * @param installDir - Path to ~/.claude/agents/devflow (or equivalent).
+ */
+export async function readInstalledAgentNames(
+  installDir: string,
+): Promise<ReadonlySet<string>> {
+  try {
+    const entries = await fs.readdir(installDir);
+    return new Set(
+      entries
+        .filter((e: string) => e.endsWith('.md'))
+        .map((e: string) => e.slice(0, -'.md'.length)),
+    );
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Set<string>();
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // saveAgentMapping
 // ---------------------------------------------------------------------------
 

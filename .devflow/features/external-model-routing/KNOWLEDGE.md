@@ -266,7 +266,7 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 **Lazy-import of `terminal.ts`** in `agents.ts`: `import('../agents-view/terminal.js')` is deferred until the interactive path runs. `--list`, `--set`, `--reset`, and non-TTY calls never load readline/tty machinery.
 
-**Model list source**: `buildTuiState()` calls `discoverExternalModels` (async, spawns, gated on `proxyEnabled`) to get the catalog, then calls `buildModelCycle(proxyEnabled, catalog)` once to build the picker cycle. `buildRow()` receives the pre-built `modelCycle` as a parameter — it performs no discovery I/O. Off-cycle pins (aliases whose current generation is not in the live cycle) are appended at the end of the cycle with `(unavailable)` annotation.
+**Model list source**: `buildTuiState()` calls `discoverExternalModels` (async, spawns, gated on `proxyEnabled`) to get the catalog, then calls `buildModelCycle(catalog)` once to build the picker cycle (the `proxyEnabled` parameter was removed in commit `ab6106e` — the cycle is catalog-driven only). Also calls `buildPickerNameMap(catalog)` to normalize stored canonical IDs to picker names in `buildRow()`. Off-cycle pins (stored models absent from the current picker cycle) are appended at the end of the per-row effective cycle with `(unavailable)` annotation.
 
 ## writeFileAtomicExclusive — Mode Preservation
 

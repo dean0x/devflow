@@ -84,3 +84,47 @@ export function isDormantExternalModel(
   if (model === undefined || proxyEnabled) return false;
   return model !== 'default' && !isClaudeModelName(model);
 }
+
+// ---------------------------------------------------------------------------
+// Agent install-state classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical install-state vocabulary for an agent row.
+ *
+ * active        — installed, in registry, model is live (no dormancy).
+ * saved-inactive — installed, in registry, but configured model is dormant
+ *                  (GPT model saved while proxy is disabled).
+ * not-installed  — in registry but the agent file is absent from the install dir.
+ * unknown        — key not in the plugin registry (orphan from agent-models.json).
+ *
+ * Lives in external-models (leaf module, no project imports) so both
+ * cli/commands/agents.ts and cli/agents-view/ can import without cycles.
+ */
+export type AgentState = 'active' | 'saved-inactive' | 'not-installed' | 'unknown';
+
+/**
+ * Classify an agent row's install state.
+ *
+ * Single source of truth shared by `--list` and the TUI so the two surfaces
+ * cannot drift. The four-way result drives the STATE column in render.ts and
+ * the STATE column in --list output.
+ *
+ * Pure function, no I/O.
+ *
+ * @param configured - The configured model string ('default' or model name).
+ * @param proxyEnabled - Whether the Devflow proxy is currently active.
+ * @param installed - Whether the agent's .md file exists in the install dir.
+ * @param inRegistry - Whether the agent name is in the plugin registry.
+ */
+export function classifyAgentState(
+  configured: string,
+  proxyEnabled: boolean,
+  installed: boolean,
+  inRegistry: boolean,
+): AgentState {
+  if (!inRegistry) return 'unknown';
+  if (!installed) return 'not-installed';
+  if (isDormantExternalModel(configured, proxyEnabled)) return 'saved-inactive';
+  return 'active';
+}

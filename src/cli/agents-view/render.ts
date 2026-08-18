@@ -40,7 +40,6 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
-import { type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -88,16 +87,16 @@ interface RenderModelCellOptions {
   /** Whether the model field is the currently active field on the cursor row. */
   readonly isActive: boolean;
   readonly maxWidth: number;
-  readonly catalog: ExternalModelCatalog;
   readonly modelCycle: readonly string[];
 }
 
 /**
  * Render the model cell for a given row, considering cursor/active/dirty state.
  *
- * Alias resolution (AC-F2): when catalog is known and configuredModel is an alias
- * (aliasToId maps it to a different canonical id), show "alias (canonical-id)".
- * Canonical ids render bare. Neither exceeds COL_MODEL = 32.
+ * Three branches (Fix 1 — alias annotation removed):
+ *   1. configuredModel === 'default' → "default (shippedDefault)" [+ dormant hint]
+ *   2. off-cycle pin → "model (unavailable)"
+ *   3. in-cycle model → bare name (aliases already rendered as picker names by buildRow)
  *
  * Off-cycle pin (AC-F4): when configuredModel is absent from modelCycle
  * (retired/unavailable model), show "model (unavailable)".
@@ -109,15 +108,14 @@ function renderModelCell({
   isCursor,
   isActive,
   maxWidth,
-  catalog,
   modelCycle,
 }: RenderModelCellOptions): string {
   const dirty = isDirtyModel(row);
 
   // Model names come from user-controlled config and the third-party external
   // model catalog. Strip ANSI escapes at the display boundary so hostile
-  // sequences cannot reach the terminal. Original values are used for map
-  // lookups and cycle checks; safe copies for display strings only.
+  // sequences cannot reach the terminal. Original values are used for cycle
+  // checks; safe copies for display strings only.
   const safeConfiguredModel = stripAnsi(row.configuredModel);
   const safeShippedDefault = stripAnsi(row.shippedDefault);
   const safeDormantModel = row.dormantModel !== null ? stripAnsi(row.dormantModel) : null;
@@ -136,16 +134,9 @@ function renderModelCell({
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.
     valueStr = `${safeConfiguredModel} (unavailable)`;
-  } else if (catalog.known) {
-    const resolvedId = catalog.aliasToId.get(row.configuredModel);
-    if (resolvedId !== undefined && resolvedId !== row.configuredModel) {
-      // Alias: show "alias (canonical-id)" — e.g. "sol (gpt-5.6-sol)"
-      valueStr = `${safeConfiguredModel} (${stripAnsi(resolvedId)})`;
-    } else {
-      // Canonical id or no alias resolution: show bare
-      valueStr = safeConfiguredModel;
-    }
   } else {
+    // In-cycle model: render bare. Aliases are already stored as picker names
+    // (normalized by buildRow via buildPickerNameMap), so no annotation needed.
     valueStr = safeConfiguredModel;
   }
 
@@ -211,7 +202,6 @@ export function renderFrame(
     activeField,
     viewportOffset,
     proxyEnabled,
-    catalog,
     modelCycle,
   } = state;
 
@@ -280,7 +270,6 @@ export function renderFrame(
         isCursor,
         isActive: isCursor && activeField === 'model',
         maxWidth: modelW,
-        catalog,
         modelCycle,
       }),
       modelW,

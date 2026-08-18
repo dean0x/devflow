@@ -17,7 +17,6 @@
  */
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -27,11 +26,17 @@ import {
   saveAgentMapping,
   reapplyAgentMapping,
   loadShippedDefaults,
+  readInstalledAgentNames,
   type AgentMappingFile,
   type AgentMapping,
   type EffortLevel,
 } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
+import {
+  CLAUDE_MODEL_ALIASES,
+  isDormantExternalModel,
+  classifyAgentState,
+  type AgentState,
+} from '../../core/external-models.js';
 import { isValidModelName } from '../../core/agent-frontmatter.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
@@ -42,6 +47,7 @@ import {
 import {
   buildRow,
   buildModelCycle,
+  buildPickerNameMap,
   computeViewportHeight,
   type AgentsViewState,
   type AgentRow,
@@ -188,14 +194,13 @@ export function applySetMapping(
 // Pure helper: buildListRows
 // ---------------------------------------------------------------------------
 
-export type RowState = 'active' | 'saved-inactive' | 'not-installed';
-
+/** D-001: RowState uses AgentState from external-models (single source of truth for both --list and TUI). */
 export interface ListRow {
   name: string;
   defaultModel: string;
   configured: string;
   effort: string;
-  state: RowState;
+  state: AgentState;
 }
 
 export interface BuildListRowsInput {
@@ -208,41 +213,26 @@ export interface BuildListRowsInput {
 
 /**
  * Build list row data for each agent.
- * Checks whether the installed file exists (async fs.access).
+ * Uses readInstalledAgentNames for a single readdir (Foundation B).
  */
 export async function buildListRows(
   input: BuildListRowsInput,
 ): Promise<ListRow[]> {
   const { agentNames, mapping, installDir, shippedDefaults, proxyEnabled } = input;
 
-  const rows: ListRow[] = await Promise.all(
-    agentNames.map(async (name): Promise<ListRow> => {
-      const entry = mapping.agents[name];
-      const configured = entry?.model ?? 'default';
-      const effort = entry?.effort ?? 'default';
-      const defaultModel = shippedDefaults[name] ?? 'unknown';
+  // Foundation B: one readdir replaces N fs.access calls.
+  const installedNames = await readInstalledAgentNames(installDir);
 
-      // Check if installed file is present
-      let installed = false;
-      try {
-        await fs.access(path.join(installDir, `${name}.md`));
-        installed = true;
-      } catch {
-        installed = false;
-      }
-
-      let state: RowState;
-      if (!installed) {
-        state = 'not-installed';
-      } else if (isDormantExternalModel(configured, proxyEnabled)) {
-        state = 'saved-inactive';
-      } else {
-        state = 'active';
-      }
-
-      return { name, defaultModel, configured, effort, state };
-    }),
-  );
+  const rows: ListRow[] = agentNames.map((name): ListRow => {
+    const entry = mapping.agents[name];
+    const configured = entry?.model ?? 'default';
+    const effort = entry?.effort ?? 'default';
+    const defaultModel = shippedDefaults[name] ?? 'unknown';
+    const installed = installedNames.has(name);
+    // inRegistry is always true here — agentNames comes from the registry.
+    const state = classifyAgentState(configured, proxyEnabled, installed, /* inRegistry */ true);
+    return { name, defaultModel, configured, effort, state };
+  });
 
   return rows;
 }
@@ -281,6 +271,9 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
         break;
       case 'not-installed':
         stateStr = color.dim('not installed');
+        break;
+      case 'unknown':
+        stateStr = color.dim('unknown');
         break;
       default: {
         const _: never = row.state;
@@ -352,8 +345,9 @@ async function buildTuiState(
   proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
 ): Promise<AgentsViewState> {
-  // Build the cycle once — shared across all rows and all keypresses.
+  // Build the cycle and picker-name map once — shared across all rows and all keypresses.
   const modelCycle = buildModelCycle(catalog);
+  const pickerNameMap = buildPickerNameMap(catalog);
 
   const rows: AgentRow[] = agentNames.map(name => {
     const entry = mapping.agents[name];
@@ -364,6 +358,7 @@ async function buildTuiState(
       savedEffort: entry?.effort,
       proxyEnabled,
       modelCycle,
+      pickerNameMap,
     });
   });
 
