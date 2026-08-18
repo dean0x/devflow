@@ -932,10 +932,60 @@ describe('T6: rowState', () => {
     expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
   });
 
-  it('active when proxy on and dormantModel null (GPT model visible)', () => {
-    // With proxy on, a GPT model is NOT dormant — it IS active.
-    const row = makeRow({ configuredModel: 'sol', dormantModel: null });
-    expect(rowState(row, /* proxyEnabled */ true)).toBe('active');
+  it('saved-inactive on the KEYPRESS — in-session GPT selection, proxy off, nothing saved yet', () => {
+    // The headline behaviour of Fix 2: the user cycles onto a GPT model while the
+    // proxy is off. Nothing has been saved, so dormantModel is still null and
+    // originalModel is still 'default' — only configuredModel carries the choice.
+    // The marker must appear immediately, not after save.
+    //
+    // This fixture makes configuredModel and originalModel DIFFER and disagree on
+    // the answer, so it distinguishes the two: keying on originalModel ('default')
+    // would return 'active' and the test would go RED.
+    const row = makeRow({
+      configuredModel: 'sol',
+      originalModel: 'default',
+      dormantModel: null,
+    });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('marker CLEARS on the keypress — dormant row cycled onto a live Claude model', () => {
+    // A dormant row (saved 'gpt-5.5', proxy off) that the user cycles onto 'opus'.
+    // The row is now dirty, so mergeTuiRowsIntoMapping will persist 'opus' — a live
+    // Claude model — and the STATE column must say so. Keying on dormantModel
+    // unconditionally pins the marker to the pre-edit value and reports
+    // 'saved-inactive' for a selection that is not dormant at all.
+    const row = makeRow({
+      configuredModel: 'opus',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(true);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('active');
+  });
+
+  it('dormant row cycled onto a DIFFERENT GPT model stays saved-inactive', () => {
+    // Same dirty path as above, but the new selection is itself external — the
+    // marker must stay on. Guards against "clear the marker whenever dirty".
+    const row = makeRow({
+      configuredModel: 'sol',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(true);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('dormant row cycled BACK onto its own saved value stays saved-inactive', () => {
+    // configuredModel === dormantModel → isDirtyModel is suppressed (nothing is
+    // written), so the untouched branch applies and the marker stays on.
+    const row = makeRow({
+      configuredModel: 'gpt-5.5',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(false);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
   });
 });
 

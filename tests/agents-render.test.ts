@@ -669,6 +669,48 @@ describe('STATE column (Fix 3)', () => {
     const rowLine = strippedLines.find(l => l.includes('Evil-agent'));
     expect(rowLine).toBeDefined();
   });
+
+  it('newline in an orphan name does not break the one-line-per-string frame contract', () => {
+    // stripAnsi strips escape sequences and C0 controls but PRESERVES \n by
+    // contract. Orphan names are arbitrary JSON keys from agent-models.json, so a
+    // key containing a newline would emit an embedded newline into a frame line —
+    // breaking renderFrame's documented contract and desyncing terminal.ts's
+    // redraw (it appends ERASE_EOL + '\n' per returned line).
+    const state = makeState({
+      rows: [makeRow({ name: 'evil\ninjected', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    for (const line of rawLines) {
+      expect(line, `frame line contains an embedded newline: ${JSON.stringify(line)}`)
+        .not.toContain('\n');
+    }
+    // The key is still visible (both halves survive, joined by the replacement space)
+    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('Evil injected'));
+    expect(rowLine).toBeDefined();
+  });
+
+  it('tab in an orphan name does not reach the frame (measures 1, renders up to 8 columns)', () => {
+    // stripAnsi also preserves \x09. A tab measures as one character in
+    // padToVisible but occupies up to eight terminal columns, misaligning every
+    // column to its right.
+    const state = makeState({
+      rows: [makeRow({ name: 'a\tb', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    for (const line of rawLines) {
+      expect(line, `frame line contains a tab: ${JSON.stringify(line)}`).not.toContain('\t');
+    }
+    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('A b'));
+    expect(rowLine).toBeDefined();
+    // Column alignment holds: at 80 cols the STATE cell starts at the declared
+    // offset PREFIX(2) + AGENT(18) + MODEL(32) + EFFORT(13) = 65. A surviving tab
+    // would shift it, because padToVisible counts \t as a single character.
+    expect(rowLine?.slice(65)).toBe('unknown');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -100,6 +100,28 @@ function truncateVisible(s: string, maxWidth: number): string {
   return truncate(raw, maxWidth);
 }
 
+/** Layout-breaking whitespace that stripAnsi deliberately preserves. */
+const LAYOUT_BREAKING_WS = /[\t\n]/g;
+
+/**
+ * Sanitize an untrusted string for a fixed-width TUI cell.
+ *
+ * stripAnsi strips escape sequences and C0 controls but, by contract, KEEPS
+ * TAB (\x09) and LF (\x0a) — correct for its own callers, wrong for a cell in
+ * a fixed-width frame. Orphan row names are arbitrary JSON keys read from
+ * agent-models.json, so neither is hypothetical:
+ *   - LF  emits a newline inside a frame line, breaking renderFrame's
+ *     one-string-per-terminal-line contract and desyncing terminal.ts's
+ *     cursor arithmetic (it writes ERASE_EOL + '\n' per returned line).
+ *   - TAB measures as one character in padToVisible but occupies up to eight
+ *     terminal columns, so every column to its right is misaligned.
+ * Both collapse to a single space; the raw key is untouched, so the save-path
+ * merge still targets the real mapping key.
+ */
+function sanitizeCell(s: string): string {
+  return stripAnsi(s).replace(LAYOUT_BREAKING_WS, ' ');
+}
+
 /** Options for renderModelCell — named to prevent silent argument transposition. */
 interface RenderModelCellOptions {
   readonly row: AgentRow;
@@ -311,10 +333,11 @@ export function renderFrame(
     const isCursor = absIdx === cursor;
 
     const prefix = isCursor ? '❯ ' : '  ';
-    // Strip ANSI from name — mandatory for orphan rows (arbitrary JSON keys from
-    // agent-models.json may contain escape sequences injected by a hostile file).
+    // Sanitize the name — mandatory for orphan rows (arbitrary JSON keys from
+    // agent-models.json may contain escape sequences, newlines or tabs injected
+    // by a hostile file).
     // Exactly ONE call site for formatAgentName (Fix 4): TUI only; --list is lowercase.
-    const safeName = formatAgentName(stripAnsi(row.name));
+    const safeName = formatAgentName(sanitizeCell(row.name));
     const nameCell = padToVisible(
       isCursor ? bold(truncateVisible(safeName, agentW)) : truncateVisible(safeName, agentW),
       agentW,
@@ -368,8 +391,9 @@ export function renderFrame(
       : '';
 
   // Truncate to cols before applying dim so narrow terminals stay within bounds.
+  // Uses the same primitive as every cell — one truncation rule per renderer.
   const keybindingsText = '  ↑↓ agent   tab field   ←→/space cycle   d default   enter save   esc cancel';
-  const keybindingsLine = dim(keybindingsText.slice(0, dims.cols));
+  const keybindingsLine = dim(truncateVisible(keybindingsText, dims.cols));
   const proxyHintLine = !proxyEnabled
     ? dim('  devflow proxy --enable to activate GPT models')
     : '';

@@ -255,18 +255,28 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
 /**
  * Classify the live state of a TUI row for display in the STATE column.
  *
- * Fix 2: single source of truth — delegates to classifyAgentState using the
- * persisted model name (dormantModel when present, otherwise configuredModel).
- * Commit 3 will add installed/inRegistry to AgentRow and thread them here.
+ * Single source of truth — delegates to classifyAgentState, so the TUI STATE
+ * column and `--list`'s STATE column share one vocabulary and cannot drift.
+ *
+ * The classified value is the model this row WILL persist, which is what makes
+ * the dormancy marker track the KEYPRESS rather than the last save:
+ *   - dirty row      → configuredModel (the in-session selection)
+ *   - untouched row  → dormantModel when set, else configuredModel
+ *
+ * The untouched branch exists because mergeTuiRowsIntoMapping writes nothing
+ * for a clean row: its persisted value survives as-is, and for a dormant row
+ * that value lives in dormantModel (configuredModel falls back to 'default'
+ * while the proxy is off). Keying on dormantModel unconditionally would pin
+ * the marker to the pre-edit value — cycling a dormant row onto a live Claude
+ * model would keep showing 'saved-inactive' even though 'opus' is what gets
+ * written. Mirroring the merge rule keeps display and persistence in lockstep.
  *
  * Pure function, no I/O.
  */
 export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
-  // The dormant-mapping design: when proxy is off and the saved model is an
-  // external GPT model, configuredModel falls back to 'default' but the actual
-  // persisted model is dormantModel. Use dormantModel so classifyAgentState
-  // can recognise the saved-inactive case.
-  const persistedModel = row.dormantModel ?? row.configuredModel;
+  const persistedModel = isDirtyModel(row)
+    ? row.configuredModel
+    : (row.dormantModel ?? row.configuredModel);
   return classifyAgentState(
     persistedModel,
     proxyEnabled,
