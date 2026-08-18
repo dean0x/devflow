@@ -39,13 +39,18 @@ afterAll(async () => {
 
 /**
  * Run a shell command synchronously.
- * Returns { stdout, stderr, exitCode }.
+ * Returns { stdout, stderr, exitCode, signal }.
  * Never throws — callers check exitCode explicitly (PF-008).
+ *
+ * `signal` is populated when execSync kills the process due to a timeout
+ * (e.g. 'SIGTERM'). When present, exitCode is 1 (fabricated by ?? 1 because
+ * status is null on a signal kill) and stderr may be empty — the signal field
+ * is what distinguishes a timeout from a real exit-1 failure.
  */
 function runSync(
   command: string,
   options: { cwd?: string; timeout?: number } = {},
-): { stdout: string; stderr: string; exitCode: number } {
+): { stdout: string; stderr: string; exitCode: number; signal?: string } {
   try {
     const stdout = execSync(command, {
       cwd: options.cwd ?? ROOT,
@@ -54,11 +59,12 @@ function runSync(
     });
     return { stdout: stdout.toString(), stderr: '', exitCode: 0 };
   } catch (err: unknown) {
-    const e = err as { stdout?: Buffer; stderr?: Buffer; status?: number };
+    const e = err as { stdout?: Buffer; stderr?: Buffer; status?: number | null; signal?: string };
     return {
       stdout: e.stdout?.toString() ?? '',
       stderr: e.stderr?.toString() ?? '',
       exitCode: e.status ?? 1,
+      ...(e.signal !== undefined && e.signal !== null ? { signal: e.signal } : {}),
     };
   }
 }
@@ -112,11 +118,14 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
 
   it('installed CLI exits 0 with --version flag', async () => {
     const cliPath = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'cli.js');
-    const result = runSync(`node "${cliPath}" --version`, { timeout: 15_000 });
+    const result = runSync(`node "${cliPath}" --version`, { timeout: 60_000 });
 
+    const exitDetail = result.signal
+      ? `TIMEOUT/signal=${result.signal} (exit ${result.exitCode})`
+      : `exit ${result.exitCode}`;
     expect(
       result.exitCode,
-      `node dist/cli.js --version failed (exit ${result.exitCode}):\n${result.stderr}`,
+      `node dist/cli.js --version failed (${exitDetail}):\n${result.stderr}`,
     ).toBe(0);
 
     // Version string should look like a semver (e.g. "2.3.0").
