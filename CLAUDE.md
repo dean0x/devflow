@@ -24,7 +24,7 @@ Registry-driven CLI tool with 22 plugins (12 core + 10 optional). Plugins are en
 | `devflow-explore` | Codebase exploration with knowledge base creation |
 | `devflow-research` | Multi-type research with trust-aware synthesis |
 | `devflow-release` | Adaptive project release with learned configuration |
-| `devflow-self-review` | Self-review (Simplifier + Scrutinizer) |
+| `devflow-self-review` | Self-review (Simplify + Scrutinize) |
 | `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis |
 | `devflow-ambient` | Ambient mode — orchestrator charter + plan handoff |
 | `devflow-core-skills` | Auto-activating quality enforcement |
@@ -140,15 +140,15 @@ All generated docs live under `.devflow/docs/` in the project root:
 ├── reviews/{branch-slug}/              # Review reports per branch
 │   ├── .last-review-head              # HEAD SHA for incremental reviews
 │   └── {timestamp}/                   # Timestamped review directory
-│       ├── {focus}.md                 # Reviewer reports (security.md, etc.)
-│       ├── review-summary.md          # Synthesizer output
+│       ├── {focus}.md                 # Review agent reports (security.md, etc.)
+│       ├── review-summary.md          # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve
 ├── bug-analysis/{branch-slug}/         # Bug analysis reports per branch
 │   ├── .last-analysis-head            # HEAD SHA for incremental analysis
 │   └── {timestamp}/                   # Timestamped analysis directory
 │       ├── {focus}.md                 # Analyzer reports (security.md, functional.md, etc.)
 │       ├── static-findings.md         # Raw static analysis tool output
-│       ├── bug-analysis-summary.md    # Synthesizer output
+│       ├── bug-analysis-summary.md    # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve (when resolving bug-analysis issues)
 ├── design/                            # Design artifacts from /plan
 ├── tickets/{slug}/                    # Ticket sets from /dynamic-tickets
@@ -160,8 +160,8 @@ All generated docs live under `.devflow/docs/` in the project root:
 │       └── wave-report.md             # Wave run summary and status
 └── research/{topic-slug}/             # Research artifacts per topic
     └── {YYYY-MM-DD_HHMM}/            # Timestamped research directory
-        ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)
-        └── research-summary.md        # Synthesizer output
+        ├── {type}.md                  # Research agent outputs (codebase.md, external.md, etc.)
+        └── research-summary.md        # Synthesize agent output
 ```
 
 Per-project runtime files live under `.devflow/`:
@@ -207,31 +207,31 @@ Per-project runtime files live under `.devflow/`:
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
 
-**Persisting agents**: Reviewer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesizer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode) / `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` (research mode) / `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` (bug-analysis mode), Researcher → `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md`, BugAnalyzer → `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md`, Coder (issue-fix mode) → commits + `## Verification` block in resolution-summary.md, Working Memory → `.devflow/memory/WORKING-MEMORY.md` (automatic)
+**Persisting agents**: Review → `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesize → `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode) / `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` (research mode) / `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` (bug-analysis mode), Research → `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md`, Diagnose → `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md`, Code (issue-fix mode) → commits + `## Verification` block in resolution-summary.md, Working Memory → `.devflow/memory/WORKING-MEMORY.md` (automatic)
 
-**Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/bug-analysis` has an analogous mechanism: it tracks HEAD SHA in `.last-analysis-head` and only analyzes commits since the last analysis run. `/resolve` defaults to the latest timestamped directory in whichever doc path (reviews or bug-analysis) matches the current workflow. `/code-review` auto-discovers git worktrees and processes all reviewable branches in parallel. `/bug-analysis` operates on the current branch only (single-worktree). Multi-cycle convergence detection: loads the prior `resolution-summary.md` as `PRIOR_RESOLUTIONS` so reviewers avoid re-raising resolved false positives; at cycle 3+ the FP ratio is computed and a warning is emitted when it exceeds 70% (suggesting merge or manual inspection). At MAX_REVIEW_CYCLES (10) a warning is emitted but the pipeline continues — convergence info is surfaced in the Synthesizer's Convergence Status section, never blocking.
+**Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/bug-analysis` has an analogous mechanism: it tracks HEAD SHA in `.last-analysis-head` and only analyzes commits since the last analysis run. `/resolve` defaults to the latest timestamped directory in whichever doc path (reviews or bug-analysis) matches the current workflow. `/code-review` auto-discovers git worktrees and processes all reviewable branches in parallel. `/bug-analysis` operates on the current branch only (single-worktree). Multi-cycle convergence detection: loads the prior `resolution-summary.md` as `PRIOR_RESOLUTIONS` so Review agents avoid re-raising resolved false positives; at cycle 3+ the FP ratio is computed and a warning is emitted when it exceeds 70% (suggesting merge or manual inspection). At MAX_REVIEW_CYCLES (10) a warning is emitted but the pipeline continues — convergence info is surfaced in the Synthesize agent's Convergence Status section, never blocking.
 
-**Coder Handoff Artifact**: Sequential Coder phases write `.devflow/docs/handoff-{branch_slug}.md` after each phase (branch-scoped to prevent concurrent session clobber). Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Coder reads it via HANDOFF_FILE input. Deleted by `/implement` command after pipeline completes.
+**Code Agent Handoff Artifact**: Sequential Code agent phases write `.devflow/docs/handoff-{branch_slug}.md` after each phase (branch-scoped to prevent concurrent session clobber). Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Code agent reads it via HANDOFF_FILE input. Deleted by `/implement` command after pipeline completes.
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `src/assets/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer, learning, triager), Sonnet for execution agents (coder, simplifier, skimmer, tester, knowledge), Haiku for I/O agents (git, synthesizer, validator). The Learning agent's spawn directive additionally resolves a per-project model override (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus`). Memory is refreshed by the detached `background-memory-update` worker (`claude -p --model claude-sonnet-4-6`), spawned by the `memory-worker` Stop hook. Knowledge is not a background worker — the Knowledge agent (sonnet) is spawned in-command by `knowledge_writeback()` at workflow end. **Per-agent overrides**: users can assign custom models (including GPT models when routing is enabled) via `devflow agents`. Overrides persist in `~/.devflow/agent-models.json` and are re-applied by `reapplyAgentMapping` on every `devflow init`.
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (review, scrutinize, evaluate, design, research, diagnose, learning, triage), Sonnet for execution agents (code, simplify, skim, test, knowledge), Haiku for I/O agents (git, synthesize, validate). The Learning agent's spawn directive additionally resolves a per-project model override (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus`). Memory is refreshed by the detached `background-memory-update` worker (`claude -p --model claude-sonnet-4-6`), spawned by the `memory-worker` Stop hook. Knowledge is not a background worker — the Knowledge agent (sonnet) is spawned in-command by `knowledge_writeback()` at workflow end. **Per-agent overrides**: users can assign custom models (including GPT models when routing is enabled) via `devflow agents`. Overrides persist in `~/.devflow/agent-models.json` and are re-applied by `reapplyAgentMapping` on every `devflow init`.
 
 ## Agent & Command Roster
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
-- `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
-- `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
-- `/code-review` — 8-12 Reviewer agents + Git + Synthesizer; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
-- `/resolve` — Triager (opus, global triage via blast-radius matrix) + Coder × N (issue-fix, PUSH: false) + Validator (verification gate) + Git; consumes decisions via `DECISIONS_CONTEXT`; Triager cites ADR-NNN/PF-NNN in verdict ledger; resolution-summary.md includes `## Verification`, `## By Design`, `## Fix Separately`, `## Escalations` sections
-- `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional knowledge base creation)
+- `/plan` — Skim + Explore + Design + Synthesize + Plan + Design → design artifact; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
+- `/implement` — Git + Code + Validate + Simplify + Scrutinize + Evaluate + Test → PR (accepts plan documents, issues, or task descriptions)
+- `/code-review` — 8-12 Review agents + Git + Synthesize; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
+- `/resolve` — Triage (opus, global triage via blast-radius matrix) + Code × N (issue-fix, PUSH: false) + Validate (verification gate) + Git; consumes decisions via `DECISIONS_CONTEXT`; Triage cites ADR-NNN/PF-NNN in verdict ledger; resolution-summary.md includes `## Verification`, `## By Design`, `## Fix Separately`, `## Escalations` sections
+- `/explore` — Skim + Explore + Synthesize + Knowledge (optional knowledge base creation)
 - `/debug` — competing hypotheses debugging
-- `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
-- `/research` — Researcher agents + Skimmer + Synthesizer + Knowledge; multi-type research with trust-aware synthesis
-- `/release` — Git agent + Validator + Synthesizer; adaptive release with learned configuration
-- `/bug-analysis` — BugAnalyzer agents + Git + Synthesizer; proactive bug finding with static and semantic analysis, incremental by default
+- `/self-review` — Simplify then Scrutinize (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
+- `/research` — Research agents + Skim + Synthesize + Knowledge; multi-type research with trust-aware synthesis
+- `/release` — Git agent + Validate + Synthesize; adaptive release with learned configuration
+- `/bug-analysis` — Diagnose agents + Git + Synthesize; proactive bug finding with static and semantic analysis, incremental by default
 
-**Shared agents** (16): git, synthesizer, skimmer, simplifier, coder, reviewer, triager, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer, learning
+**Shared agents** (16): git, synthesize, skim, simplify, code, review, triage, evaluate, test, scrutinize, validate, design, knowledge, research, diagnose, learning
 
 ## Key Conventions
 

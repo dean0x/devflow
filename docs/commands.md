@@ -29,9 +29,9 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 1. **Setup** — Auto-create feature branch, parse plan document or fetch issue
 2. **Implementation** — Write code on the feature branch
 3. **Validation** — Build, typecheck, lint, and test
-4. **Refinement** — Simplifier (code clarity) + Scrutinizer (9-pillar quality)
-5. **Alignment** — Evaluator verifies implementation matches the original request
-6. **QA Testing** — Tester executes scenario-based acceptance tests
+4. **Refinement** — Simplify (code clarity) + Scrutinize (9-pillar quality)
+5. **Alignment** — Evaluate verifies implementation matches the original request
+6. **QA Testing** — Test executes scenario-based acceptance tests
 
 Creates a PR when complete.
 
@@ -44,7 +44,7 @@ Creates a PR when complete.
 
 ## /code-review
 
-Multi-perspective code review with up to 20 specialized reviewers running in parallel:
+Multi-perspective code review with up to 20 specialized Review agents running in parallel:
 
 **Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing, Reliability
 
@@ -52,7 +52,7 @@ Multi-perspective code review with up to 20 specialized reviewers running in par
 
 **Plugin-gated** (when devflow-compliance plugin installed): Compliance
 
-Each reviewer produces findings with:
+Each Review agent produces findings with:
 - **Category**: Blocking (must-fix), Should-Fix, Pre-existing (informational)
 - **Severity**: CRITICAL, HIGH, MEDIUM, LOW
 - **Location**: Exact file:line reference
@@ -69,9 +69,9 @@ Supports multi-worktree auto-discovery — one command reviews all active branch
 
 Processes all issues from `/code-review` reports through a validation/fix split:
 
-1. **Triage** — A single Triager (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED
-2. **Fix** — Parallel Coder agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
-3. **Verify** — A Validator (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
+1. **Triage** — A single Triage agent (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED
+2. **Fix** — Parallel Code agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
+3. **Verify** — A Validate agent (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
 4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
 6. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
@@ -100,8 +100,8 @@ Investigates bugs using competing hypotheses:
 
 Self-review workflow that runs two sequential quality passes:
 
-1. **Simplifier** — Code clarity, reuse opportunities, efficiency
-2. **Scrutinizer** — 9-pillar quality evaluation (correctness, security, performance, etc.)
+1. **Simplify** — Code clarity, reuse opportunities, efficiency
+2. **Scrutinize** — 9-pillar quality evaluation (correctness, security, performance, etc.)
 
 ```
 /self-review                 # Review recent changes
@@ -111,7 +111,7 @@ Self-review workflow that runs two sequential quality passes:
 
 Structured codebase exploration with optional feature knowledge base creation:
 
-1. **Orient** — Skimmer identifies relevant files and patterns
+1. **Orient** — Skim identifies relevant files and patterns
 2. **Deep Dive** — Explore agents analyze architecture, flows, and conventions
 3. **Synthesize** — Combine findings into a structured summary
 4. **Persist** — Optionally create a feature knowledge base in `.devflow/features/`
@@ -126,7 +126,7 @@ Structured codebase exploration with optional feature knowledge base creation:
 Multi-type research with parallel investigators and trust-aware synthesis:
 
 1. **Classify** — Determine research types needed (codebase, external, competitor, market, technology)
-2. **Investigate** — Parallel researcher agents explore each domain
+2. **Investigate** — Parallel Research agents explore each domain
 3. **Synthesize** — Trust-aware synthesis weights sources by reliability
 4. **Report** — Structured findings in `.devflow/docs/research/`
 
@@ -156,7 +156,7 @@ Proactive bug finding with static and semantic analysis. Runs specialized analyz
 
 1. **Setup** — Determine branch diff, check for incremental analysis via `.last-analysis-head`
 2. **Static Analysis** — Run available static analysis tools (Snyk, CodeQL, etc.)
-3. **Semantic Analysis** — Parallel BugAnalyzer agents examine code for functional, security, performance, and reliability issues
+3. **Semantic Analysis** — Parallel Diagnose agents examine code for functional, security, performance, and reliability issues
 4. **Synthesize** — Combine static and semantic findings into actionable report
 5. **Report** — Write findings to `.devflow/docs/bug-analysis/`
 

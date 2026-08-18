@@ -37,7 +37,7 @@ Use the `tools` frontmatter field to restrict which tools an agent can access. C
 
 ```markdown
 ---
-name: Skimmer
+name: Skim
 tools: ["Bash", "Read"]
 ---
 ```
@@ -48,8 +48,8 @@ When an agent only needs a subset of tools, prefer platform-enforced restriction
 
 | Agent Type | Target Lines | Examples |
 |------------|-------------|----------|
-| Utility | 50-80 | Skimmer, Simplifier, Validator |
-| Worker | 80-120 | Coder, Reviewer, Git, Designer |
+| Utility | 50-80 | Skim, Simplify, Validate |
+| Worker | 80-120 | Code, Review, Git, Design |
 | Orchestration | 100-150 | (Commands handle orchestration, not agents) |
 
 ## What Belongs Where

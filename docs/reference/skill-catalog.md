@@ -17,7 +17,7 @@ Reference for companion skills loaded by commands. Commands load always-on compa
 
 ## File-Type Conditional Skills
 
-Commands and Coder agents load language/framework skills based on files touched:
+Commands and Code agents load language/framework skills based on files touched:
 
 | Pattern | Skill |
 |---------|-------|
@@ -46,4 +46,4 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
-- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Reviewer (compliance focus), Designer (gap-analysis compliance focus), and Coder (when COMPLIANCE: enabled and regulated surface detected); gated on devflow-compliance plugin installed
+- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus), Design agent (gap-analysis compliance focus), and Code agent (when COMPLIANCE: enabled and regulated surface detected); gated on devflow-compliance plugin installed

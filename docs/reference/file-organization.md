@@ -153,7 +153,7 @@ Assets live once in `src/assets/` and install directly to the user's `~/.claude/
 
 ### Agents
 
-All 16 agents (`git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `triager`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `learning`) are shared — committed directly in `src/assets/agents/`.
+All 16 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`) are shared — committed directly in `src/assets/agents/`.
 
 ## Settings Override
 
