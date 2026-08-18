@@ -169,7 +169,7 @@ export function getResearchDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'docs', 'research');
 }
 
-/** .devflow/docs/handoff-{branchSlug}.md — coder phase handoff artifact */
+/** .devflow/docs/handoff-{branchSlug}.md — Code agent phase handoff artifact */
 export function getHandoffPath(projectRoot: string, branchSlug: string): string {
   return path.join(projectRoot, '.devflow', 'docs', `handoff-${branchSlug}.md`);
 }

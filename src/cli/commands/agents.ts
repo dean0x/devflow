@@ -602,7 +602,6 @@ export const agentsCommand = new Command('agents')
     if (options.set) {
       // Transparently rewrite legacy agent names to their canonical counterparts,
       // mirroring how parsePluginSelection handles legacy plugin names.
-      // No-op while LEGACY_AGENT_KEYS is empty (phase 1).
       let agentName = options.set;
       if (Object.hasOwn(LEGACY_AGENT_KEYS, agentName)) {
         const canonical = LEGACY_AGENT_KEYS[agentName] as string;

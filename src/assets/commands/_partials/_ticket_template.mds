@@ -36,7 +36,7 @@ System properties that MUST remain true after this ticket is merged:
 
 ## Acceptance criteria
 
-Numbered, for the Evaluate agent and Test agents. See `acceptance_criteria_contract()` for the quality bar.
+Numbered, for the Evaluate and Test agents. See `acceptance_criteria_contract()` for the quality bar.
 
 1. POSITIVE: The system MUST...
 2. POSITIVE: The API MUST return...

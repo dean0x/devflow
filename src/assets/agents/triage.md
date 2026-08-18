@@ -39,7 +39,7 @@ You receive from orchestrator:
 **0. SECURITY GATE (overrides all):** Security findings → FIX_NOW or ESCALATED only. Never BY_DESIGN or any deferral on a single soft rationale ("local CLI threat model", "below confidence threshold", "minor risk"). Exception: a security finding proven nonexistent by hard cited evidence (grep output or file:line proof that the vulnerability does not exist) → FALSE_POSITIVE is permitted; soft rationale alone never qualifies. Security finding with ambiguous context → ESCALATED, not dismissed.
 
 **1. FALSE_POSITIVE** — Review agent factually wrong.
-REQUIRES cited evidence: grep output, file:line showing the issue does not exist, or Review agent demonstrably misunderstood the code. Cannot cite evidence → cannot use this verdict.
+REQUIRES cited evidence: grep output, file:line showing the issue does not exist, or the Review agent demonstrably misunderstood the code. Cannot cite evidence → cannot use this verdict.
 
 **2. BY_DESIGN** — code is intentional.
 REQUIRES: cite an ADR (`applies ADR-NNN`) or a comment/doc in the code itself that explicitly documents the intent. No citation → not BY_DESIGN.

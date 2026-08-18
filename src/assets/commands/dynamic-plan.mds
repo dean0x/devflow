@@ -121,7 +121,7 @@ Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns re
 const challenged = await phase("plan-challenge", () =>
   parallel((plans || []).map((plan, i) => () =>
     agent(`Challenge this implementation plan. Verbatim challenge intent:
-"Anything we can improve in this plan? Any gaps? Edge cases we did not address, changes or side-effects we did not consider? And make sure we have well-structured acceptance criteria and a test plan for our Evaluate agent and Test agents. We need to verify functionality, API contracts, performance. If there are any design decisions to be taken, loop me in."
+"Anything we can improve in this plan? Any gaps? Edge cases we did not address, changes or side-effects we did not consider? And make sure we have well-structured acceptance criteria and a test plan for our Evaluate and Test agents. We need to verify functionality, API contracts, performance. If there are any design decisions to be taken, loop me in."
 
 Plan under review: ${JSON.stringify(plan)}
 Ticket: ${JSON.stringify((tickets || [])[i])}

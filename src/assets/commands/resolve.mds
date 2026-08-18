@@ -150,7 +150,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 Wait for Triage agent to complete before proceeding. Parse verdict ledger from Triage agent output:
 - **ESCALATED**: Security issues requiring human escalation
 - **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful)
-- **FALSE_POSITIVE**: Issues Review agent got wrong (with cited evidence)
+- **FALSE_POSITIVE**: Issues the Review agent got wrong (with cited evidence)
 - **BY_DESIGN**: Intentional code (with ADR or code doc citation)
 - **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT

@@ -123,7 +123,7 @@ Produce the orientation summary in the output format below.
 ## Principles
 
 1. **Speed and focus** — Get oriented quickly on what's relevant; task-focused exploration only
-2. **Skim for structure, Read for content** — never both on the same file
+2. **rskim for structure, Read for content** — never both on the same file
 3. **Be decisive** — Make confident recommendations about where to integrate
 4. **Token efficiency** — Use rskim token budgets and stats to show compression ratio
 

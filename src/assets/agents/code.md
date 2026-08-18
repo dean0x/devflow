@@ -43,7 +43,7 @@ You receive from orchestrator:
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
-**Sequential execution context** (when part of multi-Code agent chain):
+**Sequential execution context** (when chaining multiple Code agents):
 - **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Code agent (see format below)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood
 - **HANDOFF_REQUIRED**: true if another Code agent follows this one

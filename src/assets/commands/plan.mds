@@ -98,7 +98,7 @@ This produces a compact index of active ADR/PF entries. Pass Skim agent context 
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Design agents.
+Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explore and Design agents.
 
 #### Phase 3: Explore Requirements (Parallel)
 
@@ -125,7 +125,7 @@ Spawn 4 Explore agents **in a single message**, each with Skim agent context, `D
 Agent(subagent_type="Synthesize"):
 "Synthesize EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: {all 4 outputs}
+Explore outputs: {all 4 outputs}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
@@ -252,7 +252,7 @@ Spawn 4 Explore agents **in a single message**, each with Skim agent context + a
 Agent(subagent_type="Synthesize"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: {all 4 outputs}
+Explore outputs: {all 4 outputs}
 Combine into: patterns to follow, integration points, reusable code, edge cases"
 ```
 

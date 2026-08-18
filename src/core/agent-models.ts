@@ -74,7 +74,6 @@ const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 /**
  * Maps old agent keys (form A slugs) to their canonical replacement keys.
  *
- * Populated in phase 4 of the agent-action-verbs rename wave.
  * 13 agents renamed from noun form (coder, reviewer, …) to action-verb form
  * (code, review, …). The canonicalise-agent-keys-v1 migration in migrations.ts
  * calls canonicaliseAgentKeys() to rewrite ~/.devflow/agent-models.json on the
@@ -135,7 +134,7 @@ export function canonicaliseAgentKeys(
 ): { agents: Record<string, unknown>; didMutate: boolean } {
   const warn = onWarning ?? (() => undefined);
 
-  // Fast path: empty map → always a no-op (common case until phase 4)
+  // Fast path: no legacy keys defined — skip without reading input.
   if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
     return { agents: rawAgents, didMutate: false };
   }
@@ -251,9 +250,8 @@ export async function readAgentMapping(
       agents[name] = mapping;
     }
 
-    // Apply key migration. This is a no-op while LEGACY_AGENT_KEYS is empty (phase 1).
-    // When populated in phase 4, old keys are transparently renamed on every read,
-    // covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
+    // Apply key migration: old keys (e.g. 'coder', 'reviewer') are transparently renamed
+    // on every read, covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
     const { agents: migratedAgents } = canonicaliseAgentKeys(
       agents as Record<string, unknown>,
       warn,

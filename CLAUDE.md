@@ -222,14 +222,14 @@ Per-project runtime files live under `.devflow/`:
 **Orchestration commands** (spawn agents, never do agent work in main session):
 - `/plan` — Skim + Explore + Design + Synthesize + Plan + Design → design artifact; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/implement` — Git + Code + Validate + Simplify + Scrutinize + Evaluate + Test → PR (accepts plan documents, issues, or task descriptions)
-- `/code-review` — 8-12 Review agents + Git + Synthesize; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
+- `/code-review` — 8-12 Review + Git + Synthesize; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/resolve` — Triage (opus, global triage via blast-radius matrix) + Code × N (issue-fix, PUSH: false) + Validate (verification gate) + Git; consumes decisions via `DECISIONS_CONTEXT`; Triage cites ADR-NNN/PF-NNN in verdict ledger; resolution-summary.md includes `## Verification`, `## By Design`, `## Fix Separately`, `## Escalations` sections
 - `/explore` — Skim + Explore + Synthesize + Knowledge (optional knowledge base creation)
 - `/debug` — competing hypotheses debugging
 - `/self-review` — Simplify then Scrutinize (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
-- `/research` — Research agents + Skim + Synthesize + Knowledge; multi-type research with trust-aware synthesis
-- `/release` — Git agent + Validate + Synthesize; adaptive release with learned configuration
-- `/bug-analysis` — Diagnose agents + Git + Synthesize; proactive bug finding with static and semantic analysis, incremental by default
+- `/research` — Research + Skim + Synthesize + Knowledge; multi-type research with trust-aware synthesis
+- `/release` — Git + Validate + Synthesize; adaptive release with learned configuration
+- `/bug-analysis` — Diagnose + Git + Synthesize; proactive bug finding with static and semantic analysis, incremental by default
 
 **Shared agents** (16): git, synthesize, skim, simplify, code, review, triage, evaluate, test, scrutinize, validate, design, knowledge, research, diagnose, learning
 

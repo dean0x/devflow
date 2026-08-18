@@ -107,7 +107,6 @@ export const MIGRATIONS: readonly Migration[] = [
       const warnings: string[] = []
 
       // Fast path: no legacy keys defined — skip without touching the file.
-      // This is the common case in phase 1 (LEGACY_AGENT_KEYS is empty).
       if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
         return { infos, warnings }
       }

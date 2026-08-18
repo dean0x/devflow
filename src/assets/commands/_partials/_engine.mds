@@ -133,7 +133,7 @@ If survivors remain: before the fix phase, record `preFixSha` (run `git rev-pars
 - **Default-sequential even across multiple tasks.** "They look independent" is NOT sufficient. If two tasks are somewhat related — they touch the same feature, one's completion makes the other meaningful, or they march toward a shared goal — run them sequentially.
 - **When in doubt, sequential.** Parallel must be affirmatively justified against all three bars. The cost of a wrong parallel call (incoherent merge, contended edits) dwarfs the wall-clock saved.
 
-This applies to both: multi-Code agent work on a single ticket AND multi-ticket scheduling in a wave.
+This applies to both: multiple Code agents working on a single ticket AND multi-ticket scheduling in a wave.
 @end
 
 @define build_execution_doctrine():

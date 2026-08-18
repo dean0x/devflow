@@ -66,19 +66,14 @@ session after running `devflow init` so the new charter is injected.
 
 **Claude Code built-in name collision check:**
 The new agent names were verified against the Claude Code built-in
-`subagent_type` registry. Verified clear against Claude Code build
-`claude-sonnet-4-6` (checked 2026-08-18). The built-in types known at
-that build include: `BugAnalyzer`, `Coder`, `Designer`, `Evaluator`,
-`Explore`, `Git`, `Knowledge`, `Learning`, `Plan`, `Researcher`,
-`Reviewer`, `Scrutinizer`, `Simplifier`, `Skimmer`, `Synthesizer`,
-`Tester`, `Triager`, `Validator` (plus non-devflow types). None of the
-13 new devflow names (`code`, `design`, `evaluate`, `research`, `review`,
-`scrutinize`, `simplify`, `skim`, `synthesize`, `test`, `triage`,
-`validate`, `diagnose`) collide with that set. Note: `Plan` is a
-built-in; devflow has no `plan` agent (only a `/plan` command).
-**Re-check this table on every major Claude Code upgrade** — a future
-built-in could silently shadow a devflow agent and no in-repo guard can
-detect that.
+`subagent_type` registry (checked 2026-08-18). The Claude Code built-in
+agent types are `Explore` and `Plan`. None of the 13 new devflow names
+(`code`, `design`, `evaluate`, `research`, `review`, `scrutinize`,
+`simplify`, `skim`, `synthesize`, `test`, `triage`, `validate`,
+`diagnose`) collide with either. Note: `Plan` is a Claude Code built-in;
+devflow has no `plan` agent (only a `/plan` command).
+**Re-check on each major Claude Code upgrade** — a new built-in can
+silently shadow a devflow agent and no in-repo guard can detect it.
 
 ### Fixed
 - **`devflow agents` TUI — four defects fixed** (`fix/agents-tui` wave, PR 3 of 4):
