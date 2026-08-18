@@ -114,7 +114,7 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 ### Shared Agents (used by multiple plugins)
 
-1. Create agent in `src/assets/agents/new-agent.md`
+1. Create agent in `src/assets/agents/{agent-name}.md`
 2. Follow existing agent patterns (clear specialty, restricted tools, focused scope, specific output)
 3. Add agent name to the `agents` array of each plugin entry in DEVFLOW_PLUGINS (`src/core/plugins.ts`) that needs it
 4. Run `node dist/cli.js init` to install (no build step required for agents)
