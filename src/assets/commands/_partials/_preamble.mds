@@ -38,9 +38,9 @@ Spawn devflow agents with:
 agent("your prompt here", { agentType: "Code" })
 ```
 
-Valid `agentType` values: Code agent, Validate agent, Simplify agent, Scrutinize agent, Evaluate agent, Test agent, Review agent, Git, Synthesize agent, Knowledge, Design agent.
+Valid `agentType` values: Code, Validate, Simplify, Scrutinize, Evaluate, Test, Review, Git, Synthesize, Knowledge, Design.
 
-**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Code agent→sonnet, Validate agent→haiku, Review agent→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
+**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Code→sonnet, Validate→haiku, Review→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
 
 Do not write logic that depends on an agent enumerating its own skills. Skills are loaded (confirmed by spike F5) but agents do not reliably self-report them.
 

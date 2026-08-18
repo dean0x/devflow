@@ -180,7 +180,7 @@ When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures
 Return structured completion status:
 
 ```markdown
-## Code agent Report: {TASK_ID}
+## Implementation Report: {TASK_ID}
 
 ### Status: COMPLETE | FAILED | BLOCKED
 

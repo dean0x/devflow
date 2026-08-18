@@ -621,6 +621,13 @@ describe('reapplyAgentMapping', async () => {
  * We temporarily populate LEGACY_AGENT_KEYS in each test to exercise the
  * migration logic without disturbing the shipped map or other tests.
  * Cleanup is handled by beforeEach/afterEach: clear → test body → restore.
+ *
+ * SCOPE LIMIT: every test below runs against a map this suite EMPTIED first and
+ * then seeded with synthetic entries. Nothing here can detect that the shipped
+ * 13-entry map regressed to empty. That coverage lives in GAP-6
+ * ("shipped LEGACY_AGENT_KEYS integrity") in tests/agent-name-guards.test.ts,
+ * which reads the map as shipped and never mutates it. Do not add
+ * shipped-map assertions here — beforeEach would defeat them.
  */
 describe('canonicaliseAgentKeys', () => {
   // Snapshot the shipped entries at describe-eval time so they can be

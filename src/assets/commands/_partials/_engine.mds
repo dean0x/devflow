@@ -5,11 +5,11 @@ ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 1. **Validate agent** — build / typecheck / lint / test
    - Build/test commands that may run silent for >~120s MUST follow `build_execution_doctrine()` (background Bash + Monitor poll), or they trip the 180s workflow watchdog.
-   - FAIL → Code agent fix (max 2 retries) → re-Validate agent
+   - FAIL → Code agent fix (max 2 retries) → re-run Validate agent
    - If still FAIL after 2 retries → escalate (do not loop endlessly)
 2. **Simplify agent** — reduce complexity, remove duplication
 3. **Scrutinize agent** — 9-pillar self-review (deep structural analysis)
-   - If Scrutinize agent changed code → re-Validate agent (verify the Scrutinize agent's edits compile/pass)
+   - If Scrutinize agent changed code → re-run Validate agent (verify the Scrutinize agent's edits compile/pass)
 
 **Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.
 
@@ -63,7 +63,7 @@ Keep the panel to 2–3 agents. Do not spawn redundant agents asking the same qu
 The standard implementation unit for one ticket. Run in order:
 
 ```
-Code agent(agentType:"Code", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
+Code(agentType:"Code", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
   → gate1_postcode()
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review loop, not after
 ```

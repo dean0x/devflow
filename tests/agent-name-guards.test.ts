@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
+import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents')
@@ -759,5 +760,111 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
       staleEntries,
       `Stale RETIRED_ALLOWLIST entries (no corpus hit found):\n${staleEntries.join('\n')}`,
     ).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GAP-6: Shipped LEGACY_AGENT_KEYS integrity
+// ---------------------------------------------------------------------------
+
+/**
+ * The action-verb rename map exactly as it must ship.
+ *
+ * WHY THIS IS PINNED HERE AND NOT IN agent-models.test.ts: the
+ * `canonicaliseAgentKeys` suite in that file deletes every key from the
+ * exported LEGACY_AGENT_KEYS in beforeEach and injects synthetic entries
+ * ('old-coder' → 'coder'). Every assertion there runs against a map the test
+ * emptied first, so that suite is structurally incapable of noticing that the
+ * SHIPPED map went empty — which is exactly how a stale dist/ exporting zero
+ * entries stayed green during this wave (avoids PF-018: a green test proves
+ * nothing unless it exercised a non-empty target).
+ *
+ * These guards read the map as shipped and never mutate it.
+ */
+const EXPECTED_LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.freeze({
+  'coder': 'code',
+  'designer': 'design',
+  'evaluator': 'evaluate',
+  'researcher': 'research',
+  'reviewer': 'review',
+  'scrutinizer': 'scrutinize',
+  'simplifier': 'simplify',
+  'skimmer': 'skim',
+  'synthesizer': 'synthesize',
+  'tester': 'test',
+  'triager': 'triage',
+  'validator': 'validate',
+  'bug-analyzer': 'diagnose',
+})
+
+describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
+  it('is non-empty — the map actually shipped', () => {
+    // Non-vacuity gate. If this fails, every other assertion in this describe
+    // is meaningless and the migration silently does nothing for every user.
+    expect(Object.keys(LEGACY_AGENT_KEYS).length).toBeGreaterThan(0)
+  })
+
+  it('pins the exact 13 old→new pairs', () => {
+    // Sorted plain-object comparison: catches additions, removals, and retargets.
+    const actual = Object.fromEntries(
+      Object.keys(LEGACY_AGENT_KEYS).sort().map(k => [k, LEGACY_AGENT_KEYS[k]]),
+    )
+    const expected = Object.fromEntries(
+      Object.keys(EXPECTED_LEGACY_AGENT_KEYS).sort().map(k => [k, EXPECTED_LEGACY_AGENT_KEYS[k]]),
+    )
+    expect(actual).toEqual(expected)
+    expect(Object.keys(LEGACY_AGENT_KEYS)).toHaveLength(13)
+  })
+
+  it('no legacy key collides with a live registry agent', () => {
+    // A key that is ALSO a live agent would migrate a valid current override away.
+    const live = new Set(getAllAgentNames())
+    const collisions = Object.keys(LEGACY_AGENT_KEYS).filter(k => live.has(k))
+    expect(
+      collisions,
+      `Legacy keys that are also live agents (migration would destroy valid overrides): ${collisions.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('every legacy value is a live registry agent', () => {
+    // A value that is not a live agent would migrate an override onto a dead key,
+    // silently dropping the user's setting.
+    const live = new Set(getAllAgentNames())
+    const dangling = Object.entries(LEGACY_AGENT_KEYS)
+      .filter(([, v]) => !live.has(v))
+      .map(([k, v]) => `${k} → ${v}`)
+    expect(
+      dangling,
+      `Legacy values with no live agent (override would land on a dead key): ${dangling.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('is single-hop — no value is itself a key', () => {
+    // canonicaliseAgentKeys applies exactly one pass. A chain (a→b, b→c) would
+    // resolve to b or c depending on iteration order — order-dependent corruption.
+    const keys = new Set(Object.keys(LEGACY_AGENT_KEYS))
+    const chained = Object.entries(LEGACY_AGENT_KEYS)
+      .filter(([, v]) => keys.has(v))
+      .map(([k, v]) => `${k} → ${v} (and '${v}' is itself a key)`)
+    expect(
+      chained,
+      `Multi-hop chains in LEGACY_AGENT_KEYS (single-pass migration is order-dependent):\n${chained.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('applies the real shipped map end-to-end (non-synthetic)', () => {
+    // The only test in the suite that runs canonicaliseAgentKeys against the
+    // genuine 13 mappings rather than an injected 'old-coder' → 'coder' stub.
+    const input = Object.fromEntries(
+      Object.keys(EXPECTED_LEGACY_AGENT_KEYS).map(k => [k, { model: 'opus' }]),
+    )
+    const { agents, didMutate } = canonicaliseAgentKeys(input)
+    expect(didMutate).toBe(true)
+    for (const [oldKey, newKey] of Object.entries(EXPECTED_LEGACY_AGENT_KEYS)) {
+      expect(Object.hasOwn(agents, oldKey), `'${oldKey}' should have been renamed away`).toBe(false)
+      expect(Object.hasOwn(agents, newKey), `'${newKey}' should exist after migration`).toBe(true)
+      expect(agents[newKey]).toEqual({ model: 'opus' })
+    }
+    expect(Object.keys(agents)).toHaveLength(13)
   })
 })

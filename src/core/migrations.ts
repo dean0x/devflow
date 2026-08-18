@@ -77,13 +77,24 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  *
  * Append new migrations here.
  *
- * KNOWN ISSUE (out of scope for this wave): the migration runner retries a failed
- * migration on every `devflow init`, forever, with no cap or backoff. This was
- * acceptable with an empty MIGRATIONS registry (D37: the vacuous-truth case), but
- * this commit adds the first real entry and therefore activates that code path.
- * A transient EACCES or partial write will cause the migration to run again on the
- * next init — harmless because canonicaliseAgentKeys is idempotent, but it will
- * accumulate log noise indefinitely. Fix deferred to a later release.
+ * KNOWN ISSUE (out of scope for this wave): the migration runner retries a
+ * THROWING migration on every `devflow init`, forever, with no cap or backoff.
+ * This was acceptable with an empty MIGRATIONS registry (D37: the vacuous-truth
+ * case); this registry's first real entry is added below. Fix deferred.
+ *
+ * Note how that interacts with `canonicalise-agent-keys-v1`: runGlobalMigration
+ * marks a migration applied for ANY non-throwing return, and that entry never
+ * throws — it catches every I/O and parse failure and returns it as a *warning*.
+ * So it does NOT hit the unbounded-retry path. It hits the opposite one: a
+ * transient EACCES or a failed write records the migration as applied and it
+ * never runs again, leaving legacy keys on disk permanently.
+ *
+ * That is survivable by design rather than by luck: `readAgentMapping` applies
+ * canonicaliseAgentKeys on EVERY read, so a user whose disk migration silently
+ * failed still resolves their overrides correctly, and the next write persists
+ * the canonical keys. The disk file self-heals; only the one-time rewrite is
+ * lost. A future fix should make genuine I/O failure (as distinct from
+ * "malformed file, skip it") throw so the runner retries it.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {

@@ -555,7 +555,9 @@ describe('canonicalise-agent-keys-v1 migration', () => {
   }
 
   it('fast path: returns empty infos/warnings when LEGACY_AGENT_KEYS is empty', async () => {
-    // LEGACY_AGENT_KEYS is empty (as shipped) — migration should be a no-op
+    // beforeEach emptied the map — migration should take the fast path and no-op.
+    // NOTE: the shipped map is NOT empty (13 entries); its integrity is pinned by
+    // GAP-6 in agent-name-guards.test.ts, which never mutates it.
     await fs.writeFile(
       path.join(tmpDir, 'agent-models.json'),
       JSON.stringify({ version: 1, agents: { coder: { model: 'sonnet' } } }),
@@ -651,6 +653,40 @@ describe('canonicalise-agent-keys-v1 migration', () => {
       expect(result.warnings[0]).toContain('invalid JSON');
       expect(result.infos).toEqual([]);
     }
+  });
+
+  it('unreadable file (EACCES): warns without throwing, leaving legacy keys on disk', async () => {
+    // Pins the contract the MIGRATIONS docstring relies on: this migration NEVER
+    // throws, so runGlobalMigration records it applied and it never retries. A
+    // transient read failure therefore loses the one-time disk rewrite permanently
+    // — survivable only because readAgentMapping re-applies canonicalisation on
+    // every read. If someone makes this path throw, the unbounded-retry runner
+    // path activates and this test should be revisited deliberately.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const file = path.join(tmpDir, 'agent-models.json');
+    await fs.writeFile(file, JSON.stringify({ version: 1, agents: { 'old-coder': { model: 'sonnet' } } }), 'utf-8');
+    await fs.chmod(file, 0o000);
+
+    // Guard: running as root ignores mode bits — skip rather than assert falsely.
+    let readable = true;
+    try { await fs.readFile(file, 'utf-8'); } catch { readable = false; }
+    if (readable) {
+      await fs.chmod(file, 0o600);
+      return;
+    }
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('cannot read');
+      expect(result.infos).toEqual([]);
+    }
+
+    // The file is untouched — the legacy key survives on disk.
+    await fs.chmod(file, 0o600);
+    const onDisk = JSON.parse(await fs.readFile(file, 'utf-8')) as { agents: Record<string, unknown> };
+    expect(Object.keys(onDisk.agents)).toEqual(['old-coder']);
   });
 
   it('strips BOM before parsing', async () => {
