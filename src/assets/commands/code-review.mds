@@ -129,7 +129,7 @@ MAX_REVIEW_CYCLES = 10
 
 ### Phase 1: Analyze Changed Files
 
-**Produces:** REVIEWER_LIST, COMPLIANCE_ENABLED
+**Produces:** REVIEW_FOCUS_LIST, COMPLIANCE_ENABLED
 **Requires:** DIFF_RANGE
 
 {compliance_gate()}
@@ -151,7 +151,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Docs or significant code | documentation |
 | COMPLIANCE_ENABLED | compliance |
 
-If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree.
+If `COMPLIANCE_ENABLED`: add `compliance` to REVIEW_FOCUS_LIST for every worktree.
 
 ### Phase 1b: Load Decisions Index
 
@@ -169,8 +169,8 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 
 ### Phase 2: Run Reviews (Parallel)
 
-**Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
+**Produces:** REVIEW_FOCUS_OUTPUTS
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types **or installed optional plugins** (max 20 per worktree):
 
@@ -222,7 +222,7 @@ In multi-worktree mode, process worktrees **sequentially** (one worktree at a ti
 ### Phase 3: Synthesis (Parallel)
 
 **Produces:** REVIEW_SUMMARY
-**Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
+**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO
 
 **WAIT** for Phase 2, then spawn agents per worktree **in a single message**:
 

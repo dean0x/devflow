@@ -179,7 +179,7 @@ Otherwise, batch FIX_NOW issues for Coder execution:
 
 ### Phase 4: Fix (Coder × N)
 
-**Produces:** CODER_RESULTS
+**Produces:** CODE_AGENT_RESULTS
 **Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_INFO
 
 For each batch, spawn Coder agent with `OPERATION: issue-fix` and `PUSH: false`:
@@ -209,7 +209,7 @@ Collect from each Coder:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODER_RESULTS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -220,7 +220,7 @@ Use the template from the Output Artifact section below.
 ### Phase 6: Simplify
 
 **Produces:** SIMPLIFICATION_RESULT
-**Requires:** CODER_RESULTS
+**Requires:** CODE_AGENT_RESULTS
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
@@ -235,9 +235,9 @@ Simplify and refine the fixes for clarity and consistency"
 ### Phase 7: Verification Gate
 
 **Produces:** VERIFICATION_STATUS
-**Requires:** CODER_RESULTS
+**Requires:** CODE_AGENT_RESULTS
 
-If no fixes were made (CODER_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
+If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
 
 Otherwise, spawn Validator agent:
 
@@ -283,9 +283,9 @@ git -C {worktree} push
 ### Phase 8: CI Status Gate (Conditional)
 
 **Produces:** CI_STATUS
-**Requires:** CODER_RESULTS, VERIFICATION_STATUS
+**Requires:** CODE_AGENT_RESULTS, VERIFICATION_STATUS
 
-If no issues were fixed (CODER_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+If no issues were fixed (CODE_AGENT_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
 
 If Verification Gate FAILED → skip CI gate (validation failures already reported).
 

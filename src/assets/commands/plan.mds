@@ -74,7 +74,7 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 
 #### Phase 2: Orient + Load Decisions
 
-**Produces:** SKIMMER_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`. If a skill fails to load, continue without it.
@@ -103,7 +103,7 @@ Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer 
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, DECISIONS_CONTEXT
+**Requires:** SKIM_CONTEXT, DECISIONS_CONTEXT
 
 Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated."
 
@@ -136,7 +136,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 #### Phase 5: Gap Analysis (Parallel)
 
 **Produces:** GAP_OUTPUTS, COMPLIANCE_ENABLED
-**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, DECISIONS_CONTEXT
+**Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
 {compliance_gate()}
 
@@ -230,7 +230,7 @@ User can:
 #### Phase 8: Explore Implementation (Parallel)
 
 **Produces:** IMPL_EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, ACCEPTED_SCOPE
+**Requires:** SKIM_CONTEXT, ACCEPTED_SCOPE
 
 Spawn 4 Explore agents **in a single message**, each with Skimmer context + accepted scope:
 
@@ -267,7 +267,7 @@ Spawn 3 Plan agents **in a single message**, each with implementation exploratio
 |-------|--------|
 | Implementation steps | Ordered steps with files, dependencies, gap mitigations |
 | Testing strategy | Unit tests, integration tests, edge case tests |
-| Execution strategy | SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS |
+| Execution strategy | SINGLE_CODE_AGENT vs SEQUENTIAL_CODE_AGENTS vs PARALLEL_CODE_AGENTS |
 
 Implementation steps planner: include explicit gap mitigations (from Phase 6) in the relevant steps.
 
@@ -315,7 +315,7 @@ Review the full plan for all 6 anti-patterns. Report all findings with evidence.
 Use AskUserQuestion to present:
 
 1. **Implementation Plan Summary**
-   - Execution strategy (SINGLE_CODER / SEQUENTIAL_CODERS / PARALLEL_CODERS)
+   - Execution strategy (SINGLE_CODE_AGENT / SEQUENTIAL_CODE_AGENTS / PARALLEL_CODE_AGENTS)
    - Key implementation steps with files
    - Test strategy
 
@@ -364,7 +364,7 @@ issue: 42
 title: "Feature Title"
 slug: feature-slug
 created: 2026-04-07T14:30:00Z
-execution-strategy: SINGLE_CODER
+execution-strategy: SINGLE_CODE_AGENT
 context-risk: LOW
 ---
 ```
@@ -374,8 +374,8 @@ Required sections:
 2. **Acceptance Criteria** — testable success conditions (from exploration + gap analysis)
 3. **Scope** — v1 included, deferred, excluded
 4. **Gap Analysis Results** — blocking gaps with resolutions, should-address items
-5. **Execution Strategy** — SINGLE_CODER/SEQUENTIAL/PARALLEL with rationale
-6. **Subtask Breakdown** — phases with domains and dependencies (if not SINGLE_CODER)
+5. **Execution Strategy** — SINGLE_CODE_AGENT/SEQUENTIAL/PARALLEL with rationale
+6. **Subtask Breakdown** — phases with domains and dependencies (if not SINGLE_CODE_AGENT)
 7. **Implementation Plan** — ordered steps with files and gap mitigations
 8. **Patterns to Follow** — from exploration synthesis (file:line references)
 9. **Integration Points** — entry points, services, models to connect

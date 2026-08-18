@@ -49,8 +49,8 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
     ).toBe(true);
     // Simplifier must NOT have apply-decisions (PR #182 explicit assertion)
-    const simplifierTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
-    expect(simplifierTranscript).not.toContain('apply-decisions');
+    const simplifyTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
+    expect(simplifyTranscript).not.toContain('apply-decisions');
   }, 90000);
 
   it('Scrutinizer preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {

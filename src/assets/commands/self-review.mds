@@ -38,7 +38,7 @@ Pass `FEATURE_KNOWLEDGE` to Scrutinizer.
 
 ### Phase 1: Simplifier (Code Refinement)
 
-**Produces:** SIMPLIFIER_COMMITS
+**Produces:** SIMPLIFY_COMMITS
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION
 
 Spawn Simplifier agent to refine code for clarity and consistency:

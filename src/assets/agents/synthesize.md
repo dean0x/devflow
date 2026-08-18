@@ -83,32 +83,32 @@ Analyze 3 axes to determine strategy:
 
 | Axis | Signals | Impact |
 |------|---------|--------|
-| **Artifact Independence** | Shared contracts? Integration points? Cross-file dependencies? | If coupled → SINGLE_CODER |
-| **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODERS |
+| **Artifact Independence** | Shared contracts? Integration points? Cross-file dependencies? | If coupled → SINGLE_CODE_AGENT |
+| **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODE_AGENTS |
 | **Domain Specialization** | Tech stack detected (backend, frontend, tests) | Determines DOMAIN hints |
 
 **Context Risk Levels:**
-- **LOW**: <10 files, single module → SINGLE_CODER
-- **MEDIUM**: 10-20 files, 2-3 modules → Consider SEQUENTIAL_CODERS
-- **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
-- **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
+- **LOW**: <10 files, single module → SINGLE_CODE_AGENT
+- **MEDIUM**: 10-20 files, 2-3 modules → Consider SEQUENTIAL_CODE_AGENTS
+- **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODE_AGENTS (2-3 phases)
+- **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODE_AGENTS (more phases)
 
 **Strategy Selection:**
-- **SINGLE_CODER** (~80%): Default. Coherent A→Z implementation. Best for consistency in naming, patterns, error handling.
-- **SEQUENTIAL_CODERS** (~15%): Context overflow risk or layered dependencies. Split into phases with handoff summaries.
-- **PARALLEL_CODERS** (~5%): True artifact independence - no shared contracts, no integration points. Rare.
+- **SINGLE_CODE_AGENT** (~80%): Default. Coherent A→Z implementation. Best for consistency in naming, patterns, error handling.
+- **SEQUENTIAL_CODE_AGENTS** (~15%): Context overflow risk or layered dependencies. Split into phases with handoff summaries.
+- **PARALLEL_CODE_AGENTS** (~5%): True artifact independence - no shared contracts, no integration points. Rare.
 
 **Output:**
 ```markdown
 ## Planning Synthesis
 
 ### Execution Strategy
-**Type**: {SINGLE_CODER | SEQUENTIAL_CODERS | PARALLEL_CODERS}
+**Type**: {SINGLE_CODE_AGENT | SEQUENTIAL_CODE_AGENTS | PARALLEL_CODE_AGENTS}
 **Context Risk**: {LOW | MEDIUM | HIGH | CRITICAL}
 **File Estimate**: {n} files across {m} modules
 **Reason**: {why this strategy}
 
-### Subtask Breakdown (if not SINGLE_CODER)
+### Subtask Breakdown (if not SINGLE_CODE_AGENT)
 | Phase | Domain | Description | Files | Depends On |
 |-------|--------|-------------|-------|------------|
 | 1 | backend | {description} | `file1`, `file2` | - |
