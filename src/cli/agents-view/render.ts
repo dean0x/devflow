@@ -7,7 +7,7 @@
  * Layout (fixed lines = 9, viewport = dims.rows - 9):
  *   1  Title "  Devflow Agents" + right "proxy: enabled|disabled"
  *   2  (blank)
- *   3  Column header "    AGENT  MODEL  EFFORT"
+ *   3  Column header "    AGENT  MODEL  EFFORT  STATE"
  *   4  Scroll-up indicator "  ↑ N more" (blank if none)
  *   5+ Viewport rows
  *  -3  Scroll-down indicator "  ↓ N more" (blank if none)
@@ -15,11 +15,12 @@
  *  -1  Unsaved count "  N unsaved changes" (blank if 0)
  *   0  Keybinding footer
  *
- * Columns (chars):
+ * Columns (chars) — total 78 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
- *   AGENT   : 20
+ *   AGENT   : 18
  *   MODEL   : 32
- *   EFFORT  : 14
+ *   EFFORT  : 13
+ *   STATE   : 13
  */
 
 import {
@@ -37,6 +38,7 @@ import {
   isDirtyEffort,
   unsavedCount,
   isOffCycle,
+  rowState,
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
@@ -58,9 +60,10 @@ export function computeViewportHeight(termRows: number): number {
   return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
 }
 
-const COL_AGENT = 20;
+const COL_AGENT = 18;
 const COL_MODEL = 32;
-const COL_EFFORT = 14;
+const COL_EFFORT = 13;
+const COL_STATE = 13;
 
 // ---------------------------------------------------------------------------
 // Cell renderers (pure, return styled string)
@@ -179,6 +182,35 @@ function renderEffortCell(
   return truncateVisible(cell, maxWidth);
 }
 
+/**
+ * Render the state cell (installed/active/dormant/orphan) for a row.
+ * Pure function — derives state via rowState(row, proxyEnabled).
+ */
+function renderStateCell(row: AgentRow, proxyEnabled: boolean, maxWidth: number): string {
+  const state = rowState(row, proxyEnabled);
+  let cell: string;
+  switch (state) {
+    case 'active':
+      cell = green('active');
+      break;
+    case 'saved-inactive':
+      cell = yellow('saved-inactive');
+      break;
+    case 'not-installed':
+      cell = dim('not installed');
+      break;
+    case 'unknown':
+      cell = dim('unknown');
+      break;
+    default: {
+      const _: never = state;
+      void _;
+      cell = '';
+    }
+  }
+  return truncateVisible(cell, maxWidth);
+}
+
 // ---------------------------------------------------------------------------
 // renderFrame
 // ---------------------------------------------------------------------------
@@ -211,11 +243,12 @@ export function renderFrame(
   );
 
   // Column widths — shrink gracefully at narrow terminals.
-  const totalContent = 2 + COL_AGENT + COL_MODEL + COL_EFFORT; // prefix + 3 cols
+  const totalContent = 2 + COL_AGENT + COL_MODEL + COL_EFFORT + COL_STATE; // prefix + 4 cols
   const scale = Math.min(1, dims.cols / Math.max(totalContent, 1));
   const agentW = Math.max(6, Math.floor(COL_AGENT * scale));
   const modelW = Math.max(8, Math.floor(COL_MODEL * scale));
   const effortW = Math.max(7, Math.floor(COL_EFFORT * scale));
+  const stateW = Math.max(5, Math.floor(COL_STATE * scale));
 
   // ---------------------------------------------------------------------------
   // 1. Title line
@@ -238,7 +271,8 @@ export function renderFrame(
     `    ` +
     padToVisible(gray('AGENT'), agentW) +
     padToVisible(gray('MODEL'), modelW) +
-    gray('EFFORT');
+    padToVisible(gray('EFFORT'), effortW) +
+    gray('STATE');
 
   // ---------------------------------------------------------------------------
   // 3. Determine visible row range
@@ -260,8 +294,11 @@ export function renderFrame(
     const isCursor = absIdx === cursor;
 
     const prefix = isCursor ? '❯ ' : '  ';
+    // Strip ANSI from name — mandatory for orphan rows (arbitrary JSON keys from
+    // agent-models.json may contain escape sequences injected by a hostile file).
+    const safeName = stripAnsi(row.name);
     const nameCell = padToVisible(
-      isCursor ? bold(truncateVisible(row.name, agentW)) : truncateVisible(row.name, agentW),
+      isCursor ? bold(truncateVisible(safeName, agentW)) : truncateVisible(safeName, agentW),
       agentW,
     );
     const modelCell = padToVisible(
@@ -274,14 +311,18 @@ export function renderFrame(
       }),
       modelW,
     );
-    const effortCell = renderEffortCell(
-      row,
-      isCursor,
-      isCursor && activeField === 'effort',
+    const effortCell = padToVisible(
+      renderEffortCell(
+        row,
+        isCursor,
+        isCursor && activeField === 'effort',
+        effortW,
+      ),
       effortW,
     );
+    const stateCell = renderStateCell(row, proxyEnabled, stateW);
 
-    return `${prefix}${nameCell}${modelCell}${effortCell}`;
+    return `${prefix}${nameCell}${modelCell}${effortCell}${stateCell}`;
   });
 
   // ---------------------------------------------------------------------------

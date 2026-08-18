@@ -100,6 +100,8 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalEffort: 'default',
     dormantModel: null,
     offCyclePin: null,
+    installed: true,
+    inRegistry: true,
     ...overrides,
   };
 }

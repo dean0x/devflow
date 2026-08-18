@@ -28,6 +28,8 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalEffort: 'default',
     dormantModel: null,
     offCyclePin: null,
+    installed: true,
+    inRegistry: true,
     ...overrides,
   };
 }
@@ -96,10 +98,10 @@ describe('renderFrame — structure', () => {
     expect(titleLine).toContain('proxy: disabled');
   });
 
-  it('includes column header with AGENT, MODEL, EFFORT', () => {
+  it('T7: column header includes AGENT, MODEL, EFFORT, and STATE (Fix 3)', () => {
     const lines = renderStripped(makeState());
     const headerLine = lines.find(l =>
-      l.includes('AGENT') && l.includes('MODEL') && l.includes('EFFORT')
+      l.includes('AGENT') && l.includes('MODEL') && l.includes('EFFORT') && l.includes('STATE')
     );
     expect(headerLine).toBeDefined();
   });
@@ -543,6 +545,73 @@ describe('alias rendering', () => {
     expect(rowLine).toContain('gpt-5.5');
     expect(rowLine).not.toContain('gpt-5.5 (gpt-5.5)');
     expect(rowLine).not.toContain('(unavailable)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8-T11: STATE column rendering (Fix 3)
+// ---------------------------------------------------------------------------
+
+describe('STATE column (Fix 3)', () => {
+  it('T8: active row shows "active" in STATE column', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'coder', configuredModel: 'sonnet', installed: true, inRegistry: true })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('active');
+  });
+
+  it('T9: not-installed row shows "not installed" in STATE column', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'coder', installed: false, inRegistry: true })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('coder'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('not installed');
+  });
+
+  it('T10: orphan row (inRegistry=false) shows "unknown" in STATE column', () => {
+    // An arbitrary key from agent-models.json not present in the plugin registry.
+    const state = makeState({
+      rows: [makeRow({ name: 'old-custom-agent', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('old-custom-agent'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('unknown');
+    // Must not show 'not installed' — 'unknown' takes priority (inRegistry check first)
+    expect(rowLine).not.toContain('not installed');
+  });
+
+  it('T11: stripAnsi on name cell — ANSI escape in orphan name is stripped from raw output', () => {
+    // Orphan names come from arbitrary JSON keys — a hostile key could inject ANSI codes.
+    // render.ts must call stripAnsi(row.name) BEFORE rendering so raw output is clean.
+    const ansiName = '\x1b[31mevil-agent\x1b[0m'; // red "evil-agent"
+    const state = makeState({
+      rows: [makeRow({ name: ansiName, installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    // The RAW frame (not stripped) must not contain the ANSI opener \x1b[31m from the name.
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    const allRaw = rawLines.join('\n');
+    // The injection sequence from the name must be absent in raw output.
+    // (render.ts colors STATE column, so some \x1b[ will appear — but not from the name)
+    // Check specifically for the red color code that was in the name:
+    expect(allRaw).not.toContain('\x1b[31mevil-agent');
+    // The visible text 'evil-agent' must still appear (stripped, just the text)
+    const strippedLines = rawLines.map(stripAnsi);
+    const rowLine = strippedLines.find(l => l.includes('evil-agent'));
+    expect(rowLine).toBeDefined();
   });
 });
 

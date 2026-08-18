@@ -344,11 +344,17 @@ async function buildTuiState(
   shippedDefaults: Record<string, string>,
   proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
+  installDir: string,
 ): Promise<AgentsViewState> {
   // Build the cycle and picker-name map once — shared across all rows and all keypresses.
   const modelCycle = buildModelCycle(catalog);
   const pickerNameMap = buildPickerNameMap(catalog);
 
+  // Foundation B: one readdir for install state of all agents.
+  const installedNames = await readInstalledAgentNames(installDir);
+
+  // Registry rows (in sorted order)
+  const registrySet = new Set(agentNames);
   const rows: AgentRow[] = agentNames.map(name => {
     const entry = mapping.agents[name];
     return buildRow({
@@ -359,8 +365,28 @@ async function buildTuiState(
       proxyEnabled,
       modelCycle,
       pickerNameMap,
+      installed: installedNames.has(name),
+      inRegistry: true,
     });
   });
+
+  // Orphan rows: keys in agent-models.json not present in the registry.
+  // Appended at the end so they are visually separated from known agents.
+  for (const orphanKey of Object.keys(mapping.agents)) {
+    if (registrySet.has(orphanKey)) continue;
+    const entry = mapping.agents[orphanKey];
+    rows.push(buildRow({
+      name: orphanKey,
+      shippedDefault: 'unknown',
+      savedModel: entry?.model,
+      savedEffort: entry?.effort,
+      proxyEnabled,
+      modelCycle,
+      pickerNameMap,
+      installed: installedNames.has(orphanKey),
+      inRegistry: false,
+    }));
+  }
 
   return {
     rows,
@@ -727,6 +753,7 @@ export const agentsCommand = new Command('agents')
       shippedDefaults,
       proxyEnabled,
       catalog,
+      installDir,
     );
 
     // Lazy-import terminal to avoid loading readline/tty in non-TTY paths

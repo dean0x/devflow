@@ -600,6 +600,8 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
       originalEffort: (overrides.originalEffort ?? 'default') as 'default',
       dormantModel: null,
       offCyclePin: null,
+      installed: true,
+      inRegistry: true,
     };
   }
 

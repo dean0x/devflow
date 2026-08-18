@@ -68,6 +68,10 @@ export interface AgentRow {
    * after a full forward+backward navigation. Render shows '(unavailable)'.
    */
   readonly offCyclePin: string | null;
+  /** True when the agent's .md file is present in the install directory. */
+  readonly installed: boolean;
+  /** True when the agent name exists in the plugin registry. False for orphan rows. */
+  readonly inRegistry: boolean;
 }
 
 /** Full TUI state — immutable by convention. */
@@ -266,8 +270,8 @@ export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
   return classifyAgentState(
     persistedModel,
     proxyEnabled,
-    /* installed */ true,   // TUI rows are always installed (Commit 3 will supply this)
-    /* inRegistry */ true,  // TUI rows are always in registry (Commit 3 will supply this)
+    row.installed,
+    row.inRegistry,
   );
 }
 
@@ -379,6 +383,18 @@ export interface InitRowInput {
    * which is the correct behavior when the catalog is unknown).
    */
   pickerNameMap?: ReadonlyMap<string, string>;
+  /**
+   * Whether the agent .md file is present in the install directory.
+   * Optional — defaults to true for normal registry rows; explicitly false for
+   * not-installed agents; provided by buildTuiState via readInstalledAgentNames.
+   */
+  installed?: boolean;
+  /**
+   * Whether this agent name exists in the plugin registry.
+   * Optional — defaults to true for normal rows; explicitly false for orphan
+   * rows (keys in agent-models.json not present in the registry).
+   */
+  inRegistry?: boolean;
 }
 
 /**
@@ -427,6 +443,8 @@ export function buildRow(input: InitRowInput): AgentRow {
     originalEffort: configuredEffort,
     dormantModel: dormant ? (input.savedModel ?? null) : null,
     offCyclePin,
+    installed: input.installed ?? true,
+    inRegistry: input.inRegistry ?? true,
   };
 }
 
