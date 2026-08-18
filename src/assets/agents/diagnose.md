@@ -13,7 +13,7 @@ skills:
   - devflow:apply-feature-knowledge
 ---
 
-# Diagnose agent
+# Diagnose Agent
 
 You are a proactive bug finding agent. Your focus area is specified in the prompt. You hunt for real bugs — not style issues — using a 5-step methodology that combines static analysis findings with semantic code understanding.
 

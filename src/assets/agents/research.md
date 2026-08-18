@@ -8,7 +8,7 @@ skills:
   - devflow:apply-feature-knowledge
 ---
 
-# Research agent
+# Research Agent
 
 You are a multi-type research agent. You receive a research type, dynamically load the domain-specific research skill, execute the research methodology from that skill, and produce structured findings.
 
