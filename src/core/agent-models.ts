@@ -68,6 +68,92 @@ export type EffortLevel = typeof EFFORT_LEVELS[number];
 const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 
 // ---------------------------------------------------------------------------
+// Key migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps old agent keys (form A slugs) to their canonical replacement keys.
+ *
+ * Ships EMPTY — populated in phase 4 when agents are renamed.
+ *
+ * PROTOTYPE SAFETY: Object.create(null) prevents prototype-pollution.
+ * Every lookup MUST use Object.hasOwn — never key in LEGACY_AGENT_KEYS or
+ * direct bracket access. `--set constructor` would otherwise return a function
+ * that flows into path.join (the object-literal lookup on argv trap).
+ *
+ * DORMANCY: entries are stored here whether or not the key rename has been
+ * applied to the file yet. canonicaliseAgentKeys() is a no-op when the map is
+ * empty (the common case today), so zero overhead until phase 4.
+ *
+ * NOTE on concurrent execution: runMigrations() takes no lock and two
+ * worktrees share one ~/.devflow. canonicaliseAgentKeys is idempotent, so
+ * double-execution from concurrent sessions is a harmless no-op — the second
+ * run finds the file already migrated and makes zero writes.
+ */
+export const LEGACY_AGENT_KEYS: Record<string, string> = Object.create(null) as Record<string, string>;
+
+/**
+ * Canonicalise agent keys in a raw agents map by applying LEGACY_AGENT_KEYS.
+ *
+ * For each old key found in the map:
+ *   - If the new (canonical) key is NOT already present: rename old → new.
+ *   - If the new key IS already present (collision): new wins, old dropped, one warning.
+ *
+ * Collision detection is against the ORIGINAL map so results are order-independent.
+ *
+ * The function is pure and idempotent: calling it twice on the same input
+ * produces the same result as calling it once (idempotent under concurrent execution).
+ *
+ * __proto__ is skipped on both read and write sides — setting it would mutate
+ * the prototype instead of creating a property, violating byte-identity.
+ *
+ * @param rawAgents - The `agents` field from the raw JSON file (any value types).
+ * @param onWarning - Optional callback for collision warnings.
+ * @returns { agents, didMutate } — caller persists iff didMutate is true.
+ */
+export function canonicaliseAgentKeys(
+  rawAgents: Record<string, unknown>,
+  onWarning?: (msg: string) => void,
+): { agents: Record<string, unknown>; didMutate: boolean } {
+  const warn = onWarning ?? (() => undefined);
+
+  // Fast path: empty map → always a no-op (common case until phase 4)
+  if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
+    return { agents: rawAgents, didMutate: false };
+  }
+
+  // Snapshot the original keys for collision detection (order-independent result).
+  const originalKeys = new Set(Object.keys(rawAgents));
+
+  const result: Record<string, unknown> = { ...rawAgents };
+  let didMutate = false;
+
+  for (const oldKey of originalKeys) {
+    // Skip the __proto__ key — assigning to it sets the prototype, not a property.
+    if (oldKey === '__proto__') continue;
+    if (!Object.hasOwn(LEGACY_AGENT_KEYS, oldKey)) continue;
+
+    const newKey = LEGACY_AGENT_KEYS[oldKey] as string;
+    // Guard new key for the same reason: __proto__ must not be created.
+    if (newKey === '__proto__') continue;
+
+    if (originalKeys.has(newKey)) {
+      // Collision: new (canonical) key already present → new wins, old dropped, one warning.
+      warn(
+        `agent-models: migrating key '${oldKey}' → '${newKey}' — '${newKey}' already exists, keeping existing value and dropping '${oldKey}'`,
+      );
+    } else {
+      result[newKey] = result[oldKey];
+    }
+    // Remove the legacy key regardless of collision outcome.
+    delete result[oldKey];
+    didMutate = true;
+  }
+
+  return { agents: result, didMutate };
+}
+
+// ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
 
@@ -108,9 +194,13 @@ export async function readAgentMapping(
     const content = await fs.readFile(filePath, 'utf-8');
     const data = JSON.parse(content) as Record<string, unknown>;
 
-    const rawAgents = typeof data.agents === 'object' && data.agents !== null
-      ? (data.agents as Record<string, unknown>)
-      : {};
+    // Guard: agents must be a plain object — not null, not an array.
+    // Array.isArray passes every typeof === 'object' check and causes wrong
+    // entries (numeric indices) to leak into the mapping silently.
+    const rawAgents =
+      typeof data.agents === 'object' && data.agents !== null && !Array.isArray(data.agents)
+        ? (data.agents as Record<string, unknown>)
+        : {};
 
     const agents: Record<string, AgentMapping> = {};
     for (const [name, entry] of Object.entries(rawAgents)) {
@@ -143,7 +233,15 @@ export async function readAgentMapping(
       agents[name] = mapping;
     }
 
-    return Ok({ version: 1, agents });
+    // Apply key migration. This is a no-op while LEGACY_AGENT_KEYS is empty (phase 1).
+    // When populated in phase 4, old keys are transparently renamed on every read,
+    // covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
+    const { agents: migratedAgents } = canonicaliseAgentKeys(
+      agents as Record<string, unknown>,
+      warn,
+    );
+
+    return Ok({ version: 1, agents: migratedAgents as Record<string, AgentMapping> });
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {

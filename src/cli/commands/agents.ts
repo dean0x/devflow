@@ -22,6 +22,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   EFFORT_LEVELS,
+  LEGACY_AGENT_KEYS,
   readAgentMapping,
   saveAgentMapping,
   reapplyAgentMapping,
@@ -599,7 +600,15 @@ export const agentsCommand = new Command('agents')
 
     // ── --set ────────────────────────────────────────────────────────────────
     if (options.set) {
-      const agentName = options.set;
+      // Transparently rewrite legacy agent names to their canonical counterparts,
+      // mirroring how parsePluginSelection handles legacy plugin names.
+      // No-op while LEGACY_AGENT_KEYS is empty (phase 1).
+      let agentName = options.set;
+      if (Object.hasOwn(LEGACY_AGENT_KEYS, agentName)) {
+        const canonical = LEGACY_AGENT_KEYS[agentName] as string;
+        p.log.info(`Agent '${agentName}' has been renamed to '${canonical}' — using canonical name.`);
+        agentName = canonical;
+      }
 
       // Validate agent name
       const knownAgents = getAllAgentNames();

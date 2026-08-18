@@ -12,6 +12,7 @@ import {
   type MigrationLogger,
   type RunMigrationsResult,
 } from '../src/core/migrations.js';
+import { LEGACY_AGENT_KEYS } from '../src/core/agent-models.js';
 
 describe('readAppliedMigrations', () => {
   let tmpDir: string;
@@ -98,8 +99,11 @@ describe('writeAppliedMigrations', () => {
 });
 
 describe('MIGRATIONS', () => {
-  it('is empty', () => {
-    expect(MIGRATIONS).toEqual([]);
+  it('contains canonicalise-agent-keys-v1 as the first entry', () => {
+    expect(MIGRATIONS.length).toBeGreaterThanOrEqual(1);
+    const entry = MIGRATIONS.find(m => m.id === 'canonicalise-agent-keys-v1');
+    expect(entry).toBeDefined();
+    expect(entry!.scope).toBe('global');
   });
 
   it('has unique IDs', () => {
@@ -499,5 +503,217 @@ describe('reportMigrationResult', () => {
     reportMigrationResult(result, logger, false);
     const infoCalls = calls.filter(c => c.method === 'info');
     expect(infoCalls.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canonicalise-agent-keys-v1 migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Tests for the 'canonicalise-agent-keys-v1' migration entry in MIGRATIONS.
+ *
+ * Because the migration reads LEGACY_AGENT_KEYS at runtime, we populate it
+ * in each test and restore to empty in afterEach (matching the pattern in
+ * agent-models.test.ts).
+ *
+ * We call the migration's `run()` function directly through MIGRATIONS.find()
+ * rather than through runMigrations(), so we can inspect infos/warnings without
+ * the full runner machinery.
+ */
+describe('canonicalise-agent-keys-v1 migration', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-cak-migration-test-'));
+  });
+
+  afterEach(async () => {
+    // Clear any LEGACY_AGENT_KEYS entries added by tests
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Helper: find the migration entry (test will fail loudly if absent). */
+  function getMigration() {
+    const m = MIGRATIONS.find(m => m.id === 'canonicalise-agent-keys-v1');
+    if (!m) throw new Error('canonicalise-agent-keys-v1 not found in MIGRATIONS');
+    return m;
+  }
+
+  it('fast path: returns empty infos/warnings when LEGACY_AGENT_KEYS is empty', async () => {
+    // LEGACY_AGENT_KEYS is empty (as shipped) — migration should be a no-op
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: { coder: { model: 'sonnet' } } }),
+      'utf-8',
+    );
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      expect(result.infos).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it('renames legacy key and writes updated file', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: { 'old-coder': { model: 'sonnet' } } }),
+      'utf-8',
+    );
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      expect(result.warnings).toEqual([]);
+      expect(result.infos).toHaveLength(1);
+      expect(result.infos[0]).toContain('old-coder');
+      expect(result.infos[0]).toContain('coder');
+    }
+
+    // Verify the file was updated
+    const updated = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
+      agents: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(updated.agents, 'coder')).toBe(true);
+    expect(Object.hasOwn(updated.agents, 'old-coder')).toBe(false);
+  });
+
+  it('is a no-op when file does not exist', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      expect(result.infos).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it('is a no-op when agents field is absent', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1 }),
+      'utf-8',
+    );
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    if (result) {
+      expect(result.infos).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it('is a no-op when no legacy keys are present in the file', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    // File has 'coder' (canonical), no 'old-coder'
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: { coder: { model: 'sonnet' } } }),
+      'utf-8',
+    );
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    if (result) {
+      expect(result.infos).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    }
+    // File unchanged
+    const raw = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
+      agents: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(raw.agents, 'coder')).toBe(true);
+  });
+
+  it('emits warning on invalid JSON, does not throw', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(path.join(tmpDir, 'agent-models.json'), 'not valid json', 'utf-8');
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('invalid JSON');
+      expect(result.infos).toEqual([]);
+    }
+  });
+
+  it('strips BOM before parsing', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const json = JSON.stringify({ version: 1, agents: { 'old-coder': { model: 'sonnet' } } });
+    // Prepend BOM
+    await fs.writeFile(path.join(tmpDir, 'agent-models.json'), '﻿' + json, 'utf-8');
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    if (result) {
+      expect(result.warnings).toEqual([]);
+      expect(result.infos).toHaveLength(1);
+    }
+    const updated = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
+      agents: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(updated.agents, 'coder')).toBe(true);
+  });
+
+  it('emits warning when agents field is an array', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: [] }),
+      'utf-8',
+    );
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    if (result) {
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('non-object agents field');
+      expect(result.infos).toEqual([]);
+    }
+  });
+
+  it('preserves other top-level fields after rewrite (envelope preservation)', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, extra: 'preserved', agents: { 'old-coder': { model: 'sonnet' } } }),
+      'utf-8',
+    );
+
+    await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+
+    const updated = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as Record<string, unknown>;
+    expect(updated['extra']).toBe('preserved');
+    expect(updated['version']).toBe(1);
+  });
+
+  it('is idempotent: running twice produces the same result', async () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: { 'old-coder': { model: 'sonnet' } } }),
+      'utf-8',
+    );
+
+    const mig = getMigration();
+    await mig.run({ scope: 'global', devflowDir: tmpDir });
+
+    // Second run: old key is gone, nothing to do
+    const second = await mig.run({ scope: 'global', devflowDir: tmpDir });
+    if (second) {
+      expect(second.infos).toEqual([]);
+      expect(second.warnings).toEqual([]);
+    }
+
+    // File content stable
+    const final = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
+      agents: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(final.agents, 'coder')).toBe(true);
+    expect(Object.hasOwn(final.agents, 'old-coder')).toBe(false);
   });
 });

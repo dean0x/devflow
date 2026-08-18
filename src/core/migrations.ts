@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir } from './project-paths.js';
+import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from './agent-models.js';
 
 export type MigrationScope = 'global' | 'per-project';
 
@@ -75,8 +76,111 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  * needed) from per-project (sweeps every discovered Claude-enabled project root).
  *
  * Append new migrations here.
+ *
+ * KNOWN ISSUE (out of scope for this wave): the migration runner retries a failed
+ * migration on every `devflow init`, forever, with no cap or backoff. This was
+ * acceptable with an empty MIGRATIONS registry (D37: the vacuous-truth case), but
+ * this commit adds the first real entry and therefore activates that code path.
+ * A transient EACCES or partial write will cause the migration to run again on the
+ * next init — harmless because canonicaliseAgentKeys is idempotent, but it will
+ * accumulate log noise indefinitely. Fix deferred to a later release.
  */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    id: 'canonicalise-agent-keys-v1',
+    description: 'Rename legacy agent keys in ~/.devflow/agent-models.json to their canonical names',
+    scope: 'global',
+
+    async run(ctx): Promise<MigrationRunResult> {
+      const infos: string[] = []
+      const warnings: string[] = []
+
+      // Fast path: no legacy keys defined — skip without touching the file.
+      // This is the common case in phase 1 (LEGACY_AGENT_KEYS is empty).
+      if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
+        return { infos, warnings }
+      }
+
+      const filePath = path.join(ctx.devflowDir, 'agent-models.json')
+
+      // Read raw JSON — NOT readAgentMapping, which drops invalid model/effort values
+      // and would silently delete user data on a round-trip (applies parseRawEnvelope
+      // discipline from src/core/cache.ts: read raw, validate defensively, then process).
+      let raw: string
+      try {
+        raw = await fs.readFile(filePath, 'utf-8')
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') return { infos, warnings } // no file → nothing to migrate
+        // EACCES or other OS errors: surface as warning, retry on next init
+        warnings.push(`canonicalise-agent-keys-v1: cannot read ${filePath}: ${(err as Error).message}`)
+        return { infos, warnings }
+      }
+
+      // Strip BOM (U+FEFF) — some Windows editors prepend it to JSON files
+      const content = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+
+      // Empty file → nothing to migrate
+      if (content.trim() === '') return { infos, warnings }
+
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        warnings.push(`canonicalise-agent-keys-v1: ${filePath} contains invalid JSON — skipping`)
+        return { infos, warnings }
+      }
+
+      // Validate top-level structure
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        warnings.push(`canonicalise-agent-keys-v1: ${filePath} is not a JSON object — skipping`)
+        return { infos, warnings }
+      }
+      const obj = parsed as Record<string, unknown>
+
+      // Validate agents field — must be a plain object (not null, not array).
+      // Array.isArray([]) passes typeof === 'object', so we check it explicitly.
+      const rawAgents = obj['agents']
+      if (rawAgents === undefined || rawAgents === null) {
+        return { infos, warnings } // no agents field → nothing to migrate
+      }
+      if (typeof rawAgents !== 'object' || Array.isArray(rawAgents)) {
+        warnings.push(`canonicalise-agent-keys-v1: ${filePath} has non-object agents field — skipping`)
+        return { infos, warnings }
+      }
+
+      const onWarning = (msg: string) => warnings.push(msg)
+      const { agents: migrated, didMutate } = canonicaliseAgentKeys(
+        rawAgents as Record<string, unknown>,
+        onWarning,
+      )
+
+      if (!didMutate) return { infos, warnings }
+
+      // Write back with the canonical keys, preserving the rest of the envelope
+      // (version: 1 stays, any other top-level keys are preserved unchanged).
+      // Idempotent under concurrent execution: canonicaliseAgentKeys is a pure
+      // function — if two worktrees run this simultaneously, the second write is
+      // identical to the first (no old key left to rename), so it is a no-op that
+      // overwrites with the same content. No lock is needed.
+      const updated = { ...obj, agents: migrated }
+      try {
+        await writeFileAtomicExclusive(filePath, JSON.stringify(updated, null, 2) + '\n')
+      } catch (err: unknown) {
+        warnings.push(`canonicalise-agent-keys-v1: failed to write ${filePath}: ${(err as Error).message}`)
+        return { infos, warnings }
+      }
+
+      const renamed = Object.keys(LEGACY_AGENT_KEYS).filter(
+        old => Object.hasOwn(rawAgents as Record<string, unknown>, old),
+      )
+      infos.push(
+        `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
+      )
+      return { infos, warnings }
+    },
+  },
+];
 
 const MIGRATIONS_FILE = 'migrations.json';
 

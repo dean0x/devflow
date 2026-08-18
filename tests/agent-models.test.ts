@@ -19,6 +19,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
+  LEGACY_AGENT_KEYS,
+  canonicaliseAgentKeys,
   readAgentMapping,
   saveAgentMapping,
   resolveEffective,
@@ -606,5 +608,185 @@ describe('reapplyAgentMapping', async () => {
 
     // A warning naming 'invalid-model' must have been emitted
     expect(warnings.some(w => w.includes('invalid-model'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canonicaliseAgentKeys
+// ---------------------------------------------------------------------------
+
+/**
+ * Tests for canonicaliseAgentKeys() and LEGACY_AGENT_KEYS.
+ *
+ * We temporarily populate LEGACY_AGENT_KEYS in each test to exercise the
+ * migration logic without modifying the shipped (empty) map.
+ * Cleanup is handled in afterEach to ensure map stays empty for other tests.
+ */
+describe('canonicaliseAgentKeys', () => {
+  // Save and restore LEGACY_AGENT_KEYS around each test.
+  // We mutate the exported object directly (it is Object.create(null),
+  // so Object.assign and delete work correctly).
+  afterEach(() => {
+    // Clear all entries added by tests
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+  });
+
+  it('is a no-op when LEGACY_AGENT_KEYS is empty (fast path)', () => {
+    const input = { coder: { model: 'sonnet' } };
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(false);
+    expect(agents).toBe(input); // same reference — no allocation
+  });
+
+  it('renames a legacy key to the canonical key', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = { 'old-coder': { model: 'sonnet' } };
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(true);
+    expect(Object.hasOwn(agents, 'coder')).toBe(true);
+    expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
+    expect(agents['coder']).toEqual({ model: 'sonnet' });
+  });
+
+  it('collision: new key already present → new wins, old dropped, one warning', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = {
+      'old-coder': { model: 'haiku' }, // will be dropped
+      coder: { model: 'opus' },         // already present — wins
+    };
+    const warnings: string[] = [];
+    const { agents, didMutate } = canonicaliseAgentKeys(input, (msg) => warnings.push(msg));
+    expect(didMutate).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('old-coder');
+    expect(warnings[0]).toContain('coder');
+    expect(agents['coder']).toEqual({ model: 'opus' }); // new wins
+    expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
+  });
+
+  it('collision check uses original keys (order-independent)', () => {
+    // If we have old-a → a and old-b → b, both renames happen independently
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-a'] = 'a';
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-b'] = 'b';
+    const input = { 'old-a': { model: 'sonnet' }, 'old-b': { model: 'haiku' } };
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(true);
+    expect(Object.hasOwn(agents, 'a')).toBe(true);
+    expect(Object.hasOwn(agents, 'b')).toBe(true);
+    expect(Object.hasOwn(agents, 'old-a')).toBe(false);
+    expect(Object.hasOwn(agents, 'old-b')).toBe(false);
+  });
+
+  it('is idempotent: applying twice produces identical result (concurrent-safe)', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = { 'old-coder': { model: 'sonnet' } };
+
+    const first = canonicaliseAgentKeys(input);
+    // After first application, old-coder is gone. Applying again on the result:
+    const second = canonicaliseAgentKeys(first.agents as Record<string, unknown>);
+    expect(second.didMutate).toBe(false); // no legacy keys left
+    expect(second.agents['coder']).toEqual({ model: 'sonnet' });
+  });
+
+  it('skips rename when newKey === __proto__ (prototype-safety, new-key guard)', () => {
+    // If LEGACY_AGENT_KEYS maps 'bad-key' → '__proto__', applying the rename would
+    // set the object's prototype, not a property. The guard on newKey must catch this.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['bad-key'] = '__proto__';
+    const input: Record<string, unknown> = {};
+    // Add 'bad-key' as an own property using defineProperty (can't use object literal
+    // because the key name is not special in rawAgents — it's a regular string 'bad-key').
+    Object.defineProperty(input, 'bad-key', { value: { model: 'sonnet' }, enumerable: true, configurable: true, writable: true });
+
+    const proto = Object.getPrototypeOf(input);
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    // The rename 'bad-key' → '__proto__' is skipped, but the key is still deleted
+    // (didMutate is true because the old key is removed regardless of newKey guard).
+    // What matters: the prototype of the result must be unchanged.
+    expect(Object.getPrototypeOf(agents)).toBe(proto);
+    // __proto__ must not appear as a canonical renamed key — prototype is plain Object
+    expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
+  });
+
+  it('skips rename when oldKey === __proto__ (prototype-safety, old-key guard)', () => {
+    // rawAgents with an actual own __proto__ property (not the prototype-setting form).
+    // Object.defineProperty is required — the { __proto__: value } literal form sets the
+    // prototype rather than creating an own property.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['__proto__'] = 'coder';
+    const rawAgents: Record<string, unknown> = {};
+    Object.defineProperty(rawAgents, '__proto__', {
+      value: { model: 'sonnet' },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    // Object.keys sees __proto__ as an own enumerable property here
+    expect(Object.keys(rawAgents)).toContain('__proto__');
+
+    const { agents, didMutate } = canonicaliseAgentKeys(rawAgents);
+    // The __proto__ old-key guard must fire; no rename must have happened
+    expect(didMutate).toBe(false);
+    // The result prototype must be plain Object.prototype
+    expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
+    // Clean up LEGACY_AGENT_KEYS entry (afterEach also does this, but be explicit)
+    delete (LEGACY_AGENT_KEYS as Record<string, string>)['__proto__'];
+  });
+
+  it('handles empty input object', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const { agents, didMutate } = canonicaliseAgentKeys({});
+    expect(didMutate).toBe(false);
+    expect(agents).toEqual({});
+  });
+
+  it('LEGACY_AGENT_KEYS is prototype-null (Object.create(null))', () => {
+    expect(Object.getPrototypeOf(LEGACY_AGENT_KEYS)).toBeNull();
+  });
+
+  it('readAgentMapping applies canonicalisation on read (integration)', async () => {
+    // Populate a legacy key mapping
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-canonical-test-'));
+    try {
+      // Write a file with the old key
+      const raw: AgentMappingFile = {
+        version: 1,
+        agents: { 'old-coder': { model: 'sonnet' } } as Record<string, unknown> as Record<string, AgentMapping>,
+      };
+      await fs.writeFile(path.join(tmpDir, 'agent-models.json'), JSON.stringify(raw), 'utf-8');
+
+      const result = await readAgentMapping(tmpDir);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Old key must be gone, canonical key must be present
+        expect(Object.hasOwn(result.value.agents, 'coder')).toBe(true);
+        expect(Object.hasOwn(result.value.agents, 'old-coder')).toBe(false);
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('readAgentMapping handles agents: [] (array must not be treated as object)', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-array-agents-test-'));
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, 'agent-models.json'),
+        JSON.stringify({ version: 1, agents: [] }),
+        'utf-8',
+      );
+      const result = await readAgentMapping(tmpDir);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Array should be treated as empty (no entries)
+        expect(result.value.agents).toEqual({});
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
