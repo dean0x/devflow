@@ -5,7 +5,7 @@
  */
 
 export { reduce, buildRow, buildModelCycle, pickerNames, buildPickerNameMap, isDirtyModel, isDirtyEffort, unsavedCount, isOffCycle, rowState } from './state.js';
-export { renderFrame, FIXED_ROWS, computeViewportHeight } from './render.js';
+export { renderFrame, FIXED_ROWS, computeViewportHeight, formatAgentName } from './render.js';
 export type {
   AgentRow,
   AgentsViewState,

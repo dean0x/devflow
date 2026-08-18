@@ -66,6 +66,23 @@ const COL_EFFORT = 13;
 const COL_STATE = 13;
 
 // ---------------------------------------------------------------------------
+// Name formatter — TUI only (Fix 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Capitalize the first character of the agent name for TUI display.
+ *
+ * TUI-only — `--list` output uses the raw lowercase name from the registry.
+ * Exactly ONE call site: the name cell in the row renderer below.
+ *
+ * Pure function, no I/O.
+ */
+export function formatAgentName(name: string): string {
+  if (name.length === 0) return name;
+  return name[0].toUpperCase() + name.slice(1);
+}
+
+// ---------------------------------------------------------------------------
 // Cell renderers (pure, return styled string)
 // ---------------------------------------------------------------------------
 
@@ -296,7 +313,8 @@ export function renderFrame(
     const prefix = isCursor ? '❯ ' : '  ';
     // Strip ANSI from name — mandatory for orphan rows (arbitrary JSON keys from
     // agent-models.json may contain escape sequences injected by a hostile file).
-    const safeName = stripAnsi(row.name);
+    // Exactly ONE call site for formatAgentName (Fix 4): TUI only; --list is lowercase.
+    const safeName = formatAgentName(stripAnsi(row.name));
     const nameCell = padToVisible(
       isCursor ? bold(truncateVisible(safeName, agentW)) : truncateVisible(safeName, agentW),
       agentW,

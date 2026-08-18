@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderFrame, buildModelCycle } from '../src/cli/agents-view/index.js';
+import { renderFrame, buildModelCycle, formatAgentName } from '../src/cli/agents-view/index.js';
 import { stripAnsi } from '../src/hud/colors.js';
 import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
@@ -112,12 +112,15 @@ describe('renderFrame — structure', () => {
     expect(footer).toBeDefined();
   });
 
-  it('shows all three agents by name', () => {
+  it('shows all three agents by name (capitalized for TUI — Fix 4)', () => {
     const lines = renderStripped(makeState());
     const text = lines.join('\n');
-    expect(text).toContain('bug-analyzer');
-    expect(text).toContain('coder');
-    expect(text).toContain('designer');
+    // Fix 4: formatAgentName capitalizes the first letter in the TUI
+    expect(text).toContain('Bug-analyzer');
+    expect(text).toContain('Coder');
+    expect(text).toContain('Designer');
+    // Original lowercase names must NOT appear (they are transformed)
+    expect(text).not.toContain('bug-analyzer');
   });
 });
 
@@ -128,15 +131,15 @@ describe('renderFrame — structure', () => {
 describe('cursor row marker', () => {
   it('marks cursor row with ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    // The row with ❯ should contain 'coder'
+    // The row with ❯ should contain 'Coder' (capitalized — Fix 4)
     const cursorLine = lines.find(l => l.includes('❯'));
     expect(cursorLine).toBeDefined();
-    expect(cursorLine).toContain('coder');
+    expect(cursorLine).toContain('Coder');
   });
 
   it('non-cursor rows do not have ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('bug-analyzer'));
+    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Bug-analyzer'));
     expect(nonCursorWithMarker).toHaveLength(0);
   });
 });
@@ -250,7 +253,7 @@ describe('active field brackets ‹ ›', () => {
     const state = makeState({ cursor: 1 });
     const lines = renderStripped(state);
     const nonCursorLines = lines.filter(
-      l => (l.includes('bug-analyzer') || l.includes('designer')) && !l.includes('❯')
+      l => (l.includes('Bug-analyzer') || l.includes('Designer')) && !l.includes('❯')
     );
     for (const line of nonCursorLines) {
       expect(line).not.toContain('‹');
@@ -473,7 +476,7 @@ describe('alias rendering', () => {
       activeField: 'effort', // model not active — no ‹ › brackets
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     // T4 core assertion: alias renders bare
     expect(rowLine).toContain('sol');
@@ -495,7 +498,7 @@ describe('alias rendering', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('reviewer'));
+    const rowLine = lines.find(l => l.includes('Reviewer'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('default (opus)');
   });
@@ -516,7 +519,7 @@ describe('alias rendering', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('retired-model (unavailable)');
   });
@@ -540,7 +543,7 @@ describe('alias rendering', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('gpt-5.5');
     expect(rowLine).not.toContain('gpt-5.5 (gpt-5.5)');
@@ -560,7 +563,7 @@ describe('STATE column (Fix 3)', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('active');
   });
@@ -572,7 +575,7 @@ describe('STATE column (Fix 3)', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('not installed');
   });
@@ -585,7 +588,7 @@ describe('STATE column (Fix 3)', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('old-custom-agent'));
+    const rowLine = lines.find(l => l.includes('Old-custom-agent'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('unknown');
     // Must not show 'not installed' — 'unknown' takes priority (inRegistry check first)
@@ -608,9 +611,9 @@ describe('STATE column (Fix 3)', () => {
     // (render.ts colors STATE column, so some \x1b[ will appear — but not from the name)
     // Check specifically for the red color code that was in the name:
     expect(allRaw).not.toContain('\x1b[31mevil-agent');
-    // The visible text 'evil-agent' must still appear (stripped, just the text)
+    // The visible text 'evil-agent' must still appear (stripped, capitalized as 'Evil-agent')
     const strippedLines = rawLines.map(stripAnsi);
-    const rowLine = strippedLines.find(l => l.includes('evil-agent'));
+    const rowLine = strippedLines.find(l => l.includes('Evil-agent'));
     expect(rowLine).toBeDefined();
   });
 });
@@ -638,7 +641,7 @@ describe('(unavailable) off-cycle pin', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('retired-model (unavailable)');
   });
@@ -684,7 +687,7 @@ describe('escape sequence injection safety', () => {
     const COLS = 80;
     // renderStripped strips ANSI — the visible line width must be ≤ COLS
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine.length).toBeLessThanOrEqual(COLS);
@@ -704,7 +707,7 @@ describe('escape sequence injection safety', () => {
     });
     const COLS = 80;
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     // Must not throw and must not produce a line wider than COLS
     if (rowLine !== undefined) {
@@ -736,7 +739,7 @@ describe('escape sequence injection safety', () => {
     expect(allRaw).not.toContain('\x1b]8;');
     // After stripping, the visible text ('gpt-5.5') must still appear
     const strippedLines = rawLines.map(stripAnsi);
-    const rowLine = strippedLines.find(l => l.includes('coder'));
+    const rowLine = strippedLines.find(l => l.includes('Coder'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine).toContain('gpt-5.5');
@@ -792,5 +795,57 @@ describe('T5: render.ts source does not reference aliasToId', () => {
     );
     const src = readFileSync(renderPath, 'utf-8');
     expect(src, 'render.ts must not reference aliasToId after Fix 1').not.toContain('aliasToId');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T13: formatAgentName — capitalized in TUI, --list stays lowercase (Fix 4)
+// ---------------------------------------------------------------------------
+
+describe('T13: formatAgentName (Fix 4)', () => {
+  it('capitalizes the first character only', () => {
+    expect(formatAgentName('coder')).toBe('Coder');
+    expect(formatAgentName('bug-analyzer')).toBe('Bug-analyzer');
+    expect(formatAgentName('designer')).toBe('Designer');
+    // Multi-word/compound: only first character is uppercased
+    expect(formatAgentName('my-custom-agent')).toBe('My-custom-agent');
+  });
+
+  it('empty string is returned unchanged', () => {
+    expect(formatAgentName('')).toBe('');
+  });
+
+  it('already-capitalized names are unchanged', () => {
+    expect(formatAgentName('Coder')).toBe('Coder');
+  });
+
+  it('TUI renders agent names with capital first letter', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
+        makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
+      ],
+      cursor: 0,
+    });
+    const lines = renderStripped(state);
+    const text = lines.join('\n');
+    // TUI must show capitalized names
+    expect(text).toContain('Bug-analyzer');
+    expect(text).toContain('Coder');
+    // Lowercase originals must NOT appear — they are transformed
+    expect(text).not.toContain('\nbug-analyzer');
+    expect(text).not.toContain('\ncoder');
+  });
+
+  it('--list formatListOutput uses raw lowercase name (not formatAgentName)', async () => {
+    // The --list path calls padEnd on the raw name without formatAgentName.
+    // Verify formatAgentName is NOT imported by agents.ts (--list module).
+    const { readFileSync } = await import('fs');
+    const { fileURLToPath } = await import('url');
+    const agentsPath = fileURLToPath(
+      new URL('../src/cli/commands/agents.ts', import.meta.url),
+    );
+    const src = readFileSync(agentsPath, 'utf-8');
+    expect(src, '--list path in agents.ts must not call formatAgentName').not.toContain('formatAgentName');
   });
 });
