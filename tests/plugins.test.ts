@@ -13,10 +13,7 @@ import {
   LEGACY_PLUGIN_NAMES,
   type PluginDefinition,
 } from '../src/core/plugins.js';
-import {
-  LEGACY_SKILL_NAMES,
-  LEGACY_AGENT_NAMES,
-} from '../src/targets/claude-code/legacy.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('getAllSkillNames', () => {
   it('returns a deduplicated list of skills across all plugins', () => {
@@ -217,13 +214,10 @@ describe('optional plugin flag', () => {
     expect(resolve!.agents).toContain('triage');
     expect(resolve!.agents).toContain('code');
     expect(resolve!.agents).toContain('validate');
-    // resolver has been retired — should not appear in registry
+    // resolver has been retired — should not appear in registry; retirements need
+    // no manual list entry — the registry-diff sweep in the installer
+    // (sweepOrphanedAssets) removes any installed file absent from getAllAgentNames()
     expect(resolve!.agents).not.toContain('resolver');
-    // resolver is in LEGACY_AGENT_NAMES for pre-registry-diff-sweep era cleanup; new
-    // retirements no longer require a manual list entry — the registry-diff sweep in
-    // the installer (sweepOrphanedAssets) removes any installed file whose name is
-    // absent from getAllAgentNames(), making LEGACY_AGENT_NAMES a historical deletion manifest
-    expect(LEGACY_AGENT_NAMES).toContain('resolver');
     // apply-decisions skill declared so Triage agent can cite ADR/PF entries
     expect(resolve!.skills).toContain('apply-decisions');
   });
@@ -312,21 +306,7 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
   });
 });
 
-describe('LEGACY_AGENT_NAMES consistency', () => {
-  it('no legacy agent name appears in any current plugin agents array', () => {
-    const currentAgents = getAllAgentNames();
-    for (const legacyName of LEGACY_AGENT_NAMES) {
-      expect(
-        currentAgents,
-        `LEGACY_AGENT_NAMES entry '${legacyName}' must not appear in getAllAgentNames() — remove it from LEGACY_AGENT_NAMES or update the plugin registry`,
-      ).not.toContain(legacyName);
-    }
-  });
-
-  it("dream is in LEGACY_AGENT_NAMES (renamed to learning in commit 8)", () => {
-    expect(LEGACY_AGENT_NAMES).toContain('dream');
-  });
-
+describe('agent registry membership', () => {
   it("learning is in devflow-core-skills and devflow-ambient agents (not dream)", () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');

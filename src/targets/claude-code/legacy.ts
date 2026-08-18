@@ -1,16 +1,6 @@
 /** Target-specific cleanup lists for legacy ~/.claude artifacts. */
 
 /**
- * Deprecated agent names from old installations.
- * Used during init to clean up stale agent files on upgrade.
- */
-export const LEGACY_AGENT_NAMES: string[] = [
-  'shepherd',
-  'resolver', // retired in favour of Triager + Coder-as-fixer split
-  'dream',    // renamed to 'learning' in commit 8 of rename-dream-to-learning
-];
-
-/**
  * Deprecated skill names from old installations (prefixed with devflow-).
  * Used during uninstall to clean up legacy installs.
  *
