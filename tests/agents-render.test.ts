@@ -423,6 +423,59 @@ describe('narrow width', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC-P3-WIDTH: line widths at 80 and 60 columns
+// ---------------------------------------------------------------------------
+
+describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
+  // At 80 cols (standard terminal): all columns scale to full size.
+  // totalContent = 2 + 18 + 32 + 13 + 13 = 78, so every data row is 78 chars.
+  // The keybindingsLine (77 chars) also fits within 80.
+  it('at 80 cols: every stripped line is ≤ 80 visible chars', () => {
+    const state = makeState({
+      proxyEnabled: false, // shows proxy hint line (longest footer variant)
+      rows: [
+        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+      ],
+      cursor: 0,
+      viewportHeight: 10,
+    });
+    const COLS = 80;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    for (const line of lines) {
+      expect(
+        line.length,
+        `Line exceeds ${COLS} cols: "${line}"`,
+      ).toBeLessThanOrEqual(COLS);
+    }
+  });
+
+  // At 60 cols: responsive-scale block exercises the Math.max floors.
+  // scale = 60/78 ≈ 0.769; column widths after floor: agent=13, model=24, effort=10, state=10.
+  // Max data row visible width = 2 + 13 + 24 + 10 + 10 = 59 ≤ 60.
+  // keybindingsLine is sliced to dims.cols (60) before dim() is applied.
+  it('at 60 cols: every stripped line is ≤ 60 visible chars', () => {
+    const state = makeState({
+      proxyEnabled: false, // shows proxy hint line (longest footer variant)
+      rows: [
+        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+      ],
+      cursor: 0,
+      viewportHeight: 10,
+    });
+    const COLS = 60;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    for (const line of lines) {
+      expect(
+        line.length,
+        `Line exceeds ${COLS} cols: "${line}"`,
+      ).toBeLessThanOrEqual(COLS);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Minimal / empty state
 // ---------------------------------------------------------------------------
 

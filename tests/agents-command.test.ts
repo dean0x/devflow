@@ -27,6 +27,7 @@ import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import * as modelDiscovery from '../src/core/model-discovery.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 import { MAX_TTL_MS } from '../src/core/cache.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
 // ---------------------------------------------------------------------------
 // validateSetArgs
@@ -657,5 +658,83 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
     expect(() => mergeTuiRowsIntoMapping(rows, frozen as AgentMappingFile)).not.toThrow();
     // Original mapping is untouched
     expect(frozen.agents['coder']).toEqual({ model: 'opus' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-P3-LIST: --list AGENT cell format and --set round-trip
+//
+// The AGENT column in --list output must be lowercase identifiers that users
+// can copy directly into `devflow agents --set <agent>`. Capitalization is
+// TUI-only (formatAgentName is called only in render.ts, never in agents.ts).
+// ---------------------------------------------------------------------------
+
+describe('AC-P3-LIST: --list AGENT cell is a lowercase identifier', () => {
+  let installDir: string;
+
+  beforeEach(async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-fmt-'));
+    installDir = path.join(tmpBase, 'agents');
+    await fs.mkdir(installDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(installDir), { recursive: true, force: true });
+  });
+
+  it('every AGENT name from buildListRows matches ^[a-z0-9-]+$ (no capitals)', async () => {
+    // The AGENT cell is stripAnsi(row.name) — the raw registry name.
+    // Registry names are lowercase kebab-case; capitals must NEVER appear.
+    const agentNames = getAllAgentNames();
+    expect(agentNames.length).toBeGreaterThan(0);
+
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const shippedDefaults: Record<string, string> = Object.fromEntries(
+      agentNames.map(n => [n, 'sonnet']),
+    );
+    const rows = await buildListRows({
+      agentNames,
+      mapping,
+      installDir,
+      shippedDefaults,
+      proxyEnabled: false,
+    });
+
+    const AGENT_CELL_PATTERN = /^[a-z0-9-]+$/;
+    for (const row of rows) {
+      expect(
+        row.name,
+        `AGENT cell "${row.name}" contains non-lowercase or non-identifier chars`,
+      ).toMatch(AGENT_CELL_PATTERN);
+    }
+  });
+
+  it('a name taken from --list round-trips through --set validation (getAllAgentNames contains it)', async () => {
+    // --set validates agent names against getAllAgentNames() (plus orphan keys).
+    // Any name that appears in buildListRows output must therefore be in
+    // getAllAgentNames() — ensuring a user who copies from --list can use --set.
+    const agentNames = getAllAgentNames();
+    expect(agentNames.length).toBeGreaterThan(0);
+
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const shippedDefaults: Record<string, string> = Object.fromEntries(
+      agentNames.map(n => [n, 'sonnet']),
+    );
+    const rows = await buildListRows({
+      agentNames,
+      mapping,
+      installDir,
+      shippedDefaults,
+      proxyEnabled: false,
+    });
+
+    const registrySet = new Set(getAllAgentNames());
+    for (const row of rows) {
+      // Every name from --list must be recognised by --set's validation.
+      expect(
+        registrySet.has(row.name),
+        `Agent "${row.name}" from --list is not in getAllAgentNames() — --set would reject it`,
+      ).toBe(true);
+    }
   });
 });

@@ -385,16 +385,18 @@ export interface InitRowInput {
   pickerNameMap?: ReadonlyMap<string, string>;
   /**
    * Whether the agent .md file is present in the install directory.
-   * Optional — defaults to true for normal registry rows; explicitly false for
-   * not-installed agents; provided by buildTuiState via readInstalledAgentNames.
+   * Required — tsc enumerates every construction site so each caller must decide
+   * the correct value. True for installed agents, false for not-installed agents.
+   * Provided by buildTuiState via readInstalledAgentNames.
    */
-  installed?: boolean;
+  installed: boolean;
   /**
    * Whether this agent name exists in the plugin registry.
-   * Optional — defaults to true for normal rows; explicitly false for orphan
-   * rows (keys in agent-models.json not present in the registry).
+   * Required — tsc enumerates every construction site so each caller must decide
+   * the correct value. True for normal registry rows, false for orphan rows
+   * (keys in agent-models.json not present in the registry).
    */
-  inRegistry?: boolean;
+  inRegistry: boolean;
 }
 
 /**
@@ -443,8 +445,8 @@ export function buildRow(input: InitRowInput): AgentRow {
     originalEffort: configuredEffort,
     dormantModel: dormant ? (input.savedModel ?? null) : null,
     offCyclePin,
-    installed: input.installed ?? true,
-    inRegistry: input.inRegistry ?? true,
+    installed: input.installed,
+    inRegistry: input.inRegistry,
   };
 }
 

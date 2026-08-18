@@ -367,9 +367,9 @@ export function renderFrame(
       ? `  ${yellow(`${count} unsaved change${count === 1 ? '' : 's'}`)}`
       : '';
 
-  const keybindingsLine = dim(
-    '  ↑↓ agent   tab field   ←→/space cycle   d default   enter save   esc cancel',
-  );
+  // Truncate to cols before applying dim so narrow terminals stay within bounds.
+  const keybindingsText = '  ↑↓ agent   tab field   ←→/space cycle   d default   enter save   esc cancel';
+  const keybindingsLine = dim(keybindingsText.slice(0, dims.cols));
   const proxyHintLine = !proxyEnabled
     ? dim('  devflow proxy --enable to activate GPT models')
     : '';

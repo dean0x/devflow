@@ -143,6 +143,8 @@ describe('buildRow', () => {
       name: 'coder',
       shippedDefault: 'sonnet',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('default');
     expect(row.originalModel).toBe('default');
@@ -156,6 +158,8 @@ describe('buildRow', () => {
       shippedDefault: 'sonnet',
       savedModel: 'opus',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('opus');
     expect(row.originalModel).toBe('opus');
@@ -169,6 +173,8 @@ describe('buildRow', () => {
       shippedDefault: 'sonnet',
       savedModel: 'gpt-5.5',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('default');
     expect(row.originalModel).toBe('default');
@@ -184,6 +190,8 @@ describe('buildRow', () => {
       savedModel: 'gpt-5.5',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('gpt-5.5');
     expect(row.originalModel).toBe('gpt-5.5');
@@ -197,6 +205,8 @@ describe('buildRow', () => {
       shippedDefault: 'sonnet',
       savedEffort: 'high',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredEffort).toBe('high');
     expect(row.originalEffort).toBe('high');
@@ -211,6 +221,8 @@ describe('buildRow', () => {
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // configuredModel stays as the saved model (proxy is on, not dormant)
     expect(row.configuredModel).toBe('gpt-4.2-legacy');
@@ -225,6 +237,8 @@ describe('buildRow', () => {
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
       // no modelCycle provided
+      installed: true,
+      inRegistry: true,
     });
     expect(row.offCyclePin).toBeNull();
   });
@@ -237,6 +251,8 @@ describe('buildRow', () => {
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('sol');
     expect(row.offCyclePin).toBeNull();  // 'sol' IS in the cycle
@@ -256,6 +272,8 @@ describe('T8: alias round-trip', () => {
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // 'sol' IS in the cycle, so configuredModel = 'sol', originalModel = 'sol'
     expect(row.configuredModel).toBe('sol');
@@ -273,6 +291,8 @@ describe('T8: alias round-trip', () => {
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // Dirty check: same as applyTuiSave's logic — only dirty rows get written
     const modelDirty = isDirtyModel(row);
