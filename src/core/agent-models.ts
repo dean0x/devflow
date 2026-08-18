@@ -345,7 +345,7 @@ export interface EffectiveConfig {
  *
  * Pure function — no I/O.
  *
- * @param agentName - The agent's short name (e.g., 'coder').
+ * @param agentName - The agent's short name (e.g., 'code').
  * @param mapping - The full mapping file.
  * @param shippedDefaults - Map of agent name → shipped default model.
  * @param proxyEnabled - Whether the Devflow proxy is currently active.

@@ -100,12 +100,11 @@ Plugins are entries in `DEVFLOW_PLUGINS` in `src/core/plugins.ts` — no per-plu
 ```typescript
 {
   name: 'devflow-implement',
-  description: 'Complete task implementation workflow',
+  description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
   commands: ['/implement'],
-  agents: ['git', 'coder', 'synthesizer'],
-  skills: ['patterns', 'quality-gates'],
+  agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
+  skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
   rules: [],
-  optional: false,
 }
 ```
 

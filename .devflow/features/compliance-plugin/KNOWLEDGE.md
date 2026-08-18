@@ -1,7 +1,7 @@
 ---
 feature: compliance-plugin
 name: Compliance Plugin & Installed-Gate Pattern
-description: "Use when adding the devflow-compliance optional plugin to a project, implementing plugin-presence gates for future optional plugins, modifying the compliance reviewer/designer/coder integration surfaces, changing the CLAUDE.md Frameworks declaration convention, or adding new framework references to the compliance skill. Keywords: compliance, GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, compliance_gate, COMPLIANCE_ENABLED, plugin-presence gate, optional plugin, regulated data, audit trail."
+description: "Use when adding the devflow-compliance optional plugin to a project, implementing plugin-presence gates for future optional plugins, modifying the compliance review/design/code integration surfaces, changing the CLAUDE.md Frameworks declaration convention, or adding new framework references to the compliance skill. Keywords: compliance, GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, compliance_gate, COMPLIANCE_ENABLED, plugin-presence gate, optional plugin, regulated data, audit trail."
 category: component-patterns
 directories:
   - src/assets/skills/compliance
@@ -21,7 +21,7 @@ updated: 2026-07-19
 
 The `devflow-compliance` optional plugin adds regulatory compliance analysis (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX) to three workflow commands: `/code-review`, `/plan`, and `/implement`. It is the **first optional-plugin integration** in devflow to gate its behavior entirely inside command markdown — no deterministic helper scripts, no subprocess calls, no LLM — making it the canonical template for future optional-plugin gates (applies ADR-007).
 
-The gate (`compliance_gate` partial) is resolved once per run and cached as `COMPLIANCE_ENABLED`. Downstream agents receive this flag as an input field; the orchestrator decides whether compliance work happens, not the agents themselves. The compliance skill is intentionally body-instructed inside coder.md rather than frontmatter-preloaded, so the full skill payload only loads when the task actually touches regulated surface (avoids PF-002).
+The gate (`compliance_gate` partial) is resolved once per run and cached as `COMPLIANCE_ENABLED`. Downstream agents receive this flag as an input field; the orchestrator decides whether compliance work happens, not the agents themselves. The compliance skill is intentionally body-instructed inside code.md rather than frontmatter-preloaded, so the full skill payload only loads when the task actually touches regulated surface (avoids PF-002).
 
 ## Core Responsibilities
 
@@ -29,7 +29,7 @@ The compliance plugin does three things, each in a distinct layer:
 
 - **Rule** (`src/assets/rules/compliance.md`): Always-on, global reminder installed for any project that has the plugin. Keeps compliance mindset active during quick edits that don't trigger a full workflow.
 - **Skill** (`src/assets/skills/compliance/SKILL.md` + `references/`): Loaded on-demand by agents when they detect regulated-data surface. Provides the full control catalog, severity guidance, framework-specific reference files, and the clean-report contract.
-- **Gate** (`src/assets/commands/_partials/_compliance.mds`): Orchestrator-only, resolved once per command run. Controls whether the compliance focus/reviewer/designer is activated downstream.
+- **Gate** (`src/assets/commands/_partials/_compliance.mds`): Orchestrator-only, resolved once per command run. Controls whether compliance-focused Review/Design work is activated downstream.
 
 ## Plugin-Presence Gate (`compliance_gate`)
 
@@ -77,13 +77,13 @@ The compliance focus maps to gap-analysis SKILL.md §7, which detects regulatory
 
 | Template | Context |
 |----------|---------|
-| SINGLE_CODER | Primary implementation |
+| SINGLE_CODE_AGENT | Primary implementation |
 | SEQUENTIAL Phase 1 | First of multi-phase chain |
 | SEQUENTIAL Phase 2+ | Continuation Code agents |
 | PARALLEL Code agent 1 | Independent subtask 1 |
 | PARALLEL Code agent 2 | Independent subtask 2 |
 | validation-fix Code agent | Fix validation failures |
-| alignment-fix Code agent | Fix evaluator misalignments |
+| alignment-fix Code agent | Fix misalignments reported by the Evaluate agent |
 | qa-fix Code agent | Fix QA test failures |
 
 **Backward-compatibility note:** `/resolve` and `/dynamic-build` spawners do NOT pass `COMPLIANCE` to Code agent. The code.md contract treats an absent `COMPLIANCE` field as a no-op — no compliance work is triggered. This means the compliance gate is `/implement`-only; adding it to resolve/dynamic-build is a future integration decision.
@@ -143,7 +143,7 @@ The compliance skill and its reference files use specific edition identifiers. A
 
 ## Anti-Patterns
 
-**Reinstantiating the gate per worktree.** The `compliance_gate()` call is designed for once-per-run invocation. Its result must be carried to every worktree in multi-worktree flows — do not re-resolve it inside per-worktree loops. This is how `code-review.mds` handles it: gate before Phase 1, carry `COMPLIANCE_ENABLED` through Phase 2's per-worktree reviewer construction.
+**Reinstantiating the gate per worktree.** The `compliance_gate()` call is designed for once-per-run invocation. Its result must be carried to every worktree in multi-worktree flows — do not re-resolve it inside per-worktree loops. This is how `code-review.mds` handles it: gate before Phase 1, carry `COMPLIANCE_ENABLED` through Phase 2's per-worktree Review-agent construction.
 
 **Frontmatter-preloading the compliance skill in agents.** The compliance skill (~138 lines + 8 reference files) should not be added to agent `skills:` frontmatter. It is intentionally body-instructed so it only loads when there is genuine regulated-data surface. Adding it to frontmatter would bloat every agent invocation regardless of whether compliance is relevant (avoids PF-002 — now test-enforced by `tests/build.test.ts`).
 
@@ -194,7 +194,7 @@ The compliance skill and its reference files use specific edition identifiers. A
 
 - ADR-007: Gate is command-markdown only — no deterministic helper scripts; `compliance_gate` follows this exactly
 - ADR-010: `installViaFileCopy` sole install path — plugin registration is pure registry data; `devflow-compliance` uses the standard install path
-- PF-002: Compliance skill is body-instructed in coder.md, deliberately NOT frontmatter-preloaded — now test-enforced by `tests/build.test.ts`
+- PF-002: Compliance skill is body-instructed in code.md, deliberately NOT frontmatter-preloaded — now test-enforced by `tests/build.test.ts`
 - PF-011: `build-mds.ts` uses tmp+rename to avoid delete-then-write ENOENT race; error-path now cleans orphaned `.tmp` files on `renameSync` failure
 - ADR-003: End-state docs — no tombstone comments when modifying compliance references
 - Feature knowledge: `resolve-pipeline` — Triage disposition rules for compliance issues

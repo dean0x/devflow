@@ -14,7 +14,7 @@ updated: 2026-07-08
 
 `/resolve` implements "no agent grades its own homework": a dedicated Triage agent (opus) classifies every review issue independently before Code agents touch any code. The key architectural insight is **separation of judgment from execution** — the Triage agent assigns verdicts using blast-radius scope, the Code agent fixes only what it is told to fix with `OPERATION: issue-fix`, and a Validate agent (haiku) independently verifies correctness before any commit reaches remote.
 
-The pipeline was restructured in PR #253 (feat/resolve-triager-split) to replace the former single `Resolver` agent (which both judged and fixed) with the Triage + Code-agent-as-fixer split. The retired `resolver` agent name is tracked in `LEGACY_AGENT_NAMES` and removed from installs on `devflow init`.
+The pipeline was restructured in PR #253 to replace the former single `Resolver` agent (which both judged and fixed) with the Triage + Code-agent-as-fixer split. The retired `resolver` agent file is removed from installs by the registry-diff orphan sweep on `devflow init`.
 
 ## System Context
 
@@ -41,7 +41,7 @@ Phase 0  Git validate-branch  → DIFF_FILES, BRANCH_INFO
 Phase 1  Orchestrator parses issues  → ISSUES (with reviewer_confidence %)
 Phase 2  Single global Triage agent  → verdict ledger (one verdict per issue, none vanish)
 Phase 3  Batch FIX_NOW issues  → BATCHES (same-file sequential, distinct-file parallel, max 5/batch)
-Phase 4  Code × N (OPERATION: issue-fix, PUSH: false)  → CODER_RESULTS
+Phase 4  Code × N (OPERATION: issue-fix, PUSH: false)  → CODE_AGENT_RESULTS
 Phase 5  Write resolution-summary.md  ← compaction safety; Tracked = "(pending)"
 Phase 6  Simplify (only if fixes were made)
 Phase 7  Validate gate (haiku) + Code validation-fix loop ≤ 2 + SINGLE push
@@ -195,13 +195,13 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 - `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (10-phase pipeline); compiled to `dist/commands/`
 - `src/assets/agents/triage.md` — Triage agent (opus): blast-radius disposition matrix, evidence rules, verdict ledger format
 - `src/assets/agents/code.md` — Code agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
-- `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triager, coder, simplifier, validator]`
-- `src/core/plugins.ts` — `LEGACY_AGENT_NAMES` includes `resolver` → removed from installs on `devflow init`
+- `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
+- `src/core/orphan-sweep.ts` — registry-diff sweep removes retired agent files (e.g. `resolver`) from installs on `devflow init`
 - `src/assets/commands/code-review.mds` — Contains convergence parser that reads `resolution-summary.md` Statistics rows and section headings
 
 ## Related
 
-- ADR-003 (leave-the-end-state): Resolver retired with zero tombstones; `resolver` survives only as a `LEGACY_AGENT_NAMES` cleanup entry
+- ADR-003 (leave-the-end-state): Resolver retired with zero tombstones; its installed file is pruned by the registry-diff orphan sweep
 - PF-002 (skill re-entrancy): Triage agent skills are loaded via frontmatter (`devflow:apply-decisions`, `devflow:apply-feature-knowledge`, etc.) — never body-instructed via `Skill()` calls
 - PF-003 (no bare rm in agent instructions): Agent shell operations must use safe-delete patterns
 - Feature knowledge: `dynamic-workflow-engine` — the max-5-per-batch concurrency rule was generalized from the dynamic-build pipeline to /resolve Phase 3

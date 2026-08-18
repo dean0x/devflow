@@ -189,7 +189,7 @@ Default: **sequential**. Parallel is the rare, tightly-gated exception — only 
 
 ### Budget scaling
 
-`budget` (available as a script global) governs reviewer roster size, review cycle count, and verification vote count. Never hardcode a roster size — let budget guide it.
+`budget` (available as a script global) governs Review-agent roster size, review cycle count, and verification vote count. Never hardcode a roster size — let budget guide it.
 
 ## Anti-Patterns
 

@@ -634,7 +634,7 @@ describe('resolveDevflowDirCleanup', () => {
 //   are still present when we attempt to revert their frontmatter.  If
 //   removeAllDevFlow runs first, revertExternalAgents silently skips the files
 //   (skippedMissing path) and leaves the user's install in an inconsistent
-//   state where ~/.claude/agents/devflow/coder.md still has a GPT model line.
+//   state where ~/.claude/agents/devflow/code.md still has a GPT model line.
 
 describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', () => {
   let devflowDir: string;

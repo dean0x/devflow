@@ -99,7 +99,7 @@ Devflow ships with explicit model assignments in agent frontmatter (Opus for ana
 ```bash
 npx devflow-kit agents               # Interactive TUI — navigate, cycle model, save
 npx devflow-kit agents --list        # Print all agents with current assignments
-npx devflow-kit agents --set reviewer --model sol        # Assign one agent via CLI (alias auto-tracks current generation)
+npx devflow-kit agents --set review --model sol          # Assign one agent via CLI (alias auto-tracks current generation)
 npx devflow-kit agents --reset                          # Reset all agents to shipped defaults (prompts)
 npx devflow-kit agents --reset --yes                    # Skip confirmation prompt
 ```
