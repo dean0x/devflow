@@ -30,7 +30,12 @@
  */
 
 import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
+import {
+  CLAUDE_MODEL_ALIASES,
+  isDormantExternalModel,
+  classifyAgentState,
+  type AgentState,
+} from '../../core/external-models.js';
 import { type ExternalModel, type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
@@ -241,6 +246,29 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
     if (isDirtyModel(row) || isDirtyEffort(row)) count++;
   }
   return count;
+}
+
+/**
+ * Classify the live state of a TUI row for display in the STATE column.
+ *
+ * Fix 2: single source of truth — delegates to classifyAgentState using the
+ * persisted model name (dormantModel when present, otherwise configuredModel).
+ * Commit 3 will add installed/inRegistry to AgentRow and thread them here.
+ *
+ * Pure function, no I/O.
+ */
+export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
+  // The dormant-mapping design: when proxy is off and the saved model is an
+  // external GPT model, configuredModel falls back to 'default' but the actual
+  // persisted model is dormantModel. Use dormantModel so classifyAgentState
+  // can recognise the saved-inactive case.
+  const persistedModel = row.dormantModel ?? row.configuredModel;
+  return classifyAgentState(
+    persistedModel,
+    proxyEnabled,
+    /* installed */ true,   // TUI rows are always installed (Commit 3 will supply this)
+    /* inRegistry */ true,  // TUI rows are always in registry (Commit 3 will supply this)
+  );
 }
 
 // ---------------------------------------------------------------------------

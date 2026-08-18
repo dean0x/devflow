@@ -35,6 +35,7 @@ import {
   isDirtyModel,
   isDirtyEffort,
   unsavedCount,
+  rowState,
   type AgentRow,
   type AgentsViewState,
 } from '../src/cli/agents-view/state.js';
@@ -878,6 +879,41 @@ describe('viewport scrolling', () => {
     const { state: next } = reduce(state, 'up');
     expect(next.cursor).toBe(0);
     expect(next.viewportOffset).toBe(0); // no scroll needed
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T6: rowState — single source of truth for TUI row state (Fix 2)
+// ---------------------------------------------------------------------------
+
+describe('T6: rowState', () => {
+  it('active row — no dormancy, proxy on', () => {
+    const row = makeRow({ configuredModel: 'sol', dormantModel: null });
+    expect(rowState(row, /* proxyEnabled */ true)).toBe('active');
+  });
+
+  it('active row — default model, proxy off', () => {
+    // 'default' is not an external model name → not dormant regardless of proxy
+    const row = makeRow({ configuredModel: 'default', dormantModel: null });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('active');
+  });
+
+  it('saved-inactive row — dormantModel set, proxy off', () => {
+    // When proxy is off and a GPT model is saved, configuredModel = 'default'
+    // but dormantModel = 'gpt-5.5'. rowState must detect saved-inactive.
+    const row = makeRow({ configuredModel: 'default', dormantModel: 'gpt-5.5' });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('saved-inactive row — dormantModel with alias, proxy off', () => {
+    const row = makeRow({ configuredModel: 'default', dormantModel: 'sol' });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('active when proxy on and dormantModel null (GPT model visible)', () => {
+    // With proxy on, a GPT model is NOT dormant — it IS active.
+    const row = makeRow({ configuredModel: 'sol', dormantModel: null });
+    expect(rowState(row, /* proxyEnabled */ true)).toBe('active');
   });
 });
 

@@ -15,6 +15,7 @@ import {
   applySetMapping,
   buildListRows,
   selectCatalog,
+  mergeTuiRowsIntoMapping,
   type ListRow,
 } from '../src/cli/commands/agents.js';
 import { buildModelCycle } from '../src/cli/agents-view/index.js';
@@ -400,11 +401,14 @@ describe('selectCatalog — proxy-off reads from cache, not hard-coded {known:fa
     expect(catalog.selectableNames).toContain('gpt-test-1');
   });
 
-  it('proxy off + populated cache → buildModelCycle includes the external model names', () => {
+  it('proxy off + populated cache → buildModelCycle includes the alias (not canonical id) — Fix 1', () => {
+    // Fix 1: cycle uses pickerNames(catalog.models) — aliases only.
+    // 'gpt-test-1' has alias 'test1', so 'test1' appears; 'gpt-test-1' does NOT.
     const catalog = selectCatalog(false, cacheDir);
     const cycle = buildModelCycle(catalog);
     expect(cycle).toContain('test1');
-    expect(cycle).toContain('gpt-test-1');
+    // gpt-test-1 is NOT in the cycle — it has an alias 'test1' that takes its slot
+    expect(cycle).not.toContain('gpt-test-1');
     // Claude aliases still present
     for (const alias of CLAUDE_MODEL_ALIASES) {
       expect(cycle).toContain(alias);
@@ -567,5 +571,89 @@ describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)'
       discoverSpy.mockRestore();
       getCachedSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T12: mergeTuiRowsIntoMapping — inertness guarantee (Fix 2)
+// ---------------------------------------------------------------------------
+
+describe('T12: mergeTuiRowsIntoMapping', () => {
+  const BASE_MAPPING: AgentMappingFile = {
+    version: 1,
+    agents: {
+      coder: { model: 'opus' },
+      reviewer: { model: 'sol' },
+    },
+  };
+
+  function makeRow(overrides: Partial<{
+    name: string; configuredModel: string; originalModel: string;
+    configuredEffort: string; originalEffort: string;
+  }> = {}): import('../src/cli/agents-view/state.js').AgentRow {
+    return {
+      name: overrides.name ?? 'coder',
+      shippedDefault: 'sonnet',
+      configuredModel: overrides.configuredModel ?? 'default',
+      originalModel: overrides.originalModel ?? 'default',
+      configuredEffort: (overrides.configuredEffort ?? 'default') as 'default',
+      originalEffort: (overrides.originalEffort ?? 'default') as 'default',
+      dormantModel: null,
+      offCyclePin: null,
+    };
+  }
+
+  it('untouched row is preserved byte-identical — inertness guarantee', () => {
+    // A row with configuredModel === originalModel must not modify the mapping.
+    // This is the "inertness" guarantee: selecting a model and immediately
+    // pressing Enter (without changing anything) must not dirty the mapping.
+    const rows = [
+      makeRow({ name: 'coder', configuredModel: 'opus', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    // The coder entry must be preserved exactly as-is
+    expect(result.agents['coder']).toEqual({ model: 'opus' });
+    // Unrelated entries (reviewer) must also be untouched
+    expect(result.agents['reviewer']).toEqual({ model: 'sol' });
+  });
+
+  it('dirty model row writes the new model', () => {
+    const rows = [
+      makeRow({ name: 'coder', configuredModel: 'sonnet', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    expect(result.agents['coder']).toEqual({ model: 'sonnet' });
+  });
+
+  it('resetting model to "default" deletes the model key', () => {
+    const rows = [
+      makeRow({ name: 'coder', configuredModel: 'default', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    // model key deleted; empty entry is also removed
+    expect(result.agents['coder']).toBeUndefined();
+  });
+
+  it('dirty effort row writes the new effort', () => {
+    const rows = [
+      makeRow({ name: 'coder', configuredModel: 'opus', originalModel: 'opus',
+                 configuredEffort: 'high', originalEffort: 'default' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    expect(result.agents['coder']).toEqual({ model: 'opus', effort: 'high' });
+  });
+
+  it('pure function — does not mutate original mapping', () => {
+    const frozen = {
+      version: 1 as const,
+      agents: Object.freeze({ coder: Object.freeze({ model: 'opus' }) }),
+    };
+    const rows = [
+      makeRow({ name: 'coder', configuredModel: 'sonnet', originalModel: 'opus' }),
+    ];
+    // Must not throw (mutation of frozen object throws in strict mode)
+    expect(() => mergeTuiRowsIntoMapping(rows, frozen as AgentMappingFile)).not.toThrow();
+    // Original mapping is untouched
+    expect(frozen.agents['coder']).toEqual({ model: 'opus' });
   });
 });

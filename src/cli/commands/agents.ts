@@ -375,22 +375,25 @@ async function buildTuiState(
 }
 
 // ---------------------------------------------------------------------------
-// Apply TUI save result
+// mergeTuiRowsIntoMapping — pure helper (Fix 2)
 // ---------------------------------------------------------------------------
 
-async function applyTuiSave(
-  tuiState: AgentsViewState,
+/**
+ * Merge dirty TUI rows back into the original mapping.
+ *
+ * Only rows with changed fields update the mapping — untouched rows (including
+ * dormant GPT entries) are preserved byte-identical. This is the "inertness"
+ * guarantee of Fix 2: a row that was never edited produces no write.
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function mergeTuiRowsIntoMapping(
+  rows: readonly AgentRow[],
   originalMapping: AgentMappingFile,
-  devflowDir: string,
-  installDir: string,
-  proxyEnabled: boolean,
-): Promise<Result<{ updated: number; unchanged: number; warnings: string[] }>> {
-  // Build new mapping by merging dirty fields from TUI state onto original.
-  // Per plan D: only dirty rows modify the mapping — dormant entries for
-  // untouched rows are preserved byte-identical from the original.
+): AgentMappingFile {
   const newAgents: Record<string, AgentMapping> = { ...originalMapping.agents };
 
-  for (const row of tuiState.rows) {
+  for (const row of rows) {
     const modelDirty = row.configuredModel !== row.originalModel;
     const effortDirty = row.configuredEffort !== row.originalEffort;
 
@@ -421,7 +424,21 @@ async function applyTuiSave(
     }
   }
 
-  const newMapping: AgentMappingFile = { version: 1, agents: newAgents };
+  return { version: 1, agents: newAgents };
+}
+
+// ---------------------------------------------------------------------------
+// Apply TUI save result
+// ---------------------------------------------------------------------------
+
+async function applyTuiSave(
+  tuiState: AgentsViewState,
+  originalMapping: AgentMappingFile,
+  devflowDir: string,
+  installDir: string,
+  proxyEnabled: boolean,
+): Promise<Result<{ updated: number; unchanged: number; warnings: string[] }>> {
+  const newMapping = mergeTuiRowsIntoMapping(tuiState.rows, originalMapping);
   const persistResult = await saveAgentMapping(devflowDir, newMapping);
   if (!persistResult.ok) {
     return Err(persistResult.error);
@@ -740,7 +757,7 @@ export const agentsCommand = new Command('agents')
       p.log.warn(warn);
     }
     p.outro(
-      `Saved. Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
+      `Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
       `${color.dim(`${unchanged} unchanged`)}.`
     );
   });
