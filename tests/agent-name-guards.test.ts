@@ -31,6 +31,8 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents')
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
 const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
+const DOCS_REFERENCE_DIR = path.join(ROOT, 'docs', 'reference')
+const FEATURES_DIR = path.join(ROOT, '.devflow', 'features')
 const CHARTER_PATH = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md')
 const ROSTER_SRC = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_roster.mds')
 
@@ -102,6 +104,8 @@ const RETIRED_AGENT_FORM_B: readonly string[] = [
  * Entry.path is the full display path as it appears in violation messages:
  *   "src/assets/<rel>" for assets corpus
  *   "dist/commands/<rel>" for compiled dist corpus
+ *   "docs/reference/<rel>" for contributor reference docs
+ *   ".devflow/features/<rel>" for git-tracked feature knowledge bases
  *
  * Allowed categories (in priority order):
  *   URL_LINK     — entry.name appears only as a URL or link text
@@ -307,6 +311,28 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     name: 'Validator',
     reason:
       'EXAMPLE_CODE: UserValidator — class in DI pattern example code; not an agent spawn',
+  },
+
+  // -----------------------------------------------------------------------
+  // Reviewer — DATA_FIELD (.devflow/features corpus)
+  // -----------------------------------------------------------------------
+  {
+    path: '.devflow/features/resolve-pipeline/KNOWLEDGE.md',
+    name: 'Reviewer',
+    reason:
+      'DATA_FIELD: reviewer_confidence — live field name in the /resolve issue ' +
+      'contract (resolve.mds); not a Form-B spawn key',
+  },
+
+  // -----------------------------------------------------------------------
+  // Evaluator — CONCEPT (.devflow/features corpus)
+  // -----------------------------------------------------------------------
+  {
+    path: '.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md',
+    name: 'Evaluator',
+    reason:
+      'CONCEPT: evaluator_panel — live MDS function name defined in _engine.mds; ' +
+      'not a Form-B spawn key',
   },
 ]
 
@@ -638,8 +664,11 @@ describe('GAP-4: roster model tiers match agent frontmatter (fail-loud when dist
 describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when dist absent)', () => {
   /**
    * Corpus: src/assets/**\/*.{md,mds} + dist/commands/**\/*.md
+   *         + docs/reference/**\/*.md + .devflow/features/**\/*.md
    * src/assets = the canonical shipping tree (skills, agents, commands, hooks, rules)
    * dist/commands = compiled command files actually deployed to users
+   * docs/reference = contributor docs that teach agent names and registry shapes
+   * .devflow/features = git-tracked knowledge bases injected as FEATURE_KNOWLEDGE
    *
    * If dist/ is absent: requireDistFiles() throws — FAIL LOUD, not skip.
    * That's intentional: if this guard passes with an empty dist it is not a guard.
@@ -654,13 +683,21 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     // Fail-loud: requireDistFiles() throws if dist is absent
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
+    const docsFiles = collectFiles(DOCS_REFERENCE_DIR, ['.md'])
+    const featureFiles = collectFiles(FEATURES_DIR, ['.md'])
 
-    const filesScanned = assetsFiles.length + distFiles.length
+    // Segment floors: collectFiles returns [] for a missing directory, which
+    // would silently drop a corpus segment while the 220 total still passes.
+    expect(docsFiles.length, 'docs/reference corpus segment is empty — check DOCS_REFERENCE_DIR').toBeGreaterThanOrEqual(5)
+    expect(featureFiles.length, '.devflow/features corpus segment is empty — check FEATURES_DIR').toBeGreaterThanOrEqual(3)
+
+    const filesScanned = assetsFiles.length + distFiles.length + docsFiles.length + featureFiles.length
     expect(
       filesScanned,
       `Corpus is only ${filesScanned} files (expected >= 220). ` +
       `Check glob patterns — an empty corpus is a silent false-pass.\n` +
-      `  src/assets files: ${assetsFiles.length}  dist/commands files: ${distFiles.length}`,
+      `  src/assets files: ${assetsFiles.length}  dist/commands files: ${distFiles.length}  ` +
+      `docs/reference files: ${docsFiles.length}  .devflow/features files: ${featureFiles.length}`,
     ).toBeGreaterThanOrEqual(220)
   })
 
@@ -707,6 +744,8 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
       DIST_COMMANDS_DIR,
       'dist/commands/',
     )
+    scan(collectFiles(DOCS_REFERENCE_DIR, ['.md']), DOCS_REFERENCE_DIR, 'docs/reference/')
+    scan(collectFiles(FEATURES_DIR, ['.md']), FEATURES_DIR, '.devflow/features/')
 
     expect(violations, `Retired agent names found in shipped artifacts:\n${violations.join('\n')}`).toHaveLength(0)
   })
@@ -740,6 +779,22 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
         corpus.push({
           displayPath: `dist/commands/${f}`,
           content: readFileSync(path.join(DIST_COMMANDS_DIR, f), 'utf-8'),
+        })
+      } catch { /* skip */ }
+    }
+    for (const filePath of collectFiles(DOCS_REFERENCE_DIR, ['.md'])) {
+      try {
+        corpus.push({
+          displayPath: `docs/reference/${path.relative(DOCS_REFERENCE_DIR, filePath)}`,
+          content: readFileSync(filePath, 'utf-8'),
+        })
+      } catch { /* skip */ }
+    }
+    for (const filePath of collectFiles(FEATURES_DIR, ['.md'])) {
+      try {
+        corpus.push({
+          displayPath: `.devflow/features/${path.relative(FEATURES_DIR, filePath)}`,
+          content: readFileSync(filePath, 'utf-8'),
         })
       } catch { /* skip */ }
     }
