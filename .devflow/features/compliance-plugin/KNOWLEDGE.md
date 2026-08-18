@@ -178,11 +178,11 @@ The compliance skill and its reference files use specific edition identifiers. A
 - `src/assets/skills/compliance/references/` — 8 reference files: `gdpr.md`, `hipaa.md`, `pci-dss.md`, `soc2.md`, `iso-27001.md`, `sox.md`, `detection.md`, `sources.md`
 - `src/assets/rules/compliance.md` — global always-on rule (`paths: []`); 6 compliance reminders
 - `src/core/plugins.ts` — `devflow-compliance` entry in DEVFLOW_PLUGINS; declares `skills: ["compliance"]`, `rules: ["compliance"]`, no agents
-- `src/assets/agents/coder.md` — body-instructs compliance skill invocation (line ~75); COMPLIANCE field contract
-- `src/assets/agents/reviewer.md` — compliance activation row is condition-only (the clean-report contract lives in SKILL.md, not in this file's frontmatter or the row text)
-- `src/assets/agents/synthesizer.md` — merge-don't-boost rule for compliance+security overlaps (line ~214, ~315)
-- `src/assets/agents/triager.md` — compliance disposition default (FIX_SEPARATE/TECH_DEBT) at line ~63
-- `src/assets/agents/designer.md` — compliance focus as the 5th gap-analysis Designer
+- `src/assets/agents/code.md` — body-instructs compliance skill invocation (line ~75); COMPLIANCE field contract
+- `src/assets/agents/review.md` — compliance activation row is condition-only (the clean-report contract lives in SKILL.md, not in this file's frontmatter or the row text)
+- `src/assets/agents/synthesize.md` — merge-don't-boost rule for compliance+security overlaps (line ~214, ~315)
+- `src/assets/agents/triage.md` — compliance disposition default (FIX_SEPARATE/TECH_DEBT) at line ~63
+- `src/assets/agents/design.md` — compliance focus as the 5th gap-analysis Designer
 - `src/assets/skills/gap-analysis/SKILL.md` — §7 compliance detection patterns (regulatory gaps, IaC, segregation of duties)
 - `src/core/plugins.ts` — `DEVFLOW_PLUGINS` registry entry; `LEGACY_SKILL_NAMES` frozen list (39 pre-namespace skills; `compliance` is NOT in this list — it is a post-namespace skill)
 - `tests/skill-namespace.test.ts` — Assertion A (pre-namespace skills need bare entries) + Assertion B inverse guard (post-namespace skills must not appear bare in `LEGACY_SKILL_NAMES`)

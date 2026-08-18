@@ -1,5 +1,5 @@
 ---
-name: Researcher
+name: Research
 description: Multi-type research agent with dynamic skill loading. Receives research type, loads domain-specific skill, produces structured findings.
 model: opus
 skills:

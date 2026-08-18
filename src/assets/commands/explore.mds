@@ -40,7 +40,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — p
 
 **Produces:** ORIENT_OUTPUT
 
-Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the exploration question:
+Spawn `Agent(subagent_type="Skim")` to get codebase overview relevant to the exploration question:
 
 - File structure and module boundaries in the target area
 - Entry points and key abstractions
@@ -64,7 +64,7 @@ Adjust explorer focus based on the specific exploration question.
 **Produces:** MERGED_FINDINGS
 **Requires:** EXPLORE_OUTPUT
 
-Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined findings:
+Spawn `Agent(subagent_type="Synthesize")` in `exploration` mode with combined findings:
 
 - Merge overlapping discoveries from parallel explorers
 - Resolve any contradictions between explorer findings

@@ -1,5 +1,5 @@
 ---
-name: Skimmer
+name: Skim
 description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
 model: sonnet
 tools: ["Bash", "Read"]

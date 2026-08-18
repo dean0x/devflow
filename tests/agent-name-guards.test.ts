@@ -40,21 +40,17 @@ const ROSTER_SRC = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_r
 /**
  * Maps agent slug (form A, from filename) to its non-default frontmatter name: (form B).
  *
- * Default transform: slug → capitalizeFirst(slug) → e.g. coder → Coder.
- * This default does NOT strip hyphens: capitalize('bug-analyzer') = 'Bug-analyzer'.
+ * Default transform: slug → capitalizeFirst(slug) → e.g. code → Code.
  * Entries here are cases where form B does NOT match that default.
  *
- * D-RI-1: The map MUST shrink to empty by phase 4 (the wave's acceptance criterion).
- * Today it has exactly ONE entry: bug-analyzer.md declares name: BugAnalyzer (hyphens
- * collapsed, PascalCase) instead of the default Bug-analyzer.
+ * D-RI-1: The map MUST be empty by phase 4 (the wave's acceptance criterion).
+ * Phase 2 emptied this map: all 13 renamed agents use capitalizeFirst(slug) as name:.
  *
  * SAFETY: Object.create(null) — no prototype keys can accidentally match a slug.
  * All lookups use Object.hasOwn().
  */
 const SLUG_TO_NAME_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze(
-  Object.assign(Object.create(null) as Record<string, string>, {
-    'bug-analyzer': 'BugAnalyzer',
-  }),
+  Object.assign(Object.create(null) as Record<string, string>, {}),
 )
 
 // ---------------------------------------------------------------------------
@@ -66,7 +62,6 @@ const SLUG_TO_NAME_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze(
  * Ships EMPTY — populated in phase 4 when agents are renamed.
  *
  * Derive form B by READING each agent's frontmatter name:, never by Capitalize(slug).
- * (Capitalize('bug-analyzer') = 'Bug-analyzer', not 'BugAnalyzer'.)
  *
  * Each name is searched with MAXIMAL RECALL: case-insensitive, NO trailing boundary.
  * This catches Coders, Coder's, coderPath, and ANSI-embedded 31mcoder.
@@ -207,7 +202,7 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
    * capitalizeFirst(slug) — coder → Coder, designer → Designer.
    *
    * The exception map handles the one case where form B diverges from the
-   * default: bug-analyzer → BugAnalyzer (hyphens removed, PascalCase).
+   * default: diagnose → Diagnose (capitalizeFirst, no hyphens in slug).
    * That entry exits when the agent is renamed in phase 4.
    */
   it('every agent frontmatter name: matches its slug or the exception map', () => {

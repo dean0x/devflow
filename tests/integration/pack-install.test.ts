@@ -153,11 +153,11 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     ).resolves.toBeUndefined();
 
     const agentFiles = await fs.readdir(agentsDir);
-    const hasCoder = agentFiles.includes('coder.md');
-    const hasReviewer = agentFiles.includes('reviewer.md');
+    const hasCode = agentFiles.includes('code.md');
+    const hasReview = agentFiles.includes('review.md');
 
-    expect(hasCoder, 'coder.md agent is missing from the installed package').toBe(true);
-    expect(hasReviewer, 'reviewer.md agent is missing from the installed package').toBe(true);
+    expect(hasCode, 'code.md agent is missing from the installed package').toBe(true);
+    expect(hasReview, 'review.md agent is missing from the installed package').toBe(true);
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

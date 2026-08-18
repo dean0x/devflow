@@ -92,7 +92,7 @@ const FULL_CYCLE = [
 
 function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
-    name: 'coder',
+    name: 'code',
     shippedDefault: 'sonnet',
     configuredModel: 'default',
     originalModel: 'default',
@@ -117,9 +117,9 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
       ? (overrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
-    makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-    makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
-    makeRow({ name: 'designer', shippedDefault: 'opus' }),
+    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+    makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
   return {
     cursor: overrides.cursor ?? 1,
@@ -140,7 +140,7 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
 describe('buildRow', () => {
   it('builds a row with no mapping entry — default model, no dormancy', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       proxyEnabled: false,
       installed: true,
@@ -154,7 +154,7 @@ describe('buildRow', () => {
 
   it('builds a row with a claude model mapping — applied directly', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'opus',
       proxyEnabled: false,
@@ -169,7 +169,7 @@ describe('buildRow', () => {
 
   it('builds a dormant row — external model + proxy off → configuredModel is default', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-5.5',
       proxyEnabled: false,
@@ -185,7 +185,7 @@ describe('buildRow', () => {
   it('builds a non-dormant row — external model + proxy ON → configuredModel is the model', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-5.5',
       proxyEnabled: true,
@@ -201,7 +201,7 @@ describe('buildRow', () => {
 
   it('builds a row with saved effort', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedEffort: 'high',
       proxyEnabled: false,
@@ -216,7 +216,7 @@ describe('buildRow', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     // 'gpt-4.2-legacy' is not in the catalog
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
@@ -232,7 +232,7 @@ describe('buildRow', () => {
 
   it('no off-cycle pin when modelCycle is not provided', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
@@ -246,7 +246,7 @@ describe('buildRow', () => {
   it('alias model in cycle is not an off-cycle pin', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
@@ -267,7 +267,7 @@ describe('T8: alias round-trip', () => {
   it('a mapping of {coder:{model:"sol"}} shows no dirty marker on load', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
@@ -286,7 +286,7 @@ describe('T8: alias round-trip', () => {
     // If isDirtyModel(row) is false, the original mapping entry is untouched.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
@@ -764,9 +764,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
     });
     const { state: next } = reduce(state, 'd');
@@ -777,9 +777,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'effort',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
     });
     const { state: next } = reduce(state, 'd');
@@ -799,9 +799,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'haiku', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus', configuredModel: 'fable', originalModel: 'default' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'haiku', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus', configuredModel: 'fable', originalModel: 'default' }),
       ],
       cursor: 1,
     });

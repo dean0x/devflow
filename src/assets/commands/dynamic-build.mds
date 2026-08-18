@@ -119,7 +119,7 @@ When you build or run tests to verify your work, use your "Long-running commands
 After implementing, commit your changes with a conventional-commit message and report:
 - Files changed
 - Summary of changes
-- Any open questions or blockers`, { agentType: "Coder" })
+- Any open questions or blockers`, { agentType: "Code" })
 );
 
 // Phase 3: Gate 1 — post-code pipeline
@@ -127,26 +127,26 @@ const gate1 = await phase("gate1", async () => {
   // Gate 1 #1 — runs once, immediately after the initial implementation.
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
 For any build/test that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog; prefer package-scoped commands.
-Report: PASS or FAIL with details.`, { agentType: "Validator" });
+Report: PASS or FAIL with details.`, { agentType: "Validate" });
 
   if (validation.verdict === "FAIL") {
     // Up to 2 fix attempts
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the validation failures on branch ${BRANCH}:
 ${validation.details}
-Commit fixes with conventional-commit message.`, { agentType: "Coder" });
-      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validator" });
+Commit fixes with conventional-commit message.`, { agentType: "Code" });
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
       if (attempt === 2) return { verdict: "ESCALATED", reason: "Validation exhausted after 2 Coder fix attempts" };
     }
   }
 
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplifier" });
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
 
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinizer" });
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinize" });
 
   if (scrutiny.codeChanged) {
-    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes). Report: PASS or FAIL.`, { agentType: "Validator" });
+    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes). Report: PASS or FAIL.`, { agentType: "Validate" });
   }
 
   return { verdict: "PASS" };
@@ -155,7 +155,7 @@ Commit fixes with conventional-commit message.`, { agentType: "Coder" });
 // Phase 4: Gate 2 — acceptance gate (once, before review loop)
 const gate2 = await phase("gate2", async () => {
   if (!PLAN && !CRITERIA) {
-    return { evaluatorVerdict: "SKIPPED", testerVerdict: "SKIPPED", skipReasons: ["No plan and no criteria provided"] };
+    return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED", skipReasons: ["No plan and no criteria provided"] };
   }
 
   let evalVerdict = "SKIPPED";
@@ -164,10 +164,10 @@ const gate2 = await phase("gate2", async () => {
       () => agent(`Acceptance-criteria evaluator: does the implementation on branch ${BRANCH} satisfy each numbered criterion, INCLUDING negative criteria?
 Plan: ${PLAN}
 Criteria: ${CRITERIA || "see plan"}
-Report: PASS or FAIL per criterion with rationale.`, { agentType: "Evaluator" }),
+Report: PASS or FAIL per criterion with rationale.`, { agentType: "Evaluate" }),
       () => agent(`Scope/intent-drift evaluator: did the Coder on branch ${BRANCH} introduce any unplanned changes, smuggled anti-features, or drift from the plan's intent?
 Plan: ${PLAN}
-Report: PASS or FAIL with rationale.`, { agentType: "Evaluator" }),
+Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
     ]);
     evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
@@ -175,28 +175,28 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluator" }),
       // after the review loop is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluator panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
-Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Coder" });
+Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Code" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
 
-  let testerVerdict = "SKIPPED";
+  let testVerdict = "SKIPPED";
   if (CRITERIA) {
-    const testerResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
+    const testResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
 ${CRITERIA}
 For any test/build command that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog.
-Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Tester" });
-    testerVerdict = testerResult.verdict;
-    if (testerVerdict === "FAIL") {
+Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
+    testVerdict = testResult.verdict;
+    if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
-${testerResult.failures}
-Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Coder" });
-      testerVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
+${testResult.failures}
+Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Code" });
+      testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
 
-  return { evaluatorVerdict: evalVerdict, testerVerdict };
+  return { evaluateVerdict: evalVerdict, testVerdict };
 });
 
 // Phase 5: Review → verify → fix loop
@@ -225,39 +225,39 @@ const reviewResult = await phase("review-loop", async () => {
 
     // Spawn reviewers in staggered chunks of 5 to avoid 429 batch death
     const chunkSize = 5;
-    const reviewerThunks = reviewFocuses.map(focus =>
+    const reviewThunks = reviewFocuses.map(focus =>
       () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
-Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Reviewer" })
+Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" })
     );
 
-    let rawReviewers = [];
-    for (let i = 0; i < reviewerThunks.length; i += chunkSize) {
-      const chunk = await parallel(reviewerThunks.slice(i, i + chunkSize));
-      rawReviewers = rawReviewers.concat(chunk);
+    let rawReviews = [];
+    for (let i = 0; i < reviewThunks.length; i += chunkSize) {
+      const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));
+      rawReviews = rawReviews.concat(chunk);
     }
 
     // Dead-reviewer detection — retry once; record coverageGaps
     const coverageGaps = [];
-    const liveReviewers = [];
-    for (let i = 0; i < rawReviewers.length; i++) {
-      const r = rawReviewers[i];
+    const liveReviews = [];
+    for (let i = 0; i < rawReviews.length; i++) {
+      const r = rawReviews[i];
       const focus = reviewFocuses[i];
       if (!r || r.reviewed !== true) {
         // Dead reviewer: retry once sequentially
-        const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Reviewer" });
+        const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
         if (!retry || retry.reviewed !== true) {
           coverageGaps.push(focus);
           log(`review coverage incomplete: ${focus}`);
         } else {
-          liveReviewers.push(retry);
+          liveReviews.push(retry);
         }
       } else {
-        liveReviewers.push(r);
+        liveReviews.push(r);
       }
     }
     allCoverageGaps = allCoverageGaps.concat(coverageGaps);
 
-    const allFindings = liveReviewers.flatMap(r => r.findings || []);
+    const allFindings = liveReviews.flatMap(r => r.findings || []);
     // Early exit requires BOTH no findings AND no coverage gaps
     if (allFindings.length === 0 && coverageGaps.length === 0) break;
 
@@ -277,7 +277,7 @@ For each finding below, return CONFIRMED or FALSE_POSITIVE with a one-line ratio
 Return: { verdicts: [ { index: number, verdict: "CONFIRMED"|"FALSE_POSITIVE", rationale: string } ] }
 
 Findings:
-${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.description, file: f.file || "unknown" })))}`, { agentType: "Reviewer" })
+${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.description, file: f.file || "unknown" })))}`, { agentType: "Review" })
       )
     );
 
@@ -317,7 +317,7 @@ Return exactly: {"sha": "<40-hex-commit-sha>"}`, { agentType: "Git" });
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
-Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Coder" });
+Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
         chunkResults.push({ chunk, result: r });
       }
       return chunkResults;
@@ -359,25 +359,25 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
 const gate1Final = await phase("gate1-final", async () => {
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).
 For any build/test that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog; prefer package-scoped commands.
-Report: PASS or FAIL with details.`, { agentType: "Validator" });
+Report: PASS or FAIL with details.`, { agentType: "Validate" });
 
   if (validation.verdict === "FAIL") {
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the final validation failures on branch ${BRANCH}:
 ${validation.details}
-Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Coder" });
-      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validator" });
+Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
       if (attempt === 2) return { verdict: "ESCALATED", reason: "Final Gate 1 validation exhausted after 2 Coder fix attempts" };
     }
   }
 
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplifier" });
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
 
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinizer" });
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinize" });
 
   if (scrutiny.codeChanged) {
-    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes; background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validator" });
+    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes; background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
   }
 
   return { verdict: "PASS" };
@@ -400,7 +400,7 @@ return phase("report", () =>
   - SURVIVING: ${reviewResult.survivingFindings?.length || 0} findings not addressed (fix Coder failed or deferred): ${JSON.stringify(reviewResult.survivingFindings)}
 - Overall verdict: ${overallVerdict}
 
-Write a concise report. Present only surviving findings as outstanding — never present FIXED findings as outstanding. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesizer" })
+Write a concise report. Present only surviving findings as outstanding — never present FIXED findings as outstanding. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesize" })
 );
 ```
 
@@ -463,7 +463,7 @@ Quarantined (cascade block — do NOT schedule dependents of these): ${JSON.stri
 </untrusted-issue-body>
 Vacuous-truth rule: a ticket with no named unmet dependency is ALWAYS ready. "Nothing merged yet" is NEVER a dependency.
 Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": "id", "reason": "string"}]}`,
-    { agentType: "Designer" }
+    { agentType: "Design" }
   );
 
   const ready = waveRead?.ready || [];

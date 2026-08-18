@@ -45,7 +45,7 @@ describe('getAllAgentNames', () => {
     const agents = getAllAgentNames();
     // 'git' appears in implement, code-review, resolve, debug
     expect(agents).toContain('git');
-    expect(agents).toContain('synthesizer');
+    expect(agents).toContain('synthesize');
   });
 });
 
@@ -59,8 +59,8 @@ describe('buildAssetMaps', () => {
     // 'git' first appears in devflow-implement (devflow-plan no longer declares it)
     expect(agentsMap.get('git')).toBe('devflow-implement');
 
-    // 'synthesizer' first appears in devflow-plan
-    expect(agentsMap.get('synthesizer')).toBe('devflow-plan');
+    // 'synthesize' first appears in devflow-plan
+    expect(agentsMap.get('synthesize')).toBe('devflow-plan');
   });
 
   it('returns empty maps for empty input', () => {
@@ -206,17 +206,17 @@ describe('optional plugin flag', () => {
     expect(ambient!.skills).toContain('patterns');
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');
-    expect(ambient!.agents).toContain('synthesizer');
-    expect(ambient!.agents).toContain('triager');
+    expect(ambient!.agents).toContain('synthesize');
+    expect(ambient!.agents).toContain('triage');
   });
 
   it('devflow-resolve declares triager, coder, and validator agents (no resolver)', () => {
     const resolve = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-resolve');
     expect(resolve).toBeDefined();
     // Triager validates issues; coder fixes them; validator runs the verification gate
-    expect(resolve!.agents).toContain('triager');
-    expect(resolve!.agents).toContain('coder');
-    expect(resolve!.agents).toContain('validator');
+    expect(resolve!.agents).toContain('triage');
+    expect(resolve!.agents).toContain('code');
+    expect(resolve!.agents).toContain('validate');
     // resolver has been retired — should not appear in registry
     expect(resolve!.agents).not.toContain('resolver');
     // resolver is in LEGACY_AGENT_NAMES for pre-registry-diff-sweep era cleanup; new
@@ -232,8 +232,8 @@ describe('optional plugin flag', () => {
     const implement = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-implement');
     expect(implement).toBeDefined();
     // evaluator and tester are declared so uninstalling ambient doesn't break implement
-    expect(implement!.agents).toContain('evaluator');
-    expect(implement!.agents).toContain('tester');
+    expect(implement!.agents).toContain('evaluate');
+    expect(implement!.agents).toContain('test');
     // qa skill is required for the tester agent
     expect(implement!.skills).toContain('qa');
   });
@@ -242,8 +242,8 @@ describe('optional plugin flag', () => {
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     expect(ambient).toBeDefined();
     // Ambient orchestrates the full implement pipeline, so evaluator and tester must be declared
-    expect(ambient!.agents).toContain('evaluator');
-    expect(ambient!.agents).toContain('tester');
+    expect(ambient!.agents).toContain('evaluate');
+    expect(ambient!.agents).toContain('test');
     // qa skill is required for the tester agent
     expect(ambient!.skills).toContain('qa');
   });
@@ -262,8 +262,8 @@ describe('optional plugin flag', () => {
     expect(bugAnalysis, 'devflow-bug-analysis should exist in registry').toBeDefined();
     // Core orchestration agents: git (pre-flight), bug-analyzer (semantic analysis), synthesizer (reporting)
     expect(bugAnalysis!.agents).toContain('git');
-    expect(bugAnalysis!.agents).toContain('bug-analyzer');
-    expect(bugAnalysis!.agents).toContain('synthesizer');
+    expect(bugAnalysis!.agents).toContain('diagnose');
+    expect(bugAnalysis!.agents).toContain('synthesize');
     // Skills: worktree-support for discovery, apply-feature-knowledge for context
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');

@@ -20,7 +20,7 @@ const UNKNOWN_CATALOG: ExternalModelCatalog = { known: false };
 
 function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
-    name: 'coder',
+    name: 'code',
     shippedDefault: 'sonnet',
     configuredModel: 'default',
     originalModel: 'default',
@@ -43,9 +43,9 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
       ? (overrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
-    makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-    makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
-    makeRow({ name: 'designer', shippedDefault: 'opus' }),
+    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+    makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
   return {
     rows,
@@ -116,11 +116,11 @@ describe('renderFrame — structure', () => {
     const lines = renderStripped(makeState());
     const text = lines.join('\n');
     // Fix 4: formatAgentName title-cases each hyphen-separated segment
-    expect(text).toContain('Bug-Analyzer');
-    expect(text).toContain('Coder');
-    expect(text).toContain('Designer');
+    expect(text).toContain('Diagnose');
+    expect(text).toContain('Code');
+    expect(text).toContain('Design');
     // Original lowercase names must NOT appear (they are transformed)
-    expect(text).not.toContain('bug-analyzer');
+    expect(text).not.toContain('diagnose');
   });
 });
 
@@ -131,15 +131,15 @@ describe('renderFrame — structure', () => {
 describe('cursor row marker', () => {
   it('marks cursor row with ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    // The row with ❯ should contain 'Coder' (capitalized — Fix 4)
+    // The row with ❯ should contain 'Code' (capitalized — Fix 4)
     const cursorLine = lines.find(l => l.includes('❯'));
     expect(cursorLine).toBeDefined();
-    expect(cursorLine).toContain('Coder');
+    expect(cursorLine).toContain('Code');
   });
 
   it('non-cursor rows do not have ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Bug-Analyzer'));
+    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Diagnose'));
     expect(nonCursorWithMarker).toHaveLength(0);
   });
 });
@@ -151,7 +151,7 @@ describe('cursor row marker', () => {
 describe('default rows', () => {
   it('shows default model with shipped default in parens', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
       activeField: 'effort', // model not active so no brackets
     });
@@ -172,7 +172,7 @@ describe('dirty marker ●', () => {
     const state = makeState({
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'opus',
           originalModel: 'default', // dirty
@@ -192,7 +192,7 @@ describe('dirty marker ●', () => {
     const state = makeState({
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredEffort: 'high',
           originalEffort: 'default', // dirty
@@ -208,7 +208,7 @@ describe('dirty marker ●', () => {
 
   it('does not show ● on clean fields', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
     });
     const lines = renderStripped(state);
@@ -225,7 +225,7 @@ describe('dirty marker ●', () => {
 describe('active field brackets ‹ ›', () => {
   it('wraps model value in ‹ › when model is the active field on cursor row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
       activeField: 'model',
     });
@@ -238,7 +238,7 @@ describe('active field brackets ‹ ›', () => {
 
   it('wraps effort value in ‹ › when effort is the active field on cursor row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'high' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'high' })],
       cursor: 0,
       activeField: 'effort',
     });
@@ -273,7 +273,7 @@ describe('proxy-on with dirty row', () => {
       activeField: 'effort',
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'gpt-5.5',
           originalModel: 'default', // dirty
@@ -290,7 +290,7 @@ describe('proxy-on with dirty row', () => {
   it('shows unsaved changes count', () => {
     const state = makeState({
       rows: [
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
         makeRow({ name: 'other', shippedDefault: 'haiku', configuredEffort: 'high', originalEffort: 'default' }),
       ],
     });
@@ -319,7 +319,7 @@ describe('proxy-off with dormant row', () => {
       activeField: 'effort',
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'default',
           originalModel: 'default',
@@ -434,8 +434,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
     const state = makeState({
       proxyEnabled: false, // shows proxy hint line (longest footer variant)
       rows: [
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
       cursor: 0,
       viewportHeight: 10,
@@ -458,8 +458,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
     const state = makeState({
       proxyEnabled: false, // shows proxy hint line (longest footer variant)
       rows: [
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
       cursor: 0,
       viewportHeight: 10,
@@ -487,7 +487,7 @@ describe('minimal state', () => {
 
   it('renders without throwing for single row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
     });
     expect(() => renderFrame(state, { rows: 24, cols: 80 })).not.toThrow();
@@ -524,12 +524,12 @@ describe('alias rendering', () => {
       proxyEnabled: true,
       catalog,
       modelCycle: buildModelCycle(catalog),
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
       cursor: 0,
       activeField: 'effort', // model not active — no ‹ › brackets
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     // T4 core assertion: alias renders bare
     expect(rowLine).toContain('sol');
@@ -546,12 +546,12 @@ describe('alias rendering', () => {
       proxyEnabled: true,
       catalog: UNKNOWN_CATALOG,
       modelCycle: buildModelCycle(UNKNOWN_CATALOG),
-      rows: [makeRow({ name: 'reviewer', shippedDefault: 'opus', configuredModel: 'default' })],
+      rows: [makeRow({ name: 'review', shippedDefault: 'opus', configuredModel: 'default' })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Reviewer'));
+    const rowLine = lines.find(l => l.includes('Review'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('default (opus)');
   });
@@ -563,7 +563,7 @@ describe('alias rendering', () => {
       catalog: UNKNOWN_CATALOG,
       modelCycle: ['default', 'sonnet', 'opus'],
       rows: [makeRow({
-        name: 'coder',
+        name: 'code',
         configuredModel: 'retired-model',
         originalModel: 'retired-model',
         offCyclePin: 'retired-model',
@@ -572,7 +572,7 @@ describe('alias rendering', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('retired-model (unavailable)');
   });
@@ -591,12 +591,12 @@ describe('alias rendering', () => {
       proxyEnabled: true,
       catalog,
       modelCycle: buildModelCycle(catalog), // includes 'gpt-5.5'
-      rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.5', originalModel: 'gpt-5.5' })],
+      rows: [makeRow({ name: 'code', configuredModel: 'gpt-5.5', originalModel: 'gpt-5.5' })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('gpt-5.5');
     expect(rowLine).not.toContain('gpt-5.5 (gpt-5.5)');
@@ -611,24 +611,24 @@ describe('alias rendering', () => {
 describe('STATE column (Fix 3)', () => {
   it('T8: active row shows "active" in STATE column', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', configuredModel: 'sonnet', installed: true, inRegistry: true })],
+      rows: [makeRow({ name: 'code', configuredModel: 'sonnet', installed: true, inRegistry: true })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('active');
   });
 
   it('T9: not-installed row shows "not installed" in STATE column', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', installed: false, inRegistry: true })],
+      rows: [makeRow({ name: 'code', installed: false, inRegistry: true })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('not installed');
   });
@@ -727,7 +727,7 @@ describe('(unavailable) off-cycle pin', () => {
       // modelCycle does NOT include 'retired-model'
       modelCycle: ['default', 'sonnet', 'opus'],
       rows: [makeRow({
-        name: 'coder',
+        name: 'code',
         configuredModel: 'retired-model',
         originalModel: 'retired-model',
         offCyclePin: 'retired-model',
@@ -736,7 +736,7 @@ describe('(unavailable) off-cycle pin', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('retired-model (unavailable)');
   });
@@ -753,7 +753,7 @@ describe('column bounds', () => {
     const state = makeState({
       rows: [
         makeRow({ name: 'bug-analyzer-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'default' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'default' }),
       ],
       cursor: 0,
     });
@@ -774,7 +774,7 @@ describe('escape sequence injection safety', () => {
   it('ANSI escape code in agent name does not expand visible column width', () => {
     // An agent name containing ANSI codes must still be padded by VISIBLE width.
     // padToVisible uses stripAnsi before measuring, so the column width is correct.
-    const ansiName = '\x1b[31mcoder\x1b[0m'; // red "coder"
+    const ansiName = '\x1b[31mcode\x1b[0m'; // red "code"
     const state = makeState({
       rows: [makeRow({ name: ansiName, shippedDefault: 'sonnet' })],
       cursor: 0,
@@ -782,7 +782,7 @@ describe('escape sequence injection safety', () => {
     const COLS = 80;
     // renderStripped strips ANSI — the visible line width must be ≤ COLS
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine.length).toBeLessThanOrEqual(COLS);
@@ -794,7 +794,7 @@ describe('escape sequence injection safety', () => {
     // measures by stripAnsi result. The rendered line should remain ≤ COLS.
     const nulModel = 'sol\x00evil';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', configuredModel: nulModel, originalModel: nulModel })],
+      rows: [makeRow({ name: 'code', configuredModel: nulModel, originalModel: nulModel })],
       // Put nulModel in modelCycle so it doesn't trigger (unavailable) path
       modelCycle: ['default', nulModel],
       catalog: UNKNOWN_CATALOG,
@@ -802,7 +802,7 @@ describe('escape sequence injection safety', () => {
     });
     const COLS = 80;
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('Coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     // Must not throw and must not produce a line wider than COLS
     if (rowLine !== undefined) {
@@ -821,7 +821,7 @@ describe('escape sequence injection safety', () => {
     // After the fix, the raw TUI output must not contain the OSC-8 opener.
     const osc8Model = '\x1b]8;;https://evil.com\x07gpt-5.5\x1b]8;;\x07';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', configuredModel: osc8Model, originalModel: osc8Model })],
+      rows: [makeRow({ name: 'code', configuredModel: osc8Model, originalModel: osc8Model })],
       // Include the raw model in the cycle so it does NOT trigger (unavailable)
       modelCycle: ['default', osc8Model],
       catalog: UNKNOWN_CATALOG,
@@ -834,7 +834,7 @@ describe('escape sequence injection safety', () => {
     expect(allRaw).not.toContain('\x1b]8;');
     // After stripping, the visible text ('gpt-5.5') must still appear
     const strippedLines = rawLines.map(stripAnsi);
-    const rowLine = strippedLines.find(l => l.includes('Coder'));
+    const rowLine = strippedLines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine).toContain('gpt-5.5');
@@ -845,7 +845,7 @@ describe('escape sequence injection safety', () => {
     // The shippedDefault hint is rendered in the model cell as "(shippedDefault)".
     const osc8Default = '\x1b]8;;https://evil.com\x07sonnet\x1b]8;;\x07';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: osc8Default, configuredModel: 'default' })],
+      rows: [makeRow({ name: 'code', shippedDefault: osc8Default, configuredModel: 'default' })],
       cursor: 0,
       activeField: 'effort',
     });
@@ -860,7 +860,7 @@ describe('escape sequence injection safety', () => {
     const state = makeState({
       proxyEnabled: false,
       rows: [makeRow({
-        name: 'coder',
+        name: 'code',
         configuredModel: 'default',
         originalModel: 'default',
         dormantModel: osc8Dormant,
@@ -921,19 +921,19 @@ describe('T13: formatAgentName (Fix 4)', () => {
   it('TUI renders agent names with capital first letter', () => {
     const state = makeState({
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet' }),
       ],
       cursor: 0,
     });
     const lines = renderStripped(state);
     const text = lines.join('\n');
     // TUI must show hyphen-aware title-cased names
-    expect(text).toContain('Bug-Analyzer');
-    expect(text).toContain('Coder');
+    expect(text).toContain('Diagnose');
+    expect(text).toContain('Code');
     // Lowercase originals must NOT appear — they are transformed
-    expect(text).not.toContain('\nbug-analyzer');
-    expect(text).not.toContain('\ncoder');
+    expect(text).not.toContain('\ndiagnose');
+    expect(text).not.toContain('\ncode');
   });
 
   it('--list formatListOutput uses raw lowercase name (not formatAgentName)', async () => {

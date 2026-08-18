@@ -35,7 +35,7 @@ Globals available in the script body: `args`, `budget`, `workflow()`.
 Spawn devflow agents with:
 
 ```js
-agent("your prompt here", { agentType: "Coder" })
+agent("your prompt here", { agentType: "Code" })
 ```
 
 Valid `agentType` values: Coder, Validator, Simplifier, Scrutinizer, Evaluator, Tester, Reviewer, Git, Synthesizer, Knowledge, Designer.

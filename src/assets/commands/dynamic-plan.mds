@@ -112,7 +112,7 @@ Ticket: ${JSON.stringify(ticket)}
 Decisions context (apply devflow:apply-decisions; cite ADR/PF IDs): ${DECISIONS_CONTEXT}
 The plan must cover: approach overview, affected files and modules, key design decisions, implementation sequence (what to build first), risks and mitigations, and any open questions you cannot resolve from the ticket alone.
 Write a thorough but tight plan — every section must earn its place for a Coder who has no other context.
-Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Designer" })
+Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Design" })
   ))
 );
 
@@ -138,7 +138,7 @@ Acceptance criteria quality bar (apply strictly):
 - Implementation-coupled criteria ("the function must call X") are NOT acceptable — test behavior, not implementation.
 - Untestable criteria are NOT acceptable.
 
-Return: { ticketTitle, improvements (array), acceptanceCriteria (array of numbered strings), testPlan (array of {scenario, setup, expectedOutcome, verificationMethod}), openDecisions (array) }.`, { agentType: "Evaluator" })
+Return: { ticketTitle, improvements (array), acceptanceCriteria (array of numbered strings), testPlan (array of {scenario, setup, expectedOutcome, verificationMethod}), openDecisions (array) }.`, { agentType: "Evaluate" })
   ))
 );
 
@@ -156,7 +156,7 @@ Audit:
 
 For each conflict found: state which two tickets are involved, describe the conflict precisely, and propose a resolution aligned with the decisions ledger.
 
-Return: { conflicts (array of {tickets, conflictDescription, proposedResolution}), planAmendments (array of {ticketTitle, amendment}) }.`, { agentType: "Designer" })
+Return: { conflicts (array of {tickets, conflictDescription, proposedResolution}), planAmendments (array of {ticketTitle, amendment}) }.`, { agentType: "Design" })
 );
 
 // Phase 5: Preference-profile auto-resolution
@@ -173,7 +173,7 @@ For each open decision:
 - If the preference profile or an existing ADR/PF settles it clearly: auto-resolve and note the rationale.
 - If not settled: add to the DECISIONS-NEEDED list for the user.
 
-Return: { autoResolved (array of {decision, resolution, source}), decisionsNeeded (array of {decision, context, options}) }.`, { agentType: "Synthesizer" })
+Return: { autoResolved (array of {decision, resolution, source}), decisionsNeeded (array of {decision, context, options}) }.`, { agentType: "Synthesize" })
 );
 
 // Phase 6: Write artifacts — per-ticket plan files + DECISIONS-NEEDED.md
@@ -200,7 +200,7 @@ Then write ${OUTDIR}/DECISIONS-NEEDED.md:
 - Include cross-plan conflicts that were not auto-resolved.
 - If no decisions needed, write: "No open decisions — all settled by preference profile or existing ADRs."
 
-Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount (number) }.`, { agentType: "Synthesizer" })
+Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount (number) }.`, { agentType: "Synthesize" })
 );
 ```
 

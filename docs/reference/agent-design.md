@@ -124,4 +124,4 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 All agents live in `src/assets/agents/` — there is no separate per-plugin agent directory. For an agent used by only one plugin, add it to `src/assets/agents/` and declare it in only that plugin's `agents` array in DEVFLOW_PLUGINS.
 
-**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `coder.md`, `designer.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.
+**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `code.md`, `design.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.

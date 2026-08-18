@@ -15,7 +15,7 @@ Spawn one Designer or Synthesizer agent per candidate ticket:
 // Parallel per-ticket drafters — each is fully independent at draft time
 const drafts = await parallel(candidates.map(c => () =>
   agent(`Draft ticket for: ${c.title}\nInitiative: ${initiative}\n${constraints}`, {
-    agentType: "Designer",
+    agentType: "Design",
     schema: DRAFT_SCHEMA
   })
 ));
@@ -56,11 +56,11 @@ For each draft, run TWO independent Reviewer agents **in parallel** — one per 
 const reviews = await parallel(drafts.map((draft, i) => () =>
   parallel([
     () => agent(`Planner-readiness cold read of ticket: ${JSON.stringify(draft)}`, {
-      agentType: "Reviewer",
+      agentType: "Review",
       schema: REVIEW_SCHEMA
     }),
     () => agent(`Accuracy/scope-discipline audit of ticket: ${JSON.stringify(draft)}`, {
-      agentType: "Reviewer",
+      agentType: "Review",
       schema: REVIEW_SCHEMA
     }),
   ])
@@ -101,7 +101,7 @@ const revised = await parallel(drafts.map((draft, i) => () =>
 Ticket: ${JSON.stringify(draft)}
 Reviews: ${JSON.stringify(reviews[i])}
 Rules: if a finding asks for information that does not exist in the source initiative, add it to Open Questions — never invent. If a finding contradicts the stated initiative scope, the initiative wins; note the decline.`, {
-    agentType: "Synthesizer",
+    agentType: "Synthesize",
     schema: REVISE_SCHEMA
   })
 ));
@@ -138,7 +138,7 @@ Revised tickets: ${JSON.stringify(revised)}
 Initiative: ${initiative}
 Audit: coverage · overlaps/contradictions · dependency graph · acceptance-criteria coherence.
 Return: setVerdict + perTicketAmendments + trackingGuidance.`, {
-  agentType: "Designer",
+  agentType: "Design",
   schema: CRITIC_SCHEMA
 });
 ```
@@ -177,7 +177,7 @@ if (toAmend.length) {
     agent(`Apply cross-set amendments to ticket "${a.title}":
 Amendments: ${JSON.stringify(a.amendments)}
 Rules: same as revise — never invent; unresolvable items go to Open Questions; initiative scope wins over any amendment that contradicts it.`, {
-      agentType: "Synthesizer"
+      agentType: "Synthesize"
     })
   ));
 }
@@ -195,7 +195,7 @@ Guidance from cross-set critic: ${JSON.stringify(critic.trackingGuidance)}
 Final tickets: ${JSON.stringify(revised)}
 Structure: initiative context (1–2 paragraphs) + wave-structured execution checklist + ticket index (one line per ticket, user-facing) + explicitly-excluded items (decisions, not oversights) + invariants that bind every ticket.
 Output: write to the artifact path and return { path, title }.`, {
-  agentType: "Synthesizer",
+  agentType: "Synthesize",
   schema: { type: "object", required: ["path", "title"],
     properties: { path: { type: "string" }, title: { type: "string" } } }
 });

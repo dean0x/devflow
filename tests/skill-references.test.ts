@@ -210,10 +210,10 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'src', 'assets', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    // reviewer.md reads focus skill files directly via the Read tool using the install path
+    // review.md reads focus skill files directly via the Read tool using the install path
     // (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder is not matched
     // by extractInstallPaths, so no false capture occurs.
-    // coder.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
+    // code.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
     // not install-path references. Frontmatter-listed skills are pre-activated and must never
     // be re-invoked via the Skill tool (enforced by the structural test below).
     for (const file of agentFiles) {
@@ -687,7 +687,7 @@ describe('Test infrastructure skill references', () => {
 // Additional: Completeness check
 // ---------------------------------------------------------------------------
 
-describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
+describe('Completeness: review.md Focus Areas vs code-review plugin', () => {
   it('reviewer Focus Areas covers all skills in code-review plugin registry entry', () => {
     // Derive skill list from DEVFLOW_PLUGINS registry (plugin.json files were removed in src/ restructure)
     const codeReviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review');
@@ -700,8 +700,8 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
       'apply-feature-knowledge',  // consumption meta-skill, not a review focus
     ]);
 
-    const reviewerContent = readFileSync(
-      path.join(ROOT, 'src', 'assets', 'agents', 'reviewer.md'),
+    const reviewContent = readFileSync(
+      path.join(ROOT, 'src', 'assets', 'agents', 'review.md'),
       'utf-8',
     );
 
@@ -710,8 +710,8 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
 
       // Focus name equals the skill name directly — all skills match focus 1:1
       expect(
-        reviewerContent.includes(`| ${skill} |`) || reviewerContent.includes(`| \`${skill}\` |`),
-        `reviewer.md Focus Areas table is missing focus '${skill}' (from code-review plugin registry skill '${skill}')`,
+        reviewContent.includes(`| ${skill} |`) || reviewContent.includes(`| \`${skill}\` |`),
+        `review.md Focus Areas table is missing focus '${skill}' (from code-review plugin registry skill '${skill}')`,
       ).toBe(true);
     }
   });
@@ -725,7 +725,7 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
  * Parse the reviewer Focus Areas table into a map of focus → skill name.
  * Accepts rows like: | `focus` | `devflow:skill` |
  */
-function parseReviewerFocusAreas(content: string): Map<string, string> {
+function parseReviewFocusAreas(content: string): Map<string, string> {
   const map = new Map<string, string>();
   for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`devflow:([\w-]+)`\s*\|/gm)) {
     map.set(match[1], match[2]);
@@ -746,11 +746,11 @@ function parseCodeReviewFocusTable(content: string): Map<string, string> {
 }
 
 describe('Cross-component runtime alignment', () => {
-  const reviewerContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'reviewer.md'), 'utf-8');
-  const reviewerFocusAreas = parseReviewerFocusAreas(reviewerContent);
+  const reviewContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'review.md'), 'utf-8');
+  const reviewFocusAreas = parseReviewFocusAreas(reviewContent);
 
   it('reviewer Focus Areas table has entries', () => {
-    expect(reviewerFocusAreas.size).toBeGreaterThan(10);
+    expect(reviewFocusAreas.size).toBeGreaterThan(10);
   });
 
   it('code-review command focus names exist in reviewer Focus Areas', () => {
@@ -768,7 +768,7 @@ describe('Cross-component runtime alignment', () => {
 
     for (const [focus] of commandFocuses) {
       expect(
-        reviewerFocusAreas.has(focus),
+        reviewFocusAreas.has(focus),
         `code-review command sends focus '${focus}' but reviewer Focus Areas table has no entry for it`,
       ).toBe(true);
     }
@@ -793,11 +793,11 @@ describe('Cross-component runtime alignment', () => {
       ).toBe(true);
 
       // The reviewer's Focus Areas skill must match the command's skill
-      const reviewerSkill = reviewerFocusAreas.get(focus);
-      if (reviewerSkill) {
+      const reviewSkill = reviewFocusAreas.get(focus);
+      if (reviewSkill) {
         expect(
-          reviewerSkill,
-          `focus '${focus}': code-review says 'devflow:${commandSkill}' but reviewer says 'devflow:${reviewerSkill}'`,
+          reviewSkill,
+          `focus '${focus}': code-review says 'devflow:${commandSkill}' but reviewer says 'devflow:${reviewSkill}'`,
         ).toBe(commandSkill);
       }
     }
@@ -879,7 +879,7 @@ describe('Cross-component runtime alignment', () => {
   });
 
   it('coder domain skill paths cover all language/ecosystem skills', () => {
-    const coderContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'coder.md'), 'utf-8');
+    const codeContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8');
 
     // Language skills that should be loadable as domain skills via Skill tool invocations
     const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
@@ -889,11 +889,11 @@ describe('Cross-component runtime alignment', () => {
     for (const skill of [...languageSkills, ...domainSkills]) {
       // Skill tool invocations: Skill(skill="devflow:X") or skill="devflow:X" or devflow:X
       const hasSkillRef =
-        coderContent.includes(`devflow:${skill}`) ||
-        coderContent.includes(`skill="devflow:${skill}"`);
+        codeContent.includes(`devflow:${skill}`) ||
+        codeContent.includes(`skill="devflow:${skill}"`);
       expect(
         hasSkillRef,
-        `coder.md domain skill section should reference 'devflow:${skill}'`,
+        `code.md domain skill section should reference 'devflow:${skill}'`,
       ).toBe(true);
     }
   });

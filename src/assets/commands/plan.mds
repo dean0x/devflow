@@ -82,7 +82,7 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 Spawn Skimmer agent for codebase context:
 
 ```
-Agent(subagent_type="Skimmer"):
+Agent(subagent_type="Skim"):
 "Orient in codebase for design planning: {feature/issues}
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area
@@ -122,7 +122,7 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECI
 **WAIT** for Phase 3 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize EXPLORATION outputs for: {feature/issues}
 Mode: exploration
 Explorer outputs: {all 4 outputs}
@@ -166,7 +166,7 @@ Each designer receives:
 - Multi-issue: all issue bodies
 
 ```
-Agent(subagent_type="Designer"):
+Agent(subagent_type="Design"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
 DECISIONS_CONTEXT: {decisions_context}
@@ -187,7 +187,7 @@ Cite evidence from provided artifacts."
 **WAIT** for Phase 5 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize GAP ANALYSIS outputs for: {feature/issues}
 Mode: design
 Designer outputs: {all designer outputs}
@@ -249,7 +249,7 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 **WAIT** for Phase 8 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
 Mode: exploration
 Explorer outputs: {all 4 outputs}
@@ -279,7 +279,7 @@ Implementation steps planner: include explicit gap mitigations (from Phase 6) in
 **WAIT** for Phase 10 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize PLANNING outputs for: {feature/issues}
 Mode: planning
 Planner outputs: {all 3 outputs}
@@ -298,7 +298,7 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 Spawn 1 Designer agent with mode `design-review`:
 
 ```
-Agent(subagent_type="Designer"):
+Agent(subagent_type="Design"):
 "Mode: design-review
 Artifacts:
   Implementation plan: {Phase 11 planning synthesis}

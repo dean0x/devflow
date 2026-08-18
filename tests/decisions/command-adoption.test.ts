@@ -75,10 +75,10 @@ describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form
 
 describe('Consumer agents — devflow:apply-decisions in skills frontmatter', () => {
   const agents: Array<[string, string]> = [
-    ['triager.md', 'src/assets/agents/triager.md'],
-    ['designer.md', 'src/assets/agents/designer.md'],
-    ['scrutinizer.md', 'src/assets/agents/scrutinizer.md'],
-    ['reviewer.md', 'src/assets/agents/reviewer.md'],
+    ['triage.md', 'src/assets/agents/triage.md'],
+    ['design.md', 'src/assets/agents/design.md'],
+    ['scrutinize.md', 'src/assets/agents/scrutinize.md'],
+    ['review.md', 'src/assets/agents/review.md'],
   ]
 
   for (const [label, relPath] of agents) {
@@ -92,8 +92,8 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
     })
   }
 
-  it('simplifier.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
-    const content = loadFile('src/assets/agents/simplifier.md')
+  it('simplify.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
+    const content = loadFile('src/assets/agents/simplify.md')
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
     expect(frontmatterMatch).toBeTruthy()
     const frontmatter = frontmatterMatch![1]
@@ -110,10 +110,10 @@ describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
     '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
-    ['triager.md', 'src/assets/agents/triager.md'],
-    ['designer.md', 'src/assets/agents/designer.md'],
-    ['scrutinizer.md', 'src/assets/agents/scrutinizer.md'],
-    ['reviewer.md', 'src/assets/agents/reviewer.md'],
+    ['triage.md', 'src/assets/agents/triage.md'],
+    ['design.md', 'src/assets/agents/design.md'],
+    ['scrutinize.md', 'src/assets/agents/scrutinize.md'],
+    ['review.md', 'src/assets/agents/review.md'],
   ]
 
   for (const [label, relPath] of consumerAgents) {
@@ -154,9 +154,9 @@ describe('DECISIONS_CONTEXT variable — present in all four command surfaces', 
 // Reviewer agent — apply-decisions section references skill
 // -------------------------------------------------------------------------
 
-describe('reviewer.md — Apply Decisions section', () => {
+describe('review.md — Apply Decisions section', () => {
   it('contains Apply Decisions section referencing devflow:apply-decisions', () => {
-    const content = loadFile('src/assets/agents/reviewer.md')
+    const content = loadFile('src/assets/agents/review.md')
     expect(content).toMatch(/## Apply Decisions|### Apply Decisions/)
     expect(content).toContain('devflow:apply-decisions')
   })

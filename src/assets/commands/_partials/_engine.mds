@@ -63,7 +63,7 @@ Keep the panel to 2–3 agents. Do not spawn redundant agents asking the same qu
 The standard implementation unit for one ticket. Run in order:
 
 ```
-Coder(agentType:"Coder", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
+Coder(agentType:"Code", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
   → gate1_postcode()
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review loop, not after
 ```
@@ -102,7 +102,7 @@ Conditional by file type detected in the diff (add these when relevant):
 
 **Reviewer result contract:** every reviewer MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. Each item in `findings` must carry: `file` (path of the primary file the finding relates to, or `null` if scope is unknown), `description` (one-sentence issue statement), and `severity` (`critical | high | medium | low`). A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD reviewer is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A cycle with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
 
-Each Reviewer gets `agentType: "Reviewer"` with its focus baked into the prompt. Total: 8–19 reviewers per cycle.
+Each Reviewer gets `agentType: "Review"` with its focus baked into the prompt. Total: 8–19 reviewers per cycle.
 
 **Step 2 — Adversarial finding verification**
 
@@ -218,8 +218,8 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
   ],
   "filesChanged": ["string — list of modified file paths"],
   "gate2": {
-    "evaluatorVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
-    "testerVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
+    "evaluateVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
+    "testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
     "skipReasons": ["string — why a gate was skipped, if applicable"]
   }
 }

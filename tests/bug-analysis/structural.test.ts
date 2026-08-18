@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
-const agentContent = loadFile('src/assets/agents/bug-analyzer.md');
+const agentContent = loadFile('src/assets/agents/diagnose.md');
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations
@@ -252,10 +252,10 @@ describe('bug-analysis.md — resolve compatibility', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 7: bug-analyzer.md — output format section headers
+// Group 7: diagnose.md — output format section headers
 // ---------------------------------------------------------------------------
 
-describe('bug-analyzer.md — output format section headers', () => {
+describe('diagnose.md — output format section headers', () => {
   it('output template contains "Issues in Your Changes (BLOCKING)" section header', () => {
     expect(agentContent).toContain('## Issues in Your Changes (BLOCKING)');
   });
@@ -292,10 +292,10 @@ describe('bug-analyzer.md — output format section headers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 8: bug-analyzer.md — frontmatter skill declarations
+// Group 8: diagnose.md — frontmatter skill declarations
 // ---------------------------------------------------------------------------
 
-describe('bug-analyzer.md — frontmatter skill declarations', () => {
+describe('diagnose.md — frontmatter skill declarations', () => {
   const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
 
   it('frontmatter declares devflow:regression skill', () => {

@@ -628,10 +628,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
   });
 
   it('spawns Simplifier and Scrutinizer exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
-    const simplifier = (compiled.match(/agentType: "Simplifier"/g) ?? []).length;
-    const scrutinizer = (compiled.match(/agentType: "Scrutinizer"/g) ?? []).length;
-    expect(simplifier, 'Simplifier should run only in the two Gate-1 passes').toBe(2);
-    expect(scrutinizer, 'Scrutinizer should run only in the two Gate-1 passes').toBe(2);
+    const simplifier = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
+    const scrutinizer = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
+    expect(simplifier, 'Simplify should run only in the two Gate-1 passes').toBe(2);
+    expect(scrutinizer, 'Scrutinize should run only in the two Gate-1 passes').toBe(2);
   });
 });
 
@@ -699,7 +699,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('review coverage incomplete');
     expect(compiled).toContain('coverageGaps.length === 0');
     // Chunk/stagger: reviewers dispatched in bounded parallel batches
-    expect(compiled).toContain('const chunk = await parallel(reviewerThunks.slice(i, i + chunkSize));');
+    expect(compiled).toContain('const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));');
   });
 
   it('C3: findings disposition replaces old survivingFindings raw dump', () => {
@@ -717,7 +717,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('ALWAYS ready');
     expect(compiled).toContain('cascade');
     expect(compiled).toContain('never kills the wave');
-    expect(compiled).toContain('agentType: "Designer"');
+    expect(compiled).toContain('agentType: "Design"');
   });
 
   it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, NEVER wrapped, bounded re-arm', () => {

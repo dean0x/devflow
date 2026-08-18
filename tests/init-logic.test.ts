@@ -887,7 +887,7 @@ describe('partial install registry-diff sweep correctness', () => {
     const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
     await fs.writeFile(retiredCommandPath, '# retired command');
 
-    // (c) An agent from a plugin NOT selected for this partial run. 'coder' IS in
+    // (c) An agent from a plugin NOT selected for this partial run. 'code' IS in
     // getAllAgentNames() (covers all plugins) even though plugins: [] installs nothing.
     // The sweep must preserve it — removing it would break a partial reinstall that
     // leaves other plugins' assets untouched.

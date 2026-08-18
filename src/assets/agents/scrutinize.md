@@ -1,5 +1,5 @@
 ---
-name: Scrutinizer
+name: Scrutinize
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Coder completes.
 model: opus
 skills:

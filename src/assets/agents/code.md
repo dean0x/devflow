@@ -1,5 +1,5 @@
 ---
-name: Coder
+name: Code
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet
 skills:

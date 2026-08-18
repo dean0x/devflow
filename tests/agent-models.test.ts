@@ -86,16 +86,16 @@ describe('readAgentMapping', () => {
     const data: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
-        reviewer: { model: 'opus', effort: 'high' },
+        code: { model: 'gpt-5.6-sol' },
+        review: { model: 'opus', effort: 'high' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
     const result = await readAgentMapping(dir);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.agents['coder']).toEqual({ model: 'gpt-5.6-sol' });
-      expect(result.value.agents['reviewer']).toEqual({ model: 'opus', effort: 'high' });
+      expect(result.value.agents['code']).toEqual({ model: 'gpt-5.6-sol' });
+      expect(result.value.agents['review']).toEqual({ model: 'opus', effort: 'high' });
     }
   });
 
@@ -106,13 +106,13 @@ describe('readAgentMapping', () => {
   });
 
   it('tolerates wrong version — still reads agents', async () => {
-    const data = { version: 99, agents: { coder: { model: 'opus' } } };
+    const data = { version: 99, agents: { code: { model: 'opus' } } };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
     const result = await readAgentMapping(dir);
     // Tolerant: still parse what we can
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.agents['coder']).toBeDefined();
+      expect(result.value.agents['code']).toBeDefined();
     }
   });
 
@@ -120,8 +120,8 @@ describe('readAgentMapping', () => {
     const data = {
       version: 1,
       agents: {
-        coder: { model: 'opus', effort: 'turbo-invalid' },
-        reviewer: { model: 'haiku', effort: 'high' },
+        code: { model: 'opus', effort: 'turbo-invalid' },
+        review: { model: 'haiku', effort: 'high' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
@@ -130,12 +130,12 @@ describe('readAgentMapping', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       // Invalid effort for coder is dropped
-      expect(result.value.agents['coder']?.effort).toBeUndefined();
+      expect(result.value.agents['code']?.effort).toBeUndefined();
       // Valid effort for reviewer preserved
-      expect(result.value.agents['reviewer']?.effort).toBe('high');
+      expect(result.value.agents['review']?.effort).toBe('high');
     }
     // Warning was emitted for the invalid effort
-    expect(warnings.some(w => w.includes('coder') || w.includes('effort'))).toBe(true);
+    expect(warnings.some(w => w.includes('code') || w.includes('effort'))).toBe(true);
   });
 
   it('preserves unknown agent names (plugin may not be installed)', async () => {
@@ -143,7 +143,7 @@ describe('readAgentMapping', () => {
       version: 1,
       agents: {
         'unknown-future-agent': { model: 'opus' },
-        coder: { model: 'sonnet' },
+        code: { model: 'sonnet' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
@@ -151,7 +151,7 @@ describe('readAgentMapping', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.agents['unknown-future-agent']).toBeDefined();
-      expect(result.value.agents['coder']).toBeDefined();
+      expect(result.value.agents['code']).toBeDefined();
     }
   });
 });
@@ -171,7 +171,7 @@ describe('saveAgentMapping', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
+        code: { model: 'gpt-5.6-sol' },
       },
     };
     const saveResult = await saveAgentMapping(dir, mapping);
@@ -180,7 +180,7 @@ describe('saveAgentMapping', () => {
     const readResult = await readAgentMapping(dir);
     expect(readResult.ok).toBe(true);
     if (readResult.ok) {
-      expect(readResult.value.agents['coder']?.model).toBe('gpt-5.6-sol');
+      expect(readResult.value.agents['code']?.model).toBe('gpt-5.6-sol');
     }
   });
 
@@ -203,8 +203,8 @@ describe('resolveEffective', () => {
   // Shipped defaults: agent → model (read from source at runtime in real impl;
   // here we use a subset for unit tests via the `shippedDefaults` parameter)
   const defaults = {
-    coder: 'sonnet',
-    reviewer: 'opus',
+    code: 'sonnet',
+    review: 'opus',
     git: 'haiku',
   };
 
@@ -215,42 +215,42 @@ describe('resolveEffective', () => {
 
   // Proxy OFF × claude model in mapping → use mapping model
   it('proxy OFF, claude model in mapping → uses mapping model (not dormant)', () => {
-    const mapping = makeMapping({ coder: { model: 'opus' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'opus' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('opus');
   });
 
   // Proxy OFF × GPT model in mapping → dormant → use shipped default
   it('proxy OFF, GPT model in mapping → dormant → uses shipped default', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet'); // falls back to shipped default
   });
 
   // Proxy ON × GPT model in mapping → materializes
   it('proxy ON, GPT model in mapping → uses GPT model', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol' } });
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.model).toBe('gpt-5.6-sol');
   });
 
   // Proxy ON × claude model in mapping → uses mapping model
   it('proxy ON, claude model in mapping → uses mapping model', () => {
-    const mapping = makeMapping({ reviewer: { model: 'haiku' } });
-    const result = resolveEffective('reviewer', mapping, defaults, true);
+    const mapping = makeMapping({ review: { model: 'haiku' } });
+    const result = resolveEffective('review', mapping, defaults, true);
     expect(result.model).toBe('haiku');
   });
 
   // No mapping entry → use shipped default regardless of proxy
   it('no mapping entry, proxy OFF → uses shipped default', () => {
     const mapping = makeMapping({});
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet');
   });
 
   it('no mapping entry, proxy ON → uses shipped default', () => {
     const mapping = makeMapping({});
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.model).toBe('sonnet');
   });
 
@@ -263,29 +263,29 @@ describe('resolveEffective', () => {
 
   // Effort is orthogonal to proxy state — always applies
   it('effort from mapping is returned regardless of proxy state (OFF)', () => {
-    const mapping = makeMapping({ coder: { model: 'sonnet', effort: 'high' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'sonnet', effort: 'high' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.effort).toBe('high');
   });
 
   it('effort from mapping is returned regardless of proxy state (ON)', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol', effort: 'max' } });
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol', effort: 'max' } });
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.effort).toBe('max');
   });
 
   // GPT model dormant (proxy OFF) but effort still applies
   it('GPT model dormant but effort still applied (proxy OFF)', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol', effort: 'low' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol', effort: 'low' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet'); // dormant → fallback
     expect(result.effort).toBe('low');   // effort always applies
   });
 
   // No effort in mapping → undefined
   it('no effort in mapping → effort is undefined', () => {
-    const mapping = makeMapping({ coder: { model: 'opus' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'opus' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.effort).toBeUndefined();
   });
 });
@@ -299,8 +299,8 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
-        reviewer: { model: 'gpt-5.5' },
+        code: { model: 'gpt-5.6-sol' },
+        review: { model: 'gpt-5.5' },
         git: { model: 'haiku' },
       },
     };
@@ -311,7 +311,7 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'sonnet' },
+        code: { model: 'sonnet' },
       },
     };
     expect(countExternalMappedAgents(mapping)).toBe(0);
@@ -326,8 +326,8 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { effort: 'high' },
-        reviewer: { model: 'gpt-5.6-sol' },
+        code: { effort: 'high' },
+        review: { model: 'gpt-5.6-sol' },
       },
     };
     expect(countExternalMappedAgents(mapping)).toBe(1);
@@ -346,8 +346,8 @@ describe('reapplyAgentMapping', async () => {
 
   // Read shipped defaults live from source at test init time (TEST-7 fix).
   // Avoids brittle hardcoding that breaks when model-strategy changes agent files.
-  let coderShippedDefault = 'sonnet'; // conservative fallback; overridden below
-  let reviewerShippedDefault = 'opus'; // conservative fallback; overridden below
+  let codeShippedDefault = 'sonnet'; // conservative fallback; overridden below
+  let reviewShippedDefault = 'opus'; // conservative fallback; overridden below
 
   try {
     const mod = await import('../src/core/agent-models.js');
@@ -357,11 +357,11 @@ describe('reapplyAgentMapping', async () => {
     // loadShippedDefaults reads live from src/assets/agents/ — same source
     // reapplyAgentMapping uses, so the assertion matches what the function writes.
     const defaults = await mod.loadShippedDefaults();
-    if (defaults['coder']) {
-      coderShippedDefault = defaults['coder'];
+    if (defaults['code']) {
+      codeShippedDefault = defaults['code'];
     }
-    if (defaults['reviewer']) {
-      reviewerShippedDefault = defaults['reviewer'];
+    if (defaults['review']) {
+      reviewShippedDefault = defaults['review'];
     }
   } catch {
     // Module not yet implemented — tests will be skipped
@@ -384,13 +384,13 @@ describe('reapplyAgentMapping', async () => {
     if (!reapplyAgentMapping) return; // impl not ready
 
     // Create a minimal fake installed agent file
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     // Mapping: set coder to opus
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -400,20 +400,20 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,
     });
 
-    expect(result.updated).toContain('coder');
-    const updated = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    expect(result.updated).toContain('code');
+    const updated = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(updated).toContain('model: opus');
   });
 
   it('idempotency: second pass reports all unchanged', async () => {
     if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -437,12 +437,12 @@ describe('reapplyAgentMapping', async () => {
   it('GPT model stays dormant (proxy OFF) — installed file keeps shipped default', async () => {
     if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -453,20 +453,20 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // Installed file should have shipped default, not GPT model
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
+    expect(content).toContain(`model: ${codeShippedDefault}`); // shipped default (read live)
   });
 
   it('GPT model materializes when proxy ON', async () => {
     if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -476,7 +476,7 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: true, // proxy ON → GPT model materializes
     });
 
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).toContain('model: gpt-5.6-sol');
   });
 
@@ -486,7 +486,7 @@ describe('reapplyAgentMapping', async () => {
     // No files in tmpInstallDir
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -496,7 +496,7 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,
     });
 
-    expect(result.skippedMissing).toContain('coder');
+    expect(result.skippedMissing).toContain('code');
     expect(result.updated).toHaveLength(0);
   });
 
@@ -504,12 +504,12 @@ describe('reapplyAgentMapping', async () => {
     if (!revertExternalAgents) return;
 
     // Installed file already has GPT model applied
-    const agentContent = '---\nname: Coder\nmodel: gpt-5.6-sol\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: gpt-5.6-sol\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -519,9 +519,9 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // Coder should be back to shipped default
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
+    expect(content).toContain(`model: ${codeShippedDefault}`); // shipped default (read live)
   });
 
   it('T5: alias-shaped AND canonical-id external entries both stay dormant when proxy is OFF', async () => {
@@ -541,21 +541,21 @@ describe('reapplyAgentMapping', async () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'sol' },          // alias-shaped — previously untested on reapply path
-        reviewer: { model: 'gpt-5.6-sol' }, // canonical-id — also covered here for completeness
+        code: { model: 'sol' },          // alias-shaped — previously untested on reapply path
+        review: { model: 'gpt-5.6-sol' }, // canonical-id — also covered here for completeness
       },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
     // Installed files start at their shipped defaults
     await fs.writeFile(
-      path.join(tmpInstallDir, 'coder.md'),
-      `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`,
+      path.join(tmpInstallDir, 'code.md'),
+      `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`,
       'utf-8',
     );
     await fs.writeFile(
-      path.join(tmpInstallDir, 'reviewer.md'),
-      `---\nname: Reviewer\nmodel: ${reviewerShippedDefault}\n---\n\nbody\n`,
+      path.join(tmpInstallDir, 'review.md'),
+      `---\nname: Review\nmodel: ${reviewShippedDefault}\n---\n\nbody\n`,
       'utf-8',
     );
 
@@ -565,14 +565,14 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,  // proxy OFF → both external entries must stay dormant
     });
 
-    const coderFile = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const codeFile = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     // Neither the alias nor the canonical id may appear in the installed file
-    expect(coderFile).not.toMatch(/model:\s*(sol|gpt-)/);
-    expect(coderFile).toContain(`model: ${coderShippedDefault}`);
+    expect(codeFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(codeFile).toContain(`model: ${codeShippedDefault}`);
 
-    const reviewerFile = await fs.readFile(path.join(tmpInstallDir, 'reviewer.md'), 'utf-8');
-    expect(reviewerFile).not.toMatch(/model:\s*(sol|gpt-)/);
-    expect(reviewerFile).toContain(`model: ${reviewerShippedDefault}`);
+    const reviewFile = await fs.readFile(path.join(tmpInstallDir, 'review.md'), 'utf-8');
+    expect(reviewFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(reviewFile).toContain(`model: ${reviewShippedDefault}`);
   });
 
   it('AC-S1: hostile model name in mapping is rejected — installed file unchanged, warning emitted', async () => {
@@ -585,14 +585,14 @@ describe('reapplyAgentMapping', async () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt\ntools:\n  - bash' },
+        code: { model: 'gpt\ntools:\n  - bash' },
       },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
-    const originalContent = `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`;
-    const coderPath = path.join(tmpInstallDir, 'coder.md');
-    await fs.writeFile(coderPath, originalContent, 'utf-8');
+    const originalContent = `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`;
+    const codePath = path.join(tmpInstallDir, 'code.md');
+    await fs.writeFile(codePath, originalContent, 'utf-8');
 
     const warnings: string[] = [];
     await reapplyAgentMapping({
@@ -603,7 +603,7 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // File must be byte-identical to before (rewrite was rejected)
-    const afterContent = await fs.readFile(coderPath, 'utf-8');
+    const afterContent = await fs.readFile(codePath, 'utf-8');
     expect(afterContent).toBe(originalContent);
 
     // A warning naming 'invalid-model' must have been emitted

@@ -1,5 +1,5 @@
 ---
-name: BugAnalyzer
+name: Diagnose
 description: Proactive bug finding agent with static+semantic analysis. Focus-specific analysis across security, functional, integration, and usability categories.
 model: opus
 skills:

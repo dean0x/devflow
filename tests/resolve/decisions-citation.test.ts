@@ -12,7 +12,7 @@
 //       filterDecisionsContext has been removed)
 //   2. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
 //      (index.md direct-read invocation covered by tests/decisions/command-adoption.test.ts)
-//   3. Structural tests: triager.md — Input Context + Apply Decisions
+//   3. Structural tests: triage.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
 //   4. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 
@@ -209,11 +209,11 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: src/assets/agents/triager.md
+// Structural tests: src/assets/agents/triage.md
 // ---------------------------------------------------------------------------
 
-describe('triager.md — Input Context and Apply Decisions section', () => {
-  const content = loadFile('src/assets/agents/triager.md');
+describe('triage.md — Input Context and Apply Decisions section', () => {
+  const content = loadFile('src/assets/agents/triage.md');
 
   it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
@@ -225,7 +225,7 @@ describe('triager.md — Input Context and Apply Decisions section', () => {
   });
 
   it('Apply Decisions usage describes citing inline in Reasoning column', () => {
-    // Extract only the Apply Decisions bullet from Responsibilities — triager.md has
+    // Extract only the Apply Decisions bullet from Responsibilities — triage.md has
     // "Reasoning" columns in three unrelated output tables, so asserting against the
     // whole file is self-ratifying. This scopes the assertion to the actual coupling.
     const applyDecisionsStep = extractSection(content, '**Apply Decisions**', '\n3. **Assign disposition**');
@@ -263,8 +263,8 @@ describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('triager.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('src/assets/agents/triager.md');
+  it('triage.md contains DECISIONS_CONTEXT', () => {
+    const content = loadFile('src/assets/agents/triage.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 

@@ -135,7 +135,7 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 Spawn a single global Triager agent for ALL issues:
 
 ```
-Agent(subagent_type="Triager"):
+Agent(subagent_type="Triage"):
 "ISSUES: {all_issues}
 DIFF_FILES: {diff_files}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
@@ -185,7 +185,7 @@ Otherwise, batch FIX_NOW issues for Coder execution:
 For each batch, spawn Coder agent with `OPERATION: issue-fix` and `PUSH: false`:
 
 ```
-Agent(subagent_type="Coder"):
+Agent(subagent_type="Code"):
 "TASK_ID: resolve-{batch-id}
 OPERATION: issue-fix
 ISSUES: {fix_now_issues_in_batch}
@@ -225,7 +225,7 @@ Use the template from the Output Artifact section below.
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
 ```
-Agent(subagent_type="Simplifier", run_in_background=false):
+Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 FILES_CHANGED: {list of files modified by Coders}
@@ -242,7 +242,7 @@ If no fixes were made (CODER_RESULTS contains 0 commits) → skip: "No fixes app
 Otherwise, spawn Validator agent:
 
 ```
-Agent(subagent_type="Validator", model="haiku"):
+Agent(subagent_type="Validate", model="haiku"):
 "FILES_CHANGED: {list of files from Coder output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -256,7 +256,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 3. If `validation_retry_count <= 2`:
    - Spawn Coder with fix context:
    ```
-   Agent(subagent_type="Coder"):
+   Agent(subagent_type="Code"):
    "TASK_ID: resolve-\{batch-id\}-valfix-\{count\}
    OPERATION: validation-fix
    VALIDATION_FAILURES: \{parsed failures from Validator\}
@@ -296,7 +296,7 @@ Otherwise, for each worktree with fixes:
 2. **If PASSING** → proceed to next phase.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
 4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

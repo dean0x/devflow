@@ -111,7 +111,7 @@ Based on Setup context (plan document, issue body, or conversation context), use
 **SINGLE_CODER** (default):
 
 ```
-Agent(subagent_type="Coder"):
+Agent(subagent_type="Code"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
@@ -133,7 +133,7 @@ Spawn Coders one at a time, passing handoff summaries between phases:
 
 **Phase 1 Coder:**
 ```
-Agent(subagent_type="Coder"):
+Agent(subagent_type="Code"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
@@ -151,7 +151,7 @@ HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 
 **Phase 2+ Coders** (after prior phase completes):
 ```
-Agent(subagent_type="Coder"):
+Agent(subagent_type="Code"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
@@ -178,7 +178,7 @@ HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 Spawn multiple Coders **in a single message**, each with independent subtask:
 
 ```
-Agent(subagent_type="Coder"):  # Coder 1
+Agent(subagent_type="Code"):  # Coder 1
 "TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
@@ -191,7 +191,7 @@ DECISIONS_CONTEXT: {decisions_context}
 COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
-Agent(subagent_type="Coder"):  # Coder 2 (same message)
+Agent(subagent_type="Code"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
@@ -219,7 +219,7 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 After Coder completes, spawn Validator to verify correctness:
 
 ```
-Agent(subagent_type="Validator", model="haiku"):
+Agent(subagent_type="Validate", model="haiku"):
 "FILES_CHANGED: {list of files from Coder output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -231,7 +231,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 3. If `validation_retry_count <= 2`:
    - Spawn Coder with fix context:
    ```
-   Agent(subagent_type="Coder"):
+   Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix validation failures
    OPERATION: validation-fix
@@ -253,7 +253,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 After validation passes, spawn Simplifier to polish the code:
 
 ```
-Agent(subagent_type="Simplifier"):
+Agent(subagent_type="Simplify"):
 "Simplify recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Coder output}
@@ -268,7 +268,7 @@ Focus on code modified by Coder, apply project standards, enhance clarity"
 After Simplifier completes, spawn Scrutinizer as final quality gate:
 
 ```
-Agent(subagent_type="Scrutinizer"):
+Agent(subagent_type="Scrutinize"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Coder output}
 DECISIONS_CONTEXT: {decisions_context}
@@ -286,7 +286,7 @@ If Scrutinizer returns BLOCKED, report to user and halt.
 If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
 ```
-Agent(subagent_type="Validator", model="haiku"):
+Agent(subagent_type="Validate", model="haiku"):
 "FILES_CHANGED: {files modified by Scrutinizer}
 VALIDATION_SCOPE: changed-only
 Verify Scrutinizer's fixes didn't break anything."
@@ -304,7 +304,7 @@ Verify Scrutinizer's fixes didn't break anything."
 After Scrutinizer passes (and re-validation if needed), spawn Evaluator to validate alignment:
 
 ```
-Agent(subagent_type="Evaluator"):
+Agent(subagent_type="Evaluate"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Coder output}
@@ -321,7 +321,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 3. If `alignment_fix_count <= 2`:
    - Spawn Coder to fix misalignments:
    ```
-   Agent(subagent_type="Coder"):
+   Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
@@ -332,7 +332,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
-   Agent(subagent_type="Validator", model="haiku"):
+   Agent(subagent_type="Validate", model="haiku"):
    "FILES_CHANGED: \{files modified by fix Coder\}
    VALIDATION_SCOPE: changed-only"
    ```
@@ -348,7 +348,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 After Evaluator passes, spawn Tester for scenario-based acceptance testing:
 
 ```
-Agent(subagent_type="Tester"):
+Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Coder output}
@@ -364,7 +364,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 3. If `qa_retry_count <= 2`:
    - Spawn Coder to fix QA failures:
    ```
-   Agent(subagent_type="Coder"):
+   Agent(subagent_type="Code"):
    "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix QA test failures
    OPERATION: qa-fix
@@ -375,7 +375,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
-   Agent(subagent_type="Validator", model="haiku"):
+   Agent(subagent_type="Validate", model="haiku"):
    "FILES_CHANGED: \{files modified by fix Coder\}
    VALIDATION_SCOPE: changed-only"
    ```
@@ -395,7 +395,7 @@ Strategy-conditional: run for **SINGLE_CODER** (PR exists from Phase 2), skip fo
 2. **If PASSING** → proceed to Phase 10.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
 4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

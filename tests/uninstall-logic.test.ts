@@ -17,13 +17,13 @@ describe('computeAssetsToRemove', () => {
   });
 
   it('removes agents unique to selected plugins', () => {
-    // devflow-bug-analysis has agent 'bug-analyzer' which is unique to it
+    // devflow-bug-analysis has agent 'diagnose' which is unique to it
     const bugAnalysisPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
     // Non-empty assertion: guard against vacuous pass if the plugin is accidentally deleted
     expect(bugAnalysisPlugin).toBeDefined();
     expect(bugAnalysisPlugin.agents.length).toBeGreaterThan(0);
     const { agents } = computeAssetsToRemove([bugAnalysisPlugin], DEVFLOW_PLUGINS);
-    expect(agents).toContain('bug-analyzer');
+    expect(agents).toContain('diagnose');
   });
 
   it('retains agents shared with remaining plugins', () => {
@@ -111,12 +111,12 @@ describe('formatDryRunPlan', () => {
   it('lists skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['security', 'test-driven-development'],
-      agents: ['coder'],
+      agents: ['code'],
       commands: ['/implement'],
     });
     expect(plan).toContain('security');
     expect(plan).toContain('test-driven-development');
-    expect(plan).toContain('coder');
+    expect(plan).toContain('code');
     expect(plan).toContain('/implement');
   });
 
@@ -149,7 +149,7 @@ describe('formatDryRunPlan', () => {
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design', 'software-design', 'testing'],
-      agents: ['coder', 'coder'],
+      agents: ['code', 'code'],
       commands: ['/implement', '/implement'],
     });
     // Should show count based on unique items, not duplicates
@@ -896,7 +896,7 @@ describe('removeAllDevFlow — full uninstall (TEST-9a)', () => {
     const agentsDir = path.join(claudeDir, 'agents', 'devflow');
     await fs.mkdir(agentsDir, { recursive: true });
     // Registry agent — a real agent name from the registry
-    await fs.writeFile(path.join(agentsDir, 'coder.md'), '---\nmodel: sonnet\n---\n', 'utf-8');
+    await fs.writeFile(path.join(agentsDir, 'code.md'), '---\nmodel: sonnet\n---\n', 'utf-8');
     // Retired agent — a name no longer in any plugin
     await fs.writeFile(path.join(agentsDir, 'old-retired-agent.md'), 'retired', 'utf-8');
     // User-dropped file — arbitrary extra content in the dir
@@ -1020,7 +1020,7 @@ describe('isDevFlowInstalled — multi-namespace detection (TEST-9e)', () => {
   it('(9e) returns true when agents/devflow exists but commands/devflow is absent', async () => {
     await fs.mkdir(path.join(claudeDir, 'agents', 'devflow'), { recursive: true });
     await fs.writeFile(
-      path.join(claudeDir, 'agents', 'devflow', 'coder.md'),
+      path.join(claudeDir, 'agents', 'devflow', 'code.md'),
       '---\nmodel: sonnet\n---',
       'utf-8',
     );

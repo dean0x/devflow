@@ -34,22 +34,22 @@ async function readAgent(name: string): Promise<string> {
 
 describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
   const AGENTS = [
-    'bug-analyzer.md',
-    'coder.md',
-    'designer.md',
-    'evaluator.md',
+    'code.md',
+    'design.md',
+    'diagnose.md',
+    'evaluate.md',
     'git.md',
     'knowledge.md',
     'learning.md',
-    'researcher.md',
-    'reviewer.md',
-    'scrutinizer.md',
-    'simplifier.md',
-    'skimmer.md',
-    'synthesizer.md',
-    'tester.md',
-    'triager.md',
-    'validator.md',
+    'research.md',
+    'review.md',
+    'scrutinize.md',
+    'simplify.md',
+    'skim.md',
+    'synthesize.md',
+    'test.md',
+    'triage.md',
+    'validate.md',
   ];
 
   for (const agentFile of AGENTS) {

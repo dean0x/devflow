@@ -192,7 +192,7 @@ Spawn ALL active BugAnalyzer agents **in a single message** (parallel, NOT backg
 
 For each active focus, spawn:
 ```
-Agent(subagent_type="BugAnalyzer", run_in_background=false):
+Agent(subagent_type="Diagnose", run_in_background=false):
 "Analyze focusing on {focus}.
 FOCUS: {focus}
 DIFF_COMMAND: git diff {DIFF_RANGE}
@@ -221,7 +221,7 @@ Notes:
 Spawn Synthesizer:
 
 ```
-Agent(subagent_type="Synthesizer", run_in_background=false):
+Agent(subagent_type="Synthesize", run_in_background=false):
 "Mode: bug-analysis
 ANALYSIS_BASE_DIR: {ANALYSIS_DIR}
 BRANCH: {branch} -> {base_branch}

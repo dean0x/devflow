@@ -58,7 +58,7 @@ Generate topic slug from the research question (kebab-case, lowercase, no articl
 
 Only if `codebase` type is in RESEARCH_PLAN.
 
-Spawn `Agent(subagent_type="Skimmer")` targeting codebase areas relevant to the research question.
+Spawn `Agent(subagent_type="Skim")` targeting codebase areas relevant to the research question.
 
 Skip and set ORIENT_OUTPUT = "(none)" if `codebase` type is not in RESEARCH_PLAN.
 
@@ -67,7 +67,7 @@ Skip and set ORIENT_OUTPUT = "(none)" if `codebase` type is not in RESEARCH_PLAN
 **Produces:** RESEARCH_OUTPUTS
 **Requires:** RESEARCH_PLAN, ORIENT_OUTPUT (optional)
 
-Spawn 2-5 `Agent(subagent_type="Researcher")` agents **in a single message** (parallel execution).
+Spawn 2-5 `Agent(subagent_type="Research")` agents **in a single message** (parallel execution).
 
 Each Researcher receives:
 - `RESEARCH_TYPE`, `RESEARCH_QUESTION`, `OUTPUT_PATH` from RESEARCH_PLAN
@@ -83,7 +83,7 @@ Each Researcher writes findings to disk at OUTPUT_PATH.
 **Produces:** RESEARCH_SUMMARY
 **Requires:** RESEARCH_OUTPUTS
 
-Spawn `Agent(subagent_type="Synthesizer")` in `research` mode:
+Spawn `Agent(subagent_type="Synthesize")` in `research` mode:
 - Reads researcher outputs from RESEARCH_OUTPUTS paths
 - Merges findings with trust-aware aggregation
 - Writes `research-summary.md` to the same timestamped directory

@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { loadFile, extractSection, computeFpRatio } from '../helpers'
 
 // -------------------------------------------------------------------------
-// Group 1: reviewer.md — convergence inputs
+// Group 1: review.md — convergence inputs
 // -------------------------------------------------------------------------
 
-describe('reviewer.md — convergence inputs', () => {
-  const content = loadFile('src/assets/agents/reviewer.md')
+describe('review.md — convergence inputs', () => {
+  const content = loadFile('src/assets/agents/review.md')
 
   it('declares PRIOR_RESOLUTIONS in Input section', () => {
     const input = extractSection(content, '## Input', '## Focus Areas')
@@ -112,11 +112,11 @@ describe('code-review.md — convergence gate', () => {
 })
 
 // -------------------------------------------------------------------------
-// Group 4: synthesizer.md — convergence status
+// Group 4: synthesize.md — convergence status
 // -------------------------------------------------------------------------
 
-describe('synthesizer.md — convergence status', () => {
-  const content = loadFile('src/assets/agents/synthesizer.md')
+describe('synthesize.md — convergence status', () => {
+  const content = loadFile('src/assets/agents/synthesize.md')
 
   it('review mode mentions convergence or Convergence Status', () => {
     const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
@@ -146,9 +146,9 @@ describe('synthesizer.md — convergence status', () => {
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
-  const reviewer = loadFile('src/assets/agents/reviewer.md')
+  const reviewer = loadFile('src/assets/agents/review.md')
   const codeReview = loadFile('dist/commands/code-review.md')
-  const synthesizer = loadFile('src/assets/agents/synthesizer.md')
+  const synthesizer = loadFile('src/assets/agents/synthesize.md')
 
   it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
@@ -175,7 +175,7 @@ describe('Cross-cutting convergence consistency', () => {
     expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
-  it('reviewer.md and synthesizer.md both reference convergence concepts', () => {
+  it('review.md and synthesize.md both reference convergence concepts', () => {
     expect(reviewer).toMatch(/[Cc]onvergence|[Cc]ross.[Cc]ycle/)
     expect(synthesizer).toMatch(/[Cc]onvergence/)
   })

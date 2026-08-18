@@ -96,7 +96,7 @@ Pre-release checks:
 - Tag does not already exist
 - Custom checks from RELEASE_CONFIG
 
-Spawn `Agent(subagent_type="Validator")` for build + test.
+Spawn `Agent(subagent_type="Validate")` for build + test.
 
 Write `.release/.progress.json` checkpoint.
 

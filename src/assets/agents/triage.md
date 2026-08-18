@@ -1,5 +1,5 @@
 ---
-name: Triager
+name: Triage
 description: Validates review issues against blast-radius disposition matrix. Assigns one verdict per issue. Never edits code.
 model: opus
 skills:

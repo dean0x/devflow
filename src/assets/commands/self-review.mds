@@ -43,7 +43,7 @@ Pass `FEATURE_KNOWLEDGE` to Scrutinizer.
 
 Spawn Simplifier agent to refine code for clarity and consistency:
 
-Agent(subagent_type="Simplifier", run_in_background=false):
+Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: \{task_description\}
 FILES_CHANGED: \{files_changed\}
 Simplify and refine the code for clarity and consistency while preserving functionality."
@@ -57,7 +57,7 @@ Simplify and refine the code for clarity and consistency while preserving functi
 
 Spawn Scrutinizer agent for quality evaluation and fixing:
 
-Agent(subagent_type="Scrutinizer", run_in_background=false):
+Agent(subagent_type="Scrutinize", run_in_background=false):
 "TASK_DESCRIPTION: \{task_description\}
 FILES_CHANGED: \{files_changed\}
 DECISIONS_CONTEXT: \{decisions_context\}
@@ -75,7 +75,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
 If Scrutinizer made changes (STATUS == FIXED):
 
-Agent(subagent_type="Validator", run_in_background=false):
+Agent(subagent_type="Validate", run_in_background=false):
 "FILES_CHANGED: \{scrutinizer_modified_files\}
 VALIDATION_SCOPE: changed-only
 Run build, typecheck, lint, test on modified files"

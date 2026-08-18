@@ -1,5 +1,5 @@
 ---
-name: Reviewer
+name: Review
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
 model: opus
 skills:

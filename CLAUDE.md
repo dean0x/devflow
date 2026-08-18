@@ -110,7 +110,7 @@ Compiled commands (`dist/commands/*.md` — output of `npm run build:mds`) are t
 ```bash
 # 1. Edit source files
 vim src/assets/commands/code-review.mds     # Commands (MDS sources; .md for static commands)
-vim src/assets/agents/coder.md              # Agents
+vim src/assets/agents/code.md              # Agents
 vim src/assets/skills/security/SKILL.md     # Skills
 vim src/assets/rules/security.md            # Rules
 

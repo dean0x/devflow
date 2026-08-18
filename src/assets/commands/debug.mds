@@ -122,7 +122,7 @@ Evaluate investigation verdicts before synthesis:
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "You are a root cause analyst. Synthesize these investigation reports:
 
 {paste all investigator reports}
@@ -172,7 +172,7 @@ Produce the final report:
 
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
-- **YES** → Load `devflow:patterns` and `devflow:test-driven-development` skills, implement the fix, then spawn `Agent(subagent_type="Simplifier")` on changed files.
+- **YES** → Load `devflow:patterns` and `devflow:test-driven-development` skills, implement the fix, then spawn `Agent(subagent_type="Simplify")` on changed files.
 - **NO** → Done. Report stands as documentation.
 
 {knowledge_writeback()}

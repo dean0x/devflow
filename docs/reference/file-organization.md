@@ -46,8 +46,8 @@ devflow/
 │       │   └── ...
 │       ├── agents/                   # 16 agents
 │       │   ├── git.md
-│       │   ├── synthesizer.md
-│       │   ├── coder.md
+│       │   ├── synthesize.md
+│       │   ├── code.md
 │       │   └── ...
 │       ├── rules/                    # 13 rules (flat .md files)
 │       │   ├── engineering.md
