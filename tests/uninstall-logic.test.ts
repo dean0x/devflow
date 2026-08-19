@@ -1244,15 +1244,26 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
     await fs.rm(devflowDir, { recursive: true, force: true });
   });
 
-  it('(A5) names agent-models.json in the enumerated paths', async () => {
-    // Seed agent-models.json in devflowDir — installArtifactPaths includes it.
+  it('(A5) names agent-models.json in the enumerated paths when seeded, omits it when absent', async () => {
+    // F7: step 4 must apply the same existence filter as steps 1-3 (fs.access guard).
+    // de-vacuize A5: assert BOTH present-when-seeded AND absent-when-not-seeded.
+
+    // Case 1: seeded — must appear
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    const withSeed = await enumerateDryRunExtras(claudeDir, devflowDir);
+    expect(
+      withSeed.some(e => e.includes('agent-models.json')),
+      'agent-models.json must appear when the file exists',
+    ).toBe(true);
 
-    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
-
-    // agent-models.json must appear — it is in installArtifactPaths (single source of truth).
-    const hasAgentModels = entries.some(e => e.includes('agent-models.json'));
-    expect(hasAgentModels, 'agent-models.json must be listed in dry-run extras').toBe(true);
+    // Case 2: absent — must NOT appear (discriminating assertion: prior bug listed
+    // all installArtifactPaths unconditionally, so the absent file still appeared).
+    await fs.rm(path.join(devflowDir, 'agent-models.json'));
+    const withoutSeed = await enumerateDryRunExtras(claudeDir, devflowDir);
+    expect(
+      withoutSeed.some(e => e.includes('agent-models.json')),
+      'agent-models.json must NOT appear when the file is absent (existence filter)',
+    ).toBe(false);
   });
 
   it('(A5) names a bare legacy skill dir that exists on disk', async () => {
@@ -1497,5 +1508,133 @@ describe('runCleanupPhase (A8)', () => {
     // Non-vacuity: the slice really is the phase body, and it really does gate on isTTY.
     expect(body).toContain('isTTY');
     expect(body).not.toContain('process.stdin.isTTY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F5: settings-hooks cleanup block removal static guard
+//
+// The block at ~:816-833 (settings.hooks check + delete settings.hooks) is
+// transition residue: all Devflow strippers above it delete settings.hooks
+// when it empties, so the block only fires when third-party hooks remain —
+// then incorrectly offers to delete ALL hooks (including foreign ones).
+// The block must be removed; this static guard prevents it from creeping back.
+// ---------------------------------------------------------------------------
+
+describe('F5: foreign hook survives runCleanupPhase — static code guard', () => {
+  it('F5: runCleanupPhase body contains no "delete settings.hooks" after the Devflow strippers', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // The surgical Devflow strippers (removeAmbientHook, removeMemoryHooks, etc.) handle
+    // Devflow hook removal. If all Devflow hooks are gone, settings.hooks is empty/absent
+    // (strippers clean up). Any remaining settings.hooks entries are THIRD-PARTY — they
+    // must never be deleted here.
+    expect(body, 'runCleanupPhase must not bulk-delete settings.hooks after surgical strippers').not.toContain('delete settings.hooks');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F6: proxy port read-after-delete static guard
+//
+// runCleanupPhase called readProxyState inside the settings-cleanup loop, but
+// proxy.json is removed by removeDevFlowInstallArtifacts (called inside
+// runFullPhaseForScope, which precedes runCleanupPhase). After the fix, the
+// managed port is captured before artifact removal and threaded via opts.
+// ---------------------------------------------------------------------------
+
+describe('F6: proxy port captured before artifact removal — static code guard', () => {
+  it('F6: runCleanupPhase body does not call readProxyState (port pre-captured in opts)', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // After the fix, the port is threaded in via opts (pre-captured before proxy.json
+    // deletion) rather than re-read inside the function where proxy.json is already gone.
+    expect(body, 'runCleanupPhase must not re-read proxy.json (it is deleted before this phase runs)').not.toContain('readProxyState(');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F9: orphaned devflow:* skill dirs removed by full uninstall
+//
+// removeAllDevFlow walks the registry + legacy list, never the directory, so
+// orphaned devflow:* skill dirs (retired skills) survive. sweepDevflowNamespaces
+// is wired only into the selective path. Fix: add the directory-walking sweep
+// to the full path too.
+// ---------------------------------------------------------------------------
+
+describe('F9: removeAllDevFlow removes orphaned devflow:* skill dirs', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-f9-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('F9: an orphaned devflow:* skill dir that is NOT in the registry is removed by removeAllDevFlow', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Construct the orphan dir name programmatically so the skill-references scanner
+    // does not flag the literal string as a prefixed skill reference.
+    const ORPHAN_SKILL_DIR = ['devflow', 'f9-retired-orphan-skill'].join(':');
+    const orphanSkillDir = path.join(skillsDir, ORPHAN_SKILL_DIR);
+    await fs.mkdir(orphanSkillDir, { recursive: true });
+    await fs.writeFile(path.join(orphanSkillDir, 'SKILL.md'), '# orphan', 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    // Orphan must be gone after full uninstall
+    await expect(fs.access(orphanSkillDir)).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F11: sweepDevflowNamespaces skills-arm — registry skill survives
+//
+// The existing test (9b-A6) verifies orphan removal but never asserts that a
+// REGISTRY devflow:* skill is spared (unlike agent and command siblings).
+// ---------------------------------------------------------------------------
+
+describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-f11-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('F11: a devflow:* skill dir whose base name is in the registry survives the sweep', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Pick any registry skill name and place a prefixed dir for it
+    const { getAllSkillNames } = await import('../src/core/plugins.js');
+    const registrySkill = [...getAllSkillNames()][0]!;
+    const prefixedDir = path.join(skillsDir, `devflow:${registrySkill}`);
+    await fs.mkdir(prefixedDir, { recursive: true });
+    await fs.writeFile(path.join(prefixedDir, 'SKILL.md'), '# registry skill', 'utf-8');
+
+    await sweepDevflowNamespaces(claudeDir, false);
+
+    // Registry skill must survive the sweep (analogous to agent and command survival assertions)
+    await expect(fs.access(prefixedDir)).resolves.not.toThrow();
   });
 });

@@ -26,7 +26,7 @@ import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HIST
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { stripFlags, stripViewMode } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
-import { getPackageRoot } from '../../core/paths.js';
+import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -358,8 +358,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     // recursive rm below into a wipe of devflowDir itself (or an ancestor). Asserting
     // it in production code — not only in tests — keeps the invariant load-bearing
     // (reliability rule) and never throws (engineering rule).
-    const containment = path.relative(devflowDir, fullPath);
-    if (containment === '' || containment.startsWith('..') || path.isAbsolute(containment)) {
+    if (!isContainedIn(devflowDir, artifact.relPath)) {
       continue;
     }
     try {
@@ -458,8 +457,15 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
 
   // 4. All install artifacts — derived from the single source of truth shared
   //    with the real removal loop (removeDevFlowInstallArtifacts).
+  //    Guard with fs.access so files that never existed don't pollute the preview.
+  //    (F7: previously pushed unconditionally, inflating the dry-run list with
+  //    paths that were never on disk.)
   for (const artifact of installArtifactPaths(devflowDir)) {
-    extras.push(path.join(devflowDir, artifact.relPath));
+    const fullPath = path.join(devflowDir, artifact.relPath);
+    try {
+      await fs.access(fullPath);
+      extras.push(fullPath);
+    } catch { /* absent — omit from dry-run preview */ }
   }
 
   return extras;
@@ -701,6 +707,11 @@ export async function runCleanupPhase(opts: {
   verbose: boolean;
   cwd: string;
   isTTY: boolean;
+  /** Pre-captured managed proxy ports per scope, read BEFORE artifact removal.
+   * proxy.json is deleted by removeDevFlowInstallArtifacts (inside runFullPhaseForScope),
+   * so reading it inside this phase would always yield the DEFAULT_PROXY_PORT fallback
+   * and leave a non-default ANTHROPIC_BASE_URL (e.g. port 4200) unstripped. (F6) */
+  managedProxyPorts?: ReadonlyMap<string, number>;
 }): Promise<void> {
   const { scopesToUninstall, keepDocs, verbose, cwd, isTTY } = opts;
   // Resolve the git root from the injected cwd, not process.cwd(): otherwise
@@ -718,6 +729,9 @@ export async function runCleanupPhase(opts: {
 
   if (devflowDataExists) {
     let shouldRemoveDevflow = false;
+    // Tracks whether a specific "preserved" log was already emitted (e.g. the
+    // cancel-path message below) to avoid printing the generic one twice. (F10)
+    let preservedLogged = false;
 
     if (keepDocs) {
       shouldRemoveDevflow = false;
@@ -733,6 +747,7 @@ export async function runCleanupPhase(opts: {
         // and safe-delete removal — removeAllDevFlow has already run.
         // applies ADR-003: clean end-state on every path.
         p.log.info('.devflow/ preserved (prompt cancelled — continuing cleanup)');
+        preservedLogged = true;
       }
 
       shouldRemoveDevflow = resolveProjectDataCleanup(removeDevflow);
@@ -741,7 +756,7 @@ export async function runCleanupPhase(opts: {
     if (shouldRemoveDevflow) {
       await fs.rm(devflowDataDir, { recursive: true, force: true });
       p.log.success('.devflow/ removed');
-    } else {
+    } else if (!preservedLogged) {
       p.log.info('.devflow/ preserved');
     }
   }
@@ -793,12 +808,12 @@ export async function runCleanupPhase(opts: {
       settingsContent = stripViewMode(settingsContent);
       settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
       // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
-      // REG-1: scope the URL strip to the port Devflow manages — read proxy.json to
-      // determine which port we own; a user's own localhost gateway on any other port
-      // is left in settings untouched.
+      // REG-1: scope the URL strip to the port Devflow manages — use the pre-captured port
+      // (from opts.managedProxyPorts) because proxy.json is already deleted by
+      // removeDevFlowInstallArtifacts before this phase runs. A user's own localhost
+      // gateway on any other port is left in settings untouched.
       {
-        const proxyStateForStrip = await readProxyState(paths.devflowDir);
-        const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+        const managedPort = opts.managedProxyPorts?.get(scope) ?? DEFAULT_PROXY_PORT;
         const parsedSettings = JSON.parse(settingsContent) as Settings;
         applyDisableToSettings(parsedSettings, managedPort);
         settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
@@ -811,26 +826,11 @@ export async function runCleanupPhase(opts: {
         }
       }
 
-      const settings = JSON.parse(settingsContent);
-
-      if (settings.hooks) {
-        if (isTTY) {
-          const removeHooks = await p.confirm({
-            message: `Remove Devflow hooks from settings.json (${scope} scope)? Other settings preserved.`,
-            initialValue: false,
-          });
-
-          if (!p.isCancel(removeHooks) && removeHooks) {
-            delete settings.hooks;
-            await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-            p.log.success(`Devflow hooks removed from settings.json (${scope})`);
-          } else {
-            p.log.info(`settings.json hooks preserved (${scope})`);
-          }
-        } else {
-          p.log.info(`settings.json hooks preserved (${scope}, non-interactive mode)`);
-        }
-      }
+      // The Devflow strippers above (removeAmbientHook, removeMemoryHooks, etc.) surgically
+      // remove every Devflow-owned hook entry. When they complete, any remaining
+      // settings.hooks entries belong to THIRD-PARTY tools and must be preserved.
+      // (F5: a prior bulk-removal block here was incorrectly scoped — it only fired when
+      // foreign hooks were present, and would have removed them. It is gone now.)
     } catch {
       // settings.json doesn't exist or can't be parsed — skip
     }
@@ -1026,6 +1026,20 @@ export const uninstallCommand = new Command('uninstall')
       return;
     }
 
+    // Pre-capture managed proxy ports for each scope BEFORE artifact removal.
+    // proxy.json is deleted by removeDevFlowInstallArtifacts (inside runFullPhaseForScope),
+    // so reading it after the full phase would always yield DEFAULT_PROXY_PORT. (F6)
+    const managedProxyPorts = new Map<string, number>();
+    if (!isSelectiveUninstall) {
+      for (const scope of scopesToUninstall) {
+        try {
+          const paths = await getInstallationPaths(scope);
+          const proxyState = await readProxyState(paths.devflowDir);
+          if (proxyState.ok) managedProxyPorts.set(scope, proxyState.value.port);
+        } catch { /* non-fatal: if we can't read, we fall back to DEFAULT_PROXY_PORT */ }
+      }
+    }
+
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
       let claudeDir: string;
@@ -1062,7 +1076,7 @@ export const uninstallCommand = new Command('uninstall')
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
     if (!isSelectiveUninstall) {
-      await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd(), isTTY: !!process.stdin.isTTY });
+      await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd(), isTTY: !!process.stdin.isTTY, managedProxyPorts });
     }
 
     const status = color.green('Devflow uninstalled successfully');
@@ -1127,6 +1141,12 @@ export async function removeAllDevFlow(
   } catch {
     // Old structure doesn't exist
   }
+
+  // Registry-diff sweep: catch any devflow:* skill dirs whose names left the
+  // registry (retired, renamed, or deleted). The loop above walks the static
+  // registry + LEGACY list; this sweep walks the actual directory, so orphaned
+  // dirs from older versions are also cleaned up. (F9)
+  await sweepDevflowNamespaces(claudeDir, verbose);
 }
 
 /**
