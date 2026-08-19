@@ -91,7 +91,7 @@ const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
  * double-execution from concurrent sessions is a harmless no-op — the second
  * run finds the file already migrated and makes zero writes.
  */
-export const LEGACY_AGENT_KEYS: Record<string, string> = Object.assign(
+export const LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.assign(
   Object.create(null) as Record<string, string>,
   {
     // Phase 4 — agent-action-verbs rename (old slug → new slug)
@@ -132,10 +132,10 @@ export const LEGACY_AGENT_KEYS: Record<string, string> = Object.assign(
  *   renamed: legacy keys successfully renamed to their canonical form.
  *   dropped: legacy keys that existed but could not be renamed (collision or prototype safety).
  */
-export function canonicaliseAgentKeys(
-  rawAgents: Record<string, unknown>,
+export function canonicaliseAgentKeys<T>(
+  rawAgents: Record<string, T>,
   onWarning?: (msg: string) => void,
-): { agents: Record<string, unknown>; didMutate: boolean; renamed: string[]; dropped: string[] } {
+): { agents: Record<string, T>; didMutate: boolean; renamed: string[]; dropped: string[] } {
   const warn = onWarning ?? (() => undefined);
   const renamed: string[] = [];
   const dropped: string[] = [];
@@ -148,7 +148,7 @@ export function canonicaliseAgentKeys(
   // Snapshot the original keys for collision detection (order-independent result).
   const originalKeys = new Set(Object.keys(rawAgents));
 
-  const result: Record<string, unknown> = { ...rawAgents };
+  const result: Record<string, T> = { ...rawAgents };
   let didMutate = false;
 
   for (const oldKey of originalKeys) {
