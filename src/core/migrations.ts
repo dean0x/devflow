@@ -50,9 +50,8 @@ export interface MigrationRunResult {
 }
 
 /**
- * Inline migrations return MigrationRunResult for structured output (infos/warnings
- * surfaced to the user). Test overrides may return void — the runner treats void as
- * { infos: [], warnings: [] } for backward compat.
+ * A single migration entry. The `run` method returns a structured result
+ * carrying infos and warnings surfaced to the user after `devflow init`.
  */
 export interface Migration<S extends MigrationScope = MigrationScope> {
   id: string;
@@ -60,7 +59,7 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
   scope: S;
   run(
     ctx: S extends 'global' ? GlobalMigrationContext : PerProjectMigrationContext,
-  ): Promise<MigrationRunResult | void>;
+  ): Promise<MigrationRunResult>;
 }
 
 /**
@@ -291,12 +290,6 @@ async function pooled<T, R>(
   return results;
 }
 
-/** Coerce a migration run result (may be void for test stubs) to { infos, warnings }. */
-function normaliseRunResult(result: MigrationRunResult | void): MigrationRunResult {
-  if (result == null) return { infos: [], warnings: [] };
-  return result;
-}
-
 /**
  * Run a single global migration, returning { applied, failure, infos, warnings }.
  *
@@ -315,8 +308,7 @@ async function runGlobalMigration(
   warnings: string[];
 }> {
   try {
-    const raw = await migration.run(ctx);
-    const runResult = normaliseRunResult(raw);
+    const runResult = await migration.run(ctx);
     return { applied: true, failure: null, infos: runResult.infos, warnings: runResult.warnings };
   } catch (error) {
     return {
@@ -392,9 +384,8 @@ async function runPerProjectMigration(
         error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
       });
     } else {
-      const runResult = normaliseRunResult(result.value);
-      infos.push(...runResult.infos);
-      warnings.push(...runResult.warnings);
+      infos.push(...result.value.infos);
+      warnings.push(...result.value.warnings);
     }
   }
 

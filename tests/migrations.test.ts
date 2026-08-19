@@ -173,7 +173,7 @@ describe('runMigrations', () => {
       id: 'test-record-stub',
       description: 'simple no-op stub',
       scope: 'global',
-      run: async () => { ran = true; },
+      run: async () => { ran = true; return { infos: [], warnings: [] }; },
     };
 
     const ctx = { devflowDir: fakeHome };
@@ -202,7 +202,7 @@ describe('runMigrations', () => {
       id: 'test-global-succeeding',
       description: 'Test: always succeeds',
       scope: 'global',
-      run: async () => { successRan = true; },
+      run: async () => { successRan = true; return { infos: [], warnings: [] }; },
     };
 
     const ctx = { devflowDir: fakeHome };
@@ -242,6 +242,7 @@ describe('runMigrations', () => {
         if (ctx.projectRoot === project2) {
           throw new Error('simulated per-project failure');
         }
+        return { infos: [], warnings: [] };
       },
     };
 
@@ -276,7 +277,7 @@ describe('runMigrations', () => {
       id: 'test-per-project-empty-sweep',
       description: 'Test: per-project with no projects',
       scope: 'per-project',
-      run: async () => { ranAnywhere = true; },
+      run: async () => { ranAnywhere = true; return { infos: [], warnings: [] }; },
     };
 
     const ctx = { devflowDir: fakeHome };
@@ -298,7 +299,7 @@ describe('runMigrations', () => {
       id: 'test-idem-stub',
       description: 'counts invocations',
       scope: 'global',
-      run: async () => { runCount++; },
+      run: async () => { runCount++; return { infos: [], warnings: [] }; },
     };
 
     const ctx = { devflowDir: fakeHome };
@@ -330,6 +331,7 @@ describe('runMigrations', () => {
           memoryDir: ctx.memoryDir,
           projectRoot: ctx.projectRoot,
         });
+        return { infos: [], warnings: [] };
       },
     };
 
@@ -356,7 +358,7 @@ describe('runMigrations', () => {
       id: 'test-global-ctx-stub',
       description: 'captures global context',
       scope: 'global',
-      run: async (ctx) => { receivedCtx = { scope: ctx.scope, devflowDir: ctx.devflowDir }; },
+      run: async (ctx) => { receivedCtx = { scope: ctx.scope, devflowDir: ctx.devflowDir }; return { infos: [], warnings: [] }; },
     };
 
     const ctx = { devflowDir: fakeHome };
@@ -565,11 +567,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     );
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      expect(result.infos).toEqual([]);
-      expect(result.warnings).toEqual([]);
-    }
+    expect(result.infos).toEqual([]);
+    expect(result.warnings).toEqual([]);
   });
 
   it('renames legacy key and writes updated file', async () => {
@@ -581,13 +580,10 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     );
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      expect(result.warnings).toEqual([]);
-      expect(result.infos).toHaveLength(1);
-      expect(result.infos[0]).toContain('old-coder');
-      expect(result.infos[0]).toContain('coder');
-    }
+    expect(result.warnings).toEqual([]);
+    expect(result.infos).toHaveLength(1);
+    expect(result.infos[0]).toContain('old-coder');
+    expect(result.infos[0]).toContain('coder');
 
     // Verify the file was updated
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
@@ -608,13 +604,10 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     );
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      // No rename info — the legacy key was dropped, not renamed
-      expect(result.infos.some(i => i.includes('renamed') && i.includes('coder'))).toBe(false);
-      // Warnings must mention the drop
-      expect(result.warnings.some(w => w.includes('coder') && w.toLowerCase().includes('drop'))).toBe(true);
-    }
+    // No rename info — the legacy key was dropped, not renamed
+    expect(result.infos.some(i => i.includes('renamed') && i.includes('coder'))).toBe(false);
+    // Warnings must mention the drop
+    expect(result.warnings.some(w => w.includes('coder') && w.toLowerCase().includes('drop'))).toBe(true);
 
     // On disk: 'code' present with canonical value ('haiku'), 'coder' absent
     const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
@@ -628,11 +621,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
   it('is a no-op when file does not exist', async () => {
     (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      expect(result.infos).toEqual([]);
-      expect(result.warnings).toEqual([]);
-    }
+    expect(result.infos).toEqual([]);
+    expect(result.warnings).toEqual([]);
   });
 
   it('is a no-op when agents field is absent', async () => {
@@ -643,10 +633,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
       'utf-8',
     );
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    if (result) {
-      expect(result.infos).toEqual([]);
-      expect(result.warnings).toEqual([]);
-    }
+    expect(result.infos).toEqual([]);
+    expect(result.warnings).toEqual([]);
   });
 
   it('is a no-op when no legacy keys are present in the file', async () => {
@@ -659,10 +647,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     );
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    if (result) {
-      expect(result.infos).toEqual([]);
-      expect(result.warnings).toEqual([]);
-    }
+    expect(result.infos).toEqual([]);
+    expect(result.warnings).toEqual([]);
     // File unchanged
     const raw = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
       agents: Record<string, unknown>;
@@ -675,12 +661,9 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     await fs.writeFile(path.join(tmpDir, 'agent-models.json'), 'not valid json', 'utf-8');
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      expect(result.warnings).toHaveLength(1);
-      expect(result.warnings[0]).toContain('invalid JSON');
-      expect(result.infos).toEqual([]);
-    }
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('invalid JSON');
+    expect(result.infos).toEqual([]);
   });
 
   it('unreadable file (EACCES): warns without throwing, leaving legacy keys on disk', async () => {
@@ -704,12 +687,9 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     }
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    expect(result).toBeDefined();
-    if (result) {
-      expect(result.warnings).toHaveLength(1);
-      expect(result.warnings[0]).toContain('cannot read');
-      expect(result.infos).toEqual([]);
-    }
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('cannot read');
+    expect(result.infos).toEqual([]);
 
     // The file is untouched — the legacy key survives on disk.
     await fs.chmod(file, 0o600);
@@ -724,10 +704,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     await fs.writeFile(path.join(tmpDir, 'agent-models.json'), '﻿' + json, 'utf-8');
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    if (result) {
-      expect(result.warnings).toEqual([]);
-      expect(result.infos).toHaveLength(1);
-    }
+    expect(result.warnings).toEqual([]);
+    expect(result.infos).toHaveLength(1);
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
       agents: Record<string, unknown>;
     };
@@ -743,11 +721,9 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     );
 
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
-    if (result) {
-      expect(result.warnings).toHaveLength(1);
-      expect(result.warnings[0]).toContain('non-object agents field');
-      expect(result.infos).toEqual([]);
-    }
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('non-object agents field');
+    expect(result.infos).toEqual([]);
   });
 
   it('preserves other top-level fields after rewrite (envelope preservation)', async () => {
@@ -778,10 +754,8 @@ describe('canonicalise-agent-keys-v1 migration', () => {
 
     // Second run: old key is gone, nothing to do
     const second = await mig.run({ scope: 'global', devflowDir: tmpDir });
-    if (second) {
-      expect(second.infos).toEqual([]);
-      expect(second.warnings).toEqual([]);
-    }
+    expect(second.infos).toEqual([]);
+    expect(second.warnings).toEqual([]);
 
     // File content stable
     const final = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
