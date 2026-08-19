@@ -63,6 +63,11 @@ const GIT_ENV = {
   GIT_COMMITTER_NAME: 'Test',
   GIT_COMMITTER_EMAIL: 'test@test.com',
   GIT_CONFIG_NOSYSTEM: '1',
+  // Suppress global git config — a real ~/.gitconfig with commit.gpgsign=true or
+  // core.hooksPath can silently break every fixture; gitAsync swallows errors so the
+  // suite stays green by local-config luck rather than design. /dev/null is an empty
+  // config that satisfies git's "user.email required for commits" path via env vars.
+  GIT_CONFIG_GLOBAL: '/dev/null',
 };
 
 // Async git helper for concurrent shape setup.
@@ -190,6 +195,31 @@ let dirBrandNew: string;
 //           Used by: edge "not a git repo at all".
 let dirNotGit: string;
 
+// Shape L — remote + origin/HEAD set to origin/main + develop pushed to origin/develop.
+//           Two variants: fully-pushed develop (L1) and develop +1 unpushed commit (L2).
+//           Used by: "trunk branch (develop) self-compare" describe.
+//
+//           RED against old applyDefaultBranchRule: old code only redirected to
+//           origin/<branch> when branch === defaultShort ('main'), so develop was
+//           compared against origin/main, giving wrong ahead/filesChanged counts.
+//           GREEN after fix: isTrunkBranch('develop') === true, so the comparison
+//           correctly uses origin/develop.
+let dirLPushed: string;    // fully-pushed develop
+let dirLUnpushed: string;  // develop +1 unpushed commit
+
+// Shape M — remote + origin/HEAD set + feature branch with:
+//     • 1 committed file  (→ ahead=1)
+//     • 1 unstaged tracked change
+//     • 1 staged change
+//     • 1 untracked file (excluded from diff count by design)
+//   Expected: ahead=1, filesChanged=3 (diff vs mergeBase includes committed+staged+unstaged,
+//   not untracked). Used by: "dirty-tree asymmetry" describe.
+//
+//   This pins the DELIBERATE ASYMMETRY documented in gatherGitStatus:
+//   • ahead counts only committed-but-not-in-base commits (no working tree)
+//   • filesChanged uses `git diff --shortstat <mergeBase>` (working tree vs merge base)
+let dirM: string;
+
 // ─── pre-computed gatherGitStatus results ────────────────────────────────────
 //
 // ALL gatherGitStatus calls are executed in the module-level beforeAll so that
@@ -213,6 +243,9 @@ let statusDetachedHead: GitStatusResult;     // edge "detached HEAD"
 let statusNoOriginHead1: GitStatusResult;    // edge "no origin/HEAD symbolic ref"
 let statusBrandNew: GitStatusResult;    // edge "brand-new repo with no commits"
 let statusNotGit: GitStatusResult;      // edge "not a git repo at all"
+let statusLPushed: GitStatusResult;     // Shape L1: fully-pushed develop
+let statusLUnpushed: GitStatusResult;   // Shape L2: develop +1 unpushed
+let statusM: GitStatusResult;           // Shape M: dirty-tree asymmetry
 
 // ─── temp dirs collected for cleanup ─────────────────────────────────────────
 const allTempDirs: string[] = [];
@@ -402,6 +435,83 @@ beforeAll(async () => {
       dirNotGit = mkdtempSync(join(tmpdir(), 'devflow-hud-git-notgit-'));
       allTempDirs.push(dirNotGit);
       statusNotGit = await gatherGitStatus(dirNotGit);
+    })(),
+
+    // Shape L1: remote + origin/HEAD → origin/main + develop pushed to origin/develop
+    // fully-pushed develop → ahead=0, filesChanged=0 (vs origin/develop, NOT origin/main)
+    // RED against old code: applyDefaultBranchRule returns origin/main for develop,
+    // giving ahead=1 (the one commit on develop) instead of 0.
+    (async () => {
+      dirLPushed = mkdtempSync(join(tmpdir(), 'devflow-hud-git-'));
+      allTempDirs.push(dirLPushed);
+      await gitAsync(dirLPushed, ['init', '-b', 'main']);
+      await addCommitAsync(dirLPushed, 'README.md');
+      const bareL1 = mkdtempSync(join(tmpdir(), 'devflow-hud-git-bare-'));
+      allTempDirs.push(bareL1);
+      await gitAsync(bareL1, ['init', '--bare', '-b', 'main']);
+      await gitAsync(dirLPushed, ['remote', 'add', 'origin', bareL1]);
+      await gitAsync(dirLPushed, ['push', '-u', 'origin', 'main']);
+      await gitAsync(dirLPushed, ['remote', 'set-head', 'origin', 'main']); // origin/HEAD → origin/main
+      await gitAsync(dirLPushed, ['checkout', '-b', 'develop']);
+      await addCommitAsync(dirLPushed, 'develop-1.txt');
+      await gitAsync(dirLPushed, ['push', '-u', 'origin', 'develop']); // push develop → origin/develop
+      statusLPushed = await gatherGitStatus(dirLPushed);
+    })(),
+
+    // Shape L2: same setup as L1 + one extra unpushed commit on develop
+    // develop +1 unpushed → ahead=1, filesChanged=1 (vs origin/develop)
+    // RED against old code: applyDefaultBranchRule uses origin/main as base → ahead=2.
+    (async () => {
+      dirLUnpushed = mkdtempSync(join(tmpdir(), 'devflow-hud-git-'));
+      allTempDirs.push(dirLUnpushed);
+      await gitAsync(dirLUnpushed, ['init', '-b', 'main']);
+      await addCommitAsync(dirLUnpushed, 'README.md');
+      const bareL2 = mkdtempSync(join(tmpdir(), 'devflow-hud-git-bare-'));
+      allTempDirs.push(bareL2);
+      await gitAsync(bareL2, ['init', '--bare', '-b', 'main']);
+      await gitAsync(dirLUnpushed, ['remote', 'add', 'origin', bareL2]);
+      await gitAsync(dirLUnpushed, ['push', '-u', 'origin', 'main']);
+      await gitAsync(dirLUnpushed, ['remote', 'set-head', 'origin', 'main']);
+      await gitAsync(dirLUnpushed, ['checkout', '-b', 'develop']);
+      await addCommitAsync(dirLUnpushed, 'develop-1.txt');
+      await gitAsync(dirLUnpushed, ['push', '-u', 'origin', 'develop']); // push 1 commit
+      await addCommitAsync(dirLUnpushed, 'develop-2.txt'); // extra unpushed commit
+      statusLUnpushed = await gatherGitStatus(dirLUnpushed);
+    })(),
+
+    // Shape M: origin/HEAD set + feature branch + dirty working tree.
+    // Pins the deliberate ahead/filesChanged asymmetry in gatherGitStatus:
+    //   ahead = 1  (one committed-but-not-in-base commit)
+    //   filesChanged = 3  (committed file + unstaged tracked change + staged change;
+    //                      untracked file excluded from git diff --shortstat)
+    // git diff --shortstat <mergeBase> compares the working tree against the merge base
+    // and includes staged + unstaged tracked changes + committed changes — but NOT untracked.
+    (async () => {
+      dirM = mkdtempSync(join(tmpdir(), 'devflow-hud-git-'));
+      allTempDirs.push(dirM);
+      await gitAsync(dirM, ['init', '-b', 'main']);
+      // Seed main with 2 tracked files so we can modify one later
+      await addCommitAsync(dirM, 'tracked-a.txt');
+      await addCommitAsync(dirM, 'tracked-b.txt');
+      const bareM = mkdtempSync(join(tmpdir(), 'devflow-hud-git-bare-'));
+      allTempDirs.push(bareM);
+      await gitAsync(bareM, ['init', '--bare', '-b', 'main']);
+      await gitAsync(dirM, ['remote', 'add', 'origin', bareM]);
+      await gitAsync(dirM, ['push', '-u', 'origin', 'main']);
+      await gitAsync(dirM, ['remote', 'set-head', 'origin', 'main']);
+      await gitAsync(dirM, ['checkout', '-b', 'feat/dirty']);
+      // 1 committed file (→ ahead=1)
+      await addCommitAsync(dirM, 'm-committed.txt');
+      // 1 unstaged tracked change (modify tracked-a.txt already in the index)
+      writeFileSync(join(dirM, 'tracked-a.txt'), 'modified');
+      // 1 staged change (stage tracked-b.txt modification)
+      writeFileSync(join(dirM, 'tracked-b.txt'), 'staged');
+      await gitAsync(dirM, ['add', 'tracked-b.txt']);
+      // 1 untracked file (must NOT appear in filesChanged)
+      writeFileSync(join(dirM, 'untracked.txt'), 'untracked');
+      // filesChanged = committed(1) + unstaged(1) + staged(1) = 3
+      // ahead = 1 (only the committed commit)
+      statusM = await gatherGitStatus(dirM);
     })(),
 
   ]);
@@ -641,16 +751,98 @@ describe('gatherGitStatus — diff and ahead/behind share reference point', () =
 });
 
 describe('gatherGitStatus — no gh network call on render path', () => {
-  // Uses dirNoOriginHead1 (shared with edge "no origin/HEAD symbolic ref").
+  // Uses dirOrphan — the only shape where a gh-based fallback would have fired
+  // in the old code (no remote, no common refs to fall back to). The old Layer 2
+  // reflog-based code used dirNoOriginHead1 but its reflog satisfied the heuristic
+  // so it never actually discriminated. dirOrphan is the correct regression target:
+  // if gh were ever (re-)added as a fallback, it would fire here first.
+  //
   // This test MUST call gatherGitStatus live because it needs to observe which
   // execFile calls were made. It clears the mock first so pre-computation calls
   // do not contaminate the assertion.
 
   it('never invokes gh during gatherGitStatus', async () => {
     mockedExecFile.mockClear();
-    await gatherGitStatus(dirNoOriginHead1);
+    await gatherGitStatus(dirOrphan);
 
     const ghCalls = mockedExecFile.mock.calls.filter(([cmd]) => cmd === 'gh');
     expect(ghCalls).toHaveLength(0);
+  });
+});
+
+describe('gatherGitStatus — dirty-tree ahead/filesChanged asymmetry (Shape M)', () => {
+  /**
+   * Pins the deliberate design in gatherGitStatus where ahead/behind counts
+   * only committed-but-not-in-base commits, while filesChanged uses
+   * `git diff --shortstat <mergeBase>` which includes the working tree.
+   *
+   * Shape M: 1 committed file, 1 unstaged tracked change, 1 staged change,
+   * 1 untracked file (excluded). Expected: ahead=1, filesChanged=3.
+   *
+   * This asymmetry is documented in the diff-stats comment in gatherGitStatus
+   * (~line 69-73 of src/hud/git.ts): "diff includes the working tree;
+   * ahead/behind counts commits only. This asymmetry is deliberate."
+   *
+   * The dirty/staged porcelain parsing (~line 36-46) is also exercised here —
+   * dirty=true because of unstaged tracked change, staged=true because of staged change.
+   */
+
+  it('ahead counts only committed-but-not-in-base commits, not working-tree changes', () => {
+    expect(statusM).not.toBeNull();
+    expect(statusM?.branch).toBe('feat/dirty');
+    expect(statusM?.ahead).toBe(1); // only the committed file
+  });
+
+  it('filesChanged includes committed + staged + unstaged tracked, but not untracked', () => {
+    // git diff --shortstat <mergeBase> shows: committed file + unstaged tracked + staged = 3
+    // The untracked file is excluded (diff only sees tracked content)
+    expect(statusM?.filesChanged).toBe(3);
+  });
+
+  it('dirty=true and staged=true because of working-tree modifications', () => {
+    expect(statusM?.dirty).toBe(true);   // unstaged tracked change + untracked file
+    expect(statusM?.staged).toBe(true);  // staged change
+  });
+});
+
+describe('gatherGitStatus — trunk branch (develop) self-compare (Shape L)', () => {
+  /**
+   * Regression: the old applyDefaultBranchRule only redirected the current branch
+   * to origin/<branch> when branch === defaultShort (the single detected default,
+   * e.g. 'main'). For any other trunk branch (develop, staging, production) it fell
+   * through and compared against origin/main.
+   *
+   * Bug consequence: a fully-pushed develop branch showed nonzero ahead/filesChanged
+   * counts (it compared against origin/main, finding the commits on develop). A
+   * develop branch with 1 unpushed commit showed ahead=2 instead of ahead=1.
+   *
+   * Fix: isTrunkBranch() predicate covers all canonical trunk branches so develop,
+   * staging, and production all self-compare against origin/<branch> when that ref
+   * exists in the remote. Non-trunk feature branches continue to compare against
+   * the repo's default branch (origin/main) — the desired behavior for feature work.
+   *
+   * These two tests are RED against the old applyDefaultBranchRule and GREEN after
+   * the isTrunkBranch fix (per PF-018: a test must be RED first).
+   */
+
+  it('fully-pushed develop compares against origin/develop (not origin/main) → ahead=0', () => {
+    // RED against old code: old applyDefaultBranchRule returns origin/main as base.
+    // develop has 1 commit past main/origin/main → old code gives ahead=1, not 0.
+    // New code: isTrunkBranch('develop') && origin/develop in refs → base = origin/develop.
+    // develop is fully pushed → ahead=0, filesChanged=0.
+    expect(statusLPushed).not.toBeNull();
+    expect(statusLPushed?.branch).toBe('develop');
+    expect(statusLPushed?.ahead).toBe(0);
+    expect(statusLPushed?.filesChanged).toBe(0);
+  });
+
+  it('develop +1 unpushed commit → ahead=1 vs origin/develop (not ahead=2 vs origin/main)', () => {
+    // RED against old code: old code uses origin/main as base → ahead=2 (2 commits
+    // past origin/main: the pushed one + the unpushed one). New code uses origin/develop
+    // as base → ahead=1 (only the unpushed commit).
+    expect(statusLUnpushed).not.toBeNull();
+    expect(statusLUnpushed?.branch).toBe('develop');
+    expect(statusLUnpushed?.ahead).toBe(1);
+    expect(statusLUnpushed?.filesChanged).toBe(1);
   });
 });
