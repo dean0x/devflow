@@ -30,10 +30,12 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
   if (!branch) return null;
 
   // Dirty check — porcelain v1: two-char XY status prefix per path.
-  // Note: --no-optional-locks is not supported on Apple git and causes the command to
-  // exit non-zero (returning empty string from shellExec). Omit it for portability.
+  // --no-optional-locks is a git-level option and MUST precede the subcommand:
+  // `git status --no-optional-locks` is rejected as an unknown option, which makes
+  // shellExec return '' and silently reports every tree as clean. Keeping the flag
+  // (in the right position) stops the HUD from writing .git/index on every prompt.
   const statusOutput = await gitExec(
-    ['status', '--porcelain'],
+    ['--no-optional-locks', 'status', '--porcelain'],
     cwd,
   );
   let dirty = false;
@@ -169,19 +171,16 @@ function resolveComparisonRef(
  *      → builds a Set<string> of all known local and remote branch names.
  *
  * The Set answers all existence queries (layers a–c) without additional spawns.
- * This replaces the previous design of up to 11 sequential git rev-parse calls.
  *
- * resolveComparisonRef is called from all three remote layers to ensure that any
- * canonical trunk branch (develop, staging, production, release/*) self-compares
- * against origin/<branch> when that ref exists — fixing the prior asymmetry where
- * only the single detected default branch (e.g. 'main') got this treatment.
+ * resolveComparisonRef is called from all three remote layers so that any canonical
+ * trunk branch (develop, staging, production, release/*) self-compares against
+ * origin/<branch> when that ref exists, not just the detected default branch.
  *
  * Note on tag-DWIM: for-each-ref limits scope to refs/heads/ and refs/remotes/origin/,
- * so tag objects never appear in the Set. The prior design used git rev-parse --verify
- * which can DWIM-expand names to tags; this approach is stricter.
+ * so tag objects never appear in the Set — a name that happens to match a tag is not
+ * mistaken for a branch.
  */
 async function detectBaseBranch(branch: string, cwd: string): Promise<string | null> {
-  // Two parallel spawns replace the previous ≤11 sequential rev-parse calls.
   const [originHead, refsOutput] = await Promise.all([
     gitExec(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], cwd),
     gitExec(

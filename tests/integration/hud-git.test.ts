@@ -799,6 +799,31 @@ describe('gatherGitStatus — dirty-tree ahead/filesChanged asymmetry (Shape M)'
     expect(statusM?.dirty).toBe(true);   // unstaged tracked change + untracked file
     expect(statusM?.staged).toBe(true);  // staged change
   });
+
+  /**
+   * --no-optional-locks is a GIT-LEVEL option: it must sit before the subcommand.
+   * `git status --porcelain --no-optional-locks` exits non-zero with "unknown option",
+   * shellExec swallows that into '', and every tree then reports clean. The flag keeps
+   * the HUD — which runs on every prompt — from writing .git/index as a side effect.
+   *
+   * Falsification: moving the flag after 'status' makes the argv assertion pass the
+   * `.includes` check but fail the ordering check, AND flips dirty to false; dropping
+   * the flag entirely fails the ordering check alone.
+   */
+  it('runs the dirty check with --no-optional-locks BEFORE the status subcommand', async () => {
+    mockedExecFile.mockClear();
+    const live = await gatherGitStatus(dirM);
+
+    const statusCalls = mockedExecFile.mock.calls
+      .map(([, args]) => args as string[])
+      .filter(args => args.includes('status'));
+
+    expect(statusCalls).toHaveLength(1);
+    expect(statusCalls[0]).toEqual(['--no-optional-locks', 'status', '--porcelain']);
+    // The flag must not break the command: a rejected option would yield '' → clean.
+    expect(live?.dirty).toBe(true);
+    expect(live?.staged).toBe(true);
+  });
 });
 
 describe('gatherGitStatus — trunk branch (develop) self-compare (Shape L)', () => {
