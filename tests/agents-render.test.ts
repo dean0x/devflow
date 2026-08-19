@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderFrame, buildModelCycle, formatAgentName } from '../src/cli/agents-view/index.js';
-import { stripAnsi } from '../src/hud/colors.js';
+import { stripAnsi, yellow } from '../src/hud/colors.js';
 import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
@@ -429,7 +429,7 @@ describe('narrow width', () => {
 
 describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   // At 80 cols (standard terminal): all columns scale to full size.
-  // totalContent = 2 + 18 + 32 + 13 + 13 = 78, so every data row is 78 chars.
+  // totalContent = 2 + 18 + 32 + 13 + 14 = 79, so every data row is 79 chars.
   // The keybindingsLine (77 chars) also fits within 80.
   it('at 80 cols: every stripped line is ≤ 80 visible chars', () => {
     const state = makeState({
@@ -452,8 +452,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   });
 
   // At 60 cols: responsive-scale block exercises the Math.max floors.
-  // scale = 60/78 ≈ 0.769; column widths after floor: agent=13, model=24, effort=10, state=10.
-  // Max data row visible width = 2 + 13 + 24 + 10 + 10 = 59 ≤ 60.
+  // scale = 60/79 ≈ 0.759; column widths after floor: agent=13, model=24, effort=9, state=10.
+  // Max data row visible width = 2 + 13 + 24 + 9 + 10 = 58 ≤ 60.
   // keybindingsLine is sliced to dims.cols (60) before dim() is applied.
   it('at 60 cols: every stripped line is ≤ 60 visible chars', () => {
     const state = makeState({
@@ -473,6 +473,47 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
         `Line exceeds ${COLS} cols: "${line}"`,
       ).toBeLessThanOrEqual(COLS);
     }
+  });
+
+  // T15: dormant row at 80 cols — 'saved-inactive' (14 chars) fits exactly in
+  // COL_STATE=14 without being truncated, so the ANSI colour survives.
+  //
+  // Falsification record:
+  //   RED  before fix (COL_STATE=13): truncateVisible strips ANSI because
+  //        visible length 14 > 13, producing bare truncated text without colour.
+  //        `allRaw.includes(yellow('saved-inactive'))` → FAIL.
+  //   GREEN after fix (COL_STATE=14): visible length === maxWidth, string
+  //        returned as-is with ANSI intact → PASS.
+  //
+  // State column offset at 80 cols: 2 (prefix) + 18 (agent) + 32 (model) +
+  //   13 (effort) = 65.  `stripped[4].slice(65)` is exactly the STATE cell
+  //   for the first data row (dormant row — cursor is on the second row).
+  it('T15: dormant row renders yellow("saved-inactive") unclipped at 80 cols', () => {
+    const dormantRow = makeRow({
+      name: 'code',
+      shippedDefault: 'sonnet',
+      configuredModel: 'default',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+      installed: true,
+      inRegistry: true,
+    });
+    const regularRow = makeRow({ name: 'design', shippedDefault: 'opus' });
+    const state = makeState({
+      proxyEnabled: false,
+      rows: [dormantRow, regularRow],
+      cursor: 1,            // cursor on second row — dormant row gets '  ' prefix
+      viewportHeight: 10,
+    });
+    const allRaw = renderFrame(state, { rows: 24, cols: 80 });
+    const stripped = allRaw.map(stripAnsi);
+
+    // Raw line must contain the yellow-coloured string intact (ANSI survives truncation check)
+    expect(allRaw.some(l => l.includes(yellow('saved-inactive')))).toBe(true);
+
+    // Stripped state column = exactly 'saved-inactive' at offset 65 in the first data row
+    // (index 4: title[0], blank[1], header[2], scroll-indicator[3], data[4])
+    expect(stripped[4].slice(65)).toBe('saved-inactive');
   });
 });
 

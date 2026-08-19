@@ -15,12 +15,12 @@
  *  -1  Unsaved count "  N unsaved changes" (blank if 0)
  *   0  Keybinding footer
  *
- * Columns (chars) — total 78 ≤ 80:
+ * Columns (chars) — total 79 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
  *   AGENT   : 18
  *   MODEL   : 32
  *   EFFORT  : 13
- *   STATE   : 13
+ *   STATE   : 14
  */
 
 import {
@@ -63,7 +63,7 @@ export function computeViewportHeight(termRows: number): number {
 const COL_AGENT = 18;
 const COL_MODEL = 32;
 const COL_EFFORT = 13;
-const COL_STATE = 13;
+const COL_STATE = 14;
 
 // ---------------------------------------------------------------------------
 // Name formatter — TUI only (Fix 4)
