@@ -22,6 +22,23 @@ import { isDormantExternalModel } from './external-models.js';
 export type AgentState = 'active' | 'saved-inactive' | 'not-installed' | 'unknown';
 
 // ---------------------------------------------------------------------------
+// AGENT_STATE_LABELS
+// ---------------------------------------------------------------------------
+
+/**
+ * Display labels for each {@link AgentState}, shared by `--list` and the TUI
+ * so the two surfaces cannot drift from each other.
+ *
+ * Apply colour at each call site; this map holds bare text only.
+ */
+export const AGENT_STATE_LABELS: Readonly<Record<AgentState, string>> = {
+  'active': 'active',
+  'saved-inactive': 'saved-inactive',
+  'not-installed': 'not installed',
+  'unknown': 'unknown',
+};
+
+// ---------------------------------------------------------------------------
 // classifyAgentState
 // ---------------------------------------------------------------------------
 

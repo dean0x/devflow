@@ -42,6 +42,7 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
+import { AGENT_STATE_LABELS } from '../../core/agent-state.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -235,16 +236,16 @@ function renderStateCell(row: AgentRow, proxyEnabled: boolean, maxWidth: number)
   let cell: string;
   switch (state) {
     case 'active':
-      cell = green('active');
+      cell = green(AGENT_STATE_LABELS['active']);
       break;
     case 'saved-inactive':
-      cell = yellow('saved-inactive');
+      cell = yellow(AGENT_STATE_LABELS['saved-inactive']);
       break;
     case 'not-installed':
-      cell = dim('not installed');
+      cell = dim(AGENT_STATE_LABELS['not-installed']);
       break;
     case 'unknown':
-      cell = dim('unknown');
+      cell = dim(AGENT_STATE_LABELS['unknown']);
       break;
     default: {
       const _: never = state;

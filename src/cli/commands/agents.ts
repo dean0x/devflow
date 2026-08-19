@@ -38,6 +38,7 @@ import {
 } from '../../core/external-models.js';
 import {
   classifyAgentState,
+  AGENT_STATE_LABELS,
   type AgentState,
 } from '../../core/agent-state.js';
 import { isValidModelName } from '../../core/agent-frontmatter.js';
@@ -267,16 +268,16 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
     let stateStr: string;
     switch (row.state) {
       case 'active':
-        stateStr = color.green('active');
+        stateStr = color.green(AGENT_STATE_LABELS['active']);
         break;
       case 'saved-inactive':
-        stateStr = color.yellow('saved — inactive (proxy off)');
+        stateStr = color.yellow(AGENT_STATE_LABELS['saved-inactive']);
         break;
       case 'not-installed':
-        stateStr = color.dim('not installed');
+        stateStr = color.dim(AGENT_STATE_LABELS['not-installed']);
         break;
       case 'unknown':
-        stateStr = color.dim('unknown');
+        stateStr = color.dim(AGENT_STATE_LABELS['unknown']);
         break;
       default: {
         const _: never = row.state;
