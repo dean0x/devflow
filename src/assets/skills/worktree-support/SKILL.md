@@ -76,6 +76,7 @@ Return list of reviewable worktrees with path, branch, HEAD SHA.
 `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
 
 All components (agents, commands, skills) must use this exact list when checking for protected branches.
+The HUD mirrors this list in `TRUNK_BRANCHES`/`TRUNK_BRANCH_PREFIXES`/`isTrunkBranch()` in `src/core/git.ts` — update both together.
 
 ---
 

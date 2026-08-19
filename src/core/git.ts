@@ -5,6 +5,29 @@ import * as path from 'path';
 const execAsync = promisify(exec);
 
 /**
+ * Canonical trunk branch names used by the HUD to determine whether a branch
+ * should compare against origin/<branch> rather than the repo's default branch.
+ *
+ * Keep in exact sync with the Protected Branches (Canonical List) section in
+ * src/assets/skills/worktree-support/SKILL.md. Both lists must be updated together.
+ */
+export const TRUNK_BRANCHES = [
+  'main', 'master', 'develop', 'integration', 'trunk', 'staging', 'production',
+] as const;
+
+export const TRUNK_BRANCH_PREFIXES = ['release/'] as const;
+
+/**
+ * Returns true when `branch` is a canonical trunk branch — i.e., one of the
+ * TRUNK_BRANCHES literals or a branch whose name starts with a TRUNK_BRANCH_PREFIXES
+ * prefix (e.g. `release/1.2`).
+ */
+export function isTrunkBranch(branch: string): boolean {
+  if ((TRUNK_BRANCHES as readonly string[]).includes(branch)) return true;
+  return (TRUNK_BRANCH_PREFIXES as readonly string[]).some(p => branch.startsWith(p));
+}
+
+/**
  * Get git repository root directory (async, non-blocking)
  * Returns null if not in a git repository
  *
