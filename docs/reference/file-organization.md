@@ -15,13 +15,13 @@ devflow/
 │   │   │                             #   capture.ts, legacy-hooks.ts, knowledge/
 │   │   └── utils/                    # (empty — utilities moved to src/core/)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
-│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 23 plugin entries
+│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 22 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
 │   │   ├── flags.ts                  # Claude Code flag registry (20 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
-│   │   ├── migrations.ts             # Run-once migration registry (empty as of 2.0)
+│   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   └── ...                       # feature-config.ts, learning-tuning-config.ts, …

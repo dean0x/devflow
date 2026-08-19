@@ -167,6 +167,57 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 /bug-analysis --full         # Full analysis (ignore previous runs)
 ```
 
+## /dynamic-tickets
+
+Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
+
+Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block, effort estimate, and a wave assignment. Produces a machine-readable tracking issue for GitHub sync.
+
+```
+/dynamic-tickets <initiative-description-or-file>
+```
+
+## /dynamic-plan
+
+Parallel wave planning — plan-challenge every ticket, produce acceptance criteria + test plans, auto-resolve decisions against the preference profile, output DECISIONS-NEEDED.md.
+
+Takes a ticket slate (from `/dynamic-tickets`) and runs a parallel planning pass: for each ticket, challenges the design, writes detailed acceptance criteria and test plans, and resolves known decisions against `~/.devflow/preference-profile.md`. Unresolved decisions land in `DECISIONS-NEEDED.md` for human review.
+
+```
+/dynamic-plan <ticket-dir>
+```
+
+## /dynamic-build
+
+Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents.
+
+Executes the devflow implement→review→verify loop for one ticket or all tickets in a wave, respecting dependency order. Each ticket runs as a separate Code agent on a feature branch; cross-ticket dependencies block until their prerequisites are merged.
+
+```
+/dynamic-build <ticket-dir>          # Build all tickets in a wave
+/dynamic-build <ticket-file>         # Build a single ticket
+```
+
+## /dynamic-profile
+
+Decision-preference profile distiller — mine past session transcripts across all projects to write `~/.devflow/preference-profile.md`.
+
+Scans Claude Code session transcripts from all known projects, extracts repeated design and implementation preferences (style choices, library selections, architectural patterns), and writes a structured preference profile. Consumed by `/dynamic-plan` to auto-resolve common decisions without human intervention.
+
+```
+/dynamic-profile
+```
+
+## /dynamic-wave
+
+Full-pipeline wave driver — sequence dynamic-tickets → dynamic-plan → dynamic-build with human gates between runs.
+
+Orchestrates the full dynamic workflow pipeline in sequence: ticket generation, parallel planning, and dependency-aware build. Places a human confirmation gate between each phase so you can review and edit the output before proceeding to the next stage.
+
+```
+/dynamic-wave <initiative-description-or-file>
+```
+
 ## Ambient Mode
 
 Not a command — a two-hook orchestrator system (git repos only):

@@ -5,7 +5,8 @@
  * per machine (global scope) or once per machine across all discovered projects
  * (per-project scope). State is persisted at ~/.devflow/migrations.json.
  *
- * The registry is empty. To add a migration, append an entry to MIGRATIONS below.
+ * Registry holds 2.x entries only (first: canonicalise-agent-keys-v1). To add a
+ * migration, append an entry to MIGRATIONS below. No 1.x → 2.0 upgrade path.
  */
 
 import { promises as fs } from 'fs';

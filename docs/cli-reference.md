@@ -68,6 +68,8 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-python` | Language | Python patterns |
 | `devflow-java` | Language | Java patterns |
 | `devflow-rust` | Language | Rust patterns |
+| `devflow-dynamic` | Optional | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline |
+| `devflow-compliance` | Optional | Regulatory compliance patterns — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX |
 
 ## Ambient Mode
 

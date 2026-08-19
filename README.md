@@ -111,6 +111,11 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 | `/debug` | Competing hypothesis investigation |
 | `/bug-analysis` | Proactive bug finding with static and semantic analysis |
 | `/release` | Adaptive release with learned configuration |
+| `/dynamic-tickets` | Turn an initiative into a wave-structured ticket slate |
+| `/dynamic-plan` | Parallel wave planning with acceptance criteria and test plans |
+| `/dynamic-build` | Dependency-aware build engine for a ticket or wave |
+| `/dynamic-profile` | Distill session transcripts into a decision-preference profile |
+| `/dynamic-wave` | Full-pipeline wave driver: tickets → plan → build |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 
