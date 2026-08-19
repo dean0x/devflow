@@ -235,7 +235,7 @@ An orphan is an installed asset whose name is no longer in the plugin registry â
 3. Delete every entry whose extracted name is **not** in the `knownNames` set.
 4. Return a `SweepResult` with counts and per-item errors â€” failures are non-fatal (avoids PF-009).
 
-**When it runs** (`src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
+**When it runs** (`src/targets/claude-code/installer.ts: installViaFileCopy` and `src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
 
 - **On every install** (`devflow init`): `installViaFileCopy` sweeps agents, commands, and skills after copying new files, so retired assets are removed even on partial installs.
 - **On selective uninstall** (`devflow uninstall --plugin <name>`): `sweepDevflowNamespaces` runs after per-plugin file removal. `knownNames` spans ALL plugins (not just the ones being uninstalled), so assets belonging to non-selected plugins are never swept.
