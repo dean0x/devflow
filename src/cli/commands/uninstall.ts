@@ -397,6 +397,487 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Phase runners — extracted from the action function for readability and
+// independent testability.  Each covers one logical stage of the uninstall.
+// ---------------------------------------------------------------------------
+
+/**
+ * DRY-RUN PHASE: display what would be removed without making any changes.
+ *
+ * Selective: uses the pure registry-diff plan from formatDryRunPlan.
+ * Full: enumerates what is actually on disk for each detected scope so the
+ *       output reflects legacy/orphaned assets that the registry cannot see.
+ *
+ * @param opts.scopesToUninstall - Scopes detected in the setup phase.
+ * @param opts.isSelectiveUninstall - true when --plugin was given.
+ * @param opts.selectedPlugins - The plugin subset for selective mode.
+ */
+export async function runDryRunPhase(opts: {
+  scopesToUninstall: ReadonlyArray<'user' | 'local'>;
+  isSelectiveUninstall: boolean;
+  selectedPlugins: PluginDefinition[];
+}): Promise<void> {
+  const { scopesToUninstall, isSelectiveUninstall, selectedPlugins } = opts;
+
+  p.log.info(`Scope(s): ${[...scopesToUninstall].join(', ')} (dry-run shows all detected scopes)`);
+
+  if (isSelectiveUninstall) {
+    // Selective: compute from registry — this accurately reflects what would be removed.
+    const assets = computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS);
+    const plan = formatDryRunPlan(assets);
+    for (const line of plan.split('\n')) {
+      p.log.info(line);
+    }
+  } else {
+    // Full uninstall: the real path does rm -rf on entire directories plus a
+    // skills sweep. Enumerate what is actually on disk for each detected scope
+    // rather than computing from the registry (which misses legacy/orphaned assets).
+    const extras: string[] = [];
+    for (const scope of [...scopesToUninstall]) {
+      try {
+        const paths = await getInstallationPaths(scope);
+        const { claudeDir: cd, devflowDir: dd } = paths;
+        // Whole directories removed by removeAllDevFlow
+        for (const dir of [
+          path.join(cd, 'commands', 'devflow'),
+          path.join(cd, 'agents', 'devflow'),
+          path.join(cd, 'rules', 'devflow'),
+          path.join(dd, 'scripts'),
+        ]) {
+          try { await fs.access(dir); extras.push(dir); } catch { /* absent */ }
+        }
+        // Skills: list every devflow:* directory actually on disk
+        try {
+          const skillEntries = await fs.readdir(path.join(cd, 'skills'));
+          for (const e of skillEntries) {
+            if (e.startsWith(SKILL_NAMESPACE)) extras.push(path.join(cd, 'skills', e));
+          }
+        } catch { /* skills dir absent */ }
+        // ~/.devflow install artifacts
+        extras.push(`${dd} install artifacts (manifest.json, migrations.json, logs/, costs/, cache/, proxy artifacts)`);
+      } catch { /* scope path resolution failed */ }
+    }
+    // Project .devflow/ data dir
+    const devflowDataDir = path.join(process.cwd(), '.devflow');
+    try { await fs.access(devflowDataDir); extras.push(`${devflowDataDir} (if confirmed)`); } catch { /* noop */ }
+    extras.push('hooks removed from settings.json');
+
+    for (const line of extras) {
+      p.log.info(`  ${line}`);
+    }
+  }
+}
+
+/**
+ * SELECTIVE PHASE (per scope): revert agent model overrides, remove the
+ * selected plugins' assets, and clean up the ambient hook if the ambient
+ * plugin is being removed.
+ *
+ * @param opts.claudeDir   - Target Claude Code directory for this scope.
+ * @param opts.devflowDir  - Devflow data directory for this scope.
+ * @param opts.selectedPlugins - Plugin subset to remove.
+ * @param opts.selectedPluginNames - Plugin names (for ambient-hook check).
+ * @param opts.verbose     - Whether to emit verbose log lines.
+ */
+export async function runSelectivePhaseForScope(opts: {
+  claudeDir: string;
+  devflowDir: string;
+  selectedPlugins: PluginDefinition[];
+  selectedPluginNames: ReadonlyArray<string>;
+  verbose: boolean;
+}): Promise<void> {
+  const { claudeDir, devflowDir, selectedPlugins, selectedPluginNames, verbose } = opts;
+
+  // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
+  // lines from installed agent frontmatter while the files are still present.
+  // Non-fatal: tolerate missing agents dir or revert errors.
+  {
+    const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
+    try {
+      await fs.access(agentsInstallDir);
+      await revertExternalAgents({
+        installDir: agentsInstallDir,
+        devflowDir,
+        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+      });
+    } catch { /* agents dir absent or revert failed — non-fatal */ }
+  }
+
+  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
+
+  // Clean up ambient hook if ambient plugin is being removed
+  if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
+    const settingsPath = path.join(claudeDir, 'settings.json');
+    try {
+      const settings = await fs.readFile(settingsPath, 'utf-8');
+      const updated = await removeAmbientHook(settings);
+      if (updated !== settings) {
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+        if (verbose) {
+          p.log.success('Ambient mode hooks removed from settings.json');
+        }
+      }
+    } catch { /* settings.json may not exist */ }
+  }
+  void selectedPluginNames; // consumed by action for the success label
+}
+
+/**
+ * FULL PHASE (per scope): revert agent model overrides, remove all Devflow
+ * assets from the scope, then perform scope-appropriate devflowDir cleanup.
+ *
+ * Local scope: remove only install artifacts — project data (memory, learning,
+ *   docs, features) is always preserved under the git root.
+ * User scope: interactive TTY with user-authored content → confirm before wiping
+ *   ~/.devflow/; non-interactive or no user content → artifacts-only.
+ *
+ * @param opts.scope            - 'user' or 'local'.
+ * @param opts.claudeDir        - Target Claude Code directory for this scope.
+ * @param opts.devflowDir       - Devflow data directory for this scope.
+ * @param opts.devflowScriptsDir - scripts/ sub-directory removed by removeAllDevFlow.
+ * @param opts.verbose          - Whether to emit verbose log lines.
+ * @param opts.keepDocs         - When true, suppresses the full-dir prompt (artifacts-only).
+ */
+export async function runFullPhaseForScope(opts: {
+  scope: 'user' | 'local';
+  claudeDir: string;
+  devflowDir: string;
+  devflowScriptsDir: string;
+  verbose: boolean;
+  keepDocs: boolean;
+}): Promise<void> {
+  const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs } = opts;
+
+  // Revert GPT agent frontmatter before removing agents — ensures no orphaned
+  // GPT model lines remain if agents dir is preserved by a later partial flow.
+  // Non-fatal: tolerate missing agents dir or revert errors.
+  {
+    const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
+    try {
+      await fs.access(agentsInstallDir);
+      await revertExternalAgents({
+        installDir: agentsInstallDir,
+        devflowDir,
+        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+      });
+    } catch { /* agents dir absent or revert failed — non-fatal */ }
+  }
+
+  // removeAllDevFlow removes Claude Code assets (commands, agents, rules, skills)
+  // and devflowDir/scripts/. Scope-aware cleanup handles the rest of devflowDir.
+  await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
+
+  if (scope === 'local') {
+    // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
+    // (memory, learning, features, docs, config.json). Never remove those —
+    // only remove install artifacts: scripts/ (done above) + manifest.json and
+    // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
+    await removeDevFlowInstallArtifacts(devflowDir, verbose);
+    p.log.info('Local project data (memory, learning, features, docs) preserved');
+  } else {
+    // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
+    // that enumerates user-authored content worth backing up before wiping the dir.
+    // Non-interactive, no user content, or precondition guard failure → artifacts-only.
+    const userContent = await enumerateUserDevFlowContent(devflowDir);
+    const cleanupDecision = resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: process.stdin.isTTY,
+      userContent,
+      devflowDir,
+      homeDir: os.homedir(),
+      keepDocs,
+    });
+
+    if (cleanupDecision === 'artifacts-only') {
+      await removeDevFlowInstallArtifacts(devflowDir, verbose);
+      if (!process.stdin.isTTY && userContent.length > 0) {
+        p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and install artifacts only)`);
+      }
+    } else {
+      // cleanupDecision === 'prompt': interactive session with user-authored content present.
+      p.log.info(`User-authored content in ${devflowDir}:`);
+      for (const item of userContent) {
+        p.log.info(`  ${item}`);
+      }
+
+      const confirmFullCleanup = await p.confirm({
+        message: `Remove entire ${devflowDir}? (includes the items listed above, plus logs and install metadata)`,
+        initialValue: false,
+      });
+
+      if (p.isCancel(confirmFullCleanup)) {
+        // removeAllDevFlow already ran — clean up the manifest to leave a consistent
+        // state. avoids PF-014: process.exit() here would skip removeDevFlowInstallArtifacts,
+        // leaving a stale manifest.json that points to assets no longer on disk.
+        await removeDevFlowInstallArtifacts(devflowDir, verbose);
+        p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and install artifacts only)`);
+      } else if (confirmFullCleanup) {
+        await fs.rm(devflowDir, { recursive: true, force: true });
+        p.log.success(`${devflowDir} removed`);
+      } else {
+        await removeDevFlowInstallArtifacts(devflowDir, verbose);
+        p.log.info(`${devflowDir} preserved (removing scripts and install artifacts only)`);
+      }
+    }
+  }
+}
+
+/**
+ * CLEANUP PHASE: post-loop extras run only on full uninstall.
+ *
+ * Steps (all non-fatal, interactive paths guarded by process.stdin.isTTY):
+ *   1. .devflow/ project data directory
+ *   4. .claudeignore
+ *   5. settings.json — remove all Devflow hooks and flags
+ *   6. Security deny list
+ *   7. Safe-delete shell function
+ *
+ * @param opts.scopesToUninstall - Scopes processed by the scope loop.
+ * @param opts.keepDocs          - When true, .devflow/ and security prompts are suppressed.
+ * @param opts.verbose           - Whether to emit verbose log lines.
+ * @param opts.cwd               - Working directory to use for project-local path resolution
+ *                                 (.devflow/, .claudeignore fallback). Defaults to
+ *                                 process.cwd() at the call site; accept explicitly for tests.
+ */
+export async function runCleanupPhase(opts: {
+  scopesToUninstall: ReadonlyArray<'user' | 'local'>;
+  keepDocs: boolean;
+  verbose: boolean;
+  cwd: string;
+}): Promise<void> {
+  const { scopesToUninstall, keepDocs, verbose, cwd } = opts;
+  const gitRoot = await getGitRoot();
+
+  // 1. .devflow/ data directory (contains docs/, memory/, learning/, features/, etc.)
+  const devflowDataDir = path.join(cwd, '.devflow');
+  let devflowDataExists = false;
+  try {
+    await fs.access(devflowDataDir);
+    devflowDataExists = true;
+  } catch { /* .devflow doesn't exist */ }
+
+  if (devflowDataExists) {
+    let shouldRemoveDevflow = false;
+
+    if (keepDocs) {
+      shouldRemoveDevflow = false;
+    } else if (process.stdin.isTTY) {
+      const removeDevflow = await p.confirm({
+        message: '.devflow/ directory found. Remove project data (docs, memory, learning)?',
+        initialValue: false,
+      });
+
+      if (p.isCancel(removeDevflow)) {
+        // Treat cancel as decline: preserve .devflow/ and continue cleanup.
+        // avoids PF-014: process.exit() here would skip claudeignore, hooks,
+        // and safe-delete removal — removeAllDevFlow has already run.
+        // applies ADR-003: clean end-state on every path.
+        p.log.info('.devflow/ preserved (prompt cancelled — continuing cleanup)');
+      }
+
+      shouldRemoveDevflow = resolveProjectDataCleanup(removeDevflow);
+    }
+
+    if (shouldRemoveDevflow) {
+      await fs.rm(devflowDataDir, { recursive: true, force: true });
+      p.log.success('.devflow/ removed');
+    } else {
+      p.log.info('.devflow/ preserved');
+    }
+  }
+
+  // 4. .claudeignore
+  const claudeignorePath = gitRoot
+    ? path.join(gitRoot, '.claudeignore')
+    : path.join(cwd, '.claudeignore');
+
+  let claudeignoreExists = false;
+  try {
+    await fs.access(claudeignorePath);
+    claudeignoreExists = true;
+  } catch { /* doesn't exist */ }
+
+  if (claudeignoreExists) {
+    if (process.stdin.isTTY) {
+      const removeClaudeignore = await p.confirm({
+        message: '.claudeignore found. Remove it? (may contain custom rules)',
+        initialValue: false,
+      });
+
+      if (!p.isCancel(removeClaudeignore) && removeClaudeignore) {
+        await fs.rm(claudeignorePath, { force: true });
+        p.log.success('.claudeignore removed');
+      } else {
+        p.log.info('.claudeignore preserved');
+      }
+    } else {
+      p.log.info('.claudeignore preserved (non-interactive mode)');
+    }
+  }
+
+  // 5. settings.json (Devflow hooks)
+  for (const scope of [...scopesToUninstall]) {
+    try {
+      const paths = await getInstallationPaths(scope);
+      const settingsPath = path.join(paths.claudeDir, 'settings.json');
+      const originalContent = await fs.readFile(settingsPath, 'utf-8');
+
+      // Remove all Devflow hooks and flags in one pass (idempotent)
+      let settingsContent = await removeAmbientHook(originalContent);
+      settingsContent = removeMemoryHooks(settingsContent);
+      settingsContent = removeCaptureHooks(settingsContent);
+      settingsContent = removeDreamHook(settingsContent);
+      settingsContent = removeHudStatusLine(settingsContent);
+      settingsContent = removeContextHook(settingsContent);
+      settingsContent = stripFlags(settingsContent);
+      settingsContent = stripViewMode(settingsContent);
+      settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
+      // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
+      // REG-1: scope the URL strip to the port Devflow manages — read proxy.json to
+      // determine which port we own; a user's own localhost gateway on any other port
+      // is left in settings untouched.
+      {
+        const proxyStateForStrip = await readProxyState(paths.devflowDir);
+        const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+        const parsedSettings = JSON.parse(settingsContent) as Settings;
+        applyDisableToSettings(parsedSettings, managedPort);
+        settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
+      }
+
+      if (settingsContent !== originalContent) {
+        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        if (verbose) {
+          p.log.success(`Devflow hooks removed from settings.json (${scope})`);
+        }
+      }
+
+      const settings = JSON.parse(settingsContent);
+
+      if (settings.hooks) {
+        if (process.stdin.isTTY) {
+          const removeHooks = await p.confirm({
+            message: `Remove Devflow hooks from settings.json (${scope} scope)? Other settings preserved.`,
+            initialValue: false,
+          });
+
+          if (!p.isCancel(removeHooks) && removeHooks) {
+            delete settings.hooks;
+            await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+            p.log.success(`Devflow hooks removed from settings.json (${scope})`);
+          } else {
+            p.log.info(`settings.json hooks preserved (${scope})`);
+          }
+        } else {
+          p.log.info(`settings.json hooks preserved (${scope}, non-interactive mode)`);
+        }
+      }
+    } catch {
+      // settings.json doesn't exist or can't be parsed — skip
+    }
+  }
+
+  // 6. Security deny list
+
+  // Detect what's installed
+  let userSettingsJsonForSecurity: string | null = null;
+  const userSettingsPathForSecurity = path.join(getClaudeDirectory(), 'settings.json');
+  try { userSettingsJsonForSecurity = await fs.readFile(userSettingsPathForSecurity, 'utf-8'); } catch { /* absent */ }
+
+  let managedExistsForSecurity = false;
+  let managedContentForSecurity: string | null = null;
+  try {
+    const managedPath = getManagedSettingsPath();
+    managedContentForSecurity = await fs.readFile(managedPath, 'utf-8');
+    managedExistsForSecurity = true;
+  } catch { /* absent or unsupported platform */ }
+
+  const detectedSecurity = detectDenyState(
+    userSettingsJsonForSecurity,
+    managedExistsForSecurity,
+    managedContentForSecurity,
+  );
+
+  const anySecurityPresent = detectedSecurity.user || detectedSecurity.managed;
+  if (anySecurityPresent) {
+    const bothLocations = detectedSecurity.user && detectedSecurity.managed;
+    const locationLabel = bothLocations ? 'user settings + managed settings'
+      : detectedSecurity.user ? 'user settings' : 'managed settings';
+
+    const securityDecision = resolveSecurityRemovalDecision({
+      anySecurityPresent,
+      keepDocs,
+      isTTY: process.stdin.isTTY,
+    });
+
+    let shouldRemoveSecurity = false;
+
+    if (securityDecision === 'prompt') {
+      const removeDenyConfirm = await p.confirm({
+        message: `Remove Devflow security deny list from ${locationLabel}?`,
+        initialValue: false,
+      });
+
+      if (!p.isCancel(removeDenyConfirm) && removeDenyConfirm) {
+        shouldRemoveSecurity = true;
+      } else {
+        p.log.info(`Security deny list preserved (${locationLabel})`);
+      }
+    } else if (securityDecision === 'preserve') {
+      p.log.info(`Security deny list preserved (${locationLabel}, non-interactive mode)`);
+    }
+    // securityDecision === 'skip' when keepDocs is set — no message, no action
+
+    if (shouldRemoveSecurity) {
+      // Strip from user settings (ENOENT-tolerant; atomic write via temp+rename).
+      // NOTE: unparseable user settings are detected as user=false by detectDenyState
+      // (JSON.parse failure sets unknown=true but not user=true), so this branch is
+      // only reached when the JSON is valid — stripUserDenyList will not throw.
+      // Unlike `devflow security --disable`, uninstall does NOT hard-fail on corrupt
+      // JSON; it silently skips the strip instead (user=false → guard below is false).
+      if (detectedSecurity.user && userSettingsJsonForSecurity !== null) {
+        const { json: stripped, removed } = stripUserDenyList(
+          userSettingsJsonForSecurity,
+          DEVFLOW_HISTORICAL_DENY,
+        );
+        if (removed.length > 0) {
+          await writeFileAtomicExclusive(userSettingsPathForSecurity, stripped);
+          p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
+        }
+      }
+      // Strip from managed settings (ENOENT-tolerant via removeManagedSettings)
+      if (managedExistsForSecurity) {
+        await removeManagedSettings(getPackageRoot(), verbose);
+      }
+    }
+  }
+
+  // 7. Safe-delete shell function
+  const shell = detectShell();
+  const profilePath = getProfilePath(shell);
+  if (profilePath && await isAlreadyInstalled(profilePath)) {
+    if (process.stdin.isTTY) {
+      const removeSafeDelete = await p.confirm({
+        message: `Remove safe-delete function from ${profilePath}?`,
+        initialValue: false,
+      });
+
+      if (!p.isCancel(removeSafeDelete) && removeSafeDelete) {
+        const removed = await removeFromProfile(profilePath);
+        if (removed) {
+          p.log.success(`Safe-delete removed from ${profilePath}`);
+        } else {
+          p.log.warn(`Could not remove safe-delete from ${profilePath}`);
+        }
+      } else {
+        p.log.info('Safe-delete preserved in shell profile');
+      }
+    } else {
+      p.log.info(`Safe-delete function preserved in ${profilePath} (non-interactive mode)`);
+    }
+  }
+}
+
 export const uninstallCommand = new Command('uninstall')
   .description('Uninstall Devflow from Claude Code')
   .option('--keep-docs', 'Keep .devflow/ directory and project data')
@@ -481,54 +962,7 @@ export const uninstallCommand = new Command('uninstall')
 
     // === DRY RUN: show plan and exit ===
     if (dryRun) {
-      p.log.info(`Scope(s): ${scopesToUninstall.join(', ')} (dry-run shows all detected scopes)`);
-
-      if (isSelectiveUninstall) {
-        // Selective: compute from registry — this accurately reflects what would be removed.
-        const assets = computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS);
-        const plan = formatDryRunPlan(assets);
-        for (const line of plan.split('\n')) {
-          p.log.info(line);
-        }
-      } else {
-        // Full uninstall: the real path does rm -rf on entire directories plus a
-        // skills sweep. Enumerate what is actually on disk for each detected scope
-        // rather than computing from the registry (which misses legacy/orphaned assets).
-        const extras: string[] = [];
-        for (const scope of scopesToUninstall) {
-          try {
-            const paths = await getInstallationPaths(scope);
-            const { claudeDir: cd, devflowDir: dd } = paths;
-            // Whole directories removed by removeAllDevFlow
-            for (const dir of [
-              path.join(cd, 'commands', 'devflow'),
-              path.join(cd, 'agents', 'devflow'),
-              path.join(cd, 'rules', 'devflow'),
-              path.join(dd, 'scripts'),
-            ]) {
-              try { await fs.access(dir); extras.push(dir); } catch { /* absent */ }
-            }
-            // Skills: list every devflow:* directory actually on disk
-            try {
-              const skillEntries = await fs.readdir(path.join(cd, 'skills'));
-              for (const e of skillEntries) {
-                if (e.startsWith(SKILL_NAMESPACE)) extras.push(path.join(cd, 'skills', e));
-              }
-            } catch { /* skills dir absent */ }
-            // ~/.devflow install artifacts
-            extras.push(`${dd} install artifacts (manifest.json, migrations.json, logs/, costs/, cache/, proxy artifacts)`);
-          } catch { /* scope path resolution failed */ }
-        }
-        // Project .devflow/ data dir
-        const devflowDataDir = path.join(process.cwd(), '.devflow');
-        try { await fs.access(devflowDataDir); extras.push(`${devflowDataDir} (if confirmed)`); } catch { /* noop */ }
-        extras.push('hooks removed from settings.json');
-
-        for (const line of extras) {
-          p.log.info(`  ${line}`);
-        }
-      }
-
+      await runDryRunPhase({ scopesToUninstall, isSelectiveUninstall, selectedPlugins });
       p.outro(color.dim('No changes made (dry run)'));
       return;
     }
@@ -556,110 +990,9 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (isSelectiveUninstall) {
-        // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
-        // lines from installed agent frontmatter while the files are still present.
-        // Non-fatal: tolerate missing agents dir or revert errors.
-        {
-          const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
-          try {
-            await fs.access(agentsInstallDir);
-            await revertExternalAgents({
-              installDir: agentsInstallDir,
-              devflowDir,
-              onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-            });
-          } catch { /* agents dir absent or revert failed — non-fatal */ }
-        }
-
-        await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
-
-        // Clean up ambient hook if ambient plugin is being removed
-        if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
-          const settingsPath = path.join(claudeDir, 'settings.json');
-          try {
-            const settings = await fs.readFile(settingsPath, 'utf-8');
-            const updated = await removeAmbientHook(settings);
-            if (updated !== settings) {
-              await fs.writeFile(settingsPath, updated, 'utf-8');
-              if (verbose) {
-                p.log.success('Ambient mode hooks removed from settings.json');
-              }
-            }
-          } catch { /* settings.json may not exist */ }
-        }
+        await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins, selectedPluginNames, verbose });
       } else {
-        // Revert GPT agent frontmatter before removing agents — ensures no orphaned
-        // GPT model lines remain if agents dir is preserved by a later partial flow.
-        // Non-fatal: tolerate missing agents dir or revert errors.
-        {
-          const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
-          try {
-            await fs.access(agentsInstallDir);
-            await revertExternalAgents({
-              installDir: agentsInstallDir,
-              devflowDir,
-              onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-            });
-          } catch { /* agents dir absent or revert failed — non-fatal */ }
-        }
-
-        // removeAllDevFlow removes Claude Code assets (commands, agents, rules, skills)
-        // and devflowDir/scripts/. Scope-aware cleanup handles the rest of devflowDir.
-        await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
-
-        if (scope === 'local') {
-          // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
-          // (memory, learning, features, docs, config.json). Never remove those —
-          // only remove install artifacts: scripts/ (done above) + manifest.json and
-          // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
-          await removeDevFlowInstallArtifacts(devflowDir, verbose);
-          p.log.info('Local project data (memory, learning, features, docs) preserved');
-        } else {
-          // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
-          // that enumerates user-authored content worth backing up before wiping the dir.
-          // Non-interactive, no user content, or precondition guard failure → artifacts-only.
-          const userContent = await enumerateUserDevFlowContent(devflowDir);
-          const cleanupDecision = resolveDevflowDirCleanup({
-            scope: 'user',
-            isTTY: process.stdin.isTTY,
-            userContent,
-            devflowDir,
-            homeDir: os.homedir(),
-            keepDocs: !!options.keepDocs,
-          });
-
-          if (cleanupDecision === 'artifacts-only') {
-            await removeDevFlowInstallArtifacts(devflowDir, verbose);
-            if (!process.stdin.isTTY && userContent.length > 0) {
-              p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and install artifacts only)`);
-            }
-          } else {
-            // cleanupDecision === 'prompt': interactive session with user-authored content present.
-            p.log.info(`User-authored content in ${devflowDir}:`);
-            for (const item of userContent) {
-              p.log.info(`  ${item}`);
-            }
-
-            const confirmFullCleanup = await p.confirm({
-              message: `Remove entire ${devflowDir}? (includes the items listed above, plus logs and install metadata)`,
-              initialValue: false,
-            });
-
-            if (p.isCancel(confirmFullCleanup)) {
-              // removeAllDevFlow already ran — clean up the manifest to leave a consistent
-              // state. avoids PF-014: process.exit() here would skip removeDevFlowInstallArtifacts,
-              // leaving a stale manifest.json that points to assets no longer on disk.
-              await removeDevFlowInstallArtifacts(devflowDir, verbose);
-              p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and install artifacts only)`);
-            } else if (confirmFullCleanup) {
-              await fs.rm(devflowDir, { recursive: true, force: true });
-              p.log.success(`${devflowDir} removed`);
-            } else {
-              await removeDevFlowInstallArtifacts(devflowDir, verbose);
-              p.log.info(`${devflowDir} preserved (removing scripts and install artifacts only)`);
-            }
-          }
-        }
+        await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs });
       }
 
       const pluginLabel = isSelectiveUninstall
@@ -670,241 +1003,13 @@ export const uninstallCommand = new Command('uninstall')
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
     if (!isSelectiveUninstall) {
-      const gitRoot = await getGitRoot();
-
-      // 1. .devflow/ data directory (contains docs/, memory/, learning/, features/, etc.)
-      const devflowDataDir = path.join(process.cwd(), '.devflow');
-      let devflowDataExists = false;
-      try {
-        await fs.access(devflowDataDir);
-        devflowDataExists = true;
-      } catch { /* .devflow doesn't exist */ }
-
-      if (devflowDataExists) {
-        let shouldRemoveDevflow = false;
-
-        if (options.keepDocs) {
-          shouldRemoveDevflow = false;
-        } else if (process.stdin.isTTY) {
-          const removeDevflow = await p.confirm({
-            message: '.devflow/ directory found. Remove project data (docs, memory, learning)?',
-            initialValue: false,
-          });
-
-          if (p.isCancel(removeDevflow)) {
-            // Treat cancel as decline: preserve .devflow/ and continue cleanup.
-            // avoids PF-014: process.exit() here would skip claudeignore, hooks,
-            // and safe-delete removal — removeAllDevFlow has already run.
-            // applies ADR-003: clean end-state on every path.
-            p.log.info('.devflow/ preserved (prompt cancelled — continuing cleanup)');
-          }
-
-          shouldRemoveDevflow = resolveProjectDataCleanup(removeDevflow);
-        }
-
-        if (shouldRemoveDevflow) {
-          await fs.rm(devflowDataDir, { recursive: true, force: true });
-          p.log.success('.devflow/ removed');
-        } else {
-          p.log.info('.devflow/ preserved');
-        }
-      }
-
-      // 4. .claudeignore
-      const claudeignorePath = gitRoot
-        ? path.join(gitRoot, '.claudeignore')
-        : path.join(process.cwd(), '.claudeignore');
-
-      let claudeignoreExists = false;
-      try {
-        await fs.access(claudeignorePath);
-        claudeignoreExists = true;
-      } catch { /* doesn't exist */ }
-
-      if (claudeignoreExists) {
-        if (process.stdin.isTTY) {
-          const removeClaudeignore = await p.confirm({
-            message: '.claudeignore found. Remove it? (may contain custom rules)',
-            initialValue: false,
-          });
-
-          if (!p.isCancel(removeClaudeignore) && removeClaudeignore) {
-            await fs.rm(claudeignorePath, { force: true });
-            p.log.success('.claudeignore removed');
-          } else {
-            p.log.info('.claudeignore preserved');
-          }
-        } else {
-          p.log.info('.claudeignore preserved (non-interactive mode)');
-        }
-      }
-
-      // 5. settings.json (Devflow hooks)
-      for (const scope of scopesToUninstall) {
-        try {
-          const paths = await getInstallationPaths(scope);
-          const settingsPath = path.join(paths.claudeDir, 'settings.json');
-          const originalContent = await fs.readFile(settingsPath, 'utf-8');
-
-          // Remove all Devflow hooks and flags in one pass (idempotent)
-          let settingsContent = await removeAmbientHook(originalContent);
-          settingsContent = removeMemoryHooks(settingsContent);
-          settingsContent = removeCaptureHooks(settingsContent);
-          settingsContent = removeDreamHook(settingsContent);
-          settingsContent = removeHudStatusLine(settingsContent);
-          settingsContent = removeContextHook(settingsContent);
-          settingsContent = stripFlags(settingsContent);
-          settingsContent = stripViewMode(settingsContent);
-          settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
-          // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
-          // REG-1: scope the URL strip to the port Devflow manages — read proxy.json to
-          // determine which port we own; a user's own localhost gateway on any other port
-          // is left in settings untouched.
-          {
-            const proxyStateForStrip = await readProxyState(paths.devflowDir);
-            const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
-            const parsedSettings = JSON.parse(settingsContent) as Settings;
-            applyDisableToSettings(parsedSettings, managedPort);
-            settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
-          }
-
-          if (settingsContent !== originalContent) {
-            await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-            if (verbose) {
-              p.log.success(`Devflow hooks removed from settings.json (${scope})`);
-            }
-          }
-
-          const settings = JSON.parse(settingsContent);
-
-          if (settings.hooks) {
-            if (process.stdin.isTTY) {
-              const removeHooks = await p.confirm({
-                message: `Remove Devflow hooks from settings.json (${scope} scope)? Other settings preserved.`,
-                initialValue: false,
-              });
-
-              if (!p.isCancel(removeHooks) && removeHooks) {
-                delete settings.hooks;
-                await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-                p.log.success(`Devflow hooks removed from settings.json (${scope})`);
-              } else {
-                p.log.info(`settings.json hooks preserved (${scope})`);
-              }
-            } else {
-              p.log.info(`settings.json hooks preserved (${scope}, non-interactive mode)`);
-            }
-          }
-        } catch {
-          // settings.json doesn't exist or can't be parsed — skip
-        }
-      }
-
-      // 6. Security deny list (user settings + managed settings)
-
-      // Detect what's installed
-      let userSettingsJsonForSecurity: string | null = null;
-      const userSettingsPathForSecurity = path.join(getClaudeDirectory(), 'settings.json');
-      try { userSettingsJsonForSecurity = await fs.readFile(userSettingsPathForSecurity, 'utf-8'); } catch { /* absent */ }
-
-      let managedExistsForSecurity = false;
-      let managedContentForSecurity: string | null = null;
-      try {
-        const managedPath = getManagedSettingsPath();
-        managedContentForSecurity = await fs.readFile(managedPath, 'utf-8');
-        managedExistsForSecurity = true;
-      } catch { /* absent or unsupported platform */ }
-
-      const detectedSecurity = detectDenyState(
-        userSettingsJsonForSecurity,
-        managedExistsForSecurity,
-        managedContentForSecurity,
-      );
-
-      const anySecurityPresent = detectedSecurity.user || detectedSecurity.managed;
-      if (anySecurityPresent) {
-        const bothLocations = detectedSecurity.user && detectedSecurity.managed;
-        const locationLabel = bothLocations ? 'user settings + managed settings'
-          : detectedSecurity.user ? 'user settings' : 'managed settings';
-
-        const securityDecision = resolveSecurityRemovalDecision({
-          anySecurityPresent,
-          keepDocs: !!options.keepDocs,
-          isTTY: process.stdin.isTTY,
-        });
-
-        let shouldRemoveSecurity = false;
-
-        if (securityDecision === 'prompt') {
-          const removeDenyConfirm = await p.confirm({
-            message: `Remove Devflow security deny list from ${locationLabel}?`,
-            initialValue: false, // Deny list is protective — default to keeping it
-          });
-
-          if (!p.isCancel(removeDenyConfirm) && removeDenyConfirm) {
-            shouldRemoveSecurity = true;
-          } else {
-            p.log.info(`Security deny list preserved (${locationLabel})`);
-          }
-        } else if (securityDecision === 'preserve') {
-          p.log.info(`Security deny list preserved (${locationLabel}, non-interactive mode)`);
-        }
-        // securityDecision === 'skip' when keepDocs is set — no message, no action
-
-        if (shouldRemoveSecurity) {
-          // Strip from user settings (ENOENT-tolerant; atomic write via temp+rename).
-          // NOTE: unparseable user settings are detected as user=false by detectDenyState
-          // (JSON.parse failure sets unknown=true but not user=true), so this branch is
-          // only reached when the JSON is valid — stripUserDenyList will not throw.
-          // Unlike `devflow security --disable`, uninstall does NOT hard-fail on corrupt
-          // JSON; it silently skips the strip instead (user=false → guard below is false).
-          if (detectedSecurity.user && userSettingsJsonForSecurity !== null) {
-            const { json: stripped, removed } = stripUserDenyList(
-              userSettingsJsonForSecurity,
-              DEVFLOW_HISTORICAL_DENY,
-            );
-            if (removed.length > 0) {
-              await writeFileAtomicExclusive(userSettingsPathForSecurity, stripped);
-              p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
-            }
-          }
-          // Strip from managed settings (ENOENT-tolerant via removeManagedSettings)
-          if (managedExistsForSecurity) {
-            await removeManagedSettings(getPackageRoot(), verbose);
-          }
-        }
-      }
-
-      // 7. Safe-delete shell function
-      const shell = detectShell();
-      const profilePath = getProfilePath(shell);
-      if (profilePath && await isAlreadyInstalled(profilePath)) {
-        if (process.stdin.isTTY) {
-          const removeSafeDelete = await p.confirm({
-            message: `Remove safe-delete function from ${profilePath}?`,
-            initialValue: false,
-          });
-
-          if (!p.isCancel(removeSafeDelete) && removeSafeDelete) {
-            const removed = await removeFromProfile(profilePath);
-            if (removed) {
-              p.log.success(`Safe-delete removed from ${profilePath}`);
-            } else {
-              p.log.warn(`Could not remove safe-delete from ${profilePath}`);
-            }
-          } else {
-            p.log.info('Safe-delete preserved in shell profile');
-          }
-        } else {
-          p.log.info(`Safe-delete function preserved in ${profilePath} (non-interactive mode)`);
-        }
-      }
+      await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd() });
     }
 
     const status = color.green('Devflow uninstalled successfully');
-
     p.outro(`${status}${color.dim('  Reinstall: npx devflow-kit init')}`);
   });
+
 
 /**
  * Remove all Devflow assets (full uninstall).

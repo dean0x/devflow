@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
 
@@ -1135,5 +1135,204 @@ describe('isDevFlowInstalled — multi-namespace detection (TEST-9e)', () => {
 
     const result = await isDevFlowInstalled(claudeDir);
     expect(result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A8: phase runner extraction — runDryRunPhase, runSelectivePhaseForScope,
+//   runFullPhaseForScope, runCleanupPhase
+//
+// TDD: these tests were written RED (import undefined = not-a-function) before
+// the functions were exported.  Each covers a concrete behavioral invariant of
+// the phase it represents.
+// ---------------------------------------------------------------------------
+
+describe('runDryRunPhase (A8)', () => {
+  it('is an exported async function', () => {
+    expect(typeof runDryRunPhase).toBe('function');
+  });
+
+  it('(A8) selective dry-run: completes without throwing for a real plugin', async () => {
+    const reviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review')!;
+    expect(reviewPlugin).toBeDefined();
+    await expect(runDryRunPhase({
+      scopesToUninstall: ['user'],
+      isSelectiveUninstall: true,
+      selectedPlugins: [reviewPlugin],
+    })).resolves.not.toThrow();
+  });
+
+  it('(A8) full dry-run: completes without throwing with empty scopes', async () => {
+    // Empty scope list — the inner for-loop is a no-op; should not crash.
+    await expect(runDryRunPhase({
+      scopesToUninstall: [],
+      isSelectiveUninstall: false,
+      selectedPlugins: [],
+    })).resolves.not.toThrow();
+  });
+});
+
+describe('runSelectivePhaseForScope (A8)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-selective-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-devflow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runSelectivePhaseForScope).toBe('function');
+  });
+
+  it('(A8) removes agent files for the selected plugin', async () => {
+    // devflow-bug-analysis owns the 'diagnose' agent — unique to that plugin
+    const bugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
+    expect(bugPlugin).toBeDefined();
+    const agentName = 'diagnose'; // unique to devflow-bug-analysis
+    expect(bugPlugin.agents).toContain(agentName);
+
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, `${agentName}.md`), '# diagnose', 'utf-8');
+
+    await runSelectivePhaseForScope({
+      claudeDir,
+      devflowDir,
+      selectedPlugins: [bugPlugin],
+      selectedPluginNames: [bugPlugin.name],
+      verbose: false,
+    });
+
+    // diagnose.md must be removed (it is unique to devflow-bug-analysis)
+    await expect(fs.access(path.join(agentsDir, `${agentName}.md`))).rejects.toThrow();
+  });
+
+  it('(A8) tolerates absent agents dir — no throw (non-fatal)', async () => {
+    const anyPlugin = DEVFLOW_PLUGINS[0];
+    // claudeDir has no agents/devflow — runSelectivePhaseForScope must not throw
+    await expect(runSelectivePhaseForScope({
+      claudeDir,
+      devflowDir,
+      selectedPlugins: [anyPlugin],
+      selectedPluginNames: [anyPlugin.name],
+      verbose: false,
+    })).resolves.not.toThrow();
+  });
+});
+
+describe('runFullPhaseForScope (A8)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-full-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-devflowdir-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runFullPhaseForScope).toBe('function');
+  });
+
+  it('(A8) local scope: agents/devflow is removed, devflowDir install artifacts removed', async () => {
+    // Plant an agent file and a manifest (install artifact)
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'code.md'), '# code', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+    const scriptsDir = path.join(devflowDir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    await runFullPhaseForScope({
+      scope: 'local',
+      claudeDir,
+      devflowDir,
+      devflowScriptsDir: scriptsDir,
+      verbose: false,
+      keepDocs: false,
+    });
+
+    // agents/devflow is gone (removeAllDevFlow)
+    await expect(fs.access(agentsDir)).rejects.toThrow();
+    // manifest.json removed by removeDevFlowInstallArtifacts (local scope)
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('(A8) user scope (non-TTY): assets removed, install artifacts removed (artifacts-only path)', async () => {
+    // Non-TTY: process.stdin.isTTY is falsy in tests — resolveDevflowDirCleanup → artifacts-only.
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'git.md'), '# git', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+    const scriptsDir = path.join(devflowDir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    await runFullPhaseForScope({
+      scope: 'user',
+      claudeDir,
+      devflowDir,
+      devflowScriptsDir: scriptsDir,
+      verbose: false,
+      keepDocs: false,
+    });
+
+    // agents/devflow is gone
+    await expect(fs.access(agentsDir)).rejects.toThrow();
+    // manifest.json removed (artifacts-only path)
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+  });
+});
+
+describe('runCleanupPhase (A8)', () => {
+  let tmpCwd: string;
+
+  beforeEach(async () => {
+    tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-cleanup-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpCwd, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runCleanupPhase).toBe('function');
+  });
+
+  it('(A8) completes without throwing when .devflow/ is absent and no scopes (non-TTY)', async () => {
+    // Empty scopes: skips settings.json loop entirely.
+    // tmpCwd has no .devflow/ — devflowDataExists is false.
+    await expect(runCleanupPhase({
+      scopesToUninstall: [],
+      keepDocs: false,
+      verbose: false,
+      cwd: tmpCwd,
+    })).resolves.not.toThrow();
+  });
+
+  it('(A8) preserves .devflow/ in non-TTY mode (no prompt — keepDocs:false but not interactive)', async () => {
+    // process.stdin.isTTY is false in tests — shouldRemoveDevflow stays false.
+    const devflowDir = path.join(tmpCwd, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'config.json'), '{}', 'utf-8');
+
+    await runCleanupPhase({
+      scopesToUninstall: [],
+      keepDocs: false,
+      verbose: false,
+      cwd: tmpCwd,
+    });
+
+    // .devflow/ preserved (non-TTY, no prompt fired)
+    await expect(fs.access(devflowDir)).resolves.not.toThrow();
   });
 });
