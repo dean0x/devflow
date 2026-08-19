@@ -24,16 +24,21 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
+import { requireDistFiles, requireDistFile } from './helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents')
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
 const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
-const DOCS_REFERENCE_DIR = path.join(ROOT, 'docs', 'reference')
+const DOCS_DIR = path.join(ROOT, 'docs')
+// Root-level doc files included in GAP-5 corpus.
+// CHANGELOG.md is intentionally excluded: it documents history and may legitimately
+// reference retired names as examples of what was renamed.
+const ROOT_DOC_FILES = ['README.md', 'CLAUDE.md', 'CONTRIBUTING.md'].map(f => path.join(ROOT, f))
 const FEATURES_DIR = path.join(ROOT, '.devflow', 'features')
 const SCRIPTS_DIR = path.join(ASSETS_DIR, 'scripts')
 const CHARTER_PATH = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md')
@@ -401,37 +406,6 @@ function readFrontmatterModel(filePath: string): string {
   const m = content.match(/^---\n(?:.*\n)*?model:\s*(\S+)/)
   if (!m) throw new Error(`No model: field in frontmatter of ${filePath}`)
   return m[1]
-}
-
-/**
- * Ensure dist/commands/ exists and return its .md files.
- * Throws — does NOT return — when absent. A guard that silently skips
- * on a missing build artifact is not a guard.
- */
-function requireDistFiles(): string[] {
-  try {
-    return readdirSync(DIST_COMMANDS_DIR).filter(f => f.endsWith('.md'))
-  } catch {
-    throw new Error(
-      'dist/commands/ is absent — run `npm run build` first\n' +
-      '  (this guard reads compiled command files and cannot be skipped)',
-    )
-  }
-}
-
-/**
- * Read a dist command file. Throws if absent (referencing the build step).
- * A missing dist file is a build error, not a skip condition.
- */
-function requireDistFile(name: string): string {
-  const filePath = path.join(DIST_COMMANDS_DIR, name)
-  try {
-    return readFileSync(filePath, 'utf-8')
-  } catch {
-    throw new Error(
-      `dist/commands/${name} is absent — run \`npm run build\` first`,
-    )
-  }
 }
 
 /**
@@ -803,35 +777,37 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
    * If dist/ is absent: requireDistFiles() throws — FAIL LOUD, not skip.
    * That's intentional: if this guard passes with an empty dist it is not a guard.
    *
-   * filesScanned >= 220 ensures the corpus is not accidentally empty or
+   * filesScanned >= 265 ensures the corpus is not accidentally empty or
    * mis-globbed — a vacuously passing sweep on an empty corpus has burned
    * this repo before (registry-integrity Guard 5 and skill-references.test.ts:865
    * both had this failure mode; the two existing sites are fixed in this commit).
    */
 
-  it('corpus size is at least 260 files (guards against mis-glob / empty dist)', () => {
+  it('corpus size is at least 265 files (guards against mis-glob / empty dist)', () => {
     // Fail-loud: requireDistFiles() throws if dist is absent
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
-    const docsFiles = collectFiles(DOCS_REFERENCE_DIR, ['.md'])
+    const docsFiles = collectFiles(DOCS_DIR, ['.md'])
+    const rootDocFiles = ROOT_DOC_FILES.filter(f => existsSync(f))
     const featureFiles = collectFiles(FEATURES_DIR, ['.md'])
     const scriptFiles = collectScriptFiles(SCRIPTS_DIR)
 
     // Segment floors: collectFiles returns [] for a missing directory, which
-    // would silently drop a corpus segment while the 260 total still passes.
-    expect(docsFiles.length, 'docs/reference corpus segment is empty — check DOCS_REFERENCE_DIR').toBeGreaterThanOrEqual(5)
+    // would silently drop a corpus segment while the 265 total still passes.
+    expect(docsFiles.length, 'docs/ corpus segment is empty — check DOCS_DIR').toBeGreaterThanOrEqual(5)
+    expect(rootDocFiles.length, 'root doc files (README/CLAUDE/CONTRIBUTING) not found').toBeGreaterThanOrEqual(3)
     expect(featureFiles.length, '.devflow/features corpus segment is empty — check FEATURES_DIR').toBeGreaterThanOrEqual(3)
     expect(scriptFiles.length, 'src/assets/scripts corpus segment is empty — check SCRIPTS_DIR').toBeGreaterThanOrEqual(20)
 
-    const filesScanned = assetsFiles.length + distFiles.length + docsFiles.length + featureFiles.length + scriptFiles.length
+    const filesScanned = assetsFiles.length + distFiles.length + docsFiles.length + rootDocFiles.length + featureFiles.length + scriptFiles.length
     expect(
       filesScanned,
-      `Corpus is only ${filesScanned} files (expected >= 260). ` +
+      `Corpus is only ${filesScanned} files (expected >= 265). ` +
       `Check glob patterns — an empty corpus is a silent false-pass.\n` +
       `  src/assets files: ${assetsFiles.length}  dist/commands files: ${distFiles.length}  ` +
-      `docs/reference files: ${docsFiles.length}  .devflow/features files: ${featureFiles.length}  ` +
-      `src/assets/scripts files: ${scriptFiles.length}`,
-    ).toBeGreaterThanOrEqual(260)
+      `docs/ files: ${docsFiles.length}  root docs: ${rootDocFiles.length}  ` +
+      `.devflow/features files: ${featureFiles.length}  src/assets/scripts files: ${scriptFiles.length}`,
+    ).toBeGreaterThanOrEqual(265)
   })
 
   it('no retired form B names appear in any shipped artifact (vacuous when list is empty)', () => {
@@ -887,7 +863,8 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
       DIST_COMMANDS_DIR,
       'dist/commands/',
     )
-    scan(collectFiles(DOCS_REFERENCE_DIR, ['.md']), DOCS_REFERENCE_DIR, 'docs/reference/')
+    scan(collectFiles(DOCS_DIR, ['.md']), DOCS_DIR, 'docs/')
+    scan(ROOT_DOC_FILES.filter(f => existsSync(f)), ROOT, '')
     scan(collectFiles(FEATURES_DIR, ['.md']), FEATURES_DIR, '.devflow/features/')
     scan(collectScriptFiles(SCRIPTS_DIR), SCRIPTS_DIR, 'src/assets/scripts/')
 
@@ -926,10 +903,18 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
         })
       } catch { /* skip */ }
     }
-    for (const filePath of collectFiles(DOCS_REFERENCE_DIR, ['.md'])) {
+    for (const filePath of collectFiles(DOCS_DIR, ['.md'])) {
       try {
         corpus.push({
-          displayPath: `docs/reference/${path.relative(DOCS_REFERENCE_DIR, filePath)}`,
+          displayPath: `docs/${path.relative(DOCS_DIR, filePath)}`,
+          content: readFileSync(filePath, 'utf-8'),
+        })
+      } catch { /* skip */ }
+    }
+    for (const filePath of ROOT_DOC_FILES.filter(f => existsSync(f))) {
+      try {
+        corpus.push({
+          displayPath: path.relative(ROOT, filePath),
           content: readFileSync(filePath, 'utf-8'),
         })
       } catch { /* skip */ }

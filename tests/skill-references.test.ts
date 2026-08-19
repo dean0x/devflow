@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as path from 'path';
 import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { requireDistFiles, requireDistFile } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -232,13 +233,8 @@ describe('Format 3: Install path references', () => {
   it('all install paths in compiled command files are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const distCommandsDir = path.join(ROOT, 'dist', 'commands');
-    let files: string[];
-    try {
-      files = readdirSync(distCommandsDir).filter(f => f.endsWith('.md'));
-    } catch {
-      // dist/commands/ does not exist yet (pre-build) — skip gracefully
-      return;
-    }
+    // Fail-loud: requireDistFiles() throws when dist is absent — not a skip.
+    const files = requireDistFiles();
 
     let totalRefs = 0;
     for (const file of files) {
@@ -388,13 +384,8 @@ describe('Format 6: Compiled command file skill references', () => {
   it('all devflow:NAME references in dist/commands/*.md are canonical or command refs', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const distCommandsDir = path.join(ROOT, 'dist', 'commands');
-    let files: string[];
-    try {
-      files = readdirSync(distCommandsDir).filter(f => f.endsWith('.md'));
-    } catch {
-      // dist/commands/ does not exist yet (pre-build) — skip gracefully
-      return;
-    }
+    // Fail-loud: requireDistFiles() throws when dist is absent — not a skip.
+    const files = requireDistFiles();
 
     for (const file of files) {
       const filePath = path.join(distCommandsDir, file);
@@ -422,12 +413,8 @@ describe('Format 6: Compiled command file skill references', () => {
 describe('Format 7: Documentation table skill references', () => {
   it('all devflow:NAME references in docs/reference/skills-architecture.md are canonical or command refs', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    let content: string;
-    try {
-      content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
-    } catch {
-      return; // File may not exist yet
-    }
+    // Plain read — skills-architecture.md is a tracked source file; if it's missing, fail loud.
+    const content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
 
     const allRefs = extractPrefixedRefs(content);
     const skillRefs = filterNonSkillRefs(allRefs);
@@ -513,12 +500,8 @@ describe('Format 8: Skill cross-references within src/assets/skills/', () => {
 describe('Format 10: Bare skill names in skills-architecture.md tables', () => {
   it('every first-column backtick name in skills-architecture.md is canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    let content: string;
-    try {
-      content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
-    } catch {
-      return;
-    }
+    // Plain read — skills-architecture.md is a tracked source file; if it's missing, fail loud.
+    const content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
 
     const tableNames = extractTableFirstColumnNames(content);
     expect(tableNames.length, 'should find backtick names in table rows').toBeGreaterThan(0);
@@ -754,14 +737,8 @@ describe('Cross-component runtime alignment', () => {
   });
 
   it('code-review command focus names exist in review.md Focus Areas', () => {
-    const codeReviewPath = path.join(ROOT, 'dist', 'commands', 'code-review.md');
-    let commandContent: string;
-    try {
-      commandContent = readFileSync(codeReviewPath, 'utf-8');
-    } catch {
-      // dist/commands/ does not exist yet (pre-build) — skip gracefully
-      return;
-    }
+    // Fail-loud: requireDistFile() throws when dist is absent — not a skip.
+    const commandContent = requireDistFile('code-review.md');
     const commandFocuses = parseCodeReviewFocusTable(commandContent);
 
     expect(commandFocuses.size, 'code-review command should have focus entries').toBeGreaterThan(10);
@@ -776,13 +753,8 @@ describe('Cross-component runtime alignment', () => {
 
   it('code-review command skill mappings match review.md Focus Areas skill paths', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    const codeReviewPath = path.join(ROOT, 'dist', 'commands', 'code-review.md');
-    let commandContent: string;
-    try {
-      commandContent = readFileSync(codeReviewPath, 'utf-8');
-    } catch {
-      return; // pre-build skip
-    }
+    // Fail-loud: requireDistFile() throws when dist is absent — not a skip.
+    const commandContent = requireDistFile('code-review.md');
     const commandFocuses = parseCodeReviewFocusTable(commandContent);
 
     for (const [focus, commandSkill] of commandFocuses) {
@@ -804,13 +776,8 @@ describe('Cross-component runtime alignment', () => {
   });
 
   it('code-review command has no stale devflow:{focus}-patterns template', () => {
-    const codeReviewPath = path.join(ROOT, 'dist', 'commands', 'code-review.md');
-    let commandContent: string;
-    try {
-      commandContent = readFileSync(codeReviewPath, 'utf-8');
-    } catch {
-      return; // pre-build skip
-    }
+    // Fail-loud: requireDistFile() throws when dist is absent — not a skip.
+    const commandContent = requireDistFile('code-review.md');
 
     // This template was stale — it appended -patterns to every focus name
     expect(
