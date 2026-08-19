@@ -124,18 +124,21 @@ export interface ReduceResult {
  *
  * Pure function, no I/O.
  */
+/**
+ * The picker names for a single model: all aliases when the model has any,
+ * or the canonical id when it has none. This is the single alias-selection
+ * site — both `pickerNames` (cycle builder) and `buildPickerNameMap` (id→alias
+ * normaliser) call it so the two can never drift.
+ *
+ * Module-private: callers consume the public wrappers below.
+ * Pure function, no I/O.
+ */
+function pickerNamesFor(model: ExternalModel): readonly string[] {
+  return model.aliases.length > 0 ? model.aliases : [model.id];
+}
+
 export function pickerNames(models: readonly ExternalModel[]): readonly string[] {
-  const names: string[] = [];
-  for (const model of models) {
-    if (model.aliases.length > 0) {
-      for (const alias of model.aliases) {
-        names.push(alias);
-      }
-    } else {
-      names.push(model.id);
-    }
-  }
-  return names;
+  return models.flatMap(pickerNamesFor);
 }
 
 /**
@@ -157,16 +160,13 @@ export function buildPickerNameMap(
   if (!catalog.known) return new Map<string, string>();
   const map = new Map<string, string>();
   for (const model of catalog.models) {
-    if (model.aliases.length > 0) {
-      // Canonical id → first alias (the picker representative)
-      map.set(model.id, model.aliases[0]);
-      // Each alias → itself (identity, already a picker name)
-      for (const alias of model.aliases) {
-        map.set(alias, alias);
-      }
-    } else {
-      // No aliases: canonical id IS the picker name
-      map.set(model.id, model.id);
+    const names = pickerNamesFor(model);
+    const [representative] = names;
+    // Canonical id → first picker name (first alias if any, else canonical id)
+    map.set(model.id, representative);
+    // Each picker name → itself (identity, already a picker name)
+    for (const name of names) {
+      map.set(name, name);
     }
   }
   return map;
