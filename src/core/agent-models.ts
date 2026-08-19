@@ -189,6 +189,67 @@ export function canonicaliseAgentKeys<T>(
 }
 
 // ---------------------------------------------------------------------------
+// parseAgentMappingEnvelope — raw envelope reader for migrations
+// ---------------------------------------------------------------------------
+
+export type ParseEnvelopeResult =
+  | { kind: 'skip' }
+  | { kind: 'warn'; message: string }
+  | { kind: 'ok'; envelope: Record<string, unknown>; rawAgents: Record<string, unknown> };
+
+/**
+ * Read and validate the agent-models.json envelope for migration purposes.
+ *
+ * Returns a discriminated result:
+ *   skip — file absent, empty, or agents field absent; caller is a no-op.
+ *   warn — IO error, JSON parse failure, or structural violation; caller
+ *           pushes the message to its warnings array (no migration prefix here).
+ *   ok   — envelope and rawAgents are validated and ready for canonicalisation.
+ *
+ * Does NOT apply canonicaliseAgentKeys — that is the migration's responsibility.
+ * Raw read (not readAgentMapping) intentionally avoids dropping unknown fields
+ * on a round-trip (parseRawEnvelope discipline: read raw, validate defensively).
+ *
+ * Pure I/O; does not mutate the file.
+ */
+export async function parseAgentMappingEnvelope(filePath: string): Promise<ParseEnvelopeResult> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'skip' };
+    return { kind: 'warn', message: `cannot read ${filePath}: ${(err as Error).message}` };
+  }
+
+  // Strip BOM (U+FEFF) — some Windows editors prepend it to JSON files.
+  const content = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+  if (content.trim() === '') return { kind: 'skip' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { kind: 'warn', message: `${filePath} contains invalid JSON — skipping` };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { kind: 'warn', message: `${filePath} is not a JSON object — skipping` };
+  }
+  const envelope = parsed as Record<string, unknown>;
+
+  const rawAgents = envelope['agents'];
+  if (rawAgents === undefined || rawAgents === null) {
+    return { kind: 'skip' }; // no agents field → nothing to migrate
+  }
+  if (typeof rawAgents !== 'object' || Array.isArray(rawAgents)) {
+    return { kind: 'warn', message: `${filePath} has non-object agents field — skipping` };
+  }
+
+  return { kind: 'ok', envelope, rawAgents: rawAgents as Record<string, unknown> };
+}
+
+// ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
 
