@@ -455,11 +455,39 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
       spinner,
     });
 
-    // The orphan should be recorded in sweptOrphans and the file should be gone.
-    expect(report.sweptOrphans).toContain(orphanName);
+    // The orphan should be recorded in sweptOrphans (now { kind, name }[]) and the file should be gone.
+    expect(report.sweptOrphans.some(o => o.name === orphanName), 'orphan name must appear in sweptOrphans').toBe(true);
     await expect(
       fs.access(path.join(agentsTarget, `${orphanName}.md`)),
     ).rejects.toThrow();
+  });
+
+  // F15: sweptOrphans entries carry a `kind` field so formatSweepSummary can
+  // display "agent git" rather than the bare name, disambiguating same-named
+  // assets across asset types (e.g. a command and an agent both named "git").
+  it('F15: sweptOrphans entries carry { kind, name } — not bare strings', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+
+    const orphanName = 'devflow-zzz-f15-kind-sentinel';
+    await fs.mkdir(agentsTarget, { recursive: true });
+    await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    const entry = report.sweptOrphans.find(o => o.name === orphanName);
+    expect(entry, 'orphan entry must exist with a kind field').toBeDefined();
+    expect(entry?.kind).toBe('agent');
   });
 
   it('sweepFailures is empty when no removals fail', async () => {

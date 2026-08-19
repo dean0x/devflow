@@ -25,12 +25,21 @@ export interface SweepFailure {
   error: unknown;
 }
 
+/** A single entry in the swept-orphan list — name plus the asset kind for disambiguation.
+ * Carrying the kind allows formatSweepSummary to emit "agent git" rather than the bare
+ * name when an asset exists in multiple namespaces (e.g. both a command and an agent
+ * named "git"). (F15) */
+export interface SweptOrphan {
+  kind: 'skill' | 'command' | 'agent';
+  name: string;
+}
+
 export interface InstallReport {
   shadowedSkills: string[];
   shadowedRules: string[];
   skippedShadows: ShadowSkip[];
   /** Registry names removed by orphan sweeps (skills, commands, agents). */
-  sweptOrphans: string[];
+  sweptOrphans: SweptOrphan[];
   /** Per-item removal failures from orphan sweeps — isolates failures per PF-009. */
   sweepFailures: SweepFailure[];
 }
@@ -129,9 +138,9 @@ export async function installRuleFile(
   devflowDir: string,
   rulesTarget: string,
 ): Promise<RuleInstallOutcome> {
-  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
-  const targetFile = path.join(rulesTarget, `${ruleName}.md`);
-  const ruleSource = path.join(rulesDir(), `${ruleName}.md`);
+  const shadowFile = path.join(devflowDir, 'rules', mdFileName(ruleName));
+  const targetFile = path.join(rulesTarget, mdFileName(ruleName));
+  const ruleSource = path.join(rulesDir(), mdFileName(ruleName));
 
   const shadowState = await validateRuleShadow(shadowFile);
 
@@ -353,6 +362,20 @@ export interface FileCopyOptions {
 }
 
 /**
+ * Records the result of a single orphan-sweep run into the install report.
+ * Extracted from the thrice-repeated inline block to keep each call-site a
+ * one-liner and ensure the kind tag is always populated. (F14)
+ */
+function recordSweep(
+  report: InstallReport,
+  kind: SweptOrphan['kind'],
+  sweep: Awaited<ReturnType<typeof sweepOrphanedAssets>>,
+): void {
+  report.sweptOrphans.push(...sweep.removed.map(name => ({ kind, name })));
+  report.sweepFailures.push(...sweep.failed.map(f => ({ kind, name: f.name, error: f.error })));
+}
+
+/**
  * Install plugins via manual file copy.
  * Handles cleanup of old monolithic structure, deduplication of shared assets,
  * and script installation with executable permissions.
@@ -405,15 +428,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // (avoids PF-012: those lists are deletion manifests for pre-namespace paths and
   // must not be modified). Shadow dirs (~/.devflow/skills/) are keyed by bare
   // registry name and are unaffected by this sweep.
-  {
-    const r = await sweepOrphanedAssets(
-      path.join(claudeDir, 'skills'),
-      new Set(getAllSkillNames()),
-      (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
-    );
-    report.sweptOrphans.push(...r.removed);
-    report.sweepFailures.push(...r.failed.map(f => ({ kind: 'skill' as const, name: f.name, error: f.error })));
-  }
+  recordSweep(report, 'skill', await sweepOrphanedAssets(
+    path.join(claudeDir, 'skills'),
+    new Set(getAllSkillNames()),
+    (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
+  ));
 
   // Skills are universally installed — always clean both naming variants
   // to prevent duplicates (bare + prefixed) on upgrade or partial install
@@ -466,15 +485,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Sweep stale command files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllCommandNames) so commands from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
-  {
-    const r = await sweepOrphanedAssets(
-      commandsTarget,
-      new Set(getAllCommandNames()),
-      mdEntryName,
-    );
-    report.sweptOrphans.push(...r.removed);
-    report.sweepFailures.push(...r.failed.map(f => ({ kind: 'command' as const, name: f.name, error: f.error })));
-  }
+  recordSweep(report, 'command', await sweepOrphanedAssets(
+    commandsTarget,
+    new Set(getAllCommandNames()),
+    mdEntryName,
+  ));
 
   // Install agents (deduplicated) from flat src/assets/agents/{name}.md.
   // A declared agent whose source file is absent is a build/packaging failure
@@ -508,15 +523,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Sweep stale agent files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllAgentNames) so agents from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
-  {
-    const r = await sweepOrphanedAssets(
-      agentsTarget,
-      new Set(getAllAgentNames()),
-      mdEntryName,
-    );
-    report.sweptOrphans.push(...r.removed);
-    report.sweepFailures.push(...r.failed.map(f => ({ kind: 'agent' as const, name: f.name, error: f.error })));
-  }
+  recordSweep(report, 'agent', await sweepOrphanedAssets(
+    agentsTarget,
+    new Set(getAllAgentNames()),
+    mdEntryName,
+  ));
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).

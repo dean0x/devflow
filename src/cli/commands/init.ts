@@ -124,11 +124,14 @@ export function formatSweepSummary(
   const lines: SummaryLine[] = [];
 
   if (report.sweptOrphans.length > 0) {
+    // Format each orphan as "{kind} {name}" for disambiguation — the same registry
+    // name can appear in both the agent and command namespaces. (F15)
+    const labels = report.sweptOrphans.map(o => `${o.kind} ${o.name}`).join(', ');
     lines.push({
       level: 'info',
       message:
         `Removed ${report.sweptOrphans.length} orphaned asset(s) no longer in the registry: ` +
-        `${report.sweptOrphans.join(', ')}`,
+        `${labels}`,
     });
   }
 

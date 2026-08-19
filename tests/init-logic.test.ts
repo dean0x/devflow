@@ -1315,9 +1315,12 @@ describe('formatSweepSummary', () => {
     expect(formatSweepSummary({ sweptOrphans: [], sweepFailures: [] })).toEqual([])
   })
 
-  it('reports removed orphans as a single info line naming every asset', () => {
+  it('reports removed orphans as a single info line naming every asset with its kind', () => {
     const lines = formatSweepSummary({
-      sweptOrphans: ['resolver', 'audit-claude'],
+      sweptOrphans: [
+        { kind: 'agent', name: 'resolver' },
+        { kind: 'command', name: 'audit-claude' },
+      ],
       sweepFailures: [],
     })
 
@@ -1326,6 +1329,9 @@ describe('formatSweepSummary', () => {
     expect(lines[0].message).toContain('resolver')
     expect(lines[0].message).toContain('audit-claude')
     expect(lines[0].message).toContain('2')
+    // kind tag must appear in the message for disambiguation (F15)
+    expect(lines[0].message).toContain('agent resolver')
+    expect(lines[0].message).toContain('command audit-claude')
   })
 
   it('reports each sweep failure as its own warn line naming kind, asset and cause', () => {
@@ -1359,7 +1365,7 @@ describe('formatSweepSummary', () => {
 
   it('emits both the removal line and the failure lines when the sweep partly succeeded', () => {
     const lines = formatSweepSummary({
-      sweptOrphans: ['resolver'],
+      sweptOrphans: [{ kind: 'command', name: 'resolver' }],
       sweepFailures: [{ kind: 'agent', name: 'stuck', error: new Error('EACCES') }],
     })
 
