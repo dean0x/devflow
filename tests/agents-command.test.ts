@@ -682,9 +682,14 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
       installed: true,
       inRegistry: true,
     };
+    const originalEntry = mapping.agents['code'];
     const result = mergeTuiRowsIntoMapping([row], mapping);
     // Must be byte-identical — no write occurred
     expect(result.agents['code']).toEqual({ model: 'gpt-5.5' });
+    // F12: reference identity — the entry must be the SAME object (dormant short-circuit
+    // returns the original entry, not a new object with the same shape). A structural
+    // toEqual test passes either way; Object.is catches the difference.
+    expect(Object.is(result.agents['code'], originalEntry)).toBe(true);
   });
 });
 
