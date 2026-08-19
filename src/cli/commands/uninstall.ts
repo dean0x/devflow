@@ -76,16 +76,14 @@ export function computeAssetsToRemove(
  */
 export function formatDryRunPlan(
   assets: { skills: string[]; agents: string[]; commands: string[]; rules?: string[] },
-  extras?: string[],
 ): string {
   const skills = [...new Set(assets.skills)];
   const agents = [...new Set(assets.agents)];
   const commands = [...new Set(assets.commands)];
   const rules = [...new Set(assets.rules ?? [])];
   const hasAssets = skills.length > 0 || agents.length > 0 || commands.length > 0 || rules.length > 0;
-  const hasExtras = extras && extras.length > 0;
 
-  if (!hasAssets && !hasExtras) {
+  if (!hasAssets) {
     return 'Nothing to remove.';
   }
 
@@ -94,7 +92,6 @@ export function formatDryRunPlan(
   if (agents.length > 0) lines.push(`Agents (${agents.length}): ${agents.join(', ')}`);
   if (commands.length > 0) lines.push(`Commands (${commands.length}): ${commands.join(', ')}`);
   if (rules.length > 0) lines.push(`Rules (${rules.length}): ${rules.join(', ')}`);
-  if (hasExtras) lines.push(`Extras: ${extras.join(', ')}`);
 
   return lines.join('\n');
 }

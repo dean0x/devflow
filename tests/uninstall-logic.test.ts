@@ -136,16 +136,6 @@ describe('formatDryRunPlan', () => {
     expect(plan).not.toContain('Commands');
   });
 
-  it('includes extras when provided', () => {
-    const plan = formatDryRunPlan(
-      { skills: ['x'], agents: [], commands: [] },
-      ['.docs/', '.memory/', 'hooks in settings.json'],
-    );
-    expect(plan).toContain('.docs/');
-    expect(plan).toContain('.memory/');
-    expect(plan).toContain('hooks in settings.json');
-  });
-
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design', 'software-design', 'testing'],
