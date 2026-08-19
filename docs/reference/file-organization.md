@@ -208,3 +208,71 @@ The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixe
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
 Data source: `context_window.current_usage` from Claude Code's JSON stdin. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
+
+## Namespace Ownership and Orphan Sweep
+
+### Devflow-Owned Namespaces
+
+Devflow claims four namespaces inside `~/.claude/`:
+
+| Namespace | Path | Content |
+|-----------|------|---------|
+| Commands | `~/.claude/commands/devflow/` | One `.md` file per command (e.g., `implement.md`) |
+| Agents | `~/.claude/agents/devflow/` | One `.md` file per agent (e.g., `code.md`) |
+| Rules | `~/.claude/rules/devflow/` | One `.md` file per rule (e.g., `security.md`) |
+| Skills | `~/.claude/skills/devflow:*/` | One directory per skill (e.g., `devflow:software-design/`) |
+
+Nothing outside these four namespaces is written by `devflow init`. The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
+
+### Orphan Sweep (install and selective uninstall)
+
+An orphan is an installed asset whose name is no longer in the plugin registry — typically a retired or renamed agent/command/skill. Without active cleanup, orphans accumulate on disk indefinitely.
+
+**Mechanism** (`src/core/orphan-sweep.ts: sweepOrphanedAssets`):
+
+1. Read the directory listing for the target namespace.
+2. Apply a name extractor (strips `.md` for agents/commands; strips `devflow:` prefix for skills).
+3. Delete every entry whose extracted name is **not** in the `knownNames` set.
+4. Return a `SweepResult` with counts and per-item errors — failures are non-fatal (avoids PF-009).
+
+**When it runs** (`src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
+
+- **On every install** (`devflow init`): `installViaFileCopy` sweeps agents, commands, and skills after copying new files, so retired assets are removed even on partial installs.
+- **On selective uninstall** (`devflow uninstall --plugin <name>`): `sweepDevflowNamespaces` runs after per-plugin file removal. `knownNames` spans ALL plugins (not just the ones being uninstalled), so assets belonging to non-selected plugins are never swept.
+
+The skills sweep matches entries starting with `devflow:` against `getAllSkillNames()` — non-Devflow skill directories are untouched.
+
+### Full Uninstall (`devflow uninstall`)
+
+`removeAllDevFlow` removes the entire owned namespace directories and the scripts directory:
+
+```
+rm -rf ~/.claude/commands/devflow/
+rm -rf ~/.claude/agents/devflow/
+rm -rf ~/.claude/rules/devflow/
+rm -rf ~/.devflow/scripts/
+```
+
+Skills are removed individually (prefixed + unprefixed + legacy variants) rather than by namespace directory, because the `skills/` directory is shared with other tools.
+
+### Selective Uninstall (`devflow uninstall --plugin <name>`)
+
+1. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
+2. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
+3. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+
+### Install Artifacts Removed on Uninstall
+
+`removeDevFlowInstallArtifacts` removes Devflow-generated files from `~/.devflow/` on every uninstall path (decline, cancel, non-interactive, and `--keep-docs`). These are machine-generated and safe to delete — they are re-created on the next `devflow init`.
+
+| Artifact | Path | Notes |
+|----------|------|-------|
+| Manifest | `~/.devflow/manifest.json` | Plugin/feature state |
+| Migrations | `~/.devflow/migrations.json` | Run-once migration state |
+| Agent overrides | `~/.devflow/agent-models.json` | Stale keys re-apply to renamed agents on reinstall |
+| Logs | `~/.devflow/logs/` | Per-project hook logs + `proxy.log` |
+| Costs | `~/.devflow/costs/` | Session cost history |
+| Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
+| Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
+
+User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.
