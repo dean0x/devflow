@@ -15,10 +15,12 @@
  * subsequent phases as agents are renamed.
  *
  * GAP-1  Form A ↔ Form B — slug (filename) vs frontmatter name:
- * GAP-2  agentType: coverage — dynamic commands use only declared roster agents
+ * GAP-2  agentType: coverage — dynamic commands use only declared roster agents,
+ *        plus exact-case subagent_type closure over dist and hook scripts
  * GAP-3  Orchestrator charter — byte-size cap + no retired agent names
  * GAP-4  Model tiers (dist-gated) — roster model tiers match agent frontmatter
- * GAP-5  Retired-name sweep (dist-gated) — no retired names in any shipped artifact
+ * GAP-5  Retired-name sweep (dist-gated) — no retired names in any shipped
+ *        artifact, with context-scoped allowlisting
  */
 
 import { describe, it, expect } from 'vitest'
@@ -33,6 +35,7 @@ const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
 const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
 const DOCS_REFERENCE_DIR = path.join(ROOT, 'docs', 'reference')
 const FEATURES_DIR = path.join(ROOT, '.devflow', 'features')
+const SCRIPTS_DIR = path.join(ASSETS_DIR, 'scripts')
 const CHARTER_PATH = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md')
 const ROSTER_SRC = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_roster.mds')
 
@@ -97,15 +100,22 @@ const RETIRED_AGENT_FORM_B: readonly string[] = [
 /**
  * Entries that cover expected GAP-5 false positives.
  *
+ * Every entry is CONTEXT-SCOPED: it suppresses entry.name only inside the
+ * exact substrings listed in entry.contexts. The sweep strips every context
+ * occurrence from the file and re-tests — a residual match is a violation,
+ * so a future stray agent reference in an allowlisted file still fails.
+ *
  * An entry MUST satisfy both directions:
- *   (a) Forward  — the corpus file at entry.path contains entry.name (case-insensitive).
- *   (b) Backward — a new `it` block asserts every entry has at least one live hit.
+ *   (a) Forward  — after stripping entry.contexts, no hit for entry.name remains.
+ *   (b) Backward — every entry has a live name hit AND every context string
+ *                  occurs verbatim in the file (stale contexts must be removed).
  *
  * Entry.path is the full display path as it appears in violation messages:
  *   "src/assets/<rel>" for assets corpus
  *   "dist/commands/<rel>" for compiled dist corpus
  *   "docs/reference/<rel>" for contributor reference docs
  *   ".devflow/features/<rel>" for git-tracked feature knowledge bases
+ *   "src/assets/scripts/<rel>" for extensionless hook scripts
  *
  * Allowed categories (in priority order):
  *   URL_LINK     — entry.name appears only as a URL or link text
@@ -119,6 +129,8 @@ interface AllowlistEntry {
   path: string
   name: string
   reason: string
+  /** Exact substrings that legitimately contain the retired name in this file. */
+  contexts: readonly string[]
 }
 
 const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
@@ -131,6 +143,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'URL_LINK: "CodeReviewComments" — link text for the Go wiki page; ' +
       'no agent spawn reference',
+    contexts: ['CodeReviewComments'],
   },
 
   // -----------------------------------------------------------------------
@@ -146,6 +159,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'CONCEPT: evaluator_panel MDS function import/call; inline prompt role labels ' +
       '("Acceptance-criteria evaluator:", etc.) — not Form-B spawn keys; ' +
       'actual spawn uses agentType: "Evaluate"',
+    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator'],
   },
   {
     path: 'src/assets/commands/_partials/_engine.mds',
@@ -153,6 +167,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: @define evaluator_panel() MDS function body; inline prompt descriptors ' +
       '— not Form-B spawn keys',
+    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
   },
   {
     path: 'dist/commands/dynamic-build.md',
@@ -160,6 +175,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: compiled output of dynamic-build.mds; evaluator_panel function + prompt labels ' +
       '— not Form-B spawn keys',
+    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
   },
 
   // -----------------------------------------------------------------------
@@ -171,6 +187,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'DATA_FIELD: reviewer_confidence — issue contract field carrying a confidence ' +
       'percentage; not an agent spawn',
+    contexts: ['reviewer_confidence'],
   },
   {
     path: 'src/assets/agents/code.md',
@@ -178,6 +195,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONTRACT: "Reviewer Focus Areas" — protected PR description contract heading ' +
       '(plan.mds emits; code.md maps the PR table to it); 5 sites, 3 files',
+    contexts: ['Reviewer Focus Areas'],
   },
   {
     path: 'src/assets/commands/plan.mds',
@@ -185,18 +203,21 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONTRACT: "Reviewer Focus Areas" heading emitted in PR Description Guidance output ' +
       '— protected cross-file contract; not an agent spawn',
+    contexts: ['Reviewer Focus Areas'],
   },
   {
     path: 'src/assets/commands/resolve.mds',
     name: 'Reviewer',
     reason:
       'DATA_FIELD: reviewer_confidence — issue input data field; not an agent spawn',
+    contexts: ['reviewer_confidence'],
   },
   {
     path: 'src/assets/commands/dynamic-build.mds',
     name: 'Reviewer',
     reason:
       'CONCEPT: "dead-reviewer detection" — detection concept in comment; not an agent spawn',
+    contexts: ['dead-reviewer'],
   },
   {
     path: 'src/assets/commands/_partials/_engine.mds',
@@ -204,6 +225,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: "clean reviewer" — generic prose in Review agent result contract description; ' +
       'not an agent spawn',
+    contexts: ['clean reviewer'],
   },
   {
     path: 'src/assets/skills/quality-gates/SKILL.md',
@@ -211,6 +233,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'URL_LINK: "reviewer/" — URL path segment in Google Engineering Practices link; ' +
       'not an agent spawn',
+    contexts: ['review/reviewer/'],
   },
   {
     path: 'src/assets/skills/compliance/references/sox.md',
@@ -218,6 +241,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       '"reviewer" — generic human code-review role in SOX control description; ' +
       'not an agent spawn',
+    contexts: ['lacks a PR and reviewer'],
   },
   {
     path: 'src/assets/skills/git/references/violations.md',
@@ -225,6 +249,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       '"Reviewers" — plural generic human code-review participants in violation example; ' +
       'not an agent spawn',
+    contexts: ['Reviewers can'],
   },
   {
     path: 'src/assets/skills/git/references/patterns.md',
@@ -232,12 +257,14 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONTRACT: "## Reviewer Focus Areas" section heading — protected PR description ' +
       'contract site in git skill reference patterns',
+    contexts: ['Reviewer Focus Areas'],
   },
   {
     path: 'dist/commands/resolve.md',
     name: 'Reviewer',
     reason:
       'DATA_FIELD: compiled resolve.mds; reviewer_confidence field — not an agent spawn',
+    contexts: ['reviewer_confidence'],
   },
   {
     path: 'dist/commands/dynamic-build.md',
@@ -245,12 +272,14 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: compiled dynamic-build.mds; "dead-reviewer" concept + "clean reviewer" prose ' +
       '— not agent spawns',
+    contexts: ['dead-reviewer', 'clean reviewer'],
   },
   {
     path: 'dist/commands/plan.md',
     name: 'Reviewer',
     reason:
       'CONTRACT: compiled plan.mds; "Reviewer Focus Areas" protected contract heading',
+    contexts: ['Reviewer Focus Areas'],
   },
 
   // -----------------------------------------------------------------------
@@ -262,6 +291,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: "devflow-tester-" — temp file path pattern in browser test scaffolding ' +
       '(mktemp /tmp/devflow-tester-XXXXXX.log); not an agent spawn',
+    contexts: ['devflow-tester-'],
   },
 
   // -----------------------------------------------------------------------
@@ -273,6 +303,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'THIRD_PARTY: go-playground/validator, serde+validator — third-party library names ' +
       'in skills table; not agent spawns',
+    contexts: ['go-playground/validator', 'serde + validator'],
   },
   {
     path: 'src/assets/skills/boundary-validation/references/sources.md',
@@ -280,6 +311,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'THIRD_PARTY: go-playground/validator, validator Rust crate — source bibliography ' +
       'entries; not agent spawns',
+    contexts: ['go-playground/validator', 'custom validators', 'validator (Rust crate)', 'docs.rs/validator'],
   },
   {
     path: 'src/assets/skills/python/references/sources.md',
@@ -287,30 +319,35 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'THIRD_PARTY: "field validators" — Pydantic validation terminology in source entry; ' +
       'not an agent spawn',
+    contexts: ['field validators'],
   },
   {
     path: 'src/assets/skills/complexity/references/violations.md',
     name: 'Validator',
     reason:
       'EXAMPLE_CODE: UserValidator — code identifier in violation sample; not an agent spawn',
+    contexts: ['UserValidator'],
   },
   {
     path: 'src/assets/skills/testing/references/violations.md',
     name: 'Validator',
     reason:
       'EXAMPLE_CODE: mockValidator — test variable in violation sample; not an agent spawn',
+    contexts: ['mockValidator', 'RealValidator'],
   },
   {
     path: 'src/assets/skills/architecture/SKILL.md',
     name: 'Validator',
     reason:
       'EXAMPLE_CODE: UserValidator — class name in dependency-injection example; not an agent spawn',
+    contexts: ['UserValidator'],
   },
   {
     path: 'src/assets/skills/architecture/references/patterns.md',
     name: 'Validator',
     reason:
       'EXAMPLE_CODE: UserValidator — class in DI pattern example code; not an agent spawn',
+    contexts: ['UserValidator', 'private validator', 'this.validator'],
   },
 
   // -----------------------------------------------------------------------
@@ -322,6 +359,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'DATA_FIELD: reviewer_confidence — live field name in the /resolve issue ' +
       'contract (resolve.mds); not a Form-B spawn key',
+    contexts: ['reviewer_confidence'],
   },
 
   // -----------------------------------------------------------------------
@@ -333,6 +371,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: evaluator_panel — live MDS function name defined in _engine.mds; ' +
       'not a Form-B spawn key',
+    contexts: ['evaluator_panel'],
   },
 ]
 
@@ -412,6 +451,31 @@ function collectFiles(dir: string, exts: string[]): string[] {
     if (entry.isDirectory()) {
       results.push(...collectFiles(full, exts))
     } else if (exts.some(ext => entry.name.endsWith(ext))) {
+      results.push(full)
+    }
+  }
+  return results
+}
+
+/**
+ * Recursively collect the extensionless shell/CJS hook scripts under
+ * src/assets/scripts. Excludes .md/.mds files — those are already covered by
+ * the assets corpus scan (e.g. hooks/assets/orchestrator-charter.md).
+ * Returns [] when the directory does not exist.
+ */
+function collectScriptFiles(dir: string): string[] {
+  const results: string[] = []
+  let entries: ReturnType<typeof readdirSync>
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return results
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      results.push(...collectScriptFiles(full))
+    } else if (!entry.name.endsWith('.md') && !entry.name.endsWith('.mds')) {
       results.push(full)
     }
   }
@@ -576,6 +640,65 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       `agentType values in dist/commands/ not in _roster.mds — update the roster or fix the command:\n  ${inDistNotInRoster.join('\n  ')}`,
     ).toHaveLength(0)
   })
+
+  it('subagent_type literals in dist and hook scripts exactly match a live form-B name (case-sensitive)', () => {
+    /**
+     * Guard 5 (registry-integrity) compares subagent_type values to registry
+     * slugs case-INSENSITIVELY, and GAP-1 ties slugs to form B — but nothing
+     * enforced exact case on the literal itself. subagent_type="CODE" would
+     * pass both while failing at spawn time. This closes that hole: every
+     * literal must byte-equal an actual frontmatter name: value (or a
+     * Claude Code built-in).
+     */
+    const BUILTINS_EXACT = new Set(['Explore'])
+
+    // Truth set: the real frontmatter name: values, not a derived transform.
+    const formBNames = new Set(
+      readdirSync(AGENTS_DIR)
+        .filter(f => f.endsWith('.md'))
+        .map(f => readFrontmatterName(path.join(AGENTS_DIR, f))),
+    )
+    expect(formBNames.size, 'No agent frontmatter names parsed').toBeGreaterThan(0)
+
+    // Matches subagent_type="X", subagent_type: "X", and the shell-escaped
+    // subagent_type=\"X\" form used inside hook heredoc strings.
+    const re = /subagent_type[=:]\s*\\?"([^"\\]+)\\?"/g
+
+    let matchCount = 0
+    const violations: string[] = []
+    const scanContent = (displayPath: string, content: string) => {
+      for (const m of content.matchAll(re)) {
+        matchCount++
+        const name = m[1]
+        if (BUILTINS_EXACT.has(name) || formBNames.has(name)) continue
+        violations.push(
+          `  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`,
+        )
+      }
+    }
+
+    for (const f of requireDistFiles()) {
+      scanContent(`dist/commands/${f}`, readFileSync(path.join(DIST_COMMANDS_DIR, f), 'utf-8'))
+    }
+    for (const filePath of collectScriptFiles(SCRIPTS_DIR)) {
+      scanContent(
+        `src/assets/scripts/${path.relative(SCRIPTS_DIR, filePath)}`,
+        readFileSync(filePath, 'utf-8'),
+      )
+    }
+
+    // Non-vacuity: dist currently carries ~66 spawn sites + the Learning hook
+    // directive. Far fewer scanned means the regex or the corpus broke.
+    expect(
+      matchCount,
+      `Only ${matchCount} subagent_type literals scanned (expected >= 50) — regex or corpus is broken`,
+    ).toBeGreaterThanOrEqual(50)
+
+    expect(
+      violations,
+      `Case-exact subagent_type mismatches (spawn resolution is exact; Guard 5 normalizes):\n${violations.join('\n')}`,
+    ).toHaveLength(0)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -665,10 +788,12 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
   /**
    * Corpus: src/assets/**\/*.{md,mds} + dist/commands/**\/*.md
    *         + docs/reference/**\/*.md + .devflow/features/**\/*.md
+   *         + src/assets/scripts/** (extensionless hook scripts)
    * src/assets = the canonical shipping tree (skills, agents, commands, hooks, rules)
    * dist/commands = compiled command files actually deployed to users
    * docs/reference = contributor docs that teach agent names and registry shapes
    * .devflow/features = git-tracked knowledge bases injected as FEATURE_KNOWLEDGE
+   * src/assets/scripts = shell/CJS hooks (spawn directives and injected prose live here)
    *
    * If dist/ is absent: requireDistFiles() throws — FAIL LOUD, not skip.
    * That's intentional: if this guard passes with an empty dist it is not a guard.
@@ -679,26 +804,29 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
    * both had this failure mode; the two existing sites are fixed in this commit).
    */
 
-  it('corpus size is at least 220 files (guards against mis-glob / empty dist)', () => {
+  it('corpus size is at least 260 files (guards against mis-glob / empty dist)', () => {
     // Fail-loud: requireDistFiles() throws if dist is absent
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
     const docsFiles = collectFiles(DOCS_REFERENCE_DIR, ['.md'])
     const featureFiles = collectFiles(FEATURES_DIR, ['.md'])
+    const scriptFiles = collectScriptFiles(SCRIPTS_DIR)
 
     // Segment floors: collectFiles returns [] for a missing directory, which
-    // would silently drop a corpus segment while the 220 total still passes.
+    // would silently drop a corpus segment while the 260 total still passes.
     expect(docsFiles.length, 'docs/reference corpus segment is empty — check DOCS_REFERENCE_DIR').toBeGreaterThanOrEqual(5)
     expect(featureFiles.length, '.devflow/features corpus segment is empty — check FEATURES_DIR').toBeGreaterThanOrEqual(3)
+    expect(scriptFiles.length, 'src/assets/scripts corpus segment is empty — check SCRIPTS_DIR').toBeGreaterThanOrEqual(20)
 
-    const filesScanned = assetsFiles.length + distFiles.length + docsFiles.length + featureFiles.length
+    const filesScanned = assetsFiles.length + distFiles.length + docsFiles.length + featureFiles.length + scriptFiles.length
     expect(
       filesScanned,
-      `Corpus is only ${filesScanned} files (expected >= 220). ` +
+      `Corpus is only ${filesScanned} files (expected >= 260). ` +
       `Check glob patterns — an empty corpus is a silent false-pass.\n` +
       `  src/assets files: ${assetsFiles.length}  dist/commands files: ${distFiles.length}  ` +
-      `docs/reference files: ${docsFiles.length}  .devflow/features files: ${featureFiles.length}`,
-    ).toBeGreaterThanOrEqual(220)
+      `docs/reference files: ${docsFiles.length}  .devflow/features files: ${featureFiles.length}  ` +
+      `src/assets/scripts files: ${scriptFiles.length}`,
+    ).toBeGreaterThanOrEqual(260)
   })
 
   it('no retired form B names appear in any shipped artifact (vacuous when list is empty)', () => {
@@ -708,8 +836,8 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
 
-    // Build O(1) lookup set from the allowlist: "displayPath\0name" → allowed
-    const allowedHits = new Set(RETIRED_ALLOWLIST.map(e => `${e.path}\0${e.name}`))
+    // O(1) lookup from the allowlist: "displayPath\0name" → entry (context-scoped)
+    const allowlistByHit = new Map(RETIRED_ALLOWLIST.map(e => [`${e.path}\0${e.name}`, e]))
 
     const violations: string[] = []
 
@@ -728,8 +856,18 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
           // Catches Coders, Coder's, coderPath, ANSI-embedded 31mcoder.
           const re = new RegExp(retiredName, 'i')
           if (re.test(content)) {
-            // Skip if this (displayPath, name) pair is explicitly allowlisted.
-            if (allowedHits.has(`${displayPath}\0${retiredName}`)) continue
+            const entry = allowlistByHit.get(`${displayPath}\0${retiredName}`)
+            if (entry) {
+              // Context-scoped: strip every allowlisted context, then re-test.
+              // A residual hit is a NEW reference the entry does not cover.
+              let residual = content
+              for (const ctx of entry.contexts) residual = residual.split(ctx).join('')
+              if (!re.test(residual)) continue
+              violations.push(
+                `  ${displayPath}: references retired name '${retiredName}' outside its allowlisted contexts`,
+              )
+              continue
+            }
             violations.push(
               `  ${displayPath}: references retired name '${retiredName}'`,
             )
@@ -746,6 +884,7 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     )
     scan(collectFiles(DOCS_REFERENCE_DIR, ['.md']), DOCS_REFERENCE_DIR, 'docs/reference/')
     scan(collectFiles(FEATURES_DIR, ['.md']), FEATURES_DIR, '.devflow/features/')
+    scan(collectScriptFiles(SCRIPTS_DIR), SCRIPTS_DIR, 'src/assets/scripts/')
 
     expect(violations, `Retired agent names found in shipped artifacts:\n${violations.join('\n')}`).toHaveLength(0)
   })
@@ -798,17 +937,32 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
         })
       } catch { /* skip */ }
     }
+    for (const filePath of collectScriptFiles(SCRIPTS_DIR)) {
+      try {
+        corpus.push({
+          displayPath: `src/assets/scripts/${path.relative(SCRIPTS_DIR, filePath)}`,
+          content: readFileSync(filePath, 'utf-8'),
+        })
+      } catch { /* skip */ }
+    }
 
     const staleEntries: string[] = []
     for (const entry of RETIRED_ALLOWLIST) {
       const re = new RegExp(entry.name, 'i')
-      const hasHit = corpus.some(({ displayPath, content }) =>
-        displayPath === entry.path && re.test(content),
-      )
-      if (!hasHit) {
+      const file = corpus.find(({ displayPath }) => displayPath === entry.path)
+      if (!file || !re.test(file.content)) {
         staleEntries.push(
           `  { path: '${entry.path}', name: '${entry.name}' } — no hit in corpus; stale entry must be removed`,
         )
+        continue
+      }
+      // Context staleness: every context must occur verbatim, or it suppresses nothing.
+      for (const ctx of entry.contexts) {
+        if (!file.content.includes(ctx)) {
+          staleEntries.push(
+            `  { path: '${entry.path}', name: '${entry.name}' } context '${ctx}' not found in file — stale context must be removed`,
+          )
+        }
       }
     }
     expect(
