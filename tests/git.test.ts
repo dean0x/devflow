@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // Mock child_process before importing git.ts
 vi.mock('child_process', () => ({
@@ -25,9 +28,73 @@ vi.mock('util', async (importOriginal) => {
 });
 
 import { exec } from 'child_process';
-import { getGitRoot, TRUNK_BRANCHES, isTrunkBranch } from '../src/core/git.js';
+import { getGitRoot, TRUNK_BRANCHES, TRUNK_BRANCH_PREFIXES, isTrunkBranch } from '../src/core/git.js';
 
 const mockedExec = vi.mocked(exec);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the Protected Branches canonical list from the worktree-support
+ * SKILL.md at test time so the guard test is driven by the actual source of
+ * truth rather than a third hardcoded copy.
+ *
+ * Locates the heading `## Protected Branches (Canonical List)`, takes the
+ * first non-empty line after it, and extracts all backtick-delimited tokens.
+ * Tokens without a trailing `*` are literals; tokens with a trailing `*` are
+ * wildcard prefixes (stripped: `release/*` → `release/`).
+ *
+ * Throws with a descriptive message when the heading or list line is absent —
+ * a structural change in SKILL.md should be a loud, actionable failure.
+ */
+function parseSkillMdBranches(): { literals: string[]; prefixes: string[] } {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const skillPath = resolve(
+    __dirname,
+    '../src/assets/skills/worktree-support/SKILL.md',
+  );
+  const lines = readFileSync(skillPath, 'utf-8').split('\n');
+
+  const headingIndex = lines.findIndex(
+    line => line === '## Protected Branches (Canonical List)',
+  );
+  if (headingIndex === -1) {
+    throw new Error(
+      'SKILL.md is missing "## Protected Branches (Canonical List)" heading — ' +
+        'update this test to match the new section structure',
+    );
+  }
+
+  // First non-empty line after the heading is the canonical list line.
+  const relativeIndex = lines
+    .slice(headingIndex + 1)
+    .findIndex(line => line.trim() !== '');
+  if (relativeIndex === -1) {
+    throw new Error(
+      'SKILL.md "## Protected Branches (Canonical List)" section has no ' +
+        'content line after the heading',
+    );
+  }
+  const listLine = lines[headingIndex + 1 + relativeIndex];
+
+  const literals: string[] = [];
+  const prefixes: string[] = [];
+  const tokenRe = /`([^`]+)`/g;
+  let match: RegExpExecArray | null;
+  while ((match = tokenRe.exec(listLine)) !== null) {
+    const token = match[1];
+    if (token.endsWith('*')) {
+      prefixes.push(token.slice(0, -1)); // 'release/*' → 'release/'
+    } else {
+      literals.push(token);
+    }
+  }
+
+  return { literals, prefixes };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,16 +115,46 @@ describe('TRUNK_BRANCHES', () => {
    * TRUNK_BRANCHES covers the exact literals; TRUNK_BRANCH_PREFIXES covers `release/`.
    */
 
-  it('contains every branch from the worktree-support canonical list', () => {
-    // These are the exact names from the worktree-support SKILL.md Protected Branches list.
-    // `release/*` is covered by isTrunkBranch via TRUNK_BRANCH_PREFIXES — not a literal.
-    const canonicalLiterals = [
-      'main', 'master', 'develop', 'integration', 'trunk', 'staging', 'production',
-    ];
-    for (const name of canonicalLiterals) {
+  it('matches SKILL.md literal branches exactly — set equality in both directions', () => {
+    const { literals: skillLiterals } = parseSkillMdBranches();
+    const trunkSet = new Set(TRUNK_BRANCHES as readonly string[]);
+    const skillSet = new Set(skillLiterals);
+
+    // SKILL.md → TRUNK_BRANCHES: every SKILL.md literal must appear in TRUNK_BRANCHES
+    for (const name of skillLiterals) {
       expect(
-        (TRUNK_BRANCHES as readonly string[]).includes(name),
-        `TRUNK_BRANCHES should include '${name}' from the worktree-support canonical list`,
+        trunkSet.has(name),
+        `TRUNK_BRANCHES is missing '${name}' from SKILL.md canonical list`,
+      ).toBe(true);
+    }
+
+    // TRUNK_BRANCHES → SKILL.md: every TRUNK_BRANCHES entry must appear in SKILL.md
+    for (const name of TRUNK_BRANCHES as readonly string[]) {
+      expect(
+        skillSet.has(name),
+        `TRUNK_BRANCHES has '${name}' but SKILL.md canonical list does not`,
+      ).toBe(true);
+    }
+  });
+
+  it('TRUNK_BRANCH_PREFIXES matches SKILL.md wildcard prefixes exactly — set equality in both directions', () => {
+    const { prefixes: skillPrefixes } = parseSkillMdBranches();
+    const trunkPrefixSet = new Set(TRUNK_BRANCH_PREFIXES as readonly string[]);
+    const skillPrefixSet = new Set(skillPrefixes);
+
+    // SKILL.md → TRUNK_BRANCH_PREFIXES: every SKILL.md wildcard prefix must appear
+    for (const prefix of skillPrefixes) {
+      expect(
+        trunkPrefixSet.has(prefix),
+        `TRUNK_BRANCH_PREFIXES is missing '${prefix}' from SKILL.md canonical list`,
+      ).toBe(true);
+    }
+
+    // TRUNK_BRANCH_PREFIXES → SKILL.md: every entry must appear in SKILL.md
+    for (const prefix of TRUNK_BRANCH_PREFIXES as readonly string[]) {
+      expect(
+        skillPrefixSet.has(prefix),
+        `TRUNK_BRANCH_PREFIXES has '${prefix}' but SKILL.md canonical list does not`,
       ).toBe(true);
     }
   });
