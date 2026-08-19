@@ -21,6 +21,7 @@ import * as os from 'os';
 import {
   LEGACY_AGENT_KEYS,
   canonicaliseAgentKeys,
+  parseAgentMappingEnvelope,
   readAgentMapping,
   saveAgentMapping,
   resolveEffective,
@@ -765,13 +766,17 @@ describe('canonicaliseAgentKeys', () => {
     Object.defineProperty(input, 'bad-key', { value: { model: 'sonnet' }, enumerable: true, configurable: true, writable: true });
 
     const proto = Object.getPrototypeOf(input);
-    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    const { agents, didMutate, dropped, guardDropped } = canonicaliseAgentKeys(input);
     // The rename 'bad-key' → '__proto__' is skipped, but the key is still deleted
     // (didMutate is true because the old key is removed regardless of newKey guard).
     // What matters: the prototype of the result must be unchanged.
     expect(Object.getPrototypeOf(agents)).toBe(proto);
     // __proto__ must not appear as a canonical renamed key — prototype is plain Object
     expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
+    // The drop must be reported under guardDropped (pollution-guard reason), NOT under
+    // dropped (which is reserved for canonical-key-collision reason).
+    expect(dropped).toEqual([]);
+    expect(guardDropped).toEqual(['bad-key']);
   });
 
   it('skips rename when oldKey === __proto__ (prototype-safety, old-key guard)', () => {
@@ -790,10 +795,15 @@ describe('canonicaliseAgentKeys', () => {
     // Object.keys sees __proto__ as an own enumerable property here
     expect(Object.keys(rawAgents)).toContain('__proto__');
 
-    const { agents, didMutate } = canonicaliseAgentKeys(rawAgents);
-    // The __proto__ old-key guard must fire; no rename must have happened
-    expect(didMutate).toBe(false);
-    // The result prototype must be plain Object.prototype
+    const { agents, didMutate, dropped, guardDropped } = canonicaliseAgentKeys(rawAgents);
+    // The __proto__ old-key guard must fire and report a truthful result:
+    // - didMutate is true (the key was deleted from the output object)
+    // - dropped is empty (prototype-guard skips are NOT collision drops)
+    // - guardDropped records the skipped key under the correct category
+    expect(didMutate).toBe(true);
+    expect(dropped).toEqual([]);
+    expect(guardDropped).toEqual(['__proto__']);
+    // The result prototype must be plain Object.prototype (guard must not pollute it)
     expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
     // Clean up LEGACY_AGENT_KEYS entry (afterEach also does this, but be explicit)
     delete (LEGACY_AGENT_KEYS as Record<string, string>)['__proto__'];

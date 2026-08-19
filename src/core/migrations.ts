@@ -130,7 +130,7 @@ export const MIGRATIONS: readonly AnyMigration[] = [
       }
 
       const onWarning = (msg: string) => warnings.push(msg)
-      const { agents: migrated, didMutate, renamed, dropped } = canonicaliseAgentKeys(
+      const { agents: migrated, didMutate, renamed, dropped, guardDropped } = canonicaliseAgentKeys(
         envelope.rawAgents,
         onWarning,
       )
@@ -154,6 +154,11 @@ export const MIGRATIONS: readonly AnyMigration[] = [
       if (dropped.length > 0) {
         warnings.push(
           `canonicalise-agent-keys-v1: dropped legacy key(s) ${dropped.map(k => `'${k}'`).join(', ')} — canonical key already present, existing value kept`,
+        )
+      }
+      if (guardDropped.length > 0) {
+        warnings.push(
+          `canonicalise-agent-keys-v1: dropped legacy key(s) ${guardDropped.map(k => `'${k}'`).join(', ')} — skipped due to prototype-pollution guard`,
         )
       }
       return { infos, warnings }

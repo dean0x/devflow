@@ -128,21 +128,23 @@ export const LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.assign
  *
  * @param rawAgents - The `agents` field from the raw JSON file (any value types).
  * @param onWarning - Optional callback for collision warnings.
- * @returns { agents, didMutate, renamed, dropped } — caller persists iff didMutate is true.
+ * @returns { agents, didMutate, renamed, dropped, guardDropped } — caller persists iff didMutate is true.
  *   renamed: legacy keys successfully renamed to their canonical form.
- *   dropped: legacy keys that existed but could not be renamed (collision or prototype safety).
+ *   dropped: legacy keys dropped due to canonical-key collision (new value wins).
+ *   guardDropped: legacy keys dropped due to prototype-pollution guard (distinct from collision).
  */
 export function canonicaliseAgentKeys<T>(
   rawAgents: Record<string, T>,
   onWarning?: (msg: string) => void,
-): { agents: Record<string, T>; didMutate: boolean; renamed: string[]; dropped: string[] } {
+): { agents: Record<string, T>; didMutate: boolean; renamed: string[]; dropped: string[]; guardDropped: string[] } {
   const warn = onWarning ?? (() => undefined);
   const renamed: string[] = [];
   const dropped: string[] = [];
+  const guardDropped: string[] = [];
 
   // Fast path: no legacy keys defined — skip without reading input.
   if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
-    return { agents: rawAgents, didMutate: false, renamed, dropped };
+    return { agents: rawAgents, didMutate: false, renamed, dropped, guardDropped };
   }
 
   // Snapshot the original keys for collision detection (order-independent result).
@@ -152,10 +154,18 @@ export function canonicaliseAgentKeys<T>(
   let didMutate = false;
 
   for (const oldKey of originalKeys) {
-    // Skip the __proto__ key — assigning to it sets the prototype, not a property.
-    // Count as dropped if LEGACY_AGENT_KEYS happens to declare it (adversarial input).
+    // Skip the __proto__ old-key: iteration is safe but we must never rename or
+    // assign it — even reading result['__proto__'] would touch the prototype chain.
+    // If LEGACY_AGENT_KEYS declares it, treat as a guard-drop (removes the own
+    // property that spread may have copied, and records the truthful outcome).
     if (oldKey === '__proto__') {
-      if (Object.hasOwn(LEGACY_AGENT_KEYS, '__proto__')) dropped.push('__proto__');
+      if (Object.hasOwn(LEGACY_AGENT_KEYS, '__proto__')) {
+        // Reflect.deleteProperty safely removes the own '__proto__' property
+        // (created by spread's [[DefineOwnProperty]]) without touching the prototype chain.
+        Reflect.deleteProperty(result, '__proto__');
+        guardDropped.push('__proto__');
+        didMutate = true;
+      }
       continue;
     }
     if (!Object.hasOwn(LEGACY_AGENT_KEYS, oldKey)) continue;
@@ -163,8 +173,9 @@ export function canonicaliseAgentKeys<T>(
     const newKey = LEGACY_AGENT_KEYS[oldKey] as string;
     // Guard new key: creating an own property named __proto__ would silently
     // set the prototype chain instead. Drop and remove the old key without creating target.
+    // This is a pollution-guard drop, not a collision drop — report under guardDropped.
     if (newKey === '__proto__') {
-      dropped.push(oldKey);
+      guardDropped.push(oldKey);
       delete result[oldKey];
       didMutate = true;
       continue;
@@ -185,7 +196,7 @@ export function canonicaliseAgentKeys<T>(
     didMutate = true;
   }
 
-  return { agents: result, didMutate, renamed, dropped };
+  return { agents: result, didMutate, renamed, dropped, guardDropped };
 }
 
 // ---------------------------------------------------------------------------
