@@ -239,6 +239,32 @@ export function isDirtyEffort(row: AgentRow): boolean {
   return row.configuredEffort !== row.originalEffort;
 }
 
+/**
+ * The model value that will be persisted to disk for this row.
+ *
+ * For a dirty row: the in-session selection (configuredModel).
+ * For an untouched dormant row: the saved GPT model (dormantModel), which
+ * preserves the mapping entry byte-identical even though configuredModel
+ * shows 'default' while the proxy is off.
+ * For all other untouched rows: configuredModel (which equals originalModel).
+ *
+ * Used by both rowState (STATE column display) and mergeTuiRowsIntoMapping
+ * (save merge) so the two surfaces share a single persisted-value predicate.
+ */
+export function persistedModelFor(row: AgentRow): string {
+  return isDirtyModel(row) ? row.configuredModel : (row.dormantModel ?? row.configuredModel);
+}
+
+/**
+ * The effort value that will be persisted to disk for this row.
+ *
+ * For a dirty row: the in-session selection (configuredEffort).
+ * For an untouched row: the original effort (originalEffort).
+ */
+export function persistedEffortFor(row: AgentRow): EffortLevel | 'default' {
+  return isDirtyEffort(row) ? row.configuredEffort : row.originalEffort;
+}
+
 /** Count of rows with any dirty field (model OR effort). */
 export function unsavedCount(rows: readonly AgentRow[]): number {
   let count = 0;
@@ -270,11 +296,8 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
  * Pure function, no I/O.
  */
 export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
-  const persistedModel = isDirtyModel(row)
-    ? row.configuredModel
-    : (row.dormantModel ?? row.configuredModel);
   return classifyAgentState({
-    configured: persistedModel,
+    configured: persistedModelFor(row),
     proxyEnabled,
     installed: row.installed,
     inRegistry: row.inRegistry,

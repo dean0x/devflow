@@ -659,6 +659,32 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
     // Original mapping is untouched
     expect(frozen.agents['code']).toEqual({ model: 'opus' });
   });
+
+  it('dormant row cycled back to its saved GPT model is inert (no write)', () => {
+    // A dormant row has originalModel='default' (proxy-off fallback) but
+    // dormantModel='gpt-5.5' (the saved GPT model). If the user cycles
+    // to 'gpt-5.5', isDirtyModel returns false (not a change). The merge
+    // must treat the row as inert — not re-write 'gpt-5.5' over 'default'.
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { code: { model: 'gpt-5.5' } },
+    };
+    const row: import('../src/cli/agents-view/state.js').AgentRow = {
+      name: 'code',
+      shippedDefault: 'sonnet',
+      configuredModel: 'gpt-5.5',  // user cycled to the dormant model
+      originalModel: 'default',     // proxy-off display fallback at init
+      configuredEffort: 'default',
+      originalEffort: 'default',
+      dormantModel: 'gpt-5.5',     // the saved GPT model
+      offCyclePin: null,
+      installed: true,
+      inRegistry: true,
+    };
+    const result = mergeTuiRowsIntoMapping([row], mapping);
+    // Must be byte-identical — no write occurred
+    expect(result.agents['code']).toEqual({ model: 'gpt-5.5' });
+  });
 });
 
 // ---------------------------------------------------------------------------

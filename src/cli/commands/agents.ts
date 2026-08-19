@@ -53,6 +53,8 @@ import {
   buildModelCycle,
   buildPickerNameMap,
   computeViewportHeight,
+  isDirtyModel,
+  isDirtyEffort,
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
@@ -423,8 +425,8 @@ export function mergeTuiRowsIntoMapping(
   const newAgents: Record<string, AgentMapping> = { ...originalMapping.agents };
 
   for (const row of rows) {
-    const modelDirty = row.configuredModel !== row.originalModel;
-    const effortDirty = row.configuredEffort !== row.originalEffort;
+    const modelDirty = isDirtyModel(row);
+    const effortDirty = isDirtyEffort(row);
 
     if (!modelDirty && !effortDirty) continue;
 
