@@ -967,4 +967,23 @@ describe('parseAgentMappingEnvelope', () => {
       expect(result.message).toContain('non-object agents field');
     }
   });
+
+  // --- arms ~:247-249 and ~:253-255 (previously untested) ---
+
+  it('warn: top-level JSON non-object (bare number) — message contains "not a JSON object"', async () => {
+    // Arm ~:247-249: parsed is a primitive, not an object → kind=warn
+    await fs.writeFile(filePath, '42', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('not a JSON object');
+    }
+  });
+
+  it('skip: agents field is null — kind=skip (no agents to migrate)', async () => {
+    // Arm ~:253-255: rawAgents is null → kind=skip (treated as absent, nothing to migrate)
+    await fs.writeFile(filePath, '{"agents":null}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
+  });
 });
