@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
 
@@ -614,6 +614,34 @@ describe('resolveDevflowDirCleanup', () => {
       homeDir: HOME,
       keepDocs: false,
     })).toBe('prompt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A7: resolveProjectDataCleanup — pure function for .devflow/ prompt cancel
+// ---------------------------------------------------------------------------
+
+describe('resolveProjectDataCleanup (A7)', () => {
+  it('returns true for boolean true (user confirmed removal)', () => {
+    expect(resolveProjectDataCleanup(true)).toBe(true);
+  });
+
+  it('returns false for boolean false (user declined)', () => {
+    expect(resolveProjectDataCleanup(false)).toBe(false);
+  });
+
+  it('returns false for a symbol (cancel sentinel — treated as decline, not abort)', () => {
+    // The cancel symbol is what p.confirm() returns when the user presses Ctrl-C.
+    // It must be treated as decline so the remaining cleanup steps still run
+    // (avoids PF-014: process.exit here would skip claudeignore, hooks, safe-delete).
+    expect(resolveProjectDataCleanup(Symbol('clack-cancel'))).toBe(false);
+  });
+
+  it('returns false for any non-true value — type-safe exhaustive check', () => {
+    // Any value that is not boolean `true` must return false (no surprises).
+    for (const val of [false, Symbol(), Symbol('other')]) {
+      expect(resolveProjectDataCleanup(val)).toBe(false);
+    }
   });
 });
 

@@ -150,6 +150,23 @@ export function resolveSecurityRemovalDecision(opts: {
  * prompt is suppressed — artifacts-only regardless of isTTY or userContent. This prevents
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
+/**
+ * Resolve the answer from a Clack confirm prompt for the .devflow/ project data
+ * removal question into a boolean removal decision.
+ *
+ * A cancel (user presses Ctrl-C on this prompt) is treated as decline: the
+ * .devflow/ directory is preserved and the uninstall continues with the remaining
+ * steps rather than aborting via process.exit() (applies PF-014, applies ADR-003).
+ *
+ * PURE — no I/O, fully testable.
+ *
+ * @param answer - The value returned by p.confirm(): boolean or a cancel symbol.
+ * @returns true only when the user explicitly confirmed removal.
+ */
+export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
+  return answer === true;
+}
+
 export function resolveDevflowDirCleanup(opts: {
   scope: 'user' | 'local';
   isTTY: boolean;
@@ -675,11 +692,14 @@ export const uninstallCommand = new Command('uninstall')
           });
 
           if (p.isCancel(removeDevflow)) {
-            p.cancel('Uninstall cancelled.');
-            process.exit(0);
+            // Treat cancel as decline: preserve .devflow/ and continue cleanup.
+            // avoids PF-014: process.exit() here would skip claudeignore, hooks,
+            // and safe-delete removal — removeAllDevFlow has already run.
+            // applies ADR-003: clean end-state on every path.
+            p.log.info('.devflow/ preserved (prompt cancelled — continuing cleanup)');
           }
 
-          shouldRemoveDevflow = removeDevflow;
+          shouldRemoveDevflow = resolveProjectDataCleanup(removeDevflow);
         }
 
         if (shouldRemoveDevflow) {
