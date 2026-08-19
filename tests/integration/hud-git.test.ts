@@ -199,11 +199,8 @@ let dirNotGit: string;
 //           Two variants: fully-pushed develop (L1) and develop +1 unpushed commit (L2).
 //           Used by: "trunk branch (develop) self-compare" describe.
 //
-//           RED against old applyDefaultBranchRule: old code only redirected to
-//           origin/<branch> when branch === defaultShort ('main'), so develop was
-//           compared against origin/main, giving wrong ahead/filesChanged counts.
-//           GREEN after fix: isTrunkBranch('develop') === true, so the comparison
-//           correctly uses origin/develop.
+//           Verifies: isTrunkBranch('develop') causes develop branches to self-compare
+//           against origin/develop rather than the repo default (origin/main).
 let dirLPushed: string;    // fully-pushed develop
 let dirLUnpushed: string;  // develop +1 unpushed commit
 
@@ -439,8 +436,7 @@ beforeAll(async () => {
 
     // Shape L1: remote + origin/HEAD → origin/main + develop pushed to origin/develop
     // fully-pushed develop → ahead=0, filesChanged=0 (vs origin/develop, NOT origin/main)
-    // RED against old code: applyDefaultBranchRule returns origin/main for develop,
-    // giving ahead=1 (the one commit on develop) instead of 0.
+    // Comparing vs origin/main would give ahead=1 (the one commit on develop).
     (async () => {
       dirLPushed = mkdtempSync(join(tmpdir(), 'devflow-hud-git-'));
       allTempDirs.push(dirLPushed);
@@ -460,7 +456,7 @@ beforeAll(async () => {
 
     // Shape L2: same setup as L1 + one extra unpushed commit on develop
     // develop +1 unpushed → ahead=1, filesChanged=1 (vs origin/develop)
-    // RED against old code: applyDefaultBranchRule uses origin/main as base → ahead=2.
+    // Comparing vs origin/main would give ahead=2 (1 on develop + 1 unpushed).
     (async () => {
       dirLUnpushed = mkdtempSync(join(tmpdir(), 'devflow-hud-git-'));
       allTempDirs.push(dirLUnpushed);
@@ -807,28 +803,19 @@ describe('gatherGitStatus — dirty-tree ahead/filesChanged asymmetry (Shape M)'
 
 describe('gatherGitStatus — trunk branch (develop) self-compare (Shape L)', () => {
   /**
-   * Regression: the old applyDefaultBranchRule only redirected the current branch
-   * to origin/<branch> when branch === defaultShort (the single detected default,
-   * e.g. 'main'). For any other trunk branch (develop, staging, production) it fell
-   * through and compared against origin/main.
+   * Regression guard: trunk branches (develop, staging, production) must self-compare
+   * against their own remote counterpart (origin/<branch>) rather than the repo's
+   * default branch (origin/main).
    *
-   * Bug consequence: a fully-pushed develop branch showed nonzero ahead/filesChanged
-   * counts (it compared against origin/main, finding the commits on develop). A
-   * develop branch with 1 unpushed commit showed ahead=2 instead of ahead=1.
+   * A fully-pushed develop branch shows ahead=0, filesChanged=0 when compared against
+   * origin/develop. A develop branch with one unpushed commit shows ahead=1.
    *
-   * Fix: isTrunkBranch() predicate covers all canonical trunk branches so develop,
-   * staging, and production all self-compare against origin/<branch> when that ref
-   * exists in the remote. Non-trunk feature branches continue to compare against
-   * the repo's default branch (origin/main) — the desired behavior for feature work.
-   *
-   * These two tests are RED against the old applyDefaultBranchRule and GREEN after
-   * the isTrunkBranch fix (per PF-018: a test must be RED first).
+   * isTrunkBranch() covers all canonical trunk branches. Non-trunk feature branches
+   * continue to compare against the repo's default branch (origin/main).
    */
 
   it('fully-pushed develop compares against origin/develop (not origin/main) → ahead=0', () => {
-    // RED against old code: old applyDefaultBranchRule returns origin/main as base.
-    // develop has 1 commit past main/origin/main → old code gives ahead=1, not 0.
-    // New code: isTrunkBranch('develop') && origin/develop in refs → base = origin/develop.
+    // isTrunkBranch('develop') && origin/develop in refs → base = origin/develop.
     // develop is fully pushed → ahead=0, filesChanged=0.
     expect(statusLPushed).not.toBeNull();
     expect(statusLPushed?.branch).toBe('develop');
