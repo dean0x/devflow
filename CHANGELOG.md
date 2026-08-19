@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING CHANGES
+
+#### Agent rename — 13 agents renamed to action-verb form
+
+All 13 non-immutable devflow agents have been renamed from noun form to
+action-verb form. The three unchanged agents are `git`, `knowledge`, and
+`learning`.
+
+| Old name (Form A slug) | New name (Form A slug) | Old Form B (`name:`) | New Form B (`name:`) |
+|------------------------|------------------------|----------------------|----------------------|
+| `coder`       | `code`      | `Coder`       | `Code`      |
+| `designer`    | `design`    | `Designer`    | `Design`    |
+| `evaluator`   | `evaluate`  | `Evaluator`   | `Evaluate`  |
+| `researcher`  | `research`  | `Researcher`  | `Research`  |
+| `reviewer`    | `review`    | `Reviewer`    | `Review`    |
+| `scrutinizer` | `scrutinize`| `Scrutinizer` | `Scrutinize`|
+| `simplifier`  | `simplify`  | `Simplifier`  | `Simplify`  |
+| `skimmer`     | `skim`      | `Skimmer`     | `Skim`      |
+| `synthesizer` | `synthesize`| `Synthesizer` | `Synthesize`|
+| `tester`      | `test`      | `Tester`      | `Test`      |
+| `triager`     | `triage`    | `Triager`     | `Triage`    |
+| `validator`   | `validate`  | `Validator`   | `Validate`  |
+| `bug-analyzer`| `diagnose`  | `BugAnalyzer` | `Diagnose`  |
+
+**What devflow migrates automatically:**
+- All devflow-owned agent files (`~/.claude/agents/devflow/`), command
+  sources (`~/.claude/commands/devflow/`), and skill files are
+  updated on `devflow init`. No manual action needed for devflow's own
+  files.
+- `agent-models.json` key migration: old slug keys in
+  `~/.devflow/agent-models.json` (e.g. `coder`, `reviewer`) are
+  rewritten to their canonical new form (e.g. `code`, `review`) both on
+  read by `readAgentMapping` and by the one-time global migration
+  `canonicalise-agent-keys-v1` that runs on the first `devflow init`
+  after this upgrade.
+
+**What you must migrate by hand:**
+- Any `subagent_type` values in your **own** custom commands or agents
+  that reference the old Form B names (`Coder`, `Reviewer`, etc.) must
+  be updated by you — devflow cannot migrate files it does not own. For
+  example: `agentType: "Coder"` → `agentType: "Code"`.
+- Any references to old agent names in your **own** CLAUDE.md or project
+  files — devflow never edits your CLAUDE.md.
+
+**Downgrade warning — per-agent model overrides stop silently:**
+If you upgrade to this version and then **downgrade** to a prior devflow
+version, any per-agent model overrides saved under the new canonical key
+names (e.g. `code`, `review`) will silently stop applying — the older
+version does not know the new names and will not find the override
+entries. Retroactive version-detection is impossible: `readAgentMapping`
+never reads the `version` field from `agent-models.json`, and a test
+pins that behaviour. There is no mechanism that could warn you. If you
+downgrade, verify your overrides with `devflow agents --list`.
+
+**Open-session warning:**
+A Claude Code session left **open across the upgrade** holds a stale
+orchestrator charter that still names the old agents. Restart any open
+session after running `devflow init` so the new charter is injected.
+
+**Claude Code built-in name collision check:**
+The new agent names were verified against the Claude Code built-in
+`subagent_type` registry (checked 2026-08-18). The Claude Code built-in
+agent types are `Explore` and `Plan`. None of the 13 new devflow names
+(`code`, `design`, `evaluate`, `research`, `review`, `scrutinize`,
+`simplify`, `skim`, `synthesize`, `test`, `triage`, `validate`,
+`diagnose`) collide with either. Note: `Plan` is a Claude Code built-in;
+devflow has no `plan` agent (only a `/plan` command).
+**Re-check on each major Claude Code upgrade** — a new built-in can
+silently shadow a devflow agent and no in-repo guard can detect it.
+
 ### Added
 - **External model routing** (`devflow proxy --enable/--disable/--status`): Routes Devflow agents through GPT models (via an OpenAI/Codex subscription) using a local relay that intercepts Claude Code's model requests by injecting `ANTHROPIC_BASE_URL` into `settings.json`. `--enable` runs a four-check preflight in order — ① relay binary resolvable from Devflow's `node_modules`, ② Codex auth present at `~/.codex/auth.json`, ③ target port free or already occupied by a Devflow relay (adopted path skips spawn), ④ `settings.json` parseable with no foreign `ANTHROPIC_BASE_URL` — then spawns the relay with a 50×100ms bounded probe loop, then runs a post-spawn doctor verification gate; on doctor failure the relay is killed (self-spawned only — an adopted relay is never killed) and the enable rolls back. `--disable` strips `ANTHROPIC_BASE_URL` from `settings.json`, reverts installed agent frontmatter to Claude defaults, and emits a `kill <pid>` hint; the relay process is intentionally left running for in-flight sessions. `--status` shows relay identity, port, Codex auth content (expiry and account, not just file existence), external-mapped agent count, and the cached routable model registry. The `ensure-proxy` hook (registered on both `SessionStart` and `UserPromptSubmit`) auto-revives a down relay at session start; the `UserPromptSubmit` path exits before any proxy-state I/O to avoid per-prompt overhead. Feature state is manifest-gated (`manifest.features.proxy`); runtime authority lives in `~/.devflow/proxy.json`. Default OFF; Advanced init only. New dependency: `subswitch@0.2.0` (exact-pinned). **Upgrade**: run `devflow init` (Advanced path) to configure, or `devflow proxy --enable` after install.
 - **Per-agent model and effort configuration** (`devflow agents`): Interactive TUI and CLI (`--list`, `--set <agent> --model <model>`, `--set <agent> --effort <level>`, `--reset`) for assigning models and effort levels to individual Devflow agents. Overrides are stored deviations-only in `~/.devflow/agent-models.json`; absent entries resolve to shipped defaults read live from agent source files. The routable model catalog is discovered live from the relay binary and cached at `~/.devflow/cache/models/` (24h TTL, at most 3 versioned entries keyed by runtime version, stale entries serve as fallback on discovery failure) — there is no hardcoded model list. Model aliases (e.g. `sol`, `terra`, `luna`) auto-track current model generations. GPT model assignments are **dormant** while routing is disabled — saved to disk but not materialized into agent frontmatter until `devflow proxy --enable`. Effort overrides (`low`/`medium`/`high`/`xhigh`/`max`) are orthogonal to dormancy and apply regardless of proxy state. `reapplyAgentMapping` re-applies all saved overrides after every `devflow init` so customizations survive reinstalls.
@@ -15,37 +85,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Triager agent** (opus, blast-radius judgment): dedicated validation-only agent that classifies every review issue using a first-match-wins disposition matrix — SECURITY GATE → FALSE_POSITIVE → BY_DESIGN → FIX_NOW → FIX_SEPARATE → TECH_DEBT / ESCALATED — before any Coder touches code. Reads 30-line context around each reported file:line to verify issues; requires file:line evidence for FALSE_POSITIVE and an ADR or inline comment citation for BY_DESIGN. Never edits code.
 - **Coder `issue-fix` mode** for `/resolve`: Coder receives pre-classified FIX_NOW issues from the Triager and applies fixes without re-litigating dispositions (`OPERATION: issue-fix`, `PUSH: false`). A `validation-fix` mode handles Validator gate failures; a `ci-fix` mode handles CI failures.
 - **Verification Gate** in `/resolve` Phase 7: Validator (haiku) runs build/typecheck/lint/test against changed files; up to 2 Coder validation-fix retries on FAIL; single `git push` fires at the end of this gate (pass or fail) — never before.
-- **New `resolution-summary.md` sections**: `## By Design`, `## Fix Separately`, `## Escalations`, `## Verification` — all strictly additive over the existing convergence-parser contract (`## Fixed Issues`, `## False Positives` headings and Statistics table rows unchanged).
+- **New `resolution-summary.md` sections**: `## Decisions Citations`, `## By Design`, `## Fix Separately`, `## Escalations`, `## Verification` — all strictly additive over the existing convergence-parser contract (`## Fixed Issues`, `## False Positives` headings and Statistics table rows unchanged). The Triage agent aggregates cited ADR-NNN/PF-NNN IDs from its reasoning column into `## Decisions Citations`; the section is omitted when no citations were made.
 - **Rules shadow CLI** (`rules shadow <name>` / `rules unshadow <name>` / `rules list`): shadow a rule with your own version (seeded from the installed rule or built plugin source as fallback), remove a shadow override, and list all known rules with install status and shadow state.
 - **Install-report shadow warnings on `devflow init`**: invalid shadows (missing `SKILL.md`, empty rule file, or a directory at the shadow path) are surfaced in the post-install summary without failing init.
 
 ### Changed
 - **`devflow skills list-shadowed` renamed to `devflow skills list`** (BREAKING): `skills list` now shows all known skills with install and shadow state via `validateSkillShadow`. The `list-shadowed` subcommand is removed.
-- **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triager + Coder pair. The Triager (opus) runs a blast-radius disposition pass; the Coder (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triager, coder, simplifier, validator]`.
+- **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triage + Code pair. The Triage agent (opus) runs a blast-radius disposition pass; the Code agent (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triage, code, simplify, validate]`.
 - **`devflow init` (Advanced path)**: A proxy prompt (external model routing, default OFF) is now offered after the Claude Code flags selector. On enable during init, the same four-check preflight runs but no relay is spawned and no doctor runs — the first session's `ensure-proxy` hook starts the relay; preflight failure warns and forces proxy off without aborting init. `reapplyAgentMapping` now runs after every post-install file-copy to re-apply saved agent model overrides to freshly installed agent files.
 - **`devflow uninstall`**: Now removes proxy artifacts on uninstall — `ensure-proxy` hook registrations, `ANTHROPIC_BASE_URL` from `settings.json`, and the model discovery cache (`~/.devflow/cache/models/`) — in addition to standard command/agent/skill/rule removal.
-
-### Removed
-- **1.x migration registry and helper modules** (BREAKING): all 20 run-once 1.x upgrade migrations removed from `MIGRATIONS`; helper modules `legacy-decisions-purge.ts`, `decisions-ledger-migration.ts`, `marketplace-cleanup.ts`, and `mkdir-lock.ts` deleted. The migration framework stays for future 2.x entries. No 1.x → 2.0 upgrade path.
-- **Native `claude plugin install` path** (BREAKING): the `claude plugin install` code path is removed; `installViaFileCopy` (file copy) is the sole install mechanism for all Devflow assets.
-- **`extraKnownMarketplaces` registration from settings template**: the Devflow marketplace entry is no longer written to `~/.claude/settings.json` on install.
-- **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
-- **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
-- **Resolver agent**: retired in favor of the Triager + Coder split. The `resolver` agent name is tracked in `LEGACY_AGENT_NAMES` and removed from installs on `devflow init`.
-- Self-learning system: detects repeated workflows and creates slash commands/skills automatically
-- **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
-- **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
-- **Knowledge citations in review & resolve outputs**: Resolvers and Reviewers cite matching ADR-NNN/PF-NNN IDs inline with an explicit hallucination guard (verbatim-only, no inference). `/resolve` aggregates cited IDs into a `## Knowledge Citations` section at the top of `resolution-summary.md`.
-
-### Changed
-- **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (resolver, designer, simplifier, scrutinizer, reviewer) Read full entry bodies on demand. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Shared algorithm extracted to new `devflow:apply-knowledge` skill. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
+- **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (`triage`, `design`, `simplify`, `scrutinize`, `review`) Read full entry bodies on demand via `devflow:apply-decisions` and `devflow:apply-feature-knowledge`. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
 - **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
 - **Learning**: Raised procedural thresholds from 2 to 3 observations with 24h+ temporal spread for both types
 - **Learning**: Reduced default `max_daily_runs` from 10 to 5
 - **Learning**: Renamed artifact paths: `commands/learned/` → `commands/self-learning/`, `skills/learned-{name}/` → `skills/{name}/`
 - **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
 
+### Removed
+- **`devflow-audit-claude` plugin and `/audit-claude` command** (BREAKING): The CLAUDE.md audit plugin is removed. `--plugin=audit-claude` is now rejected by `devflow init`; stale `devflow-audit-claude` entries in existing manifests are silently pruned by `DELETED_PLUGIN_NAMES` on the next partial reinstall. The `claude-md-auditor` agent and `audit-claude.md` command are deleted; the orphan sweep removes any previously installed copies automatically.
+- **Non-selectable optional carry mechanism**: `resolveNonSelectableOptionalCarry` and `applyNonSelectableCarry` deleted from `init-seed.ts`. The carry was guarding a now-impossible state (the only non-selectable optional plugin was `devflow-audit-claude`). A structural invariant test (`EXCLUDED ∩ optional === ∅`) ensures this state stays impossible. No behavior change for users.
+- **1.x migration registry and helper modules** (BREAKING): all 20 run-once 1.x upgrade migrations removed from `MIGRATIONS`; helper modules `legacy-decisions-purge.ts`, `decisions-ledger-migration.ts`, `marketplace-cleanup.ts`, and `mkdir-lock.ts` deleted. The migration framework stays for future 2.x entries. No 1.x → 2.0 upgrade path.
+- **Native `claude plugin install` path** (BREAKING): the `claude plugin install` code path is removed; `installViaFileCopy` (file copy) is the sole install mechanism for all Devflow assets.
+- **`extraKnownMarketplaces` registration from settings template**: the Devflow marketplace entry is no longer written to `~/.claude/settings.json` on install.
+- **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
+- **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
+- **Resolver agent**: retired in favor of the Triage + Code split. The `resolver` agent file is removed from installs on `devflow init` by the orphan sweep.
+
 ### Fixed
+- **`devflow agents` TUI — four defects fixed**:
+  - **Fix 1 (alias rendering)**: GPT model aliases (`sol`, `terra`, `luna`) previously rendered with a parenthetical canonical-id annotation (`sol (gpt-5.6-sol)`). The picker cycle is now built from `pickerNames(catalog.models)` — aliases only; canonical id only when a model has no aliases. Aliases render bare. Stored canonical ids (e.g. `gpt-5.6-sol` saved via `--set`) are normalized to their alias on read by `buildPickerNameMap` — no disk write. `catalog.aliasToId` is no longer referenced in `render.ts`.
+  - **Fix 2 (inertness at selection time)**: `mergeTuiRowsIntoMapping` extracted from `applyTuiSave` as an exported pure helper — only dirty rows modify the mapping (inertness guarantee). `rowState(row, proxyEnabled)` added to `state.ts` as a single source of truth for TUI row state. Save outro wording aligned with `--set` output (dropped "Saved. " prefix).
+  - **Fix 3 (install state + orphan visibility)**: `AgentRow` and `InitRowInput` gain required `installed` and `inRegistry` fields. `buildTuiState` calls `readInstalledAgentNames` (one `readdir`, no per-agent `fs.access`) and appends orphan rows — arbitrary keys from `agent-models.json` not present in the registry — with `inRegistry: false`. A 4th **STATE** column is added to the TUI frame (AGENT 18, MODEL 32, EFFORT 13, STATE 14 = 79 ≤ 80), showing `active` / `saved-inactive` / `not installed` / `unknown`. `stripAnsi(row.name)` is mandatory before name-cell rendering to prevent ANSI injection via hostile JSON keys.
+  - **Fix 4 (capitalized names)**: `formatAgentName` added to `render.ts` with exactly ONE call site — title-cases each hyphen-separated segment of the agent name for TUI display only (e.g. `bug-analyzer` → `Bug-Analyzer`). `--list` output remains lowercase because the AGENT column is an identifier users copy into `--set`, which exact-matches.
 - **Learning**: reject observations with empty id/type/pattern fields
 - **Learning**: Handle string-typed `.message.content` in transcript extraction (was only handling arrays)
 - **Learning**: Eliminate empty-array loop noise when Sonnet returns no observations

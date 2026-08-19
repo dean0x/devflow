@@ -41,20 +41,20 @@ async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): P
  */
 describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
 
-  it('Simplifier preloads software-design and worktree-support', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Simplifier', 'simplify this trivial function: function add(a, b) { return a + b; }');
+  it('Simplify agent preloads software-design and worktree-support', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Simplify', 'simplify this trivial function: function add(a, b) { return a + b; }');
     const expected = ['software-design', 'worktree-support'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
       `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
     ).toBe(true);
-    // Simplifier must NOT have apply-decisions (PR #182 explicit assertion)
-    const simplifierTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
-    expect(simplifierTranscript).not.toContain('apply-decisions');
+    // Simplify agent must NOT have apply-decisions (PR #182 explicit assertion)
+    const simplifyTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
+    expect(simplifyTranscript).not.toContain('apply-decisions');
   }, 90000);
 
-  it('Scrutinizer preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Scrutinizer', 'evaluate this code: const x = 1;');
+  it('Scrutinize agent preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Scrutinize', 'evaluate this code: const x = 1;');
     const expected = ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -62,8 +62,8 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Reviewer preloads review-methodology, worktree-support, apply-decisions', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Reviewer', 'review this code: const y = 2;');
+  it('Review agent preloads review-methodology, worktree-support, apply-decisions', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Review', 'review this code: const y = 2;');
     const expected = ['review-methodology', 'worktree-support', 'apply-decisions'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -71,8 +71,8 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Coder preloads all 8 declared core skills', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Coder', 'implement a no-op task');
+  it('Code agent preloads all 8 declared core skills', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Code', 'implement a no-op task');
     const expected = [
       'software-design', 'git', 'patterns', 'testing',
       'test-driven-development', 'dependency-research', 'boundary-validation', 'worktree-support',
@@ -83,8 +83,8 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Designer preloads worktree-support, apply-decisions, gap-analysis, design-review', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Designer', 'analyze this design: "Add a cache layer."');
+  it('Design agent preloads worktree-support, apply-decisions, gap-analysis, design-review', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Design', 'analyze this design: "Add a cache layer."');
     const expected = ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -101,8 +101,8 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Researcher preloads worktree-support, apply-decisions, apply-feature-knowledge', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Researcher', 'research this topic: what testing frameworks exist');
+  it('Research agent preloads worktree-support, apply-decisions, apply-feature-knowledge', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Research', 'research this topic: what testing frameworks exist');
     const expected = ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),

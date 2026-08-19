@@ -112,7 +112,7 @@ Invoke `/devflow:dynamic-build` in WAVE mode with:
 
 The build command will:
 - Read wave tickets and reason about their dependency order
-- For each ready ticket: implement → Gate 1 → Gate 2 (Evaluator + Tester) → review loop
+- For each ready ticket: implement → Gate 1 → Gate 2 (Evaluate agent + Test agent) → review loop
 - Merge completed tickets to the integration branch `wave/\{slug\}`
 - Quarantine and escalate tickets it cannot complete
 - Write a wave run report to `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`

@@ -28,8 +28,8 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── .last-review-head              # HEAD SHA of last completed review (for incremental)
 │   ├── {timestamp}/                   # Timestamped review directory (YYYY-MM-DD_HHMM)
-│   │   ├── {focus}.md                 # Reviewer report (e.g., security.md, architecture.md)
-│   │   ├── review-summary.md          # Synthesizer output
+│   │   ├── {focus}.md                 # Review agent report (e.g., security.md, architecture.md)
+│   │   ├── review-summary.md          # Synthesize agent output
 │   │   └── resolution-summary.md      # Written by /resolve (if run)
 │   └── {timestamp}/                   # Second review (incremental)
 │       ├── {focus}.md
@@ -39,7 +39,7 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │   └── {timestamp}/                   # Timestamped analysis directory (YYYY-MM-DD_HHMM)
 │       ├── {focus}.md                 # Analyzer report (e.g., security.md, functional.md)
 │       ├── static-findings.md         # Raw static analysis tool output
-│       ├── bug-analysis-summary.md    # Synthesizer output
+│       ├── bug-analysis-summary.md    # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve (if run)
 ├── design/                             # Design artifacts from /plan
 │   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
@@ -52,8 +52,8 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │       └── wave-report.md              # Wave run summary and status
 ├── research/{topic-slug}/              # Research artifacts per topic
 │   └── {YYYY-MM-DD_HHMM}/             # Timestamped research directory
-│       ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)
-│       └── research-summary.md        # Synthesizer output
+│       ├── {type}.md                  # Research agent outputs (codebase.md, external.md, etc.)
+│       └── research-summary.md        # Synthesize agent output
 ├── status/                             # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -134,24 +134,24 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
-| Reviewer | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
-| Synthesizer (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
+| Review agent | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
+| Synthesize agent (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
 | Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
 | Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 | Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
 | Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
-| Designer (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
-| Researcher | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
-| Synthesizer (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
-| BugAnalyzer | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
-| Synthesizer (bug-analysis) | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` | Creates new in timestamped dir |
+| Design agent (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
+| Research agent | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
+| Synthesize agent (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
+| Diagnose agent | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
+| Synthesize agent (bug-analysis) | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` | Creates new in timestamped dir |
 | Bug-analysis cmd | `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head` | Overwrites with HEAD SHA |
 
 ### Agents That Don't Persist
 
 - Git (fetch-issue: read-only, comment-pr: PR comments only)
-- Coder (commits to git, no .devflow/docs/ output)
+- Code agent (commits to git, no .devflow/docs/ output)
 
 ---
 

@@ -8,12 +8,12 @@ import {
   partitionSelectablePlugins,
   prefixSkillName,
   WORKFLOW_ORDER,
+  EXCLUDED,
+  DELETED_PLUGIN_NAMES,
+  LEGACY_PLUGIN_NAMES,
   type PluginDefinition,
 } from '../src/core/plugins.js';
-import {
-  LEGACY_SKILL_NAMES,
-  LEGACY_AGENT_NAMES,
-} from '../src/targets/claude-code/legacy.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('getAllSkillNames', () => {
   it('returns a deduplicated list of skills across all plugins', () => {
@@ -42,7 +42,7 @@ describe('getAllAgentNames', () => {
     const agents = getAllAgentNames();
     // 'git' appears in implement, code-review, resolve, debug
     expect(agents).toContain('git');
-    expect(agents).toContain('synthesizer');
+    expect(agents).toContain('synthesize');
   });
 });
 
@@ -56,8 +56,8 @@ describe('buildAssetMaps', () => {
     // 'git' first appears in devflow-implement (devflow-plan no longer declares it)
     expect(agentsMap.get('git')).toBe('devflow-implement');
 
-    // 'synthesizer' first appears in devflow-plan
-    expect(agentsMap.get('synthesizer')).toBe('devflow-plan');
+    // 'synthesize' first appears in devflow-plan
+    expect(agentsMap.get('synthesize')).toBe('devflow-plan');
   });
 
   it('returns empty maps for empty input', () => {
@@ -177,8 +177,8 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('non-language plugins do not have optional: true (except audit-claude, dynamic, compliance)', () => {
-    const allowedOptional = new Set([...languagePluginNames, 'devflow-audit-claude', 'devflow-dynamic', 'devflow-compliance']);
+  it('non-language plugins do not have optional: true (except dynamic, compliance)', () => {
+    const allowedOptional = new Set([...languagePluginNames, 'devflow-dynamic', 'devflow-compliance']);
     for (const plugin of DEVFLOW_PLUGINS) {
       if (!allowedOptional.has(plugin.name)) {
         expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();
@@ -193,15 +193,6 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('audit-claude is excluded from init multiselect choices', () => {
-    // partitionSelectablePlugins excludes devflow-audit-claude from both buckets
-    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
-    const selectableNames = [...workflow, ...language].map(pl => pl.name);
-    expect(selectableNames).not.toContain('devflow-audit-claude');
-    // But it still exists in the registry (installable via --plugin=audit-claude)
-    expect(DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')).toBeDefined();
-  });
-
   it('devflow-ambient declares review/resolve skill dependencies', () => {
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     expect(ambient).toBeDefined();
@@ -212,42 +203,42 @@ describe('optional plugin flag', () => {
     expect(ambient!.skills).toContain('patterns');
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');
-    expect(ambient!.agents).toContain('synthesizer');
-    expect(ambient!.agents).toContain('triager');
+    expect(ambient!.agents).toContain('synthesize');
+    expect(ambient!.agents).toContain('triage');
   });
 
-  it('devflow-resolve declares triager, coder, and validator agents (no resolver)', () => {
+  it('devflow-resolve declares triage, code, and validate agents (no resolver)', () => {
     const resolve = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-resolve');
     expect(resolve).toBeDefined();
-    // Triager validates issues; coder fixes them; validator runs the verification gate
-    expect(resolve!.agents).toContain('triager');
-    expect(resolve!.agents).toContain('coder');
-    expect(resolve!.agents).toContain('validator');
-    // resolver has been retired — should not appear in registry
+    // Triage agent validates issues; Code agent fixes them; Validate agent runs the verification gate
+    expect(resolve!.agents).toContain('triage');
+    expect(resolve!.agents).toContain('code');
+    expect(resolve!.agents).toContain('validate');
+    // resolver has been retired — should not appear in registry; retirements need
+    // no manual list entry — the registry-diff sweep in the installer
+    // (sweepOrphanedAssets) removes any installed file absent from getAllAgentNames()
     expect(resolve!.agents).not.toContain('resolver');
-    // retired agents must be in LEGACY_AGENT_NAMES so devflow init cleans up stale files
-    expect(LEGACY_AGENT_NAMES).toContain('resolver');
-    // apply-decisions skill declared so Triager can cite ADR/PF entries
+    // apply-decisions skill declared so Triage agent can cite ADR/PF entries
     expect(resolve!.skills).toContain('apply-decisions');
   });
 
-  it('devflow-implement declares evaluator and tester agents and qa skill', () => {
+  it('devflow-implement declares evaluate and test agents and qa skill', () => {
     const implement = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-implement');
     expect(implement).toBeDefined();
-    // evaluator and tester are declared so uninstalling ambient doesn't break implement
-    expect(implement!.agents).toContain('evaluator');
-    expect(implement!.agents).toContain('tester');
-    // qa skill is required for the tester agent
+    // evaluate and test agents are declared so uninstalling ambient doesn't break implement
+    expect(implement!.agents).toContain('evaluate');
+    expect(implement!.agents).toContain('test');
+    // qa skill is required for the test agent
     expect(implement!.skills).toContain('qa');
   });
 
-  it('devflow-ambient declares evaluator, tester agents and qa skill', () => {
+  it('devflow-ambient declares evaluate, test agents and qa skill', () => {
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     expect(ambient).toBeDefined();
-    // Ambient orchestrates the full implement pipeline, so evaluator and tester must be declared
-    expect(ambient!.agents).toContain('evaluator');
-    expect(ambient!.agents).toContain('tester');
-    // qa skill is required for the tester agent
+    // Ambient orchestrates the full implement pipeline, so evaluate and test agents must be declared
+    expect(ambient!.agents).toContain('evaluate');
+    expect(ambient!.agents).toContain('test');
+    // qa skill is required for the test agent
     expect(ambient!.skills).toContain('qa');
   });
 
@@ -263,14 +254,14 @@ describe('optional plugin flag', () => {
   it('devflow-bug-analysis declares correct agents, skills, and command', () => {
     const bugAnalysis = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis');
     expect(bugAnalysis, 'devflow-bug-analysis should exist in registry').toBeDefined();
-    // Core orchestration agents: git (pre-flight), bug-analyzer (semantic analysis), synthesizer (reporting)
+    // Core orchestration agents: git (pre-flight), diagnose (semantic analysis), synthesize (reporting)
     expect(bugAnalysis!.agents).toContain('git');
-    expect(bugAnalysis!.agents).toContain('bug-analyzer');
-    expect(bugAnalysis!.agents).toContain('synthesizer');
+    expect(bugAnalysis!.agents).toContain('diagnose');
+    expect(bugAnalysis!.agents).toContain('synthesize');
     // Skills: worktree-support for discovery, apply-feature-knowledge for context
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
-    // Skills added in batch-2: apply-decisions + the 5 bug-analyzer category skills
+    // Skills added in batch-2: apply-decisions + the 5 diagnose-agent category skills
     expect(bugAnalysis!.skills).toContain('apply-decisions');
     expect(bugAnalysis!.skills).toContain('security');
     expect(bugAnalysis!.skills).toContain('reliability');
@@ -284,21 +275,38 @@ describe('optional plugin flag', () => {
   });
 });
 
-describe('LEGACY_AGENT_NAMES consistency', () => {
-  it('no legacy agent name appears in any current plugin agents array', () => {
-    const currentAgents = getAllAgentNames();
-    for (const legacyName of LEGACY_AGENT_NAMES) {
-      expect(
-        currentAgents,
-        `LEGACY_AGENT_NAMES entry '${legacyName}' must not appear in getAllAgentNames() — remove it from LEGACY_AGENT_NAMES or update the plugin registry`,
-      ).not.toContain(legacyName);
-    }
+describe('DELETED_PLUGIN_NAMES consistency', () => {
+  // DELETED_PLUGIN_NAMES is a PRUNING manifest, not an install-naming list:
+  // resolvePluginList drops every listed name from the user's manifest.plugins on
+  // partial reinstall. A LIVE plugin name listed here is therefore silently erased
+  // from the user's recorded selection, and resolveSeedPlugins then omits it from
+  // the next re-init seed — a plugin the user chose disappears with no error.
+  // Same misread class as PF-012 (deletion manifest that reads like a naming list);
+  // guarded here because the state-aware-init contract forbids it. applies ADR-014
+  it('contains no name that is still a live plugin in the registry', () => {
+    const liveNames = new Set(DEVFLOW_PLUGINS.map(p => p.name));
+    expect(liveNames.size, 'registry must be non-empty or this guard is vacuous').toBeGreaterThan(0);
+
+    const stillLive = DELETED_PLUGIN_NAMES.filter(name => liveNames.has(name));
+    expect(
+      stillLive,
+      'DELETED_PLUGIN_NAMES lists a plugin that still exists in DEVFLOW_PLUGINS — ' +
+      'it would be pruned from every user manifest on partial reinstall and dropped from the re-init seed',
+    ).toEqual([]);
   });
 
-  it("dream is in LEGACY_AGENT_NAMES (renamed to learning in commit 8)", () => {
-    expect(LEGACY_AGENT_NAMES).toContain('dream');
+  it('does not overlap LEGACY_PLUGIN_NAMES keys (deletion would pre-empt the rename)', () => {
+    // resolvePluginList filters deleted names BEFORE applying the rename map, so a
+    // name in both lists is dropped rather than migrated to its new name.
+    const overlap = DELETED_PLUGIN_NAMES.filter(name => name in LEGACY_PLUGIN_NAMES);
+    expect(
+      overlap,
+      'a name cannot be both renamed and deleted — the delete filter runs first and the rename would never apply',
+    ).toEqual([]);
   });
+});
 
+describe('agent registry membership', () => {
   it("learning is in devflow-core-skills and devflow-ambient agents (not dream)", () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
@@ -331,7 +339,24 @@ describe('LEGACY_SKILL_NAMES consistency', () => {
 });
 
 describe('partitionSelectablePlugins', () => {
-  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
+  // Independent oracle. Every other test in this describe derives its expectation
+  // from the imported EXCLUDED, so they move with production and cannot detect a
+  // change to the excluded set itself (dropping devflow-ambient leaves them green
+  // while exposing an always-installed plugin as an uncheckable-by-accident entry
+  // in the init language multiselect). This literal is the only assertion that
+  // pins WHICH plugins are excluded, so a deliberate change must land here. avoids PF-018
+  it('EXCLUDED pins exactly the always-installed plugins (independent oracle)', () => {
+    expect([...EXCLUDED].sort()).toEqual(['devflow-ambient', 'devflow-core-skills']);
+  });
+
+  it('EXCLUDED ∩ optional === ∅ — no optional plugin is non-selectable (structural invariant)', () => {
+    // This invariant ensures that every optional plugin is reachable via the init UI.
+    // Adding an optional plugin to EXCLUDED would silently drop it on full re-inits
+    // without a carry mechanism. Guards the structural requirement.
+    const optionalNames = new Set(DEVFLOW_PLUGINS.filter(p => p.optional).map(p => p.name));
+    const intersection = [...EXCLUDED].filter(name => optionalNames.has(name));
+    expect(intersection, 'EXCLUDED contains an optional plugin — add a re-init carry mechanism to preserve it across full reinstalls').toEqual([]);
+  });
 
   it('command-bearing plugins land in workflow bucket', () => {
     const { workflow } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
@@ -436,8 +461,7 @@ describe('WORKFLOW_ORDER', () => {
   });
 
   it('every WORKFLOW_ORDER entry corresponds to a real command in the registry (reverse regression guard)', () => {
-    // Build the full set of all commands across ALL plugins (including excluded ones like
-    // devflow-audit-claude, which owns /audit-claude and is intentionally in WORKFLOW_ORDER).
+    // Build the full set of all commands across ALL plugins.
     const allCommands = new Set(DEVFLOW_PLUGINS.flatMap(pl => pl.commands));
     for (const cmd of WORKFLOW_ORDER) {
       expect(

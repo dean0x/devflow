@@ -31,9 +31,11 @@ import {
   reduce,
   buildRow,
   buildModelCycle,
+  pickerNames,
   isDirtyModel,
   isDirtyEffort,
   unsavedCount,
+  rowState,
   type AgentRow,
   type AgentsViewState,
 } from '../src/cli/agents-view/state.js';
@@ -42,9 +44,15 @@ import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
-// Mock catalog — represents a realistic discovered catalog for tests
-// Cycle order (proxy ON): default → haiku → sonnet → opus → fable →
-//   sol → terra → luna → gpt-5.6-sol → gpt-5.6-terra → gpt-5.6-luna → gpt-5.5
+// Mock catalog — represents a realistic discovered catalog for tests.
+// Cycle order (proxy ON, Fix 1 — alias-only picker):
+//   default → haiku → sonnet → opus → fable →
+//   sol → terra → luna → gpt-5.5
+// (9 stops total; canonical ids gpt-5.6-* are NOT in the cycle since each has
+//  an alias; gpt-5.5 keeps its stop because its aliases[] is empty)
+//
+// catalog.selectableNames is NOT used to build the cycle — it doubles as the
+// --set validation allowlist and includes both aliases and canonical ids.
 // ---------------------------------------------------------------------------
 
 const MOCK_CATALOG_KNOWN: ExternalModelCatalog = {
@@ -70,11 +78,12 @@ const MOCK_CATALOG_KNOWN: ExternalModelCatalog = {
 
 const MOCK_CATALOG_UNKNOWN: ExternalModelCatalog = { known: false };
 
-// Full cycle when proxy is on with MOCK_CATALOG_KNOWN
+// Full cycle when proxy is on with MOCK_CATALOG_KNOWN (Fix 1: alias-only picker).
+// 9 elements: default + 4 claude aliases + 4 picker names (sol/terra/luna/gpt-5.5).
 const FULL_CYCLE = [
   'default',
   ...CLAUDE_MODEL_ALIASES,
-  ...MOCK_CATALOG_KNOWN.selectableNames,
+  'sol', 'terra', 'luna', 'gpt-5.5', // pickerNames(MOCK_CATALOG_KNOWN.models)
 ] as readonly string[];
 
 // ---------------------------------------------------------------------------
@@ -83,7 +92,7 @@ const FULL_CYCLE = [
 
 function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
-    name: 'coder',
+    name: 'code',
     shippedDefault: 'sonnet',
     configuredModel: 'default',
     originalModel: 'default',
@@ -91,6 +100,8 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalEffort: 'default',
     dormantModel: null,
     offCyclePin: null,
+    installed: true,
+    inRegistry: true,
     ...overrides,
   };
 }
@@ -106,9 +117,9 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
       ? (overrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
-    makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-    makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
-    makeRow({ name: 'designer', shippedDefault: 'opus' }),
+    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+    makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
   return {
     cursor: overrides.cursor ?? 1,
@@ -117,7 +128,6 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
     viewportHeight: overrides.viewportHeight ?? 10,
     rows,
     proxyEnabled,
-    catalog,
     modelCycle,
   };
 }
@@ -129,9 +139,11 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
 describe('buildRow', () => {
   it('builds a row with no mapping entry — default model, no dormancy', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('default');
     expect(row.originalModel).toBe('default');
@@ -141,10 +153,12 @@ describe('buildRow', () => {
 
   it('builds a row with a claude model mapping — applied directly', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'opus',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('opus');
     expect(row.originalModel).toBe('opus');
@@ -154,10 +168,12 @@ describe('buildRow', () => {
 
   it('builds a dormant row — external model + proxy off → configuredModel is default', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-5.5',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('default');
     expect(row.originalModel).toBe('default');
@@ -168,11 +184,13 @@ describe('buildRow', () => {
   it('builds a non-dormant row — external model + proxy ON → configuredModel is the model', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-5.5',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('gpt-5.5');
     expect(row.originalModel).toBe('gpt-5.5');
@@ -182,10 +200,12 @@ describe('buildRow', () => {
 
   it('builds a row with saved effort', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedEffort: 'high',
       proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredEffort).toBe('high');
     expect(row.originalEffort).toBe('high');
@@ -195,11 +215,13 @@ describe('buildRow', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     // 'gpt-4.2-legacy' is not in the catalog
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // configuredModel stays as the saved model (proxy is on, not dormant)
     expect(row.configuredModel).toBe('gpt-4.2-legacy');
@@ -209,11 +231,13 @@ describe('buildRow', () => {
 
   it('no off-cycle pin when modelCycle is not provided', () => {
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'gpt-4.2-legacy',
       proxyEnabled: true,
       // no modelCycle provided
+      installed: true,
+      inRegistry: true,
     });
     expect(row.offCyclePin).toBeNull();
   });
@@ -221,11 +245,13 @@ describe('buildRow', () => {
   it('alias model in cycle is not an off-cycle pin', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     expect(row.configuredModel).toBe('sol');
     expect(row.offCyclePin).toBeNull();  // 'sol' IS in the cycle
@@ -240,11 +266,13 @@ describe('T8: alias round-trip', () => {
   it('a mapping of {coder:{model:"sol"}} shows no dirty marker on load', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // 'sol' IS in the cycle, so configuredModel = 'sol', originalModel = 'sol'
     expect(row.configuredModel).toBe('sol');
@@ -257,11 +285,13 @@ describe('T8: alias round-trip', () => {
     // If isDirtyModel(row) is false, the original mapping entry is untouched.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const row = buildRow({
-      name: 'coder',
+      name: 'code',
       shippedDefault: 'sonnet',
       savedModel: 'sol',
       proxyEnabled: true,
       modelCycle: cycle,
+      installed: true,
+      inRegistry: true,
     });
     // Dirty check: same as applyTuiSave's logic — only dirty rows get written
     const modelDirty = isDirtyModel(row);
@@ -277,15 +307,19 @@ describe('T8: alias round-trip', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-F1: cycle order', () => {
-  it('with proxy enabled and known catalog, cycle matches expected order', () => {
+  it('with proxy enabled and known catalog, cycle matches expected order (alias-only, Fix 1)', () => {
+    // Fix 1: cycle uses pickerNames(catalog.models), NOT catalog.selectableNames.
+    // Result: aliases only; canonical ID only when a model has no aliases.
+    // gpt-5.5 has no aliases → contributes itself. gpt-5.6-* have aliases → alias only.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
     const expected = [
       'default',
-      'haiku', 'sonnet', 'opus', 'fable',  // CLAUDE_MODEL_ALIASES
-      'sol', 'terra', 'luna',               // aliases in registry order
-      'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', // canonical ids
+      'haiku', 'sonnet', 'opus', 'fable', // CLAUDE_MODEL_ALIASES
+      'sol', 'terra', 'luna',              // aliases (registry order, one per model)
+      'gpt-5.5',                           // no aliases → canonical id
     ];
     expect([...cycle]).toEqual(expected);
+    expect(cycle.length).toBe(9);
   });
 });
 
@@ -307,20 +341,19 @@ describe('AC-F4: off-cycle pin recovery', () => {
     const { state: s1 } = reduce(state, 'right');
     expect(s1.rows[0].configuredModel).toBe('default');
 
-    // The effective cycle for this row is [...mainCycle, pin], 13 elements.
-    // From 'default' (index 0), pressing right cycle.length (12) times reaches the pin
-    // (index 12 = last element of effective cycle). One more press wraps to 'default'.
+    // The effective cycle for this row is [...mainCycle, pin], 10 elements (Fix 1: 9+1).
+    // From 'default' (index 0), pressing right cycle.length (9) times reaches the pin
+    // (index 9 = last element of effective cycle). One more press wraps to 'default'.
     //
     // Trace from 'default': press 1→haiku, 2→sonnet, 3→opus, 4→fable,
-    //   5→sol, 6→terra, 7→luna, 8→gpt-5.6-sol, 9→gpt-5.6-terra,
-    //   10→gpt-5.6-luna, 11→gpt-5.5, 12→gpt-4.2-legacy (pin!), 13→default
-    const mainLen = cycle.length; // 12
+    //   5→sol, 6→terra, 7→luna, 8→gpt-5.5, 9→gpt-4.2-legacy (pin!), 10→default
+    const mainLen = cycle.length; // 9 (Fix 1)
     let s = s1;
     for (let i = 0; i < mainLen; i++) {
       const { state: next } = reduce(s, 'right');
       s = next;
     }
-    // After 12 presses from 'default', effective cycle puts us at pin (index 12)
+    // After 9 presses from 'default', effective cycle puts us at pin (index 9)
     expect(s.rows[0].configuredModel).toBe('gpt-4.2-legacy');
 
     // One more press wraps back to 'default' — confirming full cycle completes
@@ -370,11 +403,15 @@ describe('AC-F4: off-cycle pin recovery', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC-F5: known catalog drives model cycle regardless of proxy state', () => {
-  it('with proxy off and known catalog, external models are present in the cycle', () => {
+  it('with proxy off and known catalog, external picker names are present in the cycle', () => {
     // Dormant-mapping design: the TUI must show GPT models even when proxy is off
     // so users can inspect and adjust dormant mappings before enabling the proxy.
+    // Fix 1: cycle uses pickerNames(catalog.models), not catalog.selectableNames.
     const cycle = buildModelCycle(MOCK_CATALOG_KNOWN);
-    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES, ...MOCK_CATALOG_KNOWN.selectableNames]);
+    expect([...cycle]).toEqual([
+      'default', ...CLAUDE_MODEL_ALIASES,
+      ...pickerNames(MOCK_CATALOG_KNOWN.models), // ['sol','terra','luna','gpt-5.5']
+    ]);
   });
 
   it('with unknown catalog, cycle is claude-only (catalog-known gate holds)', () => {
@@ -385,6 +422,54 @@ describe('AC-F5: known catalog drives model cycle regardless of proxy state', ()
   it('with unknown catalog and proxy on, cycle is claude-only', () => {
     const cycle = buildModelCycle(MOCK_CATALOG_UNKNOWN);
     expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T1-T3: pickerNames unit tests (Fix 1 — alias-only picker)
+// ---------------------------------------------------------------------------
+
+describe('pickerNames (Fix 1)', () => {
+  it('T1: returns all aliases per model — live-cache-style fixture matches expected picker names', () => {
+    // Using MOCK_CATALOG_KNOWN which mirrors the real 4-model warm cache.
+    // gpt-5.6-sol → ['sol'], gpt-5.6-terra → ['terra'], gpt-5.6-luna → ['luna'],
+    // gpt-5.5 → [] (no aliases → contributes canonical id).
+    const result = pickerNames(MOCK_CATALOG_KNOWN.models);
+    expect(result).toEqual(['sol', 'terra', 'luna', 'gpt-5.5']);
+  });
+
+  it('T2: model with TWO aliases contributes BOTH to the picker (not just first)', () => {
+    // Regression guard: a naive first-alias-only implementation would return ['sol']
+    // but a model with 2 aliases must return all of them so the user can pick either.
+    const result = pickerNames([
+      { id: 'gpt-5.6-sol', aliases: ['sol', 'sol-preview'] },
+    ]);
+    expect(result).toEqual(['sol', 'sol-preview']);
+    expect(result).toHaveLength(2);
+  });
+
+  it('T3: zero-maintenance — completely custom catalog requires no code changes', () => {
+    // If a new model family "foo" is added to the catalog, buildModelCycle just works.
+    // No hardcoded model names anywhere — the cycle is catalog-driven.
+    const customCatalog: ExternalModelCatalog = {
+      known: true,
+      models: [
+        { id: 'foo-turbo',  aliases: ['foo'] },
+        { id: 'foo-mini',   aliases: [] },     // no alias → contributes canonical id
+      ],
+      selectableNames: ['foo', 'foo-turbo', 'foo-mini'],
+      aliasToId: new Map([
+        ['foo',       'foo-turbo'],
+        ['foo-turbo', 'foo-turbo'],
+        ['foo-mini',  'foo-mini'],
+      ]),
+      source: 'live',
+    };
+    const cycle = buildModelCycle(customCatalog);
+    // Cycle: default + claude aliases + foo + foo-mini (derived from catalog alone)
+    expect([...cycle]).toEqual(['default', ...CLAUDE_MODEL_ALIASES, 'foo', 'foo-mini']);
+    // Importantly: no 'foo-turbo' in the cycle (it has an alias 'foo' that takes its slot)
+    expect([...cycle]).not.toContain('foo-turbo');
   });
 });
 
@@ -400,14 +485,6 @@ describe('AC-P6: modelCycle not reallocated per keypress', () => {
     // modelCycle must be the same reference — not rebuilt per keypress
     expect(Object.is(s1.modelCycle, s2.modelCycle)).toBe(true);
     expect(Object.is(state.modelCycle, s1.modelCycle)).toBe(true);
-  });
-
-  it('catalog reference is the same across consecutive reduces', () => {
-    const state = makeState({ proxyEnabled: true });
-    const { state: s1 } = reduce(state, 'right');
-    const { state: s2 } = reduce(s1, 'right');
-    expect(Object.is(s1.catalog, s2.catalog)).toBe(true);
-    expect(Object.is(state.catalog, s1.catalog)).toBe(true);
   });
 
   it('modelCycle reference unchanged on up/down/tab/save/cancel', () => {
@@ -678,9 +755,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
     });
     const { state: next } = reduce(state, 'd');
@@ -691,9 +768,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'effort',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
     });
     const { state: next } = reduce(state, 'd');
@@ -713,9 +790,9 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'bug-analyzer', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'haiku', originalModel: 'default' }),
-        makeRow({ name: 'designer', shippedDefault: 'opus', configuredModel: 'fable', originalModel: 'default' }),
+        makeRow({ name: 'diagnose', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'haiku', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus', configuredModel: 'fable', originalModel: 'default' }),
       ],
       cursor: 1,
     });
@@ -815,6 +892,91 @@ describe('viewport scrolling', () => {
     const { state: next } = reduce(state, 'up');
     expect(next.cursor).toBe(0);
     expect(next.viewportOffset).toBe(0); // no scroll needed
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T6: rowState — single source of truth for TUI row state (Fix 2)
+// ---------------------------------------------------------------------------
+
+describe('T6: rowState', () => {
+  it('active row — no dormancy, proxy on', () => {
+    const row = makeRow({ configuredModel: 'sol', dormantModel: null });
+    expect(rowState(row, /* proxyEnabled */ true)).toBe('active');
+  });
+
+  it('active row — default model, proxy off', () => {
+    // 'default' is not an external model name → not dormant regardless of proxy
+    const row = makeRow({ configuredModel: 'default', dormantModel: null });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('active');
+  });
+
+  it('saved-inactive row — dormantModel set, proxy off', () => {
+    // When proxy is off and a GPT model is saved, configuredModel = 'default'
+    // but dormantModel = 'gpt-5.5'. rowState must detect saved-inactive.
+    const row = makeRow({ configuredModel: 'default', dormantModel: 'gpt-5.5' });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('saved-inactive row — dormantModel with alias, proxy off', () => {
+    const row = makeRow({ configuredModel: 'default', dormantModel: 'sol' });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('saved-inactive on the KEYPRESS — in-session GPT selection, proxy off, nothing saved yet', () => {
+    // The headline behaviour of Fix 2: the user cycles onto a GPT model while the
+    // proxy is off. Nothing has been saved, so dormantModel is still null and
+    // originalModel is still 'default' — only configuredModel carries the choice.
+    // The marker must appear immediately, not after save.
+    //
+    // This fixture makes configuredModel and originalModel DIFFER and disagree on
+    // the answer, so it distinguishes the two: keying on originalModel ('default')
+    // would return 'active' and the test would go RED.
+    const row = makeRow({
+      configuredModel: 'sol',
+      originalModel: 'default',
+      dormantModel: null,
+    });
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('marker CLEARS on the keypress — dormant row cycled onto a live Claude model', () => {
+    // A dormant row (saved 'gpt-5.5', proxy off) that the user cycles onto 'opus'.
+    // The row is now dirty, so mergeTuiRowsIntoMapping will persist 'opus' — a live
+    // Claude model — and the STATE column must say so. Keying on dormantModel
+    // unconditionally pins the marker to the pre-edit value and reports
+    // 'saved-inactive' for a selection that is not dormant at all.
+    const row = makeRow({
+      configuredModel: 'opus',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(true);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('active');
+  });
+
+  it('dormant row cycled onto a DIFFERENT GPT model stays saved-inactive', () => {
+    // Same dirty path as above, but the new selection is itself external — the
+    // marker must stay on. Guards against "clear the marker whenever dirty".
+    const row = makeRow({
+      configuredModel: 'sol',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(true);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('dormant row cycled BACK onto its own saved value stays saved-inactive', () => {
+    // configuredModel === dormantModel → isDirtyModel is suppressed (nothing is
+    // written), so the untouched branch applies and the marker stays on.
+    const row = makeRow({
+      configuredModel: 'gpt-5.5',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+    });
+    expect(isDirtyModel(row)).toBe(false);
+    expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
   });
 });
 

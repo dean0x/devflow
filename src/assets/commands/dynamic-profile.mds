@@ -11,7 +11,7 @@ output-dir: dist/commands
 
 ## dynamic-profile — distill a decision-preference profile from past sessions
 
-This command spawns an agent (or a small set of parallel readers + a synthesizer) that reads past session history across ALL projects on this machine, finds the `AskUserQuestion` moments and the user's chosen answers, and writes a plain-prose preference profile to `~/.devflow/preference-profile.md`.
+This command spawns an agent (or a small set of parallel readers + a Synthesize agent) that reads past session history across ALL projects on this machine, finds the `AskUserQuestion` moments and the user's chosen answers, and writes a plain-prose preference profile to `~/.devflow/preference-profile.md`.
 
 The profile is then consumed by `/devflow:dynamic-plan` to pre-resolve design decisions matching established taste, so only genuinely new decisions reach the user.
 

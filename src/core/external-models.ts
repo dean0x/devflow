@@ -84,3 +84,4 @@ export function isDormantExternalModel(
   if (model === undefined || proxyEnabled) return false;
   return model !== 'default' && !isClaudeModelName(model);
 }
+

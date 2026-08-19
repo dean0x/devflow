@@ -35,12 +35,12 @@ Globals available in the script body: `args`, `budget`, `workflow()`.
 Spawn devflow agents with:
 
 ```js
-agent("your prompt here", { agentType: "Coder" })
+agent("your prompt here", { agentType: "Code" })
 ```
 
-Valid `agentType` values: Coder, Validator, Simplifier, Scrutinizer, Evaluator, Tester, Reviewer, Git, Synthesizer, Knowledge, Designer.
+Valid `agentType` values: Code, Validate, Simplify, Scrutinize, Evaluate, Test, Review, Git, Synthesize, Knowledge, Design.
 
-**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Coder→sonnet, Validator→haiku, Reviewer→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
+**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Code→sonnet, Validate→haiku, Review→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
 
 Do not write logic that depends on an agent enumerating its own skills. Skills are loaded (confirmed by spike F5) but agents do not reliably self-report them.
 
@@ -58,17 +58,17 @@ Then run a cheap syntax gate: write the authored script to a fresh, run-unique s
 
 ### Budget scaling
 
-The `budget` global governs depth. Scale reviewer roster, review cycle count, and verification votes to `budget`. A low-budget run uses a leaner roster and fewer cycles; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
+The `budget` global governs depth. Scale Review agent roster, review cycle count, and verification votes to `budget`. A low-budget run uses a leaner roster and fewer cycles; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
 Before you author the workflow script, read `.devflow/learning/index.md` for the current worktree. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need DECISIONS_CONTEXT injected; lightweight agents (Validator, Simplifier) do not.
+The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Code agent, Evaluate agent, Review agent, Scrutinize agent) need DECISIONS_CONTEXT injected; lightweight agents (Validate agent, Simplify agent) do not.
 
-### Handoff convention for sequential Coders within a ticket
+### Handoff convention for sequential Code agents within a ticket
 
-When a ticket requires multiple sequential Coder phases, each Coder writes `.devflow/docs/handoff-\{branch_slug\}.md` (branch-scoped to prevent concurrent session clobber). The next Coder reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
+When a ticket requires multiple sequential Code agent phases, each Code agent writes `.devflow/docs/handoff-\{branch_slug\}.md` (branch-scoped to prevent concurrent session clobber). The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
 
 ### IRON RULE (ADR-008: LLM-vs-plumbing)
 

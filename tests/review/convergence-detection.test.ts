@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { loadFile, extractSection, computeFpRatio } from '../helpers'
 
 // -------------------------------------------------------------------------
-// Group 1: reviewer.md — convergence inputs
+// Group 1: review.md — convergence inputs
 // -------------------------------------------------------------------------
 
-describe('reviewer.md — convergence inputs', () => {
-  const content = loadFile('src/assets/agents/reviewer.md')
+describe('review.md — convergence inputs', () => {
+  const content = loadFile('src/assets/agents/review.md')
 
   it('declares PRIOR_RESOLUTIONS in Input section', () => {
     const input = extractSection(content, '## Input', '## Focus Areas')
@@ -99,24 +99,24 @@ describe('code-review.md — convergence gate', () => {
 
   // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
   // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
-  it('Phase 2 passes PRIOR_RESOLUTIONS to Reviewer agents with containment markers', () => {
+  it('Phase 2 passes PRIOR_RESOLUTIONS to Review agents with containment markers', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:')
     expect(phase2).toContain('PRIOR_RESOLUTIONS')
     expect(phase2).toContain('prior-resolution-summary')
   })
 
-  it('Phase 3 passes CYCLE_NUMBER to Synthesizer', () => {
+  it('Phase 3 passes CYCLE_NUMBER to the Synthesize agent', () => {
     const phase3 = extractSection(content, '### Phase 3:', '### Phase 4:')
     expect(phase3).toContain('CYCLE_NUMBER')
   })
 })
 
 // -------------------------------------------------------------------------
-// Group 4: synthesizer.md — convergence status
+// Group 4: synthesize.md — convergence status
 // -------------------------------------------------------------------------
 
-describe('synthesizer.md — convergence status', () => {
-  const content = loadFile('src/assets/agents/synthesizer.md')
+describe('synthesize.md — convergence status', () => {
+  const content = loadFile('src/assets/agents/synthesize.md')
 
   it('review mode mentions convergence or Convergence Status', () => {
     const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
@@ -146,9 +146,9 @@ describe('synthesizer.md — convergence status', () => {
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
-  const reviewer = loadFile('src/assets/agents/reviewer.md')
+  const reviewAgent = loadFile('src/assets/agents/review.md')
   const codeReview = loadFile('dist/commands/code-review.md')
-  const synthesizer = loadFile('src/assets/agents/synthesizer.md')
+  const synthesizeAgent = loadFile('src/assets/agents/synthesize.md')
 
   it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
@@ -171,13 +171,13 @@ describe('Cross-cutting convergence consistency', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
   })
 
-  it('synthesizer FP note threshold matches command surface (>= 3)', () => {
-    expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
+  it('synthesize agent FP note threshold matches command surface (>= 3)', () => {
+    expect(synthesizeAgent).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
-  it('reviewer.md and synthesizer.md both reference convergence concepts', () => {
-    expect(reviewer).toMatch(/[Cc]onvergence|[Cc]ross.[Cc]ycle/)
-    expect(synthesizer).toMatch(/[Cc]onvergence/)
+  it('review.md and synthesize.md both reference convergence concepts', () => {
+    expect(reviewAgent).toMatch(/[Cc]onvergence|[Cc]ross.[Cc]ycle/)
+    expect(synthesizeAgent).toMatch(/[Cc]onvergence/)
   })
 
   it('--full documented in Step 0d-i of code-review', () => {

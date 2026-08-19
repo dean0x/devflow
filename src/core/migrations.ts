@@ -5,7 +5,8 @@
  * per machine (global scope) or once per machine across all discovered projects
  * (per-project scope). State is persisted at ~/.devflow/migrations.json.
  *
- * The registry is empty. To add a migration, append an entry to MIGRATIONS below.
+ * Registry holds 2.x entries only (first: canonicalise-agent-keys-v1). To add a
+ * migration, append an entry to MIGRATIONS below. No 1.x → 2.0 upgrade path.
  */
 
 import { promises as fs } from 'fs';
@@ -13,6 +14,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir } from './project-paths.js';
+import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys, parseAgentMappingEnvelope } from './agent-models.js';
 
 export type MigrationScope = 'global' | 'per-project';
 
@@ -49,9 +51,8 @@ export interface MigrationRunResult {
 }
 
 /**
- * Inline migrations return MigrationRunResult for structured output (infos/warnings
- * surfaced to the user). Test overrides may return void — the runner treats void as
- * { infos: [], warnings: [] } for backward compat.
+ * A single migration entry. The `run` method returns a structured result
+ * carrying infos and warnings surfaced to the user after `devflow init`.
  */
 export interface Migration<S extends MigrationScope = MigrationScope> {
   id: string;
@@ -59,8 +60,18 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
   scope: S;
   run(
     ctx: S extends 'global' ? GlobalMigrationContext : PerProjectMigrationContext,
-  ): Promise<MigrationRunResult | void>;
+  ): Promise<MigrationRunResult>;
 }
+
+/**
+ * Discriminated union of all concrete migration variants.
+ *
+ * Prefer AnyMigration over the bare Migration<MigrationScope> (= Migration) in
+ * registry and runner signatures: the union form lets TypeScript narrow the run()
+ * overload by discriminating on `scope` at the call site, eliminating the
+ * `as Migration<'global'>` casts that were previously required.
+ */
+export type AnyMigration = Migration<'global'> | Migration<'per-project'>;
 
 /**
  * D31: Registry pattern over scattered `if (!applied.includes(...))` conditionals.
@@ -75,8 +86,85 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  * needed) from per-project (sweeps every discovered Claude-enabled project root).
  *
  * Append new migrations here.
+ *
+ * KNOWN ISSUE (out of scope for this wave): the migration runner retries a
+ * THROWING migration on every `devflow init`, forever, with no cap or backoff.
+ * This was acceptable with an empty MIGRATIONS registry (D37: the vacuous-truth
+ * case); this registry's first real entry is added below. Fix deferred.
+ *
+ * Note how that interacts with `canonicalise-agent-keys-v1`: runGlobalMigration
+ * marks a migration applied for ANY non-throwing return, and that entry never
+ * throws — it catches every I/O and parse failure and returns it as a *warning*.
+ * So it does NOT hit the unbounded-retry path. It hits the opposite one: a
+ * transient EACCES or a failed write records the migration as applied and it
+ * never runs again, leaving legacy keys on disk permanently.
+ *
+ * That is survivable by design rather than by luck: `readAgentMapping` applies
+ * canonicaliseAgentKeys on EVERY read, so a user whose disk migration silently
+ * failed still resolves their overrides correctly, and the next write persists
+ * the canonical keys. The disk file self-heals; only the one-time rewrite is
+ * lost. A future fix should make genuine I/O failure (as distinct from
+ * "malformed file, skip it") throw so the runner retries it.
  */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly AnyMigration[] = [
+  {
+    id: 'canonicalise-agent-keys-v1',
+    description: 'Rename legacy agent keys in ~/.devflow/agent-models.json to their canonical names',
+    scope: 'global',
+
+    async run(ctx): Promise<MigrationRunResult> {
+      const infos: string[] = []
+      const warnings: string[] = []
+
+      // Fast path: no legacy keys defined — skip without touching the file.
+      if (Object.keys(LEGACY_AGENT_KEYS).length === 0) return { infos, warnings }
+
+      const filePath = path.join(ctx.devflowDir, 'agent-models.json')
+      // parseAgentMappingEnvelope handles IO, BOM-strip, JSON parse, and shape validation.
+      // Raw read intentionally avoids readAgentMapping (which would drop unknown fields).
+      const envelope = await parseAgentMappingEnvelope(filePath)
+      if (envelope.kind === 'skip') return { infos, warnings }
+      if (envelope.kind === 'warn') {
+        warnings.push(`canonicalise-agent-keys-v1: ${envelope.message}`)
+        return { infos, warnings }
+      }
+
+      const onWarning = (msg: string) => warnings.push(msg)
+      const { agents: migrated, didMutate, renamed, dropped, guardDropped } = canonicaliseAgentKeys(
+        envelope.rawAgents,
+        onWarning,
+      )
+      if (!didMutate) return { infos, warnings }
+
+      // Write back with the canonical keys, preserving the rest of the envelope.
+      // Idempotent under concurrent execution (no lock needed; see D31 comment above).
+      const updated = { ...envelope.envelope, agents: migrated }
+      try {
+        await writeFileAtomicExclusive(filePath, JSON.stringify(updated, null, 2) + '\n')
+      } catch (err: unknown) {
+        warnings.push(`canonicalise-agent-keys-v1: failed to write ${filePath}: ${(err as Error).message}`)
+        return { infos, warnings }
+      }
+
+      if (renamed.length > 0) {
+        infos.push(
+          `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
+        )
+      }
+      if (dropped.length > 0) {
+        warnings.push(
+          `canonicalise-agent-keys-v1: dropped legacy key(s) ${dropped.map(k => `'${k}'`).join(', ')} — canonical key already present, existing value kept`,
+        )
+      }
+      if (guardDropped.length > 0) {
+        warnings.push(
+          `canonicalise-agent-keys-v1: dropped legacy key(s) ${guardDropped.map(k => `'${k}'`).join(', ')} — skipped due to prototype-pollution guard`,
+        )
+      }
+      return { infos, warnings }
+    },
+  },
+];
 
 const MIGRATIONS_FILE = 'migrations.json';
 
@@ -208,12 +296,6 @@ async function pooled<T, R>(
   return results;
 }
 
-/** Coerce a migration run result (may be void for test stubs) to { infos, warnings }. */
-function normaliseRunResult(result: MigrationRunResult | void): MigrationRunResult {
-  if (result == null) return { infos: [], warnings: [] };
-  return result;
-}
-
 /**
  * Run a single global migration, returning { applied, failure, infos, warnings }.
  *
@@ -232,8 +314,7 @@ async function runGlobalMigration(
   warnings: string[];
 }> {
   try {
-    const raw = await migration.run(ctx);
-    const runResult = normaliseRunResult(raw);
+    const runResult = await migration.run(ctx);
     return { applied: true, failure: null, infos: runResult.infos, warnings: runResult.warnings };
   } catch (error) {
     return {
@@ -265,12 +346,12 @@ async function runGlobalMigration(
  * unapplied so the next `devflow init` (which may discover the same or
  * additional projects) can retry the failed projects.
  *
- * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
- * to [] and [].every(...) returns true (vacuous truth), which would mark
- * the migration applied even though no projects were swept. This is the
- * intended behaviour: when MIGRATIONS is empty the applied-set write is
- * skipped entirely (newlyApplied stays empty), so the vacuous-truth branch
- * is a constant-time no-op.
+ * D37: runPerProjectMigration is unreachable in production — MIGRATIONS holds
+ * only a global migration (`canonicalise-agent-keys-v1`). The vacuous-truth
+ * analysis is preserved for correctness: if a per-project migration is ever
+ * added, an empty discoveredProjects list marks it applied (empty-discovery-marks-applied
+ * intended); the applied-set write is skipped only when newlyApplied is empty,
+ * which is guaranteed when MIGRATIONS has no per-project entries.
  */
 async function runPerProjectMigration(
   migration: Migration<'per-project'>,
@@ -309,9 +390,8 @@ async function runPerProjectMigration(
         error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
       });
     } else {
-      const runResult = normaliseRunResult(result.value);
-      infos.push(...runResult.infos);
-      warnings.push(...runResult.warnings);
+      infos.push(...result.value.infos);
+      warnings.push(...result.value.warnings);
     }
   }
 
@@ -323,8 +403,9 @@ async function runPerProjectMigration(
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
- * With an empty registry this is a constant-time no-op — the per-entry loop
- * never executes and migrations.json is never written.
+ * MIGRATIONS currently holds one global migration (`canonicalise-agent-keys-v1`);
+ * on a fresh machine the loop executes once and writes migrations.json. On
+ * subsequent runs the ID is already in the applied set and the loop is a no-op.
  *
  * @param ctx - devflowDir (memoryDir and projectRoot filled per-project)
  * @param discoveredProjects - absolute paths to discovered Claude-enabled project roots
@@ -333,7 +414,7 @@ async function runPerProjectMigration(
 export async function runMigrations(
   ctx: { devflowDir: string },
   discoveredProjects: string[],
-  registryOverride?: readonly Migration[],
+  registryOverride?: readonly AnyMigration[],
 ): Promise<RunMigrationsResult> {
   const registry = registryOverride ?? MIGRATIONS;
   // Always read from home-dir devflow location so state is machine-wide
@@ -355,10 +436,7 @@ export async function runMigrations(
         scope: 'global',
         devflowDir: ctx.devflowDir,
       };
-      // Type assertion required: TS narrows `migration.scope` to 'global' but cannot
-      // narrow the generic parameter S of Migration<S> — the discriminant check is the
-      // runtime guarantee. This replaces the original `as Migration<'global'>` cast.
-      const outcome = await runGlobalMigration(migration as Migration<'global'>, globalCtx);
+      const outcome = await runGlobalMigration(migration, globalCtx);
       if (outcome.applied) {
         newlyApplied.push(migration.id);
         infos.push(...outcome.infos);
@@ -367,8 +445,7 @@ export async function runMigrations(
         failures.push(outcome.failure);
       }
     } else if (migration.scope === 'per-project') {
-      // Same generic-narrowing constraint applies — discriminant check IS the guarantee.
-      const outcome = await runPerProjectMigration(migration as Migration<'per-project'>, ctx, discoveredProjects);
+      const outcome = await runPerProjectMigration(migration, ctx, discoveredProjects);
       failures.push(...outcome.failures);
       infos.push(...outcome.infos);
       warnings.push(...outcome.warnings);
@@ -376,9 +453,11 @@ export async function runMigrations(
         newlyApplied.push(migration.id);
       }
     } else {
-      // Exhaustiveness check — catches unhandled MigrationScope values at runtime
-      const _exhaustive: never = migration.scope;
-      throw new Error(`Unknown migration scope: ${_exhaustive}`);
+      // Exhaustiveness check — AnyMigration covers all MigrationScope values;
+      // migration is narrowed to `never` here so this branch is unreachable at runtime.
+      const _exhaustive: never = migration;
+      void _exhaustive;
+      throw new Error('Unknown migration scope');
     }
   }
 

@@ -1,6 +1,6 @@
 ---
 name: gap-analysis
-description: This skill should be used when analyzing design documents, specifications, or plans for completeness gaps, architectural issues, security concerns, and performance implications. Provides focus-specific detection patterns for the designer agent.
+description: This skill should be used when analyzing design documents, specifications, or plans for completeness gaps, architectural issues, security concerns, and performance implications. Provides focus-specific detection patterns for the Design agent.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

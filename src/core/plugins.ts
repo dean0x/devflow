@@ -68,7 +68,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['skimmer', 'synthesizer', 'designer'],
+    agents: ['skim', 'synthesize', 'design'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -76,7 +76,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator', 'knowledge'],
+    agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
     skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -84,15 +84,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-code-review',
     description: 'Comprehensive code review with parallel specialized agents',
     commands: ['/code-review'],
-    agents: ['git', 'reviewer', 'synthesizer'],
+    agents: ['git', 'review', 'synthesize'],
     skills: ['architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
     name: 'devflow-resolve',
-    description: 'Process and fix code review issues with blast-radius triage, Coder fixes, and Validator verification',
+    description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
-    agents: ['git', 'triager', 'coder', 'simplifier', 'validator', 'knowledge'],
+    agents: ['git', 'triage', 'code', 'simplify', 'validate', 'knowledge'],
     skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     rules: [],
   },
@@ -100,7 +100,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesizer', 'simplifier', 'knowledge'],
+    agents: ['git', 'synthesize', 'simplify', 'knowledge'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -108,15 +108,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-explore',
     description: 'Codebase exploration with structured analysis and optional knowledge base creation',
     commands: ['/explore'],
-    agents: ['skimmer', 'synthesizer', 'knowledge'],
+    agents: ['skim', 'synthesize', 'knowledge'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
     rules: [],
   },
   {
     name: 'devflow-research',
-    description: 'Multi-type research with parallel researchers and trust-aware synthesis',
+    description: 'Multi-type research with parallel Research agents and trust-aware synthesis',
     commands: ['/research'],
-    agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
+    agents: ['research', 'skim', 'synthesize', 'knowledge'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
     rules: [],
   },
@@ -124,15 +124,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-release',
     description: 'Adaptive project release with learned configuration',
     commands: ['/release'],
-    agents: ['git', 'validator'],
+    agents: ['git', 'validate'],
     skills: ['git', 'worktree-support'],
     rules: [],
   },
   {
     name: 'devflow-self-review',
-    description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
+    description: 'Self-review workflow: Simplify agent + Scrutinize agent for code quality',
     commands: ['/self-review'],
-    agents: ['simplifier', 'scrutinizer', 'validator', 'knowledge'],
+    agents: ['simplify', 'scrutinize', 'validate', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
@@ -140,7 +140,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-bug-analysis',
     description: 'Proactive bug finding with static and semantic analysis',
     commands: ['/bug-analysis'],
-    agents: ['git', 'bug-analyzer', 'synthesizer'],
+    agents: ['git', 'diagnose', 'synthesize'],
     skills: [
       'apply-decisions',
       'apply-feature-knowledge',
@@ -157,7 +157,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'triager', 'designer', 'knowledge', 'researcher', 'learning'],
+    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning'],
     skills: [
       'review-methodology',
       'security',
@@ -182,20 +182,11 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     rules: [],
   },
   {
-    name: 'devflow-audit-claude',
-    description: 'Audit CLAUDE.md files against Anthropic best practices',
-    commands: ['/audit-claude'],
-    agents: ['claude-md-auditor'],
-    skills: [],
-    optional: true,
-    rules: [],
-  },
-  {
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile', '/dynamic-wave'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'reviewer', 'git', 'synthesizer', 'knowledge', 'designer'],
+    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     optional: true,
     rules: [],
@@ -291,6 +282,16 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
   'devflow-frontend-design': 'devflow-ui-design',
   'devflow-specify': 'devflow-plan',
 };
+
+/**
+ * Plugin names that have been deleted from the registry.
+ * Used during init to prune stale entries from users' manifests on partial
+ * reinstalls — the full-reinstall path writes installedPluginNames directly
+ * and cannot carry a deleted name. Entries can be removed after 2 major versions.
+ */
+export const DELETED_PLUGIN_NAMES: string[] = [
+  'devflow-audit-claude',
+];
 
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.
@@ -462,16 +463,28 @@ export const LEGACY_RULE_NAMES: string[] = [];
 /**
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
- * code-review → resolve → self-review → bug-analysis → debug → release → audit-claude →
+ * code-review → resolve → self-review → bug-analysis → debug → release →
  * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-wave → dynamic-profile).
  * Export so init.ts can import it rather than keeping a local copy.
  */
 export const WORKFLOW_ORDER: string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
-  '/debug', '/release', '/audit-claude',
+  '/debug', '/release',
   '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
 ];
+
+/**
+ * Plugin names excluded from the init multiselect buckets.
+ * These are always installed regardless of user selection:
+ *   - devflow-core-skills  (always installed, non-optional)
+ *   - devflow-ambient      (always installed, non-optional)
+ *
+ * Invariant: EXCLUDED ∩ optional === ∅ — no optional plugin may be excluded from
+ * the init UI without a re-init carry mechanism to preserve it across full reinstalls.
+ * Guarded by the structural invariant test in tests/plugins.test.ts.
+ */
+export const EXCLUDED: ReadonlySet<string> = new Set(['devflow-core-skills', 'devflow-ambient']);
 
 /**
  * Partition the selectable plugins into workflow (command-bearing) and language
@@ -480,7 +493,6 @@ export const WORKFLOW_ORDER: string[] = [
  * Excluded from both buckets (not selectable at init):
  *   - devflow-core-skills  (always installed)
  *   - devflow-ambient      (always installed)
- *   - devflow-audit-claude (installable via --plugin only)
  *
  * Pure function — does not mutate the input array; preserves DEVFLOW_PLUGINS
  * ordering within each bucket; deterministic; no I/O.
@@ -489,7 +501,6 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
   workflow: PluginDefinition[];
   language: PluginDefinition[];
 } {
-  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
   const workflow: PluginDefinition[] = [];
   const language: PluginDefinition[] = [];
 

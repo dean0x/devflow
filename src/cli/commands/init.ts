@@ -46,7 +46,7 @@ import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, Vi
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
-import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, applyNonSelectableCarry } from './init-seed.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -57,7 +57,7 @@ export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
 export { removeDreamHook, hasDreamHook } from './legacy-hooks.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
-import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../../core/migrations.js';
+import { type RunMigrationsResult, type AnyMigration, type MigrationLogger, reportMigrationResult } from '../../core/migrations.js';
 import { getPackageRoot } from '../../core/paths.js';
 
 export type { MigrationLogger };
@@ -88,7 +88,7 @@ export async function runMigrationsWithFallback(
   runner: (
     ctx: { devflowDir: string },
     projects: string[],
-    registry?: readonly Migration[],
+    registry?: readonly AnyMigration[],
   ) => Promise<RunMigrationsResult>,
 ): Promise<RunMigrationsResult> {
   const projectsForMigration =
@@ -99,6 +99,53 @@ export async function runMigrationsWithFallback(
   reportMigrationResult(migrationResult, logger, verbose);
 
   return migrationResult;
+}
+
+/** One line of post-install summary output, with the severity it should be logged at. */
+export interface SummaryLine {
+  level: 'info' | 'warn';
+  message: string;
+}
+
+/**
+ * Turn the orphan-sweep half of an InstallReport into summary lines.
+ *
+ * The sweeps delete files from `~/.claude/{agents,commands,skills}/` behind the
+ * user's back; a removal the user never hears about is indistinguishable from an
+ * asset that was never installed, and a removal that FAILED leaves a retired agent
+ * or command still loading in Claude Code with no diagnostic at all. Both outcomes
+ * have to reach the summary.
+ *
+ * Pure function — returns lines, logs nothing (applies ADR-013).
+ */
+export function formatSweepSummary(
+  report: Pick<InstallReport, 'sweptOrphans' | 'sweepFailures'>,
+): SummaryLine[] {
+  const lines: SummaryLine[] = [];
+
+  if (report.sweptOrphans.length > 0) {
+    // Format each orphan as "{kind} {name}" for disambiguation — the same registry
+    // name can appear in both the agent and command namespaces. (F15)
+    const labels = report.sweptOrphans.map(o => `${o.kind} ${o.name}`).join(', ');
+    lines.push({
+      level: 'info',
+      message:
+        `Removed ${report.sweptOrphans.length} orphaned asset(s) no longer in the registry: ` +
+        `${labels}`,
+    });
+  }
+
+  for (const failure of report.sweepFailures) {
+    const reason = failure.error instanceof Error ? failure.error.message : String(failure.error);
+    lines.push({
+      level: 'warn',
+      message:
+        `Could not remove orphaned ${failure.kind} "${failure.name}" (${reason}) — ` +
+        `it will keep loading in Claude Code until deleted manually`,
+    });
+  }
+
+  return lines;
 }
 
 /**
@@ -333,13 +380,13 @@ export const initCommand = new Command('init')
       const pluginHints: Record<string, string> = {
         'devflow-plan': 'gap analysis, design review',
         'devflow-implement': 'code, validate, self-review, PR',
-        'devflow-code-review': 'parallel specialized reviewers',
+        'devflow-code-review': 'parallel specialized Review agents',
         'devflow-resolve': 'fix review issues by risk',
         'devflow-debug': 'competing hypotheses',
         'devflow-explore': 'codebase exploration + knowledge bases',
         'devflow-research': 'multi-type research with synthesis',
         'devflow-release': 'adaptive release with learned config',
-        'devflow-self-review': 'Simplifier + Scrutinizer',
+        'devflow-self-review': 'Simplify agent + Scrutinize agent',
         'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
@@ -1050,23 +1097,6 @@ export const initCommand = new Command('init')
       pluginsToInstall.push(ambientPlugin);
     }
 
-    // Carry non-selectable optional plugins (e.g. devflow-audit-claude) from the prior
-    // install on full re-inits. These plugins are excluded from the init prompt buckets
-    // by partitionSelectablePlugins, so they never appear in selectedPlugins and would
-    // otherwise be silently dropped on any plugin-less re-init.
-    //
-    // --reset: seedManifest is null (resolveResetGatedInputs zeros it) → carry is empty.
-    //   Factory reset correctly drops non-selectable optional plugins.
-    // --plugin X partial install: resolvePluginList already merges the full manifest list
-    //   at the manifest-write step; physical dirs are preserved (no full wipe on partial).
-    //   Skip carry here to avoid force-reinstalling plugins the user didn't target.
-    pluginsToInstall = applyNonSelectableCarry(
-      !!options.plugin,
-      seedManifest?.plugins ?? null,
-      pluginsToInstall,
-      DEVFLOW_PLUGINS,
-    );
-
     // Skills: install ALL from ALL plugins (skills are tiny markdown files;
     // commands need skills from other plugins to function)
     const skillsMap = buildFullSkillsMap();
@@ -1639,6 +1669,13 @@ export const initCommand = new Command('init')
         }
       }
       p.log.warn(`Shadow for ${skip.kind}:${skip.name} skipped (${reasonMsg}) — Devflow's version was installed`);
+    }
+
+    // Orphan-sweep reporting: removals are silent deletions from ~/.claude/, and a
+    // failed removal leaves a retired asset live. Both must surface.
+    for (const line of formatSweepSummary(installReport)) {
+      if (line.level === 'warn') p.log.warn(line.message);
+      else p.log.info(line.message);
     }
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));

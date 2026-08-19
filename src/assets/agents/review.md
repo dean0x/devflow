@@ -1,5 +1,5 @@
 ---
-name: Reviewer
+name: Review
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
 model: opus
 skills:
@@ -9,7 +9,7 @@ skills:
   - devflow:apply-feature-knowledge
 ---
 
-# Reviewer Agent
+# Review Agent
 
 You are a universal code review agent. Your focus area is specified in the prompt. You dynamically load the pattern skill for your focus area, then apply the 6-step review process from `devflow:review-methodology`.
 

@@ -1,5 +1,5 @@
 ---
-description: Research a topic using parallel multi-type researchers with trust-aware synthesis
+description: Research a topic using parallel multi-type Research agents with trust-aware synthesis
 output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
@@ -7,7 +7,7 @@ output-dir: dist/commands
 
 # Research Command
 
-Research a topic by spawning parallel researchers across multiple research types (codebase, external, market, competitor, technology). Findings are trust-annotated and synthesized into structured output.
+Research a topic by spawning parallel Research agents across multiple research types (codebase, external, market, competitor, technology). Findings are trust-annotated and synthesized into structured output.
 
 ## Usage
 
@@ -33,11 +33,11 @@ Research a topic by spawning parallel researchers across multiple research types
 
 {decisions_load()}
 
-Use `DECISIONS_CONTEXT` locally when framing research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Researcher agent in Phase 4 so they can cite relevant decisions in findings.
+Use `DECISIONS_CONTEXT` locally when framing research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Research agent in Phase 4 so they can cite relevant decisions in findings.
 
 {knowledge_load()}
 
-Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Researcher agent in Phase 4.
+Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Research agent in Phase 4.
 
 ### Phase 2: Requirements
 
@@ -58,33 +58,33 @@ Generate topic slug from the research question (kebab-case, lowercase, no articl
 
 Only if `codebase` type is in RESEARCH_PLAN.
 
-Spawn `Agent(subagent_type="Skimmer")` targeting codebase areas relevant to the research question.
+Spawn `Agent(subagent_type="Skim")` targeting codebase areas relevant to the research question.
 
 Skip and set ORIENT_OUTPUT = "(none)" if `codebase` type is not in RESEARCH_PLAN.
 
-### Phase 4: Parallel Researchers
+### Phase 4: Parallel Research agents
 
 **Produces:** RESEARCH_OUTPUTS
 **Requires:** RESEARCH_PLAN, ORIENT_OUTPUT (optional)
 
-Spawn 2-5 `Agent(subagent_type="Researcher")` agents **in a single message** (parallel execution).
+Spawn 2-5 `Agent(subagent_type="Research")` agents **in a single message** (parallel execution).
 
-Each Researcher receives:
+Each Research agent receives:
 - `RESEARCH_TYPE`, `RESEARCH_QUESTION`, `OUTPUT_PATH` from RESEARCH_PLAN
 - `DECISIONS_CONTEXT`: From Phase 1
 - `FEATURE_KNOWLEDGE`: From Phase 1
 - `ORIENT_OUTPUT`: Only for `codebase` type
 - `WORKTREE_PATH`: If in a worktree context
 
-Each Researcher writes findings to disk at OUTPUT_PATH.
+Each Research agent writes findings to disk at OUTPUT_PATH.
 
 ### Phase 5: Synthesize
 
 **Produces:** RESEARCH_SUMMARY
 **Requires:** RESEARCH_OUTPUTS
 
-Spawn `Agent(subagent_type="Synthesizer")` in `research` mode:
-- Reads researcher outputs from RESEARCH_OUTPUTS paths
+Spawn `Agent(subagent_type="Synthesize")` in `research` mode:
+- Reads Research agent outputs from RESEARCH_OUTPUTS paths
 - Merges findings with trust-aware aggregation
 - Writes `research-summary.md` to the same timestamped directory
 
@@ -135,13 +135,13 @@ Research findings saved to `.devflow/docs/research/\{topic-slug\}/\{YYYY-MM-DD_H
 │  └─ Infer 2-5 research types from question
 │
 ├─ Phase 3: Orient (conditional — codebase type only)
-│  └─ Skimmer agent (codebase overview)
+│  └─ Skim agent (codebase overview)
 │
-├─ Phase 4: Parallel Researchers
-│  └─ 2-5 Researcher agents in single message (all types simultaneously)
+├─ Phase 4: Parallel Research agents
+│  └─ 2-5 Research agents in single message (all types simultaneously)
 │
 ├─ Phase 5: Synthesize
-│  └─ Synthesizer merges findings with trust-aware aggregation
+│  └─ Synthesize agent merges findings with trust-aware aggregation
 │
 ├─ Phase 6: Present findings with trust annotations and drill-down offer
 │
@@ -159,6 +159,6 @@ Research findings saved to `.devflow/docs/research/\{topic-slug\}/\{YYYY-MM-DD_H
 ## Error Handling
 
 - If WebSearch/WebFetch unavailable: restrict to codebase type, inform user
-- If a Researcher fails: continue with remaining outputs, note gap in synthesis
-- If Synthesizer fails: present individual researcher outputs directly
+- If a Research agent fails: continue with remaining outputs, note gap in synthesis
+- If Synthesize agent fails: present individual Research agent outputs directly
 - If feature knowledge creation fails: log failure, report research results normally

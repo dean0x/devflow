@@ -19,10 +19,17 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
+  LEGACY_AGENT_KEYS,
+  canonicaliseAgentKeys,
+  parseAgentMappingEnvelope,
   readAgentMapping,
   saveAgentMapping,
   resolveEffective,
   countExternalMappedAgents,
+  readInstalledAgentNames,
+  reapplyAgentMapping,
+  revertExternalAgents,
+  loadShippedDefaults,
   EFFORT_LEVELS,
   type AgentMapping,
   type AgentMappingFile,
@@ -84,16 +91,16 @@ describe('readAgentMapping', () => {
     const data: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
-        reviewer: { model: 'opus', effort: 'high' },
+        code: { model: 'gpt-5.6-sol' },
+        review: { model: 'opus', effort: 'high' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
     const result = await readAgentMapping(dir);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.agents['coder']).toEqual({ model: 'gpt-5.6-sol' });
-      expect(result.value.agents['reviewer']).toEqual({ model: 'opus', effort: 'high' });
+      expect(result.value.agents['code']).toEqual({ model: 'gpt-5.6-sol' });
+      expect(result.value.agents['review']).toEqual({ model: 'opus', effort: 'high' });
     }
   });
 
@@ -104,13 +111,13 @@ describe('readAgentMapping', () => {
   });
 
   it('tolerates wrong version — still reads agents', async () => {
-    const data = { version: 99, agents: { coder: { model: 'opus' } } };
+    const data = { version: 99, agents: { code: { model: 'opus' } } };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
     const result = await readAgentMapping(dir);
     // Tolerant: still parse what we can
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.agents['coder']).toBeDefined();
+      expect(result.value.agents['code']).toBeDefined();
     }
   });
 
@@ -118,8 +125,8 @@ describe('readAgentMapping', () => {
     const data = {
       version: 1,
       agents: {
-        coder: { model: 'opus', effort: 'turbo-invalid' },
-        reviewer: { model: 'haiku', effort: 'high' },
+        code: { model: 'opus', effort: 'turbo-invalid' },
+        review: { model: 'haiku', effort: 'high' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
@@ -128,12 +135,12 @@ describe('readAgentMapping', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       // Invalid effort for coder is dropped
-      expect(result.value.agents['coder']?.effort).toBeUndefined();
+      expect(result.value.agents['code']?.effort).toBeUndefined();
       // Valid effort for reviewer preserved
-      expect(result.value.agents['reviewer']?.effort).toBe('high');
+      expect(result.value.agents['review']?.effort).toBe('high');
     }
     // Warning was emitted for the invalid effort
-    expect(warnings.some(w => w.includes('coder') || w.includes('effort'))).toBe(true);
+    expect(warnings.some(w => w.includes('code') || w.includes('effort'))).toBe(true);
   });
 
   it('preserves unknown agent names (plugin may not be installed)', async () => {
@@ -141,7 +148,7 @@ describe('readAgentMapping', () => {
       version: 1,
       agents: {
         'unknown-future-agent': { model: 'opus' },
-        coder: { model: 'sonnet' },
+        code: { model: 'sonnet' },
       },
     };
     await fs.writeFile(path.join(dir, 'agent-models.json'), JSON.stringify(data), 'utf-8');
@@ -149,7 +156,20 @@ describe('readAgentMapping', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.agents['unknown-future-agent']).toBeDefined();
-      expect(result.value.agents['coder']).toBeDefined();
+      expect(result.value.agents['code']).toBeDefined();
+    }
+  });
+
+  it('F1: tolerates a BOM-prefixed JSON file (BOM stripped before parse)', async () => {
+    // Windows editors often prepend U+FEFF to JSON files; JSON.parse rejects it.
+    // parseAgentMappingEnvelope strips the BOM — readAgentMapping must share that path.
+    const data = { version: 1, agents: { code: { model: 'opus' } } };
+    const bom = '﻿';
+    await fs.writeFile(path.join(dir, 'agent-models.json'), bom + JSON.stringify(data), 'utf-8');
+    const result = await readAgentMapping(dir);
+    expect(result.ok, 'BOM-prefixed file must be parseable (not an Err)').toBe(true);
+    if (result.ok) {
+      expect(result.value.agents['code']).toEqual({ model: 'opus' });
     }
   });
 });
@@ -169,7 +189,7 @@ describe('saveAgentMapping', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
+        code: { model: 'gpt-5.6-sol' },
       },
     };
     const saveResult = await saveAgentMapping(dir, mapping);
@@ -178,7 +198,7 @@ describe('saveAgentMapping', () => {
     const readResult = await readAgentMapping(dir);
     expect(readResult.ok).toBe(true);
     if (readResult.ok) {
-      expect(readResult.value.agents['coder']?.model).toBe('gpt-5.6-sol');
+      expect(readResult.value.agents['code']?.model).toBe('gpt-5.6-sol');
     }
   });
 
@@ -201,8 +221,8 @@ describe('resolveEffective', () => {
   // Shipped defaults: agent → model (read from source at runtime in real impl;
   // here we use a subset for unit tests via the `shippedDefaults` parameter)
   const defaults = {
-    coder: 'sonnet',
-    reviewer: 'opus',
+    code: 'sonnet',
+    review: 'opus',
     git: 'haiku',
   };
 
@@ -213,42 +233,42 @@ describe('resolveEffective', () => {
 
   // Proxy OFF × claude model in mapping → use mapping model
   it('proxy OFF, claude model in mapping → uses mapping model (not dormant)', () => {
-    const mapping = makeMapping({ coder: { model: 'opus' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'opus' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('opus');
   });
 
   // Proxy OFF × GPT model in mapping → dormant → use shipped default
   it('proxy OFF, GPT model in mapping → dormant → uses shipped default', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet'); // falls back to shipped default
   });
 
   // Proxy ON × GPT model in mapping → materializes
   it('proxy ON, GPT model in mapping → uses GPT model', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol' } });
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.model).toBe('gpt-5.6-sol');
   });
 
   // Proxy ON × claude model in mapping → uses mapping model
   it('proxy ON, claude model in mapping → uses mapping model', () => {
-    const mapping = makeMapping({ reviewer: { model: 'haiku' } });
-    const result = resolveEffective('reviewer', mapping, defaults, true);
+    const mapping = makeMapping({ review: { model: 'haiku' } });
+    const result = resolveEffective('review', mapping, defaults, true);
     expect(result.model).toBe('haiku');
   });
 
   // No mapping entry → use shipped default regardless of proxy
   it('no mapping entry, proxy OFF → uses shipped default', () => {
     const mapping = makeMapping({});
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet');
   });
 
   it('no mapping entry, proxy ON → uses shipped default', () => {
     const mapping = makeMapping({});
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.model).toBe('sonnet');
   });
 
@@ -261,29 +281,29 @@ describe('resolveEffective', () => {
 
   // Effort is orthogonal to proxy state — always applies
   it('effort from mapping is returned regardless of proxy state (OFF)', () => {
-    const mapping = makeMapping({ coder: { model: 'sonnet', effort: 'high' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'sonnet', effort: 'high' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.effort).toBe('high');
   });
 
   it('effort from mapping is returned regardless of proxy state (ON)', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol', effort: 'max' } });
-    const result = resolveEffective('coder', mapping, defaults, true);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol', effort: 'max' } });
+    const result = resolveEffective('code', mapping, defaults, true);
     expect(result.effort).toBe('max');
   });
 
   // GPT model dormant (proxy OFF) but effort still applies
   it('GPT model dormant but effort still applied (proxy OFF)', () => {
-    const mapping = makeMapping({ coder: { model: 'gpt-5.6-sol', effort: 'low' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'gpt-5.6-sol', effort: 'low' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.model).toBe('sonnet'); // dormant → fallback
     expect(result.effort).toBe('low');   // effort always applies
   });
 
   // No effort in mapping → undefined
   it('no effort in mapping → effort is undefined', () => {
-    const mapping = makeMapping({ coder: { model: 'opus' } });
-    const result = resolveEffective('coder', mapping, defaults, false);
+    const mapping = makeMapping({ code: { model: 'opus' } });
+    const result = resolveEffective('code', mapping, defaults, false);
     expect(result.effort).toBeUndefined();
   });
 });
@@ -297,8 +317,8 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt-5.6-sol' },
-        reviewer: { model: 'gpt-5.5' },
+        code: { model: 'gpt-5.6-sol' },
+        review: { model: 'gpt-5.5' },
         git: { model: 'haiku' },
       },
     };
@@ -309,7 +329,7 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'sonnet' },
+        code: { model: 'sonnet' },
       },
     };
     expect(countExternalMappedAgents(mapping)).toBe(0);
@@ -324,8 +344,8 @@ describe('countExternalMappedAgents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { effort: 'high' },
-        reviewer: { model: 'gpt-5.6-sol' },
+        code: { effort: 'high' },
+        review: { model: 'gpt-5.6-sol' },
       },
     };
     expect(countExternalMappedAgents(mapping)).toBe(1);
@@ -337,33 +357,11 @@ describe('countExternalMappedAgents', () => {
 // ---------------------------------------------------------------------------
 
 describe('reapplyAgentMapping', async () => {
-  // Import reapplyAgentMapping + revertExternalAgents dynamically so we can
-  // use them without top-level import (avoids module-not-found before impl)
-  let reapplyAgentMapping: (typeof import('../src/core/agent-models.js'))['reapplyAgentMapping'];
-  let revertExternalAgents: (typeof import('../src/core/agent-models.js'))['revertExternalAgents'];
-
   // Read shipped defaults live from source at test init time (TEST-7 fix).
   // Avoids brittle hardcoding that breaks when model-strategy changes agent files.
-  let coderShippedDefault = 'sonnet'; // conservative fallback; overridden below
-  let reviewerShippedDefault = 'opus'; // conservative fallback; overridden below
-
-  try {
-    const mod = await import('../src/core/agent-models.js');
-    reapplyAgentMapping = mod.reapplyAgentMapping;
-    revertExternalAgents = mod.revertExternalAgents;
-
-    // loadShippedDefaults reads live from src/assets/agents/ — same source
-    // reapplyAgentMapping uses, so the assertion matches what the function writes.
-    const defaults = await mod.loadShippedDefaults();
-    if (defaults['coder']) {
-      coderShippedDefault = defaults['coder'];
-    }
-    if (defaults['reviewer']) {
-      reviewerShippedDefault = defaults['reviewer'];
-    }
-  } catch {
-    // Module not yet implemented — tests will be skipped
-  }
+  const defaults = await loadShippedDefaults();
+  const codeShippedDefault = defaults['code'] ?? 'sonnet';
+  const reviewShippedDefault = defaults['review'] ?? 'opus';
 
   let tmpInstallDir: string;
   let tmpDevflowDir: string;
@@ -379,16 +377,15 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('applies model to an installed agent file', async () => {
-    if (!reapplyAgentMapping) return; // impl not ready
 
     // Create a minimal fake installed agent file
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     // Mapping: set coder to opus
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -398,20 +395,19 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,
     });
 
-    expect(result.updated).toContain('coder');
-    const updated = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    expect(result.updated).toContain('code');
+    const updated = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(updated).toContain('model: opus');
   });
 
   it('idempotency: second pass reports all unchanged', async () => {
-    if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -433,14 +429,13 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('GPT model stays dormant (proxy OFF) — installed file keeps shipped default', async () => {
-    if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -451,20 +446,19 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // Installed file should have shipped default, not GPT model
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
+    expect(content).toContain(`model: ${codeShippedDefault}`); // shipped default (read live)
   });
 
   it('GPT model materializes when proxy ON', async () => {
-    if (!reapplyAgentMapping) return;
 
-    const agentContent = '---\nname: Coder\nmodel: sonnet\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -474,17 +468,16 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: true, // proxy ON → GPT model materializes
     });
 
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).toContain('model: gpt-5.6-sol');
   });
 
   it('missing installed agent file → skipped silently', async () => {
-    if (!reapplyAgentMapping) return;
 
     // No files in tmpInstallDir
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -494,20 +487,19 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,
     });
 
-    expect(result.skippedMissing).toContain('coder');
+    expect(result.skippedMissing).toContain('code');
     expect(result.updated).toHaveLength(0);
   });
 
   it('revertExternalAgents reverts GPT models back to shipped defaults', async () => {
-    if (!revertExternalAgents) return;
 
     // Installed file already has GPT model applied
-    const agentContent = '---\nname: Coder\nmodel: gpt-5.6-sol\n---\n\nbody\n';
-    await fs.writeFile(path.join(tmpInstallDir, 'coder.md'), agentContent, 'utf-8');
+    const agentContent = '---\nname: Code\nmodel: gpt-5.6-sol\n---\n\nbody\n';
+    await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
 
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'gpt-5.6-sol' } },
+      agents: { code: { model: 'gpt-5.6-sol' } },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
@@ -517,9 +509,9 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // Coder should be back to shipped default
-    const content = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const content = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     expect(content).not.toContain('gpt-');
-    expect(content).toContain(`model: ${coderShippedDefault}`); // shipped default (read live)
+    expect(content).toContain(`model: ${codeShippedDefault}`); // shipped default (read live)
   });
 
   it('T5: alias-shaped AND canonical-id external entries both stay dormant when proxy is OFF', async () => {
@@ -534,26 +526,25 @@ describe('reapplyAgentMapping', async () => {
     // assert installed files contain shipped defaults — no mocking of isDormantExternalModel
     // or isClaudeModelName (per PF-016: mocking the predicate would test our assumption,
     // not the production guard).
-    if (!reapplyAgentMapping) return;
 
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'sol' },          // alias-shaped — previously untested on reapply path
-        reviewer: { model: 'gpt-5.6-sol' }, // canonical-id — also covered here for completeness
+        code: { model: 'sol' },          // alias-shaped — previously untested on reapply path
+        review: { model: 'gpt-5.6-sol' }, // canonical-id — also covered here for completeness
       },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
     // Installed files start at their shipped defaults
     await fs.writeFile(
-      path.join(tmpInstallDir, 'coder.md'),
-      `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`,
+      path.join(tmpInstallDir, 'code.md'),
+      `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`,
       'utf-8',
     );
     await fs.writeFile(
-      path.join(tmpInstallDir, 'reviewer.md'),
-      `---\nname: Reviewer\nmodel: ${reviewerShippedDefault}\n---\n\nbody\n`,
+      path.join(tmpInstallDir, 'review.md'),
+      `---\nname: Review\nmodel: ${reviewShippedDefault}\n---\n\nbody\n`,
       'utf-8',
     );
 
@@ -563,34 +554,33 @@ describe('reapplyAgentMapping', async () => {
       proxyEnabled: false,  // proxy OFF → both external entries must stay dormant
     });
 
-    const coderFile = await fs.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+    const codeFile = await fs.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
     // Neither the alias nor the canonical id may appear in the installed file
-    expect(coderFile).not.toMatch(/model:\s*(sol|gpt-)/);
-    expect(coderFile).toContain(`model: ${coderShippedDefault}`);
+    expect(codeFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(codeFile).toContain(`model: ${codeShippedDefault}`);
 
-    const reviewerFile = await fs.readFile(path.join(tmpInstallDir, 'reviewer.md'), 'utf-8');
-    expect(reviewerFile).not.toMatch(/model:\s*(sol|gpt-)/);
-    expect(reviewerFile).toContain(`model: ${reviewerShippedDefault}`);
+    const reviewFile = await fs.readFile(path.join(tmpInstallDir, 'review.md'), 'utf-8');
+    expect(reviewFile).not.toMatch(/model:\s*(sol|gpt-)/);
+    expect(reviewFile).toContain(`model: ${reviewShippedDefault}`);
   });
 
   it('AC-S1: hostile model name in mapping is rejected — installed file unchanged, warning emitted', async () => {
     // reapplyAgentMapping reads agent-models.json; rewriteAgentFrontmatter rejects
     // invalid model names (invalid-model error). The installed file must be
     // byte-identical to before and a warning must name 'invalid-model'.
-    if (!reapplyAgentMapping) return;
 
     // Hostile mapping: model name containing a newline (YAML injection attempt)
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        coder: { model: 'gpt\ntools:\n  - bash' },
+        code: { model: 'gpt\ntools:\n  - bash' },
       },
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
-    const originalContent = `---\nname: Coder\nmodel: ${coderShippedDefault}\n---\n\nbody\n`;
-    const coderPath = path.join(tmpInstallDir, 'coder.md');
-    await fs.writeFile(coderPath, originalContent, 'utf-8');
+    const originalContent = `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`;
+    const codePath = path.join(tmpInstallDir, 'code.md');
+    await fs.writeFile(codePath, originalContent, 'utf-8');
 
     const warnings: string[] = [];
     await reapplyAgentMapping({
@@ -601,10 +591,447 @@ describe('reapplyAgentMapping', async () => {
     });
 
     // File must be byte-identical to before (rewrite was rejected)
-    const afterContent = await fs.readFile(coderPath, 'utf-8');
+    const afterContent = await fs.readFile(codePath, 'utf-8');
     expect(afterContent).toBe(originalContent);
 
     // A warning naming 'invalid-model' must have been emitted
     expect(warnings.some(w => w.includes('invalid-model'))).toBe(true);
+  });
+
+  it('A3: path-traversal mapping key is warned and skipped — containment guard', async () => {
+    // A corrupted or adversarial agent-models.json may contain a key like
+    // '../../evil' that would resolve outside opts.installDir. The guard must
+    // emit a warning and skip, never reading or writing outside the install dir.
+
+    const traversalKey = '../../a3-traversal-sentinel';
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { [traversalKey]: { model: 'opus' } },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const warnings: string[] = [];
+    const result = await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: false,
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // The traversal key must be in skippedMissing (containment guard fires before readFile).
+    expect(result.skippedMissing).toContain(traversalKey);
+    // A warning mentioning the traversal key must have been emitted.
+    expect(warnings.some(w => w.includes(traversalKey))).toBe(true);
+    // The warning must mention the containment guard, not a generic message.
+    expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
+  });
+
+  it('F13: traversal key whose TARGET EXISTS outside installDir is still blocked by the containment guard', async () => {
+    // The guard must block based on the resolved path, not on ENOENT from the target.
+    // Create a sentinel file OUTSIDE the install dir — the guard must fire (not ENOENT)
+    // and the file must remain byte-identical (never touched).
+    const sentinelName = 'f13-traversal-target-exists';
+    const sentinelPath = path.join(tmpDevflowDir, sentinelName);
+    const originalContent = '# sentinel — must not be modified\n';
+    await fs.writeFile(sentinelPath, originalContent, 'utf-8');
+
+    // The traversal key resolves the sentinel through the install dir
+    const traversalKey = `../../${path.relative(path.dirname(tmpInstallDir), tmpDevflowDir)}/${sentinelName}`;
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { [traversalKey]: { model: 'opus' } },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const warnings: string[] = [];
+    await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: false,
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // The sentinel file outside installDir must remain byte-identical (guard blocked it).
+    const afterContent = await fs.readFile(sentinelPath, 'utf-8');
+    expect(afterContent).toBe(originalContent);
+
+    // A containment-guard warning must have fired (not ENOENT — the file exists).
+    expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readInstalledAgentNames
+// ---------------------------------------------------------------------------
+
+describe('readInstalledAgentNames', () => {
+  let tmpInstall: string;
+
+  beforeEach(async () => {
+    tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-riq-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpInstall, { recursive: true, force: true });
+  });
+
+  it('returns empty set when directory does not exist (ENOENT)', async () => {
+    const missing = path.join(tmpInstall, 'nonexistent');
+    const result = await readInstalledAgentNames(missing);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns empty set when path is a file, not a directory (ENOTDIR)', async () => {
+    // Place a regular file at the target path; readdir will error with ENOTDIR.
+    const filePath = path.join(tmpInstall, 'not-a-dir');
+    await fs.writeFile(filePath, 'I am a file', 'utf-8');
+    const result = await readInstalledAgentNames(filePath);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns names of .md files in a valid directory', async () => {
+    await fs.writeFile(path.join(tmpInstall, 'code.md'), '', 'utf-8');
+    await fs.writeFile(path.join(tmpInstall, 'review.md'), '', 'utf-8');
+    const result = await readInstalledAgentNames(tmpInstall);
+    expect(result.has('code')).toBe(true);
+    expect(result.has('review')).toBe(true);
+    expect(result.size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canonicaliseAgentKeys
+// ---------------------------------------------------------------------------
+
+/**
+ * Tests for canonicaliseAgentKeys() and LEGACY_AGENT_KEYS.
+ *
+ * We temporarily populate LEGACY_AGENT_KEYS in each test to exercise the
+ * migration logic without disturbing the shipped map or other tests.
+ * Cleanup is handled by beforeEach/afterEach: clear → test body → restore.
+ *
+ * SCOPE LIMIT: every test below runs against a map this suite EMPTIED first and
+ * then seeded with synthetic entries. Nothing here can detect that the shipped
+ * 13-entry map regressed to empty. That coverage lives in GAP-6
+ * ("shipped LEGACY_AGENT_KEYS integrity") in tests/agent-name-guards.test.ts,
+ * which reads the map as shipped and never mutates it. Do not add
+ * shipped-map assertions here — beforeEach would defeat them.
+ */
+describe('canonicaliseAgentKeys', () => {
+  // Snapshot the shipped entries at describe-eval time so they can be
+  // restored after each test. Tests that need specific entries add them
+  // themselves; tests that need an empty map rely on the clear in beforeEach.
+  const SHIPPED_ENTRIES: Record<string, string> = { ...LEGACY_AGENT_KEYS };
+
+  beforeEach(() => {
+    // Clear the map so each test starts from a known-empty state.
+    // Tests that need entries add them in their bodies.
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+  });
+
+  afterEach(() => {
+    // Clear any entries added by the test body, then restore shipped state.
+    for (const key of Object.keys(LEGACY_AGENT_KEYS)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (LEGACY_AGENT_KEYS as Record<string, string>)[key];
+    }
+    Object.assign(LEGACY_AGENT_KEYS, SHIPPED_ENTRIES);
+  });
+
+  it('is a no-op when LEGACY_AGENT_KEYS is empty (fast path)', () => {
+    const input = { coder: { model: 'sonnet' } };
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(false);
+    expect(agents).toBe(input); // same reference — no allocation
+  });
+
+  it('renames a legacy key to the canonical key', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = { 'old-coder': { model: 'sonnet' } };
+    const { agents, didMutate, renamed, dropped } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(true);
+    expect(Object.hasOwn(agents, 'coder')).toBe(true);
+    expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
+    expect(agents['coder']).toEqual({ model: 'sonnet' });
+    expect(renamed).toEqual(['old-coder']);
+    expect(dropped).toEqual([]);
+  });
+
+  it('collision: new key already present → new wins, old dropped, no inline warn (caller surfaces via dropped array)', () => {
+    // F8: The collision warning is surfaced by the caller's structured dropped-block
+    // (e.g. migrations.ts) rather than via onWarning here, to avoid double-reporting
+    // the same event in two different vocabularies. onWarning fires 0 times for collision.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = {
+      'old-coder': { model: 'haiku' }, // will be dropped
+      coder: { model: 'opus' },         // already present — wins
+    };
+    const warnings: string[] = [];
+    const { agents, didMutate, renamed, dropped } = canonicaliseAgentKeys(input, (msg) => warnings.push(msg));
+    expect(didMutate).toBe(true);
+    // No inline warning — collision is reported by the caller's structured dropped array.
+    expect(warnings).toHaveLength(0);
+    expect(agents['coder']).toEqual({ model: 'opus' }); // new wins
+    expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
+    expect(renamed).toEqual([]);
+    expect(dropped).toEqual(['old-coder']);
+  });
+
+  it('collision check uses original keys (order-independent)', () => {
+    // If we have old-a → a and old-b → b, both renames happen independently
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-a'] = 'a';
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-b'] = 'b';
+    const input = { 'old-a': { model: 'sonnet' }, 'old-b': { model: 'haiku' } };
+    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    expect(didMutate).toBe(true);
+    expect(Object.hasOwn(agents, 'a')).toBe(true);
+    expect(Object.hasOwn(agents, 'b')).toBe(true);
+    expect(Object.hasOwn(agents, 'old-a')).toBe(false);
+    expect(Object.hasOwn(agents, 'old-b')).toBe(false);
+  });
+
+  it('is idempotent: applying twice produces identical result (concurrent-safe)', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const input = { 'old-coder': { model: 'sonnet' } };
+
+    const first = canonicaliseAgentKeys(input);
+    // After first application, old-coder is gone. Applying again on the result:
+    const second = canonicaliseAgentKeys(first.agents as Record<string, unknown>);
+    expect(second.didMutate).toBe(false); // no legacy keys left
+    expect(second.agents['coder']).toEqual({ model: 'sonnet' });
+  });
+
+  it('skips rename when newKey === __proto__ (prototype-safety, new-key guard)', () => {
+    // If LEGACY_AGENT_KEYS maps 'bad-key' → '__proto__', applying the rename would
+    // set the object's prototype, not a property. The guard on newKey must catch this.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['bad-key'] = '__proto__';
+    const input: Record<string, unknown> = {};
+    // Add 'bad-key' as an own property using defineProperty (can't use object literal
+    // because the key name is not special in rawAgents — it's a regular string 'bad-key').
+    Object.defineProperty(input, 'bad-key', { value: { model: 'sonnet' }, enumerable: true, configurable: true, writable: true });
+
+    const proto = Object.getPrototypeOf(input);
+    const { agents, didMutate, dropped, guardDropped } = canonicaliseAgentKeys(input);
+    // The rename 'bad-key' → '__proto__' is skipped, but the key is still deleted
+    // (didMutate is true because the old key is removed regardless of newKey guard).
+    // What matters: the prototype of the result must be unchanged.
+    expect(Object.getPrototypeOf(agents)).toBe(proto);
+    // __proto__ must not appear as a canonical renamed key — prototype is plain Object
+    expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
+    // The drop must be reported under guardDropped (pollution-guard reason), NOT under
+    // dropped (which is reserved for canonical-key-collision reason).
+    expect(dropped).toEqual([]);
+    expect(guardDropped).toEqual(['bad-key']);
+  });
+
+  it('skips rename when oldKey === __proto__ (prototype-safety, old-key guard)', () => {
+    // rawAgents with an actual own __proto__ property (not the prototype-setting form).
+    // Object.defineProperty is required — the { __proto__: value } literal form sets the
+    // prototype rather than creating an own property.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['__proto__'] = 'coder';
+    const rawAgents: Record<string, unknown> = {};
+    Object.defineProperty(rawAgents, '__proto__', {
+      value: { model: 'sonnet' },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    // Object.keys sees __proto__ as an own enumerable property here
+    expect(Object.keys(rawAgents)).toContain('__proto__');
+
+    const { agents, didMutate, dropped, guardDropped } = canonicaliseAgentKeys(rawAgents);
+    // The __proto__ old-key guard must fire and report a truthful result:
+    // - didMutate is true (the key was deleted from the output object)
+    // - dropped is empty (prototype-guard skips are NOT collision drops)
+    // - guardDropped records the skipped key under the correct category
+    expect(didMutate).toBe(true);
+    expect(dropped).toEqual([]);
+    expect(guardDropped).toEqual(['__proto__']);
+    // The result prototype must be plain Object.prototype (guard must not pollute it)
+    expect(Object.getPrototypeOf(agents)).toBe(Object.prototype);
+    // Clean up LEGACY_AGENT_KEYS entry (afterEach also does this, but be explicit)
+    delete (LEGACY_AGENT_KEYS as Record<string, string>)['__proto__'];
+  });
+
+  it('handles empty input object', () => {
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+    const { agents, didMutate } = canonicaliseAgentKeys({});
+    expect(didMutate).toBe(false);
+    expect(agents).toEqual({});
+  });
+
+  it('LEGACY_AGENT_KEYS is prototype-null (Object.create(null))', () => {
+    expect(Object.getPrototypeOf(LEGACY_AGENT_KEYS)).toBeNull();
+  });
+
+  it('readAgentMapping applies canonicalisation on read (integration)', async () => {
+    // Populate a legacy key mapping
+    (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-canonical-test-'));
+    try {
+      // Write a file with the old key
+      const raw: AgentMappingFile = {
+        version: 1,
+        agents: { 'old-coder': { model: 'sonnet' } } as Record<string, unknown> as Record<string, AgentMapping>,
+      };
+      await fs.writeFile(path.join(tmpDir, 'agent-models.json'), JSON.stringify(raw), 'utf-8');
+
+      const result = await readAgentMapping(tmpDir);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Old key must be gone, canonical key must be present
+        expect(Object.hasOwn(result.value.agents, 'coder')).toBe(true);
+        expect(Object.hasOwn(result.value.agents, 'old-coder')).toBe(false);
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('readAgentMapping handles agents: [] (array must not be treated as object)', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-array-agents-test-'));
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, 'agent-models.json'),
+        JSON.stringify({ version: 1, agents: [] }),
+        'utf-8',
+      );
+      const result = await readAgentMapping(tmpDir);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Array should be treated as empty (no entries)
+        expect(result.value.agents).toEqual({});
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseAgentMappingEnvelope — direct unit tests (one per parser arm)
+// ---------------------------------------------------------------------------
+
+/**
+ * Direct tests for parseAgentMappingEnvelope().
+ *
+ * Plan item B6 required "one per parser arm": ok, skip, warn.
+ * The function was previously covered only transitively through the
+ * canonicalise-agent-keys-v1 migration harness.
+ *
+ * Each arm is pinned via its discriminant (`kind`) and the detail substrings
+ * the migration tests already rely on.
+ */
+describe('parseAgentMappingEnvelope', () => {
+  let dir: string;
+  let filePath: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-parse-envelope-'));
+    filePath = path.join(dir, 'agent-models.json');
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  // --- ok arm ---
+
+  it('ok: valid envelope with agents object returns kind=ok and rawAgents verbatim', async () => {
+    // {"agents":{"x":42}} — rawAgents.x must be 42 (no coercion, no filtering)
+    await fs.writeFile(filePath, '{"agents":{"x":42}}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.rawAgents['x']).toBe(42);
+    }
+  });
+
+  // --- skip arms ---
+
+  it('skip: file absent (ENOENT) returns kind=skip', async () => {
+    const missing = path.join(dir, 'nonexistent.json');
+    const result = await parseAgentMappingEnvelope(missing);
+    expect(result.kind).toBe('skip');
+  });
+
+  it('skip: empty file returns kind=skip', async () => {
+    await fs.writeFile(filePath, '', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
+  });
+
+  it('skip: BOM-only file returns kind=skip', async () => {
+    // U+FEFF stripped → empty string → skip
+    await fs.writeFile(filePath, '﻿', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
+  });
+
+  // --- warn arms ---
+
+  it('warn: invalid JSON — message contains "invalid JSON"', async () => {
+    await fs.writeFile(filePath, 'not valid json {{{', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('invalid JSON');
+    }
+  });
+
+  it('warn: unreadable file — message contains "cannot read"', async () => {
+    await fs.writeFile(filePath, '{"agents":{}}', 'utf-8');
+    await fs.chmod(filePath, 0o000);
+
+    // Guard: running as root ignores mode bits — skip rather than assert falsely.
+    let readable = true;
+    try { await fs.readFile(filePath, 'utf-8'); } catch { readable = false; }
+    if (readable) {
+      await fs.chmod(filePath, 0o644);
+      return;
+    }
+
+    try {
+      const result = await parseAgentMappingEnvelope(filePath);
+      expect(result.kind).toBe('warn');
+      if (result.kind === 'warn') {
+        expect(result.message).toContain('cannot read');
+      }
+    } finally {
+      await fs.chmod(filePath, 0o644).catch(() => undefined);
+    }
+  });
+
+  it('warn: non-object agents field — message contains "non-object agents field"', async () => {
+    await fs.writeFile(filePath, '{"agents":[1,2,3]}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('non-object agents field');
+    }
+  });
+
+  // --- arms ~:247-249 and ~:253-255 (previously untested) ---
+
+  it('warn: top-level JSON non-object (bare number) — message contains "not a JSON object"', async () => {
+    // Arm ~:247-249: parsed is a primitive, not an object → kind=warn
+    await fs.writeFile(filePath, '42', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('not a JSON object');
+    }
+  });
+
+  it('skip: agents field is null — kind=skip (no agents to migrate)', async () => {
+    // Arm ~:253-255: rawAgents is null → kind=skip (treated as absent, nothing to migrate)
+    await fs.writeFile(filePath, '{"agents":null}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
   });
 });

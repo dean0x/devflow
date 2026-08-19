@@ -9,13 +9,13 @@ The candidate ticket slate is **proposed by the model** (you, reading the initia
 
 #### Stage 1 — Draft (one agent per ticket, parallelisable)
 
-Spawn one Designer or Synthesizer agent per candidate ticket:
+Spawn one Design agent or Synthesize agent per candidate ticket:
 
 ```js
 // Parallel per-ticket drafters — each is fully independent at draft time
 const drafts = await parallel(candidates.map(c => () =>
   agent(`Draft ticket for: ${c.title}\nInitiative: ${initiative}\n${constraints}`, {
-    agentType: "Designer",
+    agentType: "Design",
     schema: DRAFT_SCHEMA
   })
 ));
@@ -45,22 +45,22 @@ DRAFT_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 2 — Two-lens review (parallel per ticket)
 
-For each draft, run TWO independent Reviewer agents **in parallel** — one per lens:
+For each draft, run TWO independent Review agents **in parallel** — one per lens:
 
 **Lens A — Planner-readiness (cold read):** Could a planner build from this ticket alone, with no other context? Hunt: missing information; untestable or missing negative acceptance criteria; ambiguous constraints; scope holes (things the feature obviously needs that neither In nor Out mentions); undefined terms a cold reader cannot resolve. Severity: critical = planner would be blocked or misled; major = planner would guess; minor = polish.
 
 **Lens B — Accuracy / scope-discipline audit:** Every claim is sourced from the initiative or spec. No smuggled anti-features (scope items the initiative explicitly excludes). Constraints are honored. Dependency placeholders are consistent with the candidate slate. Severity: critical = invented fact / anti-feature / leak; major = unsourced claim or stance contradiction; minor = citation polish.
 
 ```js
-// Two reviewers per ticket, parallel across both lens and all tickets
+// Two Review agents per ticket, parallel across both lens and all tickets
 const reviews = await parallel(drafts.map((draft, i) => () =>
   parallel([
     () => agent(`Planner-readiness cold read of ticket: ${JSON.stringify(draft)}`, {
-      agentType: "Reviewer",
+      agentType: "Review",
       schema: REVIEW_SCHEMA
     }),
     () => agent(`Accuracy/scope-discipline audit of ticket: ${JSON.stringify(draft)}`, {
-      agentType: "Reviewer",
+      agentType: "Review",
       schema: REVIEW_SCHEMA
     }),
   ])
@@ -92,7 +92,7 @@ REVIEW_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 3 — Revise (one agent per ticket, per review findings)
 
-For each ticket, spawn one Synthesizer or Designer agent to apply review findings:
+For each ticket, spawn one Synthesize agent or Design agent to apply review findings:
 
 ```js
 // Sequential per ticket (shared file state); parallelisable across tickets only if separate files
@@ -101,7 +101,7 @@ const revised = await parallel(drafts.map((draft, i) => () =>
 Ticket: ${JSON.stringify(draft)}
 Reviews: ${JSON.stringify(reviews[i])}
 Rules: if a finding asks for information that does not exist in the source initiative, add it to Open Questions — never invent. If a finding contradicts the stated initiative scope, the initiative wins; note the decline.`, {
-    agentType: "Synthesizer",
+    agentType: "Synthesize",
     schema: REVISE_SCHEMA
   })
 ));
@@ -125,7 +125,7 @@ REVISE_SCHEMA (in fenced block — braces are raw):
 
 #### Stage 4 — Whole-set cross-critic (single agent, sees all revised tickets)
 
-One Designer agent reviews the FULL revised set for set-level issues — not individual prose quality:
+One Design agent reviews the FULL revised set for set-level issues — not individual prose quality:
 
 1. **Coverage:** does the union of tickets cover every item the initiative mandates? Anything the initiative mandates that no ticket owns?
 2. **Overlaps / contradictions:** same responsibility claimed by two tickets; contradictory constraints between tickets; inconsistent terminology for the same concept.
@@ -138,7 +138,7 @@ Revised tickets: ${JSON.stringify(revised)}
 Initiative: ${initiative}
 Audit: coverage · overlaps/contradictions · dependency graph · acceptance-criteria coherence.
 Return: setVerdict + perTicketAmendments + trackingGuidance.`, {
-  agentType: "Designer",
+  agentType: "Design",
   schema: CRITIC_SCHEMA
 });
 ```
@@ -177,7 +177,7 @@ if (toAmend.length) {
     agent(`Apply cross-set amendments to ticket "${a.title}":
 Amendments: ${JSON.stringify(a.amendments)}
 Rules: same as revise — never invent; unresolvable items go to Open Questions; initiative scope wins over any amendment that contradicts it.`, {
-      agentType: "Synthesizer"
+      agentType: "Synthesize"
     })
   ));
 }
@@ -187,7 +187,7 @@ Rules: same as revise — never invent; unresolvable items go to Open Questions;
 
 #### Stage 6 — Assemble tracking issue
 
-One Synthesizer agent writes the tracking-issue document from the final ticket set + critic guidance:
+One Synthesize agent writes the tracking-issue document from the final ticket set + critic guidance:
 
 ```js
 const tracker = await agent(`Write a tracking-issue document for the initiative.
@@ -195,7 +195,7 @@ Guidance from cross-set critic: ${JSON.stringify(critic.trackingGuidance)}
 Final tickets: ${JSON.stringify(revised)}
 Structure: initiative context (1–2 paragraphs) + wave-structured execution checklist + ticket index (one line per ticket, user-facing) + explicitly-excluded items (decisions, not oversights) + invariants that bind every ticket.
 Output: write to the artifact path and return { path, title }.`, {
-  agentType: "Synthesizer",
+  agentType: "Synthesize",
   schema: { type: "object", required: ["path", "title"],
     properties: { path: { type: "string" }, title: { type: "string" } } }
 });

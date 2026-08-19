@@ -77,7 +77,7 @@ describe('init proxy apply-pass ordering (TEST-5)', () => {
   let tmpDir: string;
   let devflowDir: string;
   let installDir: string;
-  const agentName = 'coder'; // registered agent — reapply will find + update it
+  const agentName = 'code'; // registered agent — reapply will find + update it
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-proxy-'));

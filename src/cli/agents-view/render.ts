@@ -7,7 +7,7 @@
  * Layout (fixed lines = 9, viewport = dims.rows - 9):
  *   1  Title "  Devflow Agents" + right "proxy: enabled|disabled"
  *   2  (blank)
- *   3  Column header "    AGENT  MODEL  EFFORT"
+ *   3  Column header "    AGENT  MODEL  EFFORT  STATE"
  *   4  Scroll-up indicator "  ↑ N more" (blank if none)
  *   5+ Viewport rows
  *  -3  Scroll-down indicator "  ↓ N more" (blank if none)
@@ -15,11 +15,12 @@
  *  -1  Unsaved count "  N unsaved changes" (blank if 0)
  *   0  Keybinding footer
  *
- * Columns (chars):
+ * Columns (chars) — total 79 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
- *   AGENT   : 20
+ *   AGENT   : 18
  *   MODEL   : 32
- *   EFFORT  : 14
+ *   EFFORT  : 13
+ *   STATE   : 14
  */
 
 import {
@@ -37,10 +38,11 @@ import {
   isDirtyEffort,
   unsavedCount,
   isOffCycle,
+  rowState,
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
-import { type ExternalModelCatalog } from '../../core/model-discovery.js';
+import { AGENT_STATE_LABELS } from '../../core/agent-state.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -59,9 +61,32 @@ export function computeViewportHeight(termRows: number): number {
   return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
 }
 
-const COL_AGENT = 20;
+const COL_AGENT = 18;
 const COL_MODEL = 32;
-const COL_EFFORT = 14;
+const COL_EFFORT = 13;
+const COL_STATE = 14;
+
+// ---------------------------------------------------------------------------
+// Name formatter — TUI only (Fix 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Title-case each hyphen-separated segment of the agent name for TUI display.
+ *
+ * Examples: 'code' → 'Code', 'my-custom-agent' → 'My-Custom-Agent'
+ *
+ * TUI-only — `--list` output uses the raw lowercase name from the registry.
+ * Exactly ONE call site: the name cell in the row renderer below.
+ *
+ * Pure function, no I/O.
+ */
+export function formatAgentName(name: string): string {
+  if (name.length === 0) return name;
+  return name
+    .split('-')
+    .map(seg => (seg.length === 0 ? seg : seg[0].toUpperCase() + seg.slice(1)))
+    .join('-');
+}
 
 // ---------------------------------------------------------------------------
 // Cell renderers (pure, return styled string)
@@ -81,6 +106,28 @@ function truncateVisible(s: string, maxWidth: number): string {
   return truncate(raw, maxWidth);
 }
 
+/** Layout-breaking whitespace that stripAnsi deliberately preserves. */
+const LAYOUT_BREAKING_WS = /[\t\n]/g;
+
+/**
+ * Sanitize an untrusted string for a fixed-width TUI cell.
+ *
+ * stripAnsi strips escape sequences and C0 controls but, by contract, KEEPS
+ * TAB (\x09) and LF (\x0a) — correct for its own callers, wrong for a cell in
+ * a fixed-width frame. Orphan row names are arbitrary JSON keys read from
+ * agent-models.json, so neither is hypothetical:
+ *   - LF  emits a newline inside a frame line, breaking renderFrame's
+ *     one-string-per-terminal-line contract and desyncing terminal.ts's
+ *     cursor arithmetic (it writes ERASE_EOL + '\n' per returned line).
+ *   - TAB measures as one character in padToVisible but occupies up to eight
+ *     terminal columns, so every column to its right is misaligned.
+ * Both collapse to a single space; the raw key is untouched, so the save-path
+ * merge still targets the real mapping key.
+ */
+function sanitizeCell(s: string): string {
+  return stripAnsi(s).replace(LAYOUT_BREAKING_WS, ' ');
+}
+
 /** Options for renderModelCell — named to prevent silent argument transposition. */
 interface RenderModelCellOptions {
   readonly row: AgentRow;
@@ -88,16 +135,16 @@ interface RenderModelCellOptions {
   /** Whether the model field is the currently active field on the cursor row. */
   readonly isActive: boolean;
   readonly maxWidth: number;
-  readonly catalog: ExternalModelCatalog;
   readonly modelCycle: readonly string[];
 }
 
 /**
  * Render the model cell for a given row, considering cursor/active/dirty state.
  *
- * Alias resolution (AC-F2): when catalog is known and configuredModel is an alias
- * (aliasToId maps it to a different canonical id), show "alias (canonical-id)".
- * Canonical ids render bare. Neither exceeds COL_MODEL = 32.
+ * Three branches (Fix 1 — alias annotation removed):
+ *   1. configuredModel === 'default' → "default (shippedDefault)" [+ dormant hint]
+ *   2. off-cycle pin → "model (unavailable)"
+ *   3. in-cycle model → bare name (aliases already rendered as picker names by buildRow)
  *
  * Off-cycle pin (AC-F4): when configuredModel is absent from modelCycle
  * (retired/unavailable model), show "model (unavailable)".
@@ -109,15 +156,14 @@ function renderModelCell({
   isCursor,
   isActive,
   maxWidth,
-  catalog,
   modelCycle,
 }: RenderModelCellOptions): string {
   const dirty = isDirtyModel(row);
 
   // Model names come from user-controlled config and the third-party external
   // model catalog. Strip ANSI escapes at the display boundary so hostile
-  // sequences cannot reach the terminal. Original values are used for map
-  // lookups and cycle checks; safe copies for display strings only.
+  // sequences cannot reach the terminal. Original values are used for cycle
+  // checks; safe copies for display strings only.
   const safeConfiguredModel = stripAnsi(row.configuredModel);
   const safeShippedDefault = stripAnsi(row.shippedDefault);
   const safeDormantModel = row.dormantModel !== null ? stripAnsi(row.dormantModel) : null;
@@ -136,16 +182,9 @@ function renderModelCell({
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.
     valueStr = `${safeConfiguredModel} (unavailable)`;
-  } else if (catalog.known) {
-    const resolvedId = catalog.aliasToId.get(row.configuredModel);
-    if (resolvedId !== undefined && resolvedId !== row.configuredModel) {
-      // Alias: show "alias (canonical-id)" — e.g. "sol (gpt-5.6-sol)"
-      valueStr = `${safeConfiguredModel} (${stripAnsi(resolvedId)})`;
-    } else {
-      // Canonical id or no alias resolution: show bare
-      valueStr = safeConfiguredModel;
-    }
   } else {
+    // In-cycle model: render bare. Aliases are already stored as picker names
+    // (normalized by buildRow via buildPickerNameMap), so no annotation needed.
     valueStr = safeConfiguredModel;
   }
 
@@ -188,6 +227,35 @@ function renderEffortCell(
   return truncateVisible(cell, maxWidth);
 }
 
+/**
+ * Render the state cell (installed/active/dormant/orphan) for a row.
+ * Pure function — derives state via rowState(row, proxyEnabled).
+ */
+function renderStateCell(row: AgentRow, proxyEnabled: boolean, maxWidth: number): string {
+  const state = rowState(row, proxyEnabled);
+  let cell: string;
+  switch (state) {
+    case 'active':
+      cell = green(AGENT_STATE_LABELS['active']);
+      break;
+    case 'saved-inactive':
+      cell = yellow(AGENT_STATE_LABELS['saved-inactive']);
+      break;
+    case 'not-installed':
+      cell = dim(AGENT_STATE_LABELS['not-installed']);
+      break;
+    case 'unknown':
+      cell = dim(AGENT_STATE_LABELS['unknown']);
+      break;
+    default: {
+      const _: never = state;
+      void _;
+      cell = '';
+    }
+  }
+  return truncateVisible(cell, maxWidth);
+}
+
 // ---------------------------------------------------------------------------
 // renderFrame
 // ---------------------------------------------------------------------------
@@ -211,7 +279,6 @@ export function renderFrame(
     activeField,
     viewportOffset,
     proxyEnabled,
-    catalog,
     modelCycle,
   } = state;
 
@@ -221,11 +288,12 @@ export function renderFrame(
   );
 
   // Column widths — shrink gracefully at narrow terminals.
-  const totalContent = 2 + COL_AGENT + COL_MODEL + COL_EFFORT; // prefix + 3 cols
+  const totalContent = 2 + COL_AGENT + COL_MODEL + COL_EFFORT + COL_STATE; // prefix + 4 cols
   const scale = Math.min(1, dims.cols / Math.max(totalContent, 1));
   const agentW = Math.max(6, Math.floor(COL_AGENT * scale));
   const modelW = Math.max(8, Math.floor(COL_MODEL * scale));
   const effortW = Math.max(7, Math.floor(COL_EFFORT * scale));
+  const stateW = Math.max(5, Math.floor(COL_STATE * scale));
 
   // ---------------------------------------------------------------------------
   // 1. Title line
@@ -248,7 +316,8 @@ export function renderFrame(
     `    ` +
     padToVisible(gray('AGENT'), agentW) +
     padToVisible(gray('MODEL'), modelW) +
-    gray('EFFORT');
+    padToVisible(gray('EFFORT'), effortW) +
+    gray('STATE');
 
   // ---------------------------------------------------------------------------
   // 3. Determine visible row range
@@ -270,8 +339,13 @@ export function renderFrame(
     const isCursor = absIdx === cursor;
 
     const prefix = isCursor ? '❯ ' : '  ';
+    // Sanitize the name — mandatory for orphan rows (arbitrary JSON keys from
+    // agent-models.json may contain escape sequences, newlines or tabs injected
+    // by a hostile file).
+    // Exactly ONE call site for formatAgentName (Fix 4): TUI only; --list is lowercase.
+    const safeName = formatAgentName(sanitizeCell(row.name));
     const nameCell = padToVisible(
-      isCursor ? bold(truncateVisible(row.name, agentW)) : truncateVisible(row.name, agentW),
+      isCursor ? bold(truncateVisible(safeName, agentW)) : truncateVisible(safeName, agentW),
       agentW,
     );
     const modelCell = padToVisible(
@@ -280,19 +354,22 @@ export function renderFrame(
         isCursor,
         isActive: isCursor && activeField === 'model',
         maxWidth: modelW,
-        catalog,
         modelCycle,
       }),
       modelW,
     );
-    const effortCell = renderEffortCell(
-      row,
-      isCursor,
-      isCursor && activeField === 'effort',
+    const effortCell = padToVisible(
+      renderEffortCell(
+        row,
+        isCursor,
+        isCursor && activeField === 'effort',
+        effortW,
+      ),
       effortW,
     );
+    const stateCell = renderStateCell(row, proxyEnabled, stateW);
 
-    return `${prefix}${nameCell}${modelCell}${effortCell}`;
+    return `${prefix}${nameCell}${modelCell}${effortCell}${stateCell}`;
   });
 
   // ---------------------------------------------------------------------------
@@ -319,9 +396,10 @@ export function renderFrame(
       ? `  ${yellow(`${count} unsaved change${count === 1 ? '' : 's'}`)}`
       : '';
 
-  const keybindingsLine = dim(
-    '  ↑↓ agent   tab field   ←→/space cycle   d default   enter save   esc cancel',
-  );
+  // Truncate to cols before applying dim so narrow terminals stay within bounds.
+  // Uses the same primitive as every cell — one truncation rule per renderer.
+  const keybindingsText = '  ↑↓ agent   tab field   ←→/space cycle   d default   enter save   esc cancel';
+  const keybindingsLine = dim(truncateVisible(keybindingsText, dims.cols));
   const proxyHintLine = !proxyEnabled
     ? dim('  devflow proxy --enable to activate GPT models')
     : '';

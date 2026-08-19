@@ -12,7 +12,7 @@
 //       filterDecisionsContext has been removed)
 //   2. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
 //      (index.md direct-read invocation covered by tests/decisions/command-adoption.test.ts)
-//   3. Structural tests: triager.md — Input Context + Apply Decisions
+//   3. Structural tests: triage.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
 //   4. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 
@@ -164,7 +164,7 @@ describe('resolve.md — base command', () => {
     expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
   });
 
-  it('Step 0d instructs passing DECISIONS_CONTEXT to Triager and Coders', () => {
+  it('Step 0d instructs passing DECISIONS_CONTEXT to the Triage and Code agents', () => {
     const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('DECISIONS_CONTEXT');
   });
@@ -174,7 +174,7 @@ describe('resolve.md — base command', () => {
     expect(step0dSection).toContain('(none)');
   });
 
-  it('Phase 4 Coder spawn block includes DECISIONS_CONTEXT variable', () => {
+  it('Phase 4 Code agent spawn block includes DECISIONS_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
@@ -209,11 +209,11 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: src/assets/agents/triager.md
+// Structural tests: src/assets/agents/triage.md
 // ---------------------------------------------------------------------------
 
-describe('triager.md — Input Context and Apply Decisions section', () => {
-  const content = loadFile('src/assets/agents/triager.md');
+describe('triage.md — Input Context and Apply Decisions section', () => {
+  const content = loadFile('src/assets/agents/triage.md');
 
   it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
@@ -225,7 +225,7 @@ describe('triager.md — Input Context and Apply Decisions section', () => {
   });
 
   it('Apply Decisions usage describes citing inline in Reasoning column', () => {
-    // Extract only the Apply Decisions bullet from Responsibilities — triager.md has
+    // Extract only the Apply Decisions bullet from Responsibilities — triage.md has
     // "Reasoning" columns in three unrelated output tables, so asserting against the
     // whole file is self-ratifying. This scopes the assertion to the actual coupling.
     const applyDecisionsStep = extractSection(content, '**Apply Decisions**', '\n3. **Assign disposition**');
@@ -263,12 +263,12 @@ describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('triager.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('src/assets/agents/triager.md');
+  it('triage.md contains DECISIONS_CONTEXT', () => {
+    const content = loadFile('src/assets/agents/triage.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolve.md Phase 2 passes DECISIONS_CONTEXT to Triager', () => {
+  it('resolve.md Phase 2 passes DECISIONS_CONTEXT to the Triage agent', () => {
     const content = loadFile('dist/commands/resolve.md');
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
     expect(phase2).toContain('DECISIONS_CONTEXT');

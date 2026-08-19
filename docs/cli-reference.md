@@ -56,11 +56,10 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-explore` | Core | Codebase exploration with knowledge base creation |
 | `devflow-research` | Core | Multi-type research with trust-aware synthesis |
 | `devflow-release` | Core | Adaptive release with learned configuration |
-| `devflow-self-review` | Core | Simplifier + Scrutinizer |
+| `devflow-self-review` | Core | Simplify + Scrutinize |
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
 | `devflow-ambient` | Core | Ambient mode (orchestrator charter + plan handoff) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
-| `devflow-audit-claude` | Optional | CLAUDE.md file audit |
 | `devflow-typescript` | Language | TypeScript patterns |
 | `devflow-react` | Language | React patterns |
 | `devflow-accessibility` | Language | Web accessibility patterns |
@@ -69,6 +68,8 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-python` | Language | Python patterns |
 | `devflow-java` | Language | Java patterns |
 | `devflow-rust` | Language | Rust patterns |
+| `devflow-dynamic` | Optional | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline |
+| `devflow-compliance` | Optional | Regulatory compliance patterns — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX |
 
 ## Ambient Mode
 

@@ -406,14 +406,14 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('dist/commands/ contains exactly 16 .md files (14 compiled + 2 hand-authored)', async () => {
-    // The 2 hand-authored files are audit-claude.md and release.md, copied verbatim by build-mds.ts.
+  it('dist/commands/ contains exactly 15 .md files (14 compiled + 1 hand-authored)', async () => {
+    // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
     const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
     const mdFiles = files.filter(f => f.endsWith('.md'));
     expect(
       mdFiles.length,
-      `Expected 16 .md files in dist/commands/ (14 compiled + 2 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
-    ).toBe(16);
+      `Expected 15 .md files in dist/commands/ (14 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+    ).toBe(15);
   });
 });
 
@@ -621,17 +621,17 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Gate 1 #2');
   });
 
-  it('does NOT run Gate 1 (Validator/Simplifier/Scrutinizer) between review cycles', () => {
+  it('does NOT run Gate 1 (Validate/Simplify/Scrutinize) between review cycles', () => {
     expect(compiled).not.toContain('Gate 1 only — no Gate 2 for review-fixes');
     expect(compiled).not.toContain('Simplify recent fixes');
     expect(compiled).not.toContain('9-pillar review of recent fixes');
   });
 
-  it('spawns Simplifier and Scrutinizer exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
-    const simplifier = (compiled.match(/agentType: "Simplifier"/g) ?? []).length;
-    const scrutinizer = (compiled.match(/agentType: "Scrutinizer"/g) ?? []).length;
-    expect(simplifier, 'Simplifier should run only in the two Gate-1 passes').toBe(2);
-    expect(scrutinizer, 'Scrutinizer should run only in the two Gate-1 passes').toBe(2);
+  it('spawns Simplify and Scrutinize exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
+    const simplifyCount = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
+    const scrutinizeCount = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
+    expect(simplifyCount, 'Simplify should run only in the two Gate-1 passes').toBe(2);
+    expect(scrutinizeCount, 'Scrutinize should run only in the two Gate-1 passes').toBe(2);
   });
 });
 
@@ -694,12 +694,12 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('reviewBaseSha');
   });
 
-  it('C2: reviewer result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
+  it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
     expect(compiled).toContain('reviewed: true');
     expect(compiled).toContain('review coverage incomplete');
     expect(compiled).toContain('coverageGaps.length === 0');
-    // Chunk/stagger: reviewers dispatched in bounded parallel batches
-    expect(compiled).toContain('const chunk = await parallel(reviewerThunks.slice(i, i + chunkSize));');
+    // Chunk/stagger: Review agents dispatched in bounded parallel batches
+    expect(compiled).toContain('const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));');
   });
 
   it('C3: findings disposition replaces old survivingFindings raw dump', () => {
@@ -713,11 +713,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('FAIL-FIXED');
   });
 
-  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Designer reader', () => {
+  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Design reader', () => {
     expect(compiled).toContain('ALWAYS ready');
     expect(compiled).toContain('cascade');
     expect(compiled).toContain('never kills the wave');
-    expect(compiled).toContain('agentType: "Designer"');
+    expect(compiled).toContain('agentType: "Design"');
   });
 
   it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, NEVER wrapped, bounded re-arm', () => {

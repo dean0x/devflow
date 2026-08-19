@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: This skill should be used when reviewing implementation plans for anti-patterns, checking design quality before implementation, or performing plan-level quality assessment. Provides 6 anti-pattern detection rules for the designer agent and inline planning.
+description: This skill should be used when reviewing implementation plans for anti-patterns, checking design quality before implementation, or performing plan-level quality assessment. Provides 6 anti-pattern detection rules for the Design agent and inline planning.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

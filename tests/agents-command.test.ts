@@ -14,7 +14,9 @@ import {
   validateSetArgs,
   applySetMapping,
   buildListRows,
+  formatListOutput,
   selectCatalog,
+  mergeTuiRowsIntoMapping,
   type ListRow,
 } from '../src/cli/commands/agents.js';
 import { buildModelCycle } from '../src/cli/agents-view/index.js';
@@ -26,6 +28,7 @@ import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import * as modelDiscovery from '../src/core/model-discovery.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 import { MAX_TTL_MS } from '../src/core/cache.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
 // ---------------------------------------------------------------------------
 // validateSetArgs
@@ -155,68 +158,68 @@ describe('applySetMapping', () => {
   const emptyMapping: AgentMappingFile = { version: 1, agents: {} };
 
   it('adds model entry for agent', () => {
-    const result = applySetMapping(emptyMapping, 'coder', { model: 'opus' });
-    expect(result.agents['coder']?.model).toBe('opus');
+    const result = applySetMapping(emptyMapping, 'code', { model: 'opus' });
+    expect(result.agents['code']?.model).toBe('opus');
   });
 
   it('adds effort entry for agent', () => {
-    const result = applySetMapping(emptyMapping, 'coder', { effort: 'high' });
-    expect(result.agents['coder']?.effort).toBe('high');
+    const result = applySetMapping(emptyMapping, 'code', { effort: 'high' });
+    expect(result.agents['code']?.effort).toBe('high');
   });
 
   it('adds both model and effort', () => {
-    const result = applySetMapping(emptyMapping, 'coder', { model: 'sonnet', effort: 'max' });
-    expect(result.agents['coder']?.model).toBe('sonnet');
-    expect(result.agents['coder']?.effort).toBe('max');
+    const result = applySetMapping(emptyMapping, 'code', { model: 'sonnet', effort: 'max' });
+    expect(result.agents['code']?.model).toBe('sonnet');
+    expect(result.agents['code']?.effort).toBe('max');
   });
 
   it('clears model when model is "default"', () => {
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus', effort: 'high' } },
+      agents: { code: { model: 'opus', effort: 'high' } },
     };
-    const result = applySetMapping(mapping, 'coder', { model: 'default' });
-    expect(result.agents['coder']?.model).toBeUndefined();
-    expect(result.agents['coder']?.effort).toBe('high'); // preserved
+    const result = applySetMapping(mapping, 'code', { model: 'default' });
+    expect(result.agents['code']?.model).toBeUndefined();
+    expect(result.agents['code']?.effort).toBe('high'); // preserved
   });
 
   it('clears effort when effort is "default"', () => {
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus', effort: 'high' } },
+      agents: { code: { model: 'opus', effort: 'high' } },
     };
-    const result = applySetMapping(mapping, 'coder', { effort: 'default' });
-    expect(result.agents['coder']?.model).toBe('opus'); // preserved
-    expect(result.agents['coder']?.effort).toBeUndefined();
+    const result = applySetMapping(mapping, 'code', { effort: 'default' });
+    expect(result.agents['code']?.model).toBe('opus'); // preserved
+    expect(result.agents['code']?.effort).toBeUndefined();
   });
 
   it('clears model field and leaves an empty entry (entry removal is the TUI-save layer\'s job)', () => {
     const mapping: AgentMappingFile = {
       version: 1,
-      agents: { coder: { model: 'opus' } },
+      agents: { code: { model: 'opus' } },
     };
-    const result = applySetMapping(mapping, 'coder', { model: 'default' });
+    const result = applySetMapping(mapping, 'code', { model: 'default' });
     // model key is gone, but the entry itself remains (applySetMapping never removes empty entries)
-    expect(result.agents['coder']?.model).toBeUndefined();
-    expect('coder' in result.agents).toBe(true);
+    expect(result.agents['code']?.model).toBeUndefined();
+    expect('code' in result.agents).toBe(true);
   });
 
   it('does not mutate the original mapping', () => {
-    const original: AgentMappingFile = { version: 1, agents: { coder: { model: 'opus' } } };
-    applySetMapping(original, 'coder', { model: 'sonnet' });
-    expect(original.agents['coder']?.model).toBe('opus');
+    const original: AgentMappingFile = { version: 1, agents: { code: { model: 'opus' } } };
+    applySetMapping(original, 'code', { model: 'sonnet' });
+    expect(original.agents['code']?.model).toBe('opus');
   });
 
   it('preserves entries for other agents', () => {
     const mapping: AgentMappingFile = {
       version: 1,
       agents: {
-        designer: { model: 'haiku', effort: 'low' },
+        design: { model: 'haiku', effort: 'low' },
       },
     };
-    const result = applySetMapping(mapping, 'coder', { model: 'sonnet' });
-    expect(result.agents['designer']?.model).toBe('haiku');
-    expect(result.agents['coder']?.model).toBe('sonnet');
+    const result = applySetMapping(mapping, 'code', { model: 'sonnet' });
+    expect(result.agents['design']?.model).toBe('haiku');
+    expect(result.agents['code']?.model).toBe('sonnet');
   });
 });
 
@@ -241,7 +244,7 @@ describe('buildListRows', () => {
   });
 
   it('returns a row for each agent name', async () => {
-    const agentNames = ['coder', 'designer', 'git'];
+    const agentNames = ['code', 'design', 'git'];
     const mapping: AgentMappingFile = { version: 1, agents: {} };
     const shippedDefaults: Record<string, string> = {
       coder: 'sonnet',
@@ -261,34 +264,34 @@ describe('buildListRows', () => {
 
   it('marks state as "not installed" when agent file is absent', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].state).toBe('not-installed');
   });
 
   it('marks state as "active" when agent file is present and proxy is on', async () => {
-    await fs.writeFile(path.join(installDir, 'coder.md'), 'dummy', 'utf-8');
+    await fs.writeFile(path.join(installDir, 'code.md'), 'dummy', 'utf-8');
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: true,
     });
     expect(rows[0].state).toBe('active');
   });
 
   it('marks state as "saved-inactive" when agent has GPT model + proxy off', async () => {
-    await fs.writeFile(path.join(installDir, 'coder.md'), 'dummy', 'utf-8');
+    await fs.writeFile(path.join(installDir, 'code.md'), 'dummy', 'utf-8');
     const rows = await buildListRows({
-      agentNames: ['coder'],
-      mapping: { version: 1, agents: { coder: { model: 'gpt-5.5' } } },
+      agentNames: ['code'],
+      mapping: { version: 1, agents: { code: { model: 'gpt-5.5' } } },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].state).toBe('saved-inactive');
@@ -296,10 +299,10 @@ describe('buildListRows', () => {
 
   it('shows configured model from mapping', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
-      mapping: { version: 1, agents: { coder: { model: 'opus' } } },
+      agentNames: ['code'],
+      mapping: { version: 1, agents: { code: { model: 'opus' } } },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].configured).toBe('opus');
@@ -307,10 +310,10 @@ describe('buildListRows', () => {
 
   it('shows "default" when agent has no mapping entry', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].configured).toBe('default');
@@ -318,10 +321,10 @@ describe('buildListRows', () => {
 
   it('shows configured effort from mapping', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
-      mapping: { version: 1, agents: { coder: { effort: 'high' } } },
+      agentNames: ['code'],
+      mapping: { version: 1, agents: { code: { effort: 'high' } } },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].effort).toBe('high');
@@ -329,10 +332,10 @@ describe('buildListRows', () => {
 
   it('shows "default" effort when not configured', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].effort).toBe('default');
@@ -340,10 +343,10 @@ describe('buildListRows', () => {
 
   it('includes default model from shippedDefaults', async () => {
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { coder: 'sonnet' },
+      shippedDefaults: { code: 'sonnet' },
       proxyEnabled: false,
     });
     expect(rows[0].defaultModel).toBe('sonnet');
@@ -400,11 +403,14 @@ describe('selectCatalog — proxy-off reads from cache, not hard-coded {known:fa
     expect(catalog.selectableNames).toContain('gpt-test-1');
   });
 
-  it('proxy off + populated cache → buildModelCycle includes the external model names', () => {
+  it('proxy off + populated cache → buildModelCycle includes the alias (not canonical id) — Fix 1', () => {
+    // Fix 1: cycle uses pickerNames(catalog.models) — aliases only.
+    // 'gpt-test-1' has alias 'test1', so 'test1' appears; 'gpt-test-1' does NOT.
     const catalog = selectCatalog(false, cacheDir);
     const cycle = buildModelCycle(catalog);
     expect(cycle).toContain('test1');
-    expect(cycle).toContain('gpt-test-1');
+    // gpt-test-1 is NOT in the cycle — it has an alias 'test1' that takes its slot
+    expect(cycle).not.toContain('gpt-test-1');
     // Claude aliases still present
     for (const alias of CLAUDE_MODEL_ALIASES) {
       expect(cycle).toContain(alias);
@@ -435,8 +441,8 @@ describe('selectCatalog — proxy-off reads from cache, not hard-coded {known:fa
 describe('applySetMapping — GPT dormancy', () => {
   it('allows GPT model regardless of proxy state (proxy state checked at call site)', () => {
     const mapping: AgentMappingFile = { version: 1, agents: {} };
-    const result = applySetMapping(mapping, 'coder', { model: 'gpt-5.5' });
-    expect(result.agents['coder']?.model).toBe('gpt-5.5');
+    const result = applySetMapping(mapping, 'code', { model: 'gpt-5.5' });
+    expect(result.agents['code']?.model).toBe('gpt-5.5');
   });
 });
 
@@ -478,7 +484,7 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
       const mapping: AgentMappingFile = { version: 1, agents: {} };
       const catalog: ExternalModelCatalog = { known: false };
       await buildListRows({
-        agentNames: ['coder'],
+        agentNames: ['code'],
         mapping,
         installDir,
         shippedDefaults,
@@ -502,7 +508,7 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
 
     // No cache directory exists under devflowDir — passes catalog directly
     const rows = await buildListRows({
-      agentNames: ['coder'],
+      agentNames: ['code'],
       mapping,
       installDir,
       shippedDefaults,
@@ -511,7 +517,7 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe('coder');
+    expect(rows[0].name).toBe('code');
   });
 });
 
@@ -538,7 +544,7 @@ describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)'
 
   it('applySetMapping returns synchronously (not a Promise)', () => {
     const mapping: AgentMappingFile = { version: 1, agents: {} };
-    const result = applySetMapping(mapping, 'coder', { model: 'opus' });
+    const result = applySetMapping(mapping, 'code', { model: 'opus' });
     expect(result).not.toBeInstanceOf(Promise);
     expect(typeof (result as Record<string, unknown>)?.then).not.toBe('function');
     // Must have agents field (is an AgentMappingFile)
@@ -554,7 +560,7 @@ describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)'
     try {
       validateSetArgs({ model: 'sonnet' });
       const mapping: AgentMappingFile = { version: 1, agents: {} };
-      applySetMapping(mapping, 'coder', { model: 'opus' });
+      applySetMapping(mapping, 'code', { model: 'opus' });
       expect(
         discoverSpy,
         'validateSetArgs or applySetMapping called discoverExternalModels — AC-P9 violation',
@@ -567,5 +573,229 @@ describe('AC-P9: validateSetArgs and applySetMapping are synchronous (0 spawns)'
       discoverSpy.mockRestore();
       getCachedSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T12: mergeTuiRowsIntoMapping — inertness guarantee (Fix 2)
+// ---------------------------------------------------------------------------
+
+describe('T12: mergeTuiRowsIntoMapping', () => {
+  const BASE_MAPPING: AgentMappingFile = {
+    version: 1,
+    agents: {
+      code: { model: 'opus' },
+      review: { model: 'sol' },
+    },
+  };
+
+  function makeRow(overrides: Partial<{
+    name: string; configuredModel: string; originalModel: string;
+    configuredEffort: string; originalEffort: string;
+  }> = {}): import('../src/cli/agents-view/state.js').AgentRow {
+    return {
+      name: overrides.name ?? 'code',
+      shippedDefault: 'sonnet',
+      configuredModel: overrides.configuredModel ?? 'default',
+      originalModel: overrides.originalModel ?? 'default',
+      configuredEffort: (overrides.configuredEffort ?? 'default') as 'default',
+      originalEffort: (overrides.originalEffort ?? 'default') as 'default',
+      dormantModel: null,
+      offCyclePin: null,
+      installed: true,
+      inRegistry: true,
+    };
+  }
+
+  it('untouched row is preserved byte-identical — inertness guarantee', () => {
+    // A row with configuredModel === originalModel must not modify the mapping.
+    // This is the "inertness" guarantee: selecting a model and immediately
+    // pressing Enter (without changing anything) must not dirty the mapping.
+    const rows = [
+      makeRow({ name: 'code', configuredModel: 'opus', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    // The coder entry must be preserved exactly as-is
+    expect(result.agents['code']).toEqual({ model: 'opus' });
+    // Unrelated entries (reviewer) must also be untouched
+    expect(result.agents['review']).toEqual({ model: 'sol' });
+  });
+
+  it('dirty model row writes the new model', () => {
+    const rows = [
+      makeRow({ name: 'code', configuredModel: 'sonnet', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    expect(result.agents['code']).toEqual({ model: 'sonnet' });
+  });
+
+  it('resetting model to "default" deletes the model key', () => {
+    const rows = [
+      makeRow({ name: 'code', configuredModel: 'default', originalModel: 'opus' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    // model key deleted; empty entry is also removed
+    expect(result.agents['code']).toBeUndefined();
+  });
+
+  it('dirty effort row writes the new effort', () => {
+    const rows = [
+      makeRow({ name: 'code', configuredModel: 'opus', originalModel: 'opus',
+                 configuredEffort: 'high', originalEffort: 'default' }),
+    ];
+    const result = mergeTuiRowsIntoMapping(rows, BASE_MAPPING);
+    expect(result.agents['code']).toEqual({ model: 'opus', effort: 'high' });
+  });
+
+  it('pure function — does not mutate original mapping', () => {
+    const frozen = {
+      version: 1 as const,
+      agents: Object.freeze({ code: Object.freeze({ model: 'opus' }) }),
+    };
+    const rows = [
+      makeRow({ name: 'code', configuredModel: 'sonnet', originalModel: 'opus' }),
+    ];
+    // Must not throw (mutation of frozen object throws in strict mode)
+    expect(() => mergeTuiRowsIntoMapping(rows, frozen as AgentMappingFile)).not.toThrow();
+    // Original mapping is untouched
+    expect(frozen.agents['code']).toEqual({ model: 'opus' });
+  });
+
+  it('dormant row cycled back to its saved GPT model is inert (no write)', () => {
+    // A dormant row has originalModel='default' (proxy-off fallback) but
+    // dormantModel='gpt-5.5' (the saved GPT model). If the user cycles
+    // to 'gpt-5.5', isDirtyModel returns false (not a change). The merge
+    // must treat the row as inert — not re-write 'gpt-5.5' over 'default'.
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { code: { model: 'gpt-5.5' } },
+    };
+    const row: import('../src/cli/agents-view/state.js').AgentRow = {
+      name: 'code',
+      shippedDefault: 'sonnet',
+      configuredModel: 'gpt-5.5',  // user cycled to the dormant model
+      originalModel: 'default',     // proxy-off display fallback at init
+      configuredEffort: 'default',
+      originalEffort: 'default',
+      dormantModel: 'gpt-5.5',     // the saved GPT model
+      offCyclePin: null,
+      installed: true,
+      inRegistry: true,
+    };
+    const originalEntry = mapping.agents['code'];
+    const result = mergeTuiRowsIntoMapping([row], mapping);
+    // Must be byte-identical — no write occurred
+    expect(result.agents['code']).toEqual({ model: 'gpt-5.5' });
+    // F12: reference identity — the entry must be the SAME object (dormant short-circuit
+    // returns the original entry, not a new object with the same shape). A structural
+    // toEqual test passes either way; Object.is catches the difference.
+    expect(Object.is(result.agents['code'], originalEntry)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-P3-LIST: --list AGENT cell format and --set round-trip
+//
+// The AGENT column in --list output must be lowercase identifiers that users
+// can copy directly into `devflow agents --set <agent>`. Capitalization is
+// TUI-only (formatAgentName is called only in render.ts, never in agents.ts).
+// ---------------------------------------------------------------------------
+
+describe('AC-P3-LIST: --list AGENT cell is a lowercase identifier', () => {
+  let installDir: string;
+
+  beforeEach(async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-fmt-'));
+    installDir = path.join(tmpBase, 'agents');
+    await fs.mkdir(installDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(installDir), { recursive: true, force: true });
+  });
+
+  it('every AGENT name from buildListRows matches ^[a-z0-9-]+$ (no capitals)', async () => {
+    // The AGENT cell is stripAnsi(row.name) — the raw registry name.
+    // Registry names are lowercase kebab-case; capitals must NEVER appear.
+    const agentNames = getAllAgentNames();
+    expect(agentNames.length).toBeGreaterThan(0);
+
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const shippedDefaults: Record<string, string> = Object.fromEntries(
+      agentNames.map(n => [n, 'sonnet']),
+    );
+    const rows = await buildListRows({
+      agentNames,
+      mapping,
+      installDir,
+      shippedDefaults,
+      proxyEnabled: false,
+    });
+
+    const AGENT_CELL_PATTERN = /^[a-z0-9-]+$/;
+    for (const row of rows) {
+      expect(
+        row.name,
+        `AGENT cell "${row.name}" contains non-lowercase or non-identifier chars`,
+      ).toMatch(AGENT_CELL_PATTERN);
+    }
+  });
+
+  it('a name taken from --list round-trips through --set validation (getAllAgentNames contains it)', async () => {
+    // --set validates agent names against getAllAgentNames() (plus orphan keys).
+    // Any name that appears in buildListRows output must therefore be in
+    // getAllAgentNames() — ensuring a user who copies from --list can use --set.
+    const agentNames = getAllAgentNames();
+    expect(agentNames.length).toBeGreaterThan(0);
+
+    const mapping: AgentMappingFile = { version: 1, agents: {} };
+    const shippedDefaults: Record<string, string> = Object.fromEntries(
+      agentNames.map(n => [n, 'sonnet']),
+    );
+    const rows = await buildListRows({
+      agentNames,
+      mapping,
+      installDir,
+      shippedDefaults,
+      proxyEnabled: false,
+    });
+
+    const registrySet = new Set(getAllAgentNames());
+    for (const row of rows) {
+      // Every name from --list must be recognised by --set's validation.
+      expect(
+        registrySet.has(row.name),
+        `Agent "${row.name}" from --list is not in getAllAgentNames() — --set would reject it`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-B11: formatListOutput — saved-inactive renders with (proxy off) detail
+//
+// Plan requires: --list composes `saved-inactive (proxy off)` for the dormant
+// state. The TUI STATE column stays bare `saved-inactive` (width math assumes 14).
+// ---------------------------------------------------------------------------
+
+describe('formatListOutput (AC-B11): saved-inactive renders (proxy off) suffix', () => {
+  const makeRow = (state: ListRow['state']): ListRow => ({
+    name: 'code',
+    defaultModel: 'sonnet',
+    configured: 'gpt-5.5',
+    effort: 'default',
+    state,
+  });
+
+  it('renders "saved-inactive (proxy off)" — NOT bare "saved-inactive"', () => {
+    const output = formatListOutput([makeRow('saved-inactive')], false);
+    expect(output).toContain('saved-inactive (proxy off)');
+    expect(output).not.toContain('saved — inactive');
+  });
+
+  it('does NOT add proxy-off suffix to active state', () => {
+    const output = formatListOutput([makeRow('active')], true);
+    expect(output).not.toContain('(proxy off)');
+    expect(output).toContain('active');
   });
 });

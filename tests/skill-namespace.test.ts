@@ -160,6 +160,33 @@ describe('LEGACY_SKILL_NAMES invariant: frozen pre-namespace bare-skill coverage
   });
 });
 
+// ---------------------------------------------------------------------------
+// Non-vacuity anchor: the registry must contain skills that are NOT in
+// LEGACY_SKILL_NAMES. If this ever becomes empty, the PF-012 safety tests
+// (which use registry names as "foreign" collision names) become vacuous —
+// a registry skill that is also a legacy entry would be legitimately removed
+// by the bare cleanup pass, so there would be no unsafe deletion to guard against.
+//
+// 'security' is a concrete example: it is in the live registry (post-namespace)
+// and NOT in LEGACY_SKILL_NAMES, so tests using 'security' as the foreign
+// collision name are non-vacuous.
+// ---------------------------------------------------------------------------
+describe('non-vacuity anchor: live registry contains skills absent from LEGACY_SKILL_NAMES', () => {
+  it('getAllSkillNames() has at least one entry not in LEGACY_SKILL_NAMES', () => {
+    const registryOnlySkills = getAllSkillNames().filter(n => !LEGACY_SKILL_NAMES.includes(n));
+    expect(
+      registryOnlySkills.length,
+      'At least one registry skill must be absent from LEGACY_SKILL_NAMES, otherwise the PF-012 safety tests (which use registry names as "foreign" collision names) are vacuous',
+    ).toBeGreaterThan(0);
+  });
+
+  it('"security" is in the live registry but NOT in LEGACY_SKILL_NAMES (pins the collision scenario)', () => {
+    // If this assertion ever fails, update the PF-012 tests to use a different collision name.
+    expect(getAllSkillNames()).toContain('security');
+    expect(LEGACY_SKILL_NAMES).not.toContain('security');
+  });
+});
+
 describe('hasShadow normalizes prefixed names', () => {
   let tmpDir: string;
 
@@ -231,17 +258,22 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(content.length, 'installed SKILL.md should have non-empty content').toBeGreaterThan(10);
   });
 
-  it('removes legacy unprefixed dir during cleanup', async () => {
-    // Use a real skill name from DEVFLOW_PLUGINS so cleanup loop finds it
+  it('does NOT remove a bare dir for a registry skill (PF-012: bare cleanup is init.ts\'s job)', async () => {
+    // After the PF-012 fix, installViaFileCopy no longer removes bare dirs for
+    // live-registry skills. ~/.claude/skills/ is shared; bare dirs for current
+    // registry names are by construction foreign to Devflow. Init.ts:1149-1153
+    // (LEGACY_SKILL_NAMES only) is the sole owner of bare dir cleanup.
     const realSkill = 'software-design';
-    const legacyDir = path.join(claudeDir, 'skills', realSkill);
-    await fs.mkdir(legacyDir, { recursive: true });
-    await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
+    const bareDir = path.join(claudeDir, 'skills', realSkill);
+    await fs.mkdir(bareDir, { recursive: true });
+    const sentinel = 'bare-dir-must-survive-installer';
+    await fs.writeFile(path.join(bareDir, 'SKILL.md'), sentinel);
 
     await runInstall();
 
-    // Legacy dir for real skill should be gone (cleaned by DEVFLOW_PLUGINS loop)
-    await expect(fs.stat(legacyDir)).rejects.toThrow();
+    // Bare dir must survive — installViaFileCopy no longer removes bare dirs.
+    const survived = await fs.readFile(path.join(bareDir, 'SKILL.md'), 'utf-8');
+    expect(survived, 'bare software-design/SKILL.md must not be removed by installViaFileCopy').toBe(sentinel);
   });
 
   it('cleanup removes stale prefixed dir and reinstalls fresh', async () => {
@@ -337,33 +369,40 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(report.skippedShadows).toHaveLength(0);
   });
 
-  it('partial install still cleans skill dirs (skills are universal)', async () => {
-    // Use a real skill name so cleanup loop finds it
+  it('partial install only removes prefixed dirs — bare dirs are untouched (PF-012)', async () => {
+    // After the PF-012 fix, the installer's cleanup pass only removes prefixed
+    // dirs (devflow:<skill>), never bare dirs. Bare dirs are reserved for the frozen
+    // LEGACY_SKILL_NAMES pass in init.ts; live-registry bare dirs are foreign.
     const realSkill = 'software-design';
-    const legacyDir = path.join(claudeDir, 'skills', realSkill);
-    await fs.mkdir(legacyDir, { recursive: true });
-    await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
+    const bareDir = path.join(claudeDir, 'skills', realSkill);
+    await fs.mkdir(bareDir, { recursive: true });
+    const sentinel = 'bare-dir-survives-partial-install';
+    await fs.writeFile(path.join(bareDir, 'SKILL.md'), sentinel);
 
     await runInstall({ isPartialInstall: true });
 
-    // Legacy bare-named dir should be gone (skill cleanup always runs)
-    await expect(fs.stat(legacyDir)).rejects.toThrow();
+    // Bare dir must survive even on partial install.
+    const survived = await fs.readFile(path.join(bareDir, 'SKILL.md'), 'utf-8');
+    expect(survived, 'bare software-design/SKILL.md must not be removed by partial installViaFileCopy').toBe(sentinel);
+
     // Prefixed dir for test skill should be installed from src/assets/skills/
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
     const stat = await fs.stat(installed);
     expect(stat.isFile()).toBe(true);
   });
 
-  it('partial install preserves commands and agents dirs', async () => {
-    // Seed existing command dir
+  it('partial install preserves commands from the full registry (dir is not wholesale-wiped)', async () => {
+    // 'implement' is in getAllCommandNames() — the registry-diff sweep must not remove it.
+    // This verifies both that the commands dir is not wholesale-wiped on partial install
+    // AND that the sweep correctly uses the full registry (not the selected-plugin subset).
     const commandsDir = path.join(claudeDir, 'commands', 'devflow');
     await fs.mkdir(commandsDir, { recursive: true });
-    await fs.writeFile(path.join(commandsDir, 'existing.md'), 'keep me');
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), 'keep me');
 
     await runInstall({ isPartialInstall: true });
 
-    // Commands dir should still exist (only wiped on full install)
-    const content = await fs.readFile(path.join(commandsDir, 'existing.md'), 'utf-8');
+    // 'implement' is in the registry → survives the sweep
+    const content = await fs.readFile(path.join(commandsDir, 'implement.md'), 'utf-8');
     expect(content).toBe('keep me');
   });
 

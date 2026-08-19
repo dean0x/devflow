@@ -24,7 +24,7 @@ Web research for documentation, technical articles, community knowledge, and pub
 
 ## When This Activates
 
-Loaded by Researcher agent when `RESEARCH_TYPE` is `external`. Covers:
+Loaded by Research agent when `RESEARCH_TYPE` is `external`. Covers:
 - Finding official documentation for a technology
 - Researching how a library or API works
 - Finding community knowledge, tutorials, and best practices

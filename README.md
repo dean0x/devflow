@@ -24,15 +24,15 @@ you: add rate limiting to the /api/upload endpoint
 
          → Created branch feat/42-rate-limit-upload
          → Exploring codebase... Planning... Coding...
-         → Validator: build ✓ typecheck ✓ lint ✓ tests ✓
-         → Simplifier: cleaned up 3 files
-         → Scrutinizer: 9-pillar quality check passed
-         → Evaluator: implementation matches request ✓
-         → Tester: 5/5 QA scenarios passed ✓
+         → Validate: build ✓ typecheck ✓ lint ✓ tests ✓
+         → Simplify: cleaned up 3 files
+         → Scrutinize: 9-pillar quality check passed
+         → Evaluate: implementation matches request ✓
+         → Test: 5/5 QA scenarios passed ✓
 ```
 
 ```
-/devflow:code-review     → up to 20 reviewers examine your changes in parallel
+/devflow:code-review     → up to 20 Review agents examine your changes in parallel
 /devflow:resolve         → all issues validated and fixed automatically
 /devflow:bug-analysis    → proactive bug finding before review
 ```
@@ -50,9 +50,9 @@ you: add rate limiting to the /api/upload endpoint
 
 **Always-on rules.** 13 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust), plus a global compliance rule when the devflow-compliance plugin is installed. Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
 
-**Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplifier + Scrutinizer quality passes.
+**Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplify + Scrutinize quality passes.
 
-**Everything is composable.** 23 plugins (12 core + 10 language/ecosystem + 1 optional workflow recipes). Install only what you need.
+**Everything is composable.** 22 plugins (12 core + 10 optional). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
@@ -62,7 +62,7 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-**Up to 20 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when the devflow-compliance plugin is installed). Every finding gets validated and resolved automatically.
+**Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when the devflow-compliance plugin is installed). Every finding gets validated and resolved automatically.
 
 **41 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
 
@@ -105,12 +105,17 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 | `/research` | Multi-type research with trust-aware synthesis |
 | `/plan` | Full design pipeline: explore → gap analysis → design → PR-ready plan document |
 | `/implement` | Execute plan: accepts plan documents from `/plan`, issues, or task descriptions → PR |
-| `/self-review` | Simplifier + Scrutinizer quality pass |
+| `/self-review` | Simplify + Scrutinize quality pass |
 | `/code-review` | Multi-perspective parallel code review |
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |
 | `/bug-analysis` | Proactive bug finding with static and semantic analysis |
 | `/release` | Adaptive release with learned configuration |
+| `/dynamic-tickets` | Turn an initiative into a wave-structured ticket slate |
+| `/dynamic-plan` | Parallel wave planning with acceptance criteria and test plans |
+| `/dynamic-build` | Dependency-aware build engine for a ticket or wave |
+| `/dynamic-profile` | Distill session transcripts into a decision-preference profile |
+| `/dynamic-wave` | Full-pipeline wave driver: tickets → plan → build |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 
@@ -124,7 +129,7 @@ npx devflow-kit init --plugin=typescript,react
 
 ## How it works
 
-Devflow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, triager, coder, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
+Devflow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (review, triage, code, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
 
 For deep dives: [Working Memory](docs/working-memory.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
 
@@ -152,7 +157,7 @@ See [docs/cli-reference.md](docs/cli-reference.md) for all options.
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
-| **Devflow** | Quality Orchestration | Parallel reviewers, working memory, learning, composable plugins |
+| **Devflow** | Quality Orchestration | Parallel Review agents, working memory, learning, composable plugins |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Karpathy optimization loops, multi-agent pipelines, DAG dependencies |
 
 ## Building from Source

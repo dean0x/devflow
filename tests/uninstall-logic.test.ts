@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
+import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts } from '../src/cli/commands/uninstall.js';
-import { DEVFLOW_PLUGINS, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
@@ -17,10 +19,13 @@ describe('computeAssetsToRemove', () => {
   });
 
   it('removes agents unique to selected plugins', () => {
-    // devflow-audit-claude has agent 'claude-md-auditor' which is unique to it
-    const auditPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')!;
-    const { agents } = computeAssetsToRemove([auditPlugin], DEVFLOW_PLUGINS);
-    expect(agents).toContain('claude-md-auditor');
+    // devflow-bug-analysis has agent 'diagnose' which is unique to it
+    const bugAnalysisPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
+    // Non-empty assertion: guard against vacuous pass if the plugin is accidentally deleted
+    expect(bugAnalysisPlugin).toBeDefined();
+    expect(bugAnalysisPlugin.agents.length).toBeGreaterThan(0);
+    const { agents } = computeAssetsToRemove([bugAnalysisPlugin], DEVFLOW_PLUGINS);
+    expect(agents).toContain('diagnose');
   });
 
   it('retains agents shared with remaining plugins', () => {
@@ -108,12 +113,12 @@ describe('formatDryRunPlan', () => {
   it('lists skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['security', 'test-driven-development'],
-      agents: ['coder'],
+      agents: ['code'],
       commands: ['/implement'],
     });
     expect(plan).toContain('security');
     expect(plan).toContain('test-driven-development');
-    expect(plan).toContain('coder');
+    expect(plan).toContain('code');
     expect(plan).toContain('/implement');
   });
 
@@ -133,20 +138,10 @@ describe('formatDryRunPlan', () => {
     expect(plan).not.toContain('Commands');
   });
 
-  it('includes extras when provided', () => {
-    const plan = formatDryRunPlan(
-      { skills: ['x'], agents: [], commands: [] },
-      ['.docs/', '.memory/', 'hooks in settings.json'],
-    );
-    expect(plan).toContain('.docs/');
-    expect(plan).toContain('.memory/');
-    expect(plan).toContain('hooks in settings.json');
-  });
-
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design', 'software-design', 'testing'],
-      agents: ['coder', 'coder'],
+      agents: ['code', 'code'],
       commands: ['/implement', '/implement'],
     });
     // Should show count based on unique items, not duplicates
@@ -582,16 +577,126 @@ describe('resolveDevflowDirCleanup', () => {
     expect(artifactsOnly).toBe('artifacts-only');
     expect(prompt).toBe('prompt');
   });
+
+  // === keepDocs gate: suppresses the full ~/.devflow cleanup prompt (TEST-9d) ===
+  //
+  // --keep-docs must prevent the wipe prompt even when the session is interactive
+  // and user-authored content is present. Callers that pass keepDocs:true must
+  // fall through to removeDevFlowInstallArtifacts without prompting.
+
+  it('(9d) returns artifacts-only when keepDocs is true even with interactive TTY and user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+      keepDocs: true,
+    })).toBe('artifacts-only');
+  });
+
+  it('(9d) returns artifacts-only when keepDocs is true and no user content', () => {
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: [],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+      keepDocs: true,
+    })).toBe('artifacts-only');
+  });
+
+  it('(9d) keepDocs:false does not suppress the prompt (normal behavior preserved)', () => {
+    // Explicit false is same as omitting the field — prompt path still reachable.
+    expect(resolveDevflowDirCleanup({
+      scope: 'user',
+      isTTY: true,
+      userContent: SOME_CONTENT,
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+      keepDocs: false,
+    })).toBe('prompt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A7: resolveProjectDataCleanup — pure function for .devflow/ prompt cancel
+// ---------------------------------------------------------------------------
+
+describe('resolveProjectDataCleanup (A7)', () => {
+  it('returns true for boolean true (user confirmed removal)', () => {
+    expect(resolveProjectDataCleanup(true)).toBe(true);
+  });
+
+  it('returns false for boolean false (user declined)', () => {
+    expect(resolveProjectDataCleanup(false)).toBe(false);
+  });
+
+  it('returns false for a symbol (cancel sentinel — treated as decline, not abort)', () => {
+    // The cancel symbol is what p.confirm() returns when the user presses Ctrl-C.
+    // It must be treated as decline so the remaining cleanup steps still run
+    // (avoids PF-014: process.exit here would skip claudeignore, hooks, safe-delete).
+    expect(resolveProjectDataCleanup(Symbol('clack-cancel'))).toBe(false);
+  });
+
+  it('returns false for any non-true value — type-safe exhaustive check', () => {
+    // Any value that is not boolean `true` must return false (no surprises).
+    for (const val of [false, Symbol(), Symbol('other')]) {
+      expect(resolveProjectDataCleanup(val)).toBe(false);
+    }
+  });
 });
 
 // ─── TEST-4: removeDevFlowInstallArtifacts proxy artifact coverage ────────────
 //
-// Ordering invariant (documented here, enforced in uninstall.ts action):
+// Ordering invariant (executable guard below, in "revert-before-remove ordering"):
 //   revertExternalAgents MUST run before removeAllDevFlow so that agent files
 //   are still present when we attempt to revert their frontmatter.  If
 //   removeAllDevFlow runs first, revertExternalAgents silently skips the files
 //   (skippedMissing path) and leaves the user's install in an inconsistent
-//   state where ~/.claude/agents/devflow/coder.md still has a GPT model line.
+//   state where ~/.claude/agents/devflow/code.md still has a GPT model line.
+
+// ---------------------------------------------------------------------------
+// revert-before-remove ordering — static guard
+//
+// The wrong order produces NO observable filesystem difference: the agent file is
+// deleted either way, and revertExternalAgents fails silently down its
+// skippedMissing path. A behavioural test cannot separate the two, so the source
+// order is the guard (same shape as the render.ts aliasToId guard).
+// ---------------------------------------------------------------------------
+
+describe('revert-before-remove ordering (phase runners)', () => {
+  async function phaseBody(fnName: string, nextDecl: string): Promise<string> {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf(`export async function ${fnName}`);
+    const end = src.indexOf(nextDecl, start);
+    expect(start, `${fnName} not found in source`).toBeGreaterThan(-1);
+    expect(end, `declaration after ${fnName} not found`).toBeGreaterThan(start);
+    return src.slice(start, end);
+  }
+
+  it('runSelectivePhaseForScope reverts agent frontmatter before removeSelectedPlugins', async () => {
+    const body = await phaseBody('runSelectivePhaseForScope', 'export async function runFullPhaseForScope');
+    const revertAt = body.indexOf('revertExternalAgents(');
+    const removeAt = body.indexOf('removeSelectedPlugins(');
+    // Non-vacuity: both calls must actually be present in the slice.
+    expect(revertAt).toBeGreaterThan(-1);
+    expect(removeAt).toBeGreaterThan(-1);
+    expect(revertAt).toBeLessThan(removeAt);
+  });
+
+  it('runFullPhaseForScope reverts agent frontmatter before removeAllDevFlow', async () => {
+    const body = await phaseBody('runFullPhaseForScope', 'export async function runCleanupPhase');
+    const revertAt = body.indexOf('revertExternalAgents(');
+    const removeAt = body.indexOf('removeAllDevFlow(');
+    expect(revertAt).toBeGreaterThan(-1);
+    expect(removeAt).toBeGreaterThan(-1);
+    expect(revertAt).toBeLessThan(removeAt);
+  });
+});
 
 describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', () => {
   let devflowDir: string;
@@ -742,5 +847,944 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
 
     // If uninstall drifts to a different path, writePath still exists → this fails.
     await expect(fs.access(writePath)).rejects.toThrow();
+  });
+
+  // ─── TEST-9c: ~/.devflow residue EQUALS allow-list of user-authored files ────────
+  //
+  // Asserts EQUALITY (not subset) so any install artifact that escapes the removal
+  // list causes a test failure. Proved non-vacuous: adding an unknown artifact
+  // ('mystery-artifact.json') to the setup BEFORE the equality assertion caused
+  // the test to go RED (mystery-artifact.json appeared in the remaining set),
+  // removing it restored GREEN — confirming the assertion enforces completeness.
+
+  it('(9c) residue after artifact-only removal exactly matches user-authored allow-list', async () => {
+    // ── Install artifacts (must be removed) ──────────────────────────────────
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'migrations.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
+    await fs.mkdir(path.join(devflowDir, 'logs', 'project-slug'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'logs', 'project-slug', '.hook-debug.log'), 'debug', 'utf-8');
+    await fs.mkdir(path.join(devflowDir, 'cache', 'models'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'costs', 'sessions'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'costs', 'archive.jsonl'), '{}\n', 'utf-8');
+    // agent-models.json is an install artifact (stale keys silently re-apply to
+    // renamed/deleted agents on reinstall — AC-P1-F4), NOT user-authored content.
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+
+    // ── User-authored files (must survive) ───────────────────────────────────
+    await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'), '# Skill', 'utf-8');
+    await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    // ── Equality assertion: only user-authored entries may remain ─────────────
+    const remaining = new Set(await fs.readdir(devflowDir));
+    // Install artifacts must be gone (including agent-models.json — reclassified as artifact)
+    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json']) {
+      expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
+    }
+    // Exact equality: nothing but user-authored state remains, and every enumerated
+    // user item survives an artifact-only pass. This is the executable form of the
+    // rule that removeDevFlowInstallArtifacts and enumerateUserDevFlowContent must
+    // never overlap — the artifact pass also runs on decline/cancel/--keep-docs.
+    // agent-models.json is intentionally ABSENT: it is an install artifact (AC-P1-F4),
+    // not user-authored content, so it does not appear in enumerateUserDevFlowContent.
+    expect(remaining).toEqual(new Set([
+      'skills',
+      'rules',
+      'preference-profile.md',
+      'learning.json',
+      'hud.json',
+    ]));
+  });
+
+  // ─── TEST-9f: the two lists must be disjoint ────────────────────────────────
+  //
+  // enumerateUserDevFlowContent names what the confirm prompt says it is about to
+  // delete. removeDevFlowInstallArtifacts runs on the decline, cancel, non-interactive
+  // AND --keep-docs paths. An item on both lists is therefore deleted no matter what
+  // the user answers, which makes the prompt a lie and loses user config silently.
+
+  it('(9f) every item enumerated as user content survives an artifact-only removal', async () => {
+    await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'rules', 'security.md'), '# Rule', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
+    // agent-models.json is an INSTALL ARTIFACT (AC-P1-F4), not user content — it is
+    // present on disk here to prove the artifact pass removes it (does not survive),
+    // and it must NOT appear in the before/after enumeration.
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+
+    const before = await enumerateUserDevFlowContent(devflowDir);
+    // Non-vacuity: the enumeration found every USER-AUTHORED category on disk.
+    // Count is 5: skill shadows, rule shadows, preference-profile.md, learning.json, hud.json.
+    // agent-models.json is absent from the count — it is an artifact, not user content.
+    expect(before.length).toBe(5);
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    const after = await enumerateUserDevFlowContent(devflowDir);
+    expect(after).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4: installArtifactPaths — extracted single source of truth
+// ---------------------------------------------------------------------------
+
+describe('installArtifactPaths (A4)', () => {
+  it('is a pure function — called with the same dir returns a stable list', () => {
+    const dir = '/tmp/devflow-a4-test';
+    const result = installArtifactPaths(dir);
+    expect(result.length).toBeGreaterThan(0);
+    // Second call must return an equal structure (no mutation between calls).
+    const result2 = installArtifactPaths(dir);
+    expect(result2).toEqual(result);
+  });
+
+  it('includes migrations.json as a non-directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'migrations.json');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBeFalsy();
+  });
+
+  it('includes agent-models.json as a non-directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'agent-models.json');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBeFalsy();
+  });
+
+  it('includes logs as a directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'logs');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBe(true);
+  });
+
+  it('includes costs as a directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'costs');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST-9a: removeAllDevFlow — full uninstall empties agents/devflow including
+//   retired and user-dropped files.
+// ---------------------------------------------------------------------------
+//
+// PF-018: these tests call the exported function directly — no CLI spawn, so
+// no ~/.claude guard is needed.
+
+describe('removeAllDevFlow — full uninstall (TEST-9a)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-claude-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('(9a) agents/devflow is gone after full uninstall regardless of what files are inside', async () => {
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    // Registry agent — a real agent name from the registry
+    await fs.writeFile(path.join(agentsDir, 'code.md'), '---\nmodel: sonnet\n---\n', 'utf-8');
+    // Retired agent — a name no longer in any plugin
+    await fs.writeFile(path.join(agentsDir, 'old-retired-agent.md'), 'retired', 'utf-8');
+    // User-dropped file — arbitrary extra content in the dir
+    await fs.writeFile(path.join(agentsDir, 'user-notes.md'), 'notes', 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    // agents/devflow must be gone (rm -rf on the whole dir)
+    await expect(fs.access(agentsDir)).rejects.toThrow();
+  });
+
+  it('(9a) commands/devflow is gone after full uninstall', async () => {
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), '# implement', 'utf-8');
+    await fs.writeFile(path.join(commandsDir, 'old-legacy-cmd.md'), 'old', 'utf-8');
+
+    await removeAllDevFlow(claudeDir, path.join(claudeDir, 'scripts'), false);
+
+    await expect(fs.access(commandsDir)).rejects.toThrow();
+  });
+
+  it('(9a) completes without throwing even when all directories are absent', async () => {
+    // All target directories (commands, agents, rules, scripts) are absent — must be a no-op
+    await expect(
+      removeAllDevFlow(claudeDir, path.join(claudeDir, 'nonexistent-scripts'), false),
+    ).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST-9b: removeSelectedPlugins — selective uninstall leaves no unclaimed files.
+// Registry-diff sweep removes orphaned agents/commands not in any plugin.
+// ---------------------------------------------------------------------------
+
+describe('removeSelectedPlugins — selective uninstall sweep (TEST-9b)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-selective-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('(9b) sweeps orphaned (retired) agents that are not in any plugin registry', async () => {
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+
+    // A real registry agent — must survive (it belongs to some plugin still installed)
+    const realAgent = getAllAgentNames()[0];
+    expect(realAgent).toBeDefined(); // non-vacuous: registry is non-empty
+    await fs.writeFile(path.join(agentsDir, `${realAgent}.md`), 'real agent', 'utf-8');
+
+    // An orphaned agent name that is NOT in any plugin — must be swept
+    const orphanName = '__orphaned_test_agent_not_in_any_plugin__';
+    await fs.writeFile(path.join(agentsDir, `${orphanName}.md`), 'orphaned', 'utf-8');
+
+    // Run selective uninstall with any plugin (the sweep covers ALL plugins' names)
+    const anyPlugin = DEVFLOW_PLUGINS[0];
+    await removeSelectedPlugins(claudeDir, [anyPlugin], false);
+
+    // Orphaned agent must be swept away
+    await expect(
+      fs.access(path.join(agentsDir, `${orphanName}.md`)),
+    ).rejects.toThrow();
+
+    // Real registry agent must survive (it's in the knownNames set)
+    await expect(
+      fs.access(path.join(agentsDir, `${realAgent}.md`)),
+    ).resolves.not.toThrow();
+  });
+
+  it('(9b) commands: orphaned command files are swept; registry commands survive', async () => {
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+
+    // A known (non-orphaned) command: 'implement' is in getAllCommandNames()
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), '# implement', 'utf-8');
+
+    // An orphaned command not in any plugin
+    const orphanCmd = '__orphaned_command_not_in_registry__';
+    await fs.writeFile(path.join(commandsDir, `${orphanCmd}.md`), 'orphaned', 'utf-8');
+
+    const anyPlugin = DEVFLOW_PLUGINS[0];
+    await removeSelectedPlugins(claudeDir, [anyPlugin], false);
+
+    // Orphaned command swept
+    await expect(
+      fs.access(path.join(commandsDir, `${orphanCmd}.md`)),
+    ).rejects.toThrow();
+
+    // 'implement' survives (it's in the registry even if not removed by this plugin selection)
+    await expect(
+      fs.access(path.join(commandsDir, 'implement.md')),
+    ).resolves.not.toThrow();
+  });
+
+  it('(9b-A6) sweepDevflowNamespaces removes orphaned devflow:* skill dirs, spares registry skills', async () => {
+    // A6: skills were missing from the selective sweep before this fix.
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Construct the orphan dir name programmatically so the skill-references scanner
+    // does not flag the literal string as a prefixed skill reference (mirrors
+    // the pattern used in installer-new.test.ts for ORPHAN_DIR_NAME).
+    const ORPHAN_SKILL_DIR = ['devflow', 'zzz-orphan-skill-not-in-registry'].join(':');
+    const orphanSkillDir = path.join(skillsDir, ORPHAN_SKILL_DIR);
+    await fs.mkdir(orphanSkillDir, { recursive: true });
+    await fs.writeFile(path.join(orphanSkillDir, 'SKILL.md'), '# orphan', 'utf-8');
+
+    await sweepDevflowNamespaces(claudeDir, false);
+
+    // Orphan must be swept
+    await expect(fs.access(orphanSkillDir)).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST-9e: isDevFlowInstalled — detects via any owned namespace (not just commands)
+// ---------------------------------------------------------------------------
+//
+// Commandless plugin installs (agents + skills, no commands) must still be
+// detected. Checks all three namespaces: commands/devflow/, agents/devflow/,
+// and any devflow:* skill directory.
+
+describe('isDevFlowInstalled — multi-namespace detection (TEST-9e)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-detect-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('(9e) returns true when agents/devflow exists but commands/devflow is absent', async () => {
+    await fs.mkdir(path.join(claudeDir, 'agents', 'devflow'), { recursive: true });
+    await fs.writeFile(
+      path.join(claudeDir, 'agents', 'devflow', 'code.md'),
+      '---\nmodel: sonnet\n---',
+      'utf-8',
+    );
+    // commands/devflow intentionally absent
+
+    const result = await isDevFlowInstalled(claudeDir);
+    expect(result).toBe(true);
+  });
+
+  it('(9e) returns true when a devflow: skill dir exists but commands/devflow is absent', async () => {
+    await fs.mkdir(path.join(claudeDir, 'skills', 'devflow:software-design'), { recursive: true });
+    // commands/devflow and agents/devflow intentionally absent
+
+    const result = await isDevFlowInstalled(claudeDir);
+    expect(result).toBe(true);
+  });
+
+  it('(9e) returns true when commands/devflow exists (existing behavior preserved)', async () => {
+    await fs.mkdir(path.join(claudeDir, 'commands', 'devflow'), { recursive: true });
+
+    const result = await isDevFlowInstalled(claudeDir);
+    expect(result).toBe(true);
+  });
+
+  it('(9e) returns false when none of the owned namespaces are present', async () => {
+    // Empty claudeDir — no Devflow artifacts
+    const result = await isDevFlowInstalled(claudeDir);
+    expect(result).toBe(false);
+  });
+
+  it('(9e) returns false when skills dir has only non-devflow entries', async () => {
+    // A skill dir without the devflow: prefix must not trigger detection
+    await fs.mkdir(path.join(claudeDir, 'skills', 'other-plugin:some-skill'), { recursive: true });
+
+    const result = await isDevFlowInstalled(claudeDir);
+    expect(result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A8: phase runner extraction — runDryRunPhase, runSelectivePhaseForScope,
+//   runFullPhaseForScope, runCleanupPhase
+//
+// TDD: these tests were written RED (import undefined = not-a-function) before
+// the functions were exported.  Each covers a concrete behavioral invariant of
+// the phase it represents.
+// ---------------------------------------------------------------------------
+
+describe('runDryRunPhase (A8)', () => {
+  it('is an exported async function', () => {
+    expect(typeof runDryRunPhase).toBe('function');
+  });
+
+  it('(A8) selective dry-run: completes without throwing for a real plugin', async () => {
+    const reviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review')!;
+    expect(reviewPlugin).toBeDefined();
+    await expect(runDryRunPhase({
+      scopesToUninstall: ['user'],
+      isSelectiveUninstall: true,
+      selectedPlugins: [reviewPlugin],
+    })).resolves.not.toThrow();
+  });
+
+  it('(A8) full dry-run: completes without throwing with empty scopes', async () => {
+    // Empty scope list — the inner for-loop is a no-op; should not crash.
+    await expect(runDryRunPhase({
+      scopesToUninstall: [],
+      isSelectiveUninstall: false,
+      selectedPlugins: [],
+    })).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A5 regression: enumerateDryRunExtras — production dry-run enumeration path
+//
+// PF-018: the A4 tests pinned the pure helpers (installArtifactPaths, etc.)
+// but not the production enumeration path. This suite exercises
+// enumerateDryRunExtras — the function that runDryRunPhase calls — with a
+// seeded fake install to verify truthfulness.
+//
+// RED evidence (pre-fix): the old inline code used a hand-written string for
+// install artifacts (missing agent-models.json) and only listed the devflow-namespace
+// prefixed skill dirs (missing bare legacy dirs like codebase-navigation).
+// GREEN: enumerateDryRunExtras derives from installArtifactPaths and enumerates
+// both prefixed and bare skill candidates, so both appear in the output.
+// ---------------------------------------------------------------------------
+
+describe('enumerateDryRunExtras (A5 regression)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a5-claude-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a5-devflow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('(A5) names agent-models.json in the enumerated paths when seeded, omits it when absent', async () => {
+    // F7: step 4 must apply the same existence filter as steps 1-3 (fs.access guard).
+    // de-vacuize A5: assert BOTH present-when-seeded AND absent-when-not-seeded.
+
+    // Case 1: seeded — must appear
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    const withSeed = await enumerateDryRunExtras(claudeDir, devflowDir);
+    expect(
+      withSeed.some(e => e.includes('agent-models.json')),
+      'agent-models.json must appear when the file exists',
+    ).toBe(true);
+
+    // Case 2: absent — must NOT appear (discriminating assertion: prior bug listed
+    // all installArtifactPaths unconditionally, so the absent file still appeared).
+    await fs.rm(path.join(devflowDir, 'agent-models.json'));
+    const withoutSeed = await enumerateDryRunExtras(claudeDir, devflowDir);
+    expect(
+      withoutSeed.some(e => e.includes('agent-models.json')),
+      'agent-models.json must NOT appear when the file is absent (existence filter)',
+    ).toBe(false);
+  });
+
+  it('(A5) names a bare legacy skill dir that exists on disk', async () => {
+    // Seed a bare legacy skill dir — removeAllDevFlow removes bare variants too.
+    // 'codebase-navigation' is a LEGACY_SKILL_NAME (bare, pre-v1.0.0 era).
+    const skillsDir = path.join(claudeDir, 'skills');
+    const bareLegacySkillDir = path.join(skillsDir, 'codebase-navigation');
+    await fs.mkdir(bareLegacySkillDir, { recursive: true });
+
+    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
+
+    // The bare legacy skill path must appear — the old code only listed devflow-namespace prefixed dirs.
+    const hasBareSkill = entries.some(e => e.includes('codebase-navigation'));
+    expect(hasBareSkill, 'bare legacy skill dir codebase-navigation must be listed in dry-run extras').toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-012: enumerateDryRunExtras bare-skill safety
+  //
+  // Before fix: the bare pass iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES,
+  // so bare security/ (a foreign dir colliding with a live-registry name) was
+  // included in the preview list — implying it would be deleted.
+  //
+  // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
+  //   - bare codebase-navigation/ IS listed (it is in LEGACY_SKILL_NAMES)
+  //   - bare security/ is NOT listed (it is NOT in LEGACY_SKILL_NAMES)
+  //
+  // Discriminating: the "does NOT contain bare security" assertion fails RED
+  // before the fix and passes GREEN after.
+  // -------------------------------------------------------------------------
+  it('(PF-012) dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed both dirs so the existence guard (fs.access) includes them when present.
+    await fs.mkdir(path.join(skillsDir, 'security'), { recursive: true });
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
+
+    // codebase-navigation IS in LEGACY_SKILL_NAMES — must appear in the preview.
+    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    expect(
+      entries.some(e => e === bareLegacyPath),
+      `bare codebase-navigation path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
+    ).toBe(true);
+
+    // security is NOT in LEGACY_SKILL_NAMES — its bare path must NOT appear in the preview.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    expect(
+      entries.some(e => e === bareForeignPath),
+      `bare security path (${bareForeignPath}) must NOT appear in enumerateDryRunExtras (foreign dir)`,
+    ).toBe(false);
+  });
+});
+
+describe('runSelectivePhaseForScope (A8)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-selective-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-devflow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runSelectivePhaseForScope).toBe('function');
+  });
+
+  it('(A8) removes agent files for the selected plugin', async () => {
+    // devflow-bug-analysis owns the 'diagnose' agent — unique to that plugin
+    const bugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
+    expect(bugPlugin).toBeDefined();
+    const agentName = 'diagnose'; // unique to devflow-bug-analysis
+    expect(bugPlugin.agents).toContain(agentName);
+
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, `${agentName}.md`), '# diagnose', 'utf-8');
+
+    await runSelectivePhaseForScope({
+      claudeDir,
+      devflowDir,
+      selectedPlugins: [bugPlugin],
+      verbose: false,
+    });
+
+    // diagnose.md must be removed (it is unique to devflow-bug-analysis)
+    await expect(fs.access(path.join(agentsDir, `${agentName}.md`))).rejects.toThrow();
+  });
+
+  it('(A8) tolerates absent agents dir — no throw (non-fatal)', async () => {
+    const anyPlugin = DEVFLOW_PLUGINS[0];
+    // claudeDir has no agents/devflow — runSelectivePhaseForScope must not throw
+    await expect(runSelectivePhaseForScope({
+      claudeDir,
+      devflowDir,
+      selectedPlugins: [anyPlugin],
+      verbose: false,
+    })).resolves.not.toThrow();
+  });
+});
+
+describe('runFullPhaseForScope (A8)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-full-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-devflowdir-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runFullPhaseForScope).toBe('function');
+  });
+
+  it('(A8) local scope: agents/devflow is removed, devflowDir install artifacts removed', async () => {
+    // Plant an agent file and a manifest (install artifact)
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'code.md'), '# code', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+    const scriptsDir = path.join(devflowDir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    await runFullPhaseForScope({
+      scope: 'local',
+      claudeDir,
+      devflowDir,
+      devflowScriptsDir: scriptsDir,
+      verbose: false,
+      keepDocs: false,
+      isTTY: false,
+    });
+
+    // agents/devflow is gone (removeAllDevFlow)
+    await expect(fs.access(agentsDir)).rejects.toThrow();
+    // manifest.json removed by removeDevFlowInstallArtifacts (local scope)
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('(A8) user scope (non-TTY): assets removed, install artifacts removed (artifacts-only path)', async () => {
+    // isTTY:false is passed explicitly — resolveDevflowDirCleanup → artifacts-only.
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'git.md'), '# git', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+    const scriptsDir = path.join(devflowDir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    await runFullPhaseForScope({
+      scope: 'user',
+      claudeDir,
+      devflowDir,
+      devflowScriptsDir: scriptsDir,
+      verbose: false,
+      keepDocs: false,
+      isTTY: false,
+    });
+
+    // agents/devflow is gone
+    await expect(fs.access(agentsDir)).rejects.toThrow();
+    // manifest.json removed (artifacts-only path)
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+  });
+});
+
+describe('runCleanupPhase (A8)', () => {
+  let tmpCwd: string;
+
+  beforeEach(async () => {
+    tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a8-cleanup-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpCwd, { recursive: true, force: true });
+  });
+
+  it('is an exported async function', () => {
+    expect(typeof runCleanupPhase).toBe('function');
+  });
+
+  it('(A8) completes without throwing when .devflow/ is absent and no scopes (non-TTY)', async () => {
+    // Empty scopes: skips settings.json loop entirely.
+    // tmpCwd has no .devflow/ — devflowDataExists is false.
+    await expect(runCleanupPhase({
+      scopesToUninstall: [],
+      keepDocs: false,
+      verbose: false,
+      cwd: tmpCwd,
+      isTTY: false,
+    })).resolves.not.toThrow();
+  });
+
+  it('(A8) preserves .devflow/ in non-TTY mode (no prompt — keepDocs:false but not interactive)', async () => {
+    // isTTY:false is an explicit input, not an ambient global — no prompt can fire.
+    const devflowDir = path.join(tmpCwd, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'config.json'), '{}', 'utf-8');
+
+    await runCleanupPhase({
+      scopesToUninstall: [],
+      keepDocs: false,
+      verbose: false,
+      cwd: tmpCwd,
+      isTTY: false,
+    });
+
+    // .devflow/ preserved (non-TTY, no prompt fired)
+    await expect(fs.access(devflowDir)).resolves.not.toThrow();
+  });
+
+  /**
+   * runCleanupPhase reaches machine-wide state (settings.json, the shell profile)
+   * and it resolves the git root to decide where .claudeignore lives. Both of its
+   * ambient inputs must come from `opts`, or the phase acts on the caller's real
+   * environment while the test believes it is sandboxed in tmpCwd.
+   *
+   * Falsification: reverting the body to `getGitRoot()` makes the second assertion
+   * fail here — the phase finds the devflow repo root and reports on ITS
+   * .claudeignore instead of the fixture's.
+   */
+  it('(A8) resolves the git root from the injected cwd, not process.cwd()', async () => {
+    // Fixture repo with NO .claudeignore. The devflow checkout running this suite
+    // DOES have one, so the two roots give observably different output: resolving
+    // from process.cwd() finds a .claudeignore and announces it; resolving from
+    // `cwd` finds none and stays silent.
+    execFileSync('git', ['init', '-q'], { cwd: tmpCwd });
+    await expect(fs.access(path.join(tmpCwd, '.claudeignore'))).rejects.toThrow();
+    // Non-vacuity: the discriminator only exists because the suite's own repo has one.
+    await expect(fs.access(path.join(process.cwd(), '.claudeignore'))).resolves.toBeUndefined();
+
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      await runCleanupPhase({
+        scopesToUninstall: [],
+        keepDocs: false,
+        verbose: false,
+        cwd: tmpCwd,
+        isTTY: false,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(written.join('')).not.toContain('.claudeignore');
+  });
+
+  /**
+   * Static guard (same shape as the render.ts aliasToId guard): every destructive
+   * prompt in this phase must be gated on opts.isTTY. A single surviving
+   * process.stdin.isTTY read would fire a confirm against the developer's real
+   * settings.json or shell profile under a TTY-attached test runner — a case no
+   * behavioural test in a piped runner can reach.
+   */
+  it('(A8) runCleanupPhase reads no ambient process.stdin.isTTY', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // Non-vacuity: the slice really is the phase body, and it really does gate on isTTY.
+    expect(body).toContain('isTTY');
+    expect(body).not.toContain('process.stdin.isTTY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F5: settings-hooks cleanup block removal static guard
+//
+// The block at ~:816-833 (settings.hooks check + delete settings.hooks) is
+// transition residue: all Devflow strippers above it delete settings.hooks
+// when it empties, so the block only fires when third-party hooks remain —
+// then incorrectly offers to delete ALL hooks (including foreign ones).
+// The block must be removed; this static guard prevents it from creeping back.
+// ---------------------------------------------------------------------------
+
+describe('F5: foreign hook survives runCleanupPhase — static code guard', () => {
+  it('F5: runCleanupPhase body contains no "delete settings.hooks" after the Devflow strippers', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // The surgical Devflow strippers (removeAmbientHook, removeMemoryHooks, etc.) handle
+    // Devflow hook removal. If all Devflow hooks are gone, settings.hooks is empty/absent
+    // (strippers clean up). Any remaining settings.hooks entries are THIRD-PARTY — they
+    // must never be deleted here.
+    expect(body, 'runCleanupPhase must not bulk-delete settings.hooks after surgical strippers').not.toContain('delete settings.hooks');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F6: proxy port read-after-delete static guard
+//
+// runCleanupPhase called readProxyState inside the settings-cleanup loop, but
+// proxy.json is removed by removeDevFlowInstallArtifacts (called inside
+// runFullPhaseForScope, which precedes runCleanupPhase). After the fix, the
+// managed port is captured before artifact removal and threaded via opts.
+// ---------------------------------------------------------------------------
+
+describe('F6: proxy port captured before artifact removal — static code guard', () => {
+  it('F6: runCleanupPhase body does not call readProxyState (port pre-captured in opts)', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // After the fix, the port is threaded in via opts (pre-captured before proxy.json
+    // deletion) rather than re-read inside the function where proxy.json is already gone.
+    expect(body, 'runCleanupPhase must not re-read proxy.json (it is deleted before this phase runs)').not.toContain('readProxyState(');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F9: orphaned devflow:* skill dirs removed by full uninstall
+//
+// removeAllDevFlow walks the registry + legacy list, never the directory, so
+// orphaned devflow:* skill dirs (retired skills) survive. sweepDevflowNamespaces
+// is wired only into the selective path. Fix: add the directory-walking sweep
+// to the full path too.
+// ---------------------------------------------------------------------------
+
+describe('F9: removeAllDevFlow removes orphaned devflow:* skill dirs', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-f9-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('F9: an orphaned devflow:* skill dir that is NOT in the registry is removed by removeAllDevFlow', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Construct the orphan dir name programmatically so the skill-references scanner
+    // does not flag the literal string as a prefixed skill reference.
+    const ORPHAN_SKILL_DIR = ['devflow', 'f9-retired-orphan-skill'].join(':');
+    const orphanSkillDir = path.join(skillsDir, ORPHAN_SKILL_DIR);
+    await fs.mkdir(orphanSkillDir, { recursive: true });
+    await fs.writeFile(path.join(orphanSkillDir, 'SKILL.md'), '# orphan', 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    // Orphan must be gone after full uninstall
+    await expect(fs.access(orphanSkillDir)).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F11: sweepDevflowNamespaces skills-arm — registry skill survives
+//
+// The existing test (9b-A6) verifies orphan removal but never asserts that a
+// REGISTRY devflow:* skill is spared (unlike agent and command siblings).
+// ---------------------------------------------------------------------------
+
+describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-f11-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('F11: a devflow:* skill dir whose base name is in the registry survives the sweep', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Pick any registry skill name and place a prefixed dir for it
+    const { getAllSkillNames } = await import('../src/core/plugins.js');
+    const registrySkill = [...getAllSkillNames()][0]!;
+    const prefixedDir = path.join(skillsDir, `devflow:${registrySkill}`);
+    await fs.mkdir(prefixedDir, { recursive: true });
+    await fs.writeFile(path.join(prefixedDir, 'SKILL.md'), '# registry skill', 'utf-8');
+
+    await sweepDevflowNamespaces(claudeDir, false);
+
+    // Registry skill must survive the sweep (analogous to agent and command survival assertions)
+    await expect(fs.access(prefixedDir)).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-012: removeAllDevFlow bare-skill safety
+//
+// Before fix: removeAllDevFlow iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES
+// for BOTH the prefixed AND the bare pass. A bare ~/.claude/skills/security/
+// (foreign dir colliding with a live-registry name) would be deleted.
+//
+// After fix: bare pass iterates LEGACY_SKILL_NAMES only.
+//   - bare security/ survives (not in LEGACY_SKILL_NAMES)
+//   - bare codebase-navigation/ is removed (is in LEGACY_SKILL_NAMES)
+//   - devflow:security/ is removed (prefixed pass covers live registry)
+//
+// Discriminating: the sentinel-content assertion on security/ fails RED before
+// the fix (rmdir wipes it) and passes GREEN after.
+// ---------------------------------------------------------------------------
+describe('removeAllDevFlow: bare skill dir safety (PF-012)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('bare security/ survives, bare codebase-navigation/ removed, devflow:security/ removed', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed three dirs: one foreign bare, one legacy bare, one prefixed.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    const prefixedPath = path.join(skillsDir, 'devflow:security');
+
+    await fs.mkdir(bareForeignPath, { recursive: true });
+    await fs.mkdir(bareLegacyPath, { recursive: true });
+    await fs.mkdir(prefixedPath, { recursive: true });
+
+    const sentinel = 'sentinel-content-foreign-security-bare-dir';
+    await fs.writeFile(path.join(bareForeignPath, 'SKILL.md'), sentinel, 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    // Foreign bare security/ must survive byte-identical.
+    const survived = await fs.readFile(path.join(bareForeignPath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'bare security/SKILL.md (foreign dir) must not be deleted by removeAllDevFlow',
+    ).toBe(sentinel);
+
+    // Legacy bare codebase-navigation/ must be removed (it IS in LEGACY_SKILL_NAMES).
+    await expect(
+      fs.access(bareLegacyPath),
+      'bare codebase-navigation/ must be removed by removeAllDevFlow',
+    ).rejects.toThrow();
+
+    // Prefixed devflow:security/ must be removed (live registry coverage).
+    await expect(
+      fs.access(prefixedPath),
+      'devflow:security/ must be removed by removeAllDevFlow',
+    ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-012: removeSelectedPlugins bare-skill safety
+//
+// Before fix: for each skill in the removal set, removeSelectedPlugins tried to
+// delete bare `skill` and legacy `devflow-${skill}` variants in addition to the
+// prefixed variant. This destroyed a foreign ~/.claude/skills/security/ dir when
+// security appeared in the removal list.
+//
+// After fix: only prefixSkillName(skill) is removed; bare dirs are untouched.
+//
+// Discriminating: the sentinel check on bare security/ fails RED before the fix
+// (rmdir wipes it) and passes GREEN after.
+// ---------------------------------------------------------------------------
+describe('removeSelectedPlugins: bare skill dir safety (PF-012)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-selective-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('bare security/ survives when security is in the skills removal set', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed: foreign bare security/ with sentinel content.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    await fs.mkdir(bareForeignPath, { recursive: true });
+    const sentinel = 'sentinel-content-security-bare-selective';
+    await fs.writeFile(path.join(bareForeignPath, 'SKILL.md'), sentinel, 'utf-8');
+
+    // Remove ALL plugins so 'security' is in the skills removal set
+    // (no remaining plugin retains it).
+    await removeSelectedPlugins(claudeDir, DEVFLOW_PLUGINS, false);
+
+    // Bare security/ must survive byte-identical.
+    const survived = await fs.readFile(path.join(bareForeignPath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'bare security/SKILL.md must not be deleted by removeSelectedPlugins',
+    ).toBe(sentinel);
   });
 });

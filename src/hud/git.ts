@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
+import { isTrunkBranch } from '../core/git.js';
 import type { GitStatus } from './types.js';
 
 const GIT_TIMEOUT = 1000; // 1s per command
+const GIT_MAXBUFFER = 16 * 1024 * 1024; // 16 MiB — covers >500k refs at ~30 B/ref
 
 function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT }, (err, stdout) => {
+    execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT, maxBuffer: GIT_MAXBUFFER }, (err, stdout) => {
       resolve(err ? '' : stdout.trim());
     });
   });
@@ -24,13 +26,17 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
   const topLevel = await gitExec(['rev-parse', '--show-toplevel'], cwd);
   if (!topLevel) return null;
 
-  // Branch name
+  // Branch name — 'HEAD' means detached HEAD state
   const branch = await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   if (!branch) return null;
 
-  // Dirty check
+  // Dirty check — porcelain v1: two-char XY status prefix per path.
+  // --no-optional-locks is a git-level option and MUST precede the subcommand:
+  // `git status --no-optional-locks` is rejected as an unknown option, which makes
+  // shellExec return '' and silently reports every tree as clean. Keeping the flag
+  // (in the right position) stops the HUD from writing .git/index on every prompt.
   const statusOutput = await gitExec(
-    ['status', '--porcelain', '--no-optional-locks'],
+    ['--no-optional-locks', 'status', '--porcelain'],
     cwd,
   );
   let dirty = false;
@@ -45,34 +51,44 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
     if (worktree !== ' ' || index === '?') dirty = true;
   }
 
-  // Ahead/behind — detect base branch with layered fallback (ported from statusline.sh)
-  const baseBranch = await detectBaseBranch(branch, cwd);
   let ahead = 0;
   let behind = 0;
-  if (baseBranch) {
-    const revList = await gitExec(
-      ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`],
-      cwd,
-    );
-    const parts = revList.split(/\s+/);
-    if (parts.length === 2) {
-      behind = parseInt(parts[0], 10) || 0;
-      ahead = parseInt(parts[1], 10) || 0;
-    }
-  }
-
-  // Diff stats against base
   let filesChanged = 0;
   let additions = 0;
   let deletions = 0;
-  if (baseBranch) {
-    const diffStat = await gitExec(['diff', '--shortstat', baseBranch], cwd);
-    const filesMatch = diffStat.match(/(\d+)\s+file/);
-    const addMatch = diffStat.match(/(\d+)\s+insertion/);
-    const delMatch = diffStat.match(/(\d+)\s+deletion/);
-    filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
-    additions = addMatch ? parseInt(addMatch[1], 10) : 0;
-    deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
+
+  // Detached HEAD ('HEAD') has no branch reference to compare against — skip ahead/behind and diff.
+  if (branch !== 'HEAD') {
+    const baseRef = await detectBaseBranch(branch, cwd);
+    if (baseRef) {
+      // rev-list and merge-base are independent — run in parallel.
+      // Ahead/behind: three-dot range is merge-base-equivalent (commit count only, no working tree).
+      const [revList, mergeBase] = await Promise.all([
+        gitExec(['rev-list', '--left-right', '--count', `${baseRef}...HEAD`], cwd),
+        gitExec(['merge-base', baseRef, 'HEAD'], cwd),
+      ]);
+
+      const parts = revList.split(/\s+/);
+      if (parts.length === 2) {
+        behind = parseInt(parts[0], 10) || 0;
+        ahead = parseInt(parts[1], 10) || 0;
+      }
+
+      // Diff stats: resolve the explicit merge base so the diff covers only this branch's changes
+      // relative to the default branch. git diff --shortstat <mergeBase> compares the working tree
+      // against the merge base, intentionally including uncommitted working-tree changes in the figure.
+      // NOTE: diff includes the working tree; ahead/behind counts commits only. This asymmetry is
+      // deliberate — both reference the same merge base but differ in working-tree inclusion.
+      if (mergeBase) {
+        const diffStat = await gitExec(['diff', '--shortstat', mergeBase], cwd);
+        const filesMatch = diffStat.match(/(\d+)\s+file/);
+        const addMatch = diffStat.match(/(\d+)\s+insertion/);
+        const delMatch = diffStat.match(/(\d+)\s+deletion/);
+        filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+        additions = addMatch ? parseInt(addMatch[1], 10) : 0;
+        deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
+      }
+    }
   }
 
   // Tag and worktree info (parallel)
@@ -108,86 +124,96 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
 }
 
 /**
- * Detect the base branch for ahead/behind calculations.
- * Uses a 4-layer fallback (ported from statusline.sh):
- *   1. Branch reflog ("Created from")
- *   2. HEAD reflog ("checkout: moving from X to branch")
- *   3. GitHub PR base branch (gh pr view, cached)
- *   4. main/master fallback
+ * Resolve the comparison ref for a given branch, using a pre-built Set of known refs.
+ *
+ * CONTRACT: when the current branch IS the repo's default branch, or is any
+ * canonical trunk branch (per isTrunkBranch), and origin/<branch> exists as a
+ * remote ref, compare against origin/<branch> so the status line shows unpushed
+ * commits rather than a zero diff.
+ *
+ * Do NOT use @{upstream} for all branches — pushed feature branches would
+ * self-compare (rev-list A...A = 0 ahead/behind) and the HUD would render nothing
+ * useful. The trunk-name predicate is the correct discriminant: feature branches
+ * compare against the repo default; trunk branches compare against themselves.
+ *
+ * This function is pure/sync — the refs Set answers existence without spawning.
+ * Called from remote detection layers (a) and (b); layer (c) (local-only fallback)
+ * returns a local branch name directly and does not self-compare against origin/.
  */
-async function detectBaseBranch(
+function resolveComparisonRef(
   branch: string,
-  cwd: string,
-): Promise<string | null> {
-  // Layer 1: branch reflog — look for "branch: Created from"
-  const branchLog = await gitExec(
-    ['reflog', 'show', branch, '--format=%gs', '-n', '1'],
-    cwd,
-  );
-  const createdMatch = branchLog.match(/branch: Created from (.+)/);
-  if (createdMatch) {
-    const candidate = createdMatch[1];
-    if (candidate !== 'HEAD' && !candidate.includes('~')) {
-      const exists = await gitExec(
-        ['rev-parse', '--verify', candidate],
-        cwd,
-      );
-      if (exists) return candidate;
-    }
+  defaultRef: string,
+  refs: Set<string>,
+): string {
+  const defaultShort = defaultRef.replace(/^origin\//, '');
+  if ((branch === defaultShort || isTrunkBranch(branch)) && refs.has(`origin/${branch}`)) {
+    return `origin/${branch}`;
   }
+  return defaultRef;
+}
 
-  // Layer 2: HEAD reflog — look for "checkout: moving from X to branch"
-  // Skip for protected branches: reflog shows "moved from feature-branch to main" which is
-  // never the correct base for main. Protected branches should use Layer 4 (origin/main).
-  const protectedBranches = [
-    'main', 'master', 'develop', 'integration',
-    'production', 'staging', 'trunk', 'release', 'stable',
-  ];
-  if (!protectedBranches.includes(branch)) {
-    const headLog = await gitExec(
-      ['reflog', 'show', 'HEAD', '--format=%gs'],
+/**
+ * Detect the base (default) branch for this repository using exactly two git spawns.
+ *
+ * Resolution order:
+ *   (a) git symbolic-ref --short refs/remotes/origin/HEAD — authoritative when set by
+ *       `git clone` or `git remote set-head`. Absence is common (only set by those two
+ *       operations) and is treated as a normal fallback, not an error.
+ *   (b) First of origin/main, origin/master, origin/develop, origin/trunk that exists
+ *       as a ref in the fetched Set.
+ *   (c) No remote configured — first of main, master, develop, trunk that exists
+ *       locally (in the fetched Set). Never compare a branch against itself.
+ *   (d) Nothing resolves — return null; caller renders the counter absent rather than
+ *       wrong. Rendering nothing is strictly better than a confidently wrong number.
+ *
+ * Both spawns run in parallel:
+ *   1. git symbolic-ref --short refs/remotes/origin/HEAD
+ *   2. git for-each-ref --format=%(refname:short) refs/heads/ refs/remotes/origin/
+ *      → builds a Set<string> of all known local and remote branch names.
+ *
+ * The Set answers all existence queries (layers a–c) without additional spawns.
+ *
+ * resolveComparisonRef is called from remote layers (a) and (b) so that any canonical
+ * trunk branch (develop, staging, production, release/*) self-compares against
+ * origin/<branch> when that ref exists, not just the detected default branch.
+ * Layer (c) (no remote configured) returns a local branch name without calling this.
+ *
+ * Note on tag-DWIM: for-each-ref limits scope to refs/heads/ and refs/remotes/origin/,
+ * so tag objects never appear in the Set — a name that happens to match a tag is not
+ * mistaken for a branch.
+ */
+async function detectBaseBranch(branch: string, cwd: string): Promise<string | null> {
+  const [originHead, refsOutput] = await Promise.all([
+    gitExec(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], cwd),
+    gitExec(
+      ['for-each-ref', '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/origin/'],
       cwd,
-    );
-    const escapedBranch = branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const checkoutPattern = new RegExp(
-      `checkout: moving from (\\S+) to ${escapedBranch}`,
-    );
-    for (const line of headLog.split('\n')) {
-      const match = line.match(checkoutPattern);
-      if (match) {
-        const candidate = match[1];
-        // Skip raw commit hashes and the current branch
-        if (candidate === branch || /^[0-9a-f]{7,}$/.test(candidate)) continue;
-        const exists = await gitExec(
-          ['rev-parse', '--verify', candidate],
-          cwd,
-        );
-        if (exists) return candidate;
-      }
+    ),
+  ]);
+
+  const refs = new Set(refsOutput ? refsOutput.split('\n').filter(Boolean) : []);
+
+  // (a) Authoritative when present: set by git clone or git remote set-head.
+  //     Absence is common — do not treat as exceptional, just fall through.
+  if (originHead && refs.has(originHead)) {
+    return resolveComparisonRef(branch, originHead, refs);
+  }
+
+  // (b) Scan common remote branch names when origin/HEAD is absent.
+  for (const candidate of ['origin/main', 'origin/master', 'origin/develop', 'origin/trunk']) {
+    if (refs.has(candidate)) {
+      return resolveComparisonRef(branch, candidate, refs);
     }
   }
 
-  // Layer 3: GitHub PR base branch via gh CLI
-  const prBase = await shellExec(
-    'gh', ['pr', 'view', '--json', 'baseRefName', '-q', '.baseRefName'],
-    cwd,
-  );
-  if (prBase) {
-    const exists = await gitExec(['rev-parse', '--verify', prBase], cwd);
-    if (exists) return prBase;
+  // (c) No remote configured — fall back to local default branches.
+  for (const candidate of ['main', 'master', 'develop', 'trunk']) {
+    if (candidate === branch) continue; // Never compare a branch against itself
+    if (refs.has(candidate)) {
+      return candidate;
+    }
   }
 
-  // Layer 4: main/master fallback (skip if already on that branch — use remote tracking instead)
-  // Protected branches compare against their own remote tracking ref
-  if (protectedBranches.includes(branch)) {
-    const remote = await gitExec(['rev-parse', '--verify', `origin/${branch}`], cwd);
-    if (remote) return `origin/${branch}`;
-  }
-  for (const candidate of ['main', 'master']) {
-    if (candidate === branch) continue;
-    const exists = await gitExec(['rev-parse', '--verify', candidate], cwd);
-    if (exists) return candidate;
-  }
-
+  // (d) Cannot determine base — degrade gracefully; caller renders counter as absent.
   return null;
 }

@@ -15,13 +15,13 @@ devflow/
 │   │   │                             #   capture.ts, legacy-hooks.ts, knowledge/
 │   │   └── utils/                    # (empty — utilities moved to src/core/)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
-│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 23 plugin entries
+│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 22 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
 │   │   ├── flags.ts                  # Claude Code flag registry (20 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
-│   │   ├── migrations.ts             # Run-once migration registry (empty as of 2.0)
+│   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   └── ...                       # feature-config.ts, learning-tuning-config.ts, …
@@ -44,10 +44,10 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 17 agents (16 shared + claude-md-auditor)
+│       ├── agents/                   # 16 agents
 │       │   ├── git.md
-│       │   ├── synthesizer.md
-│       │   ├── coder.md
+│       │   ├── synthesize.md
+│       │   ├── code.md
 │       │   └── ...
 │       ├── rules/                    # 13 rules (flat .md files)
 │       │   ├── engineering.md
@@ -55,7 +55,7 @@ devflow/
 │       │   └── ...
 │       ├── commands/                 # Command sources
 │       │   ├── *.mds                 # 14 MDS host files (compiled to dist/commands/ by build:mds)
-│       │   ├── *.md                  # 2 static command files
+│       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # 10 MDS partial files (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
@@ -100,12 +100,11 @@ Plugins are entries in `DEVFLOW_PLUGINS` in `src/core/plugins.ts` — no per-plu
 ```typescript
 {
   name: 'devflow-implement',
-  description: 'Complete task implementation workflow',
+  description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
   commands: ['/implement'],
-  agents: ['git', 'coder', 'synthesizer'],
-  skills: ['patterns', 'quality-gates'],
+  agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
+  skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
   rules: [],
-  optional: false,
 }
 ```
 
@@ -151,10 +150,9 @@ Assets live once in `src/assets/` and install directly to the user's `~/.claude/
 2. Add agent name to the plugin entry's `agents` array in DEVFLOW_PLUGINS
 3. Run `node dist/cli.js init` to install
 
-### Shared vs Plugin-Specific Agents
+### Agents
 
-- **Shared** (16): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `triager`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `learning`
-- **Plugin-specific** (1): `claude-md-auditor` — committed directly in `src/assets/agents/`
+All 16 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`) are shared — committed directly in `src/assets/agents/`.
 
 ## Settings Override
 
@@ -210,3 +208,74 @@ The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixe
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
 Data source: `context_window.current_usage` from Claude Code's JSON stdin. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
+
+## Namespace Ownership and Orphan Sweep
+
+### Devflow-Owned Namespaces
+
+Devflow claims four namespaces inside `~/.claude/`:
+
+| Namespace | Path | Content |
+|-----------|------|---------|
+| Commands | `~/.claude/commands/devflow/` | One `.md` file per command (e.g., `implement.md`) |
+| Agents | `~/.claude/agents/devflow/` | One `.md` file per agent (e.g., `code.md`) |
+| Rules | `~/.claude/rules/devflow/` | One `.md` file per rule (e.g., `security.md`) |
+| Skills | `~/.claude/skills/devflow:*/` | One directory per skill (e.g., `devflow:software-design/`) |
+
+These four namespaces hold the installed asset files. `devflow init` also writes `~/.claude/settings.json` (hook registrations, flags, view mode) and `~/.devflow/` state files (manifest, migrations tracking, proxy config). The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
+
+### Orphan Sweep (install and selective uninstall)
+
+An orphan is an installed asset whose name is no longer in the plugin registry — typically a retired or renamed agent/command/skill. Without active cleanup, orphans accumulate on disk indefinitely.
+
+**Mechanism** (`src/core/orphan-sweep.ts: sweepOrphanedAssets`):
+
+1. Read the directory listing for the target namespace.
+2. Apply a name extractor (strips `.md` for agents/commands; strips `devflow:` prefix for skills).
+3. Delete every entry whose extracted name is **not** in the `knownNames` set.
+4. Return a `SweepResult` with counts and per-item errors — failures are non-fatal (avoids PF-009).
+
+**When it runs** (`src/targets/claude-code/installer.ts: installViaFileCopy` and `src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
+
+- **On every install** (`devflow init`): `installViaFileCopy` runs three sweeps — skills are swept before the skill-copy phase; commands and agents are swept after their respective copy phases. Either way, retired assets are removed on every `devflow init`, including partial installs.
+- **On full uninstall** (`devflow uninstall`): `removeAllDevFlow` calls `sweepDevflowNamespaces` after removing its registry-and-legacy-list entries so that any orphaned `devflow:*` skill directories that left the registry are also cleaned up.
+- **On selective uninstall** (`devflow uninstall --plugin <name>`): `sweepDevflowNamespaces` runs after per-plugin file removal. `knownNames` spans ALL plugins (not just the ones being uninstalled), so assets belonging to non-selected plugins are never swept.
+
+The skills sweep matches entries starting with `devflow:` against `getAllSkillNames()` — non-Devflow skill directories are untouched.
+
+### Full Uninstall (`devflow uninstall`)
+
+`removeAllDevFlow` removes the entire owned namespace directories and the scripts directory:
+
+```
+rm -rf ~/.claude/commands/devflow/
+rm -rf ~/.claude/agents/devflow/
+rm -rf ~/.claude/rules/devflow/
+rm -rf ~/.devflow/scripts/
+```
+
+Skills are removed individually rather than by namespace directory, because `~/.claude/skills/` is shared with other tools. Two separate passes run to avoid deleting foreign dirs (avoids PF-012):
+- **Prefixed** (`devflow:name`): removed for every skill in the live registry ∪ `LEGACY_SKILL_NAMES`.
+- **Bare** (unprefixed): removed only for entries in the frozen `LEGACY_SKILL_NAMES` list. A bare dir whose name matches a current registry skill is by construction foreign to Devflow (the `devflow:` namespace shipped in commit dcecda3, 2026-03-30) and must not be deleted.
+
+### Selective Uninstall (`devflow uninstall --plugin <name>`)
+
+1. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
+2. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
+3. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+
+### Install Artifacts Removed on Uninstall
+
+`removeDevFlowInstallArtifacts` removes Devflow-generated files from `~/.devflow/` on every uninstall path (decline, cancel, non-interactive, and `--keep-docs`). These are machine-generated and safe to delete — they are re-created on the next `devflow init`.
+
+| Artifact | Path | Notes |
+|----------|------|-------|
+| Manifest | `~/.devflow/manifest.json` | Plugin/feature state |
+| Migrations | `~/.devflow/migrations.json` | Run-once migration state |
+| Agent overrides | `~/.devflow/agent-models.json` | Stale keys re-apply to renamed agents on reinstall |
+| Logs | `~/.devflow/logs/` | Per-project hook logs + `proxy.log` |
+| Costs | `~/.devflow/costs/` | Session cost history |
+| Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
+| Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
+
+User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.

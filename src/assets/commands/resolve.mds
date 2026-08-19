@@ -1,5 +1,5 @@
 ---
-description: Process review issues - validate with Triager, fix with Coder, verify with Validator
+description: Process review issues - validate with Triage agent, fix with Code agent, verify with Validate agent
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
@@ -7,7 +7,7 @@ output-dir: dist/commands
 
 # Resolve Command
 
-Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Coder agents, verify fixes with a Validator gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
 
 ## Usage
 
@@ -93,11 +93,11 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 {decisions_load()}
 
-This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triager agent in Phase 2 and to Coder agents in Phase 4.
+This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` to the Triager agent in Phase 2.
+Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
 ### Phase 1: Parse Issues
 
@@ -107,9 +107,9 @@ Pass `FEATURE_KNOWLEDGE` to the Triager agent in Phase 2.
 Read review reports from `\{TARGET_DIR\}/*.md` and extract:
 
 **Exclude from issue extraction:**
-- `review-summary.md` (synthesizer output, not individual findings)
+- `review-summary.md` (Synthesize agent output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
-- `bug-analysis-summary.md` (synthesizer output for bug-analysis runs)
+- `bug-analysis-summary.md` (Synthesize agent output for bug-analysis runs)
 - `static-findings.md` (raw static analysis tool output, not individual findings)
 
 **Include:** ALL issues from all categories and severities, including Suggestions.
@@ -132,10 +132,10 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 **Produces:** TRIAGE_RESULTS
 **Requires:** ISSUES, DIFF_FILES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_INFO
 
-Spawn a single global Triager agent for ALL issues:
+Spawn a single global Triage agent for ALL issues:
 
 ```
-Agent(subagent_type="Triager"):
+Agent(subagent_type="Triage"):
 "ISSUES: {all_issues}
 DIFF_FILES: {diff_files}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
@@ -147,20 +147,20 @@ Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
-Wait for Triager to complete before proceeding. Parse verdict ledger from Triager output:
+Wait for Triage agent to complete before proceeding. Parse verdict ledger from Triage agent output:
 - **ESCALATED**: Security issues requiring human escalation
-- **FIX_NOW**: Valid issues assigned to Coders (with risk tier: Standard | Careful)
-- **FALSE_POSITIVE**: Issues reviewer got wrong (with cited evidence)
+- **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful)
+- **FALSE_POSITIVE**: Issues the Review agent got wrong (with cited evidence)
 - **BY_DESIGN**: Intentional code (with ADR or code doc citation)
 - **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT
 
-Collect all decisions citations (ADR-NNN / PF-NNN) from Triager Reasoning columns.
+Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning columns.
 
-**Triager completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
+**Triage agent completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
 1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets.
-2. If the Triager output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triager failure**:
-   - Retry the Triager once with the same inputs.
+2. If the Triage agent output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triage agent failure**:
+   - Retry the Triage agent once with the same inputs.
    - If the retry also fails the completeness check: abort with a clear error message listing the missing issue IDs and failure reason — never proceed with dropped issues.
 
 **If ESCALATED issues exist:** surface them in a `## Escalations` section with a prominent display callout — never route escalations to manage-debt.
@@ -172,20 +172,20 @@ Collect all decisions citations (ADR-NNN / PF-NNN) from Triager Reasoning column
 
 If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, display results (Phase 10).
 
-Otherwise, batch FIX_NOW issues for Coder execution:
-- **Same-file issues** → one batch (one Coder per file, sequential for same-file pairs)
-- **Distinct-file issues** → parallel Coders
+Otherwise, batch FIX_NOW issues for Code agent execution:
+- **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
+- **Distinct-file issues** → parallel Code agents
 - **Max 5 issues per batch** — chunk large sets
 
-### Phase 4: Fix (Coder × N)
+### Phase 4: Fix (Code agent × N)
 
-**Produces:** CODER_RESULTS
+**Produces:** CODE_AGENT_RESULTS
 **Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_INFO
 
-For each batch, spawn Coder agent with `OPERATION: issue-fix` and `PUSH: false`:
+For each batch, spawn Code agent with `OPERATION: issue-fix` and `PUSH: false`:
 
 ```
-Agent(subagent_type="Coder"):
+Agent(subagent_type="Code"):
 "TASK_ID: resolve-{batch-id}
 OPERATION: issue-fix
 ISSUES: {fix_now_issues_in_batch}
@@ -200,16 +200,16 @@ Same-file issues → one commit. Include ## Verification block in report.
 Regression fix without failing-then-passing regression test → BLOCKED."
 ```
 
-Spawn distinct-file batch Coders **in a single message** (parallel). Sequential Coders for same-file batches must wait for the prior Coder to complete before spawning.
+Spawn distinct-file batch Code agents **in a single message** (parallel). Sequential Code agents for same-file batches must wait for the prior Code agent to complete before spawning.
 
-Collect from each Coder:
+Collect from each Code agent:
 - `\{status, commitShas, unresolved\}` per batch
 - `## Verification` block (commands run + results)
 
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODER_RESULTS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -220,30 +220,30 @@ Use the template from the Output Artifact section below.
 ### Phase 6: Simplify
 
 **Produces:** SIMPLIFICATION_RESULT
-**Requires:** CODER_RESULTS
+**Requires:** CODE_AGENT_RESULTS
 
-If any fixes were made, spawn Simplifier agent to refine the changed code:
+If any fixes were made, spawn Simplify agent to refine the changed code:
 
 ```
-Agent(subagent_type="Simplifier", run_in_background=false):
+Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-FILES_CHANGED: {list of files modified by Coders}
+FILES_CHANGED: {list of files modified by Code agents}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
 ### Phase 7: Verification Gate
 
 **Produces:** VERIFICATION_STATUS
-**Requires:** CODER_RESULTS
+**Requires:** CODE_AGENT_RESULTS
 
-If no fixes were made (CODER_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
+If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
 
-Otherwise, spawn Validator agent:
+Otherwise, spawn Validate agent:
 
 ```
-Agent(subagent_type="Validator", model="haiku"):
-"FILES_CHANGED: {list of files from Coder output}
+Agent(subagent_type="Validate", model="haiku"):
+"FILES_CHANGED: {list of files from Code agent output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
@@ -251,15 +251,15 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 `validation_retry_count = 0`
 
 **If FAIL:**
-1. Extract failure details from Validator output
+1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Coder with fix context:
+   - Spawn Code agent with fix context:
    ```
-   Agent(subagent_type="Coder"):
+   Agent(subagent_type="Code"):
    "TASK_ID: resolve-\{batch-id\}-valfix-\{count\}
    OPERATION: validation-fix
-   VALIDATION_FAILURES: \{parsed failures from Validator\}
+   VALIDATION_FAILURES: \{parsed failures from Validate agent\}
    SCOPE: Fix only the listed failures, no other changes
    PUSH: false
    CREATE_PR: false
@@ -273,7 +273,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
 
-Push all commits to remote once (Coders and validation-fix Coders ran with PUSH: false — runs unconditionally whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
+Push all commits to remote once (Code agents and validation-fix Code agents ran with PUSH: false — runs unconditionally whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
 ```bash
 git -C {worktree} push
 ```
@@ -283,9 +283,9 @@ git -C {worktree} push
 ### Phase 8: CI Status Gate (Conditional)
 
 **Produces:** CI_STATUS
-**Requires:** CODER_RESULTS, VERIFICATION_STATUS
+**Requires:** CODE_AGENT_RESULTS, VERIFICATION_STATUS
 
-If no issues were fixed (CODER_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+If no issues were fixed (CODE_AGENT_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
 
 If Verification Gate FAILED → skip CI gate (validation failures already reported).
 
@@ -296,7 +296,7 @@ Otherwise, for each worktree with fixes:
 2. **If PASSING** → proceed to next phase.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
 4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
@@ -378,20 +378,20 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
 │
-├─ Phase 2: Global Triage [Triager, opus, single agent]
+├─ Phase 2: Global Triage [Triage agent, opus, single agent]
 │  └─ ALL issues → verdict ledger by disposition
 │
 ├─ Phase 3: Batch FIX_NOW issues (skip if empty)
 │  └─ same-file sequential, distinct-file parallel, max 5/batch
 │
-├─ Phase 4: Fix [Coder × N, OPERATION: issue-fix, PUSH: false]
+├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
 │  └─ Returns Verification block per batch
 │
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)")
 │
-├─ Phase 6: Simplify [Simplifier]
+├─ Phase 6: Simplify [Simplify agent]
 │
-├─ Phase 7: Verification Gate [Validator, haiku] + push + Coder validation-fix loop ≤2
+├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code agent validation-fix loop ≤2
 │
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
 │  └─ Git agent (check-ci-status) → poll/fix loop
@@ -424,10 +424,10 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
-2. **No agent grades its own homework** - Triager validates, Coders fix, Validator verifies
-3. **Global triage first** - Single Triager sees all issues for cross-issue consistency; no issue may vanish
+2. **No agent grades its own homework** - Triage agent validates, Code agents fix, Validate agent verifies
+3. **Global triage first** - Single Triage agent sees all issues for cross-issue consistency; no issue may vanish
 4. **Git agent for git work** - All git operations go through Git agent
-5. **Parallel execution** - Distinct-file Coder batches run in parallel; same-file batches sequential
+5. **Parallel execution** - Distinct-file Code agent batches run in parallel; same-file batches sequential
 6. **Honest reporting** - Verification failure is recorded and displayed, never silenced
 7. **Complete tracking** - Every issue gets exactly one verdict in the ledger
 8. **Latest review by default** - Only process the most recent complete review

@@ -10,6 +10,7 @@ import {
   mergeDenyList,
   discoverProjectGitRoots,
   runMigrationsWithFallback,
+  formatSweepSummary,
 } from '../src/cli/commands/init.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
@@ -26,8 +27,9 @@ import {
   ensureDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
 import type { RunMigrationsResult } from '../src/core/migrations.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -835,7 +837,9 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
   });
 
-  it('partial install (isPartialInstall=true) preserves existing commands and agents', async () => {
+  it('partial install (isPartialInstall=true) removes stale commands and agents via registry-diff sweep', async () => {
+    // 'stale' is absent from getAllCommandNames() and getAllAgentNames() — the
+    // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
       plugins: [],
       claudeDir,
@@ -846,11 +850,176 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       spinner: noopSpinner,
     });
 
-    // Stale files should still exist
-    const staleCommand = await fs.readFile(path.join(claudeDir, 'commands', 'devflow', 'stale.md'), 'utf-8');
-    expect(staleCommand).toBe('# stale');
-    const staleAgent = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', 'stale.md'), 'utf-8');
-    expect(staleAgent).toBe('# stale');
+    // Stale files (names absent from registry) should be removed by the sweep
+    await expect(fs.access(path.join(claudeDir, 'commands', 'devflow', 'stale.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Init-level LEGACY_SKILL_NAMES cleanup pin (init.ts:1149-1153)
+//
+// After the installer.ts bare-rm fix, installViaFileCopy no longer removes bare
+// skill dirs. Init.ts:1149-1153 (the LEGACY_SKILL_NAMES cleanup pass) is now
+// the SOLE path that removes bare legacy dirs. This describe pins that:
+//   (a) installViaFileCopy does NOT remove bare codebase-navigation/ (ordering dep)
+//   (b) the LEGACY_SKILL_NAMES cleanup DOES remove it
+//
+// Both tests are preservation tests (GREEN before and after the fix); they exist
+// to prevent accidental removal of the init.ts cleanup pass and to document the
+// ordering dependency that installer.ts's bare-rm deletion relies on.
+// ---------------------------------------------------------------------------
+describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-cleanup-'));
+    claudeDir = path.join(tmpDir, 'claude');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('installViaFileCopy does not remove bare codebase-navigation/ (init.ts owns that cleanup)', async () => {
+    // codebase-navigation is in LEGACY_SKILL_NAMES but NOT in the live registry.
+    // The installer's bare-rm loop (which was the bug) iterated DEVFLOW_PLUGINS skills,
+    // so codebase-navigation was never removed by installViaFileCopy even before the fix.
+    // This test pins: installViaFileCopy is not responsible for LEGACY_SKILL_NAMES cleanup.
+    const skillsDir = path.join(claudeDir, 'skills');
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const devflowDir = path.join(tmpDir, 'devflow');
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: false,
+      spinner: noopSpinner,
+    });
+
+    // codebase-navigation/ must survive installViaFileCopy — init.ts:1149 owns its cleanup
+    await expect(
+      fs.access(path.join(skillsDir, 'codebase-navigation')),
+      'codebase-navigation/ must not be removed by installViaFileCopy',
+    ).resolves.toBeUndefined();
+  });
+
+  it('LEGACY_SKILL_NAMES cleanup removes bare codebase-navigation/ after installViaFileCopy', async () => {
+    // Simulate the full init flow: installViaFileCopy + LEGACY_SKILL_NAMES cleanup.
+    // This is what init.ts:1130 + 1149-1153 does together.
+    const skillsDir = path.join(claudeDir, 'skills');
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const devflowDir = path.join(tmpDir, 'devflow');
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: false,
+      spinner: noopSpinner,
+    });
+
+    // Step 2: LEGACY_SKILL_NAMES cleanup — mirrors init.ts:1149-1153 exactly.
+    await Promise.allSettled(
+      LEGACY_SKILL_NAMES.map(legacy =>
+        fs.rm(path.join(skillsDir, legacy), { recursive: true })
+      )
+    );
+
+    // codebase-navigation/ must be gone after the LEGACY_SKILL_NAMES pass
+    await expect(
+      fs.access(path.join(skillsDir, 'codebase-navigation')),
+      'codebase-navigation/ must be removed by the LEGACY_SKILL_NAMES cleanup pass',
+    ).rejects.toThrow();
+  });
+});
+
+describe('partial install registry-diff sweep correctness', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  let devflowDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sweep-test-'));
+    claudeDir = path.join(tmpDir, 'claude');
+    devflowDir = path.join(tmpDir, 'devflow');
+
+    // Pre-create the agents and commands directories so they exist before install.
+    await fs.mkdir(path.join(claudeDir, 'agents', 'devflow'), { recursive: true });
+    await fs.mkdir(path.join(claudeDir, 'commands', 'devflow'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('removes retired assets but preserves assets from uninstalled plugins on partial install', async () => {
+    // --- Arrange ---
+
+    // (b) A retired agent: 'shepherd' is absent from getAllAgentNames().
+    // The sweep must remove it.
+    const retiredAgentPath = path.join(claudeDir, 'agents', 'devflow', 'shepherd.md');
+    await fs.writeFile(retiredAgentPath, '# retired agent');
+
+    // (b) A retired command: 'review' is absent from getAllCommandNames().
+    // The sweep must remove it.
+    const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
+    await fs.writeFile(retiredCommandPath, '# retired command');
+
+    // (c) An agent from a plugin NOT selected for this partial run. 'code' IS in
+    // getAllAgentNames() (covers all plugins) even though plugins: [] installs nothing.
+    // The sweep must preserve it — removing it would break a partial reinstall that
+    // leaves other plugins' assets untouched.
+    const knownAgents = getAllAgentNames();
+    expect(knownAgents.length).toBeGreaterThan(0); // (d) corpus non-empty guard
+    const survivingAgentName = knownAgents[0]!;
+    const survivingAgentPath = path.join(claudeDir, 'agents', 'devflow', `${survivingAgentName}.md`);
+    await fs.writeFile(survivingAgentPath, `# ${survivingAgentName} from uninstalled plugin`);
+
+    // Similarly for commands
+    const knownCommands = getAllCommandNames();
+    expect(knownCommands.length).toBeGreaterThan(0); // (d) corpus non-empty guard
+    const survivingCommandName = knownCommands[0]!;
+    const survivingCommandPath = path.join(claudeDir, 'commands', 'devflow', `${survivingCommandName}.md`);
+    await fs.writeFile(survivingCommandPath, `# ${survivingCommandName} from uninstalled plugin`);
+
+    // --- Act ---
+    await installViaFileCopy({
+      plugins: [],          // no plugins selected — pure partial install
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: true,
+      spinner: noopSpinner,
+    });
+
+    // --- Assert ---
+
+    // (b) Retired assets are gone — names absent from the full registry
+    await expect(fs.access(retiredAgentPath)).rejects.toThrow();
+    await expect(fs.access(retiredCommandPath)).rejects.toThrow();
+
+    // (c) Assets from uninstalled plugins survive — names present in the full registry
+    const agentContent = await fs.readFile(survivingAgentPath, 'utf-8');
+    expect(agentContent).toBe(`# ${survivingAgentName} from uninstalled plugin`);
+    const commandContent = await fs.readFile(survivingCommandPath, 'utf-8');
+    expect(commandContent).toBe(`# ${survivingCommandName} from uninstalled plugin`);
+
+    // (d) The directories are non-empty after the sweep — proves the sweep ran on a
+    // non-empty corpus and did not vacuously pass by finding nothing to examine.
+    const agentsAfter = await fs.readdir(path.join(claudeDir, 'agents', 'devflow'));
+    expect(agentsAfter.length).toBeGreaterThan(0);
+    const commandsAfter = await fs.readdir(path.join(claudeDir, 'commands', 'devflow'));
+    expect(commandsAfter.length).toBeGreaterThan(0);
   });
 });
 
@@ -1222,3 +1391,70 @@ describe('loadTemplateDenyEntries', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// formatSweepSummary — orphan-sweep results reach the post-install summary
+// ---------------------------------------------------------------------------
+
+describe('formatSweepSummary', () => {
+  it('returns no lines when nothing was swept and nothing failed', () => {
+    expect(formatSweepSummary({ sweptOrphans: [], sweepFailures: [] })).toEqual([])
+  })
+
+  it('reports removed orphans as a single info line naming every asset with its kind', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [
+        { kind: 'agent', name: 'resolver' },
+        { kind: 'command', name: 'audit-claude' },
+      ],
+      sweepFailures: [],
+    })
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].level).toBe('info')
+    expect(lines[0].message).toContain('resolver')
+    expect(lines[0].message).toContain('audit-claude')
+    expect(lines[0].message).toContain('2')
+    // kind tag must appear in the message for disambiguation (F15)
+    expect(lines[0].message).toContain('agent resolver')
+    expect(lines[0].message).toContain('command audit-claude')
+  })
+
+  it('reports each sweep failure as its own warn line naming kind, asset and cause', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [],
+      sweepFailures: [
+        { kind: 'agent', name: 'resolver', error: new Error('EACCES: permission denied') },
+        { kind: 'command', name: 'audit-claude', error: new Error('EBUSY: resource busy') },
+      ],
+    })
+
+    expect(lines).toHaveLength(2)
+    expect(lines.every(l => l.level === 'warn')).toBe(true)
+    expect(lines[0].message).toContain('agent')
+    expect(lines[0].message).toContain('resolver')
+    expect(lines[0].message).toContain('EACCES')
+    expect(lines[1].message).toContain('command')
+    expect(lines[1].message).toContain('audit-claude')
+    expect(lines[1].message).toContain('EBUSY')
+  })
+
+  it('stringifies a non-Error rejection value rather than printing [object Object]', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [],
+      sweepFailures: [{ kind: 'skill', name: 'legacy-skill', error: 'raw string rejection' }],
+    })
+
+    expect(lines[0].message).toContain('raw string rejection')
+    expect(lines[0].message).not.toContain('[object Object]')
+  })
+
+  it('emits both the removal line and the failure lines when the sweep partly succeeded', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [{ kind: 'command', name: 'resolver' }],
+      sweepFailures: [{ kind: 'agent', name: 'stuck', error: new Error('EACCES') }],
+    })
+
+    expect(lines.map(l => l.level)).toEqual(['info', 'warn'])
+  })
+})

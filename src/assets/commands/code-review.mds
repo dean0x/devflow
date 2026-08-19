@@ -97,7 +97,7 @@ For each worktree, perform a single pass over timestamped directories:
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: set CYCLE_NUMBER = count + 1. Read `\{PRIOR_DIR\}/resolution-summary.md` as PRIOR_RESOLUTIONS.
-5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness).
+5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for Review agent cross-cycle awareness).
 
 #### Step 0d-ii: Convergence Assessment
 
@@ -129,7 +129,7 @@ MAX_REVIEW_CYCLES = 10
 
 ### Phase 1: Analyze Changed Files
 
-**Produces:** REVIEWER_LIST, COMPLIANCE_ENABLED
+**Produces:** REVIEW_FOCUS_LIST, COMPLIANCE_ENABLED
 **Requires:** DIFF_RANGE
 
 {compliance_gate()}
@@ -151,7 +151,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Docs or significant code | documentation |
 | COMPLIANCE_ENABLED | compliance |
 
-If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree.
+If `COMPLIANCE_ENABLED`: add `compliance` to REVIEW_FOCUS_LIST for every worktree.
 
 ### Phase 1b: Load Decisions Index
 
@@ -161,18 +161,18 @@ If `COMPLIANCE_ENABLED`: add `compliance` to REVIEWER_LIST for every worktree.
 
 {decisions_load()}
 
-This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
+Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
 
 ### Phase 2: Run Reviews (Parallel)
 
-**Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
+**Produces:** REVIEW_FOCUS_OUTPUTS
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
 
-Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types **or installed optional plugins** (max 20 per worktree):
+Spawn Review agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types **or installed optional plugins** (max 20 per worktree):
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
@@ -197,11 +197,11 @@ Spawn Reviewer agents **in a single message**. Always run 8 core reviews; condit
 | documentation | conditional | devflow:documentation |
 | compliance | plugin-gated | devflow:compliance |
 
-Reviewer count: 8 always-active, +1-11 diff-driven conditional, +1 compliance when `COMPLIANCE_ENABLED` (max 20 total per worktree).
+Review agent count: 8 always-active, +1-11 diff-driven conditional, +1 compliance when `COMPLIANCE_ENABLED` (max 20 total per worktree).
 
-Each Reviewer invocation (all in one message, **NOT background**):
+Each Review agent invocation (all in one message, **NOT background**):
 ```
-Agent(subagent_type="Reviewer", run_in_background=false):
+Agent(subagent_type="Review", run_in_background=false):
 "Review focusing on {focus}. Load the pattern skill via the Skill tool: Skill(skill="devflow:{focus}").
 Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
@@ -211,18 +211,18 @@ DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
-If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
+If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
+In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 Review agents per worktree across multiple worktrees simultaneously overwhelms the system.
 
 ### Phase 3: Synthesis (Parallel)
 
 **Produces:** REVIEW_SUMMARY
-**Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
+**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO
 
 **WAIT** for Phase 2, then spawn agents per worktree **in a single message**:
 
@@ -234,13 +234,13 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Read reviews from {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/
 Create inline PR comments for findings with ≥80% confidence only.
 Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
-Deduplicate findings across reviewers, consolidate skipped into summary.
+Deduplicate findings across Review agents, consolidate skipped into summary.
 Check for existing inline comments at same file:line before creating new ones to avoid duplicates."
 ```
 
-**Synthesizer Agent** per worktree:
+**Synthesize agent** per worktree:
 ```
-Agent(subagent_type="Synthesizer", run_in_background=false):
+Agent(subagent_type="Synthesize", run_in_background=false):
 "Mode: review
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
@@ -259,7 +259,7 @@ Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-s
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `\{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/.last-review-head`
 2. Display results from all agents:
-   - Merge recommendation (from Synthesizer)
+   - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
    - PR comments created/skipped (from Git)
    - Artifact paths
@@ -284,14 +284,14 @@ In multi-worktree mode, report results per worktree.
 │  │  └─ Detect file types for conditional reviews
 │  │
 │  ├─ Phase 2: Reviews (PARALLEL within worktree)
-│  │  ├─ Reviewer: security
-│  │  ├─ Reviewer: architecture, performance, complexity
-│  │  ├─ Reviewer: consistency, regression, testing
-│  │  └─ Reviewer: [conditional]
+│  │  ├─ Review agent: security
+│  │  ├─ Review agent: architecture, performance, complexity
+│  │  ├─ Review agent: consistency, regression, testing
+│  │  └─ Review agent: [conditional]
 │  │
 │  ├─ Phase 3: Synthesis (PARALLEL within worktree)
 │  │  ├─ Git agent (comment-pr with dedup)
-│  │  └─ Synthesizer agent (mode: review)
+│  │  └─ Synthesize agent (mode: review)
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
 ```

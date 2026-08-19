@@ -17,21 +17,30 @@
  */
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   EFFORT_LEVELS,
+  LEGACY_AGENT_KEYS,
   readAgentMapping,
   saveAgentMapping,
   reapplyAgentMapping,
   loadShippedDefaults,
+  readInstalledAgentNames,
   type AgentMappingFile,
   type AgentMapping,
   type EffortLevel,
 } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
+import {
+  CLAUDE_MODEL_ALIASES,
+  isDormantExternalModel,
+} from '../../core/external-models.js';
+import {
+  classifyAgentState,
+  AGENT_STATE_LABELS,
+  type AgentState,
+} from '../../core/agent-state.js';
 import { isValidModelName } from '../../core/agent-frontmatter.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
@@ -42,7 +51,12 @@ import {
 import {
   buildRow,
   buildModelCycle,
+  buildPickerNameMap,
   computeViewportHeight,
+  isDirtyModel,
+  isDirtyEffort,
+  persistedModelFor,
+  persistedEffortFor,
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
@@ -188,14 +202,13 @@ export function applySetMapping(
 // Pure helper: buildListRows
 // ---------------------------------------------------------------------------
 
-export type RowState = 'active' | 'saved-inactive' | 'not-installed';
-
+/** D-001: RowState uses AgentState from agent-state (single source of truth for both --list and TUI). */
 export interface ListRow {
   name: string;
   defaultModel: string;
   configured: string;
   effort: string;
-  state: RowState;
+  state: AgentState;
 }
 
 export interface BuildListRowsInput {
@@ -208,41 +221,26 @@ export interface BuildListRowsInput {
 
 /**
  * Build list row data for each agent.
- * Checks whether the installed file exists (async fs.access).
+ * Uses readInstalledAgentNames for a single readdir (Foundation B).
  */
 export async function buildListRows(
   input: BuildListRowsInput,
 ): Promise<ListRow[]> {
   const { agentNames, mapping, installDir, shippedDefaults, proxyEnabled } = input;
 
-  const rows: ListRow[] = await Promise.all(
-    agentNames.map(async (name): Promise<ListRow> => {
-      const entry = mapping.agents[name];
-      const configured = entry?.model ?? 'default';
-      const effort = entry?.effort ?? 'default';
-      const defaultModel = shippedDefaults[name] ?? 'unknown';
+  // Foundation B: one readdir replaces N fs.access calls.
+  const installedNames = await readInstalledAgentNames(installDir);
 
-      // Check if installed file is present
-      let installed = false;
-      try {
-        await fs.access(path.join(installDir, `${name}.md`));
-        installed = true;
-      } catch {
-        installed = false;
-      }
-
-      let state: RowState;
-      if (!installed) {
-        state = 'not-installed';
-      } else if (isDormantExternalModel(configured, proxyEnabled)) {
-        state = 'saved-inactive';
-      } else {
-        state = 'active';
-      }
-
-      return { name, defaultModel, configured, effort, state };
-    }),
-  );
+  const rows: ListRow[] = agentNames.map((name): ListRow => {
+    const entry = mapping.agents[name];
+    const configured = entry?.model ?? 'default';
+    const effort = entry?.effort ?? 'default';
+    const defaultModel = shippedDefaults[name] ?? 'unknown';
+    const installed = installedNames.has(name);
+    // inRegistry is always true here — agentNames comes from the registry.
+    const state = classifyAgentState({ configured, proxyEnabled, installed, inRegistry: true });
+    return { name, defaultModel, configured, effort, state };
+  });
 
   return rows;
 }
@@ -251,7 +249,7 @@ export async function buildListRows(
 // --list output formatting
 // ---------------------------------------------------------------------------
 
-function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
+export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
   const lines: string[] = [];
   const AGENT_W = 20;
   const DEFAULT_W = 10;
@@ -274,13 +272,18 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
     let stateStr: string;
     switch (row.state) {
       case 'active':
-        stateStr = color.green('active');
+        stateStr = color.green(AGENT_STATE_LABELS['active']);
         break;
       case 'saved-inactive':
-        stateStr = color.yellow('saved — inactive (proxy off)');
+        // Compose the report-surface detail suffix for --list only.
+        // The TUI STATE column stays bare 'saved-inactive' (width math assumes 14).
+        stateStr = color.yellow(AGENT_STATE_LABELS['saved-inactive'] + ' (proxy off)');
         break;
       case 'not-installed':
-        stateStr = color.dim('not installed');
+        stateStr = color.dim(AGENT_STATE_LABELS['not-installed']);
+        break;
+      case 'unknown':
+        stateStr = color.dim(AGENT_STATE_LABELS['unknown']);
         break;
       default: {
         const _: never = row.state;
@@ -343,7 +346,7 @@ export function selectCatalog(proxyEnabled: boolean, cacheDir: string): External
  *
  * Builds modelCycle ONCE from the catalog and stores it in state.
  * The pure reducer reads state.modelCycle directly — never reallocates per
- * keypress (AC-P6). The catalog is also stored startup-constant for rendering.
+ * keypress (AC-P6).
  */
 async function buildTuiState(
   agentNames: string[],
@@ -351,10 +354,17 @@ async function buildTuiState(
   shippedDefaults: Record<string, string>,
   proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
+  installDir: string,
 ): Promise<AgentsViewState> {
-  // Build the cycle once — shared across all rows and all keypresses.
+  // Build the cycle and picker-name map once — shared across all rows and all keypresses.
   const modelCycle = buildModelCycle(catalog);
+  const pickerNameMap = buildPickerNameMap(catalog);
 
+  // Foundation B: one readdir for install state of all agents.
+  const installedNames = await readInstalledAgentNames(installDir);
+
+  // Registry rows (in sorted order)
+  const registrySet = new Set(agentNames);
   const rows: AgentRow[] = agentNames.map(name => {
     const entry = mapping.agents[name];
     return buildRow({
@@ -364,8 +374,29 @@ async function buildTuiState(
       savedEffort: entry?.effort,
       proxyEnabled,
       modelCycle,
+      pickerNameMap,
+      installed: installedNames.has(name),
+      inRegistry: true,
     });
   });
+
+  // Orphan rows: keys in agent-models.json not present in the registry.
+  // Appended at the end so they are visually separated from known agents.
+  for (const orphanKey of Object.keys(mapping.agents)) {
+    if (registrySet.has(orphanKey)) continue;
+    const entry = mapping.agents[orphanKey];
+    rows.push(buildRow({
+      name: orphanKey,
+      shippedDefault: 'unknown',
+      savedModel: entry?.model,
+      savedEffort: entry?.effort,
+      proxyEnabled,
+      modelCycle,
+      pickerNameMap,
+      installed: installedNames.has(orphanKey),
+      inRegistry: false,
+    }));
+  }
 
   return {
     rows,
@@ -374,9 +405,63 @@ async function buildTuiState(
     viewportOffset: 0,
     viewportHeight: computeViewportHeight(process.stdout.rows ?? 24),
     proxyEnabled,
-    catalog,
     modelCycle,
   };
+}
+
+// ---------------------------------------------------------------------------
+// mergeTuiRowsIntoMapping — pure helper (Fix 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge dirty TUI rows back into the original mapping.
+ *
+ * Only rows with changed fields update the mapping — untouched rows (including
+ * dormant GPT entries) are preserved byte-identical. This is the "inertness"
+ * guarantee of Fix 2: a row that was never edited produces no write.
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function mergeTuiRowsIntoMapping(
+  rows: readonly AgentRow[],
+  originalMapping: AgentMappingFile,
+): AgentMappingFile {
+  const newAgents: Record<string, AgentMapping> = { ...originalMapping.agents };
+
+  for (const row of rows) {
+    const modelDirty = isDirtyModel(row);
+    const effortDirty = isDirtyEffort(row);
+
+    if (!modelDirty && !effortDirty) continue;
+
+    const entry: AgentMapping = { ...newAgents[row.name] };
+
+    if (modelDirty) {
+      const persistedModel = persistedModelFor(row);
+      if (persistedModel === 'default') {
+        delete entry.model;
+      } else {
+        entry.model = persistedModel;
+      }
+    }
+    if (effortDirty) {
+      const persistedEffort = persistedEffortFor(row);
+      if (persistedEffort === 'default') {
+        delete entry.effort;
+      } else {
+        entry.effort = persistedEffort;
+      }
+    }
+
+    // Remove empty entries (no model, no effort → no deviation from defaults)
+    if (Object.keys(entry).length === 0) {
+      delete newAgents[row.name];
+    } else {
+      newAgents[row.name] = entry;
+    }
+  }
+
+  return { version: 1, agents: newAgents };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,43 +475,7 @@ async function applyTuiSave(
   installDir: string,
   proxyEnabled: boolean,
 ): Promise<Result<{ updated: number; unchanged: number; warnings: string[] }>> {
-  // Build new mapping by merging dirty fields from TUI state onto original.
-  // Per plan D: only dirty rows modify the mapping — dormant entries for
-  // untouched rows are preserved byte-identical from the original.
-  const newAgents: Record<string, AgentMapping> = { ...originalMapping.agents };
-
-  for (const row of tuiState.rows) {
-    const modelDirty = row.configuredModel !== row.originalModel;
-    const effortDirty = row.configuredEffort !== row.originalEffort;
-
-    if (!modelDirty && !effortDirty) continue;
-
-    const entry: AgentMapping = { ...newAgents[row.name] };
-
-    if (modelDirty) {
-      if (row.configuredModel === 'default') {
-        delete entry.model;
-      } else {
-        entry.model = row.configuredModel;
-      }
-    }
-    if (effortDirty) {
-      if (row.configuredEffort === 'default') {
-        delete entry.effort;
-      } else {
-        entry.effort = row.configuredEffort;
-      }
-    }
-
-    // Remove empty entries (no model, no effort → no deviation from defaults)
-    if (Object.keys(entry).length === 0) {
-      delete newAgents[row.name];
-    } else {
-      newAgents[row.name] = entry;
-    }
-  }
-
-  const newMapping: AgentMappingFile = { version: 1, agents: newAgents };
+  const newMapping = mergeTuiRowsIntoMapping(tuiState.rows, originalMapping);
   const persistResult = await saveAgentMapping(devflowDir, newMapping);
   if (!persistResult.ok) {
     return Err(persistResult.error);
@@ -561,7 +610,14 @@ export const agentsCommand = new Command('agents')
 
     // ── --set ────────────────────────────────────────────────────────────────
     if (options.set) {
-      const agentName = options.set;
+      // Transparently rewrite legacy agent names to their canonical counterparts,
+      // mirroring how parsePluginSelection handles legacy plugin names.
+      let agentName = options.set;
+      if (Object.hasOwn(LEGACY_AGENT_KEYS, agentName)) {
+        const canonical = LEGACY_AGENT_KEYS[agentName] as string;
+        p.log.info(`Agent '${agentName}' has been renamed to '${canonical}' — using canonical name.`);
+        agentName = canonical;
+      }
 
       // Validate agent name
       const knownAgents = getAllAgentNames();
@@ -715,6 +771,7 @@ export const agentsCommand = new Command('agents')
       shippedDefaults,
       proxyEnabled,
       catalog,
+      installDir,
     );
 
     // Lazy-import terminal to avoid loading readline/tty in non-TTY paths
@@ -745,7 +802,7 @@ export const agentsCommand = new Command('agents')
       p.log.warn(warn);
     }
     p.outro(
-      `Saved. Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
+      `Updated ${color.green(String(updated))} agent${updated !== 1 ? 's' : ''}, ` +
       `${color.dim(`${unchanged} unchanged`)}.`
     );
   });

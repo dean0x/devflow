@@ -532,7 +532,7 @@ describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
 // ---------------------------------------------------------------------------
 // These lightweight checks verify that the Learning agent instructions
 // (src/assets/agents/learning.md) contain the required creation-bar elements. They do
-// not test LLM judgment — that is validated by the Tester agent via scenarios.
+// not test LLM judgment — that is validated by the Test agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 

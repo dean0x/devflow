@@ -102,7 +102,7 @@ For detailed implementation:
 
 ## Integration
 
-This methodology is used by the **Reviewer** agent with different focus areas:
+This methodology is used by the **Review** agent with different focus areas:
 
 | Focus | Pattern Skill |
 |-------|---------------|
@@ -118,4 +118,4 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 | `typescript` | devflow:typescript |
 | `database` | devflow:database |
 
-The Reviewer agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.
+The Review agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.

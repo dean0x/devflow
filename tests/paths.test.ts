@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
+import { isContainedIn } from '../src/core/paths.js';
 
 // Mock git.ts before importing paths.ts
 vi.mock('../src/core/git.js', () => ({
@@ -68,6 +69,49 @@ describe('getDevFlowDirectory', () => {
     vi.stubEnv('DEVFLOW_DIR', '');
     const result = getDevFlowDirectory();
     expect(result).toBe(path.join(getHomeDirectory(), '.devflow'));
+  });
+});
+
+describe('isContainedIn', () => {
+  const parent = '/base/dir';
+
+  it('returns true for a simple filename inside parent', () => {
+    expect(isContainedIn(parent, 'file.md')).toBe(true);
+  });
+
+  it('returns true for a nested path inside parent', () => {
+    expect(isContainedIn(parent, 'sub/file.md')).toBe(true);
+  });
+
+  it('returns false for a single ..-escape', () => {
+    expect(isContainedIn(parent, '../file.md')).toBe(false);
+  });
+
+  it('returns false for a double ..-escape', () => {
+    expect(isContainedIn(parent, '../../file.md')).toBe(false);
+  });
+
+  it('returns false for an absolute path outside parent', () => {
+    expect(isContainedIn(parent, '/other/path/file.md')).toBe(false);
+  });
+
+  it('returns false for an empty candidate', () => {
+    expect(isContainedIn(parent, '')).toBe(false);
+  });
+
+  it('returns false for a dot (same-as-parent)', () => {
+    expect(isContainedIn(parent, '.')).toBe(false);
+  });
+
+  it('works with relative parent path (resolved internally)', () => {
+    // A relative parent is resolved to an absolute path — containment still holds.
+    const rel = 'some/relative/parent';
+    // A direct child of the resolved parent must be contained.
+    expect(isContainedIn(rel, 'child.md')).toBe(true);
+    // Escaping still fails even with a relative parent.
+    expect(isContainedIn(rel, '../../../evil.md')).toBe(false);
+    // Resolution is anchored on the absolute form of the relative parent.
+    expect(isContainedIn(rel, 'child.md')).toBe(isContainedIn(path.resolve(rel), 'child.md'));
   });
 });
 

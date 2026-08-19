@@ -24,7 +24,7 @@ import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js'
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRow(name = 'coder'): AgentRow {
+function makeRow(name = 'code'): AgentRow {
   return {
     name,
     shippedDefault: 'sonnet',
@@ -45,7 +45,6 @@ function makeInitialState(): AgentsViewState {
     viewportOffset: 0,
     viewportHeight: 10,
     proxyEnabled: false,
-    catalog: { known: false },
     modelCycle: [],
   };
 }

@@ -4,8 +4,8 @@
  * applies ADR-013: CLI-layer module group.
  */
 
-export { reduce, buildRow, buildModelCycle, isDirtyModel, isDirtyEffort, unsavedCount, isOffCycle } from './state.js';
-export { renderFrame, FIXED_ROWS, computeViewportHeight } from './render.js';
+export { reduce, buildRow, buildModelCycle, pickerNames, buildPickerNameMap, isDirtyModel, isDirtyEffort, persistedModelFor, persistedEffortFor, unsavedCount, isOffCycle, rowState } from './state.js';
+export { renderFrame, FIXED_ROWS, computeViewportHeight, formatAgentName } from './render.js';
 export type {
   AgentRow,
   AgentsViewState,

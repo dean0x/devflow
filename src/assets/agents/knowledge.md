@@ -26,7 +26,7 @@ tools:
 - **DECISIONS_CONTEXT** (optional): Compact ADR/PF index for cross-referencing in the Related section. When `(none)`, skip citing decisions in the Related section.
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing existing feature knowledge
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
-- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skimmer + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
+- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skim agent + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
 
 ## Responsibilities
 

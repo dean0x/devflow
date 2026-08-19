@@ -23,7 +23,7 @@ Local codebase research for finding patterns, tracing call flows, and mapping mo
 
 ## When This Activates
 
-Loaded by Researcher agent when `RESEARCH_TYPE` is `codebase`. Covers:
+Loaded by Research agent when `RESEARCH_TYPE` is `codebase`. Covers:
 - Finding existing patterns before implementing new features
 - Tracing call chains to understand data flow
 - Mapping module boundaries and dependencies

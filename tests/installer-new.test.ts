@@ -216,7 +216,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     ).rejects.toThrow();
   });
 
-  it('leaves a stale devflow:* dir on partial (--plugin) install (isPartialInstall=true)', async () => {
+  it('removes a stale devflow:* dir on partial (--plugin) install — sweep is ungated', async () => {
     const claudeDir = path.join(tmpDir, 'claude');
     const devflowDir = path.join(tmpDir, 'devflow');
     const skillsDir = path.join(claudeDir, 'skills');
@@ -233,14 +233,15 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
       devflowDir,
       skillsMap,
       agentsMap,
-      isPartialInstall: true, // partial install — sweep does NOT run
+      isPartialInstall: true, // partial install — sweep runs on every shape
       spinner,
     });
 
+    // The sweep is ungated: stale prefixed dirs are removed on partial install
     await expect(
       fs.access(orphanDir),
-      'stale prefixed dir must NOT be removed on partial install',
-    ).resolves.toBeUndefined();
+      'stale prefixed dir must be removed even on partial install',
+    ).rejects.toThrow();
   });
 
   it('leaves a bare (non-prefixed) dir untouched on full install (avoids PF-012)', async () => {
@@ -268,6 +269,65 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     await expect(
       fs.access(bareDir),
       'bare (non-prefixed) dir must NOT be removed by the prefix-diff sweep',
+    ).resolves.toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // PF-012: install must not delete a bare skill dir whose name collides with
+  // a live-registry skill name.  ~/.claude/skills/ is shared with other tools;
+  // a bare dir like `security/` may belong to a third-party plugin.
+  //
+  // Discriminating: before fix the bare rm loop iterates DEVFLOW_PLUGINS and
+  // removes ~/.claude/skills/security/, wiping the sentinel → RED.
+  // After fix the bare rm loop is gone → sentinel survives → GREEN.
+  // ---------------------------------------------------------------------------
+  it('install spares a foreign bare skill dir whose name collides with a registry skill', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed: bare security/ with sentinel content.
+    // 'security' is in the live Devflow registry (devflow-code-review et al.) but
+    // also a plausible name for a foreign plugin's skill directory.
+    const foreignBarePath = path.join(skillsDir, 'security');
+    await fs.mkdir(foreignBarePath, { recursive: true });
+    const sentinel = 'sentinel-content-foreign-security-dir';
+    await fs.writeFile(path.join(foreignBarePath, 'SKILL.md'), sentinel, 'utf-8');
+
+    // Use a plugin that declares 'security' so devflow:security/ gets installed.
+    // The real source at src/assets/skills/security/ must exist for this to succeed.
+    const securityPlugin: PluginDefinition = {
+      name: 'devflow-test-security-only',
+      description: 'Test plugin that owns the security skill',
+      commands: [],
+      agents: [],
+      skills: ['security'],
+      optional: false,
+      rules: [],
+    };
+    const { skillsMap, agentsMap } = buildAssetMaps([securityPlugin]);
+
+    await installViaFileCopy({
+      plugins: [securityPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: false,
+      spinner,
+    });
+
+    // Foreign bare security/ must survive byte-identical — not Devflow's to delete.
+    const survived = await fs.readFile(path.join(foreignBarePath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'foreign bare security/SKILL.md must survive installViaFileCopy unchanged',
+    ).toBe(sentinel);
+
+    // devflow:security/ was installed at the prefixed path (Devflow's copy).
+    await expect(
+      fs.access(path.join(skillsDir, 'devflow:security')),
+      'devflow:security/ must be installed at the prefixed path',
     ).resolves.toBeUndefined();
   });
 });
@@ -410,5 +470,99 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
         spinner,
       }),
     ).rejects.toThrow(/Rule source not found for declared rule "nonexistent-xyz-ws6a-rule"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A2: orphan-sweep results surface through InstallReport
+// ---------------------------------------------------------------------------
+
+describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+  const noOpPlugin: PluginDefinition = {
+    name: 'devflow-test-noop-a2',
+    description: 'No-op test fixture for A2',
+    commands: [],
+    agents: [],
+    skills: [],
+    optional: false,
+    rules: [],
+  };
+
+  it('sweptOrphans contains the registry name of a removed orphan agent file', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+
+    // Plant a stale agent file that is not in the registry (any real agent name would survive).
+    const orphanName = 'devflow-zzz-nonexistent-sweep-sentinel';
+    await fs.mkdir(agentsTarget, { recursive: true });
+    await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    // Use isPartialInstall:true so the pre-install directory wipe is skipped;
+    // on a full install the entire agents/devflow dir is removed before the sweep,
+    // making the sweep a no-op for that case.
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    // The orphan should be recorded in sweptOrphans (now { kind, name }[]) and the file should be gone.
+    expect(report.sweptOrphans.some(o => o.name === orphanName), 'orphan name must appear in sweptOrphans').toBe(true);
+    await expect(
+      fs.access(path.join(agentsTarget, `${orphanName}.md`)),
+    ).rejects.toThrow();
+  });
+
+  // F15: sweptOrphans entries carry a `kind` field so formatSweepSummary can
+  // display "agent git" rather than the bare name, disambiguating same-named
+  // assets across asset types (e.g. a command and an agent both named "git").
+  it('F15: sweptOrphans entries carry { kind, name } — not bare strings', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+
+    const orphanName = 'devflow-zzz-f15-kind-sentinel';
+    await fs.mkdir(agentsTarget, { recursive: true });
+    await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    const entry = report.sweptOrphans.find(o => o.name === orphanName);
+    expect(entry, 'orphan entry must exist with a kind field').toBeDefined();
+    expect(entry?.kind).toBe('agent');
+  });
+
+  it('sweepFailures is empty when no removals fail', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      spinner,
+    });
+
+    expect(report.sweepFailures).toEqual([]);
   });
 });

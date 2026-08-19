@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderFrame, buildModelCycle } from '../src/cli/agents-view/index.js';
-import { stripAnsi } from '../src/hud/colors.js';
+import { renderFrame, buildModelCycle, formatAgentName } from '../src/cli/agents-view/index.js';
+import { stripAnsi, yellow } from '../src/hud/colors.js';
 import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
 
@@ -20,7 +20,7 @@ const UNKNOWN_CATALOG: ExternalModelCatalog = { known: false };
 
 function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
-    name: 'coder',
+    name: 'code',
     shippedDefault: 'sonnet',
     configuredModel: 'default',
     originalModel: 'default',
@@ -28,22 +28,26 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalEffort: 'default',
     dormantModel: null,
     offCyclePin: null,
+    installed: true,
+    inRegistry: true,
     ...overrides,
   };
 }
 
-function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
-  const proxyEnabled = overrides.proxyEnabled ?? true;
-  const catalog: ExternalModelCatalog =
-    'catalog' in overrides ? (overrides.catalog as ExternalModelCatalog) : UNKNOWN_CATALOG;
+function makeState(
+  overrides: Partial<AgentsViewState> & { readonly catalog?: ExternalModelCatalog } = {},
+): AgentsViewState {
+  const { catalog: catalogOverride, ...stateOverrides } = overrides;
+  const proxyEnabled = stateOverrides.proxyEnabled ?? true;
+  const catalog: ExternalModelCatalog = catalogOverride ?? UNKNOWN_CATALOG;
   const modelCycle: readonly string[] =
-    'modelCycle' in overrides
-      ? (overrides.modelCycle as readonly string[])
+    'modelCycle' in stateOverrides
+      ? (stateOverrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
-  const rows = overrides.rows ?? [
-    makeRow({ name: 'bug-analyzer', shippedDefault: 'opus' }),
-    makeRow({ name: 'coder', shippedDefault: 'sonnet' }),
-    makeRow({ name: 'designer', shippedDefault: 'opus' }),
+  const rows = stateOverrides.rows ?? [
+    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+    makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
   return {
     rows,
@@ -52,9 +56,8 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
     viewportOffset: 0,
     viewportHeight: 10,
     proxyEnabled,
-    catalog,
     modelCycle,
-    ...overrides,
+    ...stateOverrides,
   };
 }
 
@@ -96,10 +99,10 @@ describe('renderFrame — structure', () => {
     expect(titleLine).toContain('proxy: disabled');
   });
 
-  it('includes column header with AGENT, MODEL, EFFORT', () => {
+  it('T7: column header includes AGENT, MODEL, EFFORT, and STATE (Fix 3)', () => {
     const lines = renderStripped(makeState());
     const headerLine = lines.find(l =>
-      l.includes('AGENT') && l.includes('MODEL') && l.includes('EFFORT')
+      l.includes('AGENT') && l.includes('MODEL') && l.includes('EFFORT') && l.includes('STATE')
     );
     expect(headerLine).toBeDefined();
   });
@@ -110,12 +113,15 @@ describe('renderFrame — structure', () => {
     expect(footer).toBeDefined();
   });
 
-  it('shows all three agents by name', () => {
+  it('shows all three agents by name (capitalized for TUI — Fix 4)', () => {
     const lines = renderStripped(makeState());
     const text = lines.join('\n');
-    expect(text).toContain('bug-analyzer');
-    expect(text).toContain('coder');
-    expect(text).toContain('designer');
+    // Fix 4: formatAgentName title-cases each hyphen-separated segment
+    expect(text).toContain('Diagnose');
+    expect(text).toContain('Code');
+    expect(text).toContain('Design');
+    // Original lowercase names must NOT appear (they are transformed)
+    expect(text).not.toContain('diagnose');
   });
 });
 
@@ -126,15 +132,15 @@ describe('renderFrame — structure', () => {
 describe('cursor row marker', () => {
   it('marks cursor row with ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    // The row with ❯ should contain 'coder'
+    // The row with ❯ should contain 'Code' (capitalized — Fix 4)
     const cursorLine = lines.find(l => l.includes('❯'));
     expect(cursorLine).toBeDefined();
-    expect(cursorLine).toContain('coder');
+    expect(cursorLine).toContain('Code');
   });
 
   it('non-cursor rows do not have ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('bug-analyzer'));
+    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Diagnose'));
     expect(nonCursorWithMarker).toHaveLength(0);
   });
 });
@@ -146,7 +152,7 @@ describe('cursor row marker', () => {
 describe('default rows', () => {
   it('shows default model with shipped default in parens', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
       activeField: 'effort', // model not active so no brackets
     });
@@ -167,7 +173,7 @@ describe('dirty marker ●', () => {
     const state = makeState({
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'opus',
           originalModel: 'default', // dirty
@@ -187,7 +193,7 @@ describe('dirty marker ●', () => {
     const state = makeState({
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredEffort: 'high',
           originalEffort: 'default', // dirty
@@ -203,7 +209,7 @@ describe('dirty marker ●', () => {
 
   it('does not show ● on clean fields', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
     });
     const lines = renderStripped(state);
@@ -220,7 +226,7 @@ describe('dirty marker ●', () => {
 describe('active field brackets ‹ ›', () => {
   it('wraps model value in ‹ › when model is the active field on cursor row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
       activeField: 'model',
     });
@@ -233,7 +239,7 @@ describe('active field brackets ‹ ›', () => {
 
   it('wraps effort value in ‹ › when effort is the active field on cursor row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'high' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'high' })],
       cursor: 0,
       activeField: 'effort',
     });
@@ -248,8 +254,9 @@ describe('active field brackets ‹ ›', () => {
     const state = makeState({ cursor: 1 });
     const lines = renderStripped(state);
     const nonCursorLines = lines.filter(
-      l => (l.includes('bug-analyzer') || l.includes('designer')) && !l.includes('❯')
+      l => (l.includes('Diagnose') || l.includes('Design')) && !l.includes('❯')
     );
+    expect(nonCursorLines.length).toBeGreaterThan(0);
     for (const line of nonCursorLines) {
       expect(line).not.toContain('‹');
     }
@@ -268,7 +275,7 @@ describe('proxy-on with dirty row', () => {
       activeField: 'effort',
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'gpt-5.5',
           originalModel: 'default', // dirty
@@ -285,7 +292,7 @@ describe('proxy-on with dirty row', () => {
   it('shows unsaved changes count', () => {
     const state = makeState({
       rows: [
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
         makeRow({ name: 'other', shippedDefault: 'haiku', configuredEffort: 'high', originalEffort: 'default' }),
       ],
     });
@@ -314,7 +321,7 @@ describe('proxy-off with dormant row', () => {
       activeField: 'effort',
       rows: [
         makeRow({
-          name: 'coder',
+          name: 'code',
           shippedDefault: 'sonnet',
           configuredModel: 'default',
           originalModel: 'default',
@@ -418,6 +425,100 @@ describe('narrow width', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC-P3-WIDTH: line widths at 80 and 60 columns
+// ---------------------------------------------------------------------------
+
+describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
+  // At 80 cols (standard terminal): all columns scale to full size.
+  // totalContent = 2 + 18 + 32 + 13 + 14 = 79, so every data row is 79 chars.
+  // The keybindingsLine (77 chars) also fits within 80.
+  it('at 80 cols: every stripped line is ≤ 80 visible chars', () => {
+    const state = makeState({
+      proxyEnabled: false, // shows proxy hint line (longest footer variant)
+      rows: [
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
+      ],
+      cursor: 0,
+      viewportHeight: 10,
+    });
+    const COLS = 80;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    for (const line of lines) {
+      expect(
+        line.length,
+        `Line exceeds ${COLS} cols: "${line}"`,
+      ).toBeLessThanOrEqual(COLS);
+    }
+  });
+
+  // At 60 cols: responsive-scale block exercises the Math.max floors.
+  // scale = 60/79 ≈ 0.759; column widths after floor: agent=13, model=24, effort=9, state=10.
+  // Max data row visible width = 2 + 13 + 24 + 9 + 10 = 58 ≤ 60.
+  // keybindingsLine is sliced to dims.cols (60) before dim() is applied.
+  it('at 60 cols: every stripped line is ≤ 60 visible chars', () => {
+    const state = makeState({
+      proxyEnabled: false, // shows proxy hint line (longest footer variant)
+      rows: [
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'design', shippedDefault: 'opus' }),
+      ],
+      cursor: 0,
+      viewportHeight: 10,
+    });
+    const COLS = 60;
+    const lines = renderStripped(state, { rows: 24, cols: COLS });
+    for (const line of lines) {
+      expect(
+        line.length,
+        `Line exceeds ${COLS} cols: "${line}"`,
+      ).toBeLessThanOrEqual(COLS);
+    }
+  });
+
+  // T15: dormant row at 80 cols — 'saved-inactive' (14 chars) fits exactly in
+  // COL_STATE=14 without being truncated, so the ANSI colour survives.
+  //
+  // Falsification record:
+  //   RED  before fix (COL_STATE=13): truncateVisible strips ANSI because
+  //        visible length 14 > 13, producing bare truncated text without colour.
+  //        `allRaw.includes(yellow('saved-inactive'))` → FAIL.
+  //   GREEN after fix (COL_STATE=14): visible length === maxWidth, string
+  //        returned as-is with ANSI intact → PASS.
+  //
+  // State column offset at 80 cols: 2 (prefix) + 18 (agent) + 32 (model) +
+  //   13 (effort) = 65.  `stripped[4].slice(65)` is exactly the STATE cell
+  //   for the first data row (dormant row — cursor is on the second row).
+  it('T15: dormant row renders yellow("saved-inactive") unclipped at 80 cols', () => {
+    const dormantRow = makeRow({
+      name: 'code',
+      shippedDefault: 'sonnet',
+      configuredModel: 'default',
+      originalModel: 'default',
+      dormantModel: 'gpt-5.5',
+      installed: true,
+      inRegistry: true,
+    });
+    const regularRow = makeRow({ name: 'design', shippedDefault: 'opus' });
+    const state = makeState({
+      proxyEnabled: false,
+      rows: [dormantRow, regularRow],
+      cursor: 1,            // cursor on second row — dormant row gets '  ' prefix
+      viewportHeight: 10,
+    });
+    const allRaw = renderFrame(state, { rows: 24, cols: 80 });
+    const stripped = allRaw.map(stripAnsi);
+
+    // Raw line must contain the yellow-coloured string intact (ANSI survives truncation check)
+    expect(allRaw.some(l => l.includes(yellow('saved-inactive')))).toBe(true);
+
+    // Stripped state column = exactly 'saved-inactive' at offset 65 in the first data row
+    // (index 4: title[0], blank[1], header[2], scroll-indicator[3], data[4])
+    expect(stripped[4].slice(65)).toBe('saved-inactive');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Minimal / empty state
 // ---------------------------------------------------------------------------
 
@@ -429,7 +530,7 @@ describe('minimal state', () => {
 
   it('renders without throwing for single row', () => {
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet' })],
       cursor: 0,
     });
     expect(() => renderFrame(state, { rows: 24, cols: 80 })).not.toThrow();
@@ -437,17 +538,28 @@ describe('minimal state', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Alias rendering (AC-F2)
+// Alias rendering (Fix 1 — bare alias, no canonical-id annotation)
 // ---------------------------------------------------------------------------
 
 describe('alias rendering', () => {
-  it('renders alias with canonical-id annotation: "sol (gpt-5.6-sol)"', () => {
-    // When catalog.known and aliasToId maps 'sol' → 'gpt-5.6-sol', the model
-    // cell must show "sol (gpt-5.6-sol)" — AC-F2.
+  // T4 / T14-MANDATORY-REWRITE: alias renders BARE, not as "sol (gpt-5.6-sol)".
+  //
+  // The OLD behavior (pre-Fix 1) annotated alias models as "sol (gpt-5.6-sol)".
+  // Fix 1 removes the annotation branch. Aliases now render bare.
+  //
+  // Falsification record (T14):
+  //   GREEN before Fix 1: renderModelCell showed "sol (gpt-5.6-sol)" via aliasToId.
+  //   RED  after rewrite, before code fix: catalog has populated models, buildModelCycle
+  //        puts 'sol' in cycle; old render code showed "(gpt-5.6-sol)" annotation.
+  //        New assertion `not.toContain('(gpt-5.6-sol)')` → FAIL (exit code 1).
+  //   GREEN after code fix: annotation branch deleted; row renders bare "sol" → PASS.
+  it('T14/T4: alias renders bare — no canonical-id annotation (sol not "sol (gpt-5.6-sol)")', () => {
+    // Populated catalog — models array is non-empty so pickerNames returns ['sol'].
+    // buildModelCycle puts 'sol' in the cycle; renderModelCell renders it bare.
     const catalog: ExternalModelCatalog = {
       known: true,
       source: 'live',
-      models: [],
+      models: [{ id: 'gpt-5.6-sol', aliases: ['sol'] }],
       selectableNames: ['sol', 'gpt-5.6-sol'],
       aliasToId: new Map([['sol', 'gpt-5.6-sol'], ['gpt-5.6-sol', 'gpt-5.6-sol']]),
     };
@@ -455,40 +567,192 @@ describe('alias rendering', () => {
       proxyEnabled: true,
       catalog,
       modelCycle: buildModelCycle(catalog),
-      rows: [makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
+      rows: [makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'sol', originalModel: 'sol' })],
       cursor: 0,
-      activeField: 'effort', // model field not active — show bare value
+      activeField: 'effort', // model not active — no ‹ › brackets
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
-    expect(rowLine).toContain('sol (gpt-5.6-sol)');
+    // T4 core assertion: alias renders bare
+    expect(rowLine).toContain('sol');
+    expect(rowLine).not.toContain('sol (gpt-5.6-sol)');
+    // No canonical-id in parens at all
+    expect(rowLine).not.toMatch(/\(gpt-/);
   });
 
-  it('renders canonical id bare (no annotation when alias === id)', () => {
-    // A canonical id has aliasToId entry that maps to itself — render bare.
-    const catalog: ExternalModelCatalog = {
-      known: true,
-      source: 'live',
-      models: [],
-      selectableNames: ['gpt-5.6-sol'],
-      aliasToId: new Map([['gpt-5.6-sol', 'gpt-5.6-sol']]),
-    };
+  it('T4: "default (opus)" parenthetical SURVIVES alias-annotation removal', () => {
+    // The shipped-default hint "(opus)" must not be stripped by Fix 1.
+    // This parenthetical answers a DIFFERENT question: "what model is the default?",
+    // not "what is the canonical id of this alias?".
     const state = makeState({
       proxyEnabled: true,
-      catalog,
-      modelCycle: buildModelCycle(catalog),
-      rows: [makeRow({ name: 'coder', configuredModel: 'gpt-5.6-sol', originalModel: 'gpt-5.6-sol' })],
+      catalog: UNKNOWN_CATALOG,
+      modelCycle: buildModelCycle(UNKNOWN_CATALOG),
+      rows: [makeRow({ name: 'review', shippedDefault: 'opus', configuredModel: 'default' })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Review'));
     expect(rowLine).toBeDefined();
-    // Must show the id; must NOT show a secondary annotation in parens
-    expect(rowLine).toContain('gpt-5.6-sol');
-    // Should NOT contain double annotation like 'gpt-5.6-sol (gpt-5.6-sol)'
-    expect(rowLine).not.toContain('gpt-5.6-sol (gpt-5.6-sol)');
+    expect(rowLine).toContain('default (opus)');
+  });
+
+  it('T4: "(unavailable)" parenthetical SURVIVES alias-annotation removal', () => {
+    // Off-cycle pins still render as "model (unavailable)".
+    const state = makeState({
+      proxyEnabled: true,
+      catalog: UNKNOWN_CATALOG,
+      modelCycle: ['default', 'sonnet', 'opus'],
+      rows: [makeRow({
+        name: 'code',
+        configuredModel: 'retired-model',
+        originalModel: 'retired-model',
+        offCyclePin: 'retired-model',
+      })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('Code'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('retired-model (unavailable)');
+  });
+
+  it('in-cycle canonical id (no alias) renders bare', () => {
+    // A canonical id that IS in the picker cycle (because it has no aliases)
+    // renders bare. 'gpt-5.5' has no aliases → it IS the picker name.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      source: 'live',
+      models: [{ id: 'gpt-5.5', aliases: [] }],
+      selectableNames: ['gpt-5.5'],
+      aliasToId: new Map([['gpt-5.5', 'gpt-5.5']]),
+    };
+    const state = makeState({
+      proxyEnabled: true,
+      catalog,
+      modelCycle: buildModelCycle(catalog), // includes 'gpt-5.5'
+      rows: [makeRow({ name: 'code', configuredModel: 'gpt-5.5', originalModel: 'gpt-5.5' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('Code'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('gpt-5.5');
+    expect(rowLine).not.toContain('gpt-5.5 (gpt-5.5)');
+    expect(rowLine).not.toContain('(unavailable)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8-T11: STATE column rendering (Fix 3)
+// ---------------------------------------------------------------------------
+
+describe('STATE column (Fix 3)', () => {
+  it('T8: active row shows "active" in STATE column', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code', configuredModel: 'sonnet', installed: true, inRegistry: true })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('Code'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('active');
+  });
+
+  it('T9: not-installed row shows "not installed" in STATE column', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code', installed: false, inRegistry: true })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('Code'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('not installed');
+  });
+
+  it('T10: orphan row (inRegistry=false) shows "unknown" in STATE column', () => {
+    // An arbitrary key from agent-models.json not present in the plugin registry.
+    const state = makeState({
+      rows: [makeRow({ name: 'old-custom-agent', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const lines = renderStripped(state);
+    const rowLine = lines.find(l => l.includes('Old-Custom-Agent'));
+    expect(rowLine).toBeDefined();
+    expect(rowLine).toContain('unknown');
+    // Must not show 'not installed' — 'unknown' takes priority (inRegistry check first)
+    expect(rowLine).not.toContain('not installed');
+  });
+
+  it('T11: stripAnsi on name cell — ANSI escape in orphan name is stripped from raw output', () => {
+    // Orphan names come from arbitrary JSON keys — a hostile key could inject ANSI codes.
+    // render.ts must call stripAnsi(row.name) BEFORE rendering so raw output is clean.
+    const ansiName = '\x1b[31mevil-agent\x1b[0m'; // red "evil-agent"
+    const state = makeState({
+      rows: [makeRow({ name: ansiName, installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    // The RAW frame (not stripped) must not contain the ANSI opener \x1b[31m from the name.
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    const allRaw = rawLines.join('\n');
+    // The injection sequence from the name must be absent in raw output.
+    // (render.ts colors STATE column, so some \x1b[ will appear — but not from the name)
+    // Check specifically for the red color code that was in the name:
+    expect(allRaw).not.toContain('\x1b[31mevil-agent');
+    // The visible text 'evil-agent' must still appear (stripped, title-cased as 'Evil-Agent')
+    const strippedLines = rawLines.map(stripAnsi);
+    const rowLine = strippedLines.find(l => l.includes('Evil-Agent'));
+    expect(rowLine).toBeDefined();
+  });
+
+  it('newline in an orphan name does not break the one-line-per-string frame contract', () => {
+    // stripAnsi strips escape sequences and C0 controls but PRESERVES \n by
+    // contract. Orphan names are arbitrary JSON keys from agent-models.json, so a
+    // key containing a newline would emit an embedded newline into a frame line —
+    // breaking renderFrame's documented contract and desyncing terminal.ts's
+    // redraw (it appends ERASE_EOL + '\n' per returned line).
+    const state = makeState({
+      rows: [makeRow({ name: 'evil\ninjected', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    for (const line of rawLines) {
+      expect(line, `frame line contains an embedded newline: ${JSON.stringify(line)}`)
+        .not.toContain('\n');
+    }
+    // The key is still visible (both halves survive, joined by the replacement space)
+    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('Evil injected'));
+    expect(rowLine).toBeDefined();
+  });
+
+  it('tab in an orphan name does not reach the frame (measures 1, renders up to 8 columns)', () => {
+    // stripAnsi also preserves \x09. A tab measures as one character in
+    // padToVisible but occupies up to eight terminal columns, misaligning every
+    // column to its right.
+    const state = makeState({
+      rows: [makeRow({ name: 'a\tb', installed: false, inRegistry: false })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const rawLines = renderFrame(state, { rows: 24, cols: 80 });
+    for (const line of rawLines) {
+      expect(line, `frame line contains a tab: ${JSON.stringify(line)}`).not.toContain('\t');
+    }
+    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('A b'));
+    expect(rowLine).toBeDefined();
+    // Column alignment holds: at 80 cols the STATE cell starts at the declared
+    // offset PREFIX(2) + AGENT(18) + MODEL(32) + EFFORT(13) = 65. A surviving tab
+    // would shift it, because padToVisible counts \t as a single character.
+    expect(rowLine?.slice(65)).toBe('unknown');
   });
 });
 
@@ -506,7 +770,7 @@ describe('(unavailable) off-cycle pin', () => {
       // modelCycle does NOT include 'retired-model'
       modelCycle: ['default', 'sonnet', 'opus'],
       rows: [makeRow({
-        name: 'coder',
+        name: 'code',
         configuredModel: 'retired-model',
         originalModel: 'retired-model',
         offCyclePin: 'retired-model',
@@ -515,7 +779,7 @@ describe('(unavailable) off-cycle pin', () => {
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('retired-model (unavailable)');
   });
@@ -531,8 +795,8 @@ describe('column bounds', () => {
     // the declared terminal width. Overflow causes visual corruption in the TUI.
     const state = makeState({
       rows: [
-        makeRow({ name: 'bug-analyzer-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
-        makeRow({ name: 'coder', shippedDefault: 'sonnet', configuredModel: 'default' }),
+        makeRow({ name: 'my-very-long-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'default' }),
       ],
       cursor: 0,
     });
@@ -553,7 +817,7 @@ describe('escape sequence injection safety', () => {
   it('ANSI escape code in agent name does not expand visible column width', () => {
     // An agent name containing ANSI codes must still be padded by VISIBLE width.
     // padToVisible uses stripAnsi before measuring, so the column width is correct.
-    const ansiName = '\x1b[31mcoder\x1b[0m'; // red "coder"
+    const ansiName = '\x1b[31mcode\x1b[0m'; // red "code"
     const state = makeState({
       rows: [makeRow({ name: ansiName, shippedDefault: 'sonnet' })],
       cursor: 0,
@@ -561,7 +825,7 @@ describe('escape sequence injection safety', () => {
     const COLS = 80;
     // renderStripped strips ANSI — the visible line width must be ≤ COLS
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine.length).toBeLessThanOrEqual(COLS);
@@ -573,7 +837,7 @@ describe('escape sequence injection safety', () => {
     // measures by stripAnsi result. The rendered line should remain ≤ COLS.
     const nulModel = 'sol\x00evil';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', configuredModel: nulModel, originalModel: nulModel })],
+      rows: [makeRow({ name: 'code', configuredModel: nulModel, originalModel: nulModel })],
       // Put nulModel in modelCycle so it doesn't trigger (unavailable) path
       modelCycle: ['default', nulModel],
       catalog: UNKNOWN_CATALOG,
@@ -581,7 +845,7 @@ describe('escape sequence injection safety', () => {
     });
     const COLS = 80;
     const lines = renderStripped(state, { rows: 24, cols: COLS });
-    const rowLine = lines.find(l => l.includes('coder'));
+    const rowLine = lines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     // Must not throw and must not produce a line wider than COLS
     if (rowLine !== undefined) {
@@ -600,7 +864,7 @@ describe('escape sequence injection safety', () => {
     // After the fix, the raw TUI output must not contain the OSC-8 opener.
     const osc8Model = '\x1b]8;;https://evil.com\x07gpt-5.5\x1b]8;;\x07';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', configuredModel: osc8Model, originalModel: osc8Model })],
+      rows: [makeRow({ name: 'code', configuredModel: osc8Model, originalModel: osc8Model })],
       // Include the raw model in the cycle so it does NOT trigger (unavailable)
       modelCycle: ['default', osc8Model],
       catalog: UNKNOWN_CATALOG,
@@ -613,7 +877,7 @@ describe('escape sequence injection safety', () => {
     expect(allRaw).not.toContain('\x1b]8;');
     // After stripping, the visible text ('gpt-5.5') must still appear
     const strippedLines = rawLines.map(stripAnsi);
-    const rowLine = strippedLines.find(l => l.includes('coder'));
+    const rowLine = strippedLines.find(l => l.includes('Code'));
     expect(rowLine).toBeDefined();
     if (rowLine !== undefined) {
       expect(rowLine).toContain('gpt-5.5');
@@ -624,7 +888,7 @@ describe('escape sequence injection safety', () => {
     // The shippedDefault hint is rendered in the model cell as "(shippedDefault)".
     const osc8Default = '\x1b]8;;https://evil.com\x07sonnet\x1b]8;;\x07';
     const state = makeState({
-      rows: [makeRow({ name: 'coder', shippedDefault: osc8Default, configuredModel: 'default' })],
+      rows: [makeRow({ name: 'code', shippedDefault: osc8Default, configuredModel: 'default' })],
       cursor: 0,
       activeField: 'effort',
     });
@@ -639,7 +903,7 @@ describe('escape sequence injection safety', () => {
     const state = makeState({
       proxyEnabled: false,
       rows: [makeRow({
-        name: 'coder',
+        name: 'code',
         configuredModel: 'default',
         originalModel: 'default',
         dormantModel: osc8Dormant,
@@ -650,5 +914,78 @@ describe('escape sequence injection safety', () => {
     const rawLines = renderFrame(state, { rows: 24, cols: 80 });
     const allRaw = rawLines.join('\n');
     expect(allRaw).not.toContain('\x1b]8;');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T5: static guard — aliasToId not referenced in render.ts (Fix 1)
+// ---------------------------------------------------------------------------
+
+describe('T5: render.ts source does not reference aliasToId', () => {
+  it('aliasToId identifier absent from render.ts — annotation branch fully deleted', async () => {
+    // Fix 1 deleted the alias→canonical-id annotation branch from renderModelCell.
+    // The render module must no longer import or read catalog.aliasToId.
+    // This test guards against accidental re-introduction.
+    const { readFileSync } = await import('fs');
+    const { fileURLToPath } = await import('url');
+    const renderPath = fileURLToPath(
+      new URL('../src/cli/agents-view/render.ts', import.meta.url),
+    );
+    const src = readFileSync(renderPath, 'utf-8');
+    expect(src, 'render.ts must not reference aliasToId after Fix 1').not.toContain('aliasToId');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T13: formatAgentName — hyphen-aware title-case in TUI, --list stays lowercase (Fix 4)
+// ---------------------------------------------------------------------------
+
+describe('T13: formatAgentName (Fix 4)', () => {
+  it('title-cases each hyphen-separated segment', () => {
+    // Single-segment names: first letter capitalized
+    expect(formatAgentName('code')).toBe('Code');
+    expect(formatAgentName('diagnose')).toBe('Diagnose');
+    // Multi-segment (orphan agent-models.json keys can be arbitrary strings):
+    // each segment is capitalized independently
+    expect(formatAgentName('two-part')).toBe('Two-Part');
+    expect(formatAgentName('my-custom-agent')).toBe('My-Custom-Agent');
+  });
+
+  it('empty string is returned unchanged', () => {
+    expect(formatAgentName('')).toBe('');
+  });
+
+  it('already-capitalized names are unchanged', () => {
+    expect(formatAgentName('Code')).toBe('Code');
+  });
+
+  it('TUI renders agent names with capital first letter', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+      ],
+      cursor: 0,
+    });
+    const lines = renderStripped(state);
+    const text = lines.join('\n');
+    // TUI must show hyphen-aware title-cased names
+    expect(text).toContain('Diagnose');
+    expect(text).toContain('Code');
+    // Lowercase originals must NOT appear — they are transformed
+    expect(text).not.toContain('\ndiagnose');
+    expect(text).not.toContain('\ncode');
+  });
+
+  it('--list formatListOutput uses raw lowercase name (not formatAgentName)', async () => {
+    // The --list path calls padEnd on the raw name without formatAgentName.
+    // Verify formatAgentName is NOT imported by agents.ts (--list module).
+    const { readFileSync } = await import('fs');
+    const { fileURLToPath } = await import('url');
+    const agentsPath = fileURLToPath(
+      new URL('../src/cli/commands/agents.ts', import.meta.url),
+    );
+    const src = readFileSync(agentsPath, 'utf-8');
+    expect(src, '--list path in agents.ts must not call formatAgentName').not.toContain('formatAgentName');
   });
 });

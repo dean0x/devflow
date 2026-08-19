@@ -37,7 +37,7 @@ Use the `tools` frontmatter field to restrict which tools an agent can access. C
 
 ```markdown
 ---
-name: Skimmer
+name: Skim
 tools: ["Bash", "Read"]
 ---
 ```
@@ -48,8 +48,8 @@ When an agent only needs a subset of tools, prefer platform-enforced restriction
 
 | Agent Type | Target Lines | Examples |
 |------------|-------------|----------|
-| Utility | 50-80 | Skimmer, Simplifier, Validator |
-| Worker | 80-120 | Coder, Reviewer, Git, Designer |
+| Utility | 50-80 | Skim, Simplify, Validate |
+| Worker | 80-120 | Code, Review, Git, Design |
 | Orchestration | 100-150 | (Commands handle orchestration, not agents) |
 
 ## What Belongs Where
@@ -99,7 +99,7 @@ Devflow ships with explicit model assignments in agent frontmatter (Opus for ana
 ```bash
 npx devflow-kit agents               # Interactive TUI — navigate, cycle model, save
 npx devflow-kit agents --list        # Print all agents with current assignments
-npx devflow-kit agents --set reviewer --model sol        # Assign one agent via CLI (alias auto-tracks current generation)
+npx devflow-kit agents --set review --model sol          # Assign one agent via CLI (alias auto-tracks current generation)
 npx devflow-kit agents --reset                          # Reset all agents to shipped defaults (prompts)
 npx devflow-kit agents --reset --yes                    # Skip confirmation prompt
 ```
@@ -114,7 +114,7 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 ### Shared Agents (used by multiple plugins)
 
-1. Create agent in `src/assets/agents/new-agent.md`
+1. Create agent in `src/assets/agents/{agent-name}.md`
 2. Follow existing agent patterns (clear specialty, restricted tools, focused scope, specific output)
 3. Add agent name to the `agents` array of each plugin entry in DEVFLOW_PLUGINS (`src/core/plugins.ts`) that needs it
 4. Run `node dist/cli.js init` to install (no build step required for agents)
@@ -124,4 +124,4 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 All agents live in `src/assets/agents/` — there is no separate per-plugin agent directory. For an agent used by only one plugin, add it to `src/assets/agents/` and declare it in only that plugin's `agents` array in DEVFLOW_PLUGINS.
 
-**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `coder.md`, `designer.md`, `claude-md-auditor.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.
+**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `code.md`, `design.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.

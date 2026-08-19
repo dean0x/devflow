@@ -71,7 +71,7 @@ Partials declare **no** `output-dir:` frontmatter key. Host files declare it as 
 ### Compiled output and test pinning
 
 `scripts/build-mds.ts` compiles all 14 host files (9 knowledge + 5 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
-- `Simplifier` and `Scrutinizer` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
+- `Simplify` and `Scrutinize` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
 - `DELTA REVIEW`, `reviewBaseSha`, `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
 - `--dry-run` absent from build/plan/tickets/wave compiled outputs, present only in dynamic-profile
 
@@ -83,40 +83,40 @@ The engine for one ticket runs these phases in order:
 
 ```
 setup (Git)
-  → implement (Coder: full task + plan + DECISIONS_CONTEXT)
-  → gate1 #1 (Validator → Coder retries ≤2 → Simplifier → Scrutinizer → re-Validator if Scrutinizer changed code)
-  → gate2 (Evaluator panel + Tester — fires ONCE before review loop; fix-and-continue with FAIL-FIXED verdict)
+  → implement (Code agent: full task + plan + DECISIONS_CONTEXT)
+  → gate1 #1 (Validate → Code retries ≤2 → Simplify → Scrutinize → re-Validate if Scrutinize changed code)
+  → gate2 (Evaluate panel + Test — fires ONCE before review loop; fix-and-continue with FAIL-FIXED verdict)
   → review-loop (cycles until clean or maxCycles — see below)
-  → gate1-final #2 (same Validator→Simplifier→Scrutinizer sequence, post-all-fixes)
-  → report (Synthesizer)
+  → gate1-final #2 (same Validate→Simplify→Scrutinize sequence, post-all-fixes)
+  → report (Synthesize)
 ```
 
-Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-loop fixes are done. It never runs between review cycles — fix Coders self-verify their own builds instead.
+Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-loop fixes are done. It never runs between review cycles — fix Code agents self-verify their own builds instead.
 
-Gate 2 fires **once**, at implementation acceptance (before the review loop), not after review fixes. If no plan exists, Evaluator is silently skipped. If no acceptance criteria exist, Tester is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
+Gate 2 fires **once**, at implementation acceptance (before the review loop), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
 
 ### Review loop
 
 Each cycle:
-1. Spawn reviewers in staggered **chunks of ~5** (sequential groups of parallel spawns) to avoid 429 rate-limit death
+1. Spawn Review agents in staggered **chunks of ~5** (sequential groups of parallel spawns) to avoid 429 rate-limit death
 2. 8 core focuses always: security, architecture, performance, complexity, consistency, regression, testing, reliability; conditional focuses added by detected file type (.ts, .go, .py, etc.)
-3. **Dead-reviewer handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. A cycle with any coverage gap can never early-exit clean, and the run verdict can never be PASS.
+3. **Dead-Review-agent handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. A cycle with any coverage gap can never early-exit clean, and the run verdict can never be PASS.
 4. **Adversarial verification**: 3-lens panel (reproduces?, real vs false positive?, rule actually applies here?) majority-survives (>50% confirm = surviving finding). Unconfirmed findings are stripped.
 5. **preFixSha**: record `git rev-parse HEAD` via haiku Git agent before each fix phase. This SHA defines the next cycle's delta-review scope. Missing preFixSha → fall back to wider full-branch scope, never narrower.
-6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Coders editing the same file concurrently). Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine). A finding with no `file` field is a singleton batch. Never hand one Coder an unbounded list.
-7. `survivingFindings` **accumulates** across cycles (never overwritten). Findings addressed by fix Coders are FIXED and trusted; a delta review in cycle N+1 re-checks earlier fixes for free.
+6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently). Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine). A finding with no `file` field is a singleton batch. Never hand one Code agent an unbounded list.
+7. `survivingFindings` **accumulates** across cycles (never overwritten). Findings addressed by fix Code agents are FIXED and trusted; a delta review in cycle N+1 re-checks earlier fixes for free.
 8. **Scope**: Cycle 1 = full branch diff. Cycles 2+ = DELTA REVIEW (`reviewBaseSha..HEAD`) — only the fix commits are re-reviewed.
 
 Early exit only when `allFindings.length === 0 && coverageGaps.length === 0`.
 
 ### Wave execution (dynamic-build, WAVE mode)
 
-1. **Designer agent (opus)** reads all wave issues and applies the **vacuous-truth rule**: a ticket with no named unmet dependency is ALWAYS ready. "Nothing merged yet" is never a blocker. A blocked verdict without a NAMED blocking ticket ID is invalid.
-2. Ready tickets run **sequentially by default** (concurrency doctrine: parallel only when all 3 bars hold — different code areas, different feature logic, different goals). The Designer reader, not a graph algorithm, decides order.
+1. **Design agent (opus)** reads all wave issues and applies the **vacuous-truth rule**: a ticket with no named unmet dependency is ALWAYS ready. "Nothing merged yet" is never a blocker. A blocked verdict without a NAMED blocking ticket ID is invalid.
+2. Ready tickets run **sequentially by default** (concurrency doctrine: parallel only when all 3 bars hold — different code areas, different feature logic, different goals). The Design agent reader, not a graph algorithm, decides order.
 3. Each ticket runs inside a **try/catch** — one ticket's crash/stall never kills the wave; it quarantines that ticket only.
-4. After engine PASS: merge to integration branch + Validator (build + test). Build red after merge → quarantine.
-5. **Cascade quarantine**: when any ticket is quarantined, quarantine propagates to its direct and transitive dependents. Named explicitly in every subsequent Designer reader prompt.
-6. After each round's merges: re-spawn the Designer reader ("given what's now merged, what's ready next?").
+4. After engine PASS: merge to integration branch + Validate (build + test). Build red after merge → quarantine.
+5. **Cascade quarantine**: when any ticket is quarantined, quarantine propagates to its direct and transitive dependents. Named explicitly in every subsequent Design agent reader prompt.
+6. After each round's merges: re-spawn the Design agent reader ("given what's now merged, what's ready next?").
 7. When nothing is ready but tickets remain: re-ask once with the vacuous-truth rule quoted verbatim. If the re-read names a specific blocker per ticket: declare deadlock with specific reasons. Otherwise continue.
 8. `MAX_ROUNDS = ticket_count * 2 + 5` (minimum 10) — always finite.
 
@@ -126,7 +126,7 @@ Integration branch is `wave/<initiative>` — **never main or master**.
 
 Before the workflow runs, the main model proposes a candidate ticket slate and waits for user confirmation — this is the human gate before the pipeline invests in drafting.
 
-The pipeline stages: `draft → [2-lens review in parallel] → revise → whole-set critic → per-ticket amend → tracking-issue`. Two review lenses per ticket: Planner-readiness (cold read) and Accuracy/scope-discipline audit. The whole-set critic (one Designer, opus) audits coverage, overlaps/contradictions, dependency graph, and acceptance-criteria coherence across the full revised set.
+The pipeline stages: `draft → [2-lens review in parallel] → revise → whole-set critic → per-ticket amend → tracking-issue`. Two review lenses per ticket: Planner-readiness (cold read) and Accuracy/scope-discipline audit. The whole-set critic (one Design agent, opus) audits coverage, overlaps/contradictions, dependency graph, and acceptance-criteria coherence across the full revised set.
 
 ### Planning pipeline (dynamic-plan)
 
@@ -134,7 +134,7 @@ The pipeline stages: `draft → [2-lens review in parallel] → revise → whole
 
 Phases: read-tickets → plan-parallel → plan-challenge → cross-plan-critic → preference-resolve → write-artifacts.
 
-The plan-challenge step uses a verbatim intent string (§5.1) — do not paraphrase when authoring the challenger agent prompt. The Evaluator agent runs the challenge (not a Reviewer). The cross-plan critic finds API conflicts, contradictory invariants, undeclared dependencies, scope overlap.
+The plan-challenge step uses a verbatim intent string (§5.1) — do not paraphrase when authoring the challenger agent prompt. The Evaluate agent runs the challenge (not a Review agent). The cross-plan critic finds API conflicts, contradictory invariants, undeclared dependencies, scope overlap.
 
 The preference profile (`~/.devflow/preference-profile.md`) auto-resolves decisions matching established taste. Unresolved decisions go to `DECISIONS-NEEDED.md` for the user.
 
@@ -142,7 +142,7 @@ The preference profile (`~/.devflow/preference-profile.md`) auto-resolves decisi
 
 ### DECISIONS_CONTEXT loading
 
-The main model reads `.devflow/learning/index.md` (the pre-rendered write-time artifact) **before authoring the workflow script** — the script body has no filesystem access. The returned index is injected into agent prompts using the `devflow:apply-decisions` algorithm. Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need it injected; Validator and Simplifier do not.
+The main model reads `.devflow/learning/index.md` (the pre-rendered write-time artifact) **before authoring the workflow script** — the script body has no filesystem access. The returned index is injected into agent prompts using the `devflow:apply-decisions` algorithm. Only agents that need architectural context (Code, Evaluate, Review, Scrutinize) need it injected; Validate and Simplify do not.
 
 ### Agent agentType usage
 
@@ -152,19 +152,19 @@ Valid agentType values and their tiers:
 
 | agentType | Tier | Role |
 |---|---|---|
-| Coder | sonnet | Writes ALL code — the ONLY agent that writes code |
-| Validator | haiku | Build / typecheck / lint / test |
-| Simplifier | sonnet | Reduce complexity, remove duplication |
-| Scrutinizer | opus | 9-pillar self-review |
-| Evaluator | opus | Plan-fidelity alignment |
-| Tester | sonnet | Scenario-based acceptance tests |
-| Reviewer | opus | Focus-parameterized review — one agent() per focus |
+| Code | sonnet | Writes ALL code — the ONLY agent that writes code |
+| Validate | haiku | Build / typecheck / lint / test |
+| Simplify | sonnet | Reduce complexity, remove duplication |
+| Scrutinize | opus | 9-pillar self-review |
+| Evaluate | opus | Plan-fidelity alignment |
+| Test | sonnet | Scenario-based acceptance tests |
+| Review | opus | Focus-parameterized review — one agent() per focus |
 | Git | haiku | Git operations |
-| Synthesizer | haiku | Summarize / aggregate multi-agent outputs |
+| Synthesize | haiku | Summarize / aggregate multi-agent outputs |
 | Knowledge | sonnet | Codebase exploration / KB creation |
-| Designer | opus | Architecture, design, dependency reasoning |
+| Design | opus | Architecture, design, dependency reasoning |
 
-A Coder writes every fix — no other agent type ever writes code.
+A Code agent writes every fix — no other agent type ever writes code.
 
 ### Workflow runtime contract
 
@@ -176,30 +176,30 @@ The script body has ONLY these hooks: `agent()`, `parallel()`, `pipeline()`, `ph
 
 ### Engine invariants (non-negotiable)
 
-1. Code is written ONLY by Coders. No other agent type writes code.
+1. Code is written ONLY by Code agents. No other agent type writes code.
 2. Findings are verified before any fix is written. Adversarial verification is not optional.
-3. All written code passes Gate 1. No code merge before Validator + Simplifier + Scrutinizer.
+3. All written code passes Gate 1. No code merge before Validate + Simplify + Scrutinize.
 4. Gate 2 runs once, at implementation acceptance. It does not re-run after review fixes.
 5. NEVER auto-merge to main or master. All merges target the integration branch. The user merges to main themselves.
 6. No unauthorized GitHub side-effects. Sub-agents never create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action.
 
 ### Concurrency doctrine
 
-Default: **sequential**. Parallel is the rare, tightly-gated exception — only when ALL THREE bars hold: (1) completely different code areas, (2) different feature logic, (3) different goals. Two Coders splitting one task is a coherence hazard. When in doubt, sequential.
+Default: **sequential**. Parallel is the rare, tightly-gated exception — only when ALL THREE bars hold: (1) completely different code areas, (2) different feature logic, (3) different goals. Two Code agents splitting one task is a coherence hazard. When in doubt, sequential.
 
 ### Budget scaling
 
-`budget` (available as a script global) governs reviewer roster size, review cycle count, and verification vote count. Never hardcode a roster size — let budget guide it.
+`budget` (available as a script global) governs Review-agent roster size, review cycle count, and verification vote count. Never hardcode a roster size — let budget guide it.
 
 ## Anti-Patterns
 
 - **Passing `opts.model` with `agentType`**: always wrong — overrides the agent's own model tier and defeats specialization.
-- **Batching multiple focuses into one Reviewer call**: defeats parallel specialization. One `agent()` call per focus area.
-- **Running Gate 1 between review cycles**: the cadence is twice per ticket only. Between cycles, fix Coders self-verify their own builds.
+- **Batching multiple focuses into one Review call**: defeats parallel specialization. One `agent()` call per focus area.
+- **Running Gate 1 between review cycles**: the cadence is twice per ticket only. Between cycles, fix Code agents self-verify their own builds.
 - **Re-running Gate 2 after review fixes**: Gate 2 fires once. The review loop is Gate-1-only after Gate 2 has fired.
-- **Treating a DEAD reviewer as a clean pass**: a null/thrown/guard-string result means coverage gap, not clean. `filter(Boolean)` before mapping over agent results is crash-safety, never a coverage-to-success converter.
+- **Treating a DEAD Review agent as a clean pass**: a null/thrown/guard-string result means coverage gap, not clean. `filter(Boolean)` before mapping over agent results is crash-safety, never a coverage-to-success converter.
 - **Authoring deterministic feature code in the script body**: no parsers, schedulers, topological-sort, cycle counters. All scheduling decisions are LLM judgment at runtime (ADR-008 Iron Rule from CLAUDE.md).
-- **Overwriting survivingFindings each cycle**: findings from past cycles where the Coder failed or deferred must accumulate. A delta review does not re-surface them; overwriting would silently drop them and let the verdict falsely read PASS.
+- **Overwriting survivingFindings each cycle**: findings from past cycles where the Code agent failed or deferred must accumulate. A delta review does not re-surface them; overwriting would silently drop them and let the verdict falsely read PASS.
 - **Merging to main or master from the workflow**: the workflow targets `wave/<initiative>` only. The user merges to main themselves.
 - **Asking questions mid-workflow**: F4 constraint — a workflow cannot pause. `AskUserQuestion` always happens at the command boundary after the workflow returns.
 
@@ -231,25 +231,25 @@ In `.mds` source files:
 - Fences (`` ``` ``) MUST start at column 0 — indented fences are not recognized as code blocks by the MDS compiler and leak as prose.
 - `output-dir:` MUST be the LAST key in the frontmatter block. No non-blank lines may follow it inside the `---` block.
 
-### Wave Designer reader must be opus tier
+### Wave Design Agent Reader Must Be Opus Tier
 
-Using a haiku-tier reader for wave dependency reasoning is a known failure mode: a haiku reader once quarantined 10 independent tickets as "blocked" because nothing had merged yet. The wave step spawns a `Designer` (opus) agent — never downgrade this to a faster tier.
+Using a haiku-tier reader for wave dependency reasoning is a known failure mode: a haiku reader once quarantined 10 independent tickets as "blocked" because nothing had merged yet. The wave step spawns a `Design` (opus) agent — never downgrade this to a faster tier.
 
 ### Empty ready-set re-ask guard
 
-When the Designer reader returns an empty ready set but tickets remain, the engine re-asks once with the vacuous-truth rule quoted verbatim before declaring deadlock. A second empty read that names a specific blocking ticket ID per remaining ticket ends the wave. Without the re-ask, a single hallucinated block causes premature deadlock.
+When the Design agent reader returns an empty ready set but tickets remain, the engine re-asks once with the vacuous-truth rule quoted verbatim before declaring deadlock. A second empty read that names a specific blocking ticket ID per remaining ticket ends the wave. Without the re-ask, a single hallucinated block causes premature deadlock.
 
 ### `--dry-run` only in dynamic-profile
 
 The `--dry-run` flag is present ONLY in `dynamic-profile.mds`. It was removed from `dynamic-build`, `dynamic-plan`, `dynamic-tickets`, and `dynamic-wave` (C7 of PR #252). The test suite pins its absence. Do not re-add it to those commands.
 
-### Skill re-entrancy in Reviewer and Evaluator agents
+### Skill re-entrancy in Review and Evaluate agents
 
-Agents that preload a skill via frontmatter `skills:` must never be instructed to invoke that same skill via the Skill tool in their body prompt. The re-entrancy guard returns a guard string (`devflow:X already running`), the agent treats it as a terminal instruction, returns with 0 tool uses, and the Workflow counts it as success — silently masking zero review coverage. Applies PF-002. When writing agent prompts for Reviewer and Evaluator, give full context directly; do not rely on Skill-tool re-invocation of a preloaded skill.
+Agents that preload a skill via frontmatter `skills:` must never be instructed to invoke that same skill via the Skill tool in their body prompt. The re-entrancy guard returns a guard string (`devflow:X already running`), the agent treats it as a terminal instruction, returns with 0 tool uses, and the Workflow counts it as success — silently masking zero review coverage. Applies PF-002. When writing agent prompts for Review and Evaluate, give full context directly; do not rely on Skill-tool re-invocation of a preloaded skill.
 
 ### Acceptance criteria quality bar
 
-A criterion is not acceptable if: vague ("the feature should work correctly"), implementation-coupled ("the function must call X"), or untestable. At least one NEGATIVE criterion (what the system MUST NOT do) is required per ticket. These rules are load-bearing because Gate 2 uses them directly — the Evaluator and Tester agents have no other source of truth.
+A criterion is not acceptable if: vague ("the feature should work correctly"), implementation-coupled ("the function must call X"), or untestable. At least one NEGATIVE criterion (what the system MUST NOT do) is required per ticket. These rules are load-bearing because Gate 2 uses them directly — the Evaluate and Test agents have no other source of truth.
 
 ### Per-ticket branch branching time
 
@@ -272,5 +272,5 @@ Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the m
 ## Related
 
 - ADR-003 (leave-the-end-state): applies to compiled output — when removing or renaming doctrine blocks, strip residue (tombstone comments, `*_old` names, guards for now-impossible states). The test suite pins the current doctrine literals; outdated pinned strings that remain after a partial rename fail tests rather than silently passing.
-- PF-002 (skill re-entrancy guard-string bail): relevant to every `agent()` call with `agentType: "Reviewer"` or `"Evaluator"` — never instruct these agents to invoke via Skill tool the same skill their frontmatter preloads.
+- PF-002 (skill re-entrancy guard-string bail): relevant to every `agent()` call with `agentType: "Review"` or `"Evaluate"` — never instruct these agents to invoke via Skill tool the same skill their frontmatter preloads.
 - `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 5 dynamic commands.

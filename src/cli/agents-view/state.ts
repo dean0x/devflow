@@ -5,7 +5,9 @@
  * avoids PF-014: pure functions only — no process.exit(), no I/O.
  *
  * Model cycle (proxy ON):  default → haiku → sonnet → opus → fable →
- *                          <aliases in registry order> → <canonical ids> → default
+ *                          <picker names in registry order> → default
+ *                          Picker names: all aliases for each model; canonical id iff
+ *                          the model has no aliases (zero-maintenance, catalog-driven).
  * Model cycle (proxy OFF): default → haiku → sonnet → opus → fable → default
  * Effort cycle:            default → low → medium → high → xhigh → max → default
  *
@@ -28,8 +30,15 @@
  */
 
 import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
-import { CLAUDE_MODEL_ALIASES, isDormantExternalModel } from '../../core/external-models.js';
-import { type ExternalModelCatalog } from '../../core/model-discovery.js';
+import {
+  CLAUDE_MODEL_ALIASES,
+  isDormantExternalModel,
+} from '../../core/external-models.js';
+import {
+  classifyAgentState,
+  type AgentState,
+} from '../../core/agent-state.js';
+import { type ExternalModel, type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -61,6 +70,10 @@ export interface AgentRow {
    * after a full forward+backward navigation. Render shows '(unavailable)'.
    */
   readonly offCyclePin: string | null;
+  /** True when the agent's .md file is present in the install directory. */
+  readonly installed: boolean;
+  /** True when the agent name exists in the plugin registry. False for orphan rows. */
+  readonly inRegistry: boolean;
 }
 
 /** Full TUI state — immutable by convention. */
@@ -73,12 +86,6 @@ export interface AgentsViewState {
   /** Number of rows the terminal viewport can display. */
   readonly viewportHeight: number;
   readonly proxyEnabled: boolean;
-  /**
-   * Discovered model catalog — built once at TUI startup, startup-constant.
-   * {known:false} when the cache is empty or discovery was unavailable.
-   * On the proxy-off path the cache-based catalog is used; see selectCatalog().
-   */
-  readonly catalog: ExternalModelCatalog;
   /**
    * Prebuilt flat cycle for all rows: ['default', ...claude, ...external].
    * Built once in buildTuiState; never reallocated per keypress (AC-P6).
@@ -99,12 +106,85 @@ export interface ReduceResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * The picker names for a single model: all aliases when the model has any,
+ * or the canonical id when it has none. This is the single alias-selection
+ * site — both `pickerNames` (cycle builder) and `buildPickerNameMap` (id→alias
+ * normaliser) call it so the two can never drift.
+ *
+ * Module-private: callers consume the public wrappers below.
+ * Pure function, no I/O.
+ */
+function pickerNamesFor(model: ExternalModel): readonly string[] {
+  return model.aliases.length > 0 ? model.aliases : [model.id];
+}
+
+/**
+ * Extract the picker name list from a model list.
+ *
+ * Zero-maintenance rule (Fix 1):
+ *   - For each model IN REGISTRY ORDER: contribute ALL of its aliases.
+ *   - Contribute the canonical ID if and only if the model has NO aliases.
+ *
+ * This means:
+ *   gpt-5.6-sol  [aliases: ['sol']]   → 'sol'
+ *   gpt-5.5      [aliases: []]        → 'gpt-5.5'
+ *   gpt-x        [aliases: ['a','b']] → 'a', 'b'
+ *
+ * When a currently-alias-less model gains an alias in a future subswitch
+ * release, it automatically renders as that alias with no code change.
+ *
+ * NOTE: catalog.selectableNames is NOT used here — it doubles as the --set
+ * validation allowlist (includes both aliases and canonical ids). Narrowing
+ * it would reject `devflow agents --set coder --model gpt-5.6-sol`.
+ *
+ * Pure function, no I/O.
+ */
+export function pickerNames(models: readonly ExternalModel[]): readonly string[] {
+  return models.flatMap(pickerNamesFor);
+}
+
+/**
+ * Build a map from every stored identifier (alias or canonical id) to the
+ * picker name that represents it in the TUI cycle.
+ *
+ * Used by buildRow to normalize a stored canonical id to its alias on read,
+ * e.g. 'gpt-5.6-sol' → 'sol', so the value stays in-cycle and does not
+ * appear as an off-cycle pin. NEVER rewrites the value on disk — only for
+ * display.
+ *
+ * Returns an empty map when the catalog is unknown.
+ *
+ * Pure function, no I/O.
+ */
+export function buildPickerNameMap(
+  catalog: ExternalModelCatalog,
+): ReadonlyMap<string, string> {
+  if (!catalog.known) return new Map<string, string>();
+  const map = new Map<string, string>();
+  for (const model of catalog.models) {
+    const names = pickerNamesFor(model);
+    const [representative] = names;
+    // Canonical id → first picker name (first alias if any, else canonical id)
+    map.set(model.id, representative);
+    // Each picker name → itself (identity, already a picker name)
+    for (const name of names) {
+      map.set(name, name);
+    }
+  }
+  return map;
+}
+
+/**
  * Build the model cycle from a discovered catalog.
  * Exported so agents.ts can call it once and store the result in state.
  *
  * Cycle order (catalog known):
  *   default → haiku → sonnet → opus → fable →
- *   <aliases in registry order, all models> → <canonical ids> → (wraps)
+ *   <picker names in registry order> → (wraps)
+ *
+ * Picker names are alias-only (canonical id only when no aliases exist),
+ * produced by pickerNames(). catalog.selectableNames is NOT used here —
+ * it is the --set validation allowlist, not the TUI picker subset.
  *
  * Cycle order (catalog unknown):
  *   default → haiku → sonnet → opus → fable → (wraps)
@@ -119,7 +199,7 @@ export function buildModelCycle(
 ): readonly string[] {
   const base: readonly string[] = ['default', ...CLAUDE_MODEL_ALIASES];
   if (!catalog.known) return base;
-  return [...base, ...catalog.selectableNames];
+  return [...base, ...pickerNames(catalog.models)];
 }
 
 const EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS];
@@ -159,6 +239,35 @@ export function isDirtyEffort(row: AgentRow): boolean {
   return row.configuredEffort !== row.originalEffort;
 }
 
+/**
+ * The model value that will be persisted to disk for this row.
+ *
+ * For a dirty row: the in-session selection (configuredModel).
+ * For an untouched dormant row: the saved GPT model (dormantModel), which
+ * preserves the mapping entry byte-identical even though configuredModel
+ * shows 'default' while the proxy is off.
+ * For all other untouched rows: configuredModel (which equals originalModel).
+ *
+ * Used by both rowState (STATE column display) and mergeTuiRowsIntoMapping
+ * (save merge) so the two surfaces share a single persisted-value predicate.
+ */
+export function persistedModelFor(row: AgentRow): string {
+  return isDirtyModel(row) ? row.configuredModel : (row.dormantModel ?? row.configuredModel);
+}
+
+/**
+ * The effort value that will be persisted to disk for this row.
+ *
+ * For a dirty row: the in-session selection (configuredEffort).
+ * For an untouched row: the original effort (originalEffort).
+ *
+ * Used by both rowState (STATE column display) and mergeTuiRowsIntoMapping
+ * (save merge) so the two surfaces share a single persisted-value predicate.
+ */
+export function persistedEffortFor(row: AgentRow): EffortLevel | 'default' {
+  return isDirtyEffort(row) ? row.configuredEffort : row.originalEffort;
+}
+
 /** Count of rows with any dirty field (model OR effort). */
 export function unsavedCount(rows: readonly AgentRow[]): number {
   let count = 0;
@@ -166,6 +275,36 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
     if (isDirtyModel(row) || isDirtyEffort(row)) count++;
   }
   return count;
+}
+
+/**
+ * Classify the live state of a TUI row for display in the STATE column.
+ *
+ * Single source of truth — delegates to classifyAgentState, so the TUI STATE
+ * column and `--list`'s STATE column share one vocabulary and cannot drift.
+ *
+ * The classified value is the model this row WILL persist, which is what makes
+ * the dormancy marker track the KEYPRESS rather than the last save:
+ *   - dirty row      → configuredModel (the in-session selection)
+ *   - untouched row  → dormantModel when set, else configuredModel
+ *
+ * The untouched branch exists because mergeTuiRowsIntoMapping writes nothing
+ * for a clean row: its persisted value survives as-is, and for a dormant row
+ * that value lives in dormantModel (configuredModel falls back to 'default'
+ * while the proxy is off). Keying on dormantModel unconditionally would pin
+ * the marker to the pre-edit value — cycling a dormant row onto a live Claude
+ * model would keep showing 'saved-inactive' even though 'opus' is what gets
+ * written. Mirroring the merge rule keeps display and persistence in lockstep.
+ *
+ * Pure function, no I/O.
+ */
+export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
+  return classifyAgentState({
+    configured: persistedModelFor(row),
+    proxyEnabled,
+    installed: row.installed,
+    inRegistry: row.inRegistry,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +404,31 @@ export interface InitRowInput {
    * Optional: omit (or pass []) to disable off-cycle detection.
    */
   modelCycle?: readonly string[];
+  /**
+   * Map from stored identifier (alias or canonical id) to picker name.
+   * Built by buildPickerNameMap(catalog). When provided, normalizes a stored
+   * canonical id (e.g. 'gpt-5.6-sol') to its alias ('sol') so the configured
+   * model stays in-cycle and does not appear as an off-cycle pin.
+   * NEVER writes the normalized value back to disk.
+   * Optional: omit on the proxy-off / cache-miss path where normalization
+   * has no effect (canonical ids not in the picker cycle become off-cycle pins
+   * which is the correct behavior when the catalog is unknown).
+   */
+  pickerNameMap?: ReadonlyMap<string, string>;
+  /**
+   * Whether the agent .md file is present in the install directory.
+   * Required — tsc enumerates every construction site so each caller must decide
+   * the correct value. True for installed agents, false for not-installed agents.
+   * Provided by buildTuiState via readInstalledAgentNames.
+   */
+  installed: boolean;
+  /**
+   * Whether this agent name exists in the plugin registry.
+   * Required — tsc enumerates every construction site so each caller must decide
+   * the correct value. True for normal registry rows, false for orphan rows
+   * (keys in agent-models.json not present in the registry).
+   */
+  inRegistry: boolean;
 }
 
 /**
@@ -281,17 +445,27 @@ export function buildRow(input: InitRowInput): AgentRow {
   const dormant = isDormantExternalModel(input.savedModel, input.proxyEnabled);
   const cycle = input.modelCycle ?? [];
 
-  const configuredModel = dormant ? 'default' : (input.savedModel ?? 'default');
+  // Normalize stored canonical id to picker name (Fix 1: in-memory only, never
+  // written back to disk). E.g. 'gpt-5.6-sol' → 'sol' when pickerNameMap is known.
+  // This keeps the value in-cycle so it does not become a spurious off-cycle pin.
+  const normalizedSavedModel =
+    input.savedModel !== undefined && input.pickerNameMap !== undefined
+      ? (input.pickerNameMap.get(input.savedModel) ?? input.savedModel)
+      : input.savedModel;
+
+  const configuredModel = dormant ? 'default' : (normalizedSavedModel ?? 'default');
   const configuredEffort = input.savedEffort ?? 'default';
 
   // Off-cycle pin detection: proxy on, model configured but absent from cycle.
+  // Use the normalized model for cycle lookup — the saved model (pre-norm) for
+  // the pin value so the original identifier is preserved on display.
   const offCyclePin =
     !dormant &&
-    input.savedModel !== undefined &&
-    input.savedModel !== 'default' &&
+    normalizedSavedModel !== undefined &&
+    normalizedSavedModel !== 'default' &&
     cycle.length > 0 &&
-    isOffCycle(cycle, input.savedModel)
-      ? input.savedModel
+    isOffCycle(cycle, normalizedSavedModel)
+      ? normalizedSavedModel
       : null;
 
   return {
@@ -303,6 +477,8 @@ export function buildRow(input: InitRowInput): AgentRow {
     originalEffort: configuredEffort,
     dormantModel: dormant ? (input.savedModel ?? null) : null,
     offCyclePin,
+    installed: input.installed,
+    inRegistry: input.inRegistry,
   };
 }
 
@@ -320,7 +496,7 @@ export function buildRow(input: InitRowInput): AgentRow {
  * Unknown keys → intent 'none', state unchanged (same reference).
  *
  * Performance: modelCycle is read from state (prebuilt, startup-constant);
- * catalog and modelCycle references are threaded unchanged through every
+ * the modelCycle reference is threaded unchanged through every
  * non-cycle reduce path (AC-P6: Object.is(s1.modelCycle, s2.modelCycle)).
  */
 export function reduce(state: AgentsViewState, key: string): ReduceResult {

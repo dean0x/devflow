@@ -74,15 +74,15 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 
 #### Phase 2: Orient + Load Decisions
 
-**Produces:** SKIMMER_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`. If a skill fails to load, continue without it.
 
-Spawn Skimmer agent for codebase context:
+Spawn Skim agent for codebase context:
 
 ```
-Agent(subagent_type="Skimmer"):
+Agent(subagent_type="Skim"):
 "Orient in codebase for design planning: {feature/issues}
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area
@@ -94,18 +94,18 @@ Return codebase context for requirements analysis."
 
 {decisions_load()}
 
-This produces a compact index of active ADR/PF entries. Pass Skimmer context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass Skim agent context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 {knowledge_load()}
 
-Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer agents.
+Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explore and Design agents.
 
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, DECISIONS_CONTEXT
+**Requires:** SKIM_CONTEXT, DECISIONS_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated."
+Spawn 4 Explore agents **in a single message**, each with Skim agent context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated."
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -122,10 +122,10 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECI
 **WAIT** for Phase 3 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: {all 4 outputs}
+Explore outputs: {all 4 outputs}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
@@ -136,11 +136,11 @@ Combine into: user needs, similar features, constraints, failure modes"
 #### Phase 5: Gap Analysis (Parallel)
 
 **Produces:** GAP_OUTPUTS, COMPLIANCE_ENABLED
-**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, DECISIONS_CONTEXT
+**Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
 {compliance_gate()}
 
-**Single-issue**: Spawn 4 Designer agents **in a single message** (**5 when COMPLIANCE_ENABLED**):
+**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_ENABLED**):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -150,23 +150,23 @@ Combine into: user needs, similar features, constraints, failure modes"
 | performance | N+1 patterns, missing caching, concurrency, query patterns |
 | compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_ENABLED) |
 
-**Multi-issue**: Spawn 6 Designer agents **in a single message** (**7 when COMPLIANCE_ENABLED**; same 4/5 plus):
+**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_ENABLED**; same 4/5 plus):
 
 | Focus | What it checks |
 |-------|----------------|
 | consistency | Cross-issue contradictions, duplicate requirements, conflicting scope |
 | dependencies | Inter-issue ordering, shared resources, breaking change propagation |
 
-Each designer receives:
+Each Design agent receives:
 - Mode: `gap-analysis`
 - Focus: (their assigned focus from table)
 - Exploration synthesis from Phase 4
-- Skimmer context from Phase 2
+- Skim agent context from Phase 2
 - `DECISIONS_CONTEXT` (index from Phase 2)
 - Multi-issue: all issue bodies
 
 ```
-Agent(subagent_type="Designer"):
+Agent(subagent_type="Design"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
 DECISIONS_CONTEXT: {decisions_context}
@@ -187,10 +187,10 @@ Cite evidence from provided artifacts."
 **WAIT** for Phase 5 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize GAP ANALYSIS outputs for: {feature/issues}
 Mode: design
-Designer outputs: {all designer outputs}
+Design agent outputs: {all Design agent outputs}
 Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 ```
 
@@ -230,9 +230,9 @@ User can:
 #### Phase 8: Explore Implementation (Parallel)
 
 **Produces:** IMPL_EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, ACCEPTED_SCOPE
+**Requires:** SKIM_CONTEXT, ACCEPTED_SCOPE
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context + accepted scope:
+Spawn 4 Explore agents **in a single message**, each with Skim agent context + accepted scope:
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -249,10 +249,10 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 **WAIT** for Phase 8 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: {all 4 outputs}
+Explore outputs: {all 4 outputs}
 Combine into: patterns to follow, integration points, reusable code, edge cases"
 ```
 
@@ -267,7 +267,7 @@ Spawn 3 Plan agents **in a single message**, each with implementation exploratio
 |-------|--------|
 | Implementation steps | Ordered steps with files, dependencies, gap mitigations |
 | Testing strategy | Unit tests, integration tests, edge case tests |
-| Execution strategy | SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS |
+| Execution strategy | SINGLE_CODE_AGENT vs SEQUENTIAL_CODE_AGENTS vs PARALLEL_CODE_AGENTS |
 
 Implementation steps planner: include explicit gap mitigations (from Phase 6) in the relevant steps.
 
@@ -279,7 +279,7 @@ Implementation steps planner: include explicit gap mitigations (from Phase 6) in
 **WAIT** for Phase 10 to complete.
 
 ```
-Agent(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesize"):
 "Synthesize PLANNING outputs for: {feature/issues}
 Mode: planning
 Planner outputs: {all 3 outputs}
@@ -295,10 +295,10 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 **Produces:** REVIEW_FINDINGS
 **Requires:** PLANNING_SYNTHESIS
 
-Spawn 1 Designer agent with mode `design-review`:
+Spawn 1 Design agent with mode `design-review`:
 
 ```
-Agent(subagent_type="Designer"):
+Agent(subagent_type="Design"):
 "Mode: design-review
 Artifacts:
   Implementation plan: {Phase 11 planning synthesis}
@@ -315,7 +315,7 @@ Review the full plan for all 6 anti-patterns. Report all findings with evidence.
 Use AskUserQuestion to present:
 
 1. **Implementation Plan Summary**
-   - Execution strategy (SINGLE_CODER / SEQUENTIAL_CODERS / PARALLEL_CODERS)
+   - Execution strategy (SINGLE_CODE_AGENT / SEQUENTIAL_CODE_AGENTS / PARALLEL_CODE_AGENTS)
    - Key implementation steps with files
    - Test strategy
 
@@ -364,7 +364,7 @@ issue: 42
 title: "Feature Title"
 slug: feature-slug
 created: 2026-04-07T14:30:00Z
-execution-strategy: SINGLE_CODER
+execution-strategy: SINGLE_CODE_AGENT
 context-risk: LOW
 ---
 ```
@@ -374,14 +374,14 @@ Required sections:
 2. **Acceptance Criteria** — testable success conditions (from exploration + gap analysis)
 3. **Scope** — v1 included, deferred, excluded
 4. **Gap Analysis Results** — blocking gaps with resolutions, should-address items
-5. **Execution Strategy** — SINGLE_CODER/SEQUENTIAL/PARALLEL with rationale
-6. **Subtask Breakdown** — phases with domains and dependencies (if not SINGLE_CODER)
+5. **Execution Strategy** — SINGLE_CODE_AGENT/SEQUENTIAL/PARALLEL with rationale
+6. **Subtask Breakdown** — phases with domains and dependencies (if not SINGLE_CODE_AGENT)
 7. **Implementation Plan** — ordered steps with files and gap mitigations
 8. **Patterns to Follow** — from exploration synthesis (file:line references)
 9. **Integration Points** — entry points, services, models to connect
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
-12. **PR Description Guidance** — problem being solved, key changes, breaking changes, reviewer focus areas
+12. **PR Description Guidance** — problem being solved, key changes, breaking changes, Reviewer Focus Areas
 
 ### 12. PR Description Guidance
 
@@ -431,7 +431,7 @@ Display completion summary:
 │  ├─ Phase 1: GATE 0 - Requirements Discovery ⛔ MANDATORY
 │  │  └─ AskUserQuestion: Validate interpretation
 │  ├─ Phase 2: Orient + Load Decisions
-│  │  ├─ Skimmer agent (codebase context)
+│  │  ├─ Skim agent (codebase context)
 │  │  └─ Read index.md → DECISIONS_CONTEXT
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
@@ -439,19 +439,19 @@ Display completion summary:
 │  │  ├─ Explore: Constraints
 │  │  └─ Explore: Failure modes
 │  └─ Phase 4: Synthesize Exploration
-│     └─ Synthesizer agent (mode: exploration)
+│     └─ Synthesize agent (mode: exploration)
 │
 ├─ Block 2: Gap Analysis
 │  ├─ Phase 5: Gap Analysis (PARALLEL)
-│  │  ├─ Designer: completeness
-│  │  ├─ Designer: architecture
-│  │  ├─ Designer: security
-│  │  ├─ Designer: performance
-│  │  ├─ Designer: compliance (plugin-gated — only when COMPLIANCE_ENABLED)
-│  │  ├─ Designer: consistency (multi-issue only)
-│  │  └─ Designer: dependencies (multi-issue only)
+│  │  ├─ Design agent: completeness
+│  │  ├─ Design agent: architecture
+│  │  ├─ Design agent: security
+│  │  ├─ Design agent: performance
+│  │  ├─ Design agent: compliance (plugin-gated — only when COMPLIANCE_ENABLED)
+│  │  ├─ Design agent: consistency (multi-issue only)
+│  │  └─ Design agent: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis
-│     └─ Synthesizer agent (mode: design)
+│     └─ Synthesize agent (mode: design)
 │
 ├─ Block 3: Scope Approval
 │  └─ Phase 7: GATE 1 - Validate Scope + Gaps ⛔ MANDATORY
@@ -464,17 +464,17 @@ Display completion summary:
 │  │  ├─ Explore: Reusable code
 │  │  └─ Explore: Edge cases
 │  ├─ Phase 9: Synthesize Implementation Exploration
-│  │  └─ Synthesizer agent (mode: exploration)
+│  │  └─ Synthesize agent (mode: exploration)
 │  ├─ Phase 10: Plan Implementation (PARALLEL)
 │  │  ├─ Plan: Implementation steps
 │  │  ├─ Plan: Testing strategy
 │  │  └─ Plan: Execution strategy
 │  └─ Phase 11: Synthesize Planning
-│     └─ Synthesizer agent (mode: planning)
+│     └─ Synthesize agent (mode: planning)
 │
 ├─ Block 5: Design Review + Approval
 │  ├─ Phase 12: Design Review
-│  │  └─ Designer agent (mode: design-review)
+│  │  └─ Design agent (mode: design-review)
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
 │     └─ AskUserQuestion: Final plan approval
 │

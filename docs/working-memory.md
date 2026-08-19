@@ -64,10 +64,10 @@ The `background-memory-update` worker (detached `claude -p` process spawned by `
 
 Beyond session memory, Devflow persists architectural decisions and known pitfalls:
 
-- **`decisions.md`** — ADR-numbered entries (append-only). Reviewers check if changes violate prior decisions.
-- **`pitfalls.md`** — PF-numbered entries scoped by area. Reviewers check if changes reintroduce known pitfalls.
+- **`decisions.md`** — ADR-numbered entries (append-only). Review agents check if changes violate prior decisions.
+- **`pitfalls.md`** — PF-numbered entries scoped by area. Review agents check if changes reintroduce known pitfalls.
 
-These files are read by reviewers automatically during `/code-review`.
+These files are read by Review agents automatically during `/code-review`.
 
 ## Documentation Structure
 
@@ -78,8 +78,8 @@ Devflow creates project documentation in `.devflow/docs/`:
 ├── reviews/{branch-slug}/              # Review reports per branch
 │   ├── .last-review-head              # HEAD SHA for incremental reviews
 │   └── {timestamp}/                   # Timestamped review directory
-│       ├── {focus}.md                 # Reviewer reports
-│       ├── review-summary.md          # Synthesizer output
+│       ├── {focus}.md                 # Review agent reports
+│       ├── review-summary.md          # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve
 └── design/                            # Implementation plans
 ```

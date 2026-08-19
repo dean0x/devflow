@@ -155,9 +155,8 @@ export function resolveSeedFlags(
  *   - Otherwise → split + adopt newly-added non-optional selectable plugins
  *     whose name is ∉ knownPlugins and ∉ manifestPlugins
  *
- * Always-installed plugins (devflow-core-skills, devflow-ambient) and
- * non-selectable optional plugins (devflow-audit-claude) are filtered out by
- * partitionSelectablePlugins and never appear in the returned buckets.
+ * Always-installed plugins (devflow-core-skills, devflow-ambient) are filtered
+ * out by partitionSelectablePlugins and never appear in the returned buckets.
  */
 export function resolveSeedPlugins(
   manifestPlugins: string[] | null,
@@ -266,85 +265,6 @@ export function resolveResetGatedInputs(
     return { seedManifest: null, seedConfig: null, seedSettings: '' };
   }
   return { seedManifest: manifest, seedConfig: projectConfig, seedSettings: settingsJson };
-}
-
-/**
- * Identify non-selectable optional plugins from the prior manifest that should be
- * carried forward on a plugin-less full re-init.
- *
- * Non-selectable optional plugins (e.g. devflow-audit-claude) are excluded from
- * the init prompt buckets by partitionSelectablePlugins and therefore never appear
- * in the seed's workflowPlugins/languagePlugins. Without an explicit carry, a
- * plugin-less full re-init would silently drop them — violating the
- * "re-init preserves all existing state" acceptance criterion.
- *
- * Rules:
- *   - null manifestPlugins (fresh install OR --reset) → empty carry set
- *   - Otherwise: carry set = manifestPlugins ∩ optional ∩ not-in-selectable-buckets
- *   - Unknown/stale names (not in allPlugins) are excluded
- *
- * The caller is responsible for injecting the carry set into pluginsToInstall only
- * on full (plugin-less) re-inits. Partial installs (--plugin flag) already merge
- * via resolvePluginList. --reset produces null seedManifest → null manifestPlugins
- * so the carry is empty by construction (factory reset drops them, as intended).
- *
- * Pure function — no I/O, no side effects.
- */
-export function resolveNonSelectableOptionalCarry(
-  manifestPlugins: string[] | null,
-  allPlugins: PluginDefinition[],
-): string[] {
-  if (manifestPlugins === null || manifestPlugins.length === 0) return [];
-
-  const { workflow, language } = partitionSelectablePlugins(allPlugins);
-  const selectableNames = new Set([
-    ...workflow.map(p => p.name),
-    ...language.map(p => p.name),
-  ]);
-
-  // Build a name→plugin Map for O(1) lookup, replacing an O(n·m) find-in-filter.
-  const pluginMap = new Map(allPlugins.map(p => [p.name, p]));
-
-  // Carry only OPTIONAL non-selectable plugins that exist in the registry.
-  // Non-optional always-installed plugins (core-skills, ambient) are excluded —
-  // they are guaranteed to be in pluginsToInstall by other mechanisms.
-  return manifestPlugins.filter(name => {
-    const plugin = pluginMap.get(name);
-    return plugin !== undefined && plugin.optional && !selectableNames.has(name);
-  });
-}
-
-/**
- * Apply the non-selectable optional plugin carry on a full (plugin-less) re-init.
- *
- * Encapsulates the `!options.plugin` gate + resolveNonSelectableOptionalCarry call
- * + dedup-merge loop from initAction, extracted as a pure function to make the
- * carry wiring independently testable without spinning up the full init action.
- *
- * @param isPartialInstall - true when --plugin was passed (carry is skipped)
- * @param manifestPlugins  - Plugin list from seedManifest (null on fresh/--reset)
- * @param pluginsToInstall - Current install list (not mutated; returns new array)
- * @param allPlugins       - Full plugin registry
- * @returns Updated plugin list with carry plugins merged in (deduped, order preserved)
- *
- * Pure function — no I/O, no side effects.
- */
-export function applyNonSelectableCarry(
-  isPartialInstall: boolean,
-  manifestPlugins: string[] | null,
-  pluginsToInstall: PluginDefinition[],
-  allPlugins: PluginDefinition[],
-): PluginDefinition[] {
-  if (isPartialInstall) return pluginsToInstall;
-  const carryNames = resolveNonSelectableOptionalCarry(manifestPlugins, allPlugins);
-  const result = [...pluginsToInstall];
-  for (const name of carryNames) {
-    const plugin = allPlugins.find(p => p.name === name);
-    if (plugin && !result.includes(plugin)) {
-      result.push(plugin);
-    }
-  }
-  return result;
 }
 
 /**

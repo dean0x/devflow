@@ -12,19 +12,19 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Evaluator |
-| `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
-| `quality-gates` | 9-pillar self-review framework | Scrutinizer |
-| `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesizer |
-| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git |
-| `patterns` | CRUD, API endpoints, events, config, logging | Coder |
-| `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Code, Scrutinize, Evaluate |
+| `review-methodology` | 6-step review process, 3-category issue classification | Review, Synthesize |
+| `quality-gates` | 9-pillar self-review framework | Scrutinize |
+| `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesize |
+| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Code, Git |
+| `patterns` | CRUD, API endpoints, events, config, logging | Code |
+| `qa` | Scenario-based acceptance testing methodology, evidence collection | Test |
 
 ### Tier 1b: Pattern Skills
 
-Domain expertise for Reviewer agent focus areas. Loaded dynamically based on review focus parameter.
+Domain expertise for Review agent focus areas. Loaded dynamically based on review focus parameter.
 
-| Skill | Purpose | Reviewer Focus |
+| Skill | Purpose | Review Focus |
 |-------|---------|----------------|
 | `security` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
 | `architecture` | SOLID violations, coupling, layering, modularity | `architecture` |
@@ -44,15 +44,15 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 
 | Skill | Purpose | Agent Refs |
 |-------|---------|------------|
-| `boundary-validation` | Boundary validation enforcement | Coder |
-| `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Designer |
-| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Designer |
-| `dependency-research` | Research-before-building enforcement | Coder |
-| `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
+| `boundary-validation` | Boundary validation enforcement | Code |
+| `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Design |
+| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Design |
+| `dependency-research` | Research-before-building enforcement | Code |
+| `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Code |
 
 #### Research Skills (Agent-Loaded)
 
-Domain expertise for Researcher agent focus areas. Loaded dynamically by Researcher agent based on RESEARCH_TYPE parameter.
+Domain expertise for Research agent focus areas. Loaded dynamically by Research agent based on RESEARCH_TYPE parameter.
 
 | Skill | Purpose | Trust Tier |
 |-------|---------|------------|
@@ -64,7 +64,7 @@ Domain expertise for Researcher agent focus areas. Loaded dynamically by Researc
 
 ### Tier 3: Domain-Specific Skills
 
-Language and framework patterns. Referenced by agents via frontmatter and conditionally activated by Reviewer.
+Language and framework patterns. Referenced by agents via frontmatter and conditionally activated by Review.
 
 | Skill | Purpose | Used When |
 |-------|---------|-----------|
@@ -82,7 +82,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 Skills activate through two guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
-2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
+2. **Review dynamic read** — The Review agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
@@ -98,12 +98,12 @@ The `devflow:<skill-name> already running` guard string is the failure signature
 
 ```yaml
 ---
-name: Coder
+name: Code
 skills: software-design, git, patterns, ...
 ---
 ```
 
-All listed skills are loaded when the Coder agent is spawned.
+All listed skills are loaded when the Code agent is spawned.
 
 ## Skill File Template
 
@@ -233,7 +233,7 @@ activation:
 | `rust` | `**/*.rs` | `**/target/**` |
 | `testing` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
 
-**Note:** Glob patterns are metadata hints for documentation. Claude Code does not currently read glob patterns to trigger skills — activation happens through agent frontmatter and Reviewer dynamic read (see "How Skills Activate" above).
+**Note:** Glob patterns are metadata hints for documentation. Claude Code does not currently read glob patterns to trigger skills — activation happens through agent frontmatter and Review dynamic read (see "How Skills Activate" above).
 
 ## Skill vs Command Decision
 

@@ -265,8 +265,8 @@ Update tech debt backlog with deferred issues from resolution and pre-existing i
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
 2. Check issue body size; archive if > 60000 chars (per devflow:git)
 3. Extract items to add:
-   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triager)
-   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triager)
+   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
+   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
    - Pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)

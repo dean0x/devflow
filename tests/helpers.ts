@@ -1,7 +1,40 @@
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
+
+const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
+
+/**
+ * Ensure dist/commands/ exists and return its .md files.
+ * Throws — does NOT return — when absent. A guard that silently skips
+ * on a missing build artifact is not a guard.
+ */
+export function requireDistFiles(): string[] {
+  try {
+    return readdirSync(DIST_COMMANDS_DIR).filter(f => f.endsWith('.md'))
+  } catch {
+    throw new Error(
+      'dist/commands/ is absent — run `npm run build` first\n' +
+      '  (this guard reads compiled command files and cannot be skipped)',
+    )
+  }
+}
+
+/**
+ * Read a dist command file. Throws if absent (referencing the build step).
+ * A missing dist file is a build error, not a skip condition.
+ */
+export function requireDistFile(name: string): string {
+  const filePath = path.join(DIST_COMMANDS_DIR, name)
+  try {
+    return readFileSync(filePath, 'utf-8')
+  } catch {
+    throw new Error(
+      `dist/commands/${name} is absent — run \`npm run build\` first`,
+    )
+  }
+}
 
 export function loadFile(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), 'utf8')

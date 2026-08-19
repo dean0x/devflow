@@ -30,6 +30,8 @@ import { isDormantExternalModel, isClaudeModelName } from './external-models.js'
 import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
 import { agentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
+import { mdEntryName, mdFileName } from './orphan-sweep.js';
+import { isContainedIn } from './paths.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -68,6 +70,196 @@ export type EffortLevel = typeof EFFORT_LEVELS[number];
 const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 
 // ---------------------------------------------------------------------------
+// Key migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps old agent keys (form A slugs) to their canonical replacement keys.
+ *
+ * 13 agents renamed from noun form (coder, reviewer, …) to action-verb form
+ * (code, review, …). The canonicalise-agent-keys-v1 migration in migrations.ts
+ * calls canonicaliseAgentKeys() to rewrite ~/.devflow/agent-models.json on the
+ * user's first init after upgrading.
+ *
+ * PROTOTYPE SAFETY: Object.create(null) prevents prototype-pollution.
+ * Every lookup MUST use Object.hasOwn — never key in LEGACY_AGENT_KEYS or
+ * direct bracket access. `--set constructor` would otherwise return a function
+ * that flows into path.join (the object-literal lookup on argv trap).
+ *
+ * DORMANCY: entries here are stored whether or not the key rename has been
+ * applied to the file yet. canonicaliseAgentKeys() is idempotent, so
+ * double-execution from concurrent sessions is a harmless no-op — the second
+ * run finds the file already migrated and makes zero writes.
+ */
+export const LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.assign(
+  Object.create(null) as Record<string, string>,
+  {
+    // Phase 4 — agent-action-verbs rename (old slug → new slug)
+    'coder':        'code',
+    'designer':     'design',
+    'evaluator':    'evaluate',
+    'researcher':   'research',
+    'reviewer':     'review',
+    'scrutinizer':  'scrutinize',
+    'simplifier':   'simplify',
+    'skimmer':      'skim',
+    'synthesizer':  'synthesize',
+    'tester':       'test',
+    'triager':      'triage',
+    'validator':    'validate',
+    'bug-analyzer': 'diagnose',
+  },
+);
+
+/**
+ * Canonicalise agent keys in a raw agents map by applying LEGACY_AGENT_KEYS.
+ *
+ * For each old key found in the map:
+ *   - If the new (canonical) key is NOT already present: rename old → new.
+ *   - If the new key IS already present (collision): new wins, old dropped, one warning.
+ *
+ * Collision detection is against the ORIGINAL map so results are order-independent.
+ *
+ * The function is pure and idempotent: calling it twice on the same input
+ * produces the same result as calling it once (idempotent under concurrent execution).
+ *
+ * __proto__ is skipped on both read and write sides — setting it would mutate
+ * the prototype instead of creating a property, violating byte-identity.
+ *
+ * @param rawAgents - The `agents` field from the raw JSON file (any value types).
+ * @param onWarning - Optional callback for collision warnings.
+ * @returns { agents, didMutate, renamed, dropped, guardDropped } — caller persists iff didMutate is true.
+ *   renamed: legacy keys successfully renamed to their canonical form.
+ *   dropped: legacy keys dropped due to canonical-key collision (new value wins).
+ *   guardDropped: legacy keys dropped due to prototype-pollution guard (distinct from collision).
+ */
+export function canonicaliseAgentKeys<T>(
+  rawAgents: Record<string, T>,
+  onWarning?: (msg: string) => void,
+): { agents: Record<string, T>; didMutate: boolean; renamed: string[]; dropped: string[]; guardDropped: string[] } {
+  const warn = onWarning ?? (() => undefined);
+  const renamed: string[] = [];
+  const dropped: string[] = [];
+  const guardDropped: string[] = [];
+
+  // Fast path: no legacy keys defined — skip without reading input.
+  if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
+    return { agents: rawAgents, didMutate: false, renamed, dropped, guardDropped };
+  }
+
+  // Snapshot the original keys for collision detection (order-independent result).
+  const originalKeys = new Set(Object.keys(rawAgents));
+
+  const result: Record<string, T> = { ...rawAgents };
+  let didMutate = false;
+
+  for (const oldKey of originalKeys) {
+    // Skip the __proto__ old-key: iteration is safe but we must never rename or
+    // assign it — even reading result['__proto__'] would touch the prototype chain.
+    // If LEGACY_AGENT_KEYS declares it, treat as a guard-drop (removes the own
+    // property that spread may have copied, and records the truthful outcome).
+    if (oldKey === '__proto__') {
+      if (Object.hasOwn(LEGACY_AGENT_KEYS, '__proto__')) {
+        // Reflect.deleteProperty safely removes the own '__proto__' property
+        // (created by spread's [[DefineOwnProperty]]) without touching the prototype chain.
+        Reflect.deleteProperty(result, '__proto__');
+        guardDropped.push('__proto__');
+        didMutate = true;
+      }
+      continue;
+    }
+    if (!Object.hasOwn(LEGACY_AGENT_KEYS, oldKey)) continue;
+
+    const newKey = LEGACY_AGENT_KEYS[oldKey] as string;
+    // Guard new key: creating an own property named __proto__ would silently
+    // set the prototype chain instead. Drop and remove the old key without creating target.
+    // This is a pollution-guard drop, not a collision drop — report under guardDropped.
+    if (newKey === '__proto__') {
+      guardDropped.push(oldKey);
+      delete result[oldKey];
+      didMutate = true;
+      continue;
+    }
+
+    if (originalKeys.has(newKey)) {
+      // Collision: new (canonical) key already present → new wins, old dropped.
+      // Warning is surfaced by the caller's structured dropped-block (e.g. migrations.ts)
+      // to avoid printing the same collision twice in two different vocabularies (F8).
+      dropped.push(oldKey);
+    } else {
+      result[newKey] = result[oldKey];
+      renamed.push(oldKey);
+    }
+    // Remove the legacy key regardless of collision outcome.
+    delete result[oldKey];
+    didMutate = true;
+  }
+
+  return { agents: result, didMutate, renamed, dropped, guardDropped };
+}
+
+// ---------------------------------------------------------------------------
+// parseAgentMappingEnvelope — raw envelope reader for migrations
+// ---------------------------------------------------------------------------
+
+export type ParseEnvelopeResult =
+  | { kind: 'skip' }
+  | { kind: 'warn'; message: string }
+  | { kind: 'ok'; envelope: Record<string, unknown>; rawAgents: Record<string, unknown> };
+
+/**
+ * Read and validate the agent-models.json envelope for migration purposes.
+ *
+ * Returns a discriminated result:
+ *   skip — file absent, empty, or agents field absent; caller is a no-op.
+ *   warn — IO error, JSON parse failure, or structural violation; caller
+ *           pushes the message to its warnings array (no migration prefix here).
+ *   ok   — envelope and rawAgents are validated and ready for canonicalisation.
+ *
+ * Does NOT apply canonicaliseAgentKeys — that is the migration's responsibility.
+ * Raw read (not readAgentMapping) intentionally avoids dropping unknown fields
+ * on a round-trip (parseRawEnvelope discipline: read raw, validate defensively).
+ *
+ * Pure I/O; does not mutate the file.
+ */
+export async function parseAgentMappingEnvelope(filePath: string): Promise<ParseEnvelopeResult> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'skip' };
+    return { kind: 'warn', message: `cannot read ${filePath}: ${(err as Error).message}` };
+  }
+
+  // Strip BOM (U+FEFF) — some Windows editors prepend it to JSON files.
+  const content = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+  if (content.trim() === '') return { kind: 'skip' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { kind: 'warn', message: `${filePath} contains invalid JSON — skipping` };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { kind: 'warn', message: `${filePath} is not a JSON object — skipping` };
+  }
+  const envelope = parsed as Record<string, unknown>;
+
+  const rawAgents = envelope['agents'];
+  if (rawAgents === undefined || rawAgents === null) {
+    return { kind: 'skip' }; // no agents field → nothing to migrate
+  }
+  if (typeof rawAgents !== 'object' || Array.isArray(rawAgents)) {
+    return { kind: 'warn', message: `${filePath} has non-object agents field — skipping` };
+  }
+
+  return { kind: 'ok', envelope, rawAgents: rawAgents as Record<string, unknown> };
+}
+
+// ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
 
@@ -104,52 +296,91 @@ export async function readAgentMapping(
   const filePath = path.join(devflowDir, 'agent-models.json');
   const warn = opts?.onWarning ?? (() => undefined);
 
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(content) as Record<string, unknown>;
-
-    const rawAgents = typeof data.agents === 'object' && data.agents !== null
-      ? (data.agents as Record<string, unknown>)
-      : {};
-
-    const agents: Record<string, AgentMapping> = {};
-    for (const [name, entry] of Object.entries(rawAgents)) {
-      if (typeof entry !== 'object' || entry === null) continue;
-      const raw = entry as Record<string, unknown>;
-      const mapping: AgentMapping = {};
-
-      if (typeof raw.model === 'string') {
-        // Tighten to the same charset used by rewriteAgentFrontmatter.
-        // The effort field is enum-validated below; model must be equally strict.
-        // An invalid entry is dropped with a warning rather than silently
-        // persisting and permanently poisoning that agent on every reapply.
-        if (isValidModelName(raw.model)) {
-          mapping.model = raw.model;
-        } else {
-          warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
-        }
-      }
-
-      if (typeof raw.effort === 'string') {
-        if (EFFORT_LEVELS_SET.has(raw.effort)) {
-          // Sound narrowing: has() proved membership; EffortLevel is a literal
-          // subtype of string so the assertion is not a compensating cast.
-          mapping.effort = raw.effort as EffortLevel;
-        } else {
-          warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
-        }
-      }
-
-      agents[name] = mapping;
-    }
-
-    return Ok({ version: 1, agents });
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
+  // parseAgentMappingEnvelope handles I/O, BOM-strip, JSON parse, and shape
+  // validation — shared with the migration path so BOM tolerance is consistent.
+  const envelope = await parseAgentMappingEnvelope(filePath);
+  if (envelope.kind === 'skip') return Ok({ version: 1, agents: {} });
+  if (envelope.kind === 'warn') {
+    // A non-object agents field (e.g. agents:[]) is treated as empty mapping — graceful
+    // degradation matches the prior inline logic and avoids Err for a recoverable state.
+    // All other warn cases (IO error, bad JSON, root non-object) are hard errors.
+    if (envelope.message.includes('non-object agents field')) {
       return Ok({ version: 1, agents: {} });
     }
-    return Err(`Failed to read agent-models.json: ${(err as Error).message}`);
+    return Err(envelope.message);
+  }
+
+  // ok arm: iterate rawAgents and validate per-entry fields.
+  const agents: Record<string, AgentMapping> = {};
+  for (const [name, entry] of Object.entries(envelope.rawAgents)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    const mapping: AgentMapping = {};
+
+    if (typeof raw.model === 'string') {
+      // Tighten to the same charset used by rewriteAgentFrontmatter.
+      // The effort field is enum-validated below; model must be equally strict.
+      // An invalid entry is dropped with a warning rather than silently
+      // persisting and permanently poisoning that agent on every reapply.
+      if (isValidModelName(raw.model)) {
+        mapping.model = raw.model;
+      } else {
+        warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
+      }
+    }
+
+    if (typeof raw.effort === 'string') {
+      if (EFFORT_LEVELS_SET.has(raw.effort)) {
+        // Sound narrowing: has() proved membership; EffortLevel is a literal
+        // subtype of string so the assertion is not a compensating cast.
+        mapping.effort = raw.effort as EffortLevel;
+      } else {
+        warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
+      }
+    }
+
+    agents[name] = mapping;
+  }
+
+  // Apply key migration: old keys (e.g. 'coder', 'reviewer') are transparently renamed
+  // on every read, covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
+  // Generic T=AgentMapping is inferred — no compensating cast needed.
+  const { agents: migratedAgents } = canonicaliseAgentKeys(agents, warn);
+
+  return Ok({ version: 1, agents: migratedAgents });
+}
+
+// ---------------------------------------------------------------------------
+// readInstalledAgentNames
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the set of agent names currently installed in `installDir`.
+ *
+ * Uses a single fs.readdir call — O(dir) not O(agents) — replacing the
+ * previous per-name fs.access loop (T8 assertion: exactly ONE readdir,
+ * ZERO fs.access calls).
+ *
+ * A missing directory returns an empty set rather than throwing (ENOENT is
+ * not an error — the install dir may not exist on a fresh machine before
+ * `devflow init` runs). Any other OS error also returns an empty set
+ * (degrade-not-throw per PF-009) — a transient or misconfigured path must
+ * not prevent the TUI or --list from starting.
+ *
+ * @param installDir - Path to ~/.claude/agents/devflow (or equivalent).
+ */
+export async function readInstalledAgentNames(
+  installDir: string,
+): Promise<ReadonlySet<string>> {
+  try {
+    const entries = await fs.readdir(installDir);
+    return new Set(
+      entries
+        .map(mdEntryName)
+        .filter((n): n is string => n !== null),
+    );
+  } catch {
+    return new Set<string>();
   }
 }
 
@@ -198,7 +429,7 @@ export interface EffectiveConfig {
  *
  * Pure function — no I/O.
  *
- * @param agentName - The agent's short name (e.g., 'coder').
+ * @param agentName - The agent's short name (e.g., 'code').
  * @param mapping - The full mapping file.
  * @param shippedDefaults - Map of agent name → shipped default model.
  * @param proxyEnabled - Whether the Devflow proxy is currently active.
@@ -246,11 +477,10 @@ export async function loadShippedDefaults(): Promise<Record<string, string>> {
     return defaults;
   }
 
-  const mdFiles = entries.filter(file => file.endsWith('.md'));
-
   const pairs = await Promise.all(
-    mdFiles.map(async (file): Promise<readonly [string, string] | null> => {
-      const agentName = file.slice(0, -3); // strip .md
+    entries.map(async (file): Promise<readonly [string, string] | null> => {
+      const agentName = mdEntryName(file);
+      if (agentName === null) return null;
       try {
         const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
         const result = readFrontmatterModel(content);
@@ -355,7 +585,19 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
         opts.onWarning?.(msg);
       };
 
-      const installPath = path.join(opts.installDir, `${agentName}.md`);
+      const installPath = path.join(opts.installDir, mdFileName(agentName));
+
+      // Guard: reject mapping keys that would read/write outside the install directory.
+      // A corrupted or adversarial agent-models.json could contain path-traversal keys
+      // such as '../../etc/passwd'; this check prevents any filesystem access beyond
+      // opts.installDir. Per PF-009 (degrade-not-throw), this emits a warning and skips gracefully.
+      if (!isContainedIn(opts.installDir, mdFileName(agentName))) {
+        localWarn(
+          `reapplyAgentMapping: agent name "${agentName}" resolves outside the install ` +
+          `directory — skipped (containment guard)`,
+        );
+        return { bucket: 'skipped', localWarnings };
+      }
 
       let currentContent: string;
       try {

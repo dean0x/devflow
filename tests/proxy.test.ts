@@ -1013,16 +1013,16 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
 
       // Installed file has GPT model already applied (as if proxy was enabled before)
       await fsAsync.writeFile(
-        path.join(tmpInstallDir, 'coder.md'),
-        '---\nname: Coder\nmodel: gpt-5.6-sol\n---\n\nbody\n',
+        path.join(tmpInstallDir, 'code.md'),
+        '---\nname: Code\nmodel: gpt-5.6-sol\n---\n\nbody\n',
         'utf-8',
       );
-      const mapping: AgentMappingFile = { version: 1, agents: { coder: { model: 'gpt-5.6-sol' } } };
+      const mapping: AgentMappingFile = { version: 1, agents: { code: { model: 'gpt-5.6-sol' } } };
       await saveAgentMapping(tmpDevflowDir, mapping);
 
       await revertExternalAgents({ installDir: tmpInstallDir, devflowDir: tmpDevflowDir });
 
-      const content = await fsAsync.readFile(path.join(tmpInstallDir, 'coder.md'), 'utf-8');
+      const content = await fsAsync.readFile(path.join(tmpInstallDir, 'code.md'), 'utf-8');
       // GPT model must be gone, replaced with a Claude model (the shipped default)
       expect(content, `[${scenario.name}] no GPT model in reverted file`).not.toContain('gpt-');
       // The file must still have a valid model: line
