@@ -755,7 +755,12 @@ describe('GAP-4: roster model tiers match agent frontmatter (fail-loud when dist
   it('every roster entry model tier matches that agent\'s frontmatter model: field', () => {
     // FAIL-LOUD: parseRosterFromDist() throws when dist is absent — not a skip.
     const rosterFromDist = parseRosterFromDist()
+    const sourceRosterSize = parseRosterFromSource().size
     expect(rosterFromDist.size, 'dist roster table is empty — parse failure or dist is stale?').toBeGreaterThan(0)
+    expect(
+      rosterFromDist.size,
+      `dist roster has ${rosterFromDist.size} entries but source _roster.mds has ${sourceRosterSize} — dist is stale, run npm run build:mds`,
+    ).toBe(sourceRosterSize)
 
     const violations: string[] = []
     for (const [agentName, rosterTier] of rosterFromDist) {
