@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts, removeAllDevFlow, removeSelectedPlugins, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
 
@@ -870,6 +870,49 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
 
     const after = await enumerateUserDevFlowContent(devflowDir);
     expect(after).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4: installArtifactPaths — extracted single source of truth
+// ---------------------------------------------------------------------------
+
+describe('installArtifactPaths (A4)', () => {
+  it('is a pure function — called with the same dir returns a stable list', () => {
+    const dir = '/tmp/devflow-a4-test';
+    const result = installArtifactPaths(dir);
+    expect(result.length).toBeGreaterThan(0);
+    // Second call must return an equal structure (no mutation between calls).
+    const result2 = installArtifactPaths(dir);
+    expect(result2).toEqual(result);
+  });
+
+  it('includes migrations.json as a non-directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'migrations.json');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBeFalsy();
+  });
+
+  it('includes agent-models.json as a non-directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'agent-models.json');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBeFalsy();
+  });
+
+  it('includes logs as a directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'logs');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBe(true);
+  });
+
+  it('includes costs as a directory artifact', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    const entry = entries.find(e => e.relPath === 'costs');
+    expect(entry).toBeDefined();
+    expect(entry?.isDir).toBe(true);
   });
 });
 

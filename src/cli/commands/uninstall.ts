@@ -251,6 +251,45 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
 }
 
 /**
+ * Single source of truth for Devflow-owned install artifacts under `devflowDir`.
+ *
+ * Returns the complete list of paths that `removeDevFlowInstallArtifacts` removes.
+ * Having this as a standalone pure function lets callers (dry-run display, tests)
+ * enumerate the artifact set without duplicating the hardcoded list.
+ *
+ * @D8 Nothing returned here may overlap with the items enumerated by
+ * `enumerateUserDevFlowContent` — the disjointness invariant is tested by test 9f
+ * and enforced by keeping both lists in one place.
+ *
+ * @param devflowDir - Absolute path to ~/.devflow (used to resolve cache dir).
+ */
+export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPath: string; isDir?: boolean }> {
+  return [
+    // migration run-state — removed so migrations re-run cleanly on reinstall
+    { relPath: 'migrations.json' },
+    // per-agent model overrides — removed so stale keys (keyed to renamed/deleted agents
+    // from the wave-4 agent roster rename) cannot silently re-apply on reinstall (AC-P1-F4)
+    { relPath: 'agent-models.json' },
+    // cost history — auto-generated session telemetry, not user-authored.
+    // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
+    // drift from their write sites in src/hud/cost-history.ts (avoids PF-013).
+    { relPath: 'costs', isDir: true },
+    // proxy artifacts
+    { relPath: 'proxy.json' },
+    { relPath: 'proxy-routing.json' },
+    { relPath: 'proxy.pid' },
+    { relPath: '.proxy-spawn.lock', isDir: true },
+    // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
+    // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
+    { relPath: 'logs', isDir: true },
+    // Model-discovery + HUD component caches. hudCacheDir() is the authoritative
+    // accessor for the cache/ parent (modelCacheDir() resolves beneath it), so the
+    // removal site stays byte-locked to the write sites (avoids PF-013).
+    { relPath: path.relative(devflowDir, hudCacheDir(devflowDir)), isDir: true },
+  ];
+}
+
+/**
  * Remove Devflow install artifacts from devflowDir: manifest.json, migrations.json,
  * proxy artifacts, logs/, costs/, and cache/.
  * The scripts/ directory is already removed by removeAllDevFlow.
@@ -296,33 +335,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
   } catch { /* proxy.pid absent or unreadable — non-fatal */ }
 
   // All install artifacts removed non-fatally (avoids PF-009).
-  // isDir MUST be marked true for directories — fs.rm throws a TypeError for
-  // directories without recursive:true, which the per-item catch swallows
-  // silently, leaving the directory on disk (avoids the isDir===true gotcha).
-  const installArtifacts: Array<{ relPath: string; isDir?: boolean }> = [
-    // migration run-state — removed so migrations re-run cleanly on reinstall
-    { relPath: 'migrations.json' },
-    // per-agent model overrides — removed so stale keys (keyed to renamed/deleted agents
-    // from the wave-4 agent roster rename) cannot silently re-apply on reinstall (AC-P1-F4)
-    { relPath: 'agent-models.json' },
-    // cost history — auto-generated session telemetry, not user-authored.
-    // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
-    // drift from their write sites in src/hud/cost-history.ts (avoids PF-013).
-    { relPath: 'costs', isDir: true },
-    // proxy artifacts
-    { relPath: 'proxy.json' },
-    { relPath: 'proxy-routing.json' },
-    { relPath: 'proxy.pid' },
-    { relPath: '.proxy-spawn.lock', isDir: true },
-    // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
-    // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
-    { relPath: 'logs', isDir: true },
-    // Model-discovery + HUD component caches. hudCacheDir() is the authoritative
-    // accessor for the cache/ parent (modelCacheDir() resolves beneath it), so the
-    // removal site stays byte-locked to the write sites (avoids PF-013).
-    { relPath: path.relative(devflowDir, hudCacheDir(devflowDir)), isDir: true },
-  ];
-  for (const artifact of installArtifacts) {
+  for (const artifact of installArtifactPaths(devflowDir)) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     // Containment invariant: every artifact must resolve to a path STRICTLY inside
     // devflowDir. A derived relPath that ever collapsed to '' or '..' would turn the
