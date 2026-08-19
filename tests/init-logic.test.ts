@@ -10,6 +10,7 @@ import {
   mergeDenyList,
   discoverProjectGitRoots,
   runMigrationsWithFallback,
+  formatSweepSummary,
 } from '../src/cli/commands/init.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
@@ -1304,3 +1305,64 @@ describe('loadTemplateDenyEntries', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// formatSweepSummary — orphan-sweep results reach the post-install summary
+// ---------------------------------------------------------------------------
+
+describe('formatSweepSummary', () => {
+  it('returns no lines when nothing was swept and nothing failed', () => {
+    expect(formatSweepSummary({ sweptOrphans: [], sweepFailures: [] })).toEqual([])
+  })
+
+  it('reports removed orphans as a single info line naming every asset', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: ['resolver', 'audit-claude'],
+      sweepFailures: [],
+    })
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].level).toBe('info')
+    expect(lines[0].message).toContain('resolver')
+    expect(lines[0].message).toContain('audit-claude')
+    expect(lines[0].message).toContain('2')
+  })
+
+  it('reports each sweep failure as its own warn line naming kind, asset and cause', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [],
+      sweepFailures: [
+        { kind: 'agent', name: 'resolver', error: new Error('EACCES: permission denied') },
+        { kind: 'command', name: 'audit-claude', error: new Error('EBUSY: resource busy') },
+      ],
+    })
+
+    expect(lines).toHaveLength(2)
+    expect(lines.every(l => l.level === 'warn')).toBe(true)
+    expect(lines[0].message).toContain('agent')
+    expect(lines[0].message).toContain('resolver')
+    expect(lines[0].message).toContain('EACCES')
+    expect(lines[1].message).toContain('command')
+    expect(lines[1].message).toContain('audit-claude')
+    expect(lines[1].message).toContain('EBUSY')
+  })
+
+  it('stringifies a non-Error rejection value rather than printing [object Object]', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: [],
+      sweepFailures: [{ kind: 'skill', name: 'legacy-skill', error: 'raw string rejection' }],
+    })
+
+    expect(lines[0].message).toContain('raw string rejection')
+    expect(lines[0].message).not.toContain('[object Object]')
+  })
+
+  it('emits both the removal line and the failure lines when the sweep partly succeeded', () => {
+    const lines = formatSweepSummary({
+      sweptOrphans: ['resolver'],
+      sweepFailures: [{ kind: 'agent', name: 'stuck', error: new Error('EACCES') }],
+    })
+
+    expect(lines.map(l => l.level)).toEqual(['info', 'warn'])
+  })
+})

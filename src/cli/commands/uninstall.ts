@@ -1083,6 +1083,10 @@ export async function removeAllDevFlow(
  *
  * knownNames spans ALL plugins for each asset type so assets belonging to
  * plugins NOT being uninstalled are never swept (avoids PF-012).
+ *
+ * Removals are announced only under `verbose`, but removal FAILURES always warn:
+ * a swept-but-not-actually-removed agent or command keeps loading in Claude Code,
+ * and the user has no other signal that it is still there.
  */
 export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean): Promise<void> {
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
@@ -1105,10 +1109,20 @@ export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   );
 
-  if (verbose) {
-    for (const name of agentsSweep.removed) p.log.success(`Swept orphaned agent ${name}`);
-    for (const name of commandsSweep.removed) p.log.success(`Swept orphaned command ${name}`);
-    for (const name of skillsSweep.removed) p.log.success(`Swept orphaned skill ${name}`);
+  const byKind = [
+    { kind: 'agent', sweep: agentsSweep },
+    { kind: 'command', sweep: commandsSweep },
+    { kind: 'skill', sweep: skillsSweep },
+  ] as const;
+
+  for (const { kind, sweep } of byKind) {
+    if (verbose) {
+      for (const name of sweep.removed) p.log.success(`Swept orphaned ${kind} ${name}`);
+    }
+    for (const failure of sweep.failed) {
+      const reason = failure.error instanceof Error ? failure.error.message : String(failure.error);
+      p.log.warn(`Could not remove orphaned ${kind} "${failure.name}" (${reason}) — remove it manually`);
+    }
   }
 }
 

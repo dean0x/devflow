@@ -101,6 +101,50 @@ export async function runMigrationsWithFallback(
   return migrationResult;
 }
 
+/** One line of post-install summary output, with the severity it should be logged at. */
+export interface SummaryLine {
+  level: 'info' | 'warn';
+  message: string;
+}
+
+/**
+ * Turn the orphan-sweep half of an InstallReport into summary lines.
+ *
+ * The sweeps delete files from `~/.claude/{agents,commands,skills}/` behind the
+ * user's back; a removal the user never hears about is indistinguishable from an
+ * asset that was never installed, and a removal that FAILED leaves a retired agent
+ * or command still loading in Claude Code with no diagnostic at all. Both outcomes
+ * have to reach the summary.
+ *
+ * Pure function — returns lines, logs nothing (applies ADR-013).
+ */
+export function formatSweepSummary(
+  report: Pick<InstallReport, 'sweptOrphans' | 'sweepFailures'>,
+): SummaryLine[] {
+  const lines: SummaryLine[] = [];
+
+  if (report.sweptOrphans.length > 0) {
+    lines.push({
+      level: 'info',
+      message:
+        `Removed ${report.sweptOrphans.length} orphaned asset(s) no longer in the registry: ` +
+        `${report.sweptOrphans.join(', ')}`,
+    });
+  }
+
+  for (const failure of report.sweepFailures) {
+    const reason = failure.error instanceof Error ? failure.error.message : String(failure.error);
+    lines.push({
+      level: 'warn',
+      message:
+        `Could not remove orphaned ${failure.kind} "${failure.name}" (${reason}) — ` +
+        `it will keep loading in Claude Code until deleted manually`,
+    });
+  }
+
+  return lines;
+}
+
 /**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
@@ -1622,6 +1666,13 @@ export const initCommand = new Command('init')
         }
       }
       p.log.warn(`Shadow for ${skip.kind}:${skip.name} skipped (${reasonMsg}) — Devflow's version was installed`);
+    }
+
+    // Orphan-sweep reporting: removals are silent deletions from ~/.claude/, and a
+    // failed removal leaves a retired asset live. Both must surface.
+    for (const line of formatSweepSummary(installReport)) {
+      if (line.level === 'warn') p.log.warn(line.message);
+      else p.log.info(line.message);
     }
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
