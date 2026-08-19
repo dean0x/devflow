@@ -14,6 +14,7 @@ import {
   validateSetArgs,
   applySetMapping,
   buildListRows,
+  formatListOutput,
   selectCatalog,
   mergeTuiRowsIntoMapping,
   type ListRow,
@@ -762,5 +763,34 @@ describe('AC-P3-LIST: --list AGENT cell is a lowercase identifier', () => {
         `Agent "${row.name}" from --list is not in getAllAgentNames() — --set would reject it`,
       ).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-B11: formatListOutput — saved-inactive renders with (proxy off) detail
+//
+// Plan requires: --list composes `saved-inactive (proxy off)` for the dormant
+// state. The TUI STATE column stays bare `saved-inactive` (width math assumes 14).
+// ---------------------------------------------------------------------------
+
+describe('formatListOutput (AC-B11): saved-inactive renders (proxy off) suffix', () => {
+  const makeRow = (state: ListRow['state']): ListRow => ({
+    name: 'code',
+    defaultModel: 'sonnet',
+    configured: 'gpt-5.5',
+    effort: 'default',
+    state,
+  });
+
+  it('renders "saved-inactive (proxy off)" — NOT bare "saved-inactive"', () => {
+    const output = formatListOutput([makeRow('saved-inactive')], false);
+    expect(output).toContain('saved-inactive (proxy off)');
+    expect(output).not.toContain('saved — inactive');
+  });
+
+  it('does NOT add proxy-off suffix to active state', () => {
+    const output = formatListOutput([makeRow('active')], true);
+    expect(output).not.toContain('(proxy off)');
+    expect(output).toContain('active');
   });
 });

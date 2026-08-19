@@ -55,6 +55,8 @@ import {
   computeViewportHeight,
   isDirtyModel,
   isDirtyEffort,
+  persistedModelFor,
+  persistedEffortFor,
   type AgentsViewState,
   type AgentRow,
 } from '../agents-view/index.js';
@@ -247,7 +249,7 @@ export async function buildListRows(
 // --list output formatting
 // ---------------------------------------------------------------------------
 
-function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
+export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
   const lines: string[] = [];
   const AGENT_W = 20;
   const DEFAULT_W = 10;
@@ -273,7 +275,9 @@ function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
         stateStr = color.green(AGENT_STATE_LABELS['active']);
         break;
       case 'saved-inactive':
-        stateStr = color.yellow(AGENT_STATE_LABELS['saved-inactive']);
+        // Compose the report-surface detail suffix for --list only.
+        // The TUI STATE column stays bare 'saved-inactive' (width math assumes 14).
+        stateStr = color.yellow(AGENT_STATE_LABELS['saved-inactive'] + ' (proxy off)');
         break;
       case 'not-installed':
         stateStr = color.dim(AGENT_STATE_LABELS['not-installed']);
@@ -433,17 +437,19 @@ export function mergeTuiRowsIntoMapping(
     const entry: AgentMapping = { ...newAgents[row.name] };
 
     if (modelDirty) {
-      if (row.configuredModel === 'default') {
+      const persistedModel = persistedModelFor(row);
+      if (persistedModel === 'default') {
         delete entry.model;
       } else {
-        entry.model = row.configuredModel;
+        entry.model = persistedModel;
       }
     }
     if (effortDirty) {
-      if (row.configuredEffort === 'default') {
+      const persistedEffort = persistedEffortFor(row);
+      if (persistedEffort === 'default') {
         delete entry.effort;
       } else {
-        entry.effort = row.configuredEffort;
+        entry.effort = persistedEffort;
       }
     }
 

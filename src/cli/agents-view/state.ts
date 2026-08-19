@@ -260,6 +260,9 @@ export function persistedModelFor(row: AgentRow): string {
  *
  * For a dirty row: the in-session selection (configuredEffort).
  * For an untouched row: the original effort (originalEffort).
+ *
+ * Used by both rowState (STATE column display) and mergeTuiRowsIntoMapping
+ * (save merge) so the two surfaces share a single persisted-value predicate.
  */
 export function persistedEffortFor(row: AgentRow): EffortLevel | 'default' {
   return isDirtyEffort(row) ? row.configuredEffort : row.originalEffort;
