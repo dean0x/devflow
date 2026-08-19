@@ -26,6 +26,9 @@ import {
   resolveEffective,
   countExternalMappedAgents,
   readInstalledAgentNames,
+  reapplyAgentMapping,
+  revertExternalAgents,
+  loadShippedDefaults,
   EFFORT_LEVELS,
   type AgentMapping,
   type AgentMappingFile,
@@ -340,33 +343,11 @@ describe('countExternalMappedAgents', () => {
 // ---------------------------------------------------------------------------
 
 describe('reapplyAgentMapping', async () => {
-  // Import reapplyAgentMapping + revertExternalAgents dynamically so we can
-  // use them without top-level import (avoids module-not-found before impl)
-  let reapplyAgentMapping: (typeof import('../src/core/agent-models.js'))['reapplyAgentMapping'];
-  let revertExternalAgents: (typeof import('../src/core/agent-models.js'))['revertExternalAgents'];
-
   // Read shipped defaults live from source at test init time (TEST-7 fix).
   // Avoids brittle hardcoding that breaks when model-strategy changes agent files.
-  let codeShippedDefault = 'sonnet'; // conservative fallback; overridden below
-  let reviewShippedDefault = 'opus'; // conservative fallback; overridden below
-
-  try {
-    const mod = await import('../src/core/agent-models.js');
-    reapplyAgentMapping = mod.reapplyAgentMapping;
-    revertExternalAgents = mod.revertExternalAgents;
-
-    // loadShippedDefaults reads live from src/assets/agents/ — same source
-    // reapplyAgentMapping uses, so the assertion matches what the function writes.
-    const defaults = await mod.loadShippedDefaults();
-    if (defaults['code']) {
-      codeShippedDefault = defaults['code'];
-    }
-    if (defaults['review']) {
-      reviewShippedDefault = defaults['review'];
-    }
-  } catch {
-    // Module not yet implemented — tests will be skipped
-  }
+  const defaults = await loadShippedDefaults();
+  const codeShippedDefault = defaults['code'] ?? 'sonnet';
+  const reviewShippedDefault = defaults['review'] ?? 'opus';
 
   let tmpInstallDir: string;
   let tmpDevflowDir: string;
@@ -382,7 +363,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('applies model to an installed agent file', async () => {
-    if (!reapplyAgentMapping) return; // impl not ready
 
     // Create a minimal fake installed agent file
     const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
@@ -407,7 +387,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('idempotency: second pass reports all unchanged', async () => {
-    if (!reapplyAgentMapping) return;
 
     const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
     await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
@@ -436,7 +415,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('GPT model stays dormant (proxy OFF) — installed file keeps shipped default', async () => {
-    if (!reapplyAgentMapping) return;
 
     const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
     await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
@@ -460,7 +438,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('GPT model materializes when proxy ON', async () => {
-    if (!reapplyAgentMapping) return;
 
     const agentContent = '---\nname: Code\nmodel: sonnet\n---\n\nbody\n';
     await fs.writeFile(path.join(tmpInstallDir, 'code.md'), agentContent, 'utf-8');
@@ -482,7 +459,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('missing installed agent file → skipped silently', async () => {
-    if (!reapplyAgentMapping) return;
 
     // No files in tmpInstallDir
     const mapping: AgentMappingFile = {
@@ -502,7 +478,6 @@ describe('reapplyAgentMapping', async () => {
   });
 
   it('revertExternalAgents reverts GPT models back to shipped defaults', async () => {
-    if (!revertExternalAgents) return;
 
     // Installed file already has GPT model applied
     const agentContent = '---\nname: Code\nmodel: gpt-5.6-sol\n---\n\nbody\n';
@@ -537,7 +512,6 @@ describe('reapplyAgentMapping', async () => {
     // assert installed files contain shipped defaults — no mocking of isDormantExternalModel
     // or isClaudeModelName (per PF-016: mocking the predicate would test our assumption,
     // not the production guard).
-    if (!reapplyAgentMapping) return;
 
     const mapping: AgentMappingFile = {
       version: 1,
@@ -580,7 +554,6 @@ describe('reapplyAgentMapping', async () => {
     // reapplyAgentMapping reads agent-models.json; rewriteAgentFrontmatter rejects
     // invalid model names (invalid-model error). The installed file must be
     // byte-identical to before and a warning must name 'invalid-model'.
-    if (!reapplyAgentMapping) return;
 
     // Hostile mapping: model name containing a newline (YAML injection attempt)
     const mapping: AgentMappingFile = {
@@ -615,7 +588,6 @@ describe('reapplyAgentMapping', async () => {
     // A corrupted or adversarial agent-models.json may contain a key like
     // '../../evil' that would resolve outside opts.installDir. The guard must
     // emit a warning and skip, never reading or writing outside the install dir.
-    if (!reapplyAgentMapping) return;
 
     const traversalKey = '../../a3-traversal-sentinel';
     const mapping: AgentMappingFile = {
