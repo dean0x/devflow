@@ -413,3 +413,69 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     ).rejects.toThrow(/Rule source not found for declared rule "nonexistent-xyz-ws6a-rule"/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A2: orphan-sweep results surface through InstallReport
+// ---------------------------------------------------------------------------
+
+describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+  const noOpPlugin: PluginDefinition = {
+    name: 'devflow-test-noop-a2',
+    description: 'No-op test fixture for A2',
+    commands: [],
+    agents: [],
+    skills: [],
+    optional: false,
+    rules: [],
+  };
+
+  it('sweptOrphans contains the registry name of a removed orphan agent file', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+
+    // Plant a stale agent file that is not in the registry (any real agent name would survive).
+    const orphanName = 'devflow-zzz-nonexistent-sweep-sentinel';
+    await fs.mkdir(agentsTarget, { recursive: true });
+    await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
+
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    // Use isPartialInstall:true so the pre-install directory wipe is skipped;
+    // on a full install the entire agents/devflow dir is removed before the sweep,
+    // making the sweep a no-op for that case.
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    // The orphan should be recorded in sweptOrphans and the file should be gone.
+    expect(report.sweptOrphans).toContain(orphanName);
+    await expect(
+      fs.access(path.join(agentsTarget, `${orphanName}.md`)),
+    ).rejects.toThrow();
+  });
+
+  it('sweepFailures is empty when no removals fail', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      spinner,
+    });
+
+    expect(report.sweepFailures).toEqual([]);
+  });
+});
