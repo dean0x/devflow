@@ -136,8 +136,8 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
  * compare against the repo default; trunk branches compare against themselves.
  *
  * This function is pure/sync — the refs Set answers existence without spawning.
- * Called from all three remote detection layers so the trunk-self-compare rule
- * applies consistently regardless of how the default branch was discovered.
+ * Called from remote detection layers (a) and (b); layer (c) (local-only fallback)
+ * returns a local branch name directly and does not self-compare against origin/.
  */
 function resolveComparisonRef(
   branch: string,
@@ -172,9 +172,10 @@ function resolveComparisonRef(
  *
  * The Set answers all existence queries (layers a–c) without additional spawns.
  *
- * resolveComparisonRef is called from all three remote layers so that any canonical
+ * resolveComparisonRef is called from remote layers (a) and (b) so that any canonical
  * trunk branch (develop, staging, production, release/*) self-compares against
  * origin/<branch> when that ref exists, not just the detected default branch.
+ * Layer (c) (no remote configured) returns a local branch name without calling this.
  *
  * Note on tag-DWIM: for-each-ref limits scope to refs/heads/ and refs/remotes/origin/,
  * so tag objects never appear in the Set — a name that happens to match a tag is not
