@@ -159,6 +159,19 @@ describe('readAgentMapping', () => {
       expect(result.value.agents['code']).toBeDefined();
     }
   });
+
+  it('F1: tolerates a BOM-prefixed JSON file (BOM stripped before parse)', async () => {
+    // Windows editors often prepend U+FEFF to JSON files; JSON.parse rejects it.
+    // parseAgentMappingEnvelope strips the BOM — readAgentMapping must share that path.
+    const data = { version: 1, agents: { code: { model: 'opus' } } };
+    const bom = '﻿';
+    await fs.writeFile(path.join(dir, 'agent-models.json'), bom + JSON.stringify(data), 'utf-8');
+    const result = await readAgentMapping(dir);
+    expect(result.ok, 'BOM-prefixed file must be parseable (not an Err)').toBe(true);
+    if (result.ok) {
+      expect(result.value.agents['code']).toEqual({ model: 'opus' });
+    }
+  });
 });
 
 describe('saveAgentMapping', () => {
@@ -612,6 +625,39 @@ describe('reapplyAgentMapping', async () => {
     // The warning must mention the containment guard, not a generic message.
     expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
   });
+
+  it('F13: traversal key whose TARGET EXISTS outside installDir is still blocked by the containment guard', async () => {
+    // The guard must block based on the resolved path, not on ENOENT from the target.
+    // Create a sentinel file OUTSIDE the install dir — the guard must fire (not ENOENT)
+    // and the file must remain byte-identical (never touched).
+    const sentinelName = 'f13-traversal-target-exists';
+    const sentinelPath = path.join(tmpDevflowDir, sentinelName);
+    const originalContent = '# sentinel — must not be modified\n';
+    await fs.writeFile(sentinelPath, originalContent, 'utf-8');
+
+    // The traversal key resolves the sentinel through the install dir
+    const traversalKey = `../../${path.relative(path.dirname(tmpInstallDir), tmpDevflowDir)}/${sentinelName}`;
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { [traversalKey]: { model: 'opus' } },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const warnings: string[] = [];
+    await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: false,
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // The sentinel file outside installDir must remain byte-identical (guard blocked it).
+    const afterContent = await fs.readFile(sentinelPath, 'utf-8');
+    expect(afterContent).toBe(originalContent);
+
+    // A containment-guard warning must have fired (not ENOENT — the file exists).
+    expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -714,7 +760,10 @@ describe('canonicaliseAgentKeys', () => {
     expect(dropped).toEqual([]);
   });
 
-  it('collision: new key already present → new wins, old dropped, one warning', () => {
+  it('collision: new key already present → new wins, old dropped, no inline warn (caller surfaces via dropped array)', () => {
+    // F8: The collision warning is surfaced by the caller's structured dropped-block
+    // (e.g. migrations.ts) rather than via onWarning here, to avoid double-reporting
+    // the same event in two different vocabularies. onWarning fires 0 times for collision.
     (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
     const input = {
       'old-coder': { model: 'haiku' }, // will be dropped
@@ -723,9 +772,8 @@ describe('canonicaliseAgentKeys', () => {
     const warnings: string[] = [];
     const { agents, didMutate, renamed, dropped } = canonicaliseAgentKeys(input, (msg) => warnings.push(msg));
     expect(didMutate).toBe(true);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('old-coder');
-    expect(warnings[0]).toContain('coder');
+    // No inline warning — collision is reported by the caller's structured dropped array.
+    expect(warnings).toHaveLength(0);
     expect(agents['coder']).toEqual({ model: 'opus' }); // new wins
     expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
     expect(renamed).toEqual([]);

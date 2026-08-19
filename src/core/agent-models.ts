@@ -182,10 +182,9 @@ export function canonicaliseAgentKeys<T>(
     }
 
     if (originalKeys.has(newKey)) {
-      // Collision: new (canonical) key already present → new wins, old dropped, one warning.
-      warn(
-        `agent-models: migrating key '${oldKey}' → '${newKey}' — '${newKey}' already exists, keeping existing value and dropping '${oldKey}'`,
-      );
+      // Collision: new (canonical) key already present → new wins, old dropped.
+      // Warning is surfaced by the caller's structured dropped-block (e.g. migrations.ts)
+      // to avoid printing the same collision twice in two different vocabularies (F8).
       dropped.push(oldKey);
     } else {
       result[newKey] = result[oldKey];
@@ -297,64 +296,58 @@ export async function readAgentMapping(
   const filePath = path.join(devflowDir, 'agent-models.json');
   const warn = opts?.onWarning ?? (() => undefined);
 
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(content) as Record<string, unknown>;
-
-    // Guard: agents must be a plain object — not null, not an array.
-    // Array.isArray passes every typeof === 'object' check and causes wrong
-    // entries (numeric indices) to leak into the mapping silently.
-    const rawAgents =
-      typeof data.agents === 'object' && data.agents !== null && !Array.isArray(data.agents)
-        ? (data.agents as Record<string, unknown>)
-        : {};
-
-    const agents: Record<string, AgentMapping> = {};
-    for (const [name, entry] of Object.entries(rawAgents)) {
-      if (typeof entry !== 'object' || entry === null) continue;
-      const raw = entry as Record<string, unknown>;
-      const mapping: AgentMapping = {};
-
-      if (typeof raw.model === 'string') {
-        // Tighten to the same charset used by rewriteAgentFrontmatter.
-        // The effort field is enum-validated below; model must be equally strict.
-        // An invalid entry is dropped with a warning rather than silently
-        // persisting and permanently poisoning that agent on every reapply.
-        if (isValidModelName(raw.model)) {
-          mapping.model = raw.model;
-        } else {
-          warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
-        }
-      }
-
-      if (typeof raw.effort === 'string') {
-        if (EFFORT_LEVELS_SET.has(raw.effort)) {
-          // Sound narrowing: has() proved membership; EffortLevel is a literal
-          // subtype of string so the assertion is not a compensating cast.
-          mapping.effort = raw.effort as EffortLevel;
-        } else {
-          warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
-        }
-      }
-
-      agents[name] = mapping;
-    }
-
-    // Apply key migration: old keys (e.g. 'coder', 'reviewer') are transparently renamed
-    // on every read, covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
-    const { agents: migratedAgents } = canonicaliseAgentKeys(
-      agents as Record<string, unknown>,
-      warn,
-    );
-
-    return Ok({ version: 1, agents: migratedAgents as Record<string, AgentMapping> });
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
+  // parseAgentMappingEnvelope handles I/O, BOM-strip, JSON parse, and shape
+  // validation — shared with the migration path so BOM tolerance is consistent.
+  const envelope = await parseAgentMappingEnvelope(filePath);
+  if (envelope.kind === 'skip') return Ok({ version: 1, agents: {} });
+  if (envelope.kind === 'warn') {
+    // A non-object agents field (e.g. agents:[]) is treated as empty mapping — graceful
+    // degradation matches the prior inline logic and avoids Err for a recoverable state.
+    // All other warn cases (IO error, bad JSON, root non-object) are hard errors.
+    if (envelope.message.includes('non-object agents field')) {
       return Ok({ version: 1, agents: {} });
     }
-    return Err(`Failed to read agent-models.json: ${(err as Error).message}`);
+    return Err(envelope.message);
   }
+
+  // ok arm: iterate rawAgents and validate per-entry fields.
+  const agents: Record<string, AgentMapping> = {};
+  for (const [name, entry] of Object.entries(envelope.rawAgents)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    const mapping: AgentMapping = {};
+
+    if (typeof raw.model === 'string') {
+      // Tighten to the same charset used by rewriteAgentFrontmatter.
+      // The effort field is enum-validated below; model must be equally strict.
+      // An invalid entry is dropped with a warning rather than silently
+      // persisting and permanently poisoning that agent on every reapply.
+      if (isValidModelName(raw.model)) {
+        mapping.model = raw.model;
+      } else {
+        warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
+      }
+    }
+
+    if (typeof raw.effort === 'string') {
+      if (EFFORT_LEVELS_SET.has(raw.effort)) {
+        // Sound narrowing: has() proved membership; EffortLevel is a literal
+        // subtype of string so the assertion is not a compensating cast.
+        mapping.effort = raw.effort as EffortLevel;
+      } else {
+        warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
+      }
+    }
+
+    agents[name] = mapping;
+  }
+
+  // Apply key migration: old keys (e.g. 'coder', 'reviewer') are transparently renamed
+  // on every read, covering all four call sites (agents.ts --set, proxy.ts, init.ts × 2).
+  // Generic T=AgentMapping is inferred — no compensating cast needed.
+  const { agents: migratedAgents } = canonicaliseAgentKeys(agents, warn);
+
+  return Ok({ version: 1, agents: migratedAgents });
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +590,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
       // Guard: reject mapping keys that would read/write outside the install directory.
       // A corrupted or adversarial agent-models.json could contain path-traversal keys
       // such as '../../etc/passwd'; this check prevents any filesystem access beyond
-      // opts.installDir. Per PF-014, this emits a warning and skips gracefully.
+      // opts.installDir. Per PF-009 (degrade-not-throw), this emits a warning and skips gracefully.
       if (!isContainedIn(opts.installDir, mdFileName(agentName))) {
         localWarn(
           `reapplyAgentMapping: agent name "${agentName}" resolves outside the install ` +
