@@ -621,17 +621,17 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Gate 1 #2');
   });
 
-  it('does NOT run Gate 1 (Validator/Simplifier/Scrutinizer) between review cycles', () => {
+  it('does NOT run Gate 1 (Validate/Simplify/Scrutinize) between review cycles', () => {
     expect(compiled).not.toContain('Gate 1 only — no Gate 2 for review-fixes');
     expect(compiled).not.toContain('Simplify recent fixes');
     expect(compiled).not.toContain('9-pillar review of recent fixes');
   });
 
-  it('spawns Simplifier and Scrutinizer exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
-    const simplifier = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
-    const scrutinizer = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
-    expect(simplifier, 'Simplify should run only in the two Gate-1 passes').toBe(2);
-    expect(scrutinizer, 'Scrutinize should run only in the two Gate-1 passes').toBe(2);
+  it('spawns Simplify and Scrutinize exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
+    const simplifyCount = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
+    const scrutinizeCount = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
+    expect(simplifyCount, 'Simplify should run only in the two Gate-1 passes').toBe(2);
+    expect(scrutinizeCount, 'Scrutinize should run only in the two Gate-1 passes').toBe(2);
   });
 });
 
@@ -694,11 +694,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('reviewBaseSha');
   });
 
-  it('C2: reviewer result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
+  it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
     expect(compiled).toContain('reviewed: true');
     expect(compiled).toContain('review coverage incomplete');
     expect(compiled).toContain('coverageGaps.length === 0');
-    // Chunk/stagger: reviewers dispatched in bounded parallel batches
+    // Chunk/stagger: Review agents dispatched in bounded parallel batches
     expect(compiled).toContain('const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));');
   });
 
@@ -713,7 +713,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('FAIL-FIXED');
   });
 
-  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Designer reader', () => {
+  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Design reader', () => {
     expect(compiled).toContain('ALWAYS ready');
     expect(compiled).toContain('cascade');
     expect(compiled).toContain('never kills the wave');

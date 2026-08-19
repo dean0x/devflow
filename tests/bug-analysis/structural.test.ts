@@ -5,8 +5,8 @@
 //   1. Phase ordering — all 7 phases present in correct order with Produces/Requires annotations
 //   2. Incremental detection — .last-analysis-head read/write semantics documented
 //   3. Static tool invocation — xargs, timeout, mktemp patterns for safety
-//   4. BugAnalyzer agent spawning — parallel spawn in a single message, required inputs
-//   5. Synthesizer agent — mode: bug-analysis output path
+//   4. Diagnose agent spawning — parallel spawn in a single message, required inputs
+//   5. Synthesize agent — mode: bug-analysis output path
 //   6. Resolve compatibility — /resolve suggestion on blocking bugs
 //   7. Exclusion list — static-findings.md and bug-analysis-summary.md excluded from issue extraction
 //
@@ -161,11 +161,11 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 4: BugAnalyzer agent spawning
+// Group 4: Diagnose agent spawning
 // ---------------------------------------------------------------------------
 
-describe('bug-analysis.md — BugAnalyzer agent spawning', () => {
-  it('Phase 5 spawns BugAnalyzer agents in a single message (parallel, not background)', () => {
+describe('bug-analysis.md — Diagnose agent spawning', () => {
+  it('Phase 5 spawns Diagnose agents in a single message (parallel, not background)', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toMatch(/single message/i);
     expect(phase5).toMatch(/run_in_background=false/);
@@ -178,12 +178,12 @@ describe('bug-analysis.md — BugAnalyzer agent spawning', () => {
     expect(phase5).toContain('(none)');
   });
 
-  it('Phase 5 passes DECISIONS_CONTEXT to BugAnalyzer agents', () => {
+  it('Phase 5 passes DECISIONS_CONTEXT to Diagnose agents', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 5 passes FEATURE_KNOWLEDGE to BugAnalyzer agents', () => {
+  it('Phase 5 passes FEATURE_KNOWLEDGE to Diagnose agents', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toContain('FEATURE_KNOWLEDGE');
   });
@@ -219,16 +219,16 @@ describe('bug-analysis.md — BugAnalyzer agent spawning', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 5: Synthesizer agent — bug-analysis mode
+// Group 5: Synthesize agent — bug-analysis mode
 // ---------------------------------------------------------------------------
 
-describe('bug-analysis.md — Synthesizer agent', () => {
-  it('Phase 6 spawns Synthesizer with mode: bug-analysis', () => {
+describe('bug-analysis.md — Synthesize agent', () => {
+  it('Phase 6 spawns the Synthesize agent with mode: bug-analysis', () => {
     const phase6 = extractSection(content, '### Phase 6:', '### Phase 7:');
     expect(phase6).toMatch(/[Mm]ode.*bug-analysis|bug-analysis.*[Mm]ode/);
   });
 
-  it('Phase 6 Synthesizer output path is {ANALYSIS_DIR}/bug-analysis-summary.md', () => {
+  it('Phase 6 Synthesize agent output path is {ANALYSIS_DIR}/bug-analysis-summary.md', () => {
     const phase6 = extractSection(content, '### Phase 6:', '### Phase 7:');
     expect(phase6).toContain('bug-analysis-summary.md');
   });

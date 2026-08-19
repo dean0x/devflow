@@ -151,7 +151,7 @@ describe('DECISIONS_CONTEXT variable — present in all four command surfaces', 
 })
 
 // -------------------------------------------------------------------------
-// Reviewer agent — apply-decisions section references skill
+// Review agent — apply-decisions section references skill
 // -------------------------------------------------------------------------
 
 describe('review.md — Apply Decisions section', () => {

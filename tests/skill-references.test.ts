@@ -688,12 +688,12 @@ describe('Test infrastructure skill references', () => {
 // ---------------------------------------------------------------------------
 
 describe('Completeness: review.md Focus Areas vs code-review plugin', () => {
-  it('reviewer Focus Areas covers all skills in code-review plugin registry entry', () => {
+  it('review.md Focus Areas covers all skills in code-review plugin registry entry', () => {
     // Derive skill list from DEVFLOW_PLUGINS registry (plugin.json files were removed in src/ restructure)
     const codeReviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review');
     expect(codeReviewPlugin, 'devflow-code-review must be registered in DEVFLOW_PLUGINS').toBeDefined();
 
-    // These meta-skills don't correspond to reviewer focus areas
+    // These meta-skills don't correspond to review focus areas
     const NON_FOCUS_SKILLS = new Set([
       'review-methodology',
       'worktree-support',
@@ -722,7 +722,7 @@ describe('Completeness: review.md Focus Areas vs code-review plugin', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse the reviewer Focus Areas table into a map of focus → skill name.
+ * Parse the review.md Focus Areas table into a map of focus → skill name.
  * Accepts rows like: | `focus` | `devflow:skill` |
  */
 function parseReviewFocusAreas(content: string): Map<string, string> {
@@ -749,11 +749,11 @@ describe('Cross-component runtime alignment', () => {
   const reviewContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'review.md'), 'utf-8');
   const reviewFocusAreas = parseReviewFocusAreas(reviewContent);
 
-  it('reviewer Focus Areas table has entries', () => {
+  it('review.md Focus Areas table has entries', () => {
     expect(reviewFocusAreas.size).toBeGreaterThan(10);
   });
 
-  it('code-review command focus names exist in reviewer Focus Areas', () => {
+  it('code-review command focus names exist in review.md Focus Areas', () => {
     const codeReviewPath = path.join(ROOT, 'dist', 'commands', 'code-review.md');
     let commandContent: string;
     try {
@@ -769,12 +769,12 @@ describe('Cross-component runtime alignment', () => {
     for (const [focus] of commandFocuses) {
       expect(
         reviewFocusAreas.has(focus),
-        `code-review command sends focus '${focus}' but reviewer Focus Areas table has no entry for it`,
+        `code-review command sends focus '${focus}' but review.md Focus Areas table has no entry for it`,
       ).toBe(true);
     }
   });
 
-  it('code-review command skill mappings match reviewer Focus Areas skill paths', () => {
+  it('code-review command skill mappings match review.md Focus Areas skill paths', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const codeReviewPath = path.join(ROOT, 'dist', 'commands', 'code-review.md');
     let commandContent: string;
@@ -792,12 +792,12 @@ describe('Cross-component runtime alignment', () => {
         `code-review command maps focus '${focus}' to 'devflow:${commandSkill}' which is not canonical`,
       ).toBe(true);
 
-      // The reviewer's Focus Areas skill must match the command's skill
+      // The review.md Focus Areas skill must match the command's skill
       const reviewSkill = reviewFocusAreas.get(focus);
       if (reviewSkill) {
         expect(
           reviewSkill,
-          `focus '${focus}': code-review says 'devflow:${commandSkill}' but reviewer says 'devflow:${reviewSkill}'`,
+          `focus '${focus}': code-review says 'devflow:${commandSkill}' but review.md says 'devflow:${reviewSkill}'`,
         ).toBe(commandSkill);
       }
     }
@@ -878,7 +878,7 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('coder domain skill paths cover all language/ecosystem skills', () => {
+  it('code.md domain skill paths cover all language/ecosystem skills', () => {
     const codeContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8');
 
     // Language skills that should be loadable as domain skills via Skill tool invocations

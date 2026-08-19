@@ -164,7 +164,7 @@ describe('resolve.md — base command', () => {
     expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
   });
 
-  it('Step 0d instructs passing DECISIONS_CONTEXT to Triager and Coders', () => {
+  it('Step 0d instructs passing DECISIONS_CONTEXT to the Triage and Code agents', () => {
     const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('DECISIONS_CONTEXT');
   });
@@ -174,7 +174,7 @@ describe('resolve.md — base command', () => {
     expect(step0dSection).toContain('(none)');
   });
 
-  it('Phase 4 Coder spawn block includes DECISIONS_CONTEXT variable', () => {
+  it('Phase 4 Code agent spawn block includes DECISIONS_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
@@ -268,7 +268,7 @@ describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolve.md Phase 2 passes DECISIONS_CONTEXT to Triager', () => {
+  it('resolve.md Phase 2 passes DECISIONS_CONTEXT to the Triage agent', () => {
     const content = loadFile('dist/commands/resolve.md');
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
     expect(phase2).toContain('DECISIONS_CONTEXT');

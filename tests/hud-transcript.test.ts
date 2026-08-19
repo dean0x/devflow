@@ -64,7 +64,7 @@ describe('parseTranscript', () => {
       type: 'tool_use',
       name: 'Agent',
       id: 'agent-1',
-      input: { subagent_type: 'Reviewer', description: 'review code' },
+      input: { subagent_type: 'Review', description: 'review code' },
     };
     const lines = [
       assistantLine([bashBlock('ls', 'tool-1'), skillBlock('devflow:testing', 'skill-1'), agentBlock]),

@@ -99,13 +99,13 @@ describe('code-review.md — convergence gate', () => {
 
   // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
   // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
-  it('Phase 2 passes PRIOR_RESOLUTIONS to Reviewer agents with containment markers', () => {
+  it('Phase 2 passes PRIOR_RESOLUTIONS to Review agents with containment markers', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:')
     expect(phase2).toContain('PRIOR_RESOLUTIONS')
     expect(phase2).toContain('prior-resolution-summary')
   })
 
-  it('Phase 3 passes CYCLE_NUMBER to Synthesizer', () => {
+  it('Phase 3 passes CYCLE_NUMBER to the Synthesize agent', () => {
     const phase3 = extractSection(content, '### Phase 3:', '### Phase 4:')
     expect(phase3).toContain('CYCLE_NUMBER')
   })
@@ -146,9 +146,9 @@ describe('synthesize.md — convergence status', () => {
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
-  const reviewer = loadFile('src/assets/agents/review.md')
+  const reviewAgent = loadFile('src/assets/agents/review.md')
   const codeReview = loadFile('dist/commands/code-review.md')
-  const synthesizer = loadFile('src/assets/agents/synthesize.md')
+  const synthesizeAgent = loadFile('src/assets/agents/synthesize.md')
 
   it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
@@ -171,13 +171,13 @@ describe('Cross-cutting convergence consistency', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
   })
 
-  it('synthesizer FP note threshold matches command surface (>= 3)', () => {
-    expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
+  it('synthesize agent FP note threshold matches command surface (>= 3)', () => {
+    expect(synthesizeAgent).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
   it('review.md and synthesize.md both reference convergence concepts', () => {
-    expect(reviewer).toMatch(/[Cc]onvergence|[Cc]ross.[Cc]ycle/)
-    expect(synthesizer).toMatch(/[Cc]onvergence/)
+    expect(reviewAgent).toMatch(/[Cc]onvergence|[Cc]ross.[Cc]ycle/)
+    expect(synthesizeAgent).toMatch(/[Cc]onvergence/)
   })
 
   it('--full documented in Step 0d-i of code-review', () => {
