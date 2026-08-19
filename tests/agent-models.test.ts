@@ -864,3 +864,107 @@ describe('canonicaliseAgentKeys', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// parseAgentMappingEnvelope — direct unit tests (one per parser arm)
+// ---------------------------------------------------------------------------
+
+/**
+ * Direct tests for parseAgentMappingEnvelope().
+ *
+ * Plan item B6 required "one per parser arm": ok, skip, warn.
+ * The function was previously covered only transitively through the
+ * canonicalise-agent-keys-v1 migration harness.
+ *
+ * Each arm is pinned via its discriminant (`kind`) and the detail substrings
+ * the migration tests already rely on.
+ */
+describe('parseAgentMappingEnvelope', () => {
+  let dir: string;
+  let filePath: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-parse-envelope-'));
+    filePath = path.join(dir, 'agent-models.json');
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  // --- ok arm ---
+
+  it('ok: valid envelope with agents object returns kind=ok and rawAgents verbatim', async () => {
+    // {"agents":{"x":42}} — rawAgents.x must be 42 (no coercion, no filtering)
+    await fs.writeFile(filePath, '{"agents":{"x":42}}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.rawAgents['x']).toBe(42);
+    }
+  });
+
+  // --- skip arms ---
+
+  it('skip: file absent (ENOENT) returns kind=skip', async () => {
+    const missing = path.join(dir, 'nonexistent.json');
+    const result = await parseAgentMappingEnvelope(missing);
+    expect(result.kind).toBe('skip');
+  });
+
+  it('skip: empty file returns kind=skip', async () => {
+    await fs.writeFile(filePath, '', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
+  });
+
+  it('skip: BOM-only file returns kind=skip', async () => {
+    // U+FEFF stripped → empty string → skip
+    await fs.writeFile(filePath, '﻿', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('skip');
+  });
+
+  // --- warn arms ---
+
+  it('warn: invalid JSON — message contains "invalid JSON"', async () => {
+    await fs.writeFile(filePath, 'not valid json {{{', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('invalid JSON');
+    }
+  });
+
+  it('warn: unreadable file — message contains "cannot read"', async () => {
+    await fs.writeFile(filePath, '{"agents":{}}', 'utf-8');
+    await fs.chmod(filePath, 0o000);
+
+    // Guard: running as root ignores mode bits — skip rather than assert falsely.
+    let readable = true;
+    try { await fs.readFile(filePath, 'utf-8'); } catch { readable = false; }
+    if (readable) {
+      await fs.chmod(filePath, 0o644);
+      return;
+    }
+
+    try {
+      const result = await parseAgentMappingEnvelope(filePath);
+      expect(result.kind).toBe('warn');
+      if (result.kind === 'warn') {
+        expect(result.message).toContain('cannot read');
+      }
+    } finally {
+      await fs.chmod(filePath, 0o644).catch(() => undefined);
+    }
+  });
+
+  it('warn: non-object agents field — message contains "non-object agents field"', async () => {
+    await fs.writeFile(filePath, '{"agents":[1,2,3]}', 'utf-8');
+    const result = await parseAgentMappingEnvelope(filePath);
+    expect(result.kind).toBe('warn');
+    if (result.kind === 'warn') {
+      expect(result.message).toContain('non-object agents field');
+    }
+  });
+});
