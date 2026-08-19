@@ -31,6 +31,7 @@ import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from 
 import { agentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
+import { isContainedIn } from './paths.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -503,6 +504,18 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
       };
 
       const installPath = path.join(opts.installDir, mdFileName(agentName));
+
+      // Guard: reject mapping keys that would read/write outside the install directory.
+      // A corrupted or adversarial agent-models.json could contain path-traversal keys
+      // such as '../../etc/passwd'; this check prevents any filesystem access beyond
+      // opts.installDir. Per PF-014, this emits a warning and skips gracefully.
+      if (!isContainedIn(opts.installDir, mdFileName(agentName))) {
+        localWarn(
+          `reapplyAgentMapping: agent name "${agentName}" resolves outside the install ` +
+          `directory — skipped (containment guard)`,
+        );
+        return { bucket: 'skipped', localWarnings };
+      }
 
       let currentContent: string;
       try {

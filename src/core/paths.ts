@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, relative, isAbsolute, resolve } from 'path';
 
 /**
  * D-paths: single package-root resolver used by everything that previously did
@@ -12,6 +12,29 @@ import { dirname, join, resolve } from 'path';
  * Throws loudly if package.json is not found at the resolved root — dist-depth
  * bugs become loud errors, never silent wrong-path lookups.
  */
+/**
+ * Returns true when `candidate`, resolved relative to `parent`, is strictly
+ * contained within `parent` — i.e., it is not the parent itself, does not
+ * escape via `..` traversal, and is not an absolute path that lands outside.
+ *
+ * Pure function — no filesystem access.
+ *
+ * Used by reapplyAgentMapping to guard against path-traversal mapping keys.
+ *
+ * @example isContainedIn('/a', 'b')       === true
+ * @example isContainedIn('/a', '../b')    === false
+ * @example isContainedIn('/a', '/b')      === false
+ * @example isContainedIn('/a', '')        === false
+ * @example isContainedIn('/a', '.')       === false  (same as parent)
+ */
+export function isContainedIn(parent: string, candidate: string): boolean {
+  if (candidate === '') return false;
+  const resolvedParent = resolve(parent);
+  const resolvedCandidate = resolve(resolvedParent, candidate);
+  const rel = relative(resolvedParent, resolvedCandidate);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 export function getPackageRoot(): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);

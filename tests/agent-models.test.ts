@@ -609,6 +609,35 @@ describe('reapplyAgentMapping', async () => {
     // A warning naming 'invalid-model' must have been emitted
     expect(warnings.some(w => w.includes('invalid-model'))).toBe(true);
   });
+
+  it('A3: path-traversal mapping key is warned and skipped — containment guard', async () => {
+    // A corrupted or adversarial agent-models.json may contain a key like
+    // '../../evil' that would resolve outside opts.installDir. The guard must
+    // emit a warning and skip, never reading or writing outside the install dir.
+    if (!reapplyAgentMapping) return;
+
+    const traversalKey = '../../a3-traversal-sentinel';
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: { [traversalKey]: { model: 'opus' } },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const warnings: string[] = [];
+    const result = await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: false,
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // The traversal key must be in skippedMissing (containment guard fires before readFile).
+    expect(result.skippedMissing).toContain(traversalKey);
+    // A warning mentioning the traversal key must have been emitted.
+    expect(warnings.some(w => w.includes(traversalKey))).toBe(true);
+    // The warning must mention the containment guard, not a generic message.
+    expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
