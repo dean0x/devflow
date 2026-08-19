@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, unprefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -947,6 +947,47 @@ export async function removeAllDevFlow(
 }
 
 /**
+ * Registry-diff sweep of all Devflow-owned namespaces in `claudeDir`:
+ *   - agents/devflow/   — entries absent from getAllAgentNames()
+ *   - commands/devflow/ — entries absent from getAllCommandNames()
+ *   - skills/           — devflow:* entries absent from getAllSkillNames()
+ *
+ * Called by removeSelectedPlugins after per-plugin removals so that retired
+ * asset names (agents/commands renamed or deleted from the registry) are
+ * cleaned up promptly rather than accumulating on disk.
+ *
+ * knownNames spans ALL plugins for each asset type so assets belonging to
+ * plugins NOT being uninstalled are never swept (avoids PF-012).
+ */
+export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean): Promise<void> {
+  const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+  const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+  const skillsDir = path.join(claudeDir, 'skills');
+
+  const agentsSweep = await sweepOrphanedAssets(
+    agentsDir,
+    new Set(getAllAgentNames()),
+    mdEntryName,
+  );
+  const commandsSweep = await sweepOrphanedAssets(
+    commandsDir,
+    new Set(getAllCommandNames()),
+    mdEntryName,
+  );
+  const skillsSweep = await sweepOrphanedAssets(
+    skillsDir,
+    new Set(getAllSkillNames()),
+    (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
+  );
+
+  if (verbose) {
+    for (const name of agentsSweep.removed) p.log.success(`Swept orphaned agent ${name}`);
+    for (const name of commandsSweep.removed) p.log.success(`Swept orphaned command ${name}`);
+    for (const name of skillsSweep.removed) p.log.success(`Swept orphaned skill ${name}`);
+  }
+}
+
+/**
  * Remove only specific plugin assets (selective uninstall).
  * For commands and agents: remove files belonging to selected plugins, then
  * sweep the install directory for any orphaned assets whose names left the
@@ -1013,21 +1054,9 @@ export async function removeSelectedPlugins(
     } catch { /* Rule file might not exist */ }
   }
 
-  // Registry-diff sweep: remove any agents or commands that were retired from
-  // the registry (their names no longer appear in getAllAgentNames / getAllCommandNames).
-  // Without this sweep, a plugin removal followed by a renamed or deleted agent
-  // leaves the old .md file on disk permanently.
-  //
-  // knownNames spans ALL plugins so assets belonging to OTHER (non-selected) plugins
-  // are never swept — only truly orphaned names are removed (avoids PF-012).
-  await sweepOrphanedAssets(
-    agentsDir,
-    new Set(getAllAgentNames()),
-    mdEntryName,
-  );
-  await sweepOrphanedAssets(
-    commandsDir,
-    new Set(getAllCommandNames()),
-    mdEntryName,
-  );
+  // Registry-diff sweep: agents, commands, AND skills — named step (A6).
+  // Removes any orphaned files whose names left the registry (retired, renamed,
+  // or deleted from all plugins). Spans ALL plugins so assets belonging to
+  // non-selected plugins are never swept (avoids PF-012).
+  await sweepDevflowNamespaces(claudeDir, verbose);
 }

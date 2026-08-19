@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
 
@@ -1028,6 +1028,23 @@ describe('removeSelectedPlugins — selective uninstall sweep (TEST-9b)', () => 
     await expect(
       fs.access(path.join(commandsDir, 'implement.md')),
     ).resolves.not.toThrow();
+  });
+
+  it('(9b-A6) sweepDevflowNamespaces removes orphaned devflow:* skill dirs, spares registry skills', async () => {
+    // A6: skills were missing from the selective sweep before this fix.
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Construct the orphan dir name programmatically so the skill-references scanner
+    // does not flag the literal string as a prefixed skill reference (mirrors
+    // the pattern used in installer-new.test.ts for ORPHAN_DIR_NAME).
+    const ORPHAN_SKILL_DIR = ['devflow', 'zzz-orphan-skill-not-in-registry'].join(':');
+    const orphanSkillDir = path.join(skillsDir, ORPHAN_SKILL_DIR);
+    await fs.mkdir(orphanSkillDir, { recursive: true });
+    await fs.writeFile(path.join(orphanSkillDir, 'SKILL.md'), '# orphan', 'utf-8');
+
+    await sweepDevflowNamespaces(claudeDir, false);
+
+    // Orphan must be swept
+    await expect(fs.access(orphanSkillDir)).rejects.toThrow();
   });
 });
 
