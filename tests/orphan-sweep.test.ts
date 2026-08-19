@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { sweepOrphanedAssets } from '../src/core/orphan-sweep.js';
+import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../src/core/orphan-sweep.js';
 
 /**
  * Direct unit coverage for the shared registry-diff sweep helper.
@@ -34,10 +34,10 @@ describe('sweepOrphanedAssets', () => {
     await fs.writeFile(path.join(dir, 'known.md'), 'keep', 'utf-8');
     await fs.writeFile(path.join(dir, 'retired.md'), 'drop', 'utf-8');
 
-    const scanned = await sweepOrphanedAssets(dir, new Set(['known']), stripMd);
+    const result = await sweepOrphanedAssets(dir, new Set(['known']), stripMd);
 
     // Non-vacuity: both entries matched the predicate and were actually examined.
-    expect(scanned).toBe(2);
+    expect(result.scanned).toBe(2);
     await expect(fs.access(path.join(dir, 'known.md'))).resolves.toBeUndefined();
     await expect(fs.access(path.join(dir, 'retired.md'))).rejects.toThrow();
   });
@@ -49,10 +49,10 @@ describe('sweepOrphanedAssets', () => {
     await fs.writeFile(path.join(dir, 'README.txt'), 'not an asset', 'utf-8');
     await fs.writeFile(path.join(dir, 'retired.md'), 'drop', 'utf-8');
 
-    const scanned = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
 
     // Only retired.md matched the predicate — the other two were never candidates.
-    expect(scanned).toBe(1);
+    expect(result.scanned).toBe(1);
     await expect(fs.access(path.join(dir, 'bare-skill'))).resolves.toBeUndefined();
     await expect(fs.access(path.join(dir, 'README.txt'))).resolves.toBeUndefined();
     await expect(fs.access(path.join(dir, 'retired.md'))).rejects.toThrow();
@@ -67,13 +67,13 @@ describe('sweepOrphanedAssets', () => {
     await fs.mkdir(orphanSkill, { recursive: true });
     await fs.writeFile(path.join(orphanSkill, 'SKILL.md'), '# retired', 'utf-8');
 
-    const scanned = await sweepOrphanedAssets(
+    const result = await sweepOrphanedAssets(
       dir,
       new Set(['live-skill']),
       (entry) => entry.startsWith(prefix) ? entry.slice(prefix.length) : null,
     );
 
-    expect(scanned).toBe(1);
+    expect(result.scanned).toBe(1);
     await expect(fs.access(orphanSkill)).rejects.toThrow();
   });
 
@@ -81,9 +81,9 @@ describe('sweepOrphanedAssets', () => {
     await fs.writeFile(path.join(dir, 'a.md'), 'x', 'utf-8');
     await fs.writeFile(path.join(dir, 'b.md'), 'x', 'utf-8');
 
-    const scanned = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
 
-    expect(scanned).toBe(2);
+    expect(result.scanned).toBe(2);
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
@@ -92,7 +92,7 @@ describe('sweepOrphanedAssets', () => {
     const missing = path.join(dir, 'never-created');
     await expect(
       sweepOrphanedAssets(missing, new Set(['anything']), stripMd),
-    ).resolves.toBe(0);
+    ).resolves.toMatchObject({ scanned: 0, removed: [], failed: [] });
     // The sweep must not create the directory it was pointed at (never writes).
     await expect(fs.access(missing)).rejects.toThrow();
   });
@@ -109,10 +109,10 @@ describe('sweepOrphanedAssets', () => {
     await fs.chmod(dir, 0o500); // r-x: readdir works, unlink does not
 
     try {
-      const scanned = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
+      const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
 
       // Non-vacuity: both entries were examined and both removals were attempted.
-      expect(scanned).toBe(2);
+      expect(result.scanned).toBe(2);
       // The removals failed, so the entries are still there — proving the rm really
       // did fail and the resolved promise is not a false negative.
       await fs.chmod(dir, 0o700);
@@ -129,8 +129,70 @@ describe('sweepOrphanedAssets', () => {
     // readdir on a file throws ENOTDIR — the helper must swallow it and report 0.
     await expect(
       sweepOrphanedAssets(filePath, new Set(['anything']), stripMd),
-    ).resolves.toBe(0);
+    ).resolves.toMatchObject({ scanned: 0, removed: [], failed: [] });
     // ...and must not have removed the file it could not read.
     await expect(fs.access(filePath)).resolves.toBeUndefined();
+  });
+
+  it('result.removed contains the registry name of each swept entry', async () => {
+    await fs.writeFile(path.join(dir, 'known.md'), 'keep', 'utf-8');
+    await fs.writeFile(path.join(dir, 'retired.md'), 'drop', 'utf-8');
+
+    const result = await sweepOrphanedAssets(dir, new Set(['known']), stripMd);
+
+    expect(result.removed).toContain('retired');
+    expect(result.removed).not.toContain('known');
+  });
+
+  it('result.failed is empty when all removals succeed', async () => {
+    await fs.writeFile(path.join(dir, 'orphan.md'), 'drop', 'utf-8');
+
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
+
+    expect(result.failed).toEqual([]);
+    expect(result.removed).toEqual(['orphan']);
+  });
+
+  it.skipIf(!canRevokeWrite)('PF-009: result.failed records per-item rm failures by registry name', async () => {
+    await fs.writeFile(path.join(dir, 'retired-a.md'), 'x', 'utf-8');
+    await fs.writeFile(path.join(dir, 'retired-b.md'), 'x', 'utf-8');
+    await fs.chmod(dir, 0o500);
+
+    try {
+      const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd);
+
+      // Both entries failed — neither appears in removed.
+      expect(result.failed).toHaveLength(2);
+      expect(result.failed.map(f => f.name).sort()).toEqual(['retired-a', 'retired-b']);
+      expect(result.removed).toEqual([]);
+    } finally {
+      await fs.chmod(dir, 0o700);
+    }
+  });
+});
+
+describe('mdFileName / mdEntryName', () => {
+  it('mdFileName converts a name to a .md filename', () => {
+    expect(mdFileName('code')).toBe('code.md');
+    expect(mdFileName('review')).toBe('review.md');
+    expect(mdFileName('my-agent')).toBe('my-agent.md');
+  });
+
+  it('mdEntryName strips .md extension from a filename', () => {
+    expect(mdEntryName('code.md')).toBe('code');
+    expect(mdEntryName('review.md')).toBe('review');
+  });
+
+  it('mdEntryName returns null for non-.md entries', () => {
+    expect(mdEntryName('code')).toBeNull();
+    expect(mdEntryName('code.ts')).toBeNull();
+    expect(mdEntryName('SKILL.md.bak')).toBeNull();
+    expect(mdEntryName('.md')).toBe('');  // edge: empty name
+  });
+
+  it('mdEntryName(mdFileName(name)) === name for any valid name (inverse pair)', () => {
+    for (const name of ['code', 'review', 'my-agent', 'knowledge']) {
+      expect(mdEntryName(mdFileName(name))).toBe(name);
+    }
   });
 });

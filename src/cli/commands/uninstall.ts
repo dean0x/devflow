@@ -7,7 +7,7 @@ import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
-import { sweepOrphanedAssets } from '../../core/orphan-sweep.js';
+import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -952,7 +952,7 @@ export async function removeSelectedPlugins(
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   for (const cmd of commands) {
-    const cmdFileName = cmd.replace(/^\//, '') + '.md';
+    const cmdFileName = mdFileName(cmd.replace(/^\//, ''));
     try {
       await fs.rm(path.join(commandsDir, cmdFileName), { force: true });
       if (verbose) {
@@ -966,7 +966,7 @@ export async function removeSelectedPlugins(
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   for (const agent of agents) {
     try {
-      await fs.rm(path.join(agentsDir, `${agent}.md`), { force: true });
+      await fs.rm(path.join(agentsDir, mdFileName(agent)), { force: true });
       if (verbose) {
         p.log.success(`Removed agent ${agent}`);
       }
@@ -996,7 +996,7 @@ export async function removeSelectedPlugins(
   const rulesDir = path.join(claudeDir, 'rules', 'devflow');
   for (const rule of rules) {
     try {
-      await fs.rm(path.join(rulesDir, `${rule}.md`), { force: true });
+      await fs.rm(path.join(rulesDir, mdFileName(rule)), { force: true });
       if (verbose) {
         p.log.success(`Removed rule ${rule}`);
       }
@@ -1013,11 +1013,11 @@ export async function removeSelectedPlugins(
   await sweepOrphanedAssets(
     agentsDir,
     new Set(getAllAgentNames()),
-    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+    mdEntryName,
   );
   await sweepOrphanedAssets(
     commandsDir,
     new Set(getAllCommandNames()),
-    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+    mdEntryName,
   );
 }

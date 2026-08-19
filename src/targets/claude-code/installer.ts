@@ -5,7 +5,7 @@ import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames } from '../../core/plugins.js';
 import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
-import { sweepOrphanedAssets } from '../../core/orphan-sweep.js';
+import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -434,7 +434,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (commandsSourceNames.size > 0) {
     await fs.mkdir(commandsTarget, { recursive: true });
     for (const name of commandsSourceNames) {
-      const srcFile = path.join(cDir, `${name}.md`);
+      const srcFile = path.join(cDir, mdFileName(name));
       try {
         await fs.access(srcFile);
       } catch {
@@ -443,7 +443,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
           `Ensure build:mds ran successfully before install.`,
         );
       }
-      await fs.copyFile(srcFile, path.join(commandsTarget, `${name}.md`));
+      await fs.copyFile(srcFile, path.join(commandsTarget, mdFileName(name)));
     }
   }
 
@@ -453,7 +453,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   await sweepOrphanedAssets(
     commandsTarget,
     new Set(getAllCommandNames()),
-    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+    mdEntryName,
   );
 
   // Install agents (deduplicated) from flat src/assets/agents/{name}.md.
@@ -472,7 +472,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (allAgentNames.size > 0) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
-      const srcFile = path.join(aDir, `${agentName}.md`);
+      const srcFile = path.join(aDir, mdFileName(agentName));
       try {
         await fs.access(srcFile);
       } catch {
@@ -481,7 +481,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
           `Ensure the agent file exists in src/assets/agents/.`,
         );
       }
-      await fs.copyFile(srcFile, path.join(agentsTarget, `${agentName}.md`));
+      await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));
     }
   }
 
@@ -491,7 +491,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   await sweepOrphanedAssets(
     agentsTarget,
     new Set(getAllAgentNames()),
-    (entry) => entry.endsWith('.md') ? entry.slice(0, -'.md'.length) : null,
+    mdEntryName,
   );
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).

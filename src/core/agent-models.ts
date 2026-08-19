@@ -30,6 +30,7 @@ import { isDormantExternalModel, isClaudeModelName } from './external-models.js'
 import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
 import { agentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
+import { mdEntryName, mdFileName } from './orphan-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -291,8 +292,8 @@ export async function readInstalledAgentNames(
     const entries = await fs.readdir(installDir);
     return new Set(
       entries
-        .filter((e: string) => e.endsWith('.md'))
-        .map((e: string) => e.slice(0, -'.md'.length)),
+        .map(mdEntryName)
+        .filter((n): n is string => n !== null),
     );
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Set<string>();
@@ -393,11 +394,10 @@ export async function loadShippedDefaults(): Promise<Record<string, string>> {
     return defaults;
   }
 
-  const mdFiles = entries.filter(file => file.endsWith('.md'));
-
   const pairs = await Promise.all(
-    mdFiles.map(async (file): Promise<readonly [string, string] | null> => {
-      const agentName = file.slice(0, -3); // strip .md
+    entries.map(async (file): Promise<readonly [string, string] | null> => {
+      const agentName = mdEntryName(file);
+      if (agentName === null) return null;
       try {
         const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
         const result = readFrontmatterModel(content);
@@ -502,7 +502,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
         opts.onWarning?.(msg);
       };
 
-      const installPath = path.join(opts.installDir, `${agentName}.md`);
+      const installPath = path.join(opts.installDir, mdFileName(agentName));
 
       let currentContent: string;
       try {
