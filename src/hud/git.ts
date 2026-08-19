@@ -3,10 +3,11 @@ import { isTrunkBranch } from '../core/git.js';
 import type { GitStatus } from './types.js';
 
 const GIT_TIMEOUT = 1000; // 1s per command
+const GIT_MAXBUFFER = 16 * 1024 * 1024; // 16 MiB — covers >500k refs at ~30 B/ref
 
 function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT }, (err, stdout) => {
+    execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT, maxBuffer: GIT_MAXBUFFER }, (err, stdout) => {
       resolve(err ? '' : stdout.trim());
     });
   });

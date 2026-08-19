@@ -858,3 +858,62 @@ describe('gatherGitStatus — trunk branch (develop) self-compare (Shape L)', ()
     expect(statusLUnpushed?.filesChanged).toBe(1);
   });
 });
+
+describe('gatherGitStatus — maxBuffer overflow degrades gracefully', () => {
+  /**
+   * Simulates a repo where `git for-each-ref` output exceeds maxBuffer, killing the
+   * child process with ERR_CHILD_PROCESS_STDIO_MAXBUFFER.
+   *
+   * Without an explicit maxBuffer cap, Node's 1 MiB default applies. On overflow:
+   *   • shellExec resolves to '' (catch-all: resolve(err ? '' : stdout.trim()))
+   *   • detectBaseBranch receives an empty refs Set → returns null
+   *   • gatherGitStatus skips ahead/behind and diff-stats → returns a degraded GitStatus
+   *
+   * This test injects the error Node would emit at the overflow boundary, verifying
+   * the degraded path: branch is still populated; ahead and behind are both 0.
+   *
+   * dirA (remote + origin/HEAD set + feat/layer-a) is the fixture so all other git
+   * commands (rev-parse, status --porcelain, describe, worktree list) resolve normally.
+   */
+
+  it('returns degraded status (ahead=0, behind=0) without crashing when for-each-ref exceeds maxBuffer', async () => {
+    // Save the current pass-through implementation so we can restore it in finally.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const passthroughImpl = mockedExecFile.getMockImplementation() as any;
+
+    // Extract the interceptor so the `as any` cast is on a named reference — not on
+    // a closing brace — which esbuild can parse without error.
+    const interceptImpl = (
+      file: string,
+      args: string[],
+      options: object,
+      cb: (err: unknown, stdout: string, stderr: string) => void,
+    ) => {
+      if (file === 'git' && args.includes('for-each-ref')) {
+        const err = Object.assign(new Error('stdout maxBuffer length exceeded'), {
+          code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+        });
+        cb(err, '', '');
+        return undefined as unknown as ReturnType<typeof execFile>;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (passthroughImpl as any)(file, args, options, cb);
+    };
+    mockedExecFile.mockClear();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockedExecFile.mockImplementation(interceptImpl as any);
+
+    try {
+      const status = await gatherGitStatus(dirA);
+
+      expect(status).not.toBeNull();
+      expect(status?.branch).toBeTruthy();  // branch name still populated
+      expect(status?.ahead).toBe(0);        // degraded: no base branch resolved → 0
+      expect(status?.behind).toBe(0);       // degraded: no base branch resolved → 0
+    } finally {
+      // Restore pass-through so subsequent tests are unaffected.
+      mockedExecFile.mockImplementation(passthroughImpl);
+      mockedExecFile.mockClear();
+    }
+  });
+});
