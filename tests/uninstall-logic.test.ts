@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
 
@@ -1212,6 +1212,61 @@ describe('runDryRunPhase (A8)', () => {
       isSelectiveUninstall: false,
       selectedPlugins: [],
     })).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A5 regression: enumerateDryRunExtras — production dry-run enumeration path
+//
+// PF-018: the A4 tests pinned the pure helpers (installArtifactPaths, etc.)
+// but not the production enumeration path. This suite exercises
+// enumerateDryRunExtras — the function that runDryRunPhase calls — with a
+// seeded fake install to verify truthfulness.
+//
+// RED evidence (pre-fix): the old inline code used a hand-written string for
+// install artifacts (missing agent-models.json) and only listed the devflow-namespace
+// prefixed skill dirs (missing bare legacy dirs like codebase-navigation).
+// GREEN: enumerateDryRunExtras derives from installArtifactPaths and enumerates
+// both prefixed and bare skill candidates, so both appear in the output.
+// ---------------------------------------------------------------------------
+
+describe('enumerateDryRunExtras (A5 regression)', () => {
+  let claudeDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a5-claude-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-a5-devflow-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('(A5) names agent-models.json in the enumerated paths', async () => {
+    // Seed agent-models.json in devflowDir — installArtifactPaths includes it.
+    await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+
+    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
+
+    // agent-models.json must appear — it is in installArtifactPaths (single source of truth).
+    const hasAgentModels = entries.some(e => e.includes('agent-models.json'));
+    expect(hasAgentModels, 'agent-models.json must be listed in dry-run extras').toBe(true);
+  });
+
+  it('(A5) names a bare legacy skill dir that exists on disk', async () => {
+    // Seed a bare legacy skill dir — removeAllDevFlow removes bare variants too.
+    // 'codebase-navigation' is a LEGACY_SKILL_NAME (bare, pre-v1.0.0 era).
+    const skillsDir = path.join(claudeDir, 'skills');
+    const bareLegacySkillDir = path.join(skillsDir, 'codebase-navigation');
+    await fs.mkdir(bareLegacySkillDir, { recursive: true });
+
+    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
+
+    // The bare legacy skill path must appear — the old code only listed devflow-namespace prefixed dirs.
+    const hasBareSkill = entries.some(e => e.includes('codebase-navigation'));
+    expect(hasBareSkill, 'bare legacy skill dir codebase-navigation must be listed in dry-run extras').toBe(true);
   });
 });
 

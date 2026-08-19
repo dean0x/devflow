@@ -267,9 +267,11 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
 /**
  * Single source of truth for Devflow-owned install artifacts under `devflowDir`.
  *
- * Returns the complete list of paths that `removeDevFlowInstallArtifacts` removes.
- * Having this as a standalone pure function lets callers (dry-run display, tests)
- * enumerate the artifact set without duplicating the hardcoded list.
+ * Returns the paths that the artifact-removal loop inside `removeDevFlowInstallArtifacts`
+ * removes. Note: manifest.json is removed by a separate step at the top of that
+ * function and is NOT in this list. Having this as a standalone pure function
+ * lets callers (dry-run display, tests) enumerate the artifact set without
+ * duplicating the list.
  *
  * @D8 Nothing returned here may overlap with the items enumerated by
  * `enumerateUserDevFlowContent` — the disjointness invariant is tested by test 9f
@@ -403,6 +405,67 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Enumerate paths that would be removed by a full uninstall for the given
+ * scope directories, intersected with what actually exists on disk.
+ *
+ * Extracted from the dry-run loop body so the enumeration logic is
+ * independently testable (avoids PF-018: tests must exercise the production
+ * path, not only the pure helper functions).
+ *
+ * Coverage matches removeAllDevFlow exactly:
+ *   1. Whole Claude directories (commands/devflow, agents/devflow, rules/devflow)
+ *      and the scripts directory inside devflowDir.
+ *   2. ALL skill removal candidates: both the prefixed (devflow:name) and bare
+ *      (name or devflow-name legacy) variants of every skill in
+ *      getAllSkillNames() ∪ LEGACY_SKILL_NAMES.
+ *   3. manifest.json (removed separately in removeDevFlowInstallArtifacts).
+ *   4. Every artifact path from installArtifactPaths(devflowDir) — the single
+ *      source of truth shared with the real removal loop.
+ *
+ * @param claudeDir  - Target Claude Code directory (e.g. ~/.claude)
+ * @param devflowDir - Devflow data directory (e.g. ~/.devflow)
+ */
+export async function enumerateDryRunExtras(claudeDir: string, devflowDir: string): Promise<string[]> {
+  const extras: string[] = [];
+
+  // 1. Whole directories removed by removeAllDevFlow
+  for (const dir of [
+    path.join(claudeDir, 'commands', 'devflow'),
+    path.join(claudeDir, 'agents', 'devflow'),
+    path.join(claudeDir, 'rules', 'devflow'),
+    path.join(devflowDir, 'scripts'),
+  ]) {
+    try { await fs.access(dir); extras.push(dir); } catch { /* absent */ }
+  }
+
+  // 2. Skills: enumerate ALL removal candidates that exist on disk.
+  // removeAllDevFlow removes both the prefixed (devflow:name) and bare (name or
+  // devflow-name legacy) variants for every skill in getAllSkillNames() ∪
+  // LEGACY_SKILL_NAMES. The preview must match this exact set (avoids PF-018).
+  const allSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
+  const skillsDir = path.join(claudeDir, 'skills');
+  for (const skillName of allSkillNames) {
+    const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
+    try { await fs.access(prefixedPath); extras.push(prefixedPath); } catch { /* absent */ }
+    const barePath = path.join(skillsDir, skillName);
+    try { await fs.access(barePath); extras.push(barePath); } catch { /* absent */ }
+  }
+
+  // 3. manifest.json — removed separately by removeDevFlowInstallArtifacts
+  //    (NOT in installArtifactPaths). List it here so the preview is complete.
+  const manifestPath = path.join(devflowDir, 'manifest.json');
+  try { await fs.access(manifestPath); extras.push(manifestPath); } catch { /* absent */ }
+
+  // 4. All install artifacts — derived from the single source of truth shared
+  //    with the real removal loop (removeDevFlowInstallArtifacts).
+  for (const artifact of installArtifactPaths(devflowDir)) {
+    extras.push(path.join(devflowDir, artifact.relPath));
+  }
+
+  return extras;
+}
+
+/**
  * DRY-RUN PHASE: display what would be removed without making any changes.
  *
  * Selective: uses the pure registry-diff plan from formatDryRunPlan.
@@ -438,24 +501,8 @@ export async function runDryRunPhase(opts: {
       try {
         const paths = await getInstallationPaths(scope);
         const { claudeDir: cd, devflowDir: dd } = paths;
-        // Whole directories removed by removeAllDevFlow
-        for (const dir of [
-          path.join(cd, 'commands', 'devflow'),
-          path.join(cd, 'agents', 'devflow'),
-          path.join(cd, 'rules', 'devflow'),
-          path.join(dd, 'scripts'),
-        ]) {
-          try { await fs.access(dir); extras.push(dir); } catch { /* absent */ }
-        }
-        // Skills: list every devflow:* directory actually on disk
-        try {
-          const skillEntries = await fs.readdir(path.join(cd, 'skills'));
-          for (const e of skillEntries) {
-            if (e.startsWith(SKILL_NAMESPACE)) extras.push(path.join(cd, 'skills', e));
-          }
-        } catch { /* skills dir absent */ }
-        // ~/.devflow install artifacts
-        extras.push(`${dd} install artifacts (manifest.json, migrations.json, logs/, costs/, cache/, proxy artifacts)`);
+        const moreExtras = await enumerateDryRunExtras(cd, dd);
+        extras.push(...moreExtras);
       } catch { /* scope path resolution failed */ }
     }
     // Project .devflow/ data dir
@@ -661,7 +708,7 @@ export async function runCleanupPhase(opts: {
   // directory, and the two halves of this phase act on different repositories.
   const gitRoot = await getGitRoot(cwd);
 
-  // 1. .devflow/ data directory (contains docs/, memory/, learning/, features/, etc.)
+  // 1. .devflow/ project data directory (contains docs/, memory/, learning/, features/, etc.)
   const devflowDataDir = path.join(cwd, '.devflow');
   let devflowDataExists = false;
   try {
@@ -699,7 +746,7 @@ export async function runCleanupPhase(opts: {
     }
   }
 
-  // 4. .claudeignore
+  // 2. .claudeignore
   const claudeignorePath = gitRoot
     ? path.join(gitRoot, '.claudeignore')
     : path.join(cwd, '.claudeignore');
@@ -728,7 +775,7 @@ export async function runCleanupPhase(opts: {
     }
   }
 
-  // 5. settings.json (Devflow hooks)
+  // 3. settings.json (Devflow hooks)
   for (const scope of [...scopesToUninstall]) {
     try {
       const paths = await getInstallationPaths(scope);
@@ -789,7 +836,7 @@ export async function runCleanupPhase(opts: {
     }
   }
 
-  // 6. Security deny list
+  // 4. Security deny list
 
   // Detect what's installed
   let userSettingsJsonForSecurity: string | null = null;
@@ -864,7 +911,7 @@ export async function runCleanupPhase(opts: {
     }
   }
 
-  // 7. Safe-delete shell function
+  // 5. Safe-delete shell function
   const shell = detectShell();
   const profilePath = getProfilePath(shell);
   if (profilePath && await isAlreadyInstalled(profilePath)) {
