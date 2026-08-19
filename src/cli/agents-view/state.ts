@@ -106,6 +106,19 @@ export interface ReduceResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * The picker names for a single model: all aliases when the model has any,
+ * or the canonical id when it has none. This is the single alias-selection
+ * site — both `pickerNames` (cycle builder) and `buildPickerNameMap` (id→alias
+ * normaliser) call it so the two can never drift.
+ *
+ * Module-private: callers consume the public wrappers below.
+ * Pure function, no I/O.
+ */
+function pickerNamesFor(model: ExternalModel): readonly string[] {
+  return model.aliases.length > 0 ? model.aliases : [model.id];
+}
+
+/**
  * Extract the picker name list from a model list.
  *
  * Zero-maintenance rule (Fix 1):
@@ -126,19 +139,6 @@ export interface ReduceResult {
  *
  * Pure function, no I/O.
  */
-/**
- * The picker names for a single model: all aliases when the model has any,
- * or the canonical id when it has none. This is the single alias-selection
- * site — both `pickerNames` (cycle builder) and `buildPickerNameMap` (id→alias
- * normaliser) call it so the two can never drift.
- *
- * Module-private: callers consume the public wrappers below.
- * Pure function, no I/O.
- */
-function pickerNamesFor(model: ExternalModel): readonly string[] {
-  return model.aliases.length > 0 ? model.aliases : [model.id];
-}
-
 export function pickerNames(models: readonly ExternalModel[]): readonly string[] {
   return models.flatMap(pickerNamesFor);
 }

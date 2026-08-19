@@ -3,16 +3,6 @@ import { fileURLToPath } from 'url';
 import { dirname, join, relative, isAbsolute, resolve } from 'path';
 
 /**
- * D-paths: single package-root resolver used by everything that previously did
- * scattered path.resolve(__dirname, '../..') lookups.
- *
- * From compiled dist/core/paths.js, root is 2 levels up from __dirname.
- * From source src/core/paths.ts under vitest/tsx, root is also 2 levels up.
- *
- * Throws loudly if package.json is not found at the resolved root — dist-depth
- * bugs become loud errors, never silent wrong-path lookups.
- */
-/**
  * Returns true when `candidate`, resolved relative to `parent`, is strictly
  * contained within `parent` — i.e., it is not the parent itself, does not
  * escape via `..` traversal, and is not an absolute path that lands outside.
@@ -35,6 +25,16 @@ export function isContainedIn(parent: string, candidate: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
+/**
+ * D-paths: single package-root resolver used by everything that previously did
+ * scattered path.resolve(__dirname, '../..') lookups.
+ *
+ * From compiled dist/core/paths.js, root is 2 levels up from __dirname.
+ * From source src/core/paths.ts under vitest/tsx, root is also 2 levels up.
+ *
+ * Throws loudly if package.json is not found at the resolved root — dist-depth
+ * bugs become loud errors, never silent wrong-path lookups.
+ */
 export function getPackageRoot(): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);

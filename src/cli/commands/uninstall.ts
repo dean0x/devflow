@@ -124,6 +124,23 @@ export function resolveSecurityRemovalDecision(opts: {
 }
 
 /**
+ * Resolve the answer from a Clack confirm prompt for the .devflow/ project data
+ * removal question into a boolean removal decision.
+ *
+ * A cancel (user presses Ctrl-C on this prompt) is treated as decline: the
+ * .devflow/ directory is preserved and the uninstall continues with the remaining
+ * steps rather than aborting via process.exit() (applies PF-014, applies ADR-003).
+ *
+ * PURE — no I/O, fully testable.
+ *
+ * @param answer - The value returned by p.confirm(): boolean or a cancel symbol.
+ * @returns true only when the user explicitly confirmed removal.
+ */
+export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
+  return answer === true;
+}
+
+/**
  * Determine the appropriate cleanup action for the user-scope devflow directory on
  * full uninstall. Mirrors the resolveSecurityRemovalDecision pattern.
  *
@@ -150,23 +167,6 @@ export function resolveSecurityRemovalDecision(opts: {
  * prompt is suppressed — artifacts-only regardless of isTTY or userContent. This prevents
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
-/**
- * Resolve the answer from a Clack confirm prompt for the .devflow/ project data
- * removal question into a boolean removal decision.
- *
- * A cancel (user presses Ctrl-C on this prompt) is treated as decline: the
- * .devflow/ directory is preserved and the uninstall continues with the remaining
- * steps rather than aborting via process.exit() (applies PF-014, applies ADR-003).
- *
- * PURE — no I/O, fully testable.
- *
- * @param answer - The value returned by p.confirm(): boolean or a cancel symbol.
- * @returns true only when the user explicitly confirmed removal.
- */
-export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
-  return answer === true;
-}
-
 export function resolveDevflowDirCleanup(opts: {
   scope: 'user' | 'local';
   isTTY: boolean;

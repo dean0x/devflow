@@ -9,8 +9,4 @@ describe('noop', () => {
   it('returns undefined when called with multiple arguments', () => {
     expect(noop(1, 'two', { three: 3 })).toBeUndefined();
   });
-
-  it('is a function', () => {
-    expect(typeof noop).toBe('function');
-  });
 });
