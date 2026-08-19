@@ -597,6 +597,34 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     expect(Object.hasOwn(updated.agents, 'old-coder')).toBe(false);
   });
 
+  it('collision-on-disk: canonical wins, legacy dropped, warnings mention drop, infos silent', async () => {
+    // Both 'coder' (legacy) and 'code' (canonical) are present.
+    // Expected: 'code' (canonical) wins; 'coder' removed; warnings mention drop; no rename info.
+    (LEGACY_AGENT_KEYS as Record<string, string>)['coder'] = 'code';
+    await fs.writeFile(
+      path.join(tmpDir, 'agent-models.json'),
+      JSON.stringify({ version: 1, agents: { coder: { model: 'opus' }, code: { model: 'haiku' } } }),
+      'utf-8',
+    );
+
+    const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });
+    expect(result).toBeDefined();
+    if (result) {
+      // No rename info — the legacy key was dropped, not renamed
+      expect(result.infos.some(i => i.includes('renamed') && i.includes('coder'))).toBe(false);
+      // Warnings must mention the drop
+      expect(result.warnings.some(w => w.includes('coder') && w.toLowerCase().includes('drop'))).toBe(true);
+    }
+
+    // On disk: 'code' present with canonical value ('haiku'), 'coder' absent
+    const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'agent-models.json'), 'utf-8')) as {
+      agents: Record<string, { model: string }>;
+    };
+    expect(Object.hasOwn(onDisk.agents, 'code')).toBe(true);
+    expect(onDisk.agents['code'].model).toBe('haiku'); // canonical value wins
+    expect(Object.hasOwn(onDisk.agents, 'coder')).toBe(false);
+  });
+
   it('is a no-op when file does not exist', async () => {
     (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
     const result = await getMigration().run({ scope: 'global', devflowDir: tmpDir });

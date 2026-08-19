@@ -692,11 +692,13 @@ describe('canonicaliseAgentKeys', () => {
   it('renames a legacy key to the canonical key', () => {
     (LEGACY_AGENT_KEYS as Record<string, string>)['old-coder'] = 'coder';
     const input = { 'old-coder': { model: 'sonnet' } };
-    const { agents, didMutate } = canonicaliseAgentKeys(input);
+    const { agents, didMutate, renamed, dropped } = canonicaliseAgentKeys(input);
     expect(didMutate).toBe(true);
     expect(Object.hasOwn(agents, 'coder')).toBe(true);
     expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
     expect(agents['coder']).toEqual({ model: 'sonnet' });
+    expect(renamed).toEqual(['old-coder']);
+    expect(dropped).toEqual([]);
   });
 
   it('collision: new key already present → new wins, old dropped, one warning', () => {
@@ -706,13 +708,15 @@ describe('canonicaliseAgentKeys', () => {
       coder: { model: 'opus' },         // already present — wins
     };
     const warnings: string[] = [];
-    const { agents, didMutate } = canonicaliseAgentKeys(input, (msg) => warnings.push(msg));
+    const { agents, didMutate, renamed, dropped } = canonicaliseAgentKeys(input, (msg) => warnings.push(msg));
     expect(didMutate).toBe(true);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('old-coder');
     expect(warnings[0]).toContain('coder');
     expect(agents['coder']).toEqual({ model: 'opus' }); // new wins
     expect(Object.hasOwn(agents, 'old-coder')).toBe(false);
+    expect(renamed).toEqual([]);
+    expect(dropped).toEqual(['old-coder']);
   });
 
   it('collision check uses original keys (order-independent)', () => {

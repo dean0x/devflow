@@ -160,7 +160,7 @@ export const MIGRATIONS: readonly Migration[] = [
       }
 
       const onWarning = (msg: string) => warnings.push(msg)
-      const { agents: migrated, didMutate } = canonicaliseAgentKeys(
+      const { agents: migrated, didMutate, renamed, dropped } = canonicaliseAgentKeys(
         rawAgents as Record<string, unknown>,
         onWarning,
       )
@@ -181,12 +181,16 @@ export const MIGRATIONS: readonly Migration[] = [
         return { infos, warnings }
       }
 
-      const renamed = Object.keys(LEGACY_AGENT_KEYS).filter(
-        old => Object.hasOwn(rawAgents as Record<string, unknown>, old),
-      )
-      infos.push(
-        `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
-      )
+      if (renamed.length > 0) {
+        infos.push(
+          `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
+        )
+      }
+      if (dropped.length > 0) {
+        warnings.push(
+          `canonicalise-agent-keys-v1: dropped legacy key(s) ${dropped.map(k => `'${k}'`).join(', ')} — canonical key already present, existing value kept`,
+        )
+      }
       return { infos, warnings }
     },
   },

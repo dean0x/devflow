@@ -128,17 +128,21 @@ export const LEGACY_AGENT_KEYS: Record<string, string> = Object.assign(
  *
  * @param rawAgents - The `agents` field from the raw JSON file (any value types).
  * @param onWarning - Optional callback for collision warnings.
- * @returns { agents, didMutate } — caller persists iff didMutate is true.
+ * @returns { agents, didMutate, renamed, dropped } — caller persists iff didMutate is true.
+ *   renamed: legacy keys successfully renamed to their canonical form.
+ *   dropped: legacy keys that existed but could not be renamed (collision or prototype safety).
  */
 export function canonicaliseAgentKeys(
   rawAgents: Record<string, unknown>,
   onWarning?: (msg: string) => void,
-): { agents: Record<string, unknown>; didMutate: boolean } {
+): { agents: Record<string, unknown>; didMutate: boolean; renamed: string[]; dropped: string[] } {
   const warn = onWarning ?? (() => undefined);
+  const renamed: string[] = [];
+  const dropped: string[] = [];
 
   // Fast path: no legacy keys defined — skip without reading input.
   if (Object.keys(LEGACY_AGENT_KEYS).length === 0) {
-    return { agents: rawAgents, didMutate: false };
+    return { agents: rawAgents, didMutate: false, renamed, dropped };
   }
 
   // Snapshot the original keys for collision detection (order-independent result).
@@ -149,27 +153,39 @@ export function canonicaliseAgentKeys(
 
   for (const oldKey of originalKeys) {
     // Skip the __proto__ key — assigning to it sets the prototype, not a property.
-    if (oldKey === '__proto__') continue;
+    // Count as dropped if LEGACY_AGENT_KEYS happens to declare it (adversarial input).
+    if (oldKey === '__proto__') {
+      if (Object.hasOwn(LEGACY_AGENT_KEYS, '__proto__')) dropped.push('__proto__');
+      continue;
+    }
     if (!Object.hasOwn(LEGACY_AGENT_KEYS, oldKey)) continue;
 
     const newKey = LEGACY_AGENT_KEYS[oldKey] as string;
-    // Guard new key for the same reason: __proto__ must not be created.
-    if (newKey === '__proto__') continue;
+    // Guard new key: creating an own property named __proto__ would silently
+    // set the prototype chain instead. Drop and remove the old key without creating target.
+    if (newKey === '__proto__') {
+      dropped.push(oldKey);
+      delete result[oldKey];
+      didMutate = true;
+      continue;
+    }
 
     if (originalKeys.has(newKey)) {
       // Collision: new (canonical) key already present → new wins, old dropped, one warning.
       warn(
         `agent-models: migrating key '${oldKey}' → '${newKey}' — '${newKey}' already exists, keeping existing value and dropping '${oldKey}'`,
       );
+      dropped.push(oldKey);
     } else {
       result[newKey] = result[oldKey];
+      renamed.push(oldKey);
     }
     // Remove the legacy key regardless of collision outcome.
     delete result[oldKey];
     didMutate = true;
   }
 
-  return { agents: result, didMutate };
+  return { agents: result, didMutate, renamed, dropped };
 }
 
 // ---------------------------------------------------------------------------
