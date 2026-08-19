@@ -25,6 +25,7 @@ import {
   saveAgentMapping,
   resolveEffective,
   countExternalMappedAgents,
+  readInstalledAgentNames,
   EFFORT_LEVELS,
   type AgentMapping,
   type AgentMappingFile,
@@ -637,6 +638,45 @@ describe('reapplyAgentMapping', async () => {
     expect(warnings.some(w => w.includes(traversalKey))).toBe(true);
     // The warning must mention the containment guard, not a generic message.
     expect(warnings.some(w => w.includes('containment guard') || w.includes('resolves outside'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readInstalledAgentNames
+// ---------------------------------------------------------------------------
+
+describe('readInstalledAgentNames', () => {
+  let tmpInstall: string;
+
+  beforeEach(async () => {
+    tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-riq-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpInstall, { recursive: true, force: true });
+  });
+
+  it('returns empty set when directory does not exist (ENOENT)', async () => {
+    const missing = path.join(tmpInstall, 'nonexistent');
+    const result = await readInstalledAgentNames(missing);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns empty set when path is a file, not a directory (ENOTDIR)', async () => {
+    // Place a regular file at the target path; readdir will error with ENOTDIR.
+    const filePath = path.join(tmpInstall, 'not-a-dir');
+    await fs.writeFile(filePath, 'I am a file', 'utf-8');
+    const result = await readInstalledAgentNames(filePath);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns names of .md files in a valid directory', async () => {
+    await fs.writeFile(path.join(tmpInstall, 'code.md'), '', 'utf-8');
+    await fs.writeFile(path.join(tmpInstall, 'review.md'), '', 'utf-8');
+    const result = await readInstalledAgentNames(tmpInstall);
+    expect(result.has('code')).toBe(true);
+    expect(result.has('review')).toBe(true);
+    expect(result.size).toBe(2);
   });
 });
 

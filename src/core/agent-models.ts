@@ -359,7 +359,9 @@ export async function readAgentMapping(
  *
  * A missing directory returns an empty set rather than throwing (ENOENT is
  * not an error — the install dir may not exist on a fresh machine before
- * `devflow init` runs). Any other OS error is re-thrown.
+ * `devflow init` runs). Any other OS error also returns an empty set
+ * (degrade-not-throw per PF-009) — a transient or misconfigured path must
+ * not prevent the TUI or --list from starting.
  *
  * @param installDir - Path to ~/.claude/agents/devflow (or equivalent).
  */
@@ -373,9 +375,8 @@ export async function readInstalledAgentNames(
         .map(mdEntryName)
         .filter((n): n is string => n !== null),
     );
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Set<string>();
-    throw err;
+  } catch {
+    return new Set<string>();
   }
 }
 
