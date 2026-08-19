@@ -57,7 +57,7 @@ export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
 export { removeDreamHook, hasDreamHook } from './legacy-hooks.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
-import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../../core/migrations.js';
+import { type RunMigrationsResult, type AnyMigration, type MigrationLogger, reportMigrationResult } from '../../core/migrations.js';
 import { getPackageRoot } from '../../core/paths.js';
 
 export type { MigrationLogger };
@@ -88,7 +88,7 @@ export async function runMigrationsWithFallback(
   runner: (
     ctx: { devflowDir: string },
     projects: string[],
-    registry?: readonly Migration[],
+    registry?: readonly AnyMigration[],
   ) => Promise<RunMigrationsResult>,
 ): Promise<RunMigrationsResult> {
   const projectsForMigration =

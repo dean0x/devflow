@@ -64,6 +64,16 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
 }
 
 /**
+ * Discriminated union of all concrete migration variants.
+ *
+ * Prefer AnyMigration over the bare Migration<MigrationScope> (= Migration) in
+ * registry and runner signatures: the union form lets TypeScript narrow the run()
+ * overload by discriminating on `scope` at the call site, eliminating the
+ * `as Migration<'global'>` casts that were previously required.
+ */
+export type AnyMigration = Migration<'global'> | Migration<'per-project'>;
+
+/**
  * D31: Registry pattern over scattered `if (!applied.includes(...))` conditionals.
  *
  * A typed array of Migration entries provides:
@@ -96,7 +106,7 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
  * lost. A future fix should make genuine I/O failure (as distinct from
  * "malformed file, skip it") throw so the runner retries it.
  */
-export const MIGRATIONS: readonly Migration[] = [
+export const MIGRATIONS: readonly AnyMigration[] = [
   {
     id: 'canonicalise-agent-keys-v1',
     description: 'Rename legacy agent keys in ~/.devflow/agent-models.json to their canonical names',
@@ -406,7 +416,7 @@ async function runPerProjectMigration(
 export async function runMigrations(
   ctx: { devflowDir: string },
   discoveredProjects: string[],
-  registryOverride?: readonly Migration[],
+  registryOverride?: readonly AnyMigration[],
 ): Promise<RunMigrationsResult> {
   const registry = registryOverride ?? MIGRATIONS;
   // Always read from home-dir devflow location so state is machine-wide
@@ -428,10 +438,7 @@ export async function runMigrations(
         scope: 'global',
         devflowDir: ctx.devflowDir,
       };
-      // Type assertion required: TS narrows `migration.scope` to 'global' but cannot
-      // narrow the generic parameter S of Migration<S> — the discriminant check is the
-      // runtime guarantee. This replaces the original `as Migration<'global'>` cast.
-      const outcome = await runGlobalMigration(migration as Migration<'global'>, globalCtx);
+      const outcome = await runGlobalMigration(migration, globalCtx);
       if (outcome.applied) {
         newlyApplied.push(migration.id);
         infos.push(...outcome.infos);
@@ -440,8 +447,7 @@ export async function runMigrations(
         failures.push(outcome.failure);
       }
     } else if (migration.scope === 'per-project') {
-      // Same generic-narrowing constraint applies — discriminant check IS the guarantee.
-      const outcome = await runPerProjectMigration(migration as Migration<'per-project'>, ctx, discoveredProjects);
+      const outcome = await runPerProjectMigration(migration, ctx, discoveredProjects);
       failures.push(...outcome.failures);
       infos.push(...outcome.infos);
       warnings.push(...outcome.warnings);
@@ -449,9 +455,11 @@ export async function runMigrations(
         newlyApplied.push(migration.id);
       }
     } else {
-      // Exhaustiveness check — catches unhandled MigrationScope values at runtime
-      const _exhaustive: never = migration.scope;
-      throw new Error(`Unknown migration scope: ${_exhaustive}`);
+      // Exhaustiveness check — AnyMigration covers all MigrationScope values;
+      // migration is narrowed to `never` here so this branch is unreachable at runtime.
+      const _exhaustive: never = migration;
+      void _exhaustive;
+      throw new Error('Unknown migration scope');
     }
   }
 
