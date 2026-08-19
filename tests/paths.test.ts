@@ -105,14 +105,13 @@ describe('isContainedIn', () => {
 
   it('works with relative parent path (resolved internally)', () => {
     // A relative parent is resolved to an absolute path — containment still holds.
-    // We use an actual subdirectory of process.cwd() for a predictable result.
     const rel = 'some/relative/parent';
-    const abs = path.resolve(rel);
     // A direct child of the resolved parent must be contained.
     expect(isContainedIn(rel, 'child.md')).toBe(true);
     // Escaping still fails even with a relative parent.
-    expect(isContainedIn(rel, `../../../evil.md`)).toBe(false);
-    void abs;
+    expect(isContainedIn(rel, '../../../evil.md')).toBe(false);
+    // Resolution is anchored on the absolute form of the relative parent.
+    expect(isContainedIn(rel, 'child.md')).toBe(isContainedIn(path.resolve(rel), 'child.md'));
   });
 });
 

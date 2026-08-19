@@ -1022,7 +1022,6 @@ export const uninstallCommand = new Command('uninstall')
     p.outro(`${status}${color.dim('  Reinstall: npx devflow-kit init')}`);
   });
 
-
 /**
  * Remove all Devflow assets (full uninstall).
  */
