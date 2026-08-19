@@ -210,7 +210,7 @@ Callers persist the result iff `didMutate` is true. The function is idempotent �
 - `{ kind: 'warn', message }` — I/O error, invalid JSON, or non-object structure; caller pushes the message to its warnings array.
 - `{ kind: 'ok', envelope, rawAgents }` — validated envelope ready for canonicalisation.
 
-This parser handles BOM (U+FEFF) stripping and whitespace-only files tolerantly. `readAgentMapping` does NOT call `parseAgentMappingEnvelope` — it is a raw-envelope reader for migrations that need the unparsed `agents` field before applying any transformation. The `readAgentMapping` path applies canonicalisation inline on every read, covering all four call sites transparently.
+This parser handles BOM (U+FEFF) stripping and whitespace-only files tolerantly. **`readAgentMapping` now routes through `parseAgentMappingEnvelope`** (F1 fix) — the shared parse path gives both `readAgentMapping` and the migration the same BOM tolerance and JSON-parse error handling. Special case: when the envelope returns `kind: 'warn'` with a "non-object agents field" message (e.g., the file has `agents: []`), `readAgentMapping` returns `Ok({ version: 1, agents: {} })` for backward compatibility — the migration path treats the same case as a suspicious-but-tolerated warn. The `readAgentMapping` path applies `canonicaliseAgentKeys` inline on every read, covering all four call sites transparently.
 
 **`readInstalledAgentNames(installDir)`** degrades to an empty `Set<string>` on **any** readdir failure — not just `ENOENT`. A transient permission error or misconfigured path must not prevent the TUI or `--list` from starting (avoids PF-009). The single `fs.readdir` call replaces the previous per-name `fs.access` loop, giving O(dir) instead of O(agents) I/O.
 

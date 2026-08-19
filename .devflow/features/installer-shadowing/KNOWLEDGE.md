@@ -93,18 +93,23 @@ Also exports the **`mdFileName` / `mdEntryName` inverse pair** for `.md` asset n
 
 All three `knownNames` sets span ALL plugins — not just the selected subset — so assets from unselected plugins survive a partial run; only assets completely absent from the registry are removed. **Intersecting with the selected-plugin subset would be a data-loss bug** (assets from OTHER plugins would be deleted on a single-plugin reinstall). Separate from the sweeps, `installViaFileCopy` still performs a **full directory wipe** of `commands/devflow/`, `agents/devflow/`, and `rules/devflow/` before reinstalling on full (non-partial) installs.
 
-Sweep results fold into `InstallReport.sweptOrphans` (names removed) and `InstallReport.sweepFailures` (per-item failures with kind discriminant).
+Sweep results fold into `InstallReport.sweptOrphans` (F15: `SweptOrphan[]` — each entry carries `{ kind: 'skill'|'command'|'agent', name: string }` for disambiguation) and `InstallReport.sweepFailures` (per-item failures with kind discriminant). The `recordSweep(report, kind, sweep)` helper (F14) centralises the push from all three sweep call sites.
 
 ### InstallReport
 
 `installViaFileCopy` returns `InstallReport`:
 
 ```typescript
+export interface SweptOrphan {           // F15: carries kind tag for disambiguation
+  kind: 'skill' | 'command' | 'agent';
+  name: string;
+}
+
 export interface InstallReport {
   shadowedSkills: string[];   // bare skill names that had a valid shadow applied
   shadowedRules: string[];    // bare rule names that had a valid shadow applied
   skippedShadows: ShadowSkip[];   // invalid shadows that were bypassed
-  sweptOrphans: string[];     // registry names removed by orphan sweeps (skills, commands, agents)
+  sweptOrphans: SweptOrphan[];    // F15: { kind, name }[] removed by orphan sweeps (skills, commands, agents)
   sweepFailures: SweepFailure[]; // per-item removal failures from orphan sweeps
 }
 
