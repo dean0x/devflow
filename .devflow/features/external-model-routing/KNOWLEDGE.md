@@ -3,9 +3,9 @@ feature: external-model-routing
 name: External Model Routing & Per-Agent Model Config
 description: "Use when working on the proxy lifecycle (enable/disable/status/preflight), the ensure-proxy hook, per-agent model mapping, agent frontmatter rewriting, or the agents TUI. Keywords: proxy, external-model-routing, GPT, agent-models, ensure-proxy, frontmatter, devflow proxy, devflow agents, subswitch, ANTHROPIC_BASE_URL, dormancy, reapplyAgentMapping."
 category: architecture
-directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
+directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
-updated: 2026-08-16
+updated: 2026-08-19
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -196,6 +196,26 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 
 **Type precision**: `EFFORT_LEVELS` in `agent-models.ts` and `CLAUDE_MODEL_ALIASES` in `external-models.ts` are both `as const`, giving derived literal union types (`EffortLevel = 'low'|'medium'|'high'|'xhigh'|'max'`, `ClaudeModelAlias = 'haiku'|'sonnet'|'opus'|'fable'`). These flow through `AgentMapping.effort`, `EffectiveConfig.effort`, and `AgentRow.configuredEffort`/`originalEffort` as `EffortLevel` (not `string`). The one remaining `as EffortLevel` cast at the `readAgentMapping` parse site is sound: the `has()` check proves membership before the cast.
 
+**`LEGACY_AGENT_KEYS`** is typed `Readonly<Record<string, string>>` — built via `Object.assign(Object.create(null))` to prevent `__proto__` pollution on lookup. Every access uses `Object.hasOwn`, never `key in LEGACY_AGENT_KEYS` or direct bracket access.
+
+**`canonicaliseAgentKeys<T>`** is generic over the entry value type `T`, returning `{ agents: Record<string, T>; didMutate: boolean; renamed: string[]; dropped: string[]; guardDropped: string[] }`. The extra arrays give callers truthful accounting:
+- `renamed` — legacy keys successfully renamed to their canonical form.
+- `dropped` — legacy keys dropped due to canonical-key collision (new value wins).
+- `guardDropped` — legacy keys dropped because the old or new key was `__proto__` (prototype-pollution guard, distinct from collision).
+
+Callers persist the result iff `didMutate` is true. The function is idempotent — a second call on the already-migrated map produces zero mutations.
+
+**`parseAgentMappingEnvelope(filePath)`** is an exported discriminated parser shared by `readAgentMapping` and the `canonicalise-agent-keys-v1` migration. It returns one of three variants:
+- `{ kind: 'skip' }` — file absent, empty (including BOM-only), or `agents` field absent; caller is a no-op.
+- `{ kind: 'warn', message }` — I/O error, invalid JSON, or non-object structure; caller pushes the message to its warnings array.
+- `{ kind: 'ok', envelope, rawAgents }` — validated envelope ready for canonicalisation.
+
+This parser handles BOM (U+FEFF) stripping and whitespace-only files tolerantly. `readAgentMapping` does NOT call `parseAgentMappingEnvelope` — it is a raw-envelope reader for migrations that need the unparsed `agents` field before applying any transformation. The `readAgentMapping` path applies canonicalisation inline on every read, covering all four call sites transparently.
+
+**`readInstalledAgentNames(installDir)`** degrades to an empty `Set<string>` on **any** readdir failure — not just `ENOENT`. A transient permission error or misconfigured path must not prevent the TUI or `--list` from starting (avoids PF-009). The single `fs.readdir` call replaces the previous per-name `fs.access` loop, giving O(dir) instead of O(agents) I/O.
+
+**Containment guard in `reapplyAgentMapping`**: before reading or writing any agent file, `reapplyAgentMapping` calls `isContainedIn(opts.installDir, mdFileName(agentName))` from `src/core/paths.ts`. A key that resolves outside the install directory (e.g., a path-traversal key like `../../etc/passwd` from a corrupted `agent-models.json`) is skipped with a warning and placed in the `skippedMissing` bucket — no filesystem access beyond `installDir` is ever attempted.
+
 ### isDormantExternalModel — single dormancy predicate
 
 `isDormantExternalModel(model, proxyEnabled)` is exported from `src/core/external-models.ts` (leaf module, no project imports — avoids cycles). It is the **single source of truth** for the dormancy predicate, consumed by:
@@ -232,6 +252,34 @@ Warning collection is **deterministic**: each parallel task returns its local wa
 
 **Must run AFTER preflight resolves the final `proxyEnabled` value.** In `devflow init`, the proxy preflight block can force `proxyEnabled=false` on failure. Running `reapplyAgentMapping` earlier would leave GPT model identifiers in agent frontmatter files when preflight fails (dormancy violation).
 
+## Agent State Classification (agent-state.ts)
+
+`src/core/agent-state.ts` is a **core leaf module** (applies ADR-013) — no CLI or adapter imports — that provides the single vocabulary for the STATE column shared by `devflow agents --list` and the TUI. Moving the classifier out of `external-models.ts` into its own module gives it a clear single responsibility: map raw installation facts to a human-readable state label.
+
+**`AgentState`** — four-way discriminated union:
+```typescript
+type AgentState = 'active' | 'saved-inactive' | 'not-installed' | 'unknown';
+```
+
+**`AGENT_STATE_LABELS`** — `Readonly<Record<AgentState, string>>` mapping each state to its bare display text (no color applied; color is the call site's responsibility). Shared by `render.ts` (TUI STATE column) and `formatListOutput` in `agents.ts` (`--list` STATE column) so the two surfaces cannot drift from each other.
+
+**`classifyAgentState(opts)`** — pure function with no I/O:
+```typescript
+interface ClassifyAgentStateOptions {
+  configured: string;   // 'default' or a model name
+  proxyEnabled: boolean;
+  installed: boolean;   // agent .md present in install dir
+  inRegistry: boolean;  // agent name in plugin registry
+}
+```
+Classification rules (evaluated in order):
+1. `!inRegistry` → `'unknown'` (orphan rows from `agent-models.json` not in the registry)
+2. `!installed` → `'not-installed'`
+3. `isDormantExternalModel(configured, proxyEnabled)` → `'saved-inactive'`
+4. Otherwise → `'active'`
+
+**`--list` vs TUI rendering**: both surfaces call `AGENT_STATE_LABELS[state]` for the bare text, then apply color at the call site. The `--list` path additionally appends `' (proxy off)'` to the `saved-inactive` label for extra report-surface context — the TUI STATE column stays bare (column width `COL_STATE = 14` fits `'saved-inactive'` exactly at 80 cols without clipping).
+
 ## agent-frontmatter Surgical Rewrite Invariants
 
 `rewriteAgentFrontmatter()` in `src/core/agent-frontmatter.ts` is a pure, zero-I/O function. Key invariants:
@@ -252,8 +300,8 @@ This prevents silent corruption of multi-line YAML values that legitimately cont
 
 The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (applies ADR-013):
 
-- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to initialize dormancy state. All types and dirty helpers exported. No I/O.
-- **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants).
+- **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to set dormancy state; `rowState()` delegates to `classifyAgentState()` (from agent-state.ts) so the TUI STATE column and `--list` share one classification vocabulary. `persistedModelFor(row)` and `persistedEffortFor(row)` are exported predicates consumed by both `rowState` (STATE column display) and `mergeTuiRowsIntoMapping` (save merge) — the two sites cannot drift on what value gets written. All types and dirty helpers exported. No I/O.
+- **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants). `COL_STATE = 14` — sized so `'saved-inactive'` (13 chars) renders unclipped at 80-column terminals; row budget is 79 chars total (2 prefix + 18 agent + 32 model + 13 effort + 14 state).
 - **`terminal.ts`** — impure shell. Manages alt-screen, raw mode, SIGINT/SIGTERM handlers, SIGWINCH resize. All cleanup wired via `resolve()` inside the Promise constructor — never `process.exit()` inside a finally-guarded scope (avoids PF-014).
 
 **`TuiIO` injectable seam** (`terminal.ts`): `runAgentsTui(initialState, io?)` accepts an optional `TuiIO` override with fake `stdin`/`stdout` for testing. The default is `process.stdin`/`process.stdout`. Tests pass `PassThrough` streams to drive the TUI without a real TTY.
@@ -266,7 +314,7 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 **Lazy-import of `terminal.ts`** in `agents.ts`: `import('../agents-view/terminal.js')` is deferred until the interactive path runs. `--list`, `--set`, `--reset`, and non-TTY calls never load readline/tty machinery.
 
-**Model list source**: `buildTuiState()` calls `discoverExternalModels` (async, spawns, gated on `proxyEnabled`) to get the catalog, then calls `buildModelCycle(catalog)` once to build the picker cycle (the `proxyEnabled` parameter was removed in commit `ab6106e` — the cycle is catalog-driven only). Also calls `buildPickerNameMap(catalog)` to normalize stored canonical IDs to picker names in `buildRow()`. Off-cycle pins (stored models absent from the current picker cycle) are appended at the end of the per-row effective cycle with `(unavailable)` annotation.
+**Model list source**: `buildTuiState()` calls `discoverExternalModels` (async, spawns, gated on `proxyEnabled`) to get the catalog, then calls `buildModelCycle(catalog)` once to build the picker cycle (catalog-driven only). Also calls `buildPickerNameMap(catalog)` to normalize stored canonical IDs to picker names in `buildRow()`. The catalog is a local variable in `buildTuiState` — it is **not stored on `AgentsViewState`**; only the derived `modelCycle` is carried on state (prebuilt once at startup, read directly by the pure reducer on every keypress, never reallocated — AC-P6). Off-cycle pins (stored models absent from the current picker cycle) are appended at the end of the per-row effective cycle with `(unavailable)` annotation.
 
 ## writeFileAtomicExclusive — Mode Preservation
 
@@ -290,6 +338,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Pre-spawn doctor gating (chicken-and-egg)**: The relay's `doctor` subcommand probes the relay port to confirm it is running — a not-yet-started relay makes that probe fail (exit 1). A pre-spawn gate is therefore always unsatisfiable on a cold path and invisible to unit tests that mock doctor exit 0 (found during the first live enable). Doctor must gate post-spawn only, after the relay is confirmed up (D-EFR-2).
 - **D-EFR-3: Never mock the routing-runtime subprocess without a paired real-binary test**: any test that mocks the routing-runtime subprocess must be paired with at least one CI-executed test that does not. The specific trap (PF-016 reproduced exactly): `tests/integration/**` is excluded from `npm test` by `vitest.config.ts` while CI runs only `npm run build && npm test` — a real-binary test placed in `tests/integration/` would never execute in CI. Place real-binary tests in `tests/` (not `tests/integration/`).
 - **Calling model discovery from `validateSetArgs` or `--list`/`--reset`**: `validateSetArgs` uses `isValidModelName` (from agent-frontmatter.ts, pure regex) — not model discovery. The zero-spawn constraint for `--list`, `--set`, and `--reset` is a firm requirement pinned by module-boundary spy tests in `tests/agents-command.test.ts`. Importing or calling `discoverExternalModels`/`getExternalModelsCached` from the validation path breaks these tests and violates the configure-first-then-enable flow.
+- **Putting the agent-state classifier in external-models.ts**: `external-models.ts` is a leaf module with a single responsibility (dormancy predicate + Claude alias set). Agent state classification belongs in `src/core/agent-state.ts` (applies ADR-013). Adding classifier logic to external-models.ts would give it two reasons to change and break its leaf-module contract.
 
 ## Gotchas
 
@@ -297,39 +346,40 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning. `spawnedPid` will be absent from `SpawnRelayResult` on this path — `runPostSpawnVerification` must never kill an adopted relay.
 - **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
 - **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`.
-- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantExternalModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. On save, if `isDirtyModel` is false, the original GPT mapping entry is preserved byte-identical.
+- **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantExternalModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. `persistedModelFor(row)` returns `dormantModel` for an untouched dormant row, so `mergeTuiRowsIntoMapping` preserves the GPT mapping entry byte-identical on save even though `configuredModel` shows `'default'`.
 - **`binPath` must be spawned with `node <path>`**: npm does not guarantee executable bits on installed package binaries. Always spawn as `node <binPath>`, never `<binPath>` directly.
 - **Leaked stub relays**: proxy tests that spawn stub relays must reap them on the failure path too — not only the happy path. Use `afterEach`/`onTestFinished` with SIGTERM→SIGKILL escalation and confirm death via `process.kill(pid, 0)`. Real incident: three orphaned stub relays accumulated over ~3 weeks; a full run stretched from ~24 seconds to 40+ minutes and produced 13–21 spurious failures in unrelated files (memory pipeline, capture hooks) that were repeatedly misdiagnosed as product defects.
 - **`resolveProxyBin()` uses `createRequire(import.meta.url)`**: ESM-safe way to resolve CommonJS package paths. The `require.resolve('subswitch/package.json')` approach finds the package relative to devflow's own `node_modules`, not the user's project.
 - **env -i corporate-TLS**: `NODE_EXTRA_CA_CERTS` is now included in both the hook's `_RELAY_ENV` array and `scrubChildEnv()` in `proxy-log.ts`, so corporate-TLS deployments that supply a CA bundle via this var will have it forwarded to the relay. It is included only when non-empty (an empty path causes TLS errors). `NODE_OPTIONS` remains excluded from both allowlists — it permits arbitrary code execution via `--require`/`--import`. A drift-guard test in `tests/proxy-log.test.ts` asserts the hook's conditional append exists, so a future one-sided change is caught early rather than silently breaking one spawn path.
 - **`classifyCodexAuthReadError` is directly testable**: the ENOENT→`{kind:'absent'}` vs other-error→`{kind:'unreadable'}` classification that used to live inside `runStatus` is now exported from `codex-auth-inspect.ts`. Tests can import and call it with a synthetic error object without needing to mock the filesystem.
 - **`isProxyEnabled()` is the sole dormancy authority**: it reads only `proxy.json`. On preflight failure in `init.ts`, `proxy.json` is explicitly written to `enabled:false` so `isProxyEnabled()` returns the correct value for the `reapplyAgentMapping` call that follows. Any new code path that forces the proxy off must write this file — relying on manifest alone is insufficient.
-- **`env -i corporate-TLS`**: `NODE_EXTRA_CA_CERTS` is now in both allowlists (hook `_RELAY_ENV` and `scrubChildEnv()`) so corporate-TLS deployments can supply a CA bundle via this var. It is passed through only when non-empty. `NODE_OPTIONS` remains excluded (arbitrary code execution risk). A drift-guard test in `tests/proxy-log.test.ts` verifies both allowlists agree.
+- **`readInstalledAgentNames` degrades on any error, not just ENOENT**: the catch block is bare (`catch {}`) — EPERM, ENOTDIR, and any other OS error all return an empty set rather than throwing (avoids PF-009). A misconfigured install path must not crash the TUI or `--list`.
 
 ## Key Files
 
 - `src/core/proxy-state.ts` — ProxyState schema, read/write, `isProxyEnabled()`, `resolveProxyBin()`, `buildRoutingConfigJson()`
 - `src/core/external-models.ts` — `CLAUDE_MODEL_ALIASES` (as const), `ClaudeModelAlias` literal union, `isClaudeModelName()`, `isDormantExternalModel()` (leaf module, no project imports)
+- `src/core/agent-state.ts` — `AgentState` type, `AGENT_STATE_LABELS` record, `classifyAgentState()` — single vocabulary for the STATE column shared by `--list` and the TUI (applies ADR-013; leaf module, imports only external-models.ts)
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`, `isValidModelName()` (MODEL_NAME_RE — imported by validateSetArgs for zero-spawn charset validation)
-- `src/core/agent-models.ts` — `EFFORT_LEVELS` (as const), `EffortLevel` literal union, `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `loadShippedDefaults()`
+- `src/core/agent-models.ts` — `EFFORT_LEVELS` (as const), `EffortLevel` literal union, `LEGACY_AGENT_KEYS` (Readonly), `canonicaliseAgentKeys<T>()` (generic, returns `{agents, didMutate, renamed, dropped, guardDropped}`), `parseAgentMappingEnvelope()` (discriminated ok/skip/warn parser), `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()` (with containment guard via `isContainedIn`), `revertExternalAgents()`, `loadShippedDefaults()`
 - `src/core/codex-auth-inspect.ts` — `inspectCodexAuth()` (pure absent/unreadable/present verdict); `classifyCodexAuthReadError(err)` (exported, directly testable ENOENT→absent vs other→unreadable classification). Re-derived rather than imported from the routing runtime, which ships no `exports` map. JWT payload decoded for display only — never signature-verified, no token material returned, account id truncated to 6-char suffix.
 - `src/core/model-discovery.ts` — `discoverExternalModels(cacheDir, logPath, deps?)` (async, spawns runtime); `getExternalModelsCached(cacheDir)` (sync, reads newest cache entry regardless of TTL); `parseModelsJson(raw)` (pure parser); exports `Result`, `ParsedCatalog`, `SPAWN_TIMEOUT_MS`, `SIGKILL_GRACE_MS` for test consumers
 - `src/core/cache.ts` — `modelCacheDir(devflowDir)` and `hudCacheDir(devflowDir)` path accessors (single source of truth for cache layout — avoids PF-013); `parseRawEnvelope()` (single canonical envelope parser, rejects non-finite ttl); `readCache()`, `writeCache()` with 0700/0600 permissions; `pruneOldEntries()` (keeps 3 entries by timestamp, reaps `.json.tmp.*` orphans)
 - `src/core/proxy-log.ts` — `scrubChildEnv()` (allowlist-based env for relay spawn; paired with hook's `env -i` allowlist), `openProxyLog()`, `rotateProxyLogIfLarge()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
 - `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `formatCodexAuthLine` (returns `{level,msg}`), `realHttpGet`, `PostSpawnDoctorDeps`
-- `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()` (calls `isValidModelName`, zero-spawn), `applySetMapping()`, `buildListRows()`
-- `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `unsavedCount()`
-- `src/cli/agents-view/render.ts` — pure frame renderer; exports `FIXED_ROWS`, `computeViewportHeight`
+- `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()` (calls `isValidModelName`, zero-spawn), `applySetMapping()`, `buildListRows()`, `mergeTuiRowsIntoMapping()` (consumes `persistedModelFor`/`persistedEffortFor`)
+- `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `persistedModelFor()`, `persistedEffortFor()`, `rowState()` (delegates to `classifyAgentState`), `unsavedCount()`
+- `src/cli/agents-view/render.ts` — pure frame renderer; `COL_STATE = 14`; exports `FIXED_ROWS`, `computeViewportHeight`
 - `src/cli/agents-view/terminal.ts` — impure TUI shell, `runAgentsTui()`, `TuiIO`, `MAX_KEYPRESSES`
 - `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook; writes `proxy.pid` after spawn; UserPromptSubmit exits before proxy-state reads; relay spawned via `env -i` 6-var allowlist
 - `src/cli/commands/init.ts` — proxy preflight block (4-check, no doctor, no spawn); `reapplyAgentMapping` guard after preflight; convergence writes `proxy.json enabled:false` on preflight failure
 
 ## Related
 
-- **ADR-013**: src/core vs src/cli boundary — all state I/O and pure logic in `src/core/`; CLI orchestration and user-facing action handlers in `src/cli/`. The proxy feature is the canonical multi-module example of this split.
+- **ADR-013**: src/core vs src/cli boundary — all state I/O and pure logic in `src/core/`; CLI orchestration and user-facing action handlers in `src/cli/`. The proxy feature is the canonical multi-module example of this split. `src/core/agent-state.ts` is a new application: moving the agent-state classifier out of `external-models.ts` into its own core leaf module gives it a single responsibility and a clear home (applies ADR-013).
 - **ADR-014**: state-aware re-init — `proxy` is seeded from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy` in `resolveSeedFeatures`. On `--reset`, seeds as `false`. Never read from `config.json`.
-- **PF-009**: all proxy artifact removals in uninstall/disable are non-fatal; preflight failure warns but never aborts `devflow init` — `proxyEnabled` is simply forced to `false`.
+- **PF-009**: all proxy artifact removals in uninstall/disable are non-fatal; preflight failure warns but never aborts `devflow init` — `proxyEnabled` is simply forced to `false`. Also: `readInstalledAgentNames` degrades to empty set on any error; `writeFileAtomicExclusive` chmod step is non-fatal.
 - **PF-013**: cache path accessors (`modelCacheDir`, `hudCacheDir`) in `cache.ts` prevent write-site/removal-site drift — the canonical PF-013 shape applied to the model-discovery cache.
 - **PF-014**: no `process.exit()` inside finally-guarded scopes — TUI cleanup wired via Promise `resolve()`; hard failures in CLI commands set `process.exitCode = 1` and return.
 - **PF-015**: every path that forces proxy off must converge `proxy.json enabled:false` alongside manifest/hooks/env — `isProxyEnabled()` reads only `proxy.json`, so this file is the load-bearing convergence point.
