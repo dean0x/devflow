@@ -1,18 +1,18 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, getPackageRoot, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, migrations.json."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, sweepDevflowNamespaces, resolveProjectDataCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, enumerateDryRunExtras, sweepDevflowNamespaces, resolveProjectDataCleanup, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, getPackageRoot, isContainedIn, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, SweepResult, sweepOrphans, sweepFailures, SweepFailure, mdFileName, mdEntryName, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, AnyMigration, migrations.json."
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts, src/core/migrations.ts]
 created: 2026-07-13
-updated: 2026-08-18
+updated: 2026-08-19
 ---
 
 # Installer & Skill/Rule Shadowing
 
 ## Overview
 
-Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/targets/claude-code/installer.ts`. File copy is the sole install mechanism. All asset source paths are resolved via named accessors in `src/core/assets.ts`, which are backed by `getPackageRoot()` in `src/core/paths.ts`. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow and skip events in the post-install summary.
+Devflow installs its assets (skills, rules, agents, commands, scripts) via a single path: `installViaFileCopy` in `src/targets/claude-code/installer.ts`. File copy is the sole install mechanism. All asset source paths are resolved via named accessors in `src/core/assets.ts`, which are backed by `getPackageRoot()` in `src/core/paths.ts`. `installViaFileCopy` returns an `InstallReport` that `init.ts` uses to surface shadow, skip, and orphan-sweep events in the post-install summary.
 
 The shadow override system lets users place personal versions of skills or rules at well-known paths under `~/.devflow/`. On every `devflow init` or `devflow rules --enable`, Devflow detects a valid shadow and installs the user's copy instead of the Devflow source — without failing init. This knowledge covers the entire install-to-uninstall lifecycle, the CLI surface for managing overrides, and the state-aware init seeding layer. Current counts: 22 plugins, 16 agents, 15 dist commands, 41 skills, 13 rules.
 
@@ -44,6 +44,8 @@ All five call `getPackageRoot()` internally.
 
 `getPackageRoot()` resolves the package root from `import.meta.url` depth — 2 levels up from compiled `dist/core/paths.js`. It **throws loudly** if `package.json` is absent at the resolved root. Depth-mismatch bugs surface immediately at install time rather than silently producing wrong paths.
 
+`isContainedIn(parent, candidate)` is a new pure containment predicate: resolves both paths and checks that `candidate` is strictly inside `parent` (non-empty relative, no `..` prefix, not absolute outside). Used by `reapplyAgentMapping` to guard against path-traversal mapping keys. No filesystem access.
+
 ### Hard-Error Policy for Declared Sources
 
 All four asset types now **throw** when a declared source is absent — there are no silent skips for registered assets:
@@ -59,11 +61,27 @@ Shadow paths remain tolerant: invalid/missing shadows warn-and-install-source (a
 
 ### Shared Orphan-Sweep Module (`src/core/orphan-sweep.ts`)
 
-`sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<number>` is the single compute site for registry-diff sweeps. It is imported by both `installer.ts` and `uninstall.ts` — no duplication. Key contract details:
+`sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<SweepResult>` is the single compute site for registry-diff sweeps. It is imported by both `installer.ts` and `uninstall.ts` — no duplication.
 
-- **Returns the scanned entry count** (entries matched by the predicate), NOT the removed count. Tests assert non-vacuousness by checking this value is > 0.
-- **Per-item isolation**: the outer `readdir` and the inner `rm` are independently try/caught. A missing directory is a no-op; a failed individual removal does not abort the batch (avoids PF-009).
+`SweepResult` shape:
+
+```typescript
+export interface SweepResult {
+  scanned: number;    // count of entries the predicate accepted (matched), regardless of outcome
+  removed: string[];  // registry names successfully removed
+  failed: ReadonlyArray<{ name: string; error: unknown }>; // per-item removal failures (avoids PF-009)
+}
+```
+
+Key contract details:
+
+- **`scanned`** is the count of entries accepted by the predicate, NOT the removed count. Tests assert non-vacuousness by checking `scanned > 0`. A `scanned` of 0 means the predicate matched nothing — the registry is not being exercised.
+- **Per-item isolation**: the outer `readdir` and the inner `rm` are independently try/caught. A missing directory is a no-op; a failed individual removal is recorded in `failed` without aborting the batch (avoids PF-009).
 - **`knownNames` must span ALL plugins**, never intersected with any selected-plugin subset — assets from uninstalled plugins must survive a partial sweep.
+
+Also exports the **`mdFileName` / `mdEntryName` inverse pair** for `.md` asset naming:
+- `mdFileName(name)` — converts a registry name to its `.md` filename. Inverse of `mdEntryName`.
+- `mdEntryName(entry)` — extracts the registry name from a `.md` directory entry, or returns `null` for non-`.md` entries (suitable as a pass-through predicate for `sweepOrphanedAssets`). Inverse of `mdFileName`.
 
 ### Orphan Sweep (three ungated namespaces)
 
@@ -75,15 +93,25 @@ Shadow paths remain tolerant: invalid/missing shadows warn-and-install-source (a
 
 All three `knownNames` sets span ALL plugins — not just the selected subset — so assets from unselected plugins survive a partial run; only assets completely absent from the registry are removed. **Intersecting with the selected-plugin subset would be a data-loss bug** (assets from OTHER plugins would be deleted on a single-plugin reinstall). Separate from the sweeps, `installViaFileCopy` still performs a **full directory wipe** of `commands/devflow/`, `agents/devflow/`, and `rules/devflow/` before reinstalling on full (non-partial) installs.
 
+Sweep results fold into `InstallReport.sweptOrphans` (names removed) and `InstallReport.sweepFailures` (per-item failures with kind discriminant).
+
 ### InstallReport
 
 `installViaFileCopy` returns `InstallReport`:
 
 ```typescript
 export interface InstallReport {
-  shadowedSkills: string[];  // bare skill names that had a valid shadow applied
-  shadowedRules: string[];   // bare rule names that had a valid shadow applied
-  skippedShadows: ShadowSkip[];  // invalid shadows that were bypassed
+  shadowedSkills: string[];   // bare skill names that had a valid shadow applied
+  shadowedRules: string[];    // bare rule names that had a valid shadow applied
+  skippedShadows: ShadowSkip[];   // invalid shadows that were bypassed
+  sweptOrphans: string[];     // registry names removed by orphan sweeps (skills, commands, agents)
+  sweepFailures: SweepFailure[]; // per-item removal failures from orphan sweeps
+}
+
+export interface SweepFailure {
+  kind: 'skill' | 'command' | 'agent';
+  name: string;
+  error: unknown;
 }
 
 export interface ShadowSkip {
@@ -177,13 +205,28 @@ After `removeAllDevFlow`, scope-specific logic handles the remainder of `devflow
 
 **`resolveDevflowDirCleanup`** precondition guard: four invariants must hold — `basename(devflowDir) === '.devflow'`, `devflowDir !== homeDir`, `devflowDir !== '/'`, and `devflowDir.startsWith(homeDir + sep)`. Any failure → returns `'artifacts-only'` immediately (never throws in business logic). **`--keep-docs` gate**: when `keepDocs` is true, returns `'artifacts-only'` regardless of `isTTY` or user content — suppresses the full cleanup prompt (previously an active data-loss path; now fixed). Returns `'artifacts-only'` or `'prompt'`.
 
-**`enumerateUserDevFlowContent(devflowDir)`** (called BEFORE any removal) checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, `devflowDir/learning.json`, and `devflowDir/hud.json`. Returns human-readable labels. `agent-models.json` is **NOT** listed here — it is classified as an install artifact (see below).
+**`installArtifactPaths(devflowDir)`** — new exported pure SSOT function returning `ReadonlyArray<{ relPath: string; isDir?: boolean }>`. Contains all Devflow-owned install artifacts under `devflowDir` (excluding `manifest.json`, which is removed by a separate step at the top of `removeDevFlowInstallArtifacts`): `migrations.json`, `agent-models.json`, `costs/` (isDir), `proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` (isDir), `logs/` (isDir), and the cache directory (resolved via `hudCacheDir(devflowDir)`). Used as the shared source of truth by both `removeDevFlowInstallArtifacts` (removal loop) and `enumerateDryRunExtras` (dry-run preview) — the two callers are guaranteed to list the same set by construction (avoids PF-018).
 
-**`removeDevFlowInstallArtifacts(devflowDir, verbose)`** removes (non-fatally per-item): `manifest.json`, `migrations.json` (so migrations re-run cleanly on reinstall), `agent-models.json` (install artifact — stale per-agent overrides can silently re-apply to renamed/deleted agents on reinstall), `costs/` (whole tree — auto-generated session telemetry), `proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` (directory), `logs/` (whole tree — covers proxy.log, debug logs, and all per-project-slug dirs), and `cache/` (model-discovery + HUD component caches — via `hudCacheDir()` accessor). Before removing `proxy.pid`, reads PID and checks process existence via `process.kill(pid, 0)` — if still running, emits a warning with a manual kill hint; **never kills the relay**.
+**`enumerateDryRunExtras(claudeDir, devflowDir)`** — new exported async function, extracted from the dry-run loop body for independent testability (avoids PF-018). Enumerates what is actually on disk: whole Claude directories (`commands/devflow`, `agents/devflow`, `rules/devflow`, `devflowDir/scripts`), all skill removal candidates (both prefixed and bare variants for every skill in `getAllSkillNames() ∪ LEGACY_SKILL_NAMES`), `manifest.json`, and every artifact from `installArtifactPaths(devflowDir)`. Coverage matches `removeAllDevFlow` exactly so the preview cannot diverge from the real removal.
+
+**`sweepDevflowNamespaces(claudeDir, verbose)`** — new exported function that performs a registry-diff sweep of all Devflow-owned namespaces: `agents/devflow/`, `commands/devflow/`, and `skills/` (`devflow:*` entries). Called by `removeSelectedPlugins` after per-plugin removals to prune any retired asset names (renamed or deleted from the registry) without requiring the caller to know the full registry. `knownNames` spans ALL plugins for each asset type so assets belonging to non-selected plugins are never swept (avoids PF-012). Failures always warn (a swept-but-not-removed agent keeps loading in Claude Code); removals are logged only under `verbose`.
+
+**`resolveProjectDataCleanup(answer: boolean | symbol) => boolean`** — new exported pure function. Maps a `p.confirm()` answer (boolean or cancel symbol) to a removal decision: `true` only when the user explicitly confirmed; a cancel (Ctrl-C) maps to `false` (preserve) and the uninstall continues rather than `process.exit()`-ing (applies ADR-003, avoids PF-014). Previously the cancel path called `process.exit(0)` after `removeAllDevFlow` had already run, leaving `manifest.json` on disk.
+
+**Phase runners** — extracted from the `.action()` body for independent testability. Each covers one logical stage:
+
+- **`runDryRunPhase(opts)`** — selective mode: derives plan from `computeAssetsToRemove` + `formatDryRunPlan`; full mode: calls `enumerateDryRunExtras` for each scope (exercises the production enumeration path, not only pure helpers — avoids PF-018).
+- **`runSelectivePhaseForScope(opts)`** — reverts external agent frontmatter, calls `removeSelectedPlugins` (which calls `sweepDevflowNamespaces`), cleans ambient hook if ambient plugin is removed.
+- **`runFullPhaseForScope(opts)`** — reverts external agents, calls `removeAllDevFlow`, then scope-aware devflowDir cleanup (local: always artifacts-only; user: `resolveDevflowDirCleanup` gate → prompt or artifacts-only). Takes injected `isTTY` rather than reading `process.stdin.isTTY` directly.
+- **`runCleanupPhase(opts)`** — post-loop extras on full uninstall: `.devflow/` project data dir, `.claudeignore`, `settings.json` hooks/flags, security deny list, safe-delete shell function. Takes injected `cwd` and `isTTY` so prompt gates are testable without touching developer files.
+
+**`enumerateUserDevFlowContent(devflowDir)`** (called BEFORE any removal) checks for: `devflowDir/skills/` (skill shadows), `devflowDir/rules/` (rule shadows), `devflowDir/preference-profile.md`, `devflowDir/learning.json`, and `devflowDir/hud.json`. Returns human-readable labels. `agent-models.json` is **NOT** listed here — it is classified as an install artifact (see `installArtifactPaths`).
+
+**`removeDevFlowInstallArtifacts(devflowDir, verbose)`** removes (non-fatally per-item): `manifest.json` (separate step at top), then all entries from `installArtifactPaths(devflowDir)`. Before removing `proxy.pid`, reads PID and checks process existence via `process.kill(pid, 0)` — if still running, emits a warning with a manual kill hint; **never kills the relay**.
 
 **Containment precondition** (inside the artifact-removal loop): before each `fs.rm`, computes `path.relative(devflowDir, fullPath)`. If the result is `''`, starts with `'..'`, or is absolute — **skips the removal** rather than throwing. This guards against a derived relative path (e.g. from `hudCacheDir`) collapsing to `''` and triggering a recursive wipe of all of `~/.devflow`. Asserting in production code (not only tests) keeps the invariant load-bearing (reliability rule).
 
-**Hard classification invariant**: `enumerateUserDevFlowContent` (user state — survives unless explicitly confirmed) and the artifact list in `removeDevFlowInstallArtifacts` (removed on every path: decline, cancel, non-interactive, `--keep-docs`) must be **DISJOINT**. A name in both lists makes the confirmation prompt untruthful — it is presented as user content that removal would take, then deleted regardless of the answer. A test enforces this invariant. Specifically: `agent-models.json` and `migrations.json` are install artifacts; `hud.json` is user state.
+**Hard classification invariant**: `enumerateUserDevFlowContent` (user state — survives unless explicitly confirmed) and the artifact list in `installArtifactPaths` / `removeDevFlowInstallArtifacts` (removed on every path: decline, cancel, non-interactive, `--keep-docs`) must be **DISJOINT**. A name in both lists makes the confirmation prompt untruthful — it is presented as user content that removal would take, then deleted regardless of the answer. A test enforces this invariant. Specifically: `agent-models.json` and `migrations.json` are install artifacts; `hud.json` is user state.
 
 **User-scope prompt path**: confirm → `fs.rm(devflowDir, {recursive: true, force: true})`; decline OR cancel → falls through to `removeDevFlowInstallArtifacts` (applies ADR-003, avoids PF-014). `process.exit()` is never called here.
 
@@ -215,9 +258,15 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 
 ### Migrations (`src/core/migrations.ts`)
 
-The previously-empty `MIGRATIONS` registry now has one entry: `canonicalise-agent-keys-v1` (scope `'global'`), which renames legacy keys in `~/.devflow/agent-models.json` to their canonical names.
+The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `canonicalise-agent-keys-v1` (scope `'global'`), which renames legacy keys in `~/.devflow/agent-models.json` to their canonical names.
 
-**Failure mode**: `runGlobalMigration` marks a migration applied for ANY non-throwing return. This migration catches ALL I/O failures and returns them as `warnings` — it never throws. Result: a failed write is silently marked applied and never retried. Net impact is low because `readAgentMapping` applies `canonicaliseAgentKeys` on EVERY read, so the disk file self-heals on the next write even if the one-time disk migration was lost. A future fix should make genuine I/O failure throw so the runner retries it (distinguished from "malformed file, skip it" which returns correctly). `migrations.json` is removed by `removeDevFlowInstallArtifacts` so migrations re-run cleanly on reinstall.
+**`AnyMigration`** is a discriminated union `Migration<'global'> | Migration<'per-project'>` — replaces the previous `Migration<MigrationScope>` (= bare `Migration`) annotation in registry and runner signatures. The union form lets TypeScript narrow the `run()` overload by discriminating on `scope`, eliminating the `as Migration<'global'>` casts that were previously required.
+
+**`canonicaliseAgentKeys` return shape**: now returns `{ agents, didMutate, renamed, dropped, guardDropped }` — truthful reporting of which keys were renamed (collision with canonical already present), which were dropped (canonical key already present, old value discarded), and which were guard-dropped (prototype-pollution guard). `normaliseRunResult` is deleted; `run()` collapses to parse → canonicalise → write → report in a single linear flow.
+
+**Shared envelope parser**: `parseAgentMappingEnvelope(filePath)` from `agent-models.ts` handles I/O, BOM-strip, JSON parse, and shape validation. It is now used by both `readAgentMapping` (in-memory canonicalisation path) and the migration (disk-rewrite path) — single parse site for the agent-models envelope.
+
+**Failure mode**: `runGlobalMigration` marks a migration applied for ANY non-throwing return. The `canonicalise-agent-keys-v1` entry catches ALL I/O failures and returns them as `warnings` — it never throws. Result: a failed write is silently marked applied and never retried. Net impact is low because `readAgentMapping` applies `canonicaliseAgentKeys` on EVERY read, so the disk file self-heals on the next write even if the one-time disk migration was lost. A future fix should make genuine I/O failure throw so the runner retries it (distinguished from "malformed file, skip it" which returns correctly). `migrations.json` is removed by `removeDevFlowInstallArtifacts` so migrations re-run cleanly on reinstall.
 
 ## Integration Patterns
 
@@ -248,8 +297,9 @@ The previously-empty `MIGRATIONS` registry now has one entry: `canonicalise-agen
 - **Combining `--reset` with `--plugin`** — factory reset and partial install are mutually exclusive; init rejects the combination before seeding.
 - **Auto-adopting default-OFF flags in `resolveSeedFlags`** — only default-ON flags are auto-adopted when new (∉ knownFlags). Default-OFF flags must always be explicitly user-selected.
 - **Running `reapplyAgentMapping` before proxy preflight resolves** — must use the final `proxyEnabled` value. Running it earlier materializes GPT model lines even after a preflight failure, breaking the dormancy invariant.
-- **Putting a name in both `enumerateUserDevFlowContent` and `removeDevFlowInstallArtifacts`** — makes the confirmation prompt untruthful (item is presented as user content, then deleted regardless of user answer). A test enforces disjointness.
+- **Putting a name in both `enumerateUserDevFlowContent` and `installArtifactPaths`** — makes the confirmation prompt untruthful (item is presented as user content, then deleted regardless of user answer). A test enforces disjointness.
 - **Importing `EXCLUDED` as an oracle in tests** — destroys the test's independent literal check and turns invariant guards into tautologies. Pin an independent literal in the test alongside the production import.
+- **Dry-run preview using only pure helpers instead of the production enumeration path** — `runDryRunPhase` (full mode) must call `enumerateDryRunExtras`, which itself calls `installArtifactPaths`. A test that exercises only the pure helper (`installArtifactPaths` in isolation) does not catch divergence between the preview and the real removal loop. (avoids PF-018)
 
 ## Gotchas
 
@@ -259,7 +309,7 @@ The previously-empty `MIGRATIONS` registry now has one entry: `canonicalise-agen
 
 - **Agents have no legacy name list.** Orphan cleanup of agent files is the ungated registry-diff sweep via `sweepOrphanedAssets`. `LEGACY_SKILL_NAMES` and the `LEGACY_SKILLS_*` lists REMAIN load-bearing — they delete pre-namespace bare dirs outside the `devflow:` namespace.
 
-- **`sweepOrphanedAssets` returns scanned count, not removed count.** Tests use this to assert the sweep was non-vacuous. A return of 0 means the predicate matched nothing — the registry is not being exercised.
+- **`sweepOrphanedAssets` returns a `SweepResult` struct, not a count.** The `scanned` field is the count of entries matched by the predicate (not the removed count) — use it for non-vacuousness assertions in tests. A `scanned` of 0 means the predicate matched nothing; the `removed` array holds the names actually deleted; `failed` records per-item removal errors.
 
 - **`migrations.json` is an install artifact, not user state.** It is removed by `removeDevFlowInstallArtifacts` so that migrations (including `canonicalise-agent-keys-v1`) re-run cleanly on reinstall rather than remaining permanently marked done.
 
@@ -277,19 +327,21 @@ The previously-empty `MIGRATIONS` registry now has one entry: `canonicalise-agen
 
 - **`proxy` seeds from the manifest group, not the config group.** Unlike `memory`/`learning`/`knowledge` (config.json wins per ADR-001), `proxy` follows the same seeding path as `ambient`/`hud`/`rules` — manifest is authoritative, then registry default (`false`). Do not gate `proxy` on `readConfigIfPresent`.
 
+- **PF-018: dry-run preview must exercise the production enumeration path.** The original test (9j) tested `installArtifactPaths` in isolation. When the dry-run loop was refactored to use `enumerateDryRunExtras`, a real divergence (bare legacy skill dirs and `agent-models.json` were shown in the preview but not in the production removal path) was missed. The fix: `runDryRunPhase` (full mode) calls `enumerateDryRunExtras`, which derives from `installArtifactPaths` and the same skill-candidate sets that `removeAllDevFlow` uses. The updated test exercises `runDryRunPhase` directly, not only the pure helper.
+
 ## Key Files
 
-- `src/core/orphan-sweep.ts` — `sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<number>`; shared by both installer and uninstall; returns scanned count (not removed count); per-item failure isolation on both readdir and rm
-- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills, commands, agents via `sweepOrphanedAssets`
+- `src/core/orphan-sweep.ts` — `sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<SweepResult>`; `SweepResult = { scanned, removed, failed }`; `mdFileName` / `mdEntryName` inverse pair; shared by both installer and uninstall; per-item failure isolation on both readdir and rm
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport` (+ `sweptOrphans`, `sweepFailures`), `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills, commands, agents via `sweepOrphanedAssets`
 - `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
-- `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`
+- `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`; `isContainedIn(parent, candidate)` pure containment predicate (guards path-traversal in reapplyAgentMapping)
 - `src/targets/claude-code/legacy.ts` — `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
 - `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; proxy preflight block using `buildRealPreflightDeps` factory (`swallowSettingsReadError: true`); `reapplyAgentMapping` call (ordering load-bearing, guarded when mapping is empty AND proxy is off); exhaustive `ShadowSkipReason` switch with `never` guard
 - `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `applyCliToggles`, `FEATURE_DEFAULTS` (proxy: false)
-- `src/cli/commands/uninstall.ts` — exported: `removeAllDevFlow`, `removeSelectedPlugins`, `isDevFlowInstalled`, `enumerateUserDevFlowContent` (skills/rules/preference-profile/learning.json/hud.json — NOT agent-models.json), `removeDevFlowInstallArtifacts` (manifest.json + migrations.json + agent-models.json + costs/ + logs/ + cache/ + proxy artifacts; containment guard; `isDir === true` strict equality), `revertExternalAgents` runs on both full and selective paths, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup` (--keep-docs honored)
+- `src/cli/commands/uninstall.ts` — exported: `removeAllDevFlow`, `removeSelectedPlugins`, `isDevFlowInstalled`, `installArtifactPaths` (SSOT for artifact list), `enumerateDryRunExtras` (derived from installArtifactPaths + skill lists), `sweepDevflowNamespaces` (named selective-path sweep step), `resolveProjectDataCleanup` (pure: cancel→preserve, no process.exit), `enumerateUserDevFlowContent` (skills/rules/preference-profile/learning.json/hud.json — NOT agent-models.json), `removeDevFlowInstallArtifacts` (uses installArtifactPaths; containment guard; `isDir === true` strict equality), `revertExternalAgents` runs on both full and selective paths, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup` (--keep-docs honored); phase runners: `runDryRunPhase`, `runSelectivePhaseForScope`, `runFullPhaseForScope`, `runCleanupPhase` (injected cwd + isTTY)
 - `src/core/manifest.ts` — `ManifestData` (with `knownPlugins`, `features.knownFlags`, `features.proxy`), `readManifest` (self-heals via `asStringArray`; proxy absent→false), `writeManifest`, `syncManifestFeature`, `resolvePluginList` (filters `DELETED_PLUGIN_NAMES` via in-memory filter)
 - `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS` (22 plugins — no devflow-audit-claude), `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `getAllAgentNames`, `partitionSelectablePlugins`, `EXCLUDED` (module-level export), `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`, `DELETED_PLUGIN_NAMES` (['devflow-audit-claude'])
-- `src/core/migrations.ts` — `MIGRATIONS` registry (one entry: `canonicalise-agent-keys-v1`, scope `'global'`); `runGlobalMigration` marks applied on ANY non-throwing return; failure-as-warning means a failed write is permanently skipped (self-healed by `readAgentMapping`)
+- `src/core/migrations.ts` — `MIGRATIONS: readonly AnyMigration[]` (one entry: `canonicalise-agent-keys-v1`, scope `'global'`); `AnyMigration = Migration<'global'> | Migration<'per-project'>` discriminated union; `canonicaliseAgentKeys` returns `{agents, didMutate, renamed, dropped, guardDropped}`; `parseAgentMappingEnvelope` shared with `readAgentMapping`; failure-as-warning means a failed write is permanently skipped (self-healed by `readAgentMapping`)
 - `src/cli/commands/proxy.ts` — `applyDisableToSettings`, `buildRealPreflightDeps`, `addProxyHooks`, `removeProxyHooks`, `applyProxyEnv`, `stripProxyEnv`
 - `src/core/flags.ts` — `FLAG_REGISTRY`, `resolveExistingViewMode`, `resolveFinalViewMode`, `applyFlags`, `stripFlags`, `getDefaultFlags`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
@@ -303,6 +355,7 @@ The previously-empty `MIGRATIONS` registry now has one entry: `canonicalise-agen
 - ADR-014: State-aware re-init — governs `readManifest` self-heal idiom (`proxy` absent→false) and the `knownFlags`/`knownPlugins` snapshot pattern for detecting newly added registry entries
 - PF-009: Per-item failure isolation — per-rule try/catch inside `installRuleFile`; `rules --enable` wraps `installAllRules`; proxy preflight failure warns + forces off without aborting init; `sweepOrphanedAssets` outer/inner independent catches; proxy artifact removal is per-item non-fatal; non-fatal catches can mask systematic TypeErrors when optional properties are not narrowed
 - PF-012: LEGACY_* lists deletion-risk — lists split between `src/targets/claude-code/legacy.ts` (skill) and `src/core/plugins.ts` (plugin/command/rule); both must be retained across upgrades
-- PF-014: process.exit() skips cleanup — governs the cancel/decline path in user-scope uninstall; `removeDevFlowInstallArtifacts` must execute on every non-confirm path
+- PF-014: process.exit() skips cleanup — governs the cancel/decline path in user-scope uninstall; `removeDevFlowInstallArtifacts` must execute on every non-confirm path; `resolveProjectDataCleanup` maps cancel→false (preserve) instead of process.exit()
+- PF-018: Dry-run regression test must exercise the production output path — the original helper-only test missed a real preview/deletion divergence; `runDryRunPhase` (full mode) calls `enumerateDryRunExtras` which shares `installArtifactPaths` with the removal loop
 - Feature knowledge: `external-model-routing` — deep proxy mechanics (lifecycle, preflight protocol, ensure-proxy hook, per-agent model mapping, dormancy invariant, agent frontmatter rewriting, TUI); `installer-shadowing` covers only proxy's footprint in the install/uninstall pipeline and init seeding
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer
