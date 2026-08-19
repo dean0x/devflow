@@ -29,6 +29,7 @@ import {
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
 import type { RunMigrationsResult } from '../src/core/migrations.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -852,6 +853,91 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     // Stale files (names absent from registry) should be removed by the sweep
     await expect(fs.access(path.join(claudeDir, 'commands', 'devflow', 'stale.md'))).rejects.toThrow();
     await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Init-level LEGACY_SKILL_NAMES cleanup pin (init.ts:1149-1153)
+//
+// After the installer.ts bare-rm fix, installViaFileCopy no longer removes bare
+// skill dirs. Init.ts:1149-1153 (the LEGACY_SKILL_NAMES cleanup pass) is now
+// the SOLE path that removes bare legacy dirs. This describe pins that:
+//   (a) installViaFileCopy does NOT remove bare codebase-navigation/ (ordering dep)
+//   (b) the LEGACY_SKILL_NAMES cleanup DOES remove it
+//
+// Both tests are preservation tests (GREEN before and after the fix); they exist
+// to prevent accidental removal of the init.ts cleanup pass and to document the
+// ordering dependency that installer.ts's bare-rm deletion relies on.
+// ---------------------------------------------------------------------------
+describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-cleanup-'));
+    claudeDir = path.join(tmpDir, 'claude');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('installViaFileCopy does not remove bare codebase-navigation/ (init.ts owns that cleanup)', async () => {
+    // codebase-navigation is in LEGACY_SKILL_NAMES but NOT in the live registry.
+    // The installer's bare-rm loop (which was the bug) iterated DEVFLOW_PLUGINS skills,
+    // so codebase-navigation was never removed by installViaFileCopy even before the fix.
+    // This test pins: installViaFileCopy is not responsible for LEGACY_SKILL_NAMES cleanup.
+    const skillsDir = path.join(claudeDir, 'skills');
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const devflowDir = path.join(tmpDir, 'devflow');
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: false,
+      spinner: noopSpinner,
+    });
+
+    // codebase-navigation/ must survive installViaFileCopy — init.ts:1149 owns its cleanup
+    await expect(
+      fs.access(path.join(skillsDir, 'codebase-navigation')),
+      'codebase-navigation/ must not be removed by installViaFileCopy',
+    ).resolves.toBeUndefined();
+  });
+
+  it('LEGACY_SKILL_NAMES cleanup removes bare codebase-navigation/ after installViaFileCopy', async () => {
+    // Simulate the full init flow: installViaFileCopy + LEGACY_SKILL_NAMES cleanup.
+    // This is what init.ts:1130 + 1149-1153 does together.
+    const skillsDir = path.join(claudeDir, 'skills');
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const devflowDir = path.join(tmpDir, 'devflow');
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: false,
+      spinner: noopSpinner,
+    });
+
+    // Step 2: LEGACY_SKILL_NAMES cleanup — mirrors init.ts:1149-1153 exactly.
+    await Promise.allSettled(
+      LEGACY_SKILL_NAMES.map(legacy =>
+        fs.rm(path.join(skillsDir, legacy), { recursive: true })
+      )
+    );
+
+    // codebase-navigation/ must be gone after the LEGACY_SKILL_NAMES pass
+    await expect(
+      fs.access(path.join(skillsDir, 'codebase-navigation')),
+      'codebase-navigation/ must be removed by the LEGACY_SKILL_NAMES cleanup pass',
+    ).rejects.toThrow();
   });
 });
 

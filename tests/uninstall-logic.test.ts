@@ -6,6 +6,7 @@ import * as path from 'path';
 import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
 import { modelCacheDir } from '../src/core/cache.js';
+import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
@@ -1279,6 +1280,44 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
     const hasBareSkill = entries.some(e => e.includes('codebase-navigation'));
     expect(hasBareSkill, 'bare legacy skill dir codebase-navigation must be listed in dry-run extras').toBe(true);
   });
+
+  // -------------------------------------------------------------------------
+  // PF-012: enumerateDryRunExtras bare-skill safety
+  //
+  // Before fix: the bare pass iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES,
+  // so bare security/ (a foreign dir colliding with a live-registry name) was
+  // included in the preview list — implying it would be deleted.
+  //
+  // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
+  //   - bare codebase-navigation/ IS listed (it is in LEGACY_SKILL_NAMES)
+  //   - bare security/ is NOT listed (it is NOT in LEGACY_SKILL_NAMES)
+  //
+  // Discriminating: the "does NOT contain bare security" assertion fails RED
+  // before the fix and passes GREEN after.
+  // -------------------------------------------------------------------------
+  it('(PF-012) dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed both dirs so the existence guard (fs.access) includes them when present.
+    await fs.mkdir(path.join(skillsDir, 'security'), { recursive: true });
+    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+
+    const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
+
+    // codebase-navigation IS in LEGACY_SKILL_NAMES — must appear in the preview.
+    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    expect(
+      entries.some(e => e === bareLegacyPath),
+      `bare codebase-navigation path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
+    ).toBe(true);
+
+    // security is NOT in LEGACY_SKILL_NAMES — its bare path must NOT appear in the preview.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    expect(
+      entries.some(e => e === bareForeignPath),
+      `bare security path (${bareForeignPath}) must NOT appear in enumerateDryRunExtras (foreign dir)`,
+    ).toBe(false);
+  });
 });
 
 describe('runSelectivePhaseForScope (A8)', () => {
@@ -1636,5 +1675,116 @@ describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', ()
 
     // Registry skill must survive the sweep (analogous to agent and command survival assertions)
     await expect(fs.access(prefixedDir)).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-012: removeAllDevFlow bare-skill safety
+//
+// Before fix: removeAllDevFlow iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES
+// for BOTH the prefixed AND the bare pass. A bare ~/.claude/skills/security/
+// (foreign dir colliding with a live-registry name) would be deleted.
+//
+// After fix: bare pass iterates LEGACY_SKILL_NAMES only.
+//   - bare security/ survives (not in LEGACY_SKILL_NAMES)
+//   - bare codebase-navigation/ is removed (is in LEGACY_SKILL_NAMES)
+//   - devflow:security/ is removed (prefixed pass covers live registry)
+//
+// Discriminating: the sentinel-content assertion on security/ fails RED before
+// the fix (rmdir wipes it) and passes GREEN after.
+// ---------------------------------------------------------------------------
+describe('removeAllDevFlow: bare skill dir safety (PF-012)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('bare security/ survives, bare codebase-navigation/ removed, devflow:security/ removed', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed three dirs: one foreign bare, one legacy bare, one prefixed.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    const prefixedPath = path.join(skillsDir, 'devflow:security');
+
+    await fs.mkdir(bareForeignPath, { recursive: true });
+    await fs.mkdir(bareLegacyPath, { recursive: true });
+    await fs.mkdir(prefixedPath, { recursive: true });
+
+    const sentinel = 'sentinel-content-foreign-security-bare-dir';
+    await fs.writeFile(path.join(bareForeignPath, 'SKILL.md'), sentinel, 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    // Foreign bare security/ must survive byte-identical.
+    const survived = await fs.readFile(path.join(bareForeignPath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'bare security/SKILL.md (foreign dir) must not be deleted by removeAllDevFlow',
+    ).toBe(sentinel);
+
+    // Legacy bare codebase-navigation/ must be removed (it IS in LEGACY_SKILL_NAMES).
+    await expect(
+      fs.access(bareLegacyPath),
+      'bare codebase-navigation/ must be removed by removeAllDevFlow',
+    ).rejects.toThrow();
+
+    // Prefixed devflow:security/ must be removed (live registry coverage).
+    await expect(
+      fs.access(prefixedPath),
+      'devflow:security/ must be removed by removeAllDevFlow',
+    ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-012: removeSelectedPlugins bare-skill safety
+//
+// Before fix: for each skill in the removal set, removeSelectedPlugins tried to
+// delete bare `skill` and legacy `devflow-${skill}` variants in addition to the
+// prefixed variant. This destroyed a foreign ~/.claude/skills/security/ dir when
+// security appeared in the removal list.
+//
+// After fix: only prefixSkillName(skill) is removed; bare dirs are untouched.
+//
+// Discriminating: the sentinel check on bare security/ fails RED before the fix
+// (rmdir wipes it) and passes GREEN after.
+// ---------------------------------------------------------------------------
+describe('removeSelectedPlugins: bare skill dir safety (PF-012)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-selective-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('bare security/ survives when security is in the skills removal set', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed: foreign bare security/ with sentinel content.
+    const bareForeignPath = path.join(skillsDir, 'security');
+    await fs.mkdir(bareForeignPath, { recursive: true });
+    const sentinel = 'sentinel-content-security-bare-selective';
+    await fs.writeFile(path.join(bareForeignPath, 'SKILL.md'), sentinel, 'utf-8');
+
+    // Remove ALL plugins so 'security' is in the skills removal set
+    // (no remaining plugin retains it).
+    await removeSelectedPlugins(claudeDir, DEVFLOW_PLUGINS, false);
+
+    // Bare security/ must survive byte-identical.
+    const survived = await fs.readFile(path.join(bareForeignPath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'bare security/SKILL.md must not be deleted by removeSelectedPlugins',
+    ).toBe(sentinel);
   });
 });

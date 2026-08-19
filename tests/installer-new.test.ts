@@ -271,6 +271,65 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
       'bare (non-prefixed) dir must NOT be removed by the prefix-diff sweep',
     ).resolves.toBeUndefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // PF-012: install must not delete a bare skill dir whose name collides with
+  // a live-registry skill name.  ~/.claude/skills/ is shared with other tools;
+  // a bare dir like `security/` may belong to a third-party plugin.
+  //
+  // Discriminating: before fix the bare rm loop iterates DEVFLOW_PLUGINS and
+  // removes ~/.claude/skills/security/, wiping the sentinel → RED.
+  // After fix the bare rm loop is gone → sentinel survives → GREEN.
+  // ---------------------------------------------------------------------------
+  it('install spares a foreign bare skill dir whose name collides with a registry skill', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Seed: bare security/ with sentinel content.
+    // 'security' is in the live Devflow registry (devflow-code-review et al.) but
+    // also a plausible name for a foreign plugin's skill directory.
+    const foreignBarePath = path.join(skillsDir, 'security');
+    await fs.mkdir(foreignBarePath, { recursive: true });
+    const sentinel = 'sentinel-content-foreign-security-dir';
+    await fs.writeFile(path.join(foreignBarePath, 'SKILL.md'), sentinel, 'utf-8');
+
+    // Use a plugin that declares 'security' so devflow:security/ gets installed.
+    // The real source at src/assets/skills/security/ must exist for this to succeed.
+    const securityPlugin: PluginDefinition = {
+      name: 'devflow-test-security-only',
+      description: 'Test plugin that owns the security skill',
+      commands: [],
+      agents: [],
+      skills: ['security'],
+      optional: false,
+      rules: [],
+    };
+    const { skillsMap, agentsMap } = buildAssetMaps([securityPlugin]);
+
+    await installViaFileCopy({
+      plugins: [securityPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: false,
+      spinner,
+    });
+
+    // Foreign bare security/ must survive byte-identical — not Devflow's to delete.
+    const survived = await fs.readFile(path.join(foreignBarePath, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'foreign bare security/SKILL.md must survive installViaFileCopy unchanged',
+    ).toBe(sentinel);
+
+    // devflow:security/ was installed at the prefixed path (Devflow's copy).
+    await expect(
+      fs.access(path.join(skillsDir, 'devflow:security')),
+      'devflow:security/ must be installed at the prefixed path',
+    ).resolves.toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

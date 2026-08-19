@@ -434,8 +434,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   ));
 
-  // Skills are universally installed — always clean both naming variants
-  // to prevent duplicates (bare + prefixed) on upgrade or partial install
+  // Pre-clean the prefixed install targets before re-copying so stale content
+  // never bleeds into a fresh install. Bare pre-namespace dirs at
+  // ~/.claude/skills/{name} are owned solely by the frozen LEGACY_SKILL_NAMES
+  // pass in init.ts (runs immediately after this call, init.ts:1149). A bare
+  // dir whose name matches a current registry skill is by construction foreign
+  // to Devflow and must not be touched here (avoids PF-012).
   const allSkills = new Set<string>();
   for (const plugin of DEVFLOW_PLUGINS) {
     for (const skill of plugin.skills) {
@@ -443,10 +447,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
   }
   for (const skill of allSkills) {
-    // Remove legacy unprefixed directory
-    try {
-      await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
-    } catch { /* ignore */ }
     // Remove prefixed directory (will be re-created during install phase)
     try {
       await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });

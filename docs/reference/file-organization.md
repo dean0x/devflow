@@ -254,7 +254,9 @@ rm -rf ~/.claude/rules/devflow/
 rm -rf ~/.devflow/scripts/
 ```
 
-Skills are removed individually (prefixed + unprefixed + legacy variants) rather than by namespace directory, because the `skills/` directory is shared with other tools.
+Skills are removed individually rather than by namespace directory, because `~/.claude/skills/` is shared with other tools. Two separate passes run to avoid deleting foreign dirs (avoids PF-012):
+- **Prefixed** (`devflow:name`): removed for every skill in the live registry ∪ `LEGACY_SKILL_NAMES`.
+- **Bare** (unprefixed): removed only for entries in the frozen `LEGACY_SKILL_NAMES` list. A bare dir whose name matches a current registry skill is by construction foreign to Devflow (the `devflow:` namespace shipped in commit dcecda3, 2026-03-30) and must not be deleted.
 
 ### Selective Uninstall (`devflow uninstall --plugin <name>`)
 

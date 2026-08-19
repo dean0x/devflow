@@ -414,9 +414,11 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
  * Coverage matches removeAllDevFlow exactly:
  *   1. Whole Claude directories (commands/devflow, agents/devflow, rules/devflow)
  *      and the scripts directory inside devflowDir.
- *   2. ALL skill removal candidates: both the prefixed (devflow:name) and bare
- *      (name or devflow-name legacy) variants of every skill in
- *      getAllSkillNames() ∪ LEGACY_SKILL_NAMES.
+ *   2. ALL skill removal candidates (existence-filtered):
+ *      - Prefixed (devflow:name): live registry ∪ LEGACY_SKILL_NAMES.
+ *      - Bare (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
+ *        ~/.claude/skills/ is shared; bare dirs for live-registry skill names
+ *        are by construction foreign to Devflow (avoids PF-012).
  *   3. manifest.json (removed separately in removeDevFlowInstallArtifacts).
  *   4. Every artifact path from installArtifactPaths(devflowDir) — the single
  *      source of truth shared with the real removal loop.
@@ -438,14 +440,17 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
   }
 
   // 2. Skills: enumerate ALL removal candidates that exist on disk.
-  // removeAllDevFlow removes both the prefixed (devflow:name) and bare (name or
-  // devflow-name legacy) variants for every skill in getAllSkillNames() ∪
-  // LEGACY_SKILL_NAMES. The preview must match this exact set (avoids PF-018).
-  const allSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
+  // Mirrors removeAllDevFlow's split-pass approach (avoids PF-012 + PF-018):
+  //   Prefixed: live registry ∪ LEGACY_SKILL_NAMES
+  //   Bare: LEGACY_SKILL_NAMES only — shared skills/ dir; live-registry bare
+  //         dirs are by construction foreign to Devflow.
+  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
   const skillsDir = path.join(claudeDir, 'skills');
-  for (const skillName of allSkillNames) {
+  for (const skillName of prefixedSkillNames) {
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
     try { await fs.access(prefixedPath); extras.push(prefixedPath); } catch { /* absent */ }
+  }
+  for (const skillName of LEGACY_SKILL_NAMES) {
     const barePath = path.join(skillsDir, skillName);
     try { await fs.access(barePath); extras.push(barePath); } catch { /* absent */ }
   }
@@ -1109,12 +1114,20 @@ export async function removeAllDevFlow(
     }
   }
 
-  // Remove all Devflow skills: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
-  const allSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
+  // Remove Devflow skill directories.
+  // ~/.claude/skills/ is shared with other tools; the two passes use different
+  // name sets to avoid deleting foreign dirs (avoids PF-012):
+  //
+  //   Prefixed pass (devflow:name): live registry ∪ LEGACY_SKILL_NAMES.
+  //     prefixSkillName() is idempotent for already-prefixed legacy entries.
+  //   Bare pass (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
+  //     A bare dir whose name matches a live-registry skill is by construction
+  //     foreign to Devflow (the devflow: namespace shipped in dcecda3, 2026-03-30).
+  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
   const skillsDir = path.join(claudeDir, 'skills');
 
   let skillsRemoved = 0;
-  for (const skillName of allSkillNames) {
+  for (const skillName of prefixedSkillNames) {
     // Remove prefixed variant (devflow:name) — current naming
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
     try {
@@ -1122,7 +1135,9 @@ export async function removeAllDevFlow(
       await fs.rm(prefixedPath, { recursive: true, force: true });
       skillsRemoved++;
     } catch { /* Skill doesn't exist */ }
-    // Remove unprefixed/legacy variant (name or devflow-name)
+  }
+  for (const skillName of LEGACY_SKILL_NAMES) {
+    // Remove bare variant — frozen legacy list only, never the live registry
     const barePath = path.join(skillsDir, skillName);
     try {
       await fs.stat(barePath);
@@ -1245,17 +1260,15 @@ export async function removeSelectedPlugins(
 
   const skillsDir = path.join(claudeDir, 'skills');
   for (const skill of skills) {
-    // Remove all naming variants: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
-    const variants = [
-      prefixSkillName(skill),
-      skill,
-      `devflow-${skill}`,
-    ];
-    for (const variant of variants) {
-      try {
-        await fs.rm(path.join(skillsDir, variant), { recursive: true, force: true });
-      } catch { /* Skill might not exist */ }
-    }
+    // Remove only the prefixed variant (devflow:name) — current naming.
+    // Bare dirs (~/.claude/skills/{name}) and legacy devflow-* dirs are owned
+    // exclusively by the frozen LEGACY_SKILL_NAMES pass in removeAllDevFlow and
+    // in init.ts; live-registry skills never had bare installs (the devflow:
+    // namespace shipped in dcecda3, 2026-03-30), so a bare dir for a current
+    // registry name is by construction foreign (avoids PF-012).
+    try {
+      await fs.rm(path.join(skillsDir, prefixSkillName(skill)), { recursive: true, force: true });
+    } catch { /* Skill might not exist */ }
     if (verbose) {
       p.log.success(`Removed skill ${skill}`);
     }
