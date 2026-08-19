@@ -72,7 +72,7 @@ const COL_STATE = 13;
 /**
  * Title-case each hyphen-separated segment of the agent name for TUI display.
  *
- * Examples: 'code' → 'Code', 'claude-md-auditor' → 'Claude-Md-Auditor'
+ * Examples: 'code' → 'Code', 'my-custom-agent' → 'My-Custom-Agent'
  *
  * TUI-only — `--list` output uses the raw lowercase name from the registry.
  * Exactly ONE call site: the name cell in the row renderer below.

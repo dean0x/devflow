@@ -253,8 +253,9 @@ describe('active field brackets ‹ ›', () => {
     const state = makeState({ cursor: 1 });
     const lines = renderStripped(state);
     const nonCursorLines = lines.filter(
-      l => (l.includes('Bug-Analyzer') || l.includes('Designer')) && !l.includes('❯')
+      l => (l.includes('Diagnose') || l.includes('Design')) && !l.includes('❯')
     );
+    expect(nonCursorLines.length).toBeGreaterThan(0);
     for (const line of nonCursorLines) {
       expect(line).not.toContain('‹');
     }
@@ -752,7 +753,7 @@ describe('column bounds', () => {
     // the declared terminal width. Overflow causes visual corruption in the TUI.
     const state = makeState({
       rows: [
-        makeRow({ name: 'bug-analyzer-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
+        makeRow({ name: 'my-very-long-agent', shippedDefault: 'opus', configuredModel: 'claude-3-5-sonnet-20241022' }),
         makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'default' }),
       ],
       cursor: 0,
@@ -899,15 +900,13 @@ describe('T5: render.ts source does not reference aliasToId', () => {
 
 describe('T13: formatAgentName (Fix 4)', () => {
   it('title-cases each hyphen-separated segment', () => {
-    expect(formatAgentName('coder')).toBe('Coder');
-    expect(formatAgentName('bug-analyzer')).toBe('Bug-Analyzer');
-    expect(formatAgentName('designer')).toBe('Designer');
-    // Multi-segment: each part is capitalized independently
-    expect(formatAgentName('my-custom-agent')).toBe('My-Custom-Agent');
-    // Single-segment name: unchanged behavior, safe for next-PR renames
+    // Single-segment names: first letter capitalized
     expect(formatAgentName('code')).toBe('Code');
-    // Three-segment name: all segments capitalized
-    expect(formatAgentName('claude-md-auditor')).toBe('Claude-Md-Auditor');
+    expect(formatAgentName('diagnose')).toBe('Diagnose');
+    // Multi-segment (orphan agent-models.json keys can be arbitrary strings):
+    // each segment is capitalized independently
+    expect(formatAgentName('two-part')).toBe('Two-Part');
+    expect(formatAgentName('my-custom-agent')).toBe('My-Custom-Agent');
   });
 
   it('empty string is returned unchanged', () => {
@@ -915,7 +914,7 @@ describe('T13: formatAgentName (Fix 4)', () => {
   });
 
   it('already-capitalized names are unchanged', () => {
-    expect(formatAgentName('Coder')).toBe('Coder');
+    expect(formatAgentName('Code')).toBe('Code');
   });
 
   it('TUI renders agent names with capital first letter', () => {
