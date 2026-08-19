@@ -33,9 +33,11 @@ import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
 import {
   CLAUDE_MODEL_ALIASES,
   isDormantExternalModel,
+} from '../../core/external-models.js';
+import {
   classifyAgentState,
   type AgentState,
-} from '../../core/external-models.js';
+} from '../../core/agent-state.js';
 import { type ExternalModel, type ExternalModelCatalog } from '../../core/model-discovery.js';
 
 // ---------------------------------------------------------------------------
@@ -271,12 +273,12 @@ export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
   const persistedModel = isDirtyModel(row)
     ? row.configuredModel
     : (row.dormantModel ?? row.configuredModel);
-  return classifyAgentState(
-    persistedModel,
+  return classifyAgentState({
+    configured: persistedModel,
     proxyEnabled,
-    row.installed,
-    row.inRegistry,
-  );
+    installed: row.installed,
+    inRegistry: row.inRegistry,
+  });
 }
 
 // ---------------------------------------------------------------------------

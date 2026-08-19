@@ -35,9 +35,11 @@ import {
 import {
   CLAUDE_MODEL_ALIASES,
   isDormantExternalModel,
+} from '../../core/external-models.js';
+import {
   classifyAgentState,
   type AgentState,
-} from '../../core/external-models.js';
+} from '../../core/agent-state.js';
 import { isValidModelName } from '../../core/agent-frontmatter.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import { getAllAgentNames } from '../../core/plugins.js';
@@ -195,7 +197,7 @@ export function applySetMapping(
 // Pure helper: buildListRows
 // ---------------------------------------------------------------------------
 
-/** D-001: RowState uses AgentState from external-models (single source of truth for both --list and TUI). */
+/** D-001: RowState uses AgentState from agent-state (single source of truth for both --list and TUI). */
 export interface ListRow {
   name: string;
   defaultModel: string;
@@ -231,7 +233,7 @@ export async function buildListRows(
     const defaultModel = shippedDefaults[name] ?? 'unknown';
     const installed = installedNames.has(name);
     // inRegistry is always true here — agentNames comes from the registry.
-    const state = classifyAgentState(configured, proxyEnabled, installed, /* inRegistry */ true);
+    const state = classifyAgentState({ configured, proxyEnabled, installed, inRegistry: true });
     return { name, defaultModel, configured, effort, state };
   });
 
