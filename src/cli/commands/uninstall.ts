@@ -477,17 +477,15 @@ export async function runDryRunPhase(opts: {
  * @param opts.claudeDir   - Target Claude Code directory for this scope.
  * @param opts.devflowDir  - Devflow data directory for this scope.
  * @param opts.selectedPlugins - Plugin subset to remove.
- * @param opts.selectedPluginNames - Plugin names (for ambient-hook check).
  * @param opts.verbose     - Whether to emit verbose log lines.
  */
 export async function runSelectivePhaseForScope(opts: {
   claudeDir: string;
   devflowDir: string;
   selectedPlugins: PluginDefinition[];
-  selectedPluginNames: ReadonlyArray<string>;
   verbose: boolean;
 }): Promise<void> {
-  const { claudeDir, devflowDir, selectedPlugins, selectedPluginNames, verbose } = opts;
+  const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
 
   // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
   // lines from installed agent frontmatter while the files are still present.
@@ -520,7 +518,6 @@ export async function runSelectivePhaseForScope(opts: {
       }
     } catch { /* settings.json may not exist */ }
   }
-  void selectedPluginNames; // consumed by action for the success label
 }
 
 /**
@@ -538,6 +535,9 @@ export async function runSelectivePhaseForScope(opts: {
  * @param opts.devflowScriptsDir - scripts/ sub-directory removed by removeAllDevFlow.
  * @param opts.verbose          - Whether to emit verbose log lines.
  * @param opts.keepDocs         - When true, suppresses the full-dir prompt (artifacts-only).
+ * @param opts.isTTY            - Whether the session is interactive. Injected rather than
+ *   read from process.stdin so the prompt gate is an explicit input (matching
+ *   resolveDevflowDirCleanup) instead of an ambient global a test cannot control.
  */
 export async function runFullPhaseForScope(opts: {
   scope: 'user' | 'local';
@@ -546,8 +546,9 @@ export async function runFullPhaseForScope(opts: {
   devflowScriptsDir: string;
   verbose: boolean;
   keepDocs: boolean;
+  isTTY: boolean;
 }): Promise<void> {
-  const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs } = opts;
+  const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs, isTTY } = opts;
 
   // Revert GPT agent frontmatter before removing agents — ensures no orphaned
   // GPT model lines remain if agents dir is preserved by a later partial flow.
@@ -582,7 +583,7 @@ export async function runFullPhaseForScope(opts: {
     const userContent = await enumerateUserDevFlowContent(devflowDir);
     const cleanupDecision = resolveDevflowDirCleanup({
       scope: 'user',
-      isTTY: process.stdin.isTTY,
+      isTTY,
       userContent,
       devflowDir,
       homeDir: os.homedir(),
@@ -591,7 +592,7 @@ export async function runFullPhaseForScope(opts: {
 
     if (cleanupDecision === 'artifacts-only') {
       await removeDevFlowInstallArtifacts(devflowDir, verbose);
-      if (!process.stdin.isTTY && userContent.length > 0) {
+      if (!isTTY && userContent.length > 0) {
         p.log.info(`${devflowDir} preserved (non-interactive mode — removing scripts and install artifacts only)`);
       }
     } else {
@@ -626,28 +627,39 @@ export async function runFullPhaseForScope(opts: {
 /**
  * CLEANUP PHASE: post-loop extras run only on full uninstall.
  *
- * Steps (all non-fatal, interactive paths guarded by process.stdin.isTTY):
+ * Steps (all non-fatal, every interactive path gated on opts.isTTY):
  *   1. .devflow/ project data directory
- *   4. .claudeignore
- *   5. settings.json — remove all Devflow hooks and flags
- *   6. Security deny list
- *   7. Safe-delete shell function
+ *   2. .claudeignore
+ *   3. settings.json — remove all Devflow hooks and flags
+ *   4. Security deny list
+ *   5. Safe-delete shell function
+ *
+ * This phase touches machine-wide state outside `cwd` — the user's settings.json
+ * and shell profile — so both of its ambient inputs are injected: `cwd` (which now
+ * also seeds the git-root lookup) and `isTTY`. Reading process.stdin.isTTY directly
+ * would leave every destructive prompt gated on a global the caller cannot set,
+ * which under a TTY test runner points the prompts at the developer's real files.
  *
  * @param opts.scopesToUninstall - Scopes processed by the scope loop.
  * @param opts.keepDocs          - When true, .devflow/ and security prompts are suppressed.
  * @param opts.verbose           - Whether to emit verbose log lines.
- * @param opts.cwd               - Working directory to use for project-local path resolution
- *                                 (.devflow/, .claudeignore fallback). Defaults to
- *                                 process.cwd() at the call site; accept explicitly for tests.
+ * @param opts.cwd               - Working directory for project-local path resolution
+ *                                 (.devflow/, git root, .claudeignore fallback).
+ * @param opts.isTTY             - Whether the session is interactive. Every confirm
+ *                                 prompt in this phase is gated on it.
  */
 export async function runCleanupPhase(opts: {
   scopesToUninstall: ReadonlyArray<'user' | 'local'>;
   keepDocs: boolean;
   verbose: boolean;
   cwd: string;
+  isTTY: boolean;
 }): Promise<void> {
-  const { scopesToUninstall, keepDocs, verbose, cwd } = opts;
-  const gitRoot = await getGitRoot();
+  const { scopesToUninstall, keepDocs, verbose, cwd, isTTY } = opts;
+  // Resolve the git root from the injected cwd, not process.cwd(): otherwise
+  // .devflow/ resolves under `cwd` while .claudeignore resolves under the process
+  // directory, and the two halves of this phase act on different repositories.
+  const gitRoot = await getGitRoot(cwd);
 
   // 1. .devflow/ data directory (contains docs/, memory/, learning/, features/, etc.)
   const devflowDataDir = path.join(cwd, '.devflow');
@@ -662,7 +674,7 @@ export async function runCleanupPhase(opts: {
 
     if (keepDocs) {
       shouldRemoveDevflow = false;
-    } else if (process.stdin.isTTY) {
+    } else if (isTTY) {
       const removeDevflow = await p.confirm({
         message: '.devflow/ directory found. Remove project data (docs, memory, learning)?',
         initialValue: false,
@@ -699,7 +711,7 @@ export async function runCleanupPhase(opts: {
   } catch { /* doesn't exist */ }
 
   if (claudeignoreExists) {
-    if (process.stdin.isTTY) {
+    if (isTTY) {
       const removeClaudeignore = await p.confirm({
         message: '.claudeignore found. Remove it? (may contain custom rules)',
         initialValue: false,
@@ -755,7 +767,7 @@ export async function runCleanupPhase(opts: {
       const settings = JSON.parse(settingsContent);
 
       if (settings.hooks) {
-        if (process.stdin.isTTY) {
+        if (isTTY) {
           const removeHooks = await p.confirm({
             message: `Remove Devflow hooks from settings.json (${scope} scope)? Other settings preserved.`,
             initialValue: false,
@@ -807,7 +819,7 @@ export async function runCleanupPhase(opts: {
     const securityDecision = resolveSecurityRemovalDecision({
       anySecurityPresent,
       keepDocs,
-      isTTY: process.stdin.isTTY,
+      isTTY: isTTY,
     });
 
     let shouldRemoveSecurity = false;
@@ -856,7 +868,7 @@ export async function runCleanupPhase(opts: {
   const shell = detectShell();
   const profilePath = getProfilePath(shell);
   if (profilePath && await isAlreadyInstalled(profilePath)) {
-    if (process.stdin.isTTY) {
+    if (isTTY) {
       const removeSafeDelete = await p.confirm({
         message: `Remove safe-delete function from ${profilePath}?`,
         initialValue: false,
@@ -990,9 +1002,9 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (isSelectiveUninstall) {
-        await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins, selectedPluginNames, verbose });
+        await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins, verbose });
       } else {
-        await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs });
+        await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs, isTTY: !!process.stdin.isTTY });
       }
 
       const pluginLabel = isSelectiveUninstall
@@ -1003,7 +1015,7 @@ export const uninstallCommand = new Command('uninstall')
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
     if (!isSelectiveUninstall) {
-      await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd() });
+      await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd(), isTTY: !!process.stdin.isTTY });
     }
 
     const status = color.green('Devflow uninstalled successfully');

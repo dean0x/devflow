@@ -35,11 +35,15 @@ export function isTrunkBranch(branch: string): boolean {
  * - Rejects paths with injection characters (newlines, semicolons, shell operators)
  * - Ensures path is absolute
  * - Resolves path canonically
+ *
+ * @param cwd - Directory to resolve the git root from. Defaults to process.cwd().
+ *   Callers that already carry an explicit working directory must pass it, otherwise
+ *   they resolve half their paths from the injected dir and half from the process dir.
  */
-export async function getGitRoot(): Promise<string | null> {
+export async function getGitRoot(cwd: string = process.cwd()): Promise<string | null> {
   try {
     const { stdout } = await execAsync('git rev-parse --show-toplevel', {
-      cwd: process.cwd(),
+      cwd,
       encoding: 'utf-8'
     });
 

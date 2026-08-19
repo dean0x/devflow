@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
+import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
@@ -647,12 +648,54 @@ describe('resolveProjectDataCleanup (A7)', () => {
 
 // ─── TEST-4: removeDevFlowInstallArtifacts proxy artifact coverage ────────────
 //
-// Ordering invariant (documented here, enforced in uninstall.ts action):
+// Ordering invariant (executable guard below, in "revert-before-remove ordering"):
 //   revertExternalAgents MUST run before removeAllDevFlow so that agent files
 //   are still present when we attempt to revert their frontmatter.  If
 //   removeAllDevFlow runs first, revertExternalAgents silently skips the files
 //   (skippedMissing path) and leaves the user's install in an inconsistent
 //   state where ~/.claude/agents/devflow/code.md still has a GPT model line.
+
+// ---------------------------------------------------------------------------
+// revert-before-remove ordering — static guard
+//
+// The wrong order produces NO observable filesystem difference: the agent file is
+// deleted either way, and revertExternalAgents fails silently down its
+// skippedMissing path. A behavioural test cannot separate the two, so the source
+// order is the guard (same shape as the render.ts aliasToId guard).
+// ---------------------------------------------------------------------------
+
+describe('revert-before-remove ordering (phase runners)', () => {
+  async function phaseBody(fnName: string, nextDecl: string): Promise<string> {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf(`export async function ${fnName}`);
+    const end = src.indexOf(nextDecl, start);
+    expect(start, `${fnName} not found in source`).toBeGreaterThan(-1);
+    expect(end, `declaration after ${fnName} not found`).toBeGreaterThan(start);
+    return src.slice(start, end);
+  }
+
+  it('runSelectivePhaseForScope reverts agent frontmatter before removeSelectedPlugins', async () => {
+    const body = await phaseBody('runSelectivePhaseForScope', 'export async function runFullPhaseForScope');
+    const revertAt = body.indexOf('revertExternalAgents(');
+    const removeAt = body.indexOf('removeSelectedPlugins(');
+    // Non-vacuity: both calls must actually be present in the slice.
+    expect(revertAt).toBeGreaterThan(-1);
+    expect(removeAt).toBeGreaterThan(-1);
+    expect(revertAt).toBeLessThan(removeAt);
+  });
+
+  it('runFullPhaseForScope reverts agent frontmatter before removeAllDevFlow', async () => {
+    const body = await phaseBody('runFullPhaseForScope', 'export async function runCleanupPhase');
+    const revertAt = body.indexOf('revertExternalAgents(');
+    const removeAt = body.indexOf('removeAllDevFlow(');
+    expect(revertAt).toBeGreaterThan(-1);
+    expect(removeAt).toBeGreaterThan(-1);
+    expect(revertAt).toBeLessThan(removeAt);
+  });
+});
 
 describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', () => {
   let devflowDir: string;
@@ -1205,7 +1248,6 @@ describe('runSelectivePhaseForScope (A8)', () => {
       claudeDir,
       devflowDir,
       selectedPlugins: [bugPlugin],
-      selectedPluginNames: [bugPlugin.name],
       verbose: false,
     });
 
@@ -1220,7 +1262,6 @@ describe('runSelectivePhaseForScope (A8)', () => {
       claudeDir,
       devflowDir,
       selectedPlugins: [anyPlugin],
-      selectedPluginNames: [anyPlugin.name],
       verbose: false,
     })).resolves.not.toThrow();
   });
@@ -1260,6 +1301,7 @@ describe('runFullPhaseForScope (A8)', () => {
       devflowScriptsDir: scriptsDir,
       verbose: false,
       keepDocs: false,
+      isTTY: false,
     });
 
     // agents/devflow is gone (removeAllDevFlow)
@@ -1269,7 +1311,7 @@ describe('runFullPhaseForScope (A8)', () => {
   });
 
   it('(A8) user scope (non-TTY): assets removed, install artifacts removed (artifacts-only path)', async () => {
-    // Non-TTY: process.stdin.isTTY is falsy in tests — resolveDevflowDirCleanup → artifacts-only.
+    // isTTY:false is passed explicitly — resolveDevflowDirCleanup → artifacts-only.
     const agentsDir = path.join(claudeDir, 'agents', 'devflow');
     await fs.mkdir(agentsDir, { recursive: true });
     await fs.writeFile(path.join(agentsDir, 'git.md'), '# git', 'utf-8');
@@ -1284,6 +1326,7 @@ describe('runFullPhaseForScope (A8)', () => {
       devflowScriptsDir: scriptsDir,
       verbose: false,
       keepDocs: false,
+      isTTY: false,
     });
 
     // agents/devflow is gone
@@ -1316,11 +1359,12 @@ describe('runCleanupPhase (A8)', () => {
       keepDocs: false,
       verbose: false,
       cwd: tmpCwd,
+      isTTY: false,
     })).resolves.not.toThrow();
   });
 
   it('(A8) preserves .devflow/ in non-TTY mode (no prompt — keepDocs:false but not interactive)', async () => {
-    // process.stdin.isTTY is false in tests — shouldRemoveDevflow stays false.
+    // isTTY:false is an explicit input, not an ambient global — no prompt can fire.
     const devflowDir = path.join(tmpCwd, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'config.json'), '{}', 'utf-8');
@@ -1330,9 +1374,73 @@ describe('runCleanupPhase (A8)', () => {
       keepDocs: false,
       verbose: false,
       cwd: tmpCwd,
+      isTTY: false,
     });
 
     // .devflow/ preserved (non-TTY, no prompt fired)
     await expect(fs.access(devflowDir)).resolves.not.toThrow();
+  });
+
+  /**
+   * runCleanupPhase reaches machine-wide state (settings.json, the shell profile)
+   * and it resolves the git root to decide where .claudeignore lives. Both of its
+   * ambient inputs must come from `opts`, or the phase acts on the caller's real
+   * environment while the test believes it is sandboxed in tmpCwd.
+   *
+   * Falsification: reverting the body to `getGitRoot()` makes the second assertion
+   * fail here — the phase finds the devflow repo root and reports on ITS
+   * .claudeignore instead of the fixture's.
+   */
+  it('(A8) resolves the git root from the injected cwd, not process.cwd()', async () => {
+    // Fixture repo with NO .claudeignore. The devflow checkout running this suite
+    // DOES have one, so the two roots give observably different output: resolving
+    // from process.cwd() finds a .claudeignore and announces it; resolving from
+    // `cwd` finds none and stays silent.
+    execFileSync('git', ['init', '-q'], { cwd: tmpCwd });
+    await expect(fs.access(path.join(tmpCwd, '.claudeignore'))).rejects.toThrow();
+    // Non-vacuity: the discriminator only exists because the suite's own repo has one.
+    await expect(fs.access(path.join(process.cwd(), '.claudeignore'))).resolves.toBeUndefined();
+
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      await runCleanupPhase({
+        scopesToUninstall: [],
+        keepDocs: false,
+        verbose: false,
+        cwd: tmpCwd,
+        isTTY: false,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(written.join('')).not.toContain('.claudeignore');
+  });
+
+  /**
+   * Static guard (same shape as the render.ts aliasToId guard): every destructive
+   * prompt in this phase must be gated on opts.isTTY. A single surviving
+   * process.stdin.isTTY read would fire a confirm against the developer's real
+   * settings.json or shell profile under a TTY-attached test runner — a case no
+   * behavioural test in a piped runner can reach.
+   */
+  it('(A8) runCleanupPhase reads no ambient process.stdin.isTTY', async () => {
+    const src = await fs.readFile(
+      new URL('../src/cli/commands/uninstall.ts', import.meta.url),
+      'utf-8',
+    );
+    const start = src.indexOf('export async function runCleanupPhase');
+    const end = src.indexOf('export const uninstallCommand');
+    expect(start, 'runCleanupPhase not found in source').toBeGreaterThan(-1);
+    expect(end, 'uninstallCommand not found in source').toBeGreaterThan(start);
+
+    const body = src.slice(start, end);
+    // Non-vacuity: the slice really is the phase body, and it really does gate on isTTY.
+    expect(body).toContain('isTTY');
+    expect(body).not.toContain('process.stdin.isTTY');
   });
 });
