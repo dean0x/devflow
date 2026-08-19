@@ -346,12 +346,12 @@ async function runGlobalMigration(
  * unapplied so the next `devflow init` (which may discover the same or
  * additional projects) can retry the failed projects.
  *
- * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
- * to [] and [].every(...) returns true (vacuous truth), which would mark
- * the migration applied even though no projects were swept. This is the
- * intended behaviour: when MIGRATIONS is empty the applied-set write is
- * skipped entirely (newlyApplied stays empty), so the vacuous-truth branch
- * is a constant-time no-op.
+ * D37: runPerProjectMigration is unreachable in production — MIGRATIONS holds
+ * only a global migration (`canonicalise-agent-keys-v1`). The vacuous-truth
+ * analysis is preserved for correctness: if a per-project migration is ever
+ * added, an empty discoveredProjects list marks it applied (empty-discovery-marks-applied
+ * intended); the applied-set write is skipped only when newlyApplied is empty,
+ * which is guaranteed when MIGRATIONS has no per-project entries.
  */
 async function runPerProjectMigration(
   migration: Migration<'per-project'>,
@@ -403,8 +403,9 @@ async function runPerProjectMigration(
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
- * With an empty registry this is a constant-time no-op — the per-entry loop
- * never executes and migrations.json is never written.
+ * MIGRATIONS currently holds one global migration (`canonicalise-agent-keys-v1`);
+ * on a fresh machine the loop executes once and writes migrations.json. On
+ * subsequent runs the ID is already in the applied set and the loop is a no-op.
  *
  * @param ctx - devflowDir (memoryDir and projectRoot filled per-project)
  * @param discoveredProjects - absolute paths to discovered Claude-enabled project roots

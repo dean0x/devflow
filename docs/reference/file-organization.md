@@ -222,7 +222,7 @@ Devflow claims four namespaces inside `~/.claude/`:
 | Rules | `~/.claude/rules/devflow/` | One `.md` file per rule (e.g., `security.md`) |
 | Skills | `~/.claude/skills/devflow:*/` | One directory per skill (e.g., `devflow:software-design/`) |
 
-Nothing outside these four namespaces is written by `devflow init`. The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
+These four namespaces hold the installed asset files. `devflow init` also writes `~/.claude/settings.json` (hook registrations, flags, view mode) and `~/.devflow/` state files (manifest, migrations tracking, proxy config). The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
 
 ### Orphan Sweep (install and selective uninstall)
 
@@ -237,7 +237,7 @@ An orphan is an installed asset whose name is no longer in the plugin registry â
 
 **When it runs** (`src/targets/claude-code/installer.ts: installViaFileCopy` and `src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
 
-- **On every install** (`devflow init`): `installViaFileCopy` sweeps agents, commands, and skills after copying new files, so retired assets are removed even on partial installs.
+- **On every install** (`devflow init`): `installViaFileCopy` sweeps agents, commands, and skills before copying new skill files (pre-install sweep), so retired assets are removed even on partial installs.
 - **On selective uninstall** (`devflow uninstall --plugin <name>`): `sweepDevflowNamespaces` runs after per-plugin file removal. `knownNames` spans ALL plugins (not just the ones being uninstalled), so assets belonging to non-selected plugins are never swept.
 
 The skills sweep matches entries starting with `devflow:` against `getAllSkillNames()` â€” non-Devflow skill directories are untouched.

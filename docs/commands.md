@@ -171,7 +171,7 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 
 Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
 
-Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block, effort estimate, and a wave assignment. Produces a machine-readable tracking issue for GitHub sync.
+Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block and a wave assignment. Produces a tracking issue body written by the Synthesize agent.
 
 ```
 /dynamic-tickets <initiative-description-or-file>
