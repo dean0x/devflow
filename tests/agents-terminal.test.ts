@@ -45,7 +45,6 @@ function makeInitialState(): AgentsViewState {
     viewportOffset: 0,
     viewportHeight: 10,
     proxyEnabled: false,
-    catalog: { known: false },
     modelCycle: [],
   };
 }

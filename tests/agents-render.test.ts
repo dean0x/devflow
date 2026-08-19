@@ -34,15 +34,17 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
   };
 }
 
-function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
-  const proxyEnabled = overrides.proxyEnabled ?? true;
-  const catalog: ExternalModelCatalog =
-    'catalog' in overrides ? (overrides.catalog as ExternalModelCatalog) : UNKNOWN_CATALOG;
+function makeState(
+  overrides: Partial<AgentsViewState> & { readonly catalog?: ExternalModelCatalog } = {},
+): AgentsViewState {
+  const { catalog: catalogOverride, ...stateOverrides } = overrides;
+  const proxyEnabled = stateOverrides.proxyEnabled ?? true;
+  const catalog: ExternalModelCatalog = catalogOverride ?? UNKNOWN_CATALOG;
   const modelCycle: readonly string[] =
-    'modelCycle' in overrides
-      ? (overrides.modelCycle as readonly string[])
+    'modelCycle' in stateOverrides
+      ? (stateOverrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
-  const rows = overrides.rows ?? [
+  const rows = stateOverrides.rows ?? [
     makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
     makeRow({ name: 'code', shippedDefault: 'sonnet' }),
     makeRow({ name: 'design', shippedDefault: 'opus' }),
@@ -54,9 +56,8 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
     viewportOffset: 0,
     viewportHeight: 10,
     proxyEnabled,
-    catalog,
     modelCycle,
-    ...overrides,
+    ...stateOverrides,
   };
 }
 

@@ -85,12 +85,6 @@ export interface AgentsViewState {
   readonly viewportHeight: number;
   readonly proxyEnabled: boolean;
   /**
-   * Discovered model catalog — built once at TUI startup, startup-constant.
-   * {known:false} when the cache is empty or discovery was unavailable.
-   * On the proxy-off path the cache-based catalog is used; see selectCatalog().
-   */
-  readonly catalog: ExternalModelCatalog;
-  /**
    * Prebuilt flat cycle for all rows: ['default', ...claude, ...external].
    * Built once in buildTuiState; never reallocated per keypress (AC-P6).
    * Per-row effective cycle may splice in offCyclePin when non-null.
@@ -474,7 +468,7 @@ export function buildRow(input: InitRowInput): AgentRow {
  * Unknown keys → intent 'none', state unchanged (same reference).
  *
  * Performance: modelCycle is read from state (prebuilt, startup-constant);
- * catalog and modelCycle references are threaded unchanged through every
+ * the modelCycle reference is threaded unchanged through every
  * non-cycle reduce path (AC-P6: Object.is(s1.modelCycle, s2.modelCycle)).
  */
 export function reduce(state: AgentsViewState, key: string): ReduceResult {

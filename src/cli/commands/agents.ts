@@ -337,7 +337,7 @@ export function selectCatalog(proxyEnabled: boolean, cacheDir: string): External
  *
  * Builds modelCycle ONCE from the catalog and stores it in state.
  * The pure reducer reads state.modelCycle directly — never reallocates per
- * keypress (AC-P6). The catalog is also stored startup-constant for rendering.
+ * keypress (AC-P6).
  */
 async function buildTuiState(
   agentNames: string[],
@@ -396,7 +396,6 @@ async function buildTuiState(
     viewportOffset: 0,
     viewportHeight: computeViewportHeight(process.stdout.rows ?? 24),
     proxyEnabled,
-    catalog,
     modelCycle,
   };
 }

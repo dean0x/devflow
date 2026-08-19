@@ -128,7 +128,6 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
     viewportHeight: overrides.viewportHeight ?? 10,
     rows,
     proxyEnabled,
-    catalog,
     modelCycle,
   };
 }
@@ -486,14 +485,6 @@ describe('AC-P6: modelCycle not reallocated per keypress', () => {
     // modelCycle must be the same reference — not rebuilt per keypress
     expect(Object.is(s1.modelCycle, s2.modelCycle)).toBe(true);
     expect(Object.is(state.modelCycle, s1.modelCycle)).toBe(true);
-  });
-
-  it('catalog reference is the same across consecutive reduces', () => {
-    const state = makeState({ proxyEnabled: true });
-    const { state: s1 } = reduce(state, 'right');
-    const { state: s2 } = reduce(s1, 'right');
-    expect(Object.is(s1.catalog, s2.catalog)).toBe(true);
-    expect(Object.is(state.catalog, s1.catalog)).toBe(true);
   });
 
   it('modelCycle reference unchanged on up/down/tab/save/cancel', () => {
