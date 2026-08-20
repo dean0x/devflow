@@ -49,6 +49,20 @@ The orchestrator provides:
 | `ensure-traceable-issue` | Create or enrich a GitHub issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
 | `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) | `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional) |
 
+**Decision Marker Legend:**
+
+| Marker | Meaning |
+|--------|---------|
+| D1 | Conventions learning — `learn-conventions` writes `.devflow/conventions.md` once from a bounded git/gh scan |
+| D2 | Review-thread fetch/resolution — GraphQL thread fetch and the reply/resolve cycle |
+| D3 | Issue template — three-section structure (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) used by `ensure-traceable-issue` |
+| D4 | Degradation contract — every remote-dependent op degrades gracefully with `TRACEABILITY: DEGRADED ({reason})`, never aborting the caller's workflow |
+| D5 | Issue creation/enrichment — `ensure-traceable-issue` creates or enriches a GitHub issue and returns the number for downstream use |
+| D6 | Merge-readiness report — `check-merge-readiness` is report-only; it never takes action |
+| D7 | Review-summary dedup — one posted review-summary comment per cycle, marker-keyed, never edited after posting |
+| D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
+| D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
+
 ---
 
 ## Operation: ensure-pr-ready
@@ -464,6 +478,7 @@ Learn project conventions from git history and write `.devflow/conventions.md` o
    ## Branching Model
    {detected branching model description}
    ```
+5. Post-composition verification: after composing the file content in step 4 and before writing it to disk, scan the composed content against the raw strings collected in step 2 (branch names, tag names, PR titles). Assert that no output line reproduces any scanned string verbatim (shape-derived patterns only). If a match is found, replace that line with the step-3 generic default for that section and note the substitution in the op's output under `### Substitutions`. If no matches are found, write the file.
 
 **Degradation (D4):** If `gh` unauthenticated or remote unreachable: emit `TRACEABILITY: DEGRADED ({reason})`, fall back to git-only signals (branches, tags), note which sections used defaults, and continue — never abort the caller's workflow. Any 4xx on the `gh pr list` scan → skip the PR-title signal and use the default. 5xx → 1 retry; if still 5xx → use the default.
 
@@ -479,6 +494,9 @@ Learn project conventions from git history and write `.devflow/conventions.md` o
 - Version PR Titles: {detected | default}
 - Version Names: {detected | default}
 - Branching Model: {detected | default}
+
+### Substitutions (if any)
+- {section}: replaced verbatim match with generic default
 ```
 
 ---
@@ -492,33 +510,9 @@ Fetch external (non-devflow) unresolved review threads from a PR via GraphQL (bo
 **Degradation (D4):** No PR / `gh` unauthenticated / no remote → `TRACEABILITY: DEGRADED ({reason})`, return empty thread list; never block the caller.
 
 **Process:**
-1. Fetch review threads via GraphQL (bounded: ≤2 pages of 50, stop after 100 total):
-   ```bash
-   gh api graphql -f query='
-     query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-       repository(owner: $owner, name: $repo) {
-         pullRequest(number: $number) {
-           reviewThreads(first: 50, after: $cursor) {
-             pageInfo { hasNextPage endCursor }
-             nodes {
-               id isResolved path line
-               comments(first: 1) {
-                 nodes { body author { login } }
-               }
-             }
-           }
-         }
-       }
-     }' -f owner={owner} -f repo={repo} -F number={PR_NUMBER}
-   ```
-   Page 1 omits `cursor` (the variable is nullable, so the server starts at the beginning).
+1. Fetch review threads via GraphQL — use the `fetch_review_threads()` pattern in `devflow:git` → `references/github-api.md` § Review Threads (GraphQL); bounds: ≤2 pages of 50 (100 max).
 
-   If `pageInfo.hasNextPage` is true, fetch page 2 by re-running the SAME query with the
-   page-1 `pageInfo.endCursor` bound to a shell variable and passed as an argument:
-   `... -f owner={owner} -f repo={repo} -F number={PR_NUMBER} -f cursor="$END_CURSOR"`.
-   **Passing the cursor is what makes page 2 a second page** — omit it and the call
-   silently re-fetches page 1, so the ≤2-page bound would yield 50 threads twice
-   instead of 100 distinct ones. Stop after 2 pages.
+   **Cursor correctness trap:** Page 2 REQUIRES the page-1 `pageInfo.endCursor` bound as `$cursor` — omit it and the call silently re-fetches page 1, so the ≤2-page bound yields 50 threads twice instead of 100 distinct ones. Page 1 omits `cursor` (nullable; server starts at the beginning); if `pageInfo.hasNextPage` is true, pass the page-1 `endCursor` as `$cursor` for page 2. Stop after 2 pages.
 2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN.
 3. Apply devflow-authored exclusion predicate — exclude a thread if:
    - (PRIMARY) First comment body contains `<!-- devflow:` marker, OR
@@ -716,11 +710,12 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    `1.2.3` → `1.2.3`). All marker composition and comment text below use `v{BARE_VERSION}` —
    this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed.
 
-For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between operations):
-1. Fetch viewer login (once, before the loop): `gh api user --jq '.login'` → store as VIEWER_LOGIN
-2. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-3. Check if `<!-- devflow:shipped v{BARE_VERSION} -->` already present in viewer-authored comments. If yes: skip.
-4. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
+**Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+
+For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED ({n} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
+1. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+2. Check if `<!-- devflow:shipped v{BARE_VERSION} -->` already present in viewer-authored comments. If yes: skip.
+3. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
    expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
    ```
    <!-- devflow:shipped v{BARE_VERSION} -->
@@ -728,7 +723,7 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between opera
    ```
    Post it via `gh issue comment {number} --body-file {temp_file}` — the same `--body-file`
    form the other comment-posting operations use.
-5. Wait 1s between issues.
+4. Wait 1s between issues.
 
 **Output:**
 ```markdown
@@ -738,6 +733,9 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between opera
 - Posted: {n}
 - Skipped (already back-linked): {n}
 - DEGRADED: {n}
+- Truncated (beyond ≤50 bound): {n}
+
+### Status: COMPLETE | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed)
 ```
 
 ---
