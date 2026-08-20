@@ -10,7 +10,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { convergeComplianceArtifacts } from '../src/targets/claude-code/compliance-install.js';
-import { COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { ALWAYS_PRESENT_REFS, COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
 
 // ---------------------------------------------------------------------------
 // Test setup
@@ -658,5 +658,39 @@ describe('S78: claudeDir must be an absolute path', () => {
     });
     // The guard must not have fired — no warn about absolute path
     expect(warns.every(w => !w.includes('not an absolute path'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 11: ALWAYS_PRESENT_REFS exported from compliance.ts (I11)
+// ---------------------------------------------------------------------------
+
+describe('ALWAYS_PRESENT_REFS: exported from src/core/compliance.ts (I11)', () => {
+  it('contains detection.md and sources.md — the two unconditional refs', () => {
+    expect(ALWAYS_PRESENT_REFS).toContain('detection.md');
+    expect(ALWAYS_PRESENT_REFS).toContain('sources.md');
+  });
+
+  it('has exactly 2 entries — adding a third requires updating this test intentionally', () => {
+    // This is the sentinel: if someone adds a third always-present ref, this test
+    // fails, forcing a deliberate decision rather than a phantom drift in --status.
+    expect(ALWAYS_PRESENT_REFS).toHaveLength(2);
+  });
+
+  it('zero-framework install contains exactly the ALWAYS_PRESENT_REFS + SKILL.md', async () => {
+    // Cross-checks that the installer and the CLI status helper agree on which refs
+    // are unconditional: the install produces exactly ALWAYS_PRESENT_REFS, and
+    // installedRefIds (in compliance.ts) filters them out so they don't appear as
+    // "installed frameworks" in the drift display.
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: [], rulesEnabled: false, warn: vi.fn(),
+    });
+    const files = await listSkillFiles();
+    const alwaysPresentInRefs = ALWAYS_PRESENT_REFS.map(r => `references/${r}`);
+    for (const ref of alwaysPresentInRefs) {
+      expect(files).toContain(ref);
+    }
+    // Only SKILL.md + always-present refs — no framework refs
+    expect(files).toEqual(['SKILL.md', ...alwaysPresentInRefs].sort());
   });
 });

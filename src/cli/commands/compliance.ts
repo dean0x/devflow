@@ -15,6 +15,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 
 import {
+  ALWAYS_PRESENT_REFS,
   COMPLIANCE_FRAMEWORKS,
   normalizeFrameworks,
   parseFrameworkList,
@@ -164,8 +165,12 @@ async function installedRefIds(claudeDir: string): Promise<string[]> {
   try {
     const entries = await fs.readdir(refDir);
     return entries
-      .filter(e => e.endsWith('.md') && e !== 'detection.md' && e !== 'sources.md')
-      .map(e => path.basename(e, '.md'));
+      .filter(e => e.endsWith('.md') && !ALWAYS_PRESENT_REFS.includes(e))
+      .map(e => path.basename(e, '.md'))
+      // S58: sanitize — keep only entries whose basename matches the expected id
+      // shape (lowercase letters, digits, hyphens). Strips terminal-escape sequences
+      // or path segments that could be injected via a crafted filename.
+      .filter(id => /^[a-z0-9-]+$/.test(id));
   } catch {
     return [];
   }

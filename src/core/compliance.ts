@@ -54,6 +54,18 @@ export const COMPLIANCE_FRAMEWORKS: readonly ComplianceFramework[] = [
 /** Placeholder inserted in the compliance rule file and replaced at install time. */
 export const COMPLIANCE_RULE_PLACEHOLDER = '${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
 
+/**
+ * Reference files always installed in the compliance skill directory,
+ * regardless of framework selection.
+ *   detection.md — generic detection heuristics
+ *   sources.md   — authoritative source index
+ *
+ * Exported (ADR-013: pure constant in src/core/) so both compliance-install.ts
+ * (install) and compliance.ts CLI (status/drift detection) share a single
+ * definition. Adding a third always-present ref requires only one change here.
+ */
+export const ALWAYS_PRESENT_REFS: readonly string[] = ['detection.md', 'sources.md'];
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

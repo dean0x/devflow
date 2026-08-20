@@ -40,6 +40,7 @@ The orchestrator provides:
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `check-ci-status` | Check CI/PR check status for a branch | `PR_NUMBER` (optional), `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT`, `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional) |
+| `gather-release-evidence` | Collect commit list and shipped issues since the last tag for release notes (D4) | `WORKTREE_PATH` (optional) |
 | `learn-conventions` | Bounded scan → write .devflow/conventions.md once (D1) | `WORKTREE_PATH` (optional) |
 | `fetch-review-threads` | GraphQL reviewThreads, filter devflow-authored, return ext-* records (D2) | `PR_NUMBER`, `WORKTREE_PATH` (optional) |
 | `resolve-review-threads` | Reply to and optionally resolve external review threads (D2, D9) | `THREAD_MAP`, `VERIFICATION_STATUS`, `PR_NUMBER`, `WORKTREE_PATH` (optional) |
@@ -402,8 +403,9 @@ Create a GitHub release with version tag.
 
 **Process:**
 1. Validate version format (semver: X.Y.Z) — fail loudly on mismatch
+1b. Conventions: if `.devflow/conventions.md` exists, read the `## Version Names` and `## Version PR Titles` sections. Use the detected tag format when creating the annotated tag in step 3 and when composing the release title in step 5 (defaults when file is absent: tag `v{VERSION}`, title `v{VERSION}`).
 2. Verify clean working directory — fail loudly if dirty
-3. Create annotated tag with changelog content — fail loudly on error
+3. Create annotated tag with changelog content (using the tag format from step 1b) — fail loudly on error
 4. Push tag to origin — fail loudly on error; a failed push must never be swallowed and the release must not be reported as created
 5. Compose release notes body:
    - Start with `CHANGELOG_CONTENT`
@@ -421,6 +423,39 @@ Create a GitHub release with version tag.
 ### Next Steps
 - Verify at: {url}
 - Check package registry (if applicable)
+```
+
+---
+
+## Operation: gather-release-evidence
+
+Collect release evidence — commit list and shipped issue numbers since the last tag — for inclusion in release notes. Called before `create-release` to supply `COMMIT_LIST` and `SHIPPED_ISSUES`.
+
+**Input:** `WORKTREE_PATH` (optional)
+
+**Degradation (D4):** `gh` unauthenticated or remote unreachable → collect git-only signals (commit list from local history); emit `TRACEABILITY: DEGRADED ({reason})` for any GitHub signal that could not be fetched; continue — never abort the caller's workflow.
+
+**Process:**
+1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
+2. Collect commit list: `git log {last_tag}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and {n} more commits` note to signal truncation.
+3. Extract issue numbers from commit messages in `COMMIT_LIST`: parse for `#[0-9]+` references from `refs #`, `closes #`, `fixes #` patterns (case-insensitive).
+4. If `gh` is authenticated and remote is reachable: for each commit in the range, fetch merged PRs that include that commit and collect their `closingIssuesReferences` via `gh api`; merge with the commit-message set. On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
+5. Deduplicate all collected issue numbers; retain only digit-only entries; take the first ≤50; if more exist, append a `…and {n} more issues` note.
+
+**Output:**
+```markdown
+## Release Evidence
+**Last tag**: {last_tag or "initial commit"}
+**Commits since last tag**: {n} (bounded to ≤100)
+**Shipped issues**: {n} (bounded to ≤50)
+
+### COMMIT_LIST
+{git log --oneline output, ≤100 entries}
+
+### SHIPPED_ISSUES
+{space-separated issue numbers, ≤50}
+
+### Status: READY | DEGRADED ({reason})
 ```
 
 ---
@@ -447,7 +482,7 @@ Learn project conventions from git history and write `.devflow/conventions.md` o
    - Branches: `git branch -r --format='%(refname:short)' | head -50` — detect prefix/separator patterns
    - Tags: `git tag --sort=-version:refname | head -20` — detect version name patterns (e.g., `v1.2.3`, `1.2.3`)
    - Merged PR titles: `gh pr list --state merged --limit 30 --json title --jq '.[].title'` — detect PR title convention
-   - Integration branch: of the ≤5 candidates `main`, `master`, `develop`, `integration`, `trunk`, whichever exists on the remote with the most merge commits — one `git rev-list --count --merges origin/{candidate}` per candidate, at most 5 commands. Never walk merge history unbounded.
+   - Integration branch: of the ≤5 candidates `main`, `master`, `develop`, `integration`, `trunk`, whichever exists on the remote with the most merge commits — one `git rev-list --count --merges --max-count=200 origin/{candidate}` per candidate (bounded to 200 merges — sufficient for heuristic ordering), at most 5 commands.
 3. For each section, apply heuristics with a 50% majority rule. If no clear pattern: apply compliance defaults:
    - Branch Naming: `{type}/{description}` (types: feat/fix/docs/refactor/chore)
    - PR Titles: `{type}({scope}): {description}` (conventional commits)
@@ -663,7 +698,7 @@ Report-only merge readiness check (D6). Never takes action — reports READY or 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, return DEGRADED verdict.
 
 **Process:**
-1. Fetch unresolved review threads count (GraphQL, same query as fetch-review-threads; count only, no body fetch)
+1. Fetch unresolved review threads via GraphQL: `reviewThreads(first: 100) { nodes { isResolved } totalCount }`. Count unresolved from nodes (`isResolved == false`). If `totalCount > 100`, report the unresolved count as approximate: prefix with `>` and note `(count approximate — PR has more than 100 threads)`.
 2. Fetch PR review decision: `gh pr view {PR_NUMBER} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)

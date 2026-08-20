@@ -13,7 +13,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, rulesDir } from '../../core/assets.js';
-import { normalizeFrameworks, stampComplianceRule, type ComplianceFeatureState } from '../../core/compliance.js';
+import { ALWAYS_PRESENT_REFS, normalizeFrameworks, stampComplianceRule, type ComplianceFeatureState } from '../../core/compliance.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -57,15 +57,6 @@ export interface ConvergeComplianceArtifactsResult {
    */
   converged: boolean;
 }
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-/**
- * Reference files always included regardless of the framework selection.
- * detection.md — generic detection heuristics
- * sources.md   — authoritative source index
- */
-const ALWAYS_PRESENT_REFS: readonly string[] = ['detection.md', 'sources.md'];
 
 // ── Path helpers ───────────────────────────────────────────────────────────
 

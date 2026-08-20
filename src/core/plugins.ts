@@ -316,6 +316,50 @@ export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly s
  */
 export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly string[];
 
+// ── Feature redirect ──────────────────────────────────────────────────────────
+
+/**
+ * Plugin names (and aliases) that have been converted to built-in features.
+ * These names are no longer valid plugin selections; the corresponding feature
+ * is now managed via `devflow compliance` (or similar) instead.
+ */
+const FEATURE_REDIRECTED_NAMES: ReadonlySet<string> = new Set([
+  'devflow-compliance', // B2: converted to built-in feature; manage via `devflow compliance`
+  'compliance',         // shorthand alias users may type
+]);
+
+/**
+ * Resolve feature redirects from a requested plugin list.
+ *
+ * Identifies retired plugin names (converted to built-in features), strips them
+ * from the list, and returns the remaining plugins along with a notice when any
+ * were found. Callers should:
+ *   1. Print `notice` when present.
+ *   2. Continue with `remaining` (pass to parsePluginSelection).
+ *   3. Exit only when `remaining` is empty (nothing else to install/uninstall).
+ *
+ * This prevents a mixed --plugin list like `devflow-implement,devflow-compliance`
+ * from silently no-oping: the compliance redirect fires, the notice is emitted,
+ * and devflow-implement is still installed/uninstalled correctly.
+ */
+export function resolveFeatureRedirect(
+  requested: string[],
+): { redirected: string[]; remaining: string[]; notice?: string } {
+  const redirected: string[] = [];
+  const remaining: string[] = [];
+  for (const name of requested) {
+    if (FEATURE_REDIRECTED_NAMES.has(name)) {
+      redirected.push(name);
+    } else {
+      remaining.push(name);
+    }
+  }
+  const notice = redirected.length > 0
+    ? 'compliance is now a built-in feature — manage it with `devflow compliance`'
+    : undefined;
+  return { redirected, remaining, notice };
+}
+
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.
  * Validates against known plugins; returns invalid names as errors.

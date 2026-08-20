@@ -8,6 +8,7 @@ import {
   buildFullSkillsMap,
   partitionSelectablePlugins,
   prefixSkillName,
+  resolveFeatureRedirect,
   WORKFLOW_ORDER,
   EXCLUDED,
   DELETED_PLUGIN_NAMES,
@@ -534,5 +535,61 @@ describe('dream-memory skill removal (eager memory refresh)', () => {
   it('getAllSkillNames does not include dream-memory', () => {
     const skills = getAllSkillNames();
     expect(skills).not.toContain('dream-memory');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveFeatureRedirect (I30: mixed --plugin list must not silently no-op)
+// ---------------------------------------------------------------------------
+
+describe('resolveFeatureRedirect', () => {
+  it('compliance-only: redirected, empty remaining, notice present', () => {
+    const result = resolveFeatureRedirect(['devflow-compliance']);
+    expect(result.redirected).toEqual(['devflow-compliance']);
+    expect(result.remaining).toEqual([]);
+    expect(result.notice).toMatch(/compliance.*built-in feature/i);
+  });
+
+  it('compliance alias ("compliance") also redirects', () => {
+    const result = resolveFeatureRedirect(['compliance']);
+    expect(result.redirected).toEqual(['compliance']);
+    expect(result.remaining).toEqual([]);
+    expect(result.notice).toBeDefined();
+  });
+
+  it('mixed list: devflow-compliance stripped, other plugins remain (regression guard for I30)', () => {
+    // This is the exact scenario that was silently no-oping before the fix:
+    // devflow init --plugin=devflow-implement,devflow-code-review,devflow-compliance
+    // should install devflow-implement and devflow-code-review, not exit 0 before parsing.
+    const result = resolveFeatureRedirect(['devflow-implement', 'devflow-compliance', 'devflow-code-review']);
+    expect(result.redirected).toEqual(['devflow-compliance']);
+    expect(result.remaining).toEqual(['devflow-implement', 'devflow-code-review']);
+    expect(result.notice).toBeDefined();
+  });
+
+  it('mixed list with shorthand alias: compliance alias stripped, other plugins remain', () => {
+    const result = resolveFeatureRedirect(['devflow-plan', 'compliance']);
+    expect(result.redirected).toEqual(['compliance']);
+    expect(result.remaining).toEqual(['devflow-plan']);
+    expect(result.notice).toBeDefined();
+  });
+
+  it('no feature redirects: all remain, no notice', () => {
+    const result = resolveFeatureRedirect(['devflow-implement', 'devflow-plan']);
+    expect(result.redirected).toEqual([]);
+    expect(result.remaining).toEqual(['devflow-implement', 'devflow-plan']);
+    expect(result.notice).toBeUndefined();
+  });
+
+  it('empty input returns empty result with no notice', () => {
+    const result = resolveFeatureRedirect([]);
+    expect(result.redirected).toEqual([]);
+    expect(result.remaining).toEqual([]);
+    expect(result.notice).toBeUndefined();
+  });
+
+  it('preserves order of remaining plugins', () => {
+    const result = resolveFeatureRedirect(['devflow-plan', 'devflow-compliance', 'devflow-implement', 'devflow-resolve']);
+    expect(result.remaining).toEqual(['devflow-plan', 'devflow-implement', 'devflow-resolve']);
   });
 });

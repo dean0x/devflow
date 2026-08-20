@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, unprefixSkillName, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -961,12 +961,19 @@ export const uninstallCommand = new Command('uninstall')
     // Parse plugin selection
     let selectedPluginNames: string[] = [];
     if (options.plugin) {
-      // Friendly redirect for devflow-compliance (now a built-in feature)
-      if (options.plugin.split(',').map((s: string) => s.trim()).some((n: string) => n === 'devflow-compliance' || n === 'compliance')) {
-        p.log.info('compliance is now a built-in feature — manage it with `devflow compliance`');
+      // Friendly redirect for retired feature plugins (e.g. devflow-compliance → `devflow compliance`).
+      // Strip retired names, emit the notice, and continue with the remaining plugins so that a
+      // mixed list like `devflow-implement,devflow-compliance` still uninstalls devflow-implement.
+      // Exit 0 only when nothing non-retired remains (compliance-only invocation).
+      const rawNames = options.plugin.split(',').map((s: string) => s.trim());
+      const redirect = resolveFeatureRedirect(rawNames);
+      if (redirect.notice) {
+        p.log.info(redirect.notice);
+      }
+      if (redirect.remaining.length === 0) {
         process.exit(0);
       }
-      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      const { selected, invalid } = parsePluginSelection(redirect.remaining.join(','), DEVFLOW_PLUGINS);
       selectedPluginNames = selected;
       if (invalid.length > 0) {
         p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);

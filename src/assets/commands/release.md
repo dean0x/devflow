@@ -130,11 +130,9 @@ Confirm with user via AskUserQuestion before executing:
 Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
-2b. **Gather release evidence** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — Collect:
-    - `COMMIT_LIST`: `git log {last_tag}..HEAD --oneline` (commits since last tag; bounded ≤100 entries)
-    - `SHIPPED_ISSUES`: extract GitHub issue numbers from commit messages (refs/closes/fixes patterns) and, when `gh` is authenticated, fetch merged-PR `closingIssuesReferences` for this range; deduplicate, bound to ≤50 issues; degrade gracefully (D4: `TRACEABILITY: DEGRADED ({reason})`) on any API failure
+2b. **Gather release evidence** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Consume the returned `COMMIT_LIST` and `SHIPPED_ISSUES` for use in steps 4 and 4b. The Git agent applies bounds (≤100 commits, ≤50 issues) and degrades gracefully per D4.
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
-4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation; version name / tag / version-PR title follow `.devflow/conventions.md` when present (compliance default when absent); when COMPLIANCE_SKILL_INSTALLED, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs (Git agent includes them in the release notes body per Phase D `create-release` contract)
+4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); when COMPLIANCE_SKILL_INSTALLED, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts `<!-- devflow:shipped v{VERSION} -->` marker-deduped comment on each issue (≤50 issues, 1s throttle); degrade gracefully (D4) on any API failure — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
 6. **Post-release steps** — version bump to next dev, close milestone, etc.
