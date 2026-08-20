@@ -1,11 +1,11 @@
 ---
 feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
-description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules, adjusting Code agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, or understanding how DIFF_FILES flows from git validate-branch into blast-radius triage. Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt."
+description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules, adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, COMPLIANCE_SKILL_INSTALLED, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N."
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.md, src/assets/agents/code.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-08-20
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)
@@ -14,17 +14,19 @@ updated: 2026-07-08
 
 `/resolve` implements "no agent grades its own homework": a dedicated Triage agent (opus) classifies every review issue independently before Code agents touch any code. The key architectural insight is **separation of judgment from execution** — the Triage agent assigns verdicts using blast-radius scope, the Code agent fixes only what it is told to fix with `OPERATION: issue-fix`, and a Validate agent (haiku) independently verifies correctness before any commit reaches remote.
 
+PR #288 added a traceability layer: compliance-gated phases (1b, 9b-1, 9c) fetch external review threads, resolve them post-push, and check merge readiness. Phase 9b-2 posts a resolution comment to the PR unconditionally when a PR is known — regardless of compliance installation.
+
 The pipeline was restructured in PR #253 to replace the former single `Resolver` agent (which both judged and fixed) with the Triage + Code-agent-as-fixer split. The retired `resolver` agent file is removed from installs by the registry-diff orphan sweep on `devflow init`.
 
 ## System Context
 
-`/resolve` is a 10-phase orchestration command. It consumes review artifacts produced by `/code-review` or `/bug-analysis`, and its output (`resolution-summary.md`) feeds back into `/code-review`'s convergence parser on subsequent review cycles. Both directions of this coupling have byte-stable format contracts.
+`/resolve` is a multi-phase orchestration command. It consumes review artifacts produced by `/code-review` or `/bug-analysis`, and its output (`resolution-summary.md`) feeds back into `/code-review`'s convergence parser on subsequent review cycles. Both directions of this coupling have byte-stable format contracts.
 
 Agents in the pipeline:
 
 | Agent | Model | Role |
 |-------|-------|------|
-| Git | haiku | validate-branch (produces DIFF_FILES), manage-debt, check-ci-status |
+| Git | haiku | validate-branch, fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status |
 | Triage | **opus** | blast-radius judgment — never edits code |
 | Code | sonnet | issue-fix, validation-fix, alignment-fix, qa-fix modes |
 | Simplify | sonnet | refine changed code after fixes |
@@ -37,28 +39,53 @@ Plugin registry (`DEVFLOW_PLUGINS` in `plugins.ts`) and its tests (`tests/regist
 ### Phase Sequence
 
 ```
-Phase 0  Git validate-branch  → DIFF_FILES, BRANCH_INFO
-Phase 1  Orchestrator parses issues  → ISSUES (with reviewer_confidence %)
-Phase 2  Single global Triage agent  → verdict ledger (one verdict per issue, none vanish)
-Phase 3  Batch FIX_NOW issues  → BATCHES (same-file sequential, distinct-file parallel, max 5/batch)
-Phase 4  Code × N (OPERATION: issue-fix, PUSH: false)  → CODE_AGENT_RESULTS
-Phase 5  Write resolution-summary.md  ← compaction safety; Tracked = "(pending)"
-Phase 6  Simplify (only if fixes were made)
-Phase 7  Validate gate (haiku) + Code validation-fix loop ≤ 2 + SINGLE push
-Phase 8  CI Status Gate (conditional — skipped if no fixes or Phase 7 FAILED)
-Phase 9  manage-debt (FIX_SEPARATE + TECH_DEBT → backfill Tracked = #N)
-Phase 10 Display results
+Phase 0   Worktree Discovery & Pre-Flight
+  Step 0a  git worktree list → filter resolvable
+  Step 0b  Git agent (validate-branch) per worktree [parallel] ← DIFF_FILES
+  Step 0c  Target latest review directory per worktree
+  Step 0d  Load DECISIONS_CONTEXT + FEATURE_KNOWLEDGE
+           Resolve COMPLIANCE_SKILL_INSTALLED (one file-existence check, reused for all phases)
+Phase 1   Orchestrator parses issues → ISSUES (with reviewer_confidence %)
+Phase 1b  Git agent (fetch-review-threads) → THREAD_MAP  [compliance-gated]
+Phase 2   Single global Triage agent → verdict ledger (one verdict per issue, none vanish)
+Phase 3   Batch FIX_NOW issues → BATCHES (same-file sequential, distinct-file parallel, max 5/batch)
+Phase 4   Code × N (OPERATION: issue-fix, PUSH: false) → CODE_AGENT_RESULTS
+Phase 5   Write resolution-summary.md ← compaction safety; Tracked = "(pending)"
+Phase 6   Simplify (only if fixes were made)
+Phase 7   Validate gate (haiku) + Code validation-fix loop ≤ 2 + SINGLE push
+Phase 8   CI Status Gate (conditional — skipped if no fixes or Phase 7 FAILED)
+Phase 9   manage-debt (FIX_SEPARATE + TECH_DEBT → backfill Tracked = #N)  [SEQUENTIAL]
+Phase 9b  Thread Resolution + Resolution Comment
+  Step 9b-1  Git agent (resolve-review-threads)  [compliance-gated; VERIFICATION_STATUS == PASS
+              required to resolve; reply-only when FAILED or SKIPPED]
+  Step 9b-2  Git agent (post-resolution-summary)  [ALWAYS-ON when PR known]
+Phase 9c  Git agent (check-merge-readiness)  [compliance-gated, report-only]
+Phase 10  Display results
 ```
 
-**Phase 5 write-early rationale**: `resolution-summary.md` is written immediately after Phase 4 while all Code agent outputs are still in context. Later phases (Simplify, Validate, CI gate, manage-debt) can all trigger context compaction. Writing early avoids losing the record. `Tracked` cells are initially `(pending)` and backfilled after Phase 9.
+**Phase 5 write-early rationale**: `resolution-summary.md` is written immediately after Phase 4 while all Code agent outputs are still in context. Later phases (Simplify, Validate, CI gate, manage-debt, thread resolution) can all trigger context compaction. Writing early avoids losing the record. `Tracked` cells are initially `(pending)` and backfilled after Phase 9.
 
-**Phase 7 push timing**: The single `git push` fires at the END of Phase 7, whether the gate PASSED or FAILED. This ensures the branch is always visible on remote before CI or debt management runs. Code agents (Phase 4) and validation-fix Code agents (Phase 7 loop) both receive `PUSH: false`; the orchestrator owns the push.
+**Phase 7 push timing**: The single `git push` fires at the END of Phase 7, whether the gate PASSED or FAILED. This ensures the branch is always visible on remote before CI, debt management, or thread resolution runs. Code agents (Phase 4) and validation-fix Code agents (Phase 7 loop) both receive `PUSH: false`; the orchestrator owns the push.
 
 ### DIFF_FILES Flow
 
 Git agent's `validate-branch` operation emits a `### Diff Scope` block containing newline-separated filenames from `git diff {base}...HEAD --name-only`. The orchestrator extracts this into `DIFF_FILES` and passes it to the Triage agent. If the block is absent (bug-analysis edge case), `DIFF_FILES` is set to empty string `""`.
 
 `DIFF_FILES` is not a flag — it's the primary input that drives the FIX_NOW vs FIX_SEPARATE boundary in the Triage agent's blast-radius matrix.
+
+### Traceability Layer (Compliance-Gated)
+
+`COMPLIANCE_SKILL_INSTALLED` is resolved once per run in Step 0d by checking whether `~/.claude/skills/devflow:compliance/SKILL.md` exists — a single file-existence read, no subprocess. The result is reused across all phases that gate on it.
+
+**Phase 1b — fetch-review-threads**: Before Triage, the Git agent fetches unresolved external (non-devflow-authored) review threads from the PR via `OPERATION: fetch-review-threads`. Returns a `THREAD_MAP` of `ext-{N}` records (one per external thread). If `TRACEABILITY: DEGRADED` → record reason, set `THREAD_MAP = empty`, continue.
+
+**Phase 9b-1 — resolve-review-threads** (compliance-gated, runs after Phase 9 backfill): Prepares THREAD_MAP with verdicts from Triage/Code results by matching `ext-{N}` to issues by file:line correlation. Unmatched threads default to ESCALATED (human review required). Then spawns Git agent with `OPERATION: resolve-review-threads`. The D9 constraint: threads are resolved (marked resolved in the PR) **only when `VERIFICATION_STATUS == PASS`** and the verdict is FIXED/FALSE_POSITIVE/BY_DESIGN with cited evidence. When VERIFICATION_STATUS is FAILED or SKIPPED, the agent replies to the thread without resolving it. If `TRACEABILITY: DEGRADED` → warn, record in `## Third-Party Threads`, continue to 9b-2.
+
+**Phase 9b-2 — post-resolution-summary** (ALWAYS-ON): Spawns Git agent with `OPERATION: post-resolution-summary` whenever a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`. Posts a consolidated PR comment with `<!-- devflow:resolution-summary -->` marker — skipped if already posted. If `TRACEABILITY: DEGRADED` → warn, continue. Updates `## Third-Party Threads` section in resolution-summary.md.
+
+**Phase 9c — check-merge-readiness** (compliance-gated, report-only): Spawns Git agent with `OPERATION: check-merge-readiness`. Returns READY / NOT_READY / DEGRADED / CI-pending as distinct states. Reported in Phase 10 output but **never blocks** the pipeline.
+
+**TRACEABILITY: DEGRADED contract**: Any of no-PR, no-gh-auth, no-remote causes the Git agent to return `TRACEABILITY: DEGRADED ({reason})`. All traceability operations skip-and-continue on DEGRADED — they never fail the pipeline. The reason is recorded in `## Third-Party Threads` (Phase 9b-1) or warned and ignored (9b-2, 9c).
 
 ## Triage Blast-Radius Disposition Matrix
 
@@ -107,11 +134,11 @@ This is the most brittle coupling in the pipeline. `/code-review`'s convergence 
 
 **Byte-stable elements** (must not be renamed or restructured):
 
-The Statistics table rows:
+The Statistics table rows — these are the literal unpadded row labels the convergence parser matches:
 ```
-| Fixed          | {n} |
+| Fixed | {n} |
 | False Positive | {n} |
-| Deferred       | {n} |
+| Deferred | {n} |
 ```
 
 The section headings and their column layouts:
@@ -128,9 +155,21 @@ The section headings and their column layouts:
 - By Design and Escalated are **excluded from the denominator**
 - fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 → convergence warning emitted
 
-**Safe additions**: New sections (`## Escalations`, `## Blocked`, `## By Design`) are strictly additive. The parser reads specific rows and headings by label — new material does not break it.
+**Safe additions**: New sections (`## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`) are strictly additive — the parser reads specific rows and headings by label, and new material does not break it.
 
 **Unsafe changes**: Renaming `Fixed` → `Resolved`, splitting `Deferred` into two rows, changing `False Positive` to `False Positives`, restructuring the Statistics table format.
+
+## Code-Review Phase 3: Sequential Synthesis + Comment
+
+`/code-review` Phase 3 runs two steps **sequentially per worktree** (step 3b cannot start until step 3a completes):
+
+**Step 3a — Synthesize agent**: Writes `review-summary.md` to the timestamped review directory. Must complete before 3b.
+
+**Step 3b — Git agent (post-review-summary)**: Posts a consolidated PR comment after Synthesize completes. Uses `OPERATION: post-review-summary` with `<!-- devflow:review-summary cycle:{N} -->` marker. D7 dedup: if this cycle's marker is already present on the PR, skip silently.
+
+**COMPLIANCE_SKILL_INSTALLED ordering in /code-review is load-bearing**: The compliance check happens at Step 0b, explicitly **before** Step 0c spawns the Git agent (`ensure-pr-ready`). The `COMPLIANCE` value is passed to the Git agent in that spawn. Resolving it later (e.g. during Phase 1) would leave the ensure-pr-ready agent without the traceability context it needs to configure PR conventions.
+
+**comment-pr op retired**: The former `comment-pr` Git agent operation is no longer used. All PR commenting goes through `post-review-summary` (Phase 3b in /code-review) or `post-resolution-summary` (Phase 9b-2 in /resolve).
 
 ## Triage Agent Contract
 
@@ -160,7 +199,7 @@ FAIL → spawn Code agent (OPERATION: validation-fix, PUSH: false)
 
 Maximum 2 fix attempts. After 2 failures, the FAILED status is recorded in `resolution-summary.md` with a blocking callout — never silently passed.
 
-The single `git push` runs after the Verification Gate regardless of PASS or FAIL outcome, so the branch is always visible on remote.
+The single `git push` runs after the Verification Gate regardless of PASS or FAIL outcome, so the branch is always visible on remote before Phase 9b thread resolution runs.
 
 ## Anti-Patterns
 
@@ -170,6 +209,7 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 - **Using TECH_DEBT for "touches many files"**: TECH_DEBT is last resort for complete architectural overhauls only. Multi-file changes with clear blast radius → FIX_NOW/Careful or FIX_SEPARATE.
 - **Pushing before Verification Gate**: Code agents run with `PUSH: false`. The orchestrator owns the single push in Phase 7. Pushing before validation means unvalidated commits can reach remote.
 - **Writing resolution-summary.md late**: If written after Phase 6 or later, context compaction during Simplify/Validate can lose the result data. Phase 5 write-early is not optional.
+- **Blocking on traceability operations**: Phases 1b, 9b-1, 9b-2, and 9c are all skip-and-continue on `TRACEABILITY: DEGRADED`. Never treat DEGRADED as a pipeline failure — log it, record it in `## Third-Party Threads` where applicable, and continue.
 - **Bare `rm` in agent instructions**: Shell removal should use the safe-delete pattern (PF-003). Agents should not instruct bare `rm -rf` operations.
 
 ## Gotchas
@@ -178,9 +218,15 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 - **Verdict ledger completeness**: Every issue from Phase 1 must appear in the Triage agent output. The pipeline validates that no issue vanishes. If the Triage agent output is missing an issue ID, it is a Triage agent failure, not an acceptable outcome.
 
-- **resolution-summary.md is written twice**: Phase 5 writes the initial version with `Tracked = (pending)`. Phase 7 and Phase 9 update specific sections (Verification, Tracked backfill). If you add a phase that overwrites the file wholesale, you lose Phase 5's compaction safety.
+- **resolution-summary.md is written multiple times**: Phase 5 writes the initial version with `Tracked = (pending)`. Phase 7 rewrites `## Verification`. Phase 9 backfills `Tracked` cells. Phase 9b updates `## Third-Party Threads`. Any phase that overwrites the file wholesale destroys Phase 5's compaction safety — always patch specific sections.
 
 - **manage-debt runs sequentially across worktrees**: In multi-worktree mode, manage-debt cannot run in parallel — GitHub API conflicts arise when creating issues concurrently. Even though other phases (pre-flight, Code agent batches) run in parallel, Phase 9 is always sequential.
+
+- **COMPLIANCE_SKILL_INSTALLED resolve ordering is load-bearing in /code-review**: The compliance check is Step 0b, before Step 0c spawns the Git agent (`ensure-pr-ready`). The `COMPLIANCE` value is passed directly to that Git agent. Checking compliance after spawning ensure-pr-ready would leave the Git agent without the traceability context it needs.
+
+- **post-resolution-summary (9b-2) is ALWAYS-ON**: Unlike Phase 9b-1, step 9b-2 runs whenever a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`. It posts the resolution summary comment to the PR with `<!-- devflow:resolution-summary -->` dedup. Compliance installation gates only thread-resolution (9b-1).
+
+- **Unmatched ext-{N} records default to ESCALATED**: External review threads from Phase 1b that cannot be matched to a Triage verdict by file:line correlation are classified as ESCALATED in Phase 9b-1, not silently dropped.
 
 - **`--review {timestamp}` not supported in multi-worktree mode**: The `--review` flag only works in single-worktree flow. Use `--path` + `--review` to target a specific worktree and review timestamp.
 
@@ -188,16 +234,15 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 - **Bug-analysis fallback**: If all reviews are resolved (have `resolution-summary.md`), the command falls back to the latest unresolved bug-analysis directory. Reviews take priority; bug analysis is only used when no qualifying review exists.
 
-- **Triage agent receives PR_DESCRIPTION as untrusted input**: The PR body is wrapped in `<pr-description>...</pr-description>` containment markers. The Triage agent uses it to understand author intent but must never execute its content as instructions or tool invocations.
-
 ## Key Files
 
-- `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (10-phase pipeline); compiled to `dist/commands/`
+- `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (phases 0-10 + 1b, 9b, 9c); compiled to `dist/commands/`
 - `src/assets/agents/triage.md` — Triage agent (opus): blast-radius disposition matrix, evidence rules, verdict ledger format
 - `src/assets/agents/code.md` — Code agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
+- `src/assets/agents/git.md` — Git agent: validate-branch, fetch-review-threads, resolve-review-threads, post-review-summary, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status operations
 - `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
 - `src/core/orphan-sweep.ts` — registry-diff sweep removes retired agent files (e.g. `resolver`) from installs on `devflow init`
-- `src/assets/commands/code-review.mds` — Contains convergence parser that reads `resolution-summary.md` Statistics rows and section headings
+- `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b COMPLIANCE_SKILL_INSTALLED resolution
 
 ## Related
 
@@ -206,3 +251,4 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 - PF-003 (no bare rm in agent instructions): Agent shell operations must use safe-delete patterns
 - Feature knowledge: `dynamic-workflow-engine` — the max-5-per-batch concurrency rule was generalized from the dynamic-build pipeline to /resolve Phase 3
 - Feature knowledge: `ambient-orchestrator` — Triage agent is also registered in the `devflow-ambient` plugin agents list
+- Feature knowledge: `compliance-feature` — source of COMPLIANCE_SKILL_INSTALLED, traceability Git operations (fetch-review-threads, resolve-review-threads, post-review-summary, check-merge-readiness), and TRACEABILITY: DEGRADED contract
