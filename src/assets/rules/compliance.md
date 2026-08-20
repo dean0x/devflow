@@ -10,4 +10,4 @@ paths: []
 - Encrypt regulated data in transit (TLS 1.2+) and at rest — no plaintext exports, dumps, or backups
 - Collect the minimum: every stored field needs a purpose, a retention period, and a deletion path
 - Least privilege and segregation of duties — no shared accounts, no self-approval of changes
-- If the project CLAUDE.md has a `## Compliance` section, treat its declared frameworks as binding
+- Active frameworks: ${DEVFLOW_COMPLIANCE_FRAMEWORKS} — their controls are binding.
