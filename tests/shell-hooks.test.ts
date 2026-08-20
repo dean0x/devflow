@@ -1141,12 +1141,13 @@ describe('ensure-devflow-init behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const lines = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8').split('\n').map(l => l.trim());
-    // Wholesale .devflow/ replaced by the carve-out: everything local except feature knowledge
+    // Wholesale .devflow/ replaced by the carve-out: everything local except feature knowledge + conventions
     expect(lines).toContain('.devflow/*');
     expect(lines).toContain('!.devflow/features/');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines).toContain('!.devflow/conventions.md'); // v3 addition
     expect(lines).not.toContain('.devflow/'); // no bare wholesale line
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
     // No nested .devflow/.gitignore is written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
@@ -1212,7 +1213,7 @@ describe('ensure-root-gitignore behavioral', () => {
   const ignoreLines = (file: string): string[] =>
     fs.readFileSync(file, 'utf-8').split('\n').map(l => l.trim());
 
-  it('creates the root .gitignore (and .devflow/) when absent, writes the v2 marker', () => {
+  it('creates the root .gitignore (and .devflow/) when absent, writes the v3 marker', () => {
     // Standalone case (as session-start-context calls it): no .devflow/ exists yet.
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -1220,9 +1221,10 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.existsSync(gitignore)).toBe(true);
     expect(ignoreLines(gitignore)).toContain('.devflow/*');
     expect(ignoreLines(gitignore)).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(ignoreLines(gitignore)).toContain('!.devflow/conventions.md'); // v3 addition
     expect(ignoreLines(gitignore)).not.toContain('.devflow/'); // carve-out, not wholesale
     // The helper must create .devflow/ to host the marker even when called standalone
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
     // No nested .devflow/.gitignore written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
@@ -1257,17 +1259,17 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(ignoreLines(gitignore)).not.toContain('!.devflow/features/');
   });
 
-  it('v2 marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
+  it('v3 marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
     // Pre-seed the current-format marker; the helper must return early, leaving .gitignore untouched.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'), '');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'), '');
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     // No .gitignore should have been created because the marker fast-path fired first
     expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
   });
 
-  it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v2', () => {
+  it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v3', () => {
     // Simulate an existing v1 install: legacy comment + bare wholesale entry + v1 marker.
     fs.writeFileSync(
       path.join(tmpDir, '.gitignore'),
@@ -1284,10 +1286,11 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(lines).not.toContain('.devflow/');
     expect(content).not.toContain('remove to share via git');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines).toContain('!.devflow/conventions.md'); // v3 addition
     expect(content).toContain('node_modules/');
-    // Marker is bumped: v1 dropped, v2 written.
+    // Marker is bumped: v1 dropped, v3 written.
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
   });
 
   it('returns non-zero and creates nothing when called with an empty argument', () => {
@@ -1423,7 +1426,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     const gitignore = path.join(tmpDir, '.gitignore');
     expect(fs.existsSync(gitignore)).toBe(true);
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/features/*/KNOWLEDGE.md');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
   });
 });
 

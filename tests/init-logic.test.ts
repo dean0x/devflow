@@ -314,6 +314,76 @@ describe('ensureDevflowGitignore', () => {
   });
 });
 
+describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-v3-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const read = (): Promise<string> => fs.readFile(path.join(tmpDir, '.gitignore'), 'utf-8');
+  const lines = (content: string): string[] => content.split('\n').map(l => l.trim());
+  const markerV3 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3');
+  const markerV2 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2');
+
+  it('writes the v3 marker after installing the carve-out', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+
+    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+  });
+
+  it('includes the conventions.md re-include line in the installed block', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(lines(content)).toContain('!.devflow/conventions.md');
+  });
+
+  it('upgrades a v2-marked install once (appends conventions.md line, writes v3 marker)', async () => {
+    // Simulate a v2 install: .gitignore with the v2 sentinel, v2 marker present.
+    const v2Block = [
+      '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+      '.devflow/*',
+      '!.devflow/features/',
+      '.devflow/features/*',
+      '!.devflow/features/index.md',
+      '!.devflow/features/*/',
+      '.devflow/features/*/*',
+      '!.devflow/features/*/KNOWLEDGE.md',
+    ].join('\n') + '\n';
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), v2Block);
+    await fs.mkdir(path.join(tmpDir, '.devflow'), { recursive: true });
+    await fs.writeFile(markerV2(), '', 'utf-8');
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    // The conventions.md line must be appended.
+    expect(lines(content)).toContain('!.devflow/conventions.md');
+    // The v2 block content must still be present (no duplication).
+    expect(lines(content).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
+    // v3 marker must exist; v2 marker must be removed.
+    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+    await expect(fs.access(markerV2())).rejects.toThrow();
+  });
+
+  it('is a no-op (byte-identical) when v3 marker already exists', async () => {
+    // First run installs the carve-out and writes the marker.
+    await ensureDevflowGitignore(tmpDir, false);
+    const contentAfterFirstRun = await read();
+
+    // Second run — marker present, must be a no-op.
+    await ensureDevflowGitignore(tmpDir, false);
+    const contentAfterSecondRun = await read();
+
+    expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
+  });
+});
+
 
 describe('getManagedSettingsPath', () => {
   it('returns macOS path on darwin', () => {

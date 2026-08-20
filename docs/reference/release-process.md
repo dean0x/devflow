@@ -57,6 +57,18 @@ validate version format
   → restore [Unreleased] section + commit + push
 ```
 
+## Traceability Evidence (Compliance-Gated)
+
+When the compliance skill is installed (`~/.claude/skills/devflow:compliance/SKILL.md` exists), the `/release` command gathers and ships additional evidence:
+
+**Commit list in release notes** — `git log {last_tag}..HEAD --oneline` is collected before the release commit and passed to the Git `create-release` operation. The release notes body includes a `## Commits` section listing all commits since the last tag.
+
+**Shipped-issue back-links** — After the release is created, the Git `backlink-shipped-issues` operation posts a `<!-- devflow:shipped v{VERSION} -->` marker-deduped comment on each issue referenced in the shipped commits (≤50 issues, 1s throttle). Running the release again for the same version is safe — the marker prevents duplicate comments.
+
+**Conventions naming authority** — `.devflow/conventions.md` is the canonical source for version/tag/version-PR title conventions. It is written by the Git `learn-conventions` operation (which scans branch/tag/PR history to infer the project's naming patterns) and GIT-TRACKED so the team shares a single naming source. The `/release` command consults it when naming the tag and GitHub release. Re-learn conventions by deleting `.devflow/conventions.md` — the next Git `learn-conventions` call rewrites it from history.
+
+All three behaviors degrade gracefully (D4: `TRACEABILITY: DEGRADED ({reason})`) on API or file-access failures — they never block the release.
+
 ## Manual Fallback
 
 If CI is unavailable, release manually:

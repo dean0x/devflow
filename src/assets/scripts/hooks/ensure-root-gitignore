@@ -3,11 +3,14 @@
 # rules that govern .devflow/.
 #
 # .devflow/ holds per-developer runtime state (memory, learning, docs, locks) —
-# local by default. The ONE exception is feature knowledge bases under
-# .devflow/features/: index.md and every {slug}/KNOWLEDGE.md are shared via git
-# (tracked, then committed by the Knowledge agent at workflow end). Everything
-# else under .devflow/features/ stays local. A user opts back out by re-adding
-# `.devflow/features/` to their own .gitignore.
+# local by default. TWO exceptions are shared via git:
+# 1. Feature knowledge bases under .devflow/features/: index.md and every
+#    {slug}/KNOWLEDGE.md (tracked, committed by the Knowledge agent at workflow end).
+# 2. .devflow/conventions.md — naming-convention authority written by the Git
+#    learn-conventions operation; shared so the team uses one naming source.
+#
+# Everything else under .devflow/ stays local. A user opts back out by re-adding
+# `.devflow/features/` or `.devflow/conventions.md` to their own .gitignore.
 #
 # Re-including files under an ignored tree requires un-ignoring each level with a
 # `dir/*` + `!dir/keep` pair: a bare `.devflow/` excludes the directory outright,
@@ -20,10 +23,9 @@
 # Both reach this one writer so the rule is applied identically everywhere; this
 # decouples git-tracking of .devflow/ from any single feature toggle (avoids PF-014).
 #
-# Idempotent and O(1) after the first run via the .root-gitignore-configured-v2
-# marker. The marker is versioned: bumping it (v1 → v2) forces existing installs
-# to re-run once and upgrade their legacy wholesale `.devflow/` entry to the
-# features carve-out.
+# Idempotent and O(1) after the first run via the .root-gitignore-configured-v3
+# marker. The marker is versioned: bumping it (v2 → v3) forces existing installs
+# to re-run once and upgrade their block (adds !.devflow/conventions.md line).
 #
 # Usage: source ensure-root-gitignore "$PROJECT_ROOT"
 # Sourced helper: uses `return` (never exit), _ERG_-prefixed locals (never clobbers
@@ -32,7 +34,7 @@
 [ -z "$1" ] && return 1
 
 _ERG_DEVFLOW_DIR="$1/.devflow"
-_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2"
+_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3"
 
 # Fast-path: the marker means the root .gitignore was already configured (current
 # format) for this project.
@@ -46,6 +48,7 @@ _ERG_GITIGNORE="$1/.gitignore"
 
 # The carve-out block, built once into _ERG_BLOCK (emitted on create and append).
 # Keep byte-identical to ensureDevflowGitignore in src/targets/claude-code/post-install.ts.
+# D-GITIGNORE-V3: v3 adds !.devflow/conventions.md (naming authority, git-tracked).
 printf -v _ERG_BLOCK '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
   '# Exception: feature knowledge bases under .devflow/features/ are shared via git —' \
@@ -58,15 +61,19 @@ printf -v _ERG_BLOCK '%s\n' \
   '!.devflow/features/index.md' \
   '!.devflow/features/*/' \
   '.devflow/features/*/*' \
-  '!.devflow/features/*/KNOWLEDGE.md'
+  '!.devflow/features/*/KNOWLEDGE.md' \
+  '!.devflow/conventions.md'
 
 _ERG_OK=0
 if [ ! -f "$_ERG_GITIGNORE" ]; then
   # No .gitignore yet — create it with the block.
   printf '%s' "$_ERG_BLOCK" > "$_ERG_GITIGNORE" && _ERG_OK=1
-elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
-  # Carve-out already present — nothing to do.
+elif grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE"; then
+  # v3 carve-out already present — nothing to do.
   _ERG_OK=1
+elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
+  # v2→v3 upgrade: v2 sentinel present but conventions.md line absent — append just the missing line.
+  printf '!.devflow/conventions.md\n' >> "$_ERG_GITIGNORE" && _ERG_OK=1
 elif grep -qE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
   # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
   # comment, then append the carve-out block. Portable (grep filter + mv; no sed -i,
@@ -87,6 +94,10 @@ else
   { printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_GITIGNORE" && _ERG_OK=1
 fi
 
-# On success, stamp the current-format marker and drop the legacy one.
-[ "$_ERG_OK" = 1 ] && { touch "$_ERG_MARKER"; rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null; }
+# On success, stamp the current-format v3 marker and drop legacy markers.
+[ "$_ERG_OK" = 1 ] && {
+  touch "$_ERG_MARKER"
+  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2" 2>/dev/null
+  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null
+}
 return 0
