@@ -202,4 +202,4 @@ Report format for `{output_path}`:
 | java | If .java files changed |
 | python | If .py files changed |
 | rust | If .rs files changed |
-| compliance | If devflow-compliance plugin installed (orchestrator-gated) |
+| compliance | If `~/.claude/skills/devflow:compliance/SKILL.md` exists and diff touches regulated surface |

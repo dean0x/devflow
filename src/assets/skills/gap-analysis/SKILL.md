@@ -103,9 +103,9 @@ Detect ordering constraints and shared resource conflicts across issues.
 
 **Evidence trigger:** Any issue that references state, contracts, or resources that may be in flux due to another issue in the batch.
 
-### 7. Compliance (when devflow-compliance installed)
+### 7. Compliance (when compliance skill installed)
 
-Detect regulatory gaps that security doesn't cover. Load `devflow:compliance` references before analyzing.
+Detect regulatory gaps that security doesn't cover. Active frameworks = the `references/{id}.md` files present in the installed skill. Load `devflow:compliance` before analyzing.
 
 **Detection patterns:**
 - Missing audit trails on regulated mutations — writes to financial records, PHI, PCI-scoped data without durable logging

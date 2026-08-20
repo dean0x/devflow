@@ -4,7 +4,6 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Plan Command
 
@@ -135,12 +134,12 @@ Combine into: user needs, similar features, constraints, failure modes"
 
 #### Phase 5: Gap Analysis (Parallel)
 
-**Produces:** GAP_OUTPUTS, COMPLIANCE_ENABLED
+**Produces:** GAP_OUTPUTS, COMPLIANCE_SKILL_INSTALLED
 **Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
-{compliance_gate()}
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent).
 
-**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_ENABLED**):
+**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_SKILL_INSTALLED**):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -148,9 +147,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 | architecture | Pattern violations, missing integration points, layering issues |
 | security | Auth gaps, input validation, secret handling, OWASP |
 | performance | N+1 patterns, missing caching, concurrency, query patterns |
-| compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_ENABLED) |
+| compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_SKILL_INSTALLED) |
 
-**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_ENABLED**; same 4/5 plus):
+**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_SKILL_INSTALLED**; same 4/5 plus):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -447,7 +446,7 @@ Display completion summary:
 │  │  ├─ Design agent: architecture
 │  │  ├─ Design agent: security
 │  │  ├─ Design agent: performance
-│  │  ├─ Design agent: compliance (plugin-gated — only when COMPLIANCE_ENABLED)
+│  │  ├─ Design agent: compliance (only when COMPLIANCE_SKILL_INSTALLED)
 │  │  ├─ Design agent: consistency (multi-issue only)
 │  │  └─ Design agent: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis

@@ -93,10 +93,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 10 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 9 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(10);
+    expect(partialFiles).toHaveLength(9);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -777,19 +777,23 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. compliance_gate wiring in compiled host commands
+// 14. compliance wiring in compiled host commands (Part 1 — installed-skill gate)
 //
-// Guards that the compliance_gate() partial was not silently dropped from
-// the three host commands that import it. A forgotten call site compiles
-// cleanly but leaves the gate absent; asserting COMPLIANCE_ENABLED (the
-// gate's canonical output variable) catches the regression before it ships.
+// Phase C (feat/manifest-compliance) replaced the compliance_gate() partial with
+// a lightweight installed-skill existence check. Guards:
+//   - code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the
+//     skill path (the gate's canonical output variable and file-existence target)
+//   - implement.md contains neither COMPLIANCE_ENABLED nor any COMPLIANCE: line
+//     (all Part-1 compliance machinery removed; Part 2 adds a Git-oriented gate)
+//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, the
+//     COMPLIANCE: {enabled literal, or devflow-compliance (resolve.md gets its
+//     positive pin in Part 2)
 // ---------------------------------------------------------------------------
 
-describe('compliance_gate wiring in compiled host commands', () => {
-  const COMPLIANCE_GATE_HOSTS: Record<string, string> = {
+describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
+  const SKILL_CHECK_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
     'plan':        DIST_COMMANDS,
-    'implement':   DIST_COMMANDS,
   };
 
   beforeAll(() => {
@@ -801,15 +805,55 @@ describe('compliance_gate wiring in compiled host commands', () => {
     if (result.error) throw result.error;
   });
 
-  it('code-review, plan, and implement compiled outputs each contain COMPLIANCE_ENABLED', async () => {
-    for (const [basename, destRelDir] of Object.entries(COMPLIANCE_GATE_HOSTS)) {
+  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
+    for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain COMPLIANCE_ENABLED — ` +
-          `compliance_gate() call site may be missing from ${basename}.mds`,
-      ).toContain('COMPLIANCE_ENABLED');
+        `${destRelDir}/${basename}.md must contain COMPLIANCE_SKILL_INSTALLED`,
+      ).toContain('COMPLIANCE_SKILL_INSTALLED');
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain the compliance skill path`,
+      ).toContain('skills/devflow:compliance/SKILL.md');
+    }
+  });
+
+  it('implement.md contains neither COMPLIANCE_ENABLED nor any COMPLIANCE: line', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'implement.md must not contain COMPLIANCE_ENABLED — compliance machinery removed in Part 1',
+    ).not.toContain('COMPLIANCE_ENABLED');
+    expect(
+      content,
+      'implement.md must not contain any COMPLIANCE: line',
+    ).not.toMatch(/^COMPLIANCE:/m);
+  });
+
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, COMPLIANCE: {enabled, or devflow-compliance', async () => {
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      expect(
+        content,
+        `${basename}.md must not contain COMPLIANCE_ENABLED`,
+      ).not.toContain('COMPLIANCE_ENABLED');
+      expect(
+        content,
+        `${basename}.md must not contain COMPLIANCE: {enabled`,
+      ).not.toContain('COMPLIANCE: {enabled');
+      expect(
+        content,
+        `${basename}.md must not contain devflow-compliance`,
+      ).not.toContain('devflow-compliance');
     }
   });
 });

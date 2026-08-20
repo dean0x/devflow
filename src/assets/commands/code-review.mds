@@ -4,7 +4,6 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Code Review Command
 
@@ -129,12 +128,12 @@ MAX_REVIEW_CYCLES = 10
 
 ### Phase 1: Analyze Changed Files
 
-**Produces:** REVIEW_FOCUS_LIST, COMPLIANCE_ENABLED
+**Produces:** REVIEW_FOCUS_LIST, COMPLIANCE_SKILL_INSTALLED
 **Requires:** DIFF_RANGE
 
-{compliance_gate()}
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for every worktree.
 
-Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews. `COMPLIANCE_ENABLED` (resolved above) is computed once and reused for all worktrees.
+Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews.
 
 | Condition | Adds Review |
 |-----------|-------------|
@@ -149,13 +148,13 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
-| COMPLIANCE_ENABLED | compliance |
+| COMPLIANCE_SKILL_INSTALLED AND diff touches regulated surface | compliance |
 
-If `COMPLIANCE_ENABLED`: add `compliance` to REVIEW_FOCUS_LIST for every worktree.
+If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
 ### Phase 1b: Load Decisions Index
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_ENABLED (carried from Phase 1)
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED (carried from Phase 1)
 
 **Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
 
@@ -172,7 +171,7 @@ Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
 **Produces:** REVIEW_FOCUS_OUTPUTS
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
 
-Spawn Review agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types **or installed optional plugins** (max 20 per worktree):
+Spawn Review agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types (max 20 per worktree):
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
@@ -195,9 +194,9 @@ Spawn Review agents **in a single message**. Always run 8 core reviews; conditio
 | database | conditional | devflow:database |
 | dependencies | conditional | devflow:dependencies |
 | documentation | conditional | devflow:documentation |
-| compliance | plugin-gated | devflow:compliance |
+| compliance | diff-driven | devflow:compliance |
 
-Review agent count: 8 always-active, +1-11 diff-driven conditional, +1 compliance when `COMPLIANCE_ENABLED` (max 20 total per worktree).
+Review agent count: 8 always-active, +1-12 diff-driven conditional (max 20 total per worktree).
 
 Each Review agent invocation (all in one message, **NOT background**):
 ```
@@ -217,7 +216,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 Review agents per worktree across multiple worktrees simultaneously overwhelms the system.
+In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-20 Review agents per worktree across multiple worktrees simultaneously overwhelms the system.
 
 ### Phase 3: Synthesis (Parallel)
 
