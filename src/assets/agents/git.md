@@ -612,7 +612,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 | Verdict `ESCALATED` | — | reply-only; leave unresolved |
 | `VERIFICATION_STATUS` `FAILED` or `SKIPPED` | — | reply-only for all verdicts; leave unresolved |
 
-`resolveReviewThread` mutation is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN findings are the original reviewer's call to close — devflow replies with cited evidence but leaves the thread unresolved. ESCALATED, FAILED, and SKIPPED are always reply-only.
+`resolveReviewThread` mutation is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN findings are the thread author's call to close — devflow replies with cited evidence but leaves the thread unresolved. ESCALATED, FAILED, and SKIPPED are always reply-only.
 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining threads as `THROTTLED ({n} not processed)`. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
 
