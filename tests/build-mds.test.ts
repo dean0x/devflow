@@ -857,3 +857,43 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §15  Phase D traceability op guards — code-review (Part 2, Step 2.3)
+//      post-review-summary replaces retired comment-pr; devflow:review-summary marker present
+// ---------------------------------------------------------------------------
+
+describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('code-review.md contains post-review-summary and devflow:review-summary marker', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'code-review.md must reference the post-review-summary Git op',
+    ).toContain('post-review-summary');
+    expect(
+      content,
+      'code-review.md must contain the devflow:review-summary marker string',
+    ).toContain('devflow:review-summary');
+  });
+
+  it('code-review.md does not contain comment-pr (retired op)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'code-review.md must not reference the retired comment-pr op',
+    ).not.toContain('comment-pr');
+  });
+});
+
+// §16 resolve.md Phase D guards added in Step 2.4 (same commit as resolve.mds prose)

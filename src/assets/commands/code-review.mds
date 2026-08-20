@@ -218,26 +218,14 @@ IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{
 
 In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-20 Review agents per worktree across multiple worktrees simultaneously overwhelms the system.
 
-### Phase 3: Synthesis (Parallel)
+### Phase 3: Synthesis → Review Comment (Sequential)
 
-**Produces:** REVIEW_SUMMARY
+**Produces:** REVIEW_SUMMARY, PR_COMMENT
 **Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO
 
-**WAIT** for Phase 2, then spawn agents per worktree **in a single message**:
+**WAIT** for Phase 2. For each worktree, run steps 3a and 3b in sequence:
 
-**Git Agent (PR Comments)** per worktree:
-```
-Agent(subagent_type="Git", run_in_background=false):
-"OPERATION: comment-pr
-WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Read reviews from {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/
-Create inline PR comments for findings with ≥80% confidence only.
-Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
-Deduplicate findings across Review agents, consolidate skipped into summary.
-Check for existing inline comments at same file:line before creating new ones to avoid duplicates."
-```
-
-**Synthesize agent** per worktree:
+**Step 3a — Synthesize agent** per worktree (wait for completion before 3b):
 ```
 Agent(subagent_type="Synthesize", run_in_background=false):
 "Mode: review
@@ -247,8 +235,20 @@ TIMESTAMP: {timestamp}
 CYCLE_NUMBER: {cycle_number}
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 Include Convergence Status section in review-summary.md.
-Aggregate findings, determine merge recommendation
+Aggregate findings, determine merge recommendation.
 Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
+```
+
+**Step 3b — Git agent (post-review-summary)** per worktree (after Step 3a writes review-summary.md):
+```
+Agent(subagent_type="Git", run_in_background=false):
+"OPERATION: post-review-summary
+PR_NUMBER: {pr_number}
+REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
+CYCLE_NUMBER: {cycle_number}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+Post one consolidated PR comment with <!-- devflow:review-summary cycle:{cycle_number} --> marker.
+Skip if this cycle's marker already present (D7 dedup)."
 ```
 
 ### Phase 4: Write Review Head Marker & Report
@@ -260,7 +260,7 @@ Per worktree, after successful completion:
 2. Display results from all agents:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
-   - PR comments created/skipped (from Git)
+   - Review comment status: POSTED / SKIPPED (D7 dedup) / DEGRADED (from Git)
    - Artifact paths
 
 In multi-worktree mode, report results per worktree.
@@ -288,9 +288,9 @@ In multi-worktree mode, report results per worktree.
 │  │  ├─ Review agent: consistency, regression, testing
 │  │  └─ Review agent: [conditional]
 │  │
-│  ├─ Phase 3: Synthesis (PARALLEL within worktree)
-│  │  ├─ Git agent (comment-pr with dedup)
-│  │  └─ Synthesize agent (mode: review)
+│  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
+│  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
+│  │  └─ Step 3b: Git agent (post-review-summary, D7 marker-dedup)
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
 ```
@@ -309,7 +309,7 @@ In multi-worktree mode, report results per worktree.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
-| Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
+| Review comment already posted | Git agent detects `<!-- devflow:review-summary cycle:\{N\}` marker → skip silently (D7) |
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass incremental detection (Step 0c), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
