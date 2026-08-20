@@ -67,6 +67,16 @@ function buildRuleShadowTag(shadowState: RuleShadowState): string {
 }
 
 /**
+ * Resolve the short owner label for a rule.
+ * Plugin-owned rules strip the 'devflow-' prefix; feature-owned rules (e.g. compliance)
+ * have no plugin entry — they return 'feature'; unrecognised rules return 'unknown'.
+ */
+function resolveRuleOwner(name: string, ownerMap: Map<string, string>): string {
+  return ownerMap.get(name)?.replace('devflow-', '') ??
+    ((FEATURE_OWNED_RULES as readonly string[]).includes(name) ? 'feature' : 'unknown');
+}
+
+/**
  * Format a single rule row for display.
  * Shared by --status (no installed tag) and printRulesList (with installed tag).
  */
@@ -103,9 +113,7 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
       const installedTag = installedSet.has(name) ? color.green(' ✓') : color.dim(' ✗');
       const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
       const shadowState = await validateRuleShadow(shadowFile);
-      // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
-      const owner = ownerMap.get(name)?.replace('devflow-', '') ??
-        ((FEATURE_OWNED_RULES as readonly string[]).includes(name) ? 'feature' : 'unknown');
+      const owner = resolveRuleOwner(name, ownerMap);
       return { row: formatRuleRow(name, owner, shadowState, installedTag), shadowState };
     }),
   );
@@ -130,9 +138,13 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
  * Creates the shadow directory before copying.
  *
  * D35 — seedRuleShadow tiers (applies ADR-010):
- *   Tier 1 — installed rule at rulesTarget/{name}.md (fastest path when rules are enabled)
- *   Tier 2 — flat source at src/assets/rules/{name}.md (fallback when rules are disabled)
- *   Tier 3 — 'none': caller emits a manual-create instruction
+ *   Tier 1 — installed rule at rulesTarget/{name}.md (fastest path when rules are enabled).
+ *             SKIPPED for FEATURE_OWNED_RULES: the installed file is already stamped
+ *             (${DEVFLOW_COMPLIANCE_FRAMEWORKS} replaced with label text), so seeding from
+ *             it destroys the placeholder and silently disables framework stamping forever.
+ *   Tier 2 — flat source at src/assets/rules/{name}.md (always used for FEATURE_OWNED_RULES;
+ *             fallback for plugin-owned rules when Tier 1 is absent).
+ *   Tier 3 — 'none': caller emits a manual-create instruction.
  */
 export async function seedRuleShadow(
   name: string,
@@ -142,13 +154,17 @@ export async function seedRuleShadow(
 ): Promise<'installed' | 'source' | 'none'> {
   await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
 
-  // Tier 1: seed from installed rule
-  try {
-    await fs.copyFile(path.join(rulesTarget, `${name}.md`), shadowFile);
-    return 'installed';
-  } catch { /* not present — try flat source */ }
+  // Tier 1: seed from installed rule — skipped for FEATURE_OWNED_RULES because the installed
+  // file is already stamped (placeholder replaced), which would permanently disable framework
+  // stamping when the shadow is subsequently applied via convergeComplianceArtifacts.
+  if (!(FEATURE_OWNED_RULES as readonly string[]).includes(name)) {
+    try {
+      await fs.copyFile(path.join(rulesTarget, `${name}.md`), shadowFile);
+      return 'installed';
+    } catch { /* not present — try flat source */ }
+  }
 
-  // Tier 2: seed from flat rules source
+  // Tier 2: seed from flat rules source (canonical, with placeholder for templated rules)
   try {
     await fs.copyFile(path.join(rulesDir(), `${name}.md`), shadowFile);
     return 'source';
@@ -221,13 +237,17 @@ async function handleRuleUnshadow(
 }
 
 /**
- * Install rules from manifest plugins and converge compliance rule if applicable.
+ * Install rules from the manifest plugins and converge compliance artifacts.
  *
- * Extracted from the --enable handler body so it can be called both from the
- * rules CLI subcommand and from runRulesEnable (e.g. after devflow compliance --enable).
+ * Single production caller: the rules --enable handler (options.enable in the command action).
+ * Extracted as a named export for independent unit testing.
+ *
+ * Compliance convergence runs unconditionally — convergeComplianceArtifacts handles the
+ * disabled case by removing stale artifacts, so no enabled-gate is needed here. Running
+ * converge regardless of the rules-install outcome ensures that a rules-install failure
+ * cannot leave compliance artifacts in a half-converged state (avoids PF-015 violation).
  *
  * Applies PF-009: warn-not-throw on per-item compliance convergence failure.
- * Applies PF-015: compliance convergence is unconditional (no short-circuit after rules install).
  */
 export async function runRulesEnable(claudeDir: string, devflowDir: string): Promise<void> {
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
@@ -245,51 +265,55 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
   await fs.rm(rulesTarget, { recursive: true, force: true });
   await fs.mkdir(rulesTarget, { recursive: true });
 
-  let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[];
+  let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[] = [];
+  let installFailed = false;
   try {
     outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
   } catch (err) {
     p.log.error(
       `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
     );
-    process.exit(1);
+    installFailed = true;
   }
 
-  const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
-  const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';
+  if (!installFailed) {
+    const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
+    const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';
 
-  for (const { ruleName, outcome } of outcomes) {
-    if (
-      outcome === 'source-invalid-shadow:empty-shadow-file' ||
-      outcome === 'source-invalid-shadow:not-a-file'
-    ) {
-      p.log.warn(`Shadow for rule:${ruleName} is invalid — Devflow's version was installed`);
+    for (const { ruleName, outcome } of outcomes) {
+      if (
+        outcome === 'source-invalid-shadow:empty-shadow-file' ||
+        outcome === 'source-invalid-shadow:not-a-file'
+      ) {
+        p.log.warn(`Shadow for rule:${ruleName} is invalid — Devflow's version was installed`);
+      }
     }
+
+    manifest.features.rules = true;
+    manifest.updatedAt = new Date().toISOString();
+    await writeManifest(devflowDir, manifest);
+    p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
   }
 
-  manifest.features.rules = true;
-  manifest.updatedAt = new Date().toISOString();
-  await writeManifest(devflowDir, manifest);
-  p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
-
-  // Converge compliance artifacts iff compliance is enabled (PF-015: unconditional, independent).
-  // After standard rules install, so the compliance rule is installed/stamped correctly.
-  if (manifest.features.compliance.enabled) {
-    try {
-      await convergeComplianceArtifacts({
-        claudeDir,
-        devflowDir,
-        enabled: true,
-        frameworks: manifest.features.compliance.frameworks,
-        rulesEnabled: true, // we just enabled rules above
-        warn: (msg) => p.log.warn(msg),
-      });
-    } catch (err) {
-      // PF-009: warn-not-abort — compliance convergence failure does not undo rules install
-      p.log.warn(
-        `Compliance rule convergence failed — rules installed but compliance rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  // Converge compliance artifacts unconditionally — convergeComplianceArtifacts handles the
+  // disabled case itself (removes stale artifacts). Running this regardless of installFailed
+  // prevents a rules-install failure from leaving the compliance rule in a stale state.
+  // rulesEnabled reflects the actual settled state: false when install failed so the compliance
+  // rule is not installed into a wiped, rules-disabled directory (avoids PF-015).
+  try {
+    await convergeComplianceArtifacts({
+      claudeDir,
+      devflowDir,
+      enabled: manifest.features.compliance.enabled,
+      frameworks: manifest.features.compliance.frameworks,
+      rulesEnabled: !installFailed,
+      warn: (msg) => p.log.warn(msg),
+    });
+  } catch (err) {
+    // PF-009: warn-not-abort — compliance convergence failure does not undo rules install
+    p.log.warn(
+      `Compliance rule convergence failed — rules installed but compliance rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -359,9 +383,7 @@ export const rulesCommand = new Command('rules')
       const lines = await Promise.all(
         installedFiles.map(async file => {
           const n = path.basename(file, '.md');
-          // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
-          const shortOwner = ownerMap.get(n)?.replace('devflow-', '') ??
-            ((FEATURE_OWNED_RULES as readonly string[]).includes(n) ? 'feature' : 'unknown');
+          const shortOwner = resolveRuleOwner(n, ownerMap);
           const shadowFile = path.join(devflowDir, 'rules', `${n}.md`);
           const shadowState = await validateRuleShadow(shadowFile);
           return formatRuleRow(n, shortOwner, shadowState);

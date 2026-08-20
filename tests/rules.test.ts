@@ -11,6 +11,7 @@ import {
 } from '../src/core/plugins.js';
 import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/targets/claude-code/installer.js';
 import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
+import { COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
 
 // ---------------------------------------------------------------------------
 // isValidRuleName
@@ -623,6 +624,24 @@ describe('seedRuleShadow', () => {
 
     expect(tier).toBe('none');
     await expect(fs.access(shadowFile)).rejects.toThrow();
+  });
+
+  it('FEATURE_OWNED_RULES (compliance): skips stamped installed file, seeds from canonical source with placeholder (I24)', async () => {
+    // The installed compliance.md is already stamped — ${DEVFLOW_COMPLIANCE_FRAMEWORKS} has been
+    // replaced with label text. Seeding a shadow from it destroys the placeholder and permanently
+    // disables framework stamping. seedRuleShadow must skip Tier 1 for FEATURE_OWNED_RULES and
+    // use Tier 2 (canonical src/assets/rules/compliance.md which contains the placeholder).
+    const stampedContent = '# Compliance\n- Active frameworks: GDPR, SOX\n'; // no placeholder
+    await fs.writeFile(path.join(rulesTarget, 'compliance.md'), stampedContent, 'utf-8');
+    const shadowFile = path.join(devflowDir, 'rules', 'compliance.md');
+
+    const tier = await seedRuleShadow('compliance', shadowFile, rulesTarget, devflowDir);
+
+    // Must choose Tier 2 (canonical source), not Tier 1 (stamped installed file)
+    expect(tier).toBe('source');
+    const content = await fs.readFile(shadowFile, 'utf-8');
+    expect(content).toContain(COMPLIANCE_RULE_PLACEHOLDER);
+    expect(content).not.toBe(stampedContent);
   });
 
   it('creates the shadow directory before copying', async () => {
