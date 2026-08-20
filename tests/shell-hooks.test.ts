@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import { DEVFLOW_GITIGNORE_BLOCK, computeDevflowGitignore } from '../src/targets/claude-code/post-install.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -1259,14 +1260,29 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(ignoreLines(gitignore)).not.toContain('!.devflow/features/');
   });
 
-  it('v3 marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
-    // Pre-seed the current-format marker; the helper must return early, leaving .gitignore untouched.
+  it('v3 marker + sentinel present: fast-path — .gitignore not re-written on second run', () => {
+    // First run installs the carve-out, stamps the marker, and writes the sentinel.
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    const contentAfterFirst = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+
+    // Second run: marker + sentinel both present → fast-path → .gitignore unchanged.
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(contentAfterFirst);
+  });
+
+  it('v3 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
+    // Simulate a merge-conflict resolution that drops the devflow block while leaving the v3 marker.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'), '');
+    // .gitignore exists but the devflow block was dropped — only unrelated content remains.
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n');
+
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    // No .gitignore should have been created because the marker fast-path fired first
-    expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+    const lines = ignoreLines(path.join(tmpDir, '.gitignore'));
+    expect(lines).toContain('!.devflow/conventions.md');
+    expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines).toContain('node_modules/');
   });
 
   it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v3', () => {
@@ -1385,6 +1401,130 @@ describe('ensure-root-gitignore behavioral', () => {
     // Original content preserved byte-for-byte
     expect(after).toBe(content);
   });
+});
+
+// =============================================================================
+// Cross-implementation parity: ensure-root-gitignore (shell) ×
+// computeDevflowGitignore (TS) — both state machines must produce semantically
+// identical outcomes for each branch. Exercises the REAL shell script (no
+// reimplementation in the test — avoids PF-018).
+// =============================================================================
+
+describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation parity', () => {
+  const ENSURE_ROOT_PARITY = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+
+  // The v2 block (without the conventions.md line) used to seed v2-install state.
+  // This is the historically shipped v2 format; the comment text differs intentionally
+  // from the current DEVFLOW_GITIGNORE_BLOCK (which has the updated two-exceptions comment).
+  const V2_BLOCK_SEED = [
+    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+    '# Exception: feature knowledge bases under .devflow/features/ are shared via git —',
+    '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else',
+    '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`',
+    '# to your own .gitignore.',
+    '.devflow/*',
+    '!.devflow/features/',
+    '.devflow/features/*',
+    '!.devflow/features/index.md',
+    '!.devflow/features/*/',
+    '.devflow/features/*/*',
+    '!.devflow/features/*/KNOWLEDGE.md',
+  ].join('\n');
+
+  /** Run the REAL shell hook on a fresh tmpDir with an optional initial .gitignore. */
+  function runShell(initialContent: string | null): string {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-xparity-'));
+    try {
+      if (initialContent !== null) {
+        fs.writeFileSync(path.join(tmpDir, '.gitignore'), initialContent);
+      }
+      execSync(`bash -c 'source "${ENSURE_ROOT_PARITY}" "${tmpDir}"'`, { stdio: 'pipe' });
+      const gi = path.join(tmpDir, '.gitignore');
+      return fs.existsSync(gi) ? fs.readFileSync(gi, 'utf-8') : '';
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  /** Apply the TS pure function computeDevflowGitignore to the initial content. */
+  function applyTs(initialContent: string | null): string {
+    const content = initialContent ?? '';
+    return computeDevflowGitignore(content) ?? content;
+  }
+
+  // -------------------------------------------------------------------------
+  // Verbatim check: shell hook emits DEVFLOW_GITIGNORE_BLOCK byte-for-byte
+  // -------------------------------------------------------------------------
+
+  it('verbatim: fresh dir (no .gitignore) — shell output contains DEVFLOW_GITIGNORE_BLOCK verbatim', () => {
+    const shellResult = runShell(null);
+    expect(shellResult).toContain(DEVFLOW_GITIGNORE_BLOCK);
+    // For the "no file" branch both writers emit exactly DEVFLOW_GITIGNORE_BLOCK + '\n'.
+    const tsResult = applyTs(null);
+    expect(shellResult).toBe(tsResult);
+  });
+
+  // -------------------------------------------------------------------------
+  // Table-driven branch coverage: each state-machine branch, both implementations
+  // -------------------------------------------------------------------------
+
+  const PARITY_CASES: Array<{
+    label: string;
+    input: string | null;
+    sentinelPresent: boolean; // '!.devflow/conventions.md' expected in result
+    blockPresent: boolean;    // DEVFLOW_GITIGNORE_BLOCK expected verbatim in result
+  }> = [
+    {
+      label: 'no .gitignore',
+      input: null,
+      sentinelPresent: true,
+      blockPresent: true,
+    },
+    {
+      label: 'unrelated content only',
+      input: 'node_modules/\ndist/\n',
+      sentinelPresent: true,
+      blockPresent: true,
+    },
+    {
+      label: 'legacy bare .devflow/ entry',
+      input: 'node_modules/\n.devflow/\n',
+      sentinelPresent: true,
+      blockPresent: true,
+    },
+    {
+      label: 'v2-format block present (conventions.md line appended, block not re-added)',
+      input: `${V2_BLOCK_SEED}\n`,
+      sentinelPresent: true,
+      blockPresent: false, // only the missing line is appended, not the whole v3 block
+    },
+    {
+      label: 'user-authored /.devflow/ entry (no carve-out forced)',
+      input: '/.devflow/\n',
+      sentinelPresent: false, // user-authored entry respected; no block installed
+      blockPresent: false,
+    },
+  ];
+
+  for (const { label, input, sentinelPresent, blockPresent } of PARITY_CASES) {
+    it(`branch: ${label} — shell and TS agree on outcome`, () => {
+      const shellResult = runShell(input);
+      const tsResult = applyTs(input);
+
+      const hasSentinelShell = shellResult.split('\n').map(l => l.trim()).includes('!.devflow/conventions.md');
+      const hasSentinelTs = tsResult.split('\n').map(l => l.trim()).includes('!.devflow/conventions.md');
+      const hasBlockShell = shellResult.includes(DEVFLOW_GITIGNORE_BLOCK);
+      const hasBlockTs = tsResult.includes(DEVFLOW_GITIGNORE_BLOCK);
+
+      // Both implementations must agree with each other.
+      expect(hasSentinelShell).toBe(hasSentinelTs);
+      expect(hasBlockShell).toBe(hasBlockTs);
+
+      // And both must meet the expected outcome for this branch.
+      expect(hasSentinelShell).toBe(sentinelPresent);
+      expect(hasBlockShell).toBe(blockPresent);
+    });
+  }
 });
 
 describe('get-mtime behavioral', () => {

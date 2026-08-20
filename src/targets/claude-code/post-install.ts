@@ -58,9 +58,9 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
  */
 export const DEVFLOW_GITIGNORE_BLOCK = [
   '# Devflow runtime data — local by default (memory, learning, docs, locks).',
-  '# Exception: feature knowledge bases under .devflow/features/ are shared via git —',
-  '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else',
-  '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`',
+  '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/',
+  '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming',
+  '# authority). To stop sharing, re-add `.devflow/features/` or `.devflow/conventions.md`',
   '# to your own .gitignore.',
   '.devflow/*',
   '!.devflow/features/',
@@ -1004,14 +1004,27 @@ export async function ensureDevflowGitignore(
   try {
     const devflowDir = path.join(gitRoot, '.devflow');
     const markerV3 = path.join(devflowDir, GITIGNORE_MARKER_V3);
-
-    // Fast-path: v3 marker means this project already has the current-format carve-out.
-    try {
-      await fs.access(markerV3);
-      return;
-    } catch { /* not yet v3 — proceed */ }
-
     const gitignorePath = path.join(gitRoot, '.gitignore');
+
+    // Fast-path with verification: v3 marker normally means the block is installed,
+    // but the marker is a claim, not proof — a merge-conflict resolution may have
+    // dropped the block. Even when the marker exists, read .gitignore (one cheap
+    // read) and run computeDevflowGitignore; write only when it returns non-null.
+    // Idempotent: sentinel present → computeDevflowGitignore returns null → no write.
+    let v3Marked = false;
+    try { await fs.access(markerV3); v3Marked = true; } catch { /* absent */ }
+    if (v3Marked) {
+      let existingContent = '';
+      try { existingContent = await fs.readFile(gitignorePath, 'utf-8'); } catch { /* absent */ }
+      const healContent = computeDevflowGitignore(existingContent);
+      if (healContent !== null) {
+        await fs.writeFile(gitignorePath, healContent, 'utf-8');
+        if (verbose) {
+          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions shared)');
+        }
+      }
+      return;
+    }
 
     let gitignoreContent = '';
     try {

@@ -35,25 +35,29 @@
 
 _ERG_DEVFLOW_DIR="$1/.devflow"
 _ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3"
+_ERG_GITIGNORE="$1/.gitignore"
 
-# Fast-path: the marker means the root .gitignore was already configured (current
-# format) for this project.
-[ -f "$_ERG_MARKER" ] && return 0
+# Fast-path with verification: marker normally means the block is installed, but
+# the marker is a claim, not proof — a merge-conflict resolution may have dropped
+# the block. Gate the fast-path return on the v3 sentinel actually being present
+# in .gitignore. Idempotent: sentinel present → return 0; sentinel absent → heal.
+if [ -f "$_ERG_MARKER" ]; then
+  grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE" 2>/dev/null && return 0
+  # Sentinel absent — marker is stale; fall through to re-apply the block.
+fi
 
 # The marker lives under .devflow/, so the directory must exist before we touch it.
 # (ensure-devflow-init creates it earlier; session-start-context may reach here first.)
 mkdir -p "$_ERG_DEVFLOW_DIR" 2>/dev/null || return 1
-
-_ERG_GITIGNORE="$1/.gitignore"
 
 # The carve-out block, built once into _ERG_BLOCK (emitted on create and append).
 # Keep byte-identical to ensureDevflowGitignore in src/targets/claude-code/post-install.ts.
 # D-GITIGNORE-V3: v3 adds !.devflow/conventions.md (naming authority, git-tracked).
 printf -v _ERG_BLOCK '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
-  '# Exception: feature knowledge bases under .devflow/features/ are shared via git —' \
-  '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else' \
-  '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`' \
+  '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/' \
+  '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming' \
+  '# authority). To stop sharing, re-add `.devflow/features/` or `.devflow/conventions.md`' \
   '# to your own .gitignore.' \
   '.devflow/*' \
   '!.devflow/features/' \
