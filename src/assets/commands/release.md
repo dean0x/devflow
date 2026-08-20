@@ -58,7 +58,7 @@ Pass both to all subsequent agents via their input contracts.
 
 **Produces:** COMPLIANCE_SKILL_INSTALLED
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for all subsequent phases. The compliance gate determines whether release evidence is gathered and shipped-issue back-links are posted.
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise. Reuse this result for all subsequent phases. The compliance gate determines whether release evidence is gathered and shipped-issue back-links are posted.
 
 ### Phase 2: Detect Release Process (First Run Only)
 

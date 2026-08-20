@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Implement Command
 
@@ -50,7 +51,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent).
+{compliance_gate()}
 
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 

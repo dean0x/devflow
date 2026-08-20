@@ -1,0 +1,5 @@
+@define compliance_gate():
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise.
+@end
+
+@export compliance_gate

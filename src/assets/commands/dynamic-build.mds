@@ -4,6 +4,7 @@ argument-hint: "[ticket | issue-url | plan-doc]"
 output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
@@ -45,7 +46,8 @@ Before you write the workflow script:
 
 **0. Resolve compliance context**
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for every ticket in the wave.
+{compliance_gate()}
+Reuse this result for every ticket in the wave.
 
 When authoring the workflow script, include the resolved value as a constant: `COMPLIANCE = COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"`. Pass `COMPLIANCE: \{COMPLIANCE\}` to Git agent spawns (setup-task and branch-creation). When compliance-gated (`COMPLIANCE_SKILL_INSTALLED === true`), branch names follow the `.devflow/conventions.md` Branch Naming convention if that file exists; degrade gracefully if absent.
 

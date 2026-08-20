@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Plan Command
 
@@ -137,7 +138,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 **Produces:** GAP_OUTPUTS, COMPLIANCE_SKILL_INSTALLED
 **Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent).
+{compliance_gate()}
 
 **Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_SKILL_INSTALLED**):
 
@@ -405,7 +406,9 @@ Closes #{issue number}
 
 **Create or enrich GitHub issue:**
 
-When COMPLIANCE_SKILL_INSTALLED → issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary). When not installed → issue linking is optional (prompt user, skippable).
+When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
+
+When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a GitHub issue for this plan?" — skip the spawn entirely if the user declines.
 
 Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 

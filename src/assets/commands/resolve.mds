@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Resolve Command
 
@@ -99,7 +100,8 @@ This produces a compact index of active ADR/PF entries written at render time �
 
 Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for every worktree.
+{compliance_gate()}
+Reuse this result for every worktree.
 
 ### Phase 1: Parse Issues
 
@@ -134,7 +136,7 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 **Produces:** THREAD_MAP
 **Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
 
-Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false or `(none)`.
+Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
 
 Spawn Git agent to fetch unresolved external (non-devflow-authored) review threads:
 
@@ -299,7 +301,7 @@ Push all commits to remote once (Code agents and validation-fix Code agents ran 
 git -C {worktree} push
 ```
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9.
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, compliance-gated), then Phase 10 (report).
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -394,7 +396,7 @@ Update `## Third-Party Threads` section in resolution-summary.md with thread res
 **Produces:** MERGE_READINESS_REPORT
 **Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
 
-Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false or `(none)`.
+Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
 
 Spawn Git agent:
 
