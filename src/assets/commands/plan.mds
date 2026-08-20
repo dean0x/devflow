@@ -398,23 +398,38 @@ Required sections:
 
 ### Reviewer Focus Areas
 {areas needing careful review, with reasons}
+
+### Related Issues
+Closes #{issue number}
 ```
 
-**Create GitHub issue (optional):**
+**Create or enrich GitHub issue:**
 
-If the feature does not already have a GitHub issue:
-- Create via `gh issue create`
-- Title: feature name
-- Body: problem statement, user stories, v1 scope, acceptance criteria, link to design artifact path
-- Labels: feature, priority level
+When COMPLIANCE_SKILL_INSTALLED → issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary). When not installed → issue linking is optional (prompt user, skippable).
 
-Skip if issue number was provided as input.
+Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: ensure-traceable-issue
+INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
+REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
+PLAN_ARTIFACT_PATH: {the design artifact path written above}
+LABELS: feature
+The Git agent will create a GitHub issue (or enrich an existing one) using the D3 template,
+post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.
+Return the issue number."
+```
+
+Capture `ISSUE_NUMBER` from the Git agent output for use in the completion report and the `/implement` hand-off suggestion.
+
+Surface any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent output in the report.
 
 **Report:**
 
 Display completion summary:
 - Design artifact path
-- Issue URL (if created or if pre-existing)
+- Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Suggested next step: `/implement \{artifact-path\}` or `/implement #\{issue-number\}`
