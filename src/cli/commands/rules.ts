@@ -8,6 +8,7 @@ import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../../core/plug
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
+import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -216,6 +217,79 @@ async function handleRuleUnshadow(
   p.log.info('Run devflow rules --enable or devflow init to restore Devflow\'s version.');
 }
 
+/**
+ * Install rules from manifest plugins and converge compliance rule if applicable.
+ *
+ * Extracted from the --enable handler body so it can be called both from the
+ * rules CLI subcommand and from runRulesEnable (e.g. after devflow compliance --enable).
+ *
+ * Applies PF-009: warn-not-throw on per-item compliance convergence failure.
+ * Applies PF-015: compliance convergence is unconditional (no short-circuit after rules install).
+ */
+export async function runRulesEnable(claudeDir: string, devflowDir: string): Promise<void> {
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+
+  const manifest = await readManifest(devflowDir);
+  if (!manifest) {
+    p.log.error('No manifest found. Run devflow init first.');
+    process.exit(1);
+  }
+
+  const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
+  const rulesMap = buildRulesMap(installedPlugins);
+
+  // Wipe stale rules from previously uninstalled plugins before re-installing.
+  await fs.rm(rulesTarget, { recursive: true, force: true });
+  await fs.mkdir(rulesTarget, { recursive: true });
+
+  let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[];
+  try {
+    outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+  } catch (err) {
+    p.log.error(
+      `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(1);
+  }
+
+  const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
+  const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';
+
+  for (const { ruleName, outcome } of outcomes) {
+    if (
+      outcome === 'source-invalid-shadow:empty-shadow-file' ||
+      outcome === 'source-invalid-shadow:not-a-file'
+    ) {
+      p.log.warn(`Shadow for rule:${ruleName} is invalid — Devflow's version was installed`);
+    }
+  }
+
+  manifest.features.rules = true;
+  manifest.updatedAt = new Date().toISOString();
+  await writeManifest(devflowDir, manifest);
+  p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
+
+  // Converge compliance artifacts iff compliance is enabled (PF-015: unconditional, independent).
+  // After standard rules install, so the compliance rule is installed/stamped correctly.
+  if (manifest.features.compliance.enabled) {
+    try {
+      await convergeComplianceArtifacts({
+        claudeDir,
+        devflowDir,
+        enabled: true,
+        frameworks: manifest.features.compliance.frameworks,
+        rulesEnabled: true, // we just enabled rules above
+        warn: (msg) => p.log.warn(msg),
+      });
+    } catch (err) {
+      // PF-009: warn-not-abort — compliance convergence failure does not undo rules install
+      p.log.warn(
+        `Compliance rule convergence failed — rules installed but compliance rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+}
+
 export const rulesCommand = new Command('rules')
   .description('Manage Devflow rules')
   .argument('[action]', 'Action: shadow, unshadow, or list')
@@ -251,48 +325,7 @@ export const rulesCommand = new Command('rules')
     // No positional action — fall through to flag-based handling
 
     if (options.enable) {
-      const manifest = await readManifest(devflowDir);
-      if (!manifest) {
-        p.log.error('No manifest found. Run devflow init first.');
-        process.exit(1);
-      }
-
-      const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
-      const rulesMap = buildRulesMap(installedPlugins);
-      // Wipe stale rules from previously uninstalled plugins before re-installing.
-      // Mirrors the init flow which always starts from a clean rules directory.
-      await fs.rm(rulesTarget, { recursive: true, force: true });
-      await fs.mkdir(rulesTarget, { recursive: true });
-
-      // Guard against a hard-error throw (e.g. missing declared source — PF-009).
-      // Without this, the rm above leaves rules removed and the error becomes an
-      // unhandled rejection rather than a clean CLI failure.
-      let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[];
-      try {
-        outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
-      } catch (err) {
-        p.log.error(
-          `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        process.exit(1);
-      }
-
-      const shadowedCount = outcomes.filter(o => o.outcome === 'shadow').length;
-      const shadowSuffix = shadowedCount > 0 ? ` (${shadowedCount} shadowed)` : '';
-
-      for (const { ruleName, outcome } of outcomes) {
-        if (
-          outcome === 'source-invalid-shadow:empty-shadow-file' ||
-          outcome === 'source-invalid-shadow:not-a-file'
-        ) {
-          p.log.warn(`Shadow for rule:${ruleName} is invalid — Devflow's version was installed`);
-        }
-      }
-
-      manifest.features.rules = true;
-      manifest.updatedAt = new Date().toISOString();
-      await writeManifest(devflowDir, manifest);
-      p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
+      await runRulesEnable(claudeDir, devflowDir);
 
     } else if (options.disable) {
       await fs.rm(rulesTarget, { recursive: true, force: true });

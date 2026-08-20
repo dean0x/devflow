@@ -47,6 +47,8 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
+import { parseFrameworkList, COMPLIANCE_FRAMEWORKS } from '../../core/compliance.js';
+import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -204,6 +206,13 @@ interface InitOptions {
   rules?: boolean;
   /** External model routing. Advanced-only; never part of Recommended defaults. */
   proxy?: boolean;
+  /**
+   * Compliance framework list (comma-separated IDs from parseFrameworkList).
+   * string → --compliance <list> (enable with these frameworks)
+   * false  → --no-compliance (disable compliance; frameworks remembered)
+   * undefined → not passed; seed value used
+   */
+  compliance?: string | false;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -230,6 +239,8 @@ export const initCommand = new Command('init')
   .option('--no-rules', 'Disable rules')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
   .option('--no-proxy', 'Disable external model routing')
+  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
+  .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -363,6 +374,25 @@ export const initCommand = new Command('init')
       !!options.reset, existingManifest, earlyProjectConfig, earlySettingsJson ?? '',
     );
     const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+
+    // Early validation: parse --compliance <list> at the boundary before any prompts (PF-parse-at-boundary).
+    // options.compliance: string → --compliance <list>; false → --no-compliance; undefined → not passed
+    let cliComplianceOverride: { enabled: boolean; frameworks: string[] } | undefined;
+    if (typeof options.compliance === 'string') {
+      // Validate framework IDs now — fail fast before any TTY prompts
+      const parsedList = parseFrameworkList(options.compliance);
+      if (!parsedList.ok) {
+        p.log.error(parsedList.error);
+        process.exit(1);
+      }
+      cliComplianceOverride = { enabled: true, frameworks: parsedList.value };
+    } else if (options.compliance === false) {
+      // --no-compliance: disable, but preserve frameworks (disable-keeps-frameworks contract)
+      cliComplianceOverride = {
+        enabled: false,
+        frameworks: seed.features.compliance.frameworks,
+      };
+    }
 
     // Select plugins to install
     let selectedPlugins: string[] = [];
@@ -527,6 +557,10 @@ export const initCommand = new Command('init')
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
     // --reset → false (resolveResetGatedInputs null-seeds the manifest).
     let proxyEnabled = seed.features.proxy;
+    // compliance: manifest-group (like proxy); seed from prior manifest value.
+    // CLI override applied below in both Recommended and Advanced paths.
+    let complianceEnabled = seed.features.compliance.enabled;
+    let complianceFrameworks = seed.features.compliance.frameworks;
     let enabledFlags = seed.flags;
     let viewMode: ViewMode = seed.viewMode;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
@@ -564,6 +598,7 @@ export const initCommand = new Command('init')
         learning: options.learning,
         rules: options.rules,
         proxy: options.proxy,
+        compliance: cliComplianceOverride,
       });
       ambientEnabled = effectiveFeatures.ambient;
       memoryEnabled = effectiveFeatures.memory;
@@ -572,6 +607,8 @@ export const initCommand = new Command('init')
       learningEnabled = effectiveFeatures.learning;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
+      complianceEnabled = effectiveFeatures.compliance.enabled;
+      complianceFrameworks = effectiveFeatures.compliance.frameworks;
       // enabledFlags and viewMode are already initialised to seed values above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -600,6 +637,9 @@ export const initCommand = new Command('init')
 
       // Print summary
       const defaultFlagCount = enabledFlags.length;
+      const complianceSummary = complianceEnabled
+        ? `enabled${complianceFrameworks.length > 0 ? ` (${complianceFrameworks.join(', ')})` : ' (generic controls only)'}`
+        : 'disabled';
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
@@ -608,6 +648,7 @@ export const initCommand = new Command('init')
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
+        `Compliance:      ${complianceSummary}`,
         `View mode:       ${viewMode}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -775,6 +816,49 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         proxyEnabled = proxyChoice;
+      }
+
+      // Compliance feature (Advanced-only wizard step; after proxy, before flags)
+      if (cliComplianceOverride !== undefined) {
+        // --compliance or --no-compliance passed explicitly — honour without prompting
+        complianceEnabled = cliComplianceOverride.enabled;
+        complianceFrameworks = cliComplianceOverride.frameworks;
+      } else {
+        p.note(
+          'Stamps the compliance rule with active framework labels and installs\n' +
+          'framework reference files into the compliance skill. Only the\n' +
+          'frameworks you select are included — zero selection = generic controls.\n\n' +
+          'Valid framework IDs:\n' +
+          COMPLIANCE_FRAMEWORKS.map(fw => `  ${fw.id.padEnd(10)} — ${fw.hint}`).join('\n'),
+          'Compliance',
+        );
+        const complianceChoice = await p.confirm({
+          message: 'Enable compliance?',
+          initialValue: seed.features.compliance.enabled,
+        });
+        if (p.isCancel(complianceChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        complianceEnabled = complianceChoice;
+
+        if (complianceEnabled) {
+          const frameworkSelection = await p.multiselect({
+            message: 'Select compliance frameworks (Enter to skip — generic controls only)',
+            options: COMPLIANCE_FRAMEWORKS.map(fw => ({
+              value: fw.id,
+              label: fw.label,
+              hint: fw.hint,
+            })),
+            initialValues: seed.features.compliance.frameworks,
+            required: false,
+          });
+          if (p.isCancel(frameworkSelection)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+          complianceFrameworks = frameworkSelection as string[];
+        }
       }
 
       // Claude Code flags multiselect (advanced only)
@@ -1141,6 +1225,32 @@ export const initCommand = new Command('init')
       s.stop('Installation failed');
       p.log.error(`${error}`);
       process.exit(1);
+    }
+
+    // Converge compliance artifacts (PF-015: always converge, never short-circuit).
+    // Called unconditionally so that enabling/disabling compliance during init
+    // is reflected in the installed artifacts without a separate devflow compliance run.
+    // Wrapped in its own try/catch (PF-009: warn-not-abort).
+    try {
+      const convergeResult = await convergeComplianceArtifacts({
+        claudeDir,
+        devflowDir,
+        enabled: complianceEnabled,
+        frameworks: complianceFrameworks,
+        rulesEnabled,
+        warn: (msg) => p.log.warn(msg),
+      });
+      if (convergeResult.removedPreexisting) {
+        p.log.info(
+          'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
+          'run `devflow compliance --enable` to re-enable with your framework selection.',
+        );
+      }
+    } catch (err) {
+      p.log.warn(
+        `Compliance artifact convergence failed — install succeeded but compliance artifacts may be stale: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     // Clean up stale skills from previous installations
@@ -1755,8 +1865,9 @@ export const initCommand = new Command('init')
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,
-        // Thread prior compliance through unchanged (full init wiring is a later phase).
-        compliance: existingManifest?.features.compliance ?? { enabled: false, frameworks: [] },
+        // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
+        // and Advanced wizard selection. convergeComplianceArtifacts was called above.
+        compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
