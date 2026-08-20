@@ -1026,7 +1026,12 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
 
 // ---------------------------------------------------------------------------
 // §15  Phase D traceability op guards — code-review (Part 2, Step 2.3)
-//      post-review-summary replaces retired comment-pr; devflow:review-summary marker present
+//      post-review-summary replaces retired comment-pr; REVIEW_TIMESTAMP input wired (I44 dedup fix)
+//      Guard change (I16/I44): The old guard pinned the devflow:review-summary marker literal in the
+//      compiled command. Per the corrected contract, callers pass op inputs — they do not restate what
+//      the op writes internally. §15 now asserts that REVIEW_TIMESTAMP is passed as an input to the
+//      post-review-summary spawn. The marker literal check is dropped from the compiled-command surface
+//      (the marker contract is verified on the agent side via git.md — see post-review-summary D7 section).
 // ---------------------------------------------------------------------------
 
 describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () => {
@@ -1043,17 +1048,20 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
     ).toBe(0);
   });
 
-  it('code-review.md contains post-review-summary and devflow:review-summary marker', async () => {
+  it('code-review.md contains post-review-summary and passes REVIEW_TIMESTAMP input', async () => {
     const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
       'code-review.md must reference the post-review-summary Git op',
     ).toContain('post-review-summary');
+    // I44: caller must pass REVIEW_TIMESTAMP so the op can dedup on cycle+timestamp pair,
+    // not cycle alone. A re-review in the same cycle posts its own comment; a re-run of
+    // the same review (same timestamp) still deduplicates.
     expect(
       content,
-      'code-review.md must contain the devflow:review-summary marker string',
-    ).toContain('devflow:review-summary');
+      'code-review.md must pass REVIEW_TIMESTAMP to post-review-summary spawn (I44 cycle+ts dedup)',
+    ).toContain('REVIEW_TIMESTAMP');
   });
 
   it('code-review.md does not contain comment-pr (retired op)', async () => {

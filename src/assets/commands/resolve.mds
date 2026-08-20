@@ -384,7 +384,7 @@ Agent(subagent_type="Git"):
 PR_NUMBER: {pr_number}
 RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Post one consolidated PR comment with <!-- devflow:resolution-summary --> marker. Skip if already posted."
+Posts the consolidated resolution-summary comment (marker-deduped by the operation)."
 ```
 
 If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.

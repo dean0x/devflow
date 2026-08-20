@@ -253,9 +253,9 @@ Agent(subagent_type="Git", run_in_background=false):
 PR_NUMBER: {pr_number}
 REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
 CYCLE_NUMBER: {cycle_number}
+REVIEW_TIMESTAMP: {timestamp}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Post one consolidated PR comment with <!-- devflow:review-summary cycle:{cycle_number} --> marker.
-Skip if this cycle's marker already present (D7 dedup)."
+Posts the consolidated review-summary comment (marker-deduped by the operation on the cycle+timestamp pair)."
 ```
 
 ### Phase 4: Write Review Head Marker & Report
@@ -317,7 +317,7 @@ In multi-worktree mode, report results per worktree.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
-| Review comment already posted | Git agent detects `<!-- devflow:review-summary cycle:\{N\}` marker → skip silently (D7) |
+| Review comment already posted | Git agent matches `<!-- devflow:review-summary cycle:\{N\} ts:\{REVIEW_TIMESTAMP\}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment |
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |

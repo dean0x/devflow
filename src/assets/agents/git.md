@@ -36,7 +36,7 @@ The orchestrator provides:
 | `setup-task` | Create feature branch and optionally fetch/create issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional), `COMPLIANCE` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_NUMBERS` |
-| `post-review-summary` | Post consolidated review-summary comment per cycle (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `WORKTREE_PATH` (optional) |
+| `post-review-summary` | Post consolidated review-summary comment per review run (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `check-ci-status` | Check CI/PR check status for a branch | `PR_NUMBER` (optional), `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT`, `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional) |
@@ -60,7 +60,7 @@ The orchestrator provides:
 | D4 | Degradation contract — every remote-dependent op degrades gracefully with `TRACEABILITY: DEGRADED ({reason})`, never aborting the caller's workflow |
 | D5 | Issue creation/enrichment — `ensure-traceable-issue` creates or enriches a GitHub issue and returns the number for downstream use |
 | D6 | Merge-readiness report — `check-merge-readiness` is report-only; it never takes action |
-| D7 | Review-summary dedup — one posted review-summary comment per cycle, marker-keyed, never edited after posting |
+| D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
 | D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
 | D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
 
@@ -286,22 +286,24 @@ Fetch multiple GitHub issues for multi-issue planning flows.
 
 ## Operation: post-review-summary
 
-Post a consolidated code review summary as a single PR comment per review cycle (D7). Marker-based deduplication — if `<!-- devflow:review-summary cycle:{N}` already exists for this cycle, skip; never edit after posting.
+Post a consolidated code review summary as a single PR comment per review run (D7). Marker-based deduplication — if the marker for this cycle+timestamp pair already exists, skip; never edit after posting.
 
-**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `WORKTREE_PATH` (optional)
+**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional)
+
+- `REVIEW_TIMESTAMP`: the review directory timestamp slug (e.g., `2026-08-20_1030`); identifies the specific review run within a cycle so a re-review in the same cycle posts its own comment while a true re-run of the same review deduplicates
 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (no PR)`, warn in output, return. Summary is written to disk only.
 
 **Process:**
-1. Check for existing comment with this cycle's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
+1. Check for existing comment with this run's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER}` in the viewer-authored comment bodies only
-   - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER}`
+   - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
+   - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
 2. Read `REVIEW_SUMMARY_PATH` (the review-summary.md file written by the Synthesize agent)
 3. Compose comment body:
    ```
-   <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{TS} -->
+   <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
    ## Code Review — Cycle {CYCLE_NUMBER}
 
    {full content of review-summary.md}
@@ -309,7 +311,6 @@ Post a consolidated code review summary as a single PR comment per review cycle 
    ---
    *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
    ```
-   where `{TS}` = current UTC timestamp (ISO 8601, e.g., `2026-08-20T14:30:00Z`)
    Cap the composed body at 60000 characters (GitHub rejects comments over 65536 with a
    422, which the 4xx rule would silently skip — the summary would never be posted). If
    the composed body exceeds the cap, truncate lowest-value sections first (Suggestions,
@@ -323,7 +324,8 @@ Post a consolidated code review summary as a single PR comment per review cycle 
 ## Review Summary Posted
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
-**Status**: POSTED | SKIPPED (already posted for cycle {N}) | DEGRADED ({reason})
+**Review timestamp**: {REVIEW_TIMESTAMP}
+**Status**: POSTED | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
 ---
@@ -797,17 +799,7 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
-   - Compose the issue body to a temp file (`DEVFLOW_BODY_FILE`). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string:
-     ```markdown
-     ## Initial Request
-     {INITIAL_REQUEST if provided, else TASK_DESCRIPTION}
-
-     ## Product Requirements
-     {REQUIREMENTS if provided, else "(to be elaborated during planning)"}
-
-     ## Implementation Plan
-     (to be added at plan time)
-     ```
+   - Compose the issue body to a temp file (`DEVFLOW_BODY_FILE`) using the D3 template from the devflow:git skill (loaded via frontmatter — see "Traceability Issue Template (D3)" section). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string.
    - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
    - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE"`.
    - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), write to a temp file and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file {temp_file}`; then reference the comment URL in a follow-up comment to the issue.
