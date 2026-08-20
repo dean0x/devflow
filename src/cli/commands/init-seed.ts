@@ -85,7 +85,11 @@ export function resolveSeedFeatures(
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
   const proxy = manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy;
-  const compliance = manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance;
+  // Return a fresh object so callers never hold a reference to FEATURE_DEFAULTS.compliance.
+  // Without the spread, `manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance` returns
+  // the module-level default by reference — downstream mutation would corrupt it process-wide.
+  const rawCompliance = manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance;
+  const compliance = { ...rawCompliance, frameworks: [...rawCompliance.frameworks] };
 
   // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
   // Helper eliminates the repeated projectConfig !== null ternary pattern.

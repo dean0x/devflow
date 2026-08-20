@@ -144,10 +144,21 @@ const COMMAND_REFS = new Set([
   'dynamic-build',
   'dynamic-profile',
   'dynamic-wave',
-  // Git operation / traceability markers used in commands and tests — not skills, not commands,
-  // but share the devflow: prefix (e.g. <!-- devflow:review-summary ... -->,
-  // <!-- devflow:wave-report ... -->, <!-- devflow:shipped v... -->,
-  // <!-- devflow:resolution-summary ... -->).
+]);
+
+/**
+ * HTML comment marker tokens that share the devflow: prefix but are neither skills
+ * nor commands. Examples:
+ *   <!-- devflow:review-summary cycle:{N} -->
+ *   <!-- devflow:wave-report wave:{ID} -->
+ *   <!-- devflow:shipped v{VERSION} -->
+ *   <!-- devflow:resolution-summary -->
+ *
+ * These legitimately appear in compiled command files and test infrastructure, but
+ * are NOT valid in agent frontmatter or skill cross-reference checks — keep those
+ * contexts strict by using filterNonSkillRefs without this set.
+ */
+const MARKER_REFS = new Set([
   'review-summary',
   'wave-report',
   'shipped',
@@ -160,9 +171,16 @@ const COMMAND_REFS = new Set([
  */
 const PLUGIN_NAMES = new Set(DEVFLOW_PLUGINS.map(p => p.name.replace(/^devflow-/, '')));
 
-/** Filter a list of extracted names: remove command refs and plugin-name-only refs. */
-function filterNonSkillRefs(names: string[]): string[] {
-  return names.filter(name => !COMMAND_REFS.has(name) && !PLUGIN_NAMES.has(name));
+/**
+ * Filter a list of extracted names: remove command refs, plugin-name-only refs,
+ * and optionally an extra allowed set (e.g. MARKER_REFS for contexts where HTML
+ * markers legitimately appear — compiled commands, test infrastructure).
+ * Strict callers omit extraAllowed (agent frontmatter, skill cross-references).
+ */
+function filterNonSkillRefs(names: string[], extraAllowed?: ReadonlySet<string>): string[] {
+  return names.filter(
+    name => !COMMAND_REFS.has(name) && !(extraAllowed?.has(name)) && !PLUGIN_NAMES.has(name),
+  );
 }
 
 // Format 1 (plugin manifests) removed — plugin.json files were deleted in the src/ restructure.
@@ -408,7 +426,9 @@ describe('Format 6: Compiled command file skill references', () => {
       const filePath = path.join(distCommandsDir, file);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);
-      const skillRefs = filterNonSkillRefs(allRefs);
+      // MARKER_REFS allowed here: compiled commands embed HTML markers such as
+      // <!-- devflow:review-summary -->, <!-- devflow:shipped v... -->, etc.
+      const skillRefs = filterNonSkillRefs(allRefs, MARKER_REFS);
 
       for (const ref of skillRefs) {
         expect(
@@ -615,7 +635,9 @@ describe('Test infrastructure skill references', () => {
       const filePath = path.join(testsDir, relFile);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);
-      const skillRefs = filterNonSkillRefs(allRefs);
+      // MARKER_REFS allowed here: test files (e.g. build-mds.test.ts) assert that
+      // compiled commands contain HTML marker strings like devflow:review-summary.
+      const skillRefs = filterNonSkillRefs(allRefs, MARKER_REFS);
 
       for (const ref of skillRefs) {
         expect(

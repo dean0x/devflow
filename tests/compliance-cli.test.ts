@@ -152,8 +152,9 @@ describe('resolveComplianceCliAction', () => {
       { enabled: false, frameworks: [] },
       'status',
     );
-    // status is reporting only — no action messages that could be misleading
+    // status is reporting only — messages must be empty (no enable/disable/set side-effect text)
     expect(result.nextState.enabled).toBe(false);
+    expect(result.messages).toHaveLength(0);
   });
 });
 

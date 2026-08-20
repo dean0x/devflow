@@ -71,15 +71,19 @@ describe('code-review.md — convergence gate', () => {
     expect(content).toMatch(/[Cc]onvergence [Aa]ssessment/)
   })
 
-  it('Step 0d is after Step 0c and before Phase 1', () => {
-    const idx0c = content.indexOf('Step 0c')
+  it('convergence steps (0e-i, 0e-ii) are after Step 0d and before Phase 1', () => {
     const idx0d = content.indexOf('Step 0d')
+    const idx0ei = content.indexOf('Step 0e-i')
+    const idx0eii = content.indexOf('Step 0e-ii')
     const idxPhase1 = content.indexOf('### Phase 1:')
-    expect(idx0c).not.toBe(-1)
     expect(idx0d).not.toBe(-1)
+    expect(idx0ei).not.toBe(-1)
+    expect(idx0eii).not.toBe(-1)
     expect(idxPhase1).not.toBe(-1)
-    expect(idx0d).toBeGreaterThan(idx0c)
-    expect(idx0d).toBeLessThan(idxPhase1)
+    expect(idx0ei).toBeGreaterThan(idx0d)
+    expect(idx0eii).toBeGreaterThan(idx0d)
+    expect(idx0ei).toBeLessThan(idxPhase1)
+    expect(idx0eii).toBeLessThan(idxPhase1)
   })
 
   it('Step 0e-ii documents fp_ratio formula with correct denominator', () => {
