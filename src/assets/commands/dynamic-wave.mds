@@ -113,6 +113,7 @@ Invoke `/devflow:dynamic-build` in WAVE mode with:
 - The per-ticket plans and acceptance criteria (from Step 2)
 - The initiative name as the wave slug (for the integration branch `wave/\{slug\}`)
 - The tracking-issue number from Step 1 (passed as `issueNumber` — Code-agent spawns inside dynamic-build thread it through as ISSUE_NUMBER)
+- The compliance flag from Gate 0 (passed as `compliance: COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"` — dynamic-build's workflow script resolves this as `COMPLIANCE = args.compliance || "(none)"`)
 
 The build command will:
 - Read wave tickets and reason about their dependency order

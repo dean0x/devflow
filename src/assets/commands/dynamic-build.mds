@@ -103,15 +103,13 @@ const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before autho
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied; dynamic-wave threads in the tracking-issue number
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
-// Phase 1: Git setup
+// Phase 1: Git setup — declare the operation; the agent owns the process
 const gitSetup = await phase("setup", () =>
-  agent(`Set up the git branch for this ticket:
-- Create branch: ${BRANCH} from current HEAD (when COMPLIANCE is "enabled", follow .devflow/conventions.md Branch Naming if that file exists)
-- Ensure working tree is clean before starting
-- Report the base commit SHA
-
-Ticket: ${TICKET}
-COMPLIANCE: ${COMPLIANCE}`, { agentType: "Git" })
+  agent(`OPERATION: setup-task
+BASE_BRANCH: ${args.baseBranch || "HEAD"}
+TASK_DESCRIPTION: ${TICKET}
+COMPLIANCE: ${COMPLIANCE}
+${ISSUE_NUMBER && ISSUE_NUMBER !== "(none)" ? "ISSUE_INPUT: " + ISSUE_NUMBER : ""}`.trim(), { agentType: "Git" })
 );
 
 // Phase 2: Implement
@@ -494,7 +492,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT, ISSUE_NUMBER);
+      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
       if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
         await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });

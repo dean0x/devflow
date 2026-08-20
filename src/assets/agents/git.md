@@ -33,7 +33,7 @@ The orchestrator provides:
 |-----------|---------|----------------|
 | `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `COMPLIANCE` (optional) |
 | `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
-| `setup-task` | Create feature branch and optionally fetch/create issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional), `COMPLIANCE` (optional) |
+| `setup-task` | Create feature branch and optionally fetch/create issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional), `COMPLIANCE` (optional), `PLAN_ARTIFACT_PATH` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_NUMBERS` |
 | `post-review-summary` | Post consolidated review-summary comment per review run (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional) |
@@ -169,6 +169,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 - `ISSUE_INPUT` (optional): Issue number to fetch
 - `TASK_DESCRIPTION` (optional): Free-text task description (when no issue)
 - `COMPLIANCE` (optional): `enabled` when compliance skill is installed
+- `PLAN_ARTIFACT_PATH` (optional): Path to plan document; forwarded to `ensure-traceable-issue` in step 1c so the plan is attached to the traceability issue as a collapsed `<details>` comment
 
 **Process:**
 1. Record current branch as BASE_BRANCH for later PR targeting
@@ -179,7 +180,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 1c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED ({reason})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` provided: use it as the existing issue number.
-   - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` to create or find an issue. Capture the returned issue number.
+   - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
    - Issue number drives the branch name in step 3: `{type}/{number}-{slug}`.
 2. **Detect branch naming convention** from existing branches:
    ```bash
