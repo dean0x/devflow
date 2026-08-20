@@ -78,7 +78,7 @@ function normalizeId(s: string): string {
  *
  * Deduplication: first occurrence wins, subsequent occurrences of the same ID are
  * dropped. This preserves the user's intended ordering while ensuring each framework
- * appears exactly once in installed artifacts (AC-m14).
+ * appears exactly once in installed artifacts.
  */
 export function normalizeFrameworks(frameworks: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -156,7 +156,7 @@ export function normalizeComplianceFeature(
  *
  * The trailing clause lives here, not in the rule template, so the template line
  * stays slim (`- ${DEVFLOW_COMPLIANCE_FRAMEWORKS}`) and the stamp is always a
- * coherent sentence regardless of how the rule file is structured. (M10)
+ * coherent sentence regardless of how the rule file is structured.
  *
  * The stamp replaces only the placeholder; surrounding prose is template/shadow-owned.
  *

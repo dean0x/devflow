@@ -151,6 +151,22 @@ export function formatSweepSummary(
 }
 
 /**
+ * Returns true when a FEATURE_OWNED_SKILLS orphan (e.g. 'compliance') should be
+ * INCLUDED in the sweep report (i.e., surfaced to the user). Surfaced when compliance
+ * is disabled OR converge failed; suppressed only when compliance is enabled AND converge
+ * succeeded (converge re-materialized the skill, so the orphan is expected and handled).
+ *
+ * Pure predicate — extracted for testability. Used inline in the filteredSweepReport
+ * filter in the install path.
+ */
+export function shouldSurfaceFeatureOwnedSkillOrphan(
+  complianceEnabled: boolean,
+  complianceConvergeSucceeded: boolean,
+): boolean {
+  return !(complianceEnabled && complianceConvergeSucceeded);
+}
+
+/**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
  */
@@ -1817,7 +1833,7 @@ export const initCommand = new Command('init')
         // converge succeeded (converge re-materialized the skill; orphan is expected and handled).
         // When disabled or converge failed, surface the orphan so the user sees it was removed.
         if (o.kind === 'skill' && (FEATURE_OWNED_SKILLS as readonly string[]).includes(o.name)) {
-          return !(complianceEnabled && complianceConvergeSucceeded);
+          return shouldSurfaceFeatureOwnedSkillOrphan(complianceEnabled, complianceConvergeSucceeded);
         }
         return true;
       }),

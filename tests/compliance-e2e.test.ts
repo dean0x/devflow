@@ -991,7 +991,7 @@ describe.skipIf(!distExists)('S20: compliance sweep suppression conditional on e
 
   it('S20b: re-init with --no-compliance surfaces compliance in sweep report', async () => {
     // Compliance skill swept by orphan sweep; converge removes it (disabled).
-    // Suppress condition (enabled && convergeSucceeded = false) → surfaced.
+    // Fixture state: enabled = false (--no-compliance). Predicate: !(false && ...) = true → orphan surfaced.
     const result = run('init', '--no-compliance');
     expect(result.status, `init --no-compliance failed:\n${result.stderr}`).toBe(0);
 

@@ -492,7 +492,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT);
+      const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT, ISSUE_NUMBER);
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
       if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
         await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });

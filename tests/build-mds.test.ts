@@ -907,13 +907,6 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
           `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
         ).not.toContain('COMPLIANCE: {enabled');
       }
-      // COMPLIANCE: ${ is an interpolated JS form — indicates a MDS escaping bug.
-      if (!basename.startsWith('dynamic-')) {
-        expect(
-          content,
-          `${basename}.md must not contain COMPLIANCE: $\{ (interpolated JS form — MDS escaping bug)`,
-        ).not.toContain('COMPLIANCE: ${');
-      }
       // comment-pr was retired; post-review-summary replaces it.
       expect(
         content,

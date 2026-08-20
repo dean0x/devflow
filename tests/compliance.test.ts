@@ -212,13 +212,13 @@ describe('normalizeFrameworks', () => {
     expect(normalizeFrameworks(['nope', 'also-nope'])).toEqual([]);
   });
 
-  it('deduplicates repeated IDs — first occurrence wins (m14)', () => {
+  it('deduplicates repeated IDs — first occurrence wins', () => {
     // A hand-edited or migrated manifest may list the same framework multiple times.
     // normalizeFrameworks must deduplicate so each appears exactly once in installed artifacts.
     expect(normalizeFrameworks(['gdpr', 'soc2', 'gdpr', 'gdpr'])).toEqual(['gdpr', 'soc2']);
   });
 
-  it('deduplication survives alias normalization (m14)', () => {
+  it('deduplication survives alias normalization', () => {
     // iso27001 and iso-27001 both normalize to iso-27001 — only one survives.
     expect(normalizeFrameworks(['iso27001', 'iso-27001', 'gdpr'])).toEqual(['iso-27001', 'gdpr']);
   });
@@ -271,9 +271,9 @@ describe('normalizeComplianceFeature', () => {
 const PLACEHOLDER = '${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
 
 describe('stampComplianceRule', () => {
-  // M10: The stamp carries the full self-contained clause; the rule template line
+  // The stamp carries the full self-contained clause; the rule template line
   // is slim (`- ${PLACEHOLDER}`). Tests use the new template format.
-  it('stamps full "Active frameworks: ... — their controls are binding." clause (AC-36, M10)', () => {
+  it('stamps full "Active frameworks: ... — their controls are binding." clause (AC-36)', () => {
     const content = `# Compliance\n- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, ['gdpr', 'soc2']);
     expect(result).toContain('Active frameworks: GDPR, SOC 2 — their controls are binding.');
@@ -289,7 +289,7 @@ describe('stampComplianceRule', () => {
     expect(result).toContain('— their controls are binding.');
   });
 
-  it('empty list → full "Active frameworks: none declared — generic controls only." clause (AC-5, M10)', () => {
+  it('empty list → full "Active frameworks: none declared — generic controls only." clause (AC-5)', () => {
     const content = `- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, []);
     expect(result).toContain('Active frameworks: none declared — generic controls only.');
