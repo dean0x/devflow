@@ -12,10 +12,11 @@ devflow/
 │   │   ├── commands/                 # init.ts, init-seed.ts, memory.ts, learning.ts, ambient.ts,
 │   │   │                             #   flags.ts, rules.ts, skills.ts, context.ts, hud.ts,
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
-│   │   │                             #   capture.ts, legacy-hooks.ts, knowledge/
+│   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts, proxy.ts,
+│   │   │                             #   agents.ts, knowledge/
 │   │   └── utils/                    # (empty — utilities moved to src/core/)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
-│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 22 plugin entries
+│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
 │   │   ├── flags.ts                  # Claude Code flag registry (20 flags)

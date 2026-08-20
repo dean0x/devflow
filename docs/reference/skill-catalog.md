@@ -46,4 +46,4 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
-- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven), Design agent (gap-analysis compliance focus), and Code agent (when skill installed and regulated surface detected); feature-owned, always installed
+- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven), Design agent (gap-analysis compliance focus), and Code agent (when skill installed and regulated surface detected); feature-owned, opt-in (installed when compliance is enabled; not a universal skill)

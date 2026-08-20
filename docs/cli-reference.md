@@ -25,6 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
+| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; wizard step is Advanced-only) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -113,7 +114,7 @@ npx devflow-kit compliance --set ""                    # Clear all active framew
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
-The compliance skill and compliance rule are feature-owned (always installed, not plugin-scoped). Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
+The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
 
 ## Rules
 
