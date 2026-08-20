@@ -566,39 +566,44 @@ fetch_review_threads() {
     local page=0
     local max_pages=2
 
-    while [ "$has_next" = "true" ] && [ "$page" -lt "$max_pages" ]; do
-        local after_arg=""
-        if [ -n "$after" ]; then
-            after_arg=", after: \"$after\""
-        fi
-
-        local result
-        result=$(gh api graphql -f query="
-          query(\$owner: String!, \$repo: String!, \$pr: Int!) {
-            repository(owner: \$owner, name: \$repo) {
-              pullRequest(number: \$pr) {
-                reviewThreads(first: 50${after_arg}) {
+    # The cursor is a GraphQL VARIABLE, never concatenated into the query text. The query
+    # is single-quoted so $owner/$repo/$pr/$cursor stay literal for the server.
+    local query='
+      query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 50, after: $cursor) {
+              nodes {
+                id
+                isResolved
+                path
+                line
+                comments(first: 1) {
                   nodes {
-                    id
-                    isResolved
-                    path
-                    line
-                    comments(first: 1) {
-                      nodes {
-                        author { login }
-                        body
-                      }
-                    }
-                  }
-                  pageInfo {
-                    hasNextPage
-                    endCursor
+                    author { login }
+                    body
                   }
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
           }
-        " -f owner="$owner" -f repo="$repo" -F pr="$pr")
+        }
+      }'
+
+    while [ "$has_next" = "true" ] && [ "$page" -lt "$max_pages" ]; do
+        local result
+        if [ -n "$after" ]; then
+            result=$(gh api graphql -f query="$query" \
+                -f owner="$owner" -f repo="$repo" -F pr="$pr" -f cursor="$after")
+        else
+            # Page 1: omit cursor — $cursor is nullable, so the server starts at the beginning.
+            result=$(gh api graphql -f query="$query" \
+                -f owner="$owner" -f repo="$repo" -F pr="$pr")
+        fi
 
         echo "$result"
         has_next=$(echo "$result" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
