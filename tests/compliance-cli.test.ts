@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveComplianceCliAction,
+  classifyDriftMissing,
   type ComplianceCliAction,
 } from '../src/cli/commands/compliance.js';
 import {
@@ -300,5 +301,51 @@ describe('resolveResetGatedInputs — compliance', () => {
     const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
     const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['pci-dss'] });
+  });
+});
+
+// ── classifyDriftMissing — invalid-ID reporting path ─────────────────────────────
+
+describe('classifyDriftMissing', () => {
+  const REGISTRY = new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id));
+
+  it('all manifest IDs installed → both lists empty', () => {
+    const result = classifyDriftMissing(['gdpr', 'hipaa'], ['gdpr', 'hipaa'], REGISTRY);
+    expect(result.validMissing).toEqual([]);
+    expect(result.invalidIds).toEqual([]);
+  });
+
+  it('valid ID in manifest not installed → validMissing (--enable can reconcile)', () => {
+    const result = classifyDriftMissing(['gdpr', 'soc2'], ['gdpr'], REGISTRY);
+    expect(result.validMissing).toEqual(['soc2']);
+    expect(result.invalidIds).toEqual([]);
+  });
+
+  it('unknown ID in manifest → invalidIds (--set required to remove)', () => {
+    const result = classifyDriftMissing(['gdpr', 'not-a-framework'], ['gdpr'], REGISTRY);
+    expect(result.validMissing).toEqual([]);
+    expect(result.invalidIds).toEqual(['not-a-framework']);
+  });
+
+  it('mixed: one valid missing + one invalid → split across both lists', () => {
+    const result = classifyDriftMissing(
+      ['gdpr', 'sox', 'hand-edited-id'],
+      ['gdpr'],
+      REGISTRY,
+    );
+    expect(result.validMissing).toEqual(['sox']);
+    expect(result.invalidIds).toEqual(['hand-edited-id']);
+  });
+
+  it('empty manifest → both lists empty', () => {
+    const result = classifyDriftMissing([], ['gdpr'], REGISTRY);
+    expect(result.validMissing).toEqual([]);
+    expect(result.invalidIds).toEqual([]);
+  });
+
+  it('all manifest IDs are invalid → validMissing empty, invalidIds lists all', () => {
+    const result = classifyDriftMissing(['foo', 'bar'], [], REGISTRY);
+    expect(result.validMissing).toEqual([]);
+    expect(result.invalidIds).toEqual(['foo', 'bar']);
   });
 });
