@@ -22,8 +22,10 @@ The orchestrator provides:
 
 **Degradation contract (D4):** Any operation that requires remote access (GitHub API, push, PR) MUST degrade gracefully:
 - No remote / `gh` unauthenticated / no PR → emit `TRACEABILITY: DEGRADED ({reason})`, warn in output, and continue — never abort the caller's workflow.
-- Any 4xx on a traceability op (deleted issue, closed PR, secondary rate limit) → DEGRADED for that item, continue.
+- Secondary rate limit (403 or 429 response with a rate-limit body, or `X-RateLimit-Remaining` header < 10) → STOP the current fan-out operation immediately; report remaining items as `THROTTLED ({n} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue issuing requests into an active rate limit — doing so extends GitHub's penalty window.
+- Other 4xx on a traceability op (deleted issue, closed PR, permissions error) → DEGRADED for that item, continue.
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
+- **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
 ## Operations
 
@@ -60,8 +62,13 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
 4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
-4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when an issue number is known (from branch name `{type}/{number}-{slug}` pattern). If no issue number is discoverable, skip silently.
+4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
+   a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
+   b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
 
+   Compose the updated PR body (existing body + `## Related Issues` section) to a temp file and apply with `gh pr edit {PR_NUMBER} --body-file {temp_file}`. The existing PR body is third-party-editable — never interpolate it into a command string.
+
+   If no verified issue number is discoverable, skip silently.
    On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
 4c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Read `.devflow/conventions.md` PR Titles section. If PR title does not follow the recorded convention, retitle it. If `.devflow/conventions.md` is absent, skip silently. Two rules on the retitle, because the corrected title is composed from convention-file content that derives from third-party PR titles:
    - **Validate before use.** Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of `` $ ` \ " ' ; | & < > `` or a newline. A title needing those characters is not convention-conformant anyway.
@@ -153,6 +160,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 1b. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Load branch naming convention:
    - Read `.devflow/conventions.md` Branch Naming section. If file absent, invoke `learn-conventions` first (write the file), then read the result.
    - Branch naming derived in step 3 MUST follow the recorded convention.
+   - **Metacharacter guard:** `.devflow/conventions.md` is git-tracked and team-shared, so its content is third-party input. Before using the convention-derived prefix and separator in step 3, check the fully composed branch name (type + separator + slug). If it contains any of `` $ ` \ " ' ; | & < > `` or whitespace or a newline, discard the convention and fall back to the step-2 heuristic defaults. Bind the validated name to a shell variable for checkout: `DEVFLOW_BRANCH="..."`.
 1c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED ({reason})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` provided: use it as the existing issue number.
@@ -173,7 +181,7 @@ Set up task environment: derive branch name, create feature branch, and optional
      - `slug` is the issue title: lowercased, non-alphanumeric replaced with hyphens, consecutive hyphens collapsed, trimmed, max 40 characters
    - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `{type}/{slug}` (max 40 chars)
    - If neither: fallback to `task-{YYYY-MM-DD_HHMM}`
-4. Create and checkout feature branch: `git checkout -b {derived-branch-name}`
+4. Create and checkout feature branch: `git checkout -b "$DEVFLOW_BRANCH"` (using the shell variable bound in steps 1b–3; never bare-interpolate the name into the command string)
 5. Return setup summary with branch name and BASE_BRANCH recorded
 
 **Output:**
@@ -567,7 +575,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 ESCALATED threads AND any thread where `VERIFICATION_STATUS == FAILED` → reply-only, leave unresolved.
 `VERIFICATION_STATUS == SKIPPED` (gate did not run — zero fixes were applied) → same as FAILED: reply-only, leave unresolved.
 
-**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Any 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
+**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining threads as `THROTTLED ({n} not processed)`. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
 
 **Process:**
 For each `ext-{N}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`
@@ -662,7 +670,8 @@ Report-only merge readiness check (D6). Never takes action — reports READY or 
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`
    - `NOT_READY (CI failing: {checks})` — ci_status == `FAILING`
    - `NOT_READY (CI pending)` — ci_status == `PENDING` (expected after a push; non-alarming)
-   - `READY` — unresolved_threads == 0 AND reviewDecision == `APPROVED` AND ci_status == `PASSING`
+   - `NOT_READY (no approving review)` — reviewDecision == `REVIEW_REQUIRED` or null
+   - `READY` — no rule above matched (unresolved_threads == 0, reviewDecision == `APPROVED`, ci_status == `PASSING` or `NO_CI`)
 
 **Output:**
 ```markdown
@@ -686,7 +695,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 
 `SHIPPED_ISSUES`: space-separated or newline-separated list of issue numbers.
 
-**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Any 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
+**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining issues as `THROTTLED ({n} not processed)`. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
 
 **Process:**
 0. Validate inputs before any remote call — `VERSION` must match semver `X.Y.Z` (optionally
@@ -746,8 +755,8 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
    - If `PLAN_ARTIFACT_PATH` provided: post the full design artifact as a collapsed `<details>` comment on the issue, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
-   - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)
-   - Body:
+   - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
+   - Compose the issue body to a temp file (`DEVFLOW_BODY_FILE`). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string:
      ```markdown
      ## Initial Request
      {INITIAL_REQUEST if provided, else TASK_DESCRIPTION}
@@ -758,8 +767,9 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
      ## Implementation Plan
      (to be added at plan time)
      ```
-   - If `LABELS` provided: apply via `gh issue create --label "{LABELS}"`.
-   - If `PLAN_ARTIFACT_PATH` provided: post it immediately as a `<details>` comment and update Implementation Plan section with the comment URL via `gh issue comment`.
+   - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
+   - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE"`.
+   - If `PLAN_ARTIFACT_PATH` provided: write the design artifact to a temp file and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file {temp_file}`; then reference the comment URL in a follow-up comment to the issue.
 3. Return the issue number.
 
 **Output:**
@@ -812,8 +822,8 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
 
 ## Principles
 
-1. **Rate limit aware** - Always throttle API calls (1s delay between operations)
-2. **Fail gracefully (D4)** - Degrade named (`TRACEABILITY: DEGRADED ({reason})`), warn, never abort caller's workflow; 4xx = skip item; 5xx = 1 retry
+1. **Rate limit aware** - Throttle API calls (1s between operations; raise to 3s when `X-RateLimit-Remaining` < 50); on a secondary rate limit (403/429 or remaining < 10) STOP the operation and report `THROTTLED` — never continue into an active rate limit
+2. **Fail gracefully (D4)** - Degrade named (`TRACEABILITY: DEGRADED ({reason})`), warn, never abort caller's workflow; secondary rate limit = stop + THROTTLED; other 4xx = skip item; 5xx = 1 retry
 3. **Deduplicate** - Never spam duplicate comments or issues; always check for markers before posting
 4. **Actionable output** - Every response includes next steps
 5. **Clear attribution** - Include Claude Code footer on PR comments
