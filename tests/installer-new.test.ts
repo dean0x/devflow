@@ -568,17 +568,17 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// compliance skill orphan sweep after de-registration (step 1.5)
+// compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection (I09)
 //
-// After removing devflow-compliance from DEVFLOW_PLUGINS, getAllSkillNames() no
-// longer includes 'compliance'. The installer's ungated skills sweep treats
-// devflow:compliance as an orphan and removes it. This is INTENTIONAL —
-// convergeComplianceArtifacts (called after installViaFileCopy in init.ts)
-// re-materializes the artifacts when the feature is enabled.
+// The installer's knownNames set now unions FEATURE_OWNED_SKILLS, so
+// devflow:compliance is never swept by the orphan pass. Its lifecycle is owned
+// exclusively by convergeComplianceArtifacts (called after installViaFileCopy
+// in init.ts). Before I09 the compliance skill was swept and then re-materialized
+// by converge on every install, producing a spurious orphan report entry.
 // ---------------------------------------------------------------------------
 
-describe('compliance skill orphan sweep after de-registration (step 1.5)', () => {
-  it('devflow:compliance is swept when compliance is absent from getAllSkillNames()', async () => {
+describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', () => {
+  it('devflow:compliance is NOT swept because FEATURE_OWNED_SKILLS is unioned into knownNames', async () => {
     const claudeDir = path.join(tmpDir, 'claude');
     const devflowDir = path.join(tmpDir, 'devflow');
     // Construct the dir name dynamically to avoid skill-references scanner flagging it
@@ -609,13 +609,14 @@ describe('compliance skill orphan sweep after de-registration (step 1.5)', () =>
       spinner,
     });
 
-    // After de-registration, 'compliance' is absent from getAllSkillNames()
-    // so devflow:compliance is swept as an orphan (intentional per step 1.5 contract)
+    // devflow:compliance must NOT appear in sweptOrphans — it is protected by FEATURE_OWNED_SKILLS.
     const sweptEntry = report.sweptOrphans.find(o => o.name === 'compliance');
-    expect(sweptEntry, 'devflow:compliance must appear in sweptOrphans after de-registration').toBeDefined();
-    expect(sweptEntry?.kind).toBe('skill');
+    expect(
+      sweptEntry,
+      'devflow:compliance must NOT be swept: FEATURE_OWNED_SKILLS is unioned into knownNames (I09)',
+    ).toBeUndefined();
 
-    // Physical removal: dir must be gone
-    await expect(fs.access(complianceSkillDir)).rejects.toThrow();
+    // Physical state: dir must survive the sweep
+    await expect(fs.access(complianceSkillDir)).resolves.toBeUndefined();
   });
 });

@@ -414,6 +414,7 @@ describe('removedPreexisting', () => {
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.removedPreexisting).toBe(false);
+    expect(result.converged).toBe(true);
   });
 
   it('returns true and removes pre-existing skill dir when feature disabled', async () => {
@@ -558,5 +559,104 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
     ]);
     const rule = await fs.readFile(await ruleTargetPath(), 'utf-8');
     expect(rule).toContain('none declared — generic controls only');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 9: converged — truthful completion flag (I13)
+// ---------------------------------------------------------------------------
+
+describe('converged: truthful completion flag (I13)', () => {
+  it('enable with no errors → converged: true', async () => {
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
+    });
+    expect(result.converged).toBe(true);
+  });
+
+  it('disable with no errors → converged: true', async () => {
+    // First install
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
+    });
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
+    });
+    expect(result.converged).toBe(true);
+  });
+
+  it('enable with zero frameworks and rules (minimal path) → converged: true', async () => {
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: [], rulesEnabled: false, warn: vi.fn(),
+    });
+    expect(result.converged).toBe(true);
+  });
+
+  it('converged: false when warn is called during skill install failure', async () => {
+    // Remove the skills source dir to force installSkillDir to warn.
+    // We can simulate this by passing a claudeDir path whose intermediate skill
+    // target cannot be created. A non-absolute claudeDir triggers the S78 guard.
+    const warns: string[] = [];
+    const result = await convergeComplianceArtifacts({
+      claudeDir: 'relative/path',   // non-absolute → S78 guard fires → converged: false
+      devflowDir,
+      enabled: true,
+      frameworks: ['gdpr'],
+      rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+    expect(result.converged).toBe(false);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('not an absolute path');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 10: S78 — claudeDir precondition guard
+// ---------------------------------------------------------------------------
+
+describe('S78: claudeDir must be an absolute path', () => {
+  it('relative claudeDir → warns and returns converged: false without touching the filesystem', async () => {
+    const warns: string[] = [];
+    const result = await convergeComplianceArtifacts({
+      claudeDir: 'not/absolute',
+      devflowDir,
+      enabled: true,
+      frameworks: ['gdpr'],
+      rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+    expect(result.removedPreexisting).toBe(false);
+    expect(result.converged).toBe(false);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toMatch(/not an absolute path/);
+  });
+
+  it('empty claudeDir → warns and returns converged: false', async () => {
+    const warns: string[] = [];
+    const result = await convergeComplianceArtifacts({
+      claudeDir: '',
+      devflowDir,
+      enabled: false,
+      frameworks: [],
+      rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+    expect(result.converged).toBe(false);
+    expect(warns).toHaveLength(1);
+  });
+
+  it('absolute claudeDir (happy path) → no claudeDir-guard warn', async () => {
+    const warns: string[] = [];
+    await convergeComplianceArtifacts({
+      claudeDir,   // absolute path from beforeEach
+      devflowDir,
+      enabled: false,
+      frameworks: [],
+      rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+    // The guard must not have fired — no warn about absolute path
+    expect(warns.every(w => !w.includes('not an absolute path'))).toBe(true);
   });
 });

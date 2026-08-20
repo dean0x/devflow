@@ -45,6 +45,17 @@ export interface ConvergeComplianceArtifactsResult {
    * `devflow compliance --enable`").
    */
   removedPreexisting: boolean;
+  /**
+   * True when every artifact operation attempted in this convergence run completed
+   * without error. False when any warn path was taken (skill install failed,
+   * rule install failed, artifact removal failed, or claudeDir is not absolute).
+   *
+   * PF-015: converge is warn-not-throw, so callers cannot detect partial failure
+   * via a catch block. This field makes the outcome truthful: callers can surface
+   * whether the install fully succeeded rather than assuming `true` after a non-throwing
+   * return.
+   */
+  converged: boolean;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -206,12 +217,29 @@ export async function convergeComplianceArtifacts(
 ): Promise<ConvergeComplianceArtifactsResult> {
   const { claudeDir, devflowDir, enabled, frameworks, rulesEnabled, warn } = opts;
 
+  // S78: claudeDir precondition — reliability rule: assert invariants in production code.
+  // An empty or relative claudeDir would make skillTarget/ruleTarget resolve to unexpected
+  // locations. Warn and bail rather than running fs.rm with a potentially wrong path.
+  if (!path.isAbsolute(claudeDir)) {
+    warn(`compliance: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
+    return { removedPreexisting: false, converged: false };
+  }
+
   // Trust boundary. `frameworks` reaches here straight from the manifest on every
   // caller's bare --enable path, and normalizeComplianceFeature only type-checks it.
   // Filtering to registry IDs here — before any path.join or stamp — is what makes
   // AC-35/AC-36 true for ALL callers rather than only the ones that happened to run
   // parseFrameworkList. Unknown IDs are dropped, never turned into a path segment.
   const safeFrameworks = normalizeFrameworks(frameworks);
+
+  // I13: Track whether every artifact operation in this run completed without error.
+  // `converged` starts true and is set false by the tracking wrapper whenever any warn
+  // path is taken — including inside installSkillDir / installRuleFile (PF-009 paths).
+  let converged = true;
+  const trackingWarn = (msg: string): void => {
+    converged = false;
+    warn(msg);
+  };
 
   // ── Disable path ─────────────────────────────────────────────────────────
   if (!enabled) {
@@ -243,25 +271,25 @@ export async function convergeComplianceArtifacts(
 
     // PF-009: warn after BOTH attempts so neither failure blocks the other.
     if (skillErr !== null) {
-      warn(`compliance: failed to remove skill dir — ${skillErr}`);
+      trackingWarn(`compliance: failed to remove skill dir — ${skillErr}`);
     }
     if (ruleErr !== null) {
-      warn(`compliance: failed to remove rule — ${ruleErr}`);
+      trackingWarn(`compliance: failed to remove rule — ${ruleErr}`);
     }
 
-    return { removedPreexisting: skillExisted || ruleExisted };
+    return { removedPreexisting: skillExisted || ruleExisted, converged };
   }
 
   // ── Enable path ──────────────────────────────────────────────────────────
   //
   // PF-015: installSkillDir and the rule step are independent operations.
-  // An error in installSkillDir is caught internally and reported via warn,
+  // An error in installSkillDir is caught internally and reported via trackingWarn,
   // so execution always continues to the rule step.
 
-  await installSkillDir(claudeDir, devflowDir, safeFrameworks, warn);
+  await installSkillDir(claudeDir, devflowDir, safeFrameworks, trackingWarn);
 
   if (rulesEnabled) {
-    await installRuleFile(claudeDir, devflowDir, safeFrameworks, warn);
+    await installRuleFile(claudeDir, devflowDir, safeFrameworks, trackingWarn);
   } else {
     // Rules disabled: remove any stale rule left from a prior enabled run.
     // Ignore ENOENT (force: true) — absence is the desired end state.
@@ -270,5 +298,5 @@ export async function convergeComplianceArtifacts(
     } catch { /* absent = already in desired end state */ }
   }
 
-  return { removedPreexisting: false };
+  return { removedPreexisting: false, converged };
 }

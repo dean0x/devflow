@@ -958,12 +958,11 @@ describe('S19: manifest writeback deduplicates frameworks', () => {
 });
 
 // ── S20 ───────────────────────────────────────────────────────────────────────
-describe('S20: compliance sweep suppression conditional on enabled+converge', () => {
-  // Verifies that the filteredSweepReport correctly surfaces or suppresses the
-  // compliance skill orphan depending on whether compliance is enabled (and converge
-  // succeeded) vs. disabled. The sweep always finds the compliance skill as an orphan
-  // (it is excluded from knownNames by design); converge re-materializes it when
-  // enabled or removes it when disabled.
+describe('S20: compliance skill lifecycle is managed by converge, not the orphan sweep', () => {
+  // After I09: the installer's knownNames unions FEATURE_OWNED_SKILLS, so devflow:compliance
+  // is never swept as an orphan. Its lifecycle is owned exclusively by convergeComplianceArtifacts:
+  // converge installs when enabled, converge removes when disabled. The sweep report must
+  // never mention compliance in either case.
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -983,16 +982,13 @@ describe('S20: compliance sweep suppression conditional on enabled+converge', ()
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
   it('S20a: re-init with compliance still enabled does NOT surface compliance in sweep report', async () => {
-    // Compliance skill swept by orphan sweep, then re-installed by converge.
-    // Suppress condition (enabled && convergeSucceeded = true) → not surfaced.
+    // After I09: compliance skill is protected by FEATURE_OWNED_SKILLS in knownNames — it is
+    // never swept. Converge re-installs it when enabled. The sweep report must never mention it.
     const result = run('init', '--recommended');
     expect(result.status, `second init failed:\n${result.stderr}`).toBe(0);
 
     const combined = result.stdout + result.stderr;
-    // Cannot assert on sweptOrphans directly — S20 drives the CLI binary (no access to
-    // InstallReport). The formatSweepSummary message format is:
-    //   "no longer in the registry: skill compliance" ({o.kind} {o.name}).
-    // For a negative check the bare pattern is intentionally broad to catch any variant.
+    // The sweep report must not mention compliance — it is no longer a sweep target (I09).
     expect(combined).not.toMatch(/skill compliance/);
     // Compliance skill must still be present (converge re-materialized it).
     await expect(
@@ -1001,19 +997,16 @@ describe('S20: compliance sweep suppression conditional on enabled+converge', ()
     ).resolves.not.toThrow();
   });
 
-  it('S20b: re-init with --no-compliance surfaces compliance in sweep report', async () => {
-    // Compliance skill swept by orphan sweep; converge removes it (disabled).
-    // Fixture state: enabled = false (--no-compliance). Predicate: !(false && ...) = true → orphan surfaced.
+  it('S20b: re-init with --no-compliance removes compliance skill (via converge, not sweep)', async () => {
+    // After I09: compliance skill is NOT swept by the orphan sweep (FEATURE_OWNED_SKILLS guards it).
+    // Removal is owned by converge's disable path. The sweep report must NOT mention compliance.
     const result = run('init', '--no-compliance');
     expect(result.status, `init --no-compliance failed:\n${result.stderr}`).toBe(0);
 
     const combined = result.stdout + result.stderr;
-    // Cannot assert on sweptOrphans directly — S20 drives the CLI binary (no access to
-    // InstallReport). Anchor to the formatSweepSummary message structure to resist copy
-    // edits while still catching the specific orphan entry:
-    //   "no longer in the registry: skill compliance" ({o.kind} {o.name}).
-    expect(combined).toMatch(/no longer in the registry:[^\n]*skill compliance/);
-    // Compliance skill must be gone.
+    // Sweep report must not surface compliance — it is no longer a sweep target (I09).
+    expect(combined).not.toMatch(/no longer in the registry:[^\n]*skill compliance/);
+    // Compliance skill must be gone (removed by converge disable path, not by sweep).
     let exists = false;
     try { await fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')); exists = true; } catch {}
     expect(exists, 'compliance skill must be removed after --no-compliance').toBe(false);

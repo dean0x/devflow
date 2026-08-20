@@ -104,7 +104,7 @@ Reads the active frameworks from the installed `references/{id}.md` files — no
 
 ### Sweep-then-converge on init
 
-During `devflow init`, after `installViaFileCopy` runs the plugin sweep, `convergeComplianceArtifacts` is called to install or remove compliance artifacts according to the resolved compliance state. The `shouldSurfaceFeatureOwnedSkillOrphan` helper gates whether a stale `devflow:compliance` directory in the sweep report is surfaced to the user — it is suppressed when compliance is enabled and the converge succeeded.
+During `devflow init`, after `installViaFileCopy` runs the plugin sweep, `convergeComplianceArtifacts` is called to install or remove compliance artifacts according to the resolved compliance state. The installer's orphan-sweep knownNames set unions `FEATURE_OWNED_SKILLS` (I09), so `devflow:compliance` is never swept — its lifecycle is owned exclusively by `convergeComplianceArtifacts`. No suppression predicate is needed; the skill simply does not appear as an orphan.
 
 ### COMPLIANCE_SKILL_INSTALLED prompt gate
 

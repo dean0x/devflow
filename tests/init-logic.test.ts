@@ -11,7 +11,6 @@ import {
   discoverProjectGitRoots,
   runMigrationsWithFallback,
   formatSweepSummary,
-  shouldSurfaceFeatureOwnedSkillOrphan,
 } from '../src/cli/commands/init.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
@@ -1580,26 +1579,3 @@ describe('formatSweepSummary', () => {
   })
 })
 
-// shouldSurfaceFeatureOwnedSkillOrphan — sweep suppression predicate unit tests
-// ---------------------------------------------------------------------------
-// Direct e2e testing of the converge-FAILURE branch (enabled=true, converge fails) is
-// impractical in the e2e harness; these unit tests exercise the extracted predicate instead.
-// The predicate is used in the filteredSweepReport filter in the install path of init.ts.
-// ---------------------------------------------------------------------------
-
-describe('shouldSurfaceFeatureOwnedSkillOrphan', () => {
-  it('enabled=true, convergeSucceeded=true → suppress (false) — converge re-materialized skill', () => {
-    expect(shouldSurfaceFeatureOwnedSkillOrphan(true, true)).toBe(false);
-  });
-
-  it('enabled=true, convergeSucceeded=false → surface (true) — converge FAILED, skill was removed', () => {
-    // This is the converge-FAILURE branch: compliance is enabled but converge did not
-    // succeed — the sweep line must be VISIBLE so the user sees the skill was removed.
-    expect(shouldSurfaceFeatureOwnedSkillOrphan(true, false)).toBe(true);
-  });
-
-  it('enabled=false → surface (true) — compliance disabled, removal is expected to be visible', () => {
-    expect(shouldSurfaceFeatureOwnedSkillOrphan(false, false)).toBe(true);
-    expect(shouldSurfaceFeatureOwnedSkillOrphan(false, true)).toBe(true);
-  });
-})

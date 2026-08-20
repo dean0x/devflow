@@ -151,22 +151,6 @@ export function formatSweepSummary(
 }
 
 /**
- * Returns true when a FEATURE_OWNED_SKILLS orphan (e.g. 'compliance') should be
- * INCLUDED in the sweep report (i.e., surfaced to the user). Surfaced when compliance
- * is disabled OR converge failed; suppressed only when compliance is enabled AND converge
- * succeeded (converge re-materialized the skill, so the orphan is expected and handled).
- *
- * Pure predicate — extracted for testability. Used inline in the filteredSweepReport
- * filter in the install path.
- */
-export function shouldSurfaceFeatureOwnedSkillOrphan(
-  complianceEnabled: boolean,
-  complianceConvergeSucceeded: boolean,
-): boolean {
-  return !(complianceEnabled && complianceConvergeSucceeded);
-}
-
-/**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
  */
@@ -1244,6 +1228,17 @@ export const initCommand = new Command('init')
       );
     }
 
+    // I41: probe the compliance rule target BEFORE installViaFileCopy wipes the rules dir.
+    // On a full (non-partial) install, installViaFileCopy removes rules/devflow/ before
+    // reinstalling, so by the time convergeComplianceArtifacts runs the rule file is already
+    // gone. Probing here captures the pre-install state so the legacy-upgrade notice can fire
+    // even when the only surviving artifact was the rule file.
+    let hadComplianceRule = false;
+    try {
+      await fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'));
+      hadComplianceRule = true;
+    } catch { /* absent — no legacy artifact */ }
+
     // Install via file copy
     let installReport: InstallReport;
     try {
@@ -1267,9 +1262,9 @@ export const initCommand = new Command('init')
     // Called unconditionally so that enabling/disabling compliance during init
     // is reflected in the installed artifacts without a separate devflow compliance run.
     // Wrapped in its own try/catch (PF-009: warn-not-abort).
-    let complianceConvergeSucceeded = false;
+    let convergeResult: Awaited<ReturnType<typeof convergeComplianceArtifacts>> | null = null;
     try {
-      const convergeResult = await convergeComplianceArtifacts({
+      convergeResult = await convergeComplianceArtifacts({
         claudeDir,
         devflowDir,
         enabled: complianceEnabled,
@@ -1277,8 +1272,12 @@ export const initCommand = new Command('init')
         rulesEnabled,
         warn: (msg) => p.log.warn(msg),
       });
-      complianceConvergeSucceeded = true;
-      if (convergeResult.removedPreexisting) {
+      // I41: emit legacy-upgrade notice when compliance is disabled AND pre-existing artifacts
+      // were found. After I09, the skill dir survives the orphan sweep (knownNames now unions
+      // FEATURE_OWNED_SKILLS), so convergeResult.removedPreexisting correctly fires for the
+      // skill path. hadComplianceRule covers the rule path (wiped by installViaFileCopy before
+      // converge probes on full installs).
+      if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
         p.log.info(
           'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
           'run `devflow compliance --enable` to re-enable with your framework selection.',
@@ -1821,24 +1820,9 @@ export const initCommand = new Command('init')
 
     // Orphan-sweep reporting: removals are silent deletions from ~/.claude/, and a
     // failed removal leaves a retired asset live. Both must surface.
-    // FEATURE_OWNED_SKILLS (e.g. 'compliance') are excluded from the sweep's knownNames by
-    // design (they are managed by convergeComplianceArtifacts, not the orphan sweep), but
-    // the sweep still reports them as orphaned. Suppress them only when compliance is enabled
-    // and converge succeeded (i.e., converge re-materialized the skill). When disabled or
-    // converge failed, surface the orphan so the user sees the skill was removed.
-    const filteredSweepReport = {
-      ...installReport,
-      sweptOrphans: installReport.sweptOrphans.filter(o => {
-        // Suppress compliance-owned skill orphans only when compliance is enabled AND
-        // converge succeeded (converge re-materialized the skill; orphan is expected and handled).
-        // When disabled or converge failed, surface the orphan so the user sees it was removed.
-        if (o.kind === 'skill' && (FEATURE_OWNED_SKILLS as readonly string[]).includes(o.name)) {
-          return shouldSurfaceFeatureOwnedSkillOrphan(complianceEnabled, complianceConvergeSucceeded);
-        }
-        return true;
-      }),
-    };
-    for (const line of formatSweepSummary(filteredSweepReport)) {
+    // After I09, the installer's knownNames set unions FEATURE_OWNED_SKILLS, so
+    // devflow:compliance is never swept here — no suppression predicate is needed.
+    for (const line of formatSweepSummary(installReport)) {
       if (line.level === 'warn') p.log.warn(line.message);
       else p.log.info(line.message);
     }
