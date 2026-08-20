@@ -105,7 +105,7 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
       const shadowState = await validateRuleShadow(shadowFile);
       // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
       const owner = ownerMap.get(name)?.replace('devflow-', '') ??
-        ((['compliance'] as string[]).includes(name) ? 'feature' : 'unknown');
+        ((FEATURE_OWNED_RULES as readonly string[]).includes(name) ? 'feature' : 'unknown');
       return { row: formatRuleRow(name, owner, shadowState, installedTag), shadowState };
     }),
   );
@@ -361,7 +361,7 @@ export const rulesCommand = new Command('rules')
           const n = path.basename(file, '.md');
           // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
           const shortOwner = ownerMap.get(n)?.replace('devflow-', '') ??
-            ((['compliance'] as string[]).includes(n) ? 'feature' : 'unknown');
+            ((FEATURE_OWNED_RULES as readonly string[]).includes(n) ? 'feature' : 'unknown');
           const shadowFile = path.join(devflowDir, 'rules', `${n}.md`);
           const shadowState = await validateRuleShadow(shadowFile);
           return formatRuleRow(n, shortOwner, shadowState);

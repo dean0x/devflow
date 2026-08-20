@@ -398,7 +398,7 @@ export const initCommand = new Command('init')
     let selectedPlugins: string[] = [];
     if (options.plugin) {
       // Friendly redirect for devflow-compliance (now a built-in feature)
-      if (options.plugin.split(',').map((s: string) => s.trim()).some((n: string) => n === 'devflow-compliance' || n === 'compliance')) {
+      if (options.plugin.split(',').map(s => s.trim()).some(n => n === 'devflow-compliance' || n === 'compliance')) {
         p.log.info('compliance is now a built-in feature — manage it with `devflow compliance`');
         process.exit(0);
       }
@@ -641,9 +641,14 @@ export const initCommand = new Command('init')
 
       // Print summary
       const defaultFlagCount = enabledFlags.length;
-      const complianceSummary = complianceEnabled
-        ? `enabled${complianceFrameworks.length > 0 ? ` (${complianceFrameworks.join(', ')})` : ' (generic controls only)'}`
-        : 'disabled';
+      let complianceSummary: string;
+      if (!complianceEnabled) {
+        complianceSummary = 'disabled';
+      } else if (complianceFrameworks.length > 0) {
+        complianceSummary = `enabled (${complianceFrameworks.join(', ')})`;
+      } else {
+        complianceSummary = 'enabled (generic controls only)';
+      }
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
