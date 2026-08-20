@@ -50,7 +50,7 @@ Multi-perspective code review with up to 20 specialized Review agents running in
 
 **Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation
 
-**Plugin-gated** (when devflow-compliance plugin installed): Compliance
+**Diff-driven** (when compliance skill installed and diff touches regulated surface): Compliance
 
 Each Review agent produces findings with:
 - **Category**: Blocking (must-fix), Should-Fix, Pre-existing (informational)

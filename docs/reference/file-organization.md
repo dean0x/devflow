@@ -56,7 +56,7 @@ devflow/
 │       ├── commands/                 # Command sources
 │       │   ├── *.mds                 # 14 MDS host files (compiled to dist/commands/ by build:mds)
 │       │   ├── *.md                  # 1 static command file
-│       │   └── _partials/            # 10 MDS partial files (no output-dir:, never compiled directly)
+│       │   └── _partials/            # 9 MDS partial files (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns

@@ -69,7 +69,6 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-java` | Language | Java patterns |
 | `devflow-rust` | Language | Rust patterns |
 | `devflow-dynamic` | Optional | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline |
-| `devflow-compliance` | Optional | Regulatory compliance patterns — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX |
 
 ## Ambient Mode
 
@@ -99,6 +98,22 @@ npx devflow-kit knowledge --enable          # Enable feature knowledge
 npx devflow-kit knowledge --disable         # Disable feature knowledge
 npx devflow-kit knowledge --status          # Show current status
 ```
+
+## Compliance
+
+Manage regulatory compliance framework reference files installed in the compliance skill.
+
+```bash
+npx devflow-kit compliance --status                    # Show installed frameworks and skill state
+npx devflow-kit compliance --enable                    # Enable compliance feature (install skill + rule)
+npx devflow-kit compliance --disable                   # Disable compliance feature
+npx devflow-kit compliance --enable-framework gdpr     # Install GDPR reference file
+npx devflow-kit compliance --disable-framework gdpr    # Remove GDPR reference file
+```
+
+Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
+
+The compliance skill and compliance rule are feature-owned (always installed, not plugin-scoped). Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
 
 ## Rules
 
