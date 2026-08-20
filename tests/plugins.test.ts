@@ -56,8 +56,8 @@ describe('buildAssetMaps', () => {
     // 'accessibility' first appears in devflow-accessibility (optional plugin)
     expect(skillsMap.get('accessibility')).toBe('devflow-accessibility');
 
-    // 'git' first appears in devflow-implement (devflow-plan no longer declares it)
-    expect(agentsMap.get('git')).toBe('devflow-implement');
+    // 'git' first appears in devflow-plan (plan.mds spawns Git for ensure-traceable-issue)
+    expect(agentsMap.get('git')).toBe('devflow-plan');
 
     // 'synthesize' first appears in devflow-plan
     expect(agentsMap.get('synthesize')).toBe('devflow-plan');

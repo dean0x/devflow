@@ -32,6 +32,7 @@ You receive from orchestrator:
 - **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW; do not re-litigate
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
+- **ISSUE_NUMBER** (optional): GitHub issue number linked to this task — when provided, include `## Related Issues` / `Closes #{n}` in the PR body
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
@@ -89,6 +90,9 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    | Key Changes to Highlight | Changes |
    | Breaking Changes | Breaking Changes |
    | Reviewer Focus Areas | Reviewer Focus Areas |
+   | Related Issues (ISSUE_NUMBER provided) | `## Related Issues` · `Closes #{n}` |
+
+   When `ISSUE_NUMBER` is provided, always include `## Related Issues` / `Closes #{n}` in the PR body — whether composing from guidance or generating from context.
 
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 

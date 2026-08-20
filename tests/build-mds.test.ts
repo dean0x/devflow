@@ -820,20 +820,34 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     }
   });
 
-  it('implement.md contains neither COMPLIANCE_ENABLED nor any COMPLIANCE: line', async () => {
+  it('implement.md contains ISSUE_NUMBER and COMPLIANCE setup-task wiring; no COMPLIANCE_ENABLED (Phase E, AC-32)', async () => {
     const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
     const content = await fs.readFile(outputPath, 'utf-8');
+    // Positive: issue-first threading — ISSUE_NUMBER must appear in Code-agent spawns
+    expect(
+      content,
+      'implement.md must contain ISSUE_NUMBER (issue-first threading, Phase E)',
+    ).toContain('ISSUE_NUMBER');
+    // Positive: setup-task Git-input COMPLIANCE line (AC-32 sanctioned — Git spawn only)
+    expect(
+      content,
+      'implement.md must contain COMPLIANCE setup-task wiring (Git-input, AC-32 sanctioned)',
+    ).toContain('COMPLIANCE: {enabled');
+    // Negative: COMPLIANCE_ENABLED variable must not appear anywhere
     expect(
       content,
       'implement.md must not contain COMPLIANCE_ENABLED — compliance machinery removed in Part 1',
     ).not.toContain('COMPLIANCE_ENABLED');
+    // Narrow AC-32: the sanctioned COMPLIANCE: line appears ONLY in the Git setup-task spawn —
+    // never in any Code-agent (subagent_type="Code") spawn block
+    const complianceLines = content.split('\n').filter(l => /^COMPLIANCE:/.test(l));
     expect(
-      content,
-      'implement.md must not contain any COMPLIANCE: line',
-    ).not.toMatch(/^COMPLIANCE:/m);
+      complianceLines.length,
+      'implement.md must have exactly one COMPLIANCE: line (Git setup-task spawn only, AC-32)',
+    ).toBe(1);
   });
 
-  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, COMPLIANCE: {enabled, or devflow-compliance', async () => {
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance; COMPLIANCE: {enabled sanctioned only in implement.md Git spawn (AC-32)', async () => {
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -848,12 +862,16 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       ).not.toContain('COMPLIANCE_ENABLED');
       expect(
         content,
-        `${basename}.md must not contain COMPLIANCE: {enabled`,
-      ).not.toContain('COMPLIANCE: {enabled');
-      expect(
-        content,
         `${basename}.md must not contain devflow-compliance`,
       ).not.toContain('devflow-compliance');
+      // COMPLIANCE: {enabled is sanctioned only in implement.md (Git setup-task spawn, AC-32).
+      // All other files must not contain it.
+      if (basename !== 'implement') {
+        expect(
+          content,
+          `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
+        ).not.toContain('COMPLIANCE: {enabled');
+      }
     }
   });
 });
@@ -933,5 +951,40 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
       content,
       'resolve.md must contain the compliance skill path',
     ).toContain('skills/devflow:compliance/SKILL.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §17  Phase E traceability — implement.mds (2.5) + plan.mds (2.6) guards
+//      implement.md: ISSUE_NUMBER in Code-agent spawns, COMPLIANCE in Git spawn
+//      plan.md: ensure-traceable-issue replaces inline gh issue create
+// ---------------------------------------------------------------------------
+
+describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('plan.md contains ensure-traceable-issue (Phase 14 Git-agent spawn, Step 2.6)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'plan.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'plan.md must reference ensure-traceable-issue Git op (replaces inline gh issue create)',
+    ).toContain('ensure-traceable-issue');
+  });
+
+  it('implement.md contains COMPLIANCE_SKILL_INSTALLED check (Step 2.5)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'implement.md must contain COMPLIANCE_SKILL_INSTALLED (setup-task compliance resolution)',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
   });
 });

@@ -68,7 +68,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['skim', 'synthesize', 'design'],
+    agents: ['git', 'skim', 'synthesize', 'design'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
