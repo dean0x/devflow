@@ -233,6 +233,39 @@ See `references/github-api.md` for extended API, CLI, and GraphQL patterns.
 
 ---
 
+## Traceability Issue Template (D3)
+
+When creating or enriching a GitHub issue via the `ensure-traceable-issue` operation, use the following canonical D3 template:
+
+```markdown
+## Initial Request
+{The verbatim or paraphrased user request / scope statement that drove this task}
+
+## Product Requirements
+{Discovered requirements summary — user needs, acceptance criteria, constraints}
+
+## Implementation Plan
+[Design artifact posted as a collapsed comment — see linked comment below]
+```
+
+**Rules:**
+- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
+- New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
+- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
+
+## Naming Conventions Authority
+
+When `.devflow/conventions.md` is present, it is the authoritative source for:
+- Branch Naming — prefix style (`feat/`, `fix/`, etc.), separator style, slug rules
+- PR Titles — conventional commit format, scope rules
+- Version PR Titles and Version Names (when applicable)
+
+The `learn-conventions` operation writes `.devflow/conventions.md` with a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles). To re-learn conventions from scratch, delete `.devflow/conventions.md` and re-run `learn-conventions`.
+
+When `.devflow/conventions.md` is absent, fall back to heuristic branch-prefix detection from existing remote branches.
+
+---
+
 ## Extended References
 
 | Reference | Contents |
@@ -241,7 +274,7 @@ See `references/github-api.md` for extended API, CLI, and GraphQL patterns.
 | `references/patterns.md` | Safety flows, commit patterns, PR templates |
 | `references/violations.md` | Safety, commit, and PR anti-patterns |
 | `references/detection.md` | Sensitive file regex patterns and check functions |
-| `references/github-api.md` | Rate limiting, CLI commands, GraphQL, releases |
+| `references/github-api.md` | Rate limiting, CLI commands, GraphQL, releases, review thread GraphQL |
 
 ## Checklist
 
