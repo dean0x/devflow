@@ -988,3 +988,55 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
     ).toContain('COMPLIANCE_SKILL_INSTALLED');
   });
 });
+
+// ---------------------------------------------------------------------------
+// §18  Phase F release evidence (Step 2.9) + dynamic pipeline COMPLIANCE +
+//      ISSUE_NUMBER (Step 2.11)
+//      release.md: COMMIT_LIST, SHIPPED_ISSUES, backlink-shipped-issues
+//      dynamic-build.md: COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, conventions.md
+// ---------------------------------------------------------------------------
+
+describe('Phase F traceability — release.md evidence + dynamic-build compliance (Steps 2.9, 2.11)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'release.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'release.md must contain COMMIT_LIST (release evidence, Step 2.9)',
+    ).toContain('COMMIT_LIST');
+    expect(
+      content,
+      'release.md must contain SHIPPED_ISSUES (release evidence, Step 2.9)',
+    ).toContain('SHIPPED_ISSUES');
+    expect(
+      content,
+      'release.md must contain backlink-shipped-issues Git op (Step 2.9)',
+    ).toContain('backlink-shipped-issues');
+  });
+
+  it('dynamic-build.md contains COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, and conventions.md (Step 2.11)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'dynamic-build.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'dynamic-build.md must contain COMPLIANCE_SKILL_INSTALLED (pre-authoring compliance step, Step 2.11)',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(
+      content,
+      'dynamic-build.md must contain ISSUE_NUMBER (Code-agent issue threading, Step 2.11)',
+    ).toContain('ISSUE_NUMBER');
+    expect(
+      content,
+      'dynamic-build.md must contain conventions.md (branch naming authority, Step 2.11)',
+    ).toContain('conventions.md');
+  });
+});

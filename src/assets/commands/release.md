@@ -54,6 +54,12 @@ Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regene
 
 Pass both to all subsequent agents via their input contracts.
 
+### Phase 1c: Resolve Compliance Context
+
+**Produces:** COMPLIANCE_SKILL_INSTALLED
+
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for all subsequent phases. The compliance gate determines whether release evidence is gathered and shipped-issue back-links are posted.
+
 ### Phase 2: Detect Release Process (First Run Only)
 
 **Produces:** RELEASE_SIGNALS
@@ -75,6 +81,8 @@ Skip credential files (`.env*`, `*credentials*`, `*secret*`, `*.key`). Max 20 fi
 **Requires:** RELEASE_SIGNALS
 
 Map RELEASE_SIGNALS to `.release/RELEASE-FLOW.md` with sections: Packages, Pre-release Checks, Changelog, Build & Test, Publish, Post-release.
+
+**Conventions naming:** Consult `.devflow/conventions.md` (the naming authority written by the Git `learn-conventions` operation) for version/tag/version-PR title conventions. When the branching model uses version PRs, follow the Version PR Titles convention recorded there; compliance defaults when the file is absent. When the repo uses a main+integration branching model, ship via a version PR per the recorded convention. Re-learn by deleting `.devflow/conventions.md` — the next Git `learn-conventions` call rewrites it.
 
 Use AskUserQuestion for any gaps that cannot be inferred.
 
@@ -122,8 +130,12 @@ Confirm with user via AskUserQuestion before executing:
 Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
+2b. **Gather release evidence** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — Collect:
+    - `COMMIT_LIST`: `git log {last_tag}..HEAD --oneline` (commits since last tag; bounded ≤100 entries)
+    - `SHIPPED_ISSUES`: extract GitHub issue numbers from commit messages (refs/closes/fixes patterns) and, when `gh` is authenticated, fetch merged-PR `closingIssuesReferences` for this range; deduplicate, bound to ≤50 issues; degrade gracefully (D4: `TRACEABILITY: DEGRADED ({reason})`) on any API failure
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
-4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation
+4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation; version name / tag / version-PR title follow `.devflow/conventions.md` when present (compliance default when absent); when COMPLIANCE_SKILL_INSTALLED, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs (Git agent includes them in the release notes body per Phase D `create-release` contract)
+4b. **Back-link shipped issues** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts `<!-- devflow:shipped v{VERSION} -->` marker-deduped comment on each issue (≤50 issues, 1s throttle); degrade gracefully (D4) on any API failure — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
 6. **Post-release steps** — version bump to next dev, close milestone, etc.
 
