@@ -91,7 +91,7 @@ export function normalizeFrameworks(frameworks: readonly string[]): string[] {
 }
 
 /**
- * Parse and validate a framework list (comma-separated string or string[]).
+ * Parse and validate a framework list (comma-separated string).
  *
  * Normalization: lowercase, trim, space→dash, iso27001 alias.
  * Hard-rejects unknowns: error names every valid ID and every unknown ID.
@@ -99,12 +99,9 @@ export function normalizeFrameworks(frameworks: readonly string[]): string[] {
  * (AC-3, AC-4)
  */
 export function parseFrameworkList(
-  input: string | string[],
+  input: string,
 ): { ok: true; value: string[] } | { ok: false; error: string } {
-  // Split string input on commas; array input is used directly.
-  const raw: string[] = Array.isArray(input)
-    ? input
-    : input.split(',').filter(s => s.trim() !== '');
+  const raw = input.split(',').filter(s => s.trim() !== '');
 
   if (raw.length === 0) {
     return { ok: true, value: [] };

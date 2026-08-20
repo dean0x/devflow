@@ -16,6 +16,7 @@ import color from 'picocolors';
 
 import {
   COMPLIANCE_FRAMEWORKS,
+  normalizeFrameworks,
   parseFrameworkList,
 } from '../../core/compliance.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
@@ -127,7 +128,9 @@ export function resolveComplianceCliAction(
  * Separates valid (registry-known) IDs from invalid (unknown) IDs so the status
  * display can recommend the correct remediation for each class.
  *
- * Exported for unit testing — not part of the public CLI contract.
+ * Called by the --status handler to compute drift between the manifest and
+ * installed artifacts. Also exported to allow unit testing of the classification
+ * logic in isolation.
  */
 export function classifyDriftMissing(
   manifestFrameworks: readonly string[],
@@ -245,11 +248,11 @@ export const complianceCommand = new Command('compliance')
         ? current.frameworks.join(', ')
         : color.dim('none declared');
 
-      const [skillOk, refIds, ruleOk, rulesEnabled, isRuleShadowed] = await Promise.all([
+      const rulesEnabled = manifest.features.rules;
+      const [skillOk, refIds, ruleOk, isRuleShadowed] = await Promise.all([
         skillInstalled(claudeDir),
         installedRefIds(claudeDir),
         ruleInstalled(claudeDir),
-        Promise.resolve(manifest.features.rules),
         ruleShadowed(devflowDir),
       ]);
 
@@ -259,11 +262,8 @@ export const complianceCommand = new Command('compliance')
       // but only --set can remove IDs that are not in the registry.
       const registrySet = new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id));
       const manifestSet = new Set(current.frameworks);
-      const installedSet = new Set(refIds);
       const driftInstalled = refIds.filter(id => !manifestSet.has(id));
-      const driftMissing = current.frameworks.filter(id => !installedSet.has(id));
-      const validMissing = driftMissing.filter(id => registrySet.has(id));
-      const invalidIds = driftMissing.filter(id => !registrySet.has(id));
+      const { validMissing, invalidIds } = classifyDriftMissing(current.frameworks, refIds, registrySet);
 
       const lines: string[] = [
         `State:      ${enabledLabel}`,
@@ -299,12 +299,17 @@ export const complianceCommand = new Command('compliance')
 
     // ── Enable / Disable / Set ─────────────────────────────────────────────────
 
+    if (options.enable && options.disable) {
+      p.log.error('--enable and --disable are mutually exclusive: specify only one.');
+      process.exit(1);
+    }
+
     let action: ComplianceCliAction;
     if (options.set !== undefined) {
       action = 'set';
     } else if (options.enable) {
       // TTY: prompt for frameworks if no --set provided
-      if (process.stdin.isTTY && current.frameworks.length === 0 && !options.disable) {
+      if (process.stdin.isTTY && current.frameworks.length === 0) {
         // Multiselect for frameworks when enabling interactively and no prior selection
         p.note(
           COMPLIANCE_FRAMEWORKS.map(fw => `${color.cyan(fw.id)} — ${fw.hint}`).join('\n'),
@@ -345,8 +350,11 @@ export const complianceCommand = new Command('compliance')
       warn: (msg) => p.log.warn(msg),
     });
 
-    // Persist to manifest
-    manifest.features.compliance = resolved.nextState;
+    // Persist to manifest — normalizeFrameworks deduplicates (e.g. --set gdpr,GDPR → [gdpr])
+    manifest.features.compliance = {
+      enabled: resolved.nextState.enabled,
+      frameworks: normalizeFrameworks(resolved.nextState.frameworks),
+    };
     manifest.updatedAt = new Date().toISOString();
     await writeManifest(devflowDir, manifest);
 

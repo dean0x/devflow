@@ -60,8 +60,8 @@ describe('parseFrameworkList', () => {
     }
   });
 
-  it('parses a valid string array', () => {
-    const result = parseFrameworkList(['soc2', 'sox']);
+  it('parses a valid comma-separated list (soc2, sox)', () => {
+    const result = parseFrameworkList('soc2,sox');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual(['soc2', 'sox']);
@@ -124,8 +124,8 @@ describe('parseFrameworkList', () => {
     }
   });
 
-  it('accepts empty array → empty array', () => {
-    const result = parseFrameworkList([]);
+  it('accepts empty string → empty array', () => {
+    const result = parseFrameworkList('');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual([]);
@@ -146,7 +146,7 @@ describe('parseFrameworkList', () => {
   });
 
   it('all-invalid list → error (not silent empty list) (AC-4)', () => {
-    const result = parseFrameworkList(['bad-a', 'bad-b']);
+    const result = parseFrameworkList('bad-a,bad-b');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('bad-a');
@@ -164,7 +164,7 @@ describe('parseFrameworkList', () => {
 
   it('all six valid IDs parse successfully', () => {
     const all = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
-    const result = parseFrameworkList(all);
+    const result = parseFrameworkList(all.join(','));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.sort()).toEqual(all.sort());
