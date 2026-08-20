@@ -1293,6 +1293,68 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
   });
 
+  // The v2 carve-out block exactly as shipped before the conventions.md line was added.
+  const V2_BLOCK = [
+    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+    '# Exception: feature knowledge bases under .devflow/features/ are shared via git —',
+    '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else',
+    '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`',
+    '# to your own .gitignore.',
+    '.devflow/*',
+    '!.devflow/features/',
+    '.devflow/features/*',
+    '!.devflow/features/index.md',
+    '!.devflow/features/*/',
+    '.devflow/features/*/*',
+    '!.devflow/features/*/KNOWLEDGE.md',
+  ].join('\n');
+
+  const seedV2Install = (gitignoreContent: string) => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), gitignoreContent);
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'), '');
+  };
+
+  it('upgrades a v2 install: appends only the conventions.md line and bumps v2 → v3', () => {
+    seedV2Install(`node_modules/\n\n${V2_BLOCK}\n`);
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const lines = ignoreLines(gitignore);
+    // The missing line is added exactly once — the whole block is NOT re-appended.
+    expect(lines.filter(l => l === '!.devflow/conventions.md')).toHaveLength(1);
+    expect(lines.filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
+    expect(lines.filter(l => l === '.devflow/*')).toHaveLength(1);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('node_modules/');
+    // Marker is bumped: v2 dropped, v3 written.
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+  });
+
+  it('v2 → v3 upgrade does not fuse onto a .gitignore with no trailing newline', () => {
+    // A file whose last byte is not \n would otherwise turn the appended line into
+    // `!.devflow/features/*/KNOWLEDGE.md!.devflow/conventions.md`, corrupting both patterns.
+    seedV2Install(`node_modules/\n\n${V2_BLOCK}`); // note: no trailing newline
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const lines = ignoreLines(path.join(tmpDir, '.gitignore'));
+    expect(lines).toContain('!.devflow/conventions.md');
+    expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines.some(l => l.includes('KNOWLEDGE.md!'))).toBe(false);
+  });
+
+  it('re-running after a v2 → v3 upgrade is a no-op (idempotent)', () => {
+    seedV2Install(`${V2_BLOCK}\n`);
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    const afterFirst = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+
+    // Drop the marker so the fast-path cannot mask a non-idempotent content branch.
+    fs.rmSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'));
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(afterFirst);
+  });
+
   it('returns non-zero and creates nothing when called with an empty argument', () => {
     const result = execSync(
       `bash -c 'source "${ENSURE_ROOT}" ""; echo $?'`,

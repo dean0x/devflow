@@ -72,7 +72,14 @@ elif grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE"; then
   # v3 carve-out already present — nothing to do.
   _ERG_OK=1
 elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
-  # v2→v3 upgrade: v2 sentinel present but conventions.md line absent — append just the missing line.
+  # v2→v3 upgrade: v2 sentinel present but conventions.md line absent — append just the
+  # missing line. A .gitignore whose last byte is not a newline would otherwise fuse the
+  # appended line onto the last existing one, corrupting BOTH patterns; the sibling append
+  # branches below get this for free by emitting a leading '\n'. `tail -c 1` yields the
+  # empty string when the file already ends in a newline (command substitution strips it).
+  if [ -n "$(tail -c 1 "$_ERG_GITIGNORE" 2>/dev/null)" ]; then
+    printf '\n' >> "$_ERG_GITIGNORE"
+  fi
   printf '!.devflow/conventions.md\n' >> "$_ERG_GITIGNORE" && _ERG_OK=1
 elif grep -qE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
   # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
