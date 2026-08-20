@@ -263,15 +263,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     optional: true,
     rules: ['rust'],
   },
-  {
-    name: 'devflow-compliance',
-    description: 'Regulatory compliance patterns - GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX code-level controls, audit trails, data retention',
-    commands: [],
-    agents: [],
-    skills: ['compliance'],
-    optional: true,
-    rules: ['compliance'],
-  },
 ];
 
 /**
@@ -291,7 +282,39 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
  */
 export const DELETED_PLUGIN_NAMES: string[] = [
   'devflow-audit-claude',
+  'devflow-compliance', // D-B2: converted to built-in feature (devflow compliance); skill/rule assets stay in src/assets/ under feature system management
 ];
+
+/**
+ * Skills owned by the feature system — not any plugin in DEVFLOW_PLUGINS.
+ * These assets live in src/assets/skills/ and are managed by convergeComplianceArtifacts
+ * (compliance-install.ts) rather than the plugin registry or installViaFileCopy loop.
+ *
+ * Used by:
+ *   - uninstall.ts: union into prefixedSkillNames for full-uninstall and enumerateDryRunExtras
+ *   - uninstall.ts sweepDevflowNamespaces: union into knownNames to spare devflow:compliance
+ *     from the post-selective-uninstall sweep (nothing converges after selective uninstall)
+ *   - skills.ts: union into allSkills for shadow/unshadow/list
+ *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap, PF-018)
+ *
+ * D-FO-1: FEATURE_OWNED_SKILLS must be disjoint from getAllSkillNames()
+ * (guarded by plugins.test.ts FEATURE_OWNED constants describe block).
+ */
+export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly string[];
+
+/**
+ * Rules owned by the feature system — not any plugin in DEVFLOW_PLUGINS.
+ * The compliance rule (src/assets/rules/compliance.md) is stamped and installed
+ * by convergeComplianceArtifacts, not by the plugin installer.
+ *
+ * Used by:
+ *   - rules.ts: union into allRules for shadow/unshadow/list
+ *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap, PF-018)
+ *
+ * D-FO-2: FEATURE_OWNED_RULES must be disjoint from getAllRuleNames()
+ * (guarded by plugins.test.ts FEATURE_OWNED constants describe block).
+ */
+export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly string[];
 
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.

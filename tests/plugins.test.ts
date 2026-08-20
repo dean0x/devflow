@@ -3,6 +3,7 @@ import {
   DEVFLOW_PLUGINS,
   getAllSkillNames,
   getAllAgentNames,
+  getAllRuleNames,
   buildAssetMaps,
   buildFullSkillsMap,
   partitionSelectablePlugins,
@@ -11,6 +12,8 @@ import {
   EXCLUDED,
   DELETED_PLUGIN_NAMES,
   LEGACY_PLUGIN_NAMES,
+  FEATURE_OWNED_SKILLS,
+  FEATURE_OWNED_RULES,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
@@ -177,8 +180,8 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('non-language plugins do not have optional: true (except dynamic, compliance)', () => {
-    const allowedOptional = new Set([...languagePluginNames, 'devflow-dynamic', 'devflow-compliance']);
+  it('non-language plugins do not have optional: true (except dynamic)', () => {
+    const allowedOptional = new Set([...languagePluginNames, 'devflow-dynamic']);
     for (const plugin of DEVFLOW_PLUGINS) {
       if (!allowedOptional.has(plugin.name)) {
         expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();
@@ -275,6 +278,32 @@ describe('optional plugin flag', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// FEATURE_OWNED constants (step 1.5 de-registration)
+// ---------------------------------------------------------------------------
+
+describe('FEATURE_OWNED constants', () => {
+  it('FEATURE_OWNED_SKILLS equals [compliance] — compliance skill is feature-owned, not plugin-owned', () => {
+    expect(FEATURE_OWNED_SKILLS).toEqual(['compliance']);
+  });
+
+  it('FEATURE_OWNED_RULES equals [compliance] — compliance rule is feature-owned, not plugin-owned', () => {
+    expect(FEATURE_OWNED_RULES).toEqual(['compliance']);
+  });
+
+  it('FEATURE_OWNED_SKILLS is disjoint from getAllSkillNames() — no double-ownership', () => {
+    const pluginSkills = new Set(getAllSkillNames());
+    const overlap = [...FEATURE_OWNED_SKILLS].filter(s => pluginSkills.has(s));
+    expect(overlap, 'FEATURE_OWNED_SKILLS must not overlap with plugin-declared skills').toEqual([]);
+  });
+
+  it('FEATURE_OWNED_RULES is disjoint from getAllRuleNames() — no double-ownership', () => {
+    const pluginRules = new Set(getAllRuleNames());
+    const overlap = [...FEATURE_OWNED_RULES].filter(r => pluginRules.has(r));
+    expect(overlap, 'FEATURE_OWNED_RULES must not overlap with plugin-declared rules').toEqual([]);
+  });
+});
+
 describe('DELETED_PLUGIN_NAMES consistency', () => {
   // DELETED_PLUGIN_NAMES is a PRUNING manifest, not an install-naming list:
   // resolvePluginList drops every listed name from the user's manifest.plugins on
@@ -293,6 +322,10 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
       'DELETED_PLUGIN_NAMES lists a plugin that still exists in DEVFLOW_PLUGINS — ' +
       'it would be pruned from every user manifest on partial reinstall and dropped from the re-init seed',
     ).toEqual([]);
+  });
+
+  it('contains devflow-compliance (compliance converted to built-in feature in B2)', () => {
+    expect(DELETED_PLUGIN_NAMES).toContain('devflow-compliance');
   });
 
   it('does not overlap LEGACY_PLUGIN_NAMES keys (deletion would pre-empt the rename)', () => {

@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames, FEATURE_OWNED_RULES } from '../../core/plugins.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
@@ -84,7 +84,9 @@ function formatRuleRow(
  */
 async function printRulesList(claudeDir: string, devflowDir: string): Promise<void> {
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
-  const allRules = getAllRuleNames();
+  // Union FEATURE_OWNED_RULES (compliance) so list covers feature-managed rules
+  // that left the plugin registry but still live in src/assets/rules/ (step 1.5).
+  const allRules = [...getAllRuleNames(), ...FEATURE_OWNED_RULES];
   let installedNames: string[] = [];
   try {
     const entries = await fs.readdir(rulesTarget);
@@ -101,9 +103,10 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
       const installedTag = installedSet.has(name) ? color.green(' ✓') : color.dim(' ✗');
       const shadowFile = path.join(devflowDir, 'rules', `${name}.md`);
       const shadowState = await validateRuleShadow(shadowFile);
-      const owner = ownerMap.get(name) ?? 'unknown';
-      const shortOwner = owner.replace('devflow-', '');
-      return { row: formatRuleRow(name, shortOwner, shadowState, installedTag), shadowState };
+      // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
+      const owner = ownerMap.get(name)?.replace('devflow-', '') ??
+        ((['compliance'] as string[]).includes(name) ? 'feature' : 'unknown');
+      return { row: formatRuleRow(name, owner, shadowState, installedTag), shadowState };
     }),
   );
 
@@ -305,7 +308,9 @@ export const rulesCommand = new Command('rules')
 
     // Positional actions dispatch first — flags are not checked when action is given
     if (action) {
-      const allRules = getAllRuleNames();
+      // Union FEATURE_OWNED_RULES (compliance) so shadow/unshadow/list cover feature-managed
+      // rules that left the plugin registry but still live in src/assets/rules/ (step 1.5).
+      const allRules = [...getAllRuleNames(), ...FEATURE_OWNED_RULES];
 
       if (action === 'shadow') {
         await handleRuleShadow(name, allRules, devflowDir, rulesTarget);
@@ -354,7 +359,9 @@ export const rulesCommand = new Command('rules')
       const lines = await Promise.all(
         installedFiles.map(async file => {
           const n = path.basename(file, '.md');
-          const shortOwner = (ownerMap.get(n) ?? 'unknown').replace('devflow-', '');
+          // FEATURE_OWNED rules (e.g. compliance) have no plugin owner — label as 'feature'
+          const shortOwner = ownerMap.get(n)?.replace('devflow-', '') ??
+            ((['compliance'] as string[]).includes(n) ? 'feature' : 'unknown');
           const shadowFile = path.join(devflowDir, 'rules', `${n}.md`);
           const shadowState = await validateRuleShadow(shadowFile);
           return formatRuleRow(n, shortOwner, shadowState);

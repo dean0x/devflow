@@ -77,7 +77,10 @@ describe('Guard 1 (forward): every declared asset exists on disk', () => {
 
 describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin', () => {
   it('every dir in src/assets/skills/ is declared in DEVFLOW_PLUGINS', async () => {
-    const referencedSkills = new Set(getAllSkillNames());
+    // Union FEATURE_OWNED skills — compliance asset stays in src/assets/skills/ but is
+    // managed by the feature system, not any plugin (step 1.5 de-registration).
+    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    const referencedSkills = new Set([...getAllSkillNames(), 'compliance']);
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
 
     const orphans = skillDirs.filter(dir => !referencedSkills.has(dir));
@@ -104,7 +107,10 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
   });
 
   it('every file in src/assets/rules/ is declared in DEVFLOW_PLUGINS', async () => {
-    const referencedRules = new Set(getAllRuleNames());
+    // Union FEATURE_OWNED rules — compliance rule stays in src/assets/rules/ but is
+    // managed by the feature system, not any plugin (step 1.5 de-registration).
+    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    const referencedRules = new Set([...getAllRuleNames(), 'compliance']);
     const ruleFiles = await fs.readdir(path.join(ASSETS_DIR, 'rules'));
 
     const orphans = ruleFiles

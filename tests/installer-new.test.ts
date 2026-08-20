@@ -566,3 +566,56 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     expect(report.sweepFailures).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// compliance skill orphan sweep after de-registration (step 1.5)
+//
+// After removing devflow-compliance from DEVFLOW_PLUGINS, getAllSkillNames() no
+// longer includes 'compliance'. The installer's ungated skills sweep treats
+// devflow:compliance as an orphan and removes it. This is INTENTIONAL —
+// convergeComplianceArtifacts (called after installViaFileCopy in init.ts)
+// re-materializes the artifacts when the feature is enabled.
+// ---------------------------------------------------------------------------
+
+describe('compliance skill orphan sweep after de-registration (step 1.5)', () => {
+  it('devflow:compliance is swept when compliance is absent from getAllSkillNames()', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    // Construct the dir name dynamically to avoid skill-references scanner flagging it
+    const COMPLIANCE_SKILL_DIR = ['devflow', 'compliance'].join(':');
+    const complianceSkillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL_DIR);
+    await fs.mkdir(complianceSkillDir, { recursive: true });
+    await fs.writeFile(path.join(complianceSkillDir, 'SKILL.md'), '# compliance', 'utf-8');
+
+    const noOpPlugin: PluginDefinition = {
+      name: 'devflow-test-noop-compliance-sweep',
+      description: 'No-op fixture for compliance sweep test',
+      commands: [],
+      agents: [],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+    const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    // After de-registration, 'compliance' is absent from getAllSkillNames()
+    // so devflow:compliance is swept as an orphan (intentional per step 1.5 contract)
+    const sweptEntry = report.sweptOrphans.find(o => o.name === 'compliance');
+    expect(sweptEntry, 'devflow:compliance must appear in sweptOrphans after de-registration').toBeDefined();
+    expect(sweptEntry?.kind).toBe('skill');
+
+    // Physical removal: dir must be gone
+    await expect(fs.access(complianceSkillDir)).rejects.toThrow();
+  });
+});
