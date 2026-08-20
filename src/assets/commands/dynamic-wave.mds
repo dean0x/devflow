@@ -41,7 +41,8 @@ Before any commands run:
 
 1. Read the user's input (initiative description or spec doc path).
 2. Summarize what the wave will build in 2–3 sentences.
-3. Ask the user: "Ready to start the ticket-factory step? This will propose a ticket slate for your review."
+3. **Resolve `COMPLIANCE_SKILL_INSTALLED` once:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for all three pipeline steps. When compliance-gated, pass `COMPLIANCE: enabled` to each command invocation; otherwise pass `COMPLIANCE: (none)`.
+4. Ask the user: "Ready to start the ticket-factory step? This will propose a ticket slate for your review."
 
 Do not proceed until the user confirms.
 
@@ -122,8 +123,9 @@ The build command will:
 After `/devflow:dynamic-build` completes:
 
 1. Report the wave run result: tickets merged, tickets escalated, overall verdict.
-2. If there are escalations: surface each one to the user via `AskUserQuestion`.
-3. Tell the user:
+2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from Step 1's `/devflow:dynamic-tickets` output or from `TRACKING_ISSUE_NUMBER`), spawn `Agent(subagent_type="Git")` to post the contents of `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md` as a comment on the tracking issue. Use marker `<!-- devflow:wave-report \{wave-id\} -->` for dedup — skip if this wave's marker is already present; post otherwise. On API failure, degrade gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continue — never block Gate 3. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+3. If there are escalations: surface each one to the user via `AskUserQuestion`.
+4. Tell the user:
 
    "The integration branch `wave/\{slug\}` is ready for your review. **You merge it to your main branch yourself — this pipeline never auto-merges to main.**
 

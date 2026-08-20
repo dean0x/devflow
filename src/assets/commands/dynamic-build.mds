@@ -43,6 +43,12 @@ Before authoring, verify:
 
 Before you write the workflow script:
 
+**0. Resolve compliance context**
+
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for every ticket in the wave.
+
+When authoring the workflow script, include the resolved value as a constant: `COMPLIANCE = COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"`. Pass `COMPLIANCE: \{COMPLIANCE\}` to Git agent spawns (setup-task and branch-creation). When compliance-gated (`COMPLIANCE_SKILL_INSTALLED === true`), branch names follow the `.devflow/conventions.md` Branch Naming convention if that file exists; degrade gracefully if absent.
+
 **1. Apply decisions context**
 
 Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Code agent and Evaluate agent prompts.
@@ -92,15 +98,18 @@ const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLow
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
+const ISSUE_NUMBER = args.issueNumber || "(none)";  // per-ticket GitHub issue, tracking issue, or (none)
+const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup
 const gitSetup = await phase("setup", () =>
   agent(`Set up the git branch for this ticket:
-- Create branch: ${BRANCH} from current HEAD
+- Create branch: ${BRANCH} from current HEAD (when COMPLIANCE is "enabled", follow .devflow/conventions.md Branch Naming if that file exists)
 - Ensure working tree is clean before starting
 - Report the base commit SHA
 
-Ticket: ${TICKET}`, { agentType: "Git" })
+Ticket: ${TICKET}
+COMPLIANCE: ${COMPLIANCE}`, { agentType: "Git" })
 );
 
 // Phase 2: Implement
@@ -113,6 +122,8 @@ ${PLAN ? `Implementation plan:\n${PLAN}` : "No plan provided — use best judgme
 
 Relevant architectural decisions (apply devflow:apply-decisions algorithm):
 ${DECISIONS_CONTEXT}
+
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 
 When you build or run tests to verify your work, use your "Long-running commands" discipline (background-Bash + Monitor poll) for anything that may run silent >120s, and prefer package-scoped commands.
 
@@ -479,7 +490,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
       const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT);
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
       if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
-        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
+        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
       } else {
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
       }

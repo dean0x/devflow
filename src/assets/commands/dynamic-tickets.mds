@@ -35,6 +35,7 @@ Before authoring, verify:
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
 3. **GitHub paths:** if the user wants tickets filed as GitHub issues, `gh` CLI must be authenticated. If not authenticated, note it and fall back to writing ticket `.md` files locally.
 4. **No-remote path:** if the repo has no remote or `gh` is unauthenticated, skip GitHub-dependent steps (issue creation) and write ticket files to `.devflow/docs/tickets/\{slug\}/\{ts\}/` only.
+5. **Resolve `COMPLIANCE_SKILL_INSTALLED`:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). When compliance-gated, the tracking-issue body's ticket list links each ticket to its per-ticket GitHub issue (ticket→issue links), enabling issue-first traceability.
 
 ---
 
@@ -82,6 +83,7 @@ const candidates = args.candidates || [];   // [{title, summary, wave, dependsOn
 const initiative = args.initiative || args[0] || "see task description";
 const constraints = args.constraints || "";
 const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before authoring
+const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 const slug = args.slug || initiative.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
 const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
 const OUTDIR = `.devflow/docs/tickets/${slug}/${ts}`;
@@ -161,11 +163,12 @@ For each ticket in the revised set, write a file to ${OUTDIR}/{slug}.md using th
 Then write ${OUTDIR}/tracking-issue.md:
 - H1 title: initiative name + "(N tickets)"
 - ## Context: 1–2 paragraphs — what this initiative delivers and why
-- ## Execution order: wave-structured checklist, one line per ticket with wave + dependency note
+- ## Execution order: wave-structured checklist, one line per ticket with wave + dependency note; when COMPLIANCE is "enabled" AND per-ticket GitHub issues were created, link each ticket to its issue (format: "- [Ticket Name](https://github.com/.../issues/N) — one-line description")
 - ## Ticket index: one line per ticket — what it delivers, in user terms
 - ## Explicitly excluded: items the initiative deliberately excludes (decisions, not oversights)
 - ## Invariants: cross-cutting constraints that bind every ticket
 
+COMPLIANCE: ${COMPLIANCE}
 Critic guidance: ${JSON.stringify(critic && critic.trackingGuidance)}
 Revised ticket data: ${JSON.stringify(revised)}
 

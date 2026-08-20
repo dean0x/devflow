@@ -343,9 +343,16 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
     // Checks that each declared agent is spawned in AT LEAST ONE of the plugin's
     // compiled commands — not necessarily every command.
     // Naturally skips plugins that use only agentType: syntax (never entered the map above).
+    //
+    // devflow-dynamic is explicitly exempt: its agents are declared for installation and for
+    // agentType (Workflow runtime) spawning in dynamic-build/tickets/plan. dynamic-wave uses
+    // subagent_type for one Git post-comment — that incidentally enters the plugin into the map,
+    // but the remaining agents are legitimately spawned via agentType, not subagent_type.
+    const REVERSE_CHECK_EXEMPT_PLUGINS = new Set(['devflow-dynamic']);
     for (const plugin of DEVFLOW_PLUGINS) {
       const aggregate = pluginAggregateSpawned.get(plugin.name);
       if (aggregate === undefined) continue; // no subagent_type syntax in any command — skip
+      if (REVERSE_CHECK_EXEMPT_PLUGINS.has(plugin.name)) continue; // agentType + subagent_type mix
 
       const declaredAgents = new Set(plugin.agents.map(normalize));
       for (const agentNorm of declaredAgents) {

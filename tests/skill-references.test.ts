@@ -144,6 +144,14 @@ const COMMAND_REFS = new Set([
   'dynamic-build',
   'dynamic-profile',
   'dynamic-wave',
+  // Git operation / traceability markers used in commands and tests — not skills, not commands,
+  // but share the devflow: prefix (e.g. <!-- devflow:review-summary ... -->,
+  // <!-- devflow:wave-report ... -->, <!-- devflow:shipped v... -->,
+  // <!-- devflow:resolution-summary ... -->).
+  'review-summary',
+  'wave-report',
+  'shipped',
+  'resolution-summary',
 ]);
 
 /**
@@ -207,7 +215,10 @@ describe('Format 2: Agent frontmatter skills', () => {
 
 describe('Format 3: Install path references', () => {
   it('all install paths in shared agents are canonical', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
+    // code.md references ~/.claude/skills/devflow:compliance/SKILL.md for the conditional
+    // compliance gate. Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const agentsDir = path.join(ROOT, 'src', 'assets', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
