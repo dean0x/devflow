@@ -99,6 +99,8 @@ This produces a compact index of active ADR/PF entries written at render time �
 
 Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Reuse this result for every worktree.
+
 ### Phase 1: Parse Issues
 
 **Produces:** ISSUES
@@ -126,6 +128,25 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 - `description`: Problem statement
 - `suggested_fix`: From review report
 - `reviewer_confidence`: Confidence percentage if present in the report (e.g., "85%"), else omit
+
+### Phase 1b: Fetch External Review Threads (Compliance-gated)
+
+**Produces:** THREAD_MAP
+**Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
+
+Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false or `(none)`.
+
+Spawn Git agent to fetch unresolved external (non-devflow-authored) review threads:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: fetch-review-threads
+PR_NUMBER: {pr_number}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+Return THREAD_MAP for use in Phase 9b."
+```
+
+Parse `THREAD_MAP` from Git agent output. If Git agent returns `TRACEABILITY: DEGRADED`: record the reason, set `THREAD_MAP = empty`, continue.
 
 ### Phase 2: Global Triage
 
@@ -321,6 +342,73 @@ under ## Fix Separately and ## Deferred to Tech Debt."
 
 After manage-debt completes, backfill `Tracked = #\{backlog_issue_number\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item.
 
+### Phase 9b: Thread Resolution + Resolution Comment
+
+**Produces:** THREAD_RESOLUTION_RESULT, PR_COMMENT
+**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS
+
+**Step 9b-1: Resolve external threads (Compliance-gated)**
+
+Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty.
+
+Prepare THREAD_MAP with verdicts from triage/code agent results:
+- For each `ext-\{N\}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
+- Include `commit_sha` from Code agent results for FIXED verdicts
+- Unmatched threads: ESCALATED (human review)
+
+Spawn Git agent:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: resolve-review-threads
+THREAD_MAP: {thread_map_with_verdicts}
+VERIFICATION_STATUS: {PASS | FAILED}
+PR_NUMBER: {pr_number}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+D9: resolve threads only when VERIFICATION_STATUS == PASS and verdict is FIXED/FALSE_POSITIVE/BY_DESIGN with cited evidence."
+```
+
+If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.
+
+**Step 9b-2: Post resolution summary (ALWAYS-ON)**
+
+Always run this step when a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`.
+
+Spawn Git agent:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: post-resolution-summary
+PR_NUMBER: {pr_number}
+RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+Post one consolidated PR comment with <!-- devflow:resolution-summary --> marker. Skip if already posted."
+```
+
+If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.
+
+Update `## Third-Party Threads` section in resolution-summary.md with thread resolution results.
+
+### Phase 9c: Merge Readiness (Compliance-gated, Report-only)
+
+**Produces:** MERGE_READINESS_REPORT
+**Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
+
+Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false or `(none)`.
+
+Spawn Git agent:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: check-merge-readiness
+PR_NUMBER: {pr_number}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)"
+```
+
+Include merge readiness verdict (READY / NOT_READY / DEGRADED) in Phase 10 report. Never block on this result — report-only.
+
+If Git agent returns `TRACEABILITY: DEGRADED`: warn, proceed to Phase 10.
+
 ### Phase 10: Report
 
 **Requires:** TARGET_DIR
@@ -357,6 +445,9 @@ Final gate: {PASS | FAILED after N attempts}
 ### Tech Debt Added
 - {n} items added to backlog
 
+### Merge Readiness (if compliance enabled)
+{READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
+
 ### Artifacts
 - Resolution report: {TARGET_DIR}/resolution-summary.md
 ```
@@ -374,9 +465,12 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
 │  ├─ Step 0c: Target latest review directory per worktree
-│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT
+│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + COMPLIANCE_SKILL_INSTALLED
 │
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
+│
+├─ Phase 1b: Fetch external threads (compliance-gated)
+│  └─ Git agent (fetch-review-threads) → THREAD_MAP
 │
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
 │  └─ ALL issues → verdict ledger by disposition
@@ -399,6 +493,12 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=#
 │  SEQUENTIAL across worktrees
 │
+├─ Phase 9b: Thread resolution + resolution comment
+│  ├─ Step 9b-1: Git agent (resolve-review-threads) — compliance-gated
+│  └─ Step 9b-2: Git agent (post-resolution-summary) — always-on
+│
+├─ Phase 9c: Git agent (check-merge-readiness) — compliance-gated, report-only
+│
 └─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
 
@@ -420,6 +520,9 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
 | Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
+| COMPLIANCE_SKILL_INSTALLED false | Phases 1b, 9b-step-1, and 9c are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
+| THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
+| No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 
 ## Principles
 
@@ -432,6 +535,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 7. **Complete tracking** - Every issue gets exactly one verdict in the ledger
 8. **Latest review by default** - Only process the most recent complete review
 9. **Auto-discover worktrees** - One command handles all resolvable branches
+10. **Traceability-aware** - Compliance-gated ops (thread fetch/resolve, merge readiness) degrade cleanly when skill absent; resolution comment (Phase 9b-2) is always-on
 
 ## Output Artifact
 
@@ -508,6 +612,13 @@ Final gate: PASS | FAILED after {n} attempts
 | Issue | File:Line | Blocker |
 |-------|-----------|---------|
 | {description} | {file}:{line} | {why} |
+
+## Third-Party Threads
+| Thread | File:Line | Verdict | Status |
+|--------|-----------|---------|--------|
+| ext-{N} | {file}:{line} | {FIXED \| FALSE_POSITIVE \| BY_DESIGN \| ESCALATED} | {RESOLVED \| REPLIED \| DEGRADED} |
 ```
+
+_(Omit `## Third-Party Threads` if `COMPLIANCE_SKILL_INSTALLED` is false or no external threads were found.)_
 
 **Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `/code-review` convergence parser reads the `Deferred`, `Fixed`, and `False Positive` Statistics rows plus the `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable.

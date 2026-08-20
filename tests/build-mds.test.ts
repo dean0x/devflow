@@ -896,4 +896,42 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
   });
 });
 
-// §16 resolve.md Phase D guards added in Step 2.4 (same commit as resolve.mds prose)
+// ---------------------------------------------------------------------------
+// §16  Phase D traceability op guards — resolve (Part 2, Step 2.4)
+//      fetch-review-threads, resolve-review-threads, post-resolution-summary,
+//      check-merge-readiness, Third-Party Threads section, COMPLIANCE wiring
+// ---------------------------------------------------------------------------
+
+describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('resolve.md contains Phase D traceability ops', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(content, 'resolve.md must contain fetch-review-threads op').toContain('fetch-review-threads');
+    expect(content, 'resolve.md must contain resolve-review-threads op').toContain('resolve-review-threads');
+    expect(content, 'resolve.md must contain post-resolution-summary op').toContain('post-resolution-summary');
+    expect(content, 'resolve.md must contain check-merge-readiness op').toContain('check-merge-readiness');
+    expect(content, 'resolve.md must contain Third-Party Threads section').toContain('Third-Party Threads');
+  });
+
+  it('resolve.md contains COMPLIANCE_SKILL_INSTALLED check (Step 0d compliance wiring)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'resolve.md must contain COMPLIANCE_SKILL_INSTALLED from Step 0d wiring',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(
+      content,
+      'resolve.md must contain the compliance skill path',
+    ).toContain('skills/devflow:compliance/SKILL.md');
+  });
+});
