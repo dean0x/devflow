@@ -175,6 +175,8 @@ npx devflow-kit rules list                       # List all rules with install s
 npx devflow-kit rules unshadow security          # Remove override
 ```
 
+The `compliance` rule is the only templated rule — it contains a `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` placeholder that `devflow compliance --set` stamps with your active frameworks at install time. If you shadow `compliance` and remove that placeholder, `devflow compliance --set` stops updating the line; you own it entirely.
+
 ## Feature Flags
 
 ```bash

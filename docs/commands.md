@@ -13,7 +13,7 @@ Unified design planning from requirements discovery through implementation desig
 5. **Implementation Design** — Parallel planning agents design the approach
 6. **Design Review + Gate 2** — Review the design artifact, user approves the final plan
 
-Produces a machine-readable design artifact in `.devflow/docs/design/` consumed by `/implement`.
+Produces a machine-readable design artifact in `.devflow/docs/design/` consumed by `/implement`. When compliance is installed, a linked GitHub issue is auto-created or enriched and the design artifact is attached as a collapsed comment — this is mandatory. When compliance is not installed, issue linking is optional and prompted.
 
 ```
 /plan add JWT auth           # From description
@@ -58,7 +58,7 @@ Each Review agent produces findings with:
 - **Location**: Exact file:line reference
 - **Fix**: Specific code solution
 
-Supports multi-worktree auto-discovery — one command reviews all active branches.
+Supports multi-worktree auto-discovery — one command reviews all active branches. After each review cycle, a consolidated summary comment is posted to the PR (marker-deduped — skipped if a comment for the current cycle is already present).
 
 ```
 /code-review                 # Review current branch (or all worktrees)
@@ -74,7 +74,8 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 3. **Verify** — A Validate agent (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
 4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
-6. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
+6. **Resolution Comment** — Post the resolution summary as a single consolidated PR comment (marker-deduped — skipped if already posted; always runs when a PR is known)
+7. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)
