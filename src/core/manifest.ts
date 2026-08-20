@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_PLUGIN_NAMES, DELETED_PLUGIN_NAMES } from './plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
+import { normalizeComplianceFeature } from './compliance.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -55,6 +56,13 @@ export interface ManifestData {
      * Absent in pre-proxy manifests — readManifest self-heals to false.
      */
     proxy: boolean;
+    /**
+     * Compliance feature — enabled flag and selected framework IDs.
+     * Absent in pre-compliance manifests — readManifest self-heals to
+     * {enabled:false, frameworks:[]} via normalizeComplianceFeature.
+     * Disable keeps frameworks so re-enable restores the prior selection.
+     */
+    compliance: { enabled: boolean; frameworks: string[] };
   };
   installedAt: string;
   updatedAt: string;
@@ -125,6 +133,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
           : undefined,
         // Self-heal: absent proxy field defaults to false (applies ADR-014 self-heal idiom)
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
+        // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
+        // (applies ADR-014 self-heal idiom; normalizeComplianceFeature is in TOLERANT section)
+        compliance: normalizeComplianceFeature(features.compliance),
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

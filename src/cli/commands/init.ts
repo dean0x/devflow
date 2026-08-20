@@ -319,7 +319,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false, compliance: { enabled: false, frameworks: [] } },
           installedAt: now,
           updatedAt: now,
         });
@@ -1755,6 +1755,8 @@ export const initCommand = new Command('init')
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,
+        // Thread prior compliance through unchanged (full init wiring is a later phase).
+        compliance: existingManifest?.features.compliance ?? { enabled: false, frameworks: [] },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,

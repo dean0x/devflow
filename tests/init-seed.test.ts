@@ -76,6 +76,7 @@ describe('resolveSeedFeatures', () => {
       learning: false,
       rules: false,
       proxy: false,
+      compliance: { enabled: false, frameworks: [] },
     });
   });
 
