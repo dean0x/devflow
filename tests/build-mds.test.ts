@@ -138,9 +138,14 @@ describe('output-dir: stripped from compiled outputs', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('no compiled output contains output-dir:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -149,14 +154,17 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue; // not present — the subprocess test above covers presence
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not contain output-dir:`,
       ).not.toMatch(/^output-dir:/m);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('every compiled output that has frontmatter still has description:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -165,6 +173,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       // Only check files that have a frontmatter block
       if (/^---\r?\n/.test(content)) {
         expect(
@@ -173,9 +182,11 @@ describe('output-dir: stripped from compiled outputs', () => {
         ).toMatch(/^description:/m);
       }
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('dynamic compiled outputs preserve argument-hint:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(DYNAMIC_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -184,6 +195,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       if (/^---\r?\n/.test(content)) {
         expect(
           content,
@@ -191,6 +203,7 @@ describe('output-dir: stripped from compiled outputs', () => {
         ).toMatch(/^argument-hint:/m);
       }
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -201,6 +214,7 @@ describe('output-dir: stripped from compiled outputs', () => {
 describe('partial expansion in compiled knowledge outputs', () => {
   it('no compiled knowledge command contains un-expanded {knowledge_*()} call sites', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -209,14 +223,17 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         callSitePattern.test(content),
         `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled knowledge command references feature-knowledge.cjs', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -225,14 +242,17 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not reference feature-knowledge.cjs`,
       ).not.toContain('feature-knowledge.cjs');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled output contains a literal @import line', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -241,11 +261,13 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not contain unexpanded @import lines`,
       ).not.toMatch(/^@import /m);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -263,9 +285,14 @@ describe('escape-regression guard: no dist command contains literal backslash-br
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -274,11 +301,13 @@ describe('escape-regression guard: no dist command contains literal backslash-br
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
       ).not.toContain('\\{');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -294,9 +323,14 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -306,14 +340,17 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
         // file missing — covered by the command-set guard above; skip here
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
       ).toContain('.devflow/learning/index.md');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -322,11 +359,13 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not reference decisions-index.cjs`,
       ).not.toContain('decisions-index.cjs');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -417,6 +456,10 @@ describe('expected-command-set guard (C2)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('all 9 knowledge command outputs exist post-build', async () => {
@@ -637,6 +680,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
     compiled = await fs.readFile(
       path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
@@ -680,10 +727,15 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -692,11 +744,13 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       } catch {
         continue;
       }
+      scanned++;
       expect(
         callSitePattern.test(content),
         `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -716,6 +770,10 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
     compiled = await fs.readFile(
       path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
@@ -791,6 +849,10 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('dynamic-build, plan, tickets, wave do NOT contain --dry-run', async () => {
@@ -838,6 +900,10 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
@@ -883,6 +949,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
   });
 
   it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -891,6 +958,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${basename}.md must not contain COMPLIANCE_ENABLED`,
@@ -913,6 +981,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
         `${basename}.md must not contain comment-pr (retired operation)`,
       ).not.toContain('comment-pr');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('every COMPLIANCE: line in every dist command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
@@ -920,6 +989,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -928,6 +998,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       } catch {
         continue;
       }
+      scanned++;
 
       const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
       let match;
@@ -949,6 +1020,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
         `${basename}.md: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
       ).toHaveLength(0);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -965,6 +1037,10 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('code-review.md contains post-review-summary and devflow:review-summary marker', async () => {
@@ -1004,6 +1080,10 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('resolve.md contains Phase D traceability ops', async () => {
@@ -1044,6 +1124,10 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('plan.md contains ensure-traceable-issue (Phase 14 Git-agent spawn, Step 2.6)', async () => {
@@ -1080,6 +1164,10 @@ describe('Phase F traceability — release.md evidence + dynamic-build complianc
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {

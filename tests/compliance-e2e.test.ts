@@ -22,8 +22,16 @@ import * as path from 'path';
 
 const CLI = path.resolve(import.meta.dirname, '..', 'dist', 'cli.js');
 
-// Guard: skip when dist/cli.js not built (PF-018 — non-vacuous corpus)
+// Guard: fail-loud when dist/cli.js is absent — run `npm run build` first.
+// A guard that silently skips is not a guard; mirrors skill-references.test.ts's requireDistFiles approach.
+// CI always builds first so this never triggers there; locally it fails clearly instead of vacuously passing.
 const distExists = await fs.access(CLI).then(() => true).catch(() => false);
+if (!distExists) {
+  throw new Error(
+    'dist/cli.js is absent — run `npm run build` first\n' +
+    ' (compliance-e2e.test.ts requires a compiled CLI binary)',
+  );
+}
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -88,7 +96,7 @@ async function readManifest(devflowDir: string): Promise<Record<string, unknown>
 }
 
 // ── S1 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S1: fresh init --recommended → disabled compliance manifest', () => {
+describe('S1: fresh init --recommended → disabled compliance manifest', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -121,7 +129,7 @@ describe.skipIf(!distExists)('S1: fresh init --recommended → disabled complian
 });
 
 // ── S2 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
+describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -168,7 +176,7 @@ describe.skipIf(!distExists)('S2: compliance --set gdpr,soc2 → artifacts insta
 });
 
 // ── S3 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA only', () => {
+describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA only', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -215,7 +223,7 @@ describe.skipIf(!distExists)('S3: from S2 state + --set hipaa → skill updated,
 });
 
 // ── S4 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S4: from S3 state + --disable → artifacts gone, frameworks remembered', () => {
+describe('S4: from S3 state + --disable → artifacts gone, frameworks remembered', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -248,7 +256,7 @@ describe.skipIf(!distExists)('S4: from S3 state + --disable → artifacts gone, 
 });
 
 // ── S5 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S5: from S4 state + --enable → hipaa restored exactly', () => {
+describe('S5: from S4 state + --enable → hipaa restored exactly', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -294,7 +302,7 @@ describe.skipIf(!distExists)('S5: from S4 state + --enable → hipaa restored ex
 });
 
 // ── S6 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S6: from S2 state + rules --disable → skill present, rule absent', () => {
+describe('S6: from S2 state + rules --disable → skill present, rule absent', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -337,7 +345,7 @@ describe.skipIf(!distExists)('S6: from S2 state + rules --disable → skill pres
 });
 
 // ── S7 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S7: from S6 state + rules --enable → compliance rule restored with GDPR, SOC 2', () => {
+describe('S7: from S6 state + rules --enable → compliance rule restored with GDPR, SOC 2', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -369,7 +377,7 @@ describe.skipIf(!distExists)('S7: from S6 state + rules --enable → compliance 
 });
 
 // ── S8 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S8: rules off + compliance --set pci-dss → skill yes, rule no', () => {
+describe('S8: rules off + compliance --set pci-dss → skill yes, rule no', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -405,7 +413,7 @@ describe.skipIf(!distExists)('S8: rules off + compliance --set pci-dss → skill
 });
 
 // ── S9 ────────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S9: from S2 state + full init → artifacts survive sweep+converge', () => {
+describe('S9: from S2 state + full init → artifacts survive sweep+converge', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -448,7 +456,7 @@ describe.skipIf(!distExists)('S9: from S2 state + full init → artifacts surviv
 });
 
 // ── S10 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S10: from S2 state + init --plugin=devflow-code-review → compliance preserved', () => {
+describe('S10: from S2 state + init --plugin=devflow-code-review → compliance preserved', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -485,7 +493,7 @@ describe.skipIf(!distExists)('S10: from S2 state + init --plugin=devflow-code-re
 });
 
 // ── S11 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → pruned on init', () => {
+describe('S11: legacy manifest with devflow-compliance → pruned on init', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -587,7 +595,7 @@ describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → p
 });
 
 // ── S12 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S12: from S2 state + init --reset → compliance off, artifacts gone', () => {
+describe('S12: from S2 state + init --reset → compliance off, artifacts gone', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -625,7 +633,7 @@ describe.skipIf(!distExists)('S12: from S2 state + init --reset → compliance o
 // is covered by tests/init-seed.test.ts and tests/compliance-cli.test.ts.
 
 // ── S14 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S14: from S2 state + uninstall --plugin=devflow-plan → compliance retained', () => {
+describe('S14: from S2 state + uninstall --plugin=devflow-plan → compliance retained', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -657,7 +665,7 @@ describe.skipIf(!distExists)('S14: from S2 state + uninstall --plugin=devflow-pl
 });
 
 // ── S15 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S15: from S2 state + bare compliance decoy + full uninstall', () => {
+describe('S15: from S2 state + bare compliance decoy + full uninstall', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -683,9 +691,10 @@ describe.skipIf(!distExists)('S15: from S2 state + bare compliance decoy + full 
     await fs.writeFile(path.join(bareDecoy, 'SKILL.md'), sentinel, 'utf-8');
 
     // Run full uninstall (non-TTY in CI mode; scope: user)
-    run('uninstall', '--scope=user');
-    // Accept any exit code — uninstall may warn about missing dirs but still clean up.
-    // Just verify the file-system end-state.
+    const uninstallResult = run('uninstall', '--scope=user');
+    // Accept 0 or 1 (uninstall may warn about missing dirs); reject crashes (unhandled, ERR_, stack).
+    expect([0, 1], `uninstall exited unexpectedly (${uninstallResult.status}):\n${uninstallResult.stderr}`).toContain(uninstallResult.status);
+    expect(uninstallResult.stderr, 'uninstall must not crash').not.toMatch(/unhandled|ERR_|stack/i);
 
     // Prefixed devflow:compliance must be removed
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
@@ -704,7 +713,7 @@ describe.skipIf(!distExists)('S15: from S2 state + bare compliance decoy + full 
 });
 
 // ── S16 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S16: shadowed skill + rule shadow + --set gdpr → shadow SKILL.md verbatim', () => {
+describe('S16: shadowed skill + rule shadow + --set gdpr → shadow SKILL.md verbatim', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -755,7 +764,7 @@ describe.skipIf(!distExists)('S16: shadowed skill + rule shadow + --set gdpr →
 });
 
 // ── S16b ──────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S16b: rule shadow WITH placeholder → shadow stamped on --set and rules --enable', () => {
+describe('S16b: rule shadow WITH placeholder → shadow stamped on --set and rules --enable', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -809,7 +818,7 @@ describe.skipIf(!distExists)('S16b: rule shadow WITH placeholder → shadow stam
 });
 
 // ── S17 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S17: invalid framework IDs → non-zero exit, disk unchanged', () => {
+describe('S17: invalid framework IDs → non-zero exit, disk unchanged', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -847,7 +856,7 @@ describe.skipIf(!distExists)('S17: invalid framework IDs → non-zero exit, disk
 });
 
 // ── S18 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S18: fresh non-TTY --enable with no prior frameworks → generic-only', () => {
+describe('S18: fresh non-TTY --enable with no prior frameworks → generic-only', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -889,7 +898,7 @@ describe.skipIf(!distExists)('S18: fresh non-TTY --enable with no prior framewor
 });
 
 // ── S19 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks', () => {
+describe('S19: manifest writeback deduplicates frameworks', () => {
   // normalizeFrameworks is applied at manifest writeback time so that a hand-edited
   // or migrated manifest with duplicate framework IDs is cleaned up on the next init.
   let tmpHome: string;
@@ -949,7 +958,7 @@ describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks', 
 });
 
 // ── S20 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S20: compliance sweep suppression conditional on enabled+converge', () => {
+describe('S20: compliance sweep suppression conditional on enabled+converge', () => {
   // Verifies that the filteredSweepReport correctly surfaces or suppresses the
   // compliance skill orphan depending on whether compliance is enabled (and converge
   // succeeded) vs. disabled. The sweep always finds the compliance skill as an orphan
@@ -980,7 +989,10 @@ describe.skipIf(!distExists)('S20: compliance sweep suppression conditional on e
     expect(result.status, `second init failed:\n${result.stderr}`).toBe(0);
 
     const combined = result.stdout + result.stderr;
-    // The orphan message pattern is "skill compliance" — must not appear when suppressed.
+    // Cannot assert on sweptOrphans directly — S20 drives the CLI binary (no access to
+    // InstallReport). The formatSweepSummary message format is:
+    //   "no longer in the registry: skill compliance" ({o.kind} {o.name}).
+    // For a negative check the bare pattern is intentionally broad to catch any variant.
     expect(combined).not.toMatch(/skill compliance/);
     // Compliance skill must still be present (converge re-materialized it).
     await expect(
@@ -996,8 +1008,11 @@ describe.skipIf(!distExists)('S20: compliance sweep suppression conditional on e
     expect(result.status, `init --no-compliance failed:\n${result.stderr}`).toBe(0);
 
     const combined = result.stdout + result.stderr;
-    // The orphan message pattern is "skill compliance" — must appear when not suppressed.
-    expect(combined).toMatch(/skill compliance/);
+    // Cannot assert on sweptOrphans directly — S20 drives the CLI binary (no access to
+    // InstallReport). Anchor to the formatSweepSummary message structure to resist copy
+    // edits while still catching the specific orphan entry:
+    //   "no longer in the registry: skill compliance" ({o.kind} {o.name}).
+    expect(combined).toMatch(/no longer in the registry:[^\n]*skill compliance/);
     // Compliance skill must be gone.
     let exists = false;
     try { await fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')); exists = true; } catch {}
