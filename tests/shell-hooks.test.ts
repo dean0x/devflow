@@ -1364,6 +1364,27 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(result).toBe('1');
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
+
+  it('branch-order: /.devflow/ wins over v2 sentinel when both present — no carve-out appended', () => {
+    // A .gitignore with BOTH /.devflow/ (user-authored) AND the v2 sentinel.
+    // Shell (after fix) checks /.devflow/ BEFORE v2 sentinel — same as TS twin.
+    // The v2→v3 upgrade must be suppressed; /.devflow/ must survive untouched.
+    const v2Block = [
+      '!.devflow/features/*/KNOWLEDGE.md',
+      '.devflow/*',
+    ].join('\n');
+    const content = `/.devflow/\n${v2Block}\n`;
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), content);
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const after = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    // /.devflow/ respected — conventions.md line must NOT be appended
+    expect(after).not.toContain('!.devflow/conventions.md');
+    // Original content preserved byte-for-byte
+    expect(after).toBe(content);
+  });
 });
 
 describe('get-mtime behavioral', () => {

@@ -71,6 +71,11 @@ if [ ! -f "$_ERG_GITIGNORE" ]; then
 elif grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE"; then
   # v3 carve-out already present — nothing to do.
   _ERG_OK=1
+elif grep -qE '^/\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
+  # User-authored `/.devflow/` (leading slash) — respect it; don't force the carve-out.
+  # Checked BEFORE the v2 sentinel so a file containing both keeps the user-authored
+  # entry (matches ensureDevflowGitignore TS order: v3→/.devflow/→v2→wholesale→append).
+  _ERG_OK=1
 elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
   # v2→v3 upgrade: v2 sentinel present but conventions.md line absent — append just the
   # missing line. A .gitignore whose last byte is not a newline would otherwise fuse the
@@ -93,9 +98,6 @@ elif grep -qE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
   { [ -s "$_ERG_TMP" ] && printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_TMP" \
     && mv "$_ERG_TMP" "$_ERG_GITIGNORE" && _ERG_OK=1
   [ "$_ERG_OK" = 1 ] || rm -f "$_ERG_TMP" 2>/dev/null
-elif grep -qE '^/\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
-  # User-authored `/.devflow/` (leading slash) — respect it; don't force the carve-out.
-  _ERG_OK=1
 else
   # .gitignore exists but has no Devflow entry — append the block.
   { printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_GITIGNORE" && _ERG_OK=1
