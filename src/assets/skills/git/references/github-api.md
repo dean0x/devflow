@@ -379,12 +379,14 @@ gh api graphql -f query='
 # REST: automatic pagination
 gh api repos/{owner}/{repo}/issues --paginate --jq '.[].number'
 
-# GraphQL: cursor-based pagination
+# GraphQL: cursor-based pagination (bounded — max 10 pages)
 fetch_all_issues() {
     local cursor=""
     local has_next="true"
+    local page_count=0
+    local max_pages=10
 
-    while [ "$has_next" = "true" ]; do
+    while [ "$has_next" = "true" ] && [ "$page_count" -lt "$max_pages" ]; do
         local query
         if [ -z "$cursor" ]; then
             query='query { repository(owner: "owner", name: "repo") { issues(first: 100) { nodes { number title } pageInfo { hasNextPage endCursor } } } }'
@@ -397,6 +399,7 @@ fetch_all_issues() {
 
         has_next=$(echo "$result" | jq -r '.data.repository.issues.pageInfo.hasNextPage')
         cursor=$(echo "$result" | jq -r '.data.repository.issues.pageInfo.endCursor')
+        page_count=$((page_count + 1))
     done
 }
 ```
@@ -452,10 +455,11 @@ wait_for_checks() {
 
 ```bash
 batch_api_calls() {
-    local calls=("$@")
     local results=()
 
-    for call in "${calls[@]}"; do
+    # Each positional argument is a gh-api path (e.g. "repos/owner/repo/issues/1").
+    # Direct invocation — no eval; shell metacharacters in paths are not supported.
+    for api_path in "$@"; do
         REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
 
         if [ "$REMAINING" -lt 10 ]; then
@@ -463,8 +467,8 @@ batch_api_calls() {
             sleep 60
         fi
 
-        result=$(eval "$call" 2>&1) || {
-            echo "Failed: $call" >&2
+        result=$(gh api "$api_path" 2>&1) || {
+            echo "Failed: gh api $api_path" >&2
             continue
         }
 
