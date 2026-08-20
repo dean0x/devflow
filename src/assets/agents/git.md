@@ -267,9 +267,10 @@ Post a consolidated code review summary as a single PR comment per review cycle 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (no PR)`, warn in output, return. Summary is written to disk only.
 
 **Process:**
-1. Check for existing comment with this cycle's marker:
-   - `gh pr view {PR_NUMBER} --json comments --jq '.comments[].body'`
-   - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER}` in any existing comment body
+1. Check for existing comment with this cycle's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
+   - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER}` in the viewer-authored comment bodies only
    - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER}`
 2. Read `REVIEW_SUMMARY_PATH` (the review-summary.md file written by the Synthesize agent)
 3. Compose comment body:
@@ -371,17 +372,19 @@ Create a GitHub release with version tag.
 
 **Input:** `VERSION` (semver), `CHANGELOG_CONTENT`, `RELEASE_TITLE` (optional), `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional)
 
+**Degradation carve-out for primary-effect ops:** The global D4 "never abort" clause does NOT apply to the primary release effects in steps 1–6 below. A failed tag push or release create is a hard failure — report it and stop. Only the traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment and the `backlink-shipped-issues` call) degrade per D4 (emit `TRACEABILITY: DEGRADED ({reason})`, warn, continue).
+
 **Process:**
-1. Validate version format (semver: X.Y.Z)
-2. Verify clean working directory
-3. Create annotated tag with changelog content
-4. Push tag to origin
+1. Validate version format (semver: X.Y.Z) — fail loudly on mismatch
+2. Verify clean working directory — fail loudly if dirty
+3. Create annotated tag with changelog content — fail loudly on error
+4. Push tag to origin — fail loudly on error; a failed push must never be swallowed and the release must not be reported as created
 5. Compose release notes body:
    - Start with `CHANGELOG_CONTENT`
-   - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and {n} more commits` line
-   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line
+   - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and {n} more commits` line (D4 degrade if enrichment fails)
+   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line (D4 degrade if enrichment fails)
    - Cap the composed body at 60000 characters (GitHub's limit is 65536); if it would exceed that, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`
-6. Create GitHub release via `gh release create` with the composed notes body
+6. Create GitHub release via `gh release create` with the composed notes body — fail loudly on error
 
 **Output:**
 ```markdown
@@ -575,7 +578,7 @@ unexplained unresolved threads.
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
 2. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation
-3. If `VERIFICATION_STATUS == PASS` AND verdict is FIXED/FALSE_POSITIVE/BY_DESIGN: resolve via `resolveReviewThread` mutation
+3. If `VERIFICATION_STATUS == PASS` AND verdict is FIXED/FALSE_POSITIVE/BY_DESIGN AND evidence is present (FIXED: `commit_sha` non-empty; FALSE_POSITIVE/BY_DESIGN: `evidence` non-empty): resolve via `resolveReviewThread` mutation. Missing evidence → reply-only, never resolve.
 4. Wait 1s between operations
 
 **Output:**
@@ -604,8 +607,10 @@ Post the resolution summary as a single PR comment. Marker-based deduplication �
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
 **Process:**
-1. Check for existing marker: `gh pr view {PR_NUMBER} --json comments --jq '.comments[].body'`
-   - Search for `<!-- devflow:resolution-summary ts:` in any existing comment
+1. Check for existing marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
+   - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:resolution-summary ts:` in the viewer-authored comment bodies only
    - If found: skip — report `Skipped: resolution summary already posted`
 2. Read `RESOLUTION_SUMMARY_PATH` (resolution-summary.md written by Phase 5/9)
 3. Compose comment body:
@@ -687,9 +692,10 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    may carry shell metacharacters.
 
 For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between operations):
-1. Fetch existing comments: `gh issue view {number} --json comments --jq '.comments[].body'`
-2. Check if `<!-- devflow:shipped v{VERSION} -->` already present. If yes: skip.
-3. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
+1. Fetch viewer login (once, before the loop): `gh api user --jq '.login'` → store as VIEWER_LOGIN
+2. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+3. Check if `<!-- devflow:shipped v{VERSION} -->` already present in viewer-authored comments. If yes: skip.
+4. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
    expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
    ```
    <!-- devflow:shipped v{VERSION} -->
@@ -697,7 +703,7 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between opera
    ```
    Post it via `gh issue comment {number} --body-file {temp_file}` — the same `--body-file`
    form the other comment-posting operations use.
-4. Wait 1s between issues.
+5. Wait 1s between issues.
 
 **Output:**
 ```markdown
