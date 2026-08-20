@@ -8,7 +8,7 @@ import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames, FEATURE_OWNED_RULES } 
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
-import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
+import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -295,19 +295,18 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
     p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
   }
 
-  // Converge compliance artifacts unconditionally — convergeComplianceArtifacts handles the
+  // Converge compliance artifacts unconditionally — convergeFromManifest handles the
   // disabled case itself (removes stale artifacts). Running this regardless of installFailed
   // prevents a rules-install failure from leaving the compliance rule in a stale state.
-  // rulesEnabled reflects the actual settled state: false when install failed so the compliance
-  // rule is not installed into a wiped, rules-disabled directory (avoids PF-015).
+  // rulesEnabledOverride reflects the actual settled state: false when install failed so the
+  // compliance rule is not installed into a wiped, rules-disabled directory (avoids PF-015).
   try {
-    await convergeComplianceArtifacts({
+    await convergeFromManifest({
       claudeDir,
       devflowDir,
-      enabled: manifest.features.compliance.enabled,
-      frameworks: manifest.features.compliance.frameworks,
-      rulesEnabled: !installFailed,
+      manifest,
       warn: (msg) => p.log.warn(msg),
+      rulesEnabledOverride: !installFailed,
     });
   } catch (err) {
     // PF-009: warn-not-abort — compliance convergence failure does not undo rules install

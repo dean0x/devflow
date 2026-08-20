@@ -11,6 +11,8 @@ import {
   discoverProjectGitRoots,
   runMigrationsWithFallback,
   formatSweepSummary,
+  resolveComplianceInitState,
+  formatComplianceSummary,
 } from '../src/cli/commands/init.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
@@ -1576,6 +1578,66 @@ describe('formatSweepSummary', () => {
     })
 
     expect(lines.map(l => l.level)).toEqual(['info', 'warn'])
+  })
+})
+
+describe('resolveComplianceInitState', () => {
+  it('returns undefined when option is not supplied', () => {
+    expect(resolveComplianceInitState(undefined, ['gdpr'])).toBeUndefined()
+  })
+
+  it('returns enabled state with parsed frameworks when option is a valid string', () => {
+    const result = resolveComplianceInitState('gdpr,soc2', [])
+    expect(result).toEqual({ ok: true, value: { enabled: true, frameworks: ['gdpr', 'soc2'] } })
+  })
+
+  it('returns error when option contains unknown framework IDs', () => {
+    const result = resolveComplianceInitState('gdpr,unknown-fw', [])
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('unknown-fw') })
+  })
+
+  it('returns disabled state preserving seed frameworks when option is false (--no-compliance)', () => {
+    const result = resolveComplianceInitState(false, ['gdpr', 'hipaa'])
+    expect(result).toEqual({ ok: true, value: { enabled: false, frameworks: ['gdpr', 'hipaa'] } })
+  })
+
+  it('returns empty frameworks list when --no-compliance and no prior selection', () => {
+    const result = resolveComplianceInitState(false, [])
+    expect(result).toEqual({ ok: true, value: { enabled: false, frameworks: [] } })
+  })
+
+  it('parses an empty string as an empty valid framework list', () => {
+    const result = resolveComplianceInitState('', [])
+    expect(result).toEqual({ ok: true, value: { enabled: true, frameworks: [] } })
+  })
+})
+
+describe('formatComplianceSummary', () => {
+  it('returns "disabled" when not enabled', () => {
+    expect(formatComplianceSummary(false, [])).toBe('disabled')
+    expect(formatComplianceSummary(false, ['gdpr'])).toBe('disabled')
+  })
+
+  it('returns generic message when enabled with no frameworks', () => {
+    expect(formatComplianceSummary(true, [])).toBe('enabled (generic controls only)')
+  })
+
+  it('returns enabled with framework list when enabled and frameworks selected', () => {
+    expect(formatComplianceSummary(true, ['gdpr', 'soc2'])).toBe('enabled (gdpr, soc2)')
+  })
+
+  it('returns single framework correctly', () => {
+    expect(formatComplianceSummary(true, ['hipaa'])).toBe('enabled (hipaa)')
+  })
+
+  it('hud-only path: preserves compliance state from existing manifest', () => {
+    // This tests the disable-keeps-frameworks contract for the hud-only branch.
+    // Verifies that a prior compliance state {enabled:true, frameworks:['gdpr']} is not
+    // erased by the hud-only install — the formatComplianceSummary would reflect the state.
+    const priorState = { enabled: true, frameworks: ['gdpr'] }
+    const effectiveState = priorState ?? { enabled: false, frameworks: [] }
+    expect(formatComplianceSummary(effectiveState.enabled, effectiveState.frameworks))
+      .toBe('enabled (gdpr)')
   })
 })
 

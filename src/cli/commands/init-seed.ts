@@ -18,6 +18,7 @@ import { resolveExistingViewMode, FLAG_REGISTRY, type ClaudeCodeFlag, type ViewM
 import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
 import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
+import { type ComplianceFeatureState } from '../../core/compliance.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export interface FeatureSeed {
    * Full init wiring (framework multi-select, CLI toggle) is a later phase.
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
-  compliance: { enabled: boolean; frameworks: string[] };
+  compliance: ComplianceFeatureState;
 }
 
 /** Registry defaults — all features enabled except proxy (advanced-only, off by default). */

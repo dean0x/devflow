@@ -47,8 +47,8 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
-import { parseFrameworkList, COMPLIANCE_FRAMEWORKS, normalizeFrameworks } from '../../core/compliance.js';
-import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
+import { parseFrameworkList, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -192,6 +192,47 @@ export function shouldRetry(attempt: number, maxAttempts: number, accepted: bool
 }
 
 /**
+ * Parse the --compliance / --no-compliance CLI option into a compliance override.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ *
+ * Returns:
+ *   {ok: true, value}  — override state derived from the option
+ *   {ok: false, error} — invalid framework IDs (caller handles exit)
+ *   undefined          — option was not supplied; no override
+ *
+ * Respects the disable-keeps-frameworks contract: --no-compliance preserves
+ * the seed's framework list so re-enable can restore them.
+ */
+export function resolveComplianceInitState(
+  complianceOption: string | false | undefined,
+  seedFrameworks: string[],
+): { ok: true; value: ComplianceFeatureState } | { ok: false; error: string } | undefined {
+  if (typeof complianceOption === 'string') {
+    const parsed = parseFrameworkList(complianceOption);
+    if (!parsed.ok) {
+      return { ok: false, error: parsed.error };
+    }
+    return { ok: true, value: { enabled: true, frameworks: parsed.value } };
+  }
+  if (complianceOption === false) {
+    return { ok: true, value: { enabled: false, frameworks: seedFrameworks } };
+  }
+  return undefined;
+}
+
+/**
+ * Format compliance state for the Recommended-mode summary line.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function formatComplianceSummary(enabled: boolean, frameworks: string[]): string {
+  if (!enabled) return 'disabled';
+  if (frameworks.length > 0) return `enabled (${frameworks.join(', ')})`;
+  return 'enabled (generic controls only)';
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -323,6 +364,13 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
+      // Read existing manifest to preserve user-set compliance state (disable-keeps-frameworks
+      // contract: the hud-only path must not erase frameworks the user previously selected).
+      let existingHudManifest: ManifestData | null = null;
+      try {
+        existingHudManifest = await readManifest(devflowDir);
+      } catch { /* absent on fresh install — existingHudManifest stays null */ }
+
       // Write minimal manifest
       const now = new Date().toISOString();
       try {
@@ -330,7 +378,11 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false, compliance: { enabled: false, frameworks: [] } },
+          features: {
+            ambient: false, memory: false, hud: true, knowledge: false,
+            learning: false, rules: false, flags: [], proxy: false,
+            compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
+          },
           installedAt: now,
           updatedAt: now,
         });
@@ -377,21 +429,19 @@ export const initCommand = new Command('init')
 
     // Early validation: parse --compliance <list> at the boundary before any prompts (PF-parse-at-boundary).
     // options.compliance: string → --compliance <list>; false → --no-compliance; undefined → not passed
-    let cliComplianceOverride: { enabled: boolean; frameworks: string[] } | undefined;
-    if (typeof options.compliance === 'string') {
-      // Validate framework IDs now — fail fast before any TTY prompts
-      const parsedList = parseFrameworkList(options.compliance);
-      if (!parsedList.ok) {
-        p.log.error(parsedList.error);
-        process.exit(1);
+    let cliComplianceOverride: ComplianceFeatureState | undefined;
+    {
+      const complianceStateResult = resolveComplianceInitState(
+        options.compliance,
+        seed.features.compliance.frameworks,
+      );
+      if (complianceStateResult !== undefined) {
+        if (!complianceStateResult.ok) {
+          p.log.error(complianceStateResult.error);
+          process.exit(1);
+        }
+        cliComplianceOverride = complianceStateResult.value;
       }
-      cliComplianceOverride = { enabled: true, frameworks: parsedList.value };
-    } else if (options.compliance === false) {
-      // --no-compliance: disable, but preserve frameworks (disable-keeps-frameworks contract)
-      cliComplianceOverride = {
-        enabled: false,
-        frameworks: seed.features.compliance.frameworks,
-      };
     }
 
     // Select plugins to install
@@ -641,14 +691,7 @@ export const initCommand = new Command('init')
 
       // Print summary
       const defaultFlagCount = enabledFlags.length;
-      let complianceSummary: string;
-      if (!complianceEnabled) {
-        complianceSummary = 'disabled';
-      } else if (complianceFrameworks.length > 0) {
-        complianceSummary = `enabled (${complianceFrameworks.join(', ')})`;
-      } else {
-        complianceSummary = 'enabled (generic controls only)';
-      }
+      const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
@@ -904,7 +947,7 @@ export const initCommand = new Command('init')
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      enabledFlags = (flagSelection as string[]).filter(id => id !== '_separator');
+      enabledFlags = flagSelection.filter(id => id !== '_separator');
 
       // View mode selector (advanced only)
       p.note(
@@ -1262,14 +1305,12 @@ export const initCommand = new Command('init')
     // Called unconditionally so that enabling/disabling compliance during init
     // is reflected in the installed artifacts without a separate devflow compliance run.
     // Wrapped in its own try/catch (PF-009: warn-not-abort).
-    let convergeResult: Awaited<ReturnType<typeof convergeComplianceArtifacts>> | null = null;
+    let convergeResult: Awaited<ReturnType<typeof convergeFromManifest>> | null = null;
     try {
-      convergeResult = await convergeComplianceArtifacts({
+      convergeResult = await convergeFromManifest({
         claudeDir,
         devflowDir,
-        enabled: complianceEnabled,
-        frameworks: complianceFrameworks,
-        rulesEnabled,
+        manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
         warn: (msg) => p.log.warn(msg),
       });
       // I41: emit legacy-upgrade notice when compliance is disabled AND pre-existing artifacts

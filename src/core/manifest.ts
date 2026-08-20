@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_PLUGIN_NAMES, DELETED_PLUGIN_NAMES } from './plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
-import { normalizeComplianceFeature } from './compliance.js';
+import { normalizeComplianceFeature, type ComplianceFeatureState } from './compliance.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -62,7 +62,7 @@ export interface ManifestData {
      * {enabled:false, frameworks:[]} via normalizeComplianceFeature.
      * Disable keeps frameworks so re-enable restores the prior selection.
      */
-    compliance: { enabled: boolean; frameworks: string[] };
+    compliance: ComplianceFeatureState;
   };
   installedAt: string;
   updatedAt: string;

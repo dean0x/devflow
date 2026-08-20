@@ -13,7 +13,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, rulesDir } from '../../core/assets.js';
-import { normalizeFrameworks, stampComplianceRule } from '../../core/compliance.js';
+import { normalizeFrameworks, stampComplianceRule, type ComplianceFeatureState } from '../../core/compliance.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -299,4 +299,38 @@ export async function convergeComplianceArtifacts(
   }
 
   return { removedPreexisting: false, converged };
+}
+
+// ── Manifest-slice wrapper ─────────────────────────────────────────────────
+
+/**
+ * Thin wrapper around convergeComplianceArtifacts that extracts options from a
+ * manifest slice in one place, eliminating the repeated hand-assembly at each
+ * call site (init.ts, rules.ts, compliance.ts).
+ *
+ * @param opts.manifest - Structural type carrying only the compliance and rules
+ *   feature fields. Callers that have computed their own compliance state
+ *   (e.g. init.ts resolving prompt results) construct a synthetic slice;
+ *   callers with a live ManifestData can pass it directly.
+ * @param opts.rulesEnabledOverride - When provided, replaces
+ *   manifest.features.rules as the rulesEnabled source. Used by rules.ts where
+ *   rulesEnabled reflects the actual install outcome (!installFailed) rather
+ *   than the value stored in the manifest.
+ */
+export async function convergeFromManifest(opts: {
+  claudeDir: string;
+  devflowDir: string;
+  manifest: { features: { compliance: ComplianceFeatureState; rules: boolean } };
+  warn: (msg: string) => void;
+  rulesEnabledOverride?: boolean;
+}): Promise<ConvergeComplianceArtifactsResult> {
+  const { claudeDir, devflowDir, manifest, warn, rulesEnabledOverride } = opts;
+  return convergeComplianceArtifacts({
+    claudeDir,
+    devflowDir,
+    enabled: manifest.features.compliance.enabled,
+    frameworks: manifest.features.compliance.frameworks,
+    rulesEnabled: rulesEnabledOverride ?? manifest.features.rules,
+    warn,
+  });
 }

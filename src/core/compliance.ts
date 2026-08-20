@@ -6,6 +6,24 @@
  */
 
 // ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/**
+ * Named domain type for compliance feature state.
+ *
+ * Shared across manifest.ts, init-seed.ts, init.ts, compliance.ts, and
+ * compliance-install.ts — a single definition eliminates the repeated
+ * structural restatement of `{ enabled: boolean; frameworks: string[] }`.
+ */
+export interface ComplianceFeatureState {
+  enabled: boolean;
+  /** Registry-validated framework IDs. Callers MUST not assume these are validated;
+   *  normalizeFrameworks / parseFrameworkList are the trust boundaries. */
+  frameworks: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Framework registry
 // ---------------------------------------------------------------------------
 
@@ -129,7 +147,7 @@ export function parseFrameworkList(
  */
 export function normalizeComplianceFeature(
   raw: unknown,
-): { enabled: boolean; frameworks: string[] } {
+): ComplianceFeatureState {
   const DEFAULT = { enabled: false, frameworks: [] as string[] };
 
   if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {

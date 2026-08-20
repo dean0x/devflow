@@ -18,9 +18,10 @@ import {
   COMPLIANCE_FRAMEWORKS,
   normalizeFrameworks,
   parseFrameworkList,
+  type ComplianceFeatureState,
 } from '../../core/compliance.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
-import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
+import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { validateRuleShadow } from '../../targets/claude-code/installer.js';
 import {
   getClaudeDirectory,
@@ -37,7 +38,7 @@ export interface ComplianceCliActionMessage {
 }
 
 export interface ComplianceCliActionResult {
-  nextState: { enabled: boolean; frameworks: string[] };
+  nextState: ComplianceFeatureState;
   messages: ComplianceCliActionMessage[];
 }
 
@@ -62,7 +63,7 @@ export interface ComplianceCliActionResult {
  *   status  — no-op:  returns current unchanged
  */
 export function resolveComplianceCliAction(
-  current: { enabled: boolean; frameworks: string[] },
+  current: ComplianceFeatureState,
   action: ComplianceCliAction,
   setFrameworks?: string[],
 ): ComplianceCliActionResult {
@@ -329,7 +330,7 @@ export const complianceCommand = new Command('compliance')
           p.cancel('Cancelled');
           return;
         }
-        setFrameworks = selected as string[];
+        setFrameworks = selected;
         action = 'set';
       } else {
         action = 'enable';
@@ -341,12 +342,10 @@ export const complianceCommand = new Command('compliance')
     const resolved = resolveComplianceCliAction(current, action, setFrameworks);
 
     // Converge artifacts (PF-015: always converge, never short-circuit)
-    await convergeComplianceArtifacts({
+    await convergeFromManifest({
       claudeDir,
       devflowDir,
-      enabled: resolved.nextState.enabled,
-      frameworks: resolved.nextState.frameworks,
-      rulesEnabled: manifest.features.rules,
+      manifest: { features: { compliance: resolved.nextState, rules: manifest.features.rules } },
       warn: (msg) => p.log.warn(msg),
     });
 
