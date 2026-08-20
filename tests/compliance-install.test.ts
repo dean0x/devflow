@@ -402,6 +402,40 @@ describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () =
     expect(await skillExists()).toBe(true);
     expect(await ruleExists()).toBe(true);
   });
+
+  it('disable: skill dir removed even when rule removal fails — EISDIR directory obstacle (step isolation)', async () => {
+    // Portability rationale: fs.rm(path, {force:true}) without {recursive:true} throws
+    // ERR_FS_EISDIR when the target is a directory. Replacing the rule FILE with a
+    // DIRECTORY of the same name induces this error without chmod (chmod 000 is a no-op
+    // under root in some CI environments and does not test the isolation machinery).
+    const warns: string[] = [];
+
+    // Seed both artifacts via a normal enabled converge.
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true,
+      warn: vi.fn(),
+    });
+    expect(await skillExists()).toBe(true);
+    expect(await ruleExists()).toBe(true);
+
+    // Replace the rule FILE with a DIRECTORY of the same name (EISDIR obstacle).
+    await fs.rm(await ruleTargetPath(), { force: true });
+    await fs.mkdir(await ruleTargetPath());
+
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+
+    // (a) Skill dir was still removed — step isolation held despite rule removal failure.
+    expect(await skillExists()).toBe(false);
+    // (b) warn was called with the rule-removal failure.
+    expect(warns.length).toBeGreaterThanOrEqual(1);
+    expect(warns.some(w => w.includes('rule'))).toBe(true);
+    // (c) Call resolved without throwing — result was returned normally above.
+    // (d) converged is false because a warn path was taken.
+    expect(result.converged).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -474,6 +508,37 @@ describe('PF-009: failures warn via injected warn, never throw', () => {
         claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: false, warn,
       }),
     ).resolves.not.toThrow();
+  });
+
+  it('enable: skill installs successfully even when rule install fails — rule parent is a file (warn-not-throw)', async () => {
+    // Portability rationale: making the rule target's parent directory a FILE forces
+    // installRuleFile's fs.mkdir(dirname, {recursive:true}) to throw EEXIST/ENOTDIR.
+    // Portable on Linux/macOS without chmod (no-op risk under root in CI).
+    const warns: string[] = [];
+
+    // Replace {claudeDir}/rules/devflow/ (directory from beforeEach) with a file of
+    // the same name so installRuleFile cannot recreate the parent directory.
+    await fs.rm(path.join(claudeDir, 'rules', 'devflow'), { recursive: true, force: true });
+    await fs.writeFile(path.join(claudeDir, 'rules', 'devflow'), 'not-a-directory', 'utf-8');
+
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true,
+      warn: (m) => warns.push(m),
+    });
+
+    // Skill dir installed successfully — the two steps are independent (avoids PF-015
+    // short-circuit: rule failure must not suppress skill install).
+    expect(await skillExists()).toBe(true);
+    const files = await listSkillFiles();
+    expect(files).toContain('SKILL.md');
+    expect(files).toContain('references/gdpr.md');
+
+    // warn was called with the rule install failure (PF-009: warn not throw).
+    expect(warns.length).toBeGreaterThanOrEqual(1);
+    expect(warns.some(w => w.toLowerCase().includes('rule'))).toBe(true);
+
+    // converged is false because a warn path was taken.
+    expect(result.converged).toBe(false);
   });
 });
 
