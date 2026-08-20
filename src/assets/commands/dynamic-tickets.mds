@@ -35,7 +35,7 @@ Before authoring, verify:
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
 3. **GitHub paths:** if the user wants tickets filed as GitHub issues, `gh` CLI must be authenticated. If not authenticated, note it and fall back to writing ticket `.md` files locally.
 4. **No-remote path:** if the repo has no remote or `gh` is unauthenticated, skip GitHub-dependent steps (issue creation) and write ticket files to `.devflow/docs/tickets/\{slug\}/\{ts\}/` only.
-5. **Resolve `COMPLIANCE_SKILL_INSTALLED`:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). When compliance-gated, the tracking-issue body's ticket list links each ticket to its per-ticket GitHub issue (ticket→issue links), enabling issue-first traceability.
+5. **Resolve `COMPLIANCE_SKILL_INSTALLED`:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Pass the result as `COMPLIANCE` to downstream steps.
 
 ---
 
@@ -168,7 +168,6 @@ Then write ${OUTDIR}/tracking-issue.md:
 - ## Explicitly excluded: items the initiative deliberately excludes (decisions, not oversights)
 - ## Invariants: cross-cutting constraints that bind every ticket
 
-COMPLIANCE: ${COMPLIANCE}
 Critic guidance: ${JSON.stringify(critic && critic.trackingGuidance)}
 Revised ticket data: ${JSON.stringify(revised)}
 

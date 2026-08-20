@@ -502,7 +502,7 @@ describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → p
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S11-notice: full init with legacy devflow-compliance manifest emits migration notice (M3)', async () => {
+  it('S11-notice: full init with legacy devflow-compliance manifest emits migration notice', async () => {
     // Craft a legacy manifest that includes devflow-compliance as a plugin.
     const legacyManifest = {
       version: '2.0.0',
@@ -527,8 +527,7 @@ describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → p
       'utf-8',
     );
 
-    // Run a FULL init (no --plugin flag) — this triggers the legacy plugin detection notice
-    // added by M3 (before installViaFileCopy).
+    // Run a FULL init (no --plugin flag) — this triggers the legacy plugin detection notice.
     const result = run('init', '--recommended');
     expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
 
@@ -538,7 +537,7 @@ describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → p
     // but non-TTY CI environments may buffer differently.
     expect(
       result.stdout + result.stderr,
-      'output must contain the legacy plugin migration notice (M3)',
+      'output must contain the legacy plugin migration notice',
     ).toContain('Compliance has moved from a plugin to a built-in feature');
   });
 
@@ -776,12 +775,15 @@ describe.skipIf(!distExists)('S16b: rule shadow WITH placeholder → shadow stam
   it('S16b: shadow rule with placeholder is stamped on --set gdpr AND on rules --enable', async () => {
     const shadowRuleDir = path.join(devflowDir, 'rules');
     await fs.mkdir(shadowRuleDir, { recursive: true });
-    // Shadow with placeholder: stampComplianceRule will replace it
+    // Shadow uses the CURRENT template form: just the bare placeholder with no surrounding
+    // clause. stampComplianceRule replaces only the placeholder; any prose around it is
+    // template/shadow-owned. The old form ("...${PLACEHOLDER} — controls binding.") would
+    // double the trailing clause once stamped.
     const shadowRuleWithPlaceholder =
-      '# Custom rule\n- Active frameworks: ${DEVFLOW_COMPLIANCE_FRAMEWORKS} — controls binding.';
+      '# Custom rule\n- ${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
     await fs.writeFile(path.join(shadowRuleDir, 'compliance.md'), shadowRuleWithPlaceholder, 'utf-8');
 
-    // --set gdpr: should stamp the shadow content with GDPR label
+    // --set gdpr: should stamp the shadow content with the full GDPR sentence
     const result = run('compliance', '--set', 'gdpr');
     expect(result.status, `compliance --set failed:\n${result.stderr}`).toBe(0);
 
@@ -789,7 +791,7 @@ describe.skipIf(!distExists)('S16b: rule shadow WITH placeholder → shadow stam
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
       'utf-8',
     );
-    expect(ruleAfterSet).toContain('GDPR');
+    expect(ruleAfterSet).toContain('Active frameworks: GDPR — their controls are binding.');
     expect(ruleAfterSet).not.toContain('${DEVFLOW_COMPLIANCE_FRAMEWORKS}');
 
     // rules --enable should also re-stamp (runRulesEnable converges compliance)
@@ -801,7 +803,7 @@ describe.skipIf(!distExists)('S16b: rule shadow WITH placeholder → shadow stam
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
       'utf-8',
     );
-    expect(ruleAfterEnable).toContain('GDPR');
+    expect(ruleAfterEnable).toContain('Active frameworks: GDPR — their controls are binding.');
     expect(ruleAfterEnable).not.toContain('${DEVFLOW_COMPLIANCE_FRAMEWORKS}');
   });
 });
@@ -887,7 +889,7 @@ describe.skipIf(!distExists)('S18: fresh non-TTY --enable with no prior framewor
 });
 
 // ── S19 ───────────────────────────────────────────────────────────────────────
-describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks (m15)', () => {
+describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks', () => {
   // normalizeFrameworks is applied at manifest writeback time so that a hand-edited
   // or migrated manifest with duplicate framework IDs is cleaned up on the next init.
   let tmpHome: string;
@@ -906,7 +908,7 @@ describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks (m
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S19: init with duplicate frameworks in seed manifest writes deduplicated manifest (m15)', async () => {
+  it('S19: init with duplicate frameworks in seed manifest writes deduplicated manifest', async () => {
     // Write a manifest with duplicate framework IDs — simulates a hand-edited manifest
     // or migration artifact that normalizeFrameworks.dedup must clean up.
     const legacyManifest = {
@@ -932,7 +934,7 @@ describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks (m
       'utf-8',
     );
 
-    // Run full init — manifest writeback applies normalizeFrameworks (m15 fix)
+    // Run full init — manifest writeback applies normalizeFrameworks
     const result = run('init', '--recommended');
     expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
 
@@ -943,5 +945,62 @@ describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks (m
     expect(compliance.enabled).toBe(true);
     // After dedup: ['gdpr', 'soc2'] — each appears exactly once, insertion order preserved
     expect(compliance.frameworks).toEqual(['gdpr', 'soc2']);
+  });
+});
+
+// ── S20 ───────────────────────────────────────────────────────────────────────
+describe.skipIf(!distExists)('S20: compliance sweep suppression conditional on enabled+converge', () => {
+  // Verifies that the filteredSweepReport correctly surfaces or suppresses the
+  // compliance skill orphan depending on whether compliance is enabled (and converge
+  // succeeded) vs. disabled. The sweep always finds the compliance skill as an orphan
+  // (it is excluded from knownNames by design); converge re-materializes it when
+  // enabled or removes it when disabled.
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s20-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    // Base state: init with compliance enabled (gdpr)
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S20a: re-init with compliance still enabled does NOT surface compliance in sweep report', async () => {
+    // Compliance skill swept by orphan sweep, then re-installed by converge.
+    // Suppress condition (enabled && convergeSucceeded = true) → not surfaced.
+    const result = run('init', '--recommended');
+    expect(result.status, `second init failed:\n${result.stderr}`).toBe(0);
+
+    const combined = result.stdout + result.stderr;
+    // The orphan message pattern is "skill compliance" — must not appear when suppressed.
+    expect(combined).not.toMatch(/skill compliance/);
+    // Compliance skill must still be present (converge re-materialized it).
+    await expect(
+      fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')),
+      'compliance skill must survive re-init with compliance enabled',
+    ).resolves.not.toThrow();
+  });
+
+  it('S20b: re-init with --no-compliance surfaces compliance in sweep report', async () => {
+    // Compliance skill swept by orphan sweep; converge removes it (disabled).
+    // Suppress condition (enabled && convergeSucceeded = false) → surfaced.
+    const result = run('init', '--no-compliance');
+    expect(result.status, `init --no-compliance failed:\n${result.stderr}`).toBe(0);
+
+    const combined = result.stdout + result.stderr;
+    // The orphan message pattern is "skill compliance" — must appear when not suppressed.
+    expect(combined).toMatch(/skill compliance/);
+    // Compliance skill must be gone.
+    let exists = false;
+    try { await fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')); exists = true; } catch {}
+    expect(exists, 'compliance skill must be removed after --no-compliance').toBe(false);
   });
 });

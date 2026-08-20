@@ -38,7 +38,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 **Produces:** COMPLIANCE_SKILL_INSTALLED
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once, before the pre-flight spawn:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise. Reuse this result for every worktree and every downstream phase. (M7: hoisted here from Phase 1 so ensure-pr-ready receives it.)
+**Resolve `COMPLIANCE_SKILL_INSTALLED` once, before the pre-flight spawn:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise. Reuse this result for every worktree and every downstream phase.
 
 #### Step 0c: Per-Worktree Pre-Flight (Git Agent)
 
@@ -56,9 +56,9 @@ For each reviewable worktree, spawn Git agent:
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
-COMPLIANCE: \{COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"\}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
@@ -159,7 +159,7 @@ If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data mod
 
 ### Phase 1b: Load Decisions Index
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED (carried from Phase 1)
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED (carried from Step 0b)
 
 **Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
 

@@ -289,7 +289,12 @@ describe('shadow paths', () => {
   });
 
   it('placeholder-bearing rule shadow is re-stamped from shadow source', async () => {
-    const shadowContent = `# Custom Rule\n- Active frameworks: ${COMPLIANCE_RULE_PLACEHOLDER} — binding.`;
+    // Shadow uses the CURRENT template form: just the bare placeholder with no
+    // surrounding clause. stampComplianceRule replaces only the placeholder; any
+    // prose around it is template/shadow-owned. A shadow that pre-appends its own
+    // trailing clause (old form: "...${PLACEHOLDER} — binding.") would double the
+    // clause once stamped.
+    const shadowContent = `# Custom Rule\n- ${COMPLIANCE_RULE_PLACEHOLDER}`;
     await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'rules', 'compliance.md'), shadowContent, 'utf-8');
 
@@ -299,7 +304,7 @@ describe('shadow paths', () => {
     });
 
     const installed = await fs.readFile(await ruleTargetPath(), 'utf-8');
-    expect(installed).toContain('SOC 2');
+    expect(installed).toContain('Active frameworks: SOC 2 — their controls are binding.');
     expect(installed).not.toContain(COMPLIANCE_RULE_PLACEHOLDER);
   });
 });

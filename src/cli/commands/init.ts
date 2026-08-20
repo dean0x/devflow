@@ -1217,10 +1217,10 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Legacy plugin migration notice (M3): devflow-compliance was a selectable plugin
-    // in earlier releases; it is now a built-in feature (devflow compliance --enable/--disable).
-    // If the prior manifest still lists it as a plugin, emit a one-line notice so the user
-    // understands the sweep report and knows the correct CLI going forward.
+    // devflow-compliance was a selectable plugin in earlier releases; it is now a built-in
+    // feature (devflow compliance --enable/--disable). If the prior manifest still lists it
+    // as a plugin, emit a one-line notice so the user understands the sweep report and
+    // knows the correct CLI going forward.
     if (existingManifest?.plugins?.includes('devflow-compliance')) {
       p.log.info(
         'Compliance has moved from a plugin to a built-in feature — ' +
@@ -1251,6 +1251,7 @@ export const initCommand = new Command('init')
     // Called unconditionally so that enabling/disabling compliance during init
     // is reflected in the installed artifacts without a separate devflow compliance run.
     // Wrapped in its own try/catch (PF-009: warn-not-abort).
+    let complianceConvergeSucceeded = false;
     try {
       const convergeResult = await convergeComplianceArtifacts({
         claudeDir,
@@ -1260,6 +1261,7 @@ export const initCommand = new Command('init')
         rulesEnabled,
         warn: (msg) => p.log.warn(msg),
       });
+      complianceConvergeSucceeded = true;
       if (convergeResult.removedPreexisting) {
         p.log.info(
           'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
@@ -1805,13 +1807,20 @@ export const initCommand = new Command('init')
     // failed removal leaves a retired asset live. Both must surface.
     // FEATURE_OWNED_SKILLS (e.g. 'compliance') are excluded from the sweep's knownNames by
     // design (they are managed by convergeComplianceArtifacts, not the orphan sweep), but
-    // the sweep still reports them as orphaned. Filter them out before surfacing to the user
-    // so the report reflects assets that genuinely need attention. (M3)
+    // the sweep still reports them as orphaned. Suppress them only when compliance is enabled
+    // and converge succeeded (i.e., converge re-materialized the skill). When disabled or
+    // converge failed, surface the orphan so the user sees the skill was removed.
     const filteredSweepReport = {
       ...installReport,
-      sweptOrphans: installReport.sweptOrphans.filter(
-        o => !(o.kind === 'skill' && (FEATURE_OWNED_SKILLS as readonly string[]).includes(o.name)),
-      ),
+      sweptOrphans: installReport.sweptOrphans.filter(o => {
+        // Suppress compliance-owned skill orphans only when compliance is enabled AND
+        // converge succeeded (converge re-materialized the skill; orphan is expected and handled).
+        // When disabled or converge failed, surface the orphan so the user sees it was removed.
+        if (o.kind === 'skill' && (FEATURE_OWNED_SKILLS as readonly string[]).includes(o.name)) {
+          return !(complianceEnabled && complianceConvergeSucceeded);
+        }
+        return true;
+      }),
     };
     for (const line of formatSweepSummary(filteredSweepReport)) {
       if (line.level === 'warn') p.log.warn(line.message);
@@ -1897,7 +1906,7 @@ export const initCommand = new Command('init')
         proxy: proxyEnabled,
         // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.
-        // normalizeFrameworks: dedup + filter unknowns before persisting (m15).
+        // normalizeFrameworks: dedup + filter unknowns before persisting.
         compliance: { enabled: complianceEnabled, frameworks: normalizeFrameworks(complianceFrameworks) },
       },
       installedAt: existingManifest?.installedAt ?? now,

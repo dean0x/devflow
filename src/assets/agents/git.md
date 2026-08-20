@@ -697,7 +697,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 
    Normalize VERSION: strip any leading `v` to get BARE_VERSION (e.g. `v1.2.3` → `1.2.3`,
    `1.2.3` → `1.2.3`). All marker composition and comment text below use `v{BARE_VERSION}` —
-   this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed. (m13)
+   this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed.
 
 For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between operations):
 1. Fetch viewer login (once, before the loop): `gh api user --jq '.login'` → store as VIEWER_LOGIN

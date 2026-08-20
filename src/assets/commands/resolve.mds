@@ -299,7 +299,7 @@ Push all commits to remote once (Code agents and validation-fix Code agents ran 
 git -C {worktree} push
 ```
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report).
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9.
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -362,7 +362,7 @@ Spawn Git agent:
 Agent(subagent_type="Git"):
 "OPERATION: resolve-review-threads
 THREAD_MAP: {thread_map_with_verdicts}
-VERIFICATION_STATUS: {PASS | FAILED}
+VERIFICATION_STATUS: {PASS | FAILED | SKIPPED}
 PR_NUMBER: {pr_number}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 D9: resolve threads only when VERIFICATION_STATUS == PASS and verdict is FIXED/FALSE_POSITIVE/BY_DESIGN with cited evidence."

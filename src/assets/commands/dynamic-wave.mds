@@ -110,6 +110,7 @@ Invoke `/devflow:dynamic-build` in WAVE mode with:
 - The wave tickets (from Step 1)
 - The per-ticket plans and acceptance criteria (from Step 2)
 - The initiative name as the wave slug (for the integration branch `wave/\{slug\}`)
+- The tracking-issue number from Step 1 (passed as `issueNumber` — Code-agent spawns inside dynamic-build thread it through as ISSUE_NUMBER)
 
 The build command will:
 - Read wave tickets and reason about their dependency order

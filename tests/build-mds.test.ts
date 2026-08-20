@@ -250,6 +250,39 @@ describe('partial expansion in compiled knowledge outputs', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 3a. Escape-regression guard — no dist file contains literal backslash-brace
+//     MDS does NOT process \{ escapes inside plain ``` fences; they ship verbatim.
+//     Escapes belong only in prose outside fences. This guard catches the whole class.
+// ---------------------------------------------------------------------------
+
+describe('escape-regression guard: no dist command contains literal backslash-brace (\\{)', () => {
+  beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+  });
+
+  it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
+      ).not.toContain('\\{');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3b. decisions_load host adoption — all knowledge hosts compile the index.md read
 // ---------------------------------------------------------------------------
 
@@ -779,7 +812,7 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 // ---------------------------------------------------------------------------
 // 14. compliance wiring in compiled host commands (installed-skill gate)
 //
-// Current compliance guard state (M9 — updated from stale Phase C comment):
+// Current compliance guard state:
 //   - code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED
 //     and the skill path (the gate's canonical variable and file-existence target)
 //   - implement.md has exactly one COMPLIANCE: line — in the Git setup-task spawn
@@ -788,8 +821,8 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 //     their Git pre-flight (ensure-pr-ready) spawns — not in any Code-agent spawn
 //   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance
 //   - no compiled dist/commands/*.md contains the literal COMPLIANCE: ${
-//     (interpolated JS form — would indicate a MDS escaping bug) (m11)
-//   - no compiled dist/commands/*.md contains comment-pr (retired op; m11)
+//     (interpolated JS form — would indicate a MDS escaping bug)
+//   - no compiled dist/commands/*.md contains comment-pr (retired op)
 // ---------------------------------------------------------------------------
 
 describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
@@ -849,7 +882,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     ).toBe(1);
   });
 
-  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32, m11)', async () => {
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32)', async () => {
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -874,21 +907,54 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
           `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
         ).not.toContain('COMPLIANCE: {enabled');
       }
-      // m11: COMPLIANCE: ${ is an interpolated JS form. In prose-only compiled files
-      // (no MDS JS fences) it would indicate a MDS escaping bug. Exempt dynamic-* files
-      // because their JS fences legitimately use ${COMPLIANCE} in Git agent spawns.
+      // COMPLIANCE: ${ is an interpolated JS form — indicates a MDS escaping bug.
       if (!basename.startsWith('dynamic-')) {
         expect(
           content,
           `${basename}.md must not contain COMPLIANCE: $\{ (interpolated JS form — MDS escaping bug)`,
         ).not.toContain('COMPLIANCE: ${');
       }
-      // m11: comment-pr was retired; post-review-summary replaces it.
-      // No compiled command should reference the old op.
+      // comment-pr was retired; post-review-summary replaces it.
       expect(
         content,
         `${basename}.md must not contain comment-pr (retired operation)`,
       ).not.toContain('comment-pr');
+    }
+  });
+
+  it('every COMPLIANCE: line in every dist command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
+    // Asserts that no COMPLIANCE: key appears in a prose or JS fence block whose agent is
+    // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
+    // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
+    // verify the fence also references "Git" as the agent type.
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
+      let match;
+      const violations: string[] = [];
+
+      while ((match = fencePattern.exec(content)) !== null) {
+        const block = match[0];
+        if (!/^COMPLIANCE:/m.test(block)) continue;
+        const hasGit =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!hasGit) {
+          violations.push(`fence at offset ${match.index}`);
+        }
+      }
+
+      expect(
+        violations,
+        `${basename}.md: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+      ).toHaveLength(0);
     }
   });
 });

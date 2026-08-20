@@ -158,6 +158,8 @@ export function normalizeComplianceFeature(
  * stays slim (`- ${DEVFLOW_COMPLIANCE_FRAMEWORKS}`) and the stamp is always a
  * coherent sentence regardless of how the rule file is structured. (M10)
  *
+ * The stamp replaces only the placeholder; surrounding prose is template/shadow-owned.
+ *
  * If the placeholder is absent (e.g. a user shadow without it), content is returned
  * unchanged — no-op stamp.
  *
