@@ -533,7 +533,7 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
       workflow.push(plugin);
     } else {
       // "language" bucket: command-less selectable plugins — language/ecosystem
-      // plugins (typescript, go, etc.) and cross-cutting optional rules (compliance).
+      // plugins (typescript, go, etc.).
       // If a command-less plugin needs a distinct install group, add a category field.
       language.push(plugin);
     }

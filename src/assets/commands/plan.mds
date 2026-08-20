@@ -412,9 +412,11 @@ Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 ```
 Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
-INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
-REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
-PLAN_ARTIFACT_PATH: {the design artifact path written above}
+ISSUE_INPUT: \{issue_number_from_arguments if /plan invoked with #N, else omit\}
+TASK_DESCRIPTION: \{Gate 0 confirmed scope — one-line title\}
+INITIAL_REQUEST: \{the Gate 0 confirmed scope statement\}
+REQUIREMENTS: \{discovered requirements summary from Phase 6 gap synthesis\}
+PLAN_ARTIFACT_PATH: \{the design artifact path written above\}
 LABELS: feature
 The Git agent will create a GitHub issue (or enrich an existing one) using the D3 template,
 post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.

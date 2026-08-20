@@ -145,6 +145,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the validation failures on branch ${BRANCH}:
 ${validation.details}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -186,6 +187,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
       // after the review loop is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluate agent panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Code" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -202,6 +204,7 @@ Cover: functionality, API contracts, performance. Report: PASS or FAIL per scena
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Code" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -327,6 +330,7 @@ Return exactly: {"sha": "<40-hex-commit-sha>"}`, { agentType: "Git" });
         const r = await agent(`Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
         chunkResults.push({ chunk, result: r });

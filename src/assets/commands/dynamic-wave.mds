@@ -123,7 +123,15 @@ The build command will:
 After `/devflow:dynamic-build` completes:
 
 1. Report the wave run result: tickets merged, tickets escalated, overall verdict.
-2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from Step 1's `/devflow:dynamic-tickets` output or from `TRACKING_ISSUE_NUMBER`), spawn `Agent(subagent_type="Git")` to post the contents of `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md` as a comment on the tracking issue. Use marker `<!-- devflow:wave-report \{wave-id\} -->` for dedup — skip if this wave's marker is already present; post otherwise. On API failure, degrade gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continue — never block Gate 3. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from Step 1's `/devflow:dynamic-tickets` output or from `TRACKING_ISSUE_NUMBER`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
+   ```
+   Agent(subagent_type="Git",
+     OPERATION: post-wave-report,
+     TRACKING_ISSUE: \{tracking_issue_number\},
+     WAVE_REPORT_PATH: .devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md,
+     WAVE_ID: \{WAVE_ID\})
+   ```
+   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks Gate 3. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
 3. If there are escalations: surface each one to the user via `AskUserQuestion`.
 4. Tell the user:
 

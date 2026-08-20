@@ -777,17 +777,19 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. compliance wiring in compiled host commands (Part 1 — installed-skill gate)
+// 14. compliance wiring in compiled host commands (installed-skill gate)
 //
-// Phase C (feat/manifest-compliance) replaced the compliance_gate() partial with
-// a lightweight installed-skill existence check. Guards:
-//   - code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the
-//     skill path (the gate's canonical output variable and file-existence target)
-//   - implement.md contains neither COMPLIANCE_ENABLED nor any COMPLIANCE: line
-//     (all Part-1 compliance machinery removed; Part 2 adds a Git-oriented gate)
-//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, the
-//     COMPLIANCE: {enabled literal, or devflow-compliance (resolve.md gets its
-//     positive pin in Part 2)
+// Current compliance guard state (M9 — updated from stale Phase C comment):
+//   - code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED
+//     and the skill path (the gate's canonical variable and file-existence target)
+//   - implement.md has exactly one COMPLIANCE: line — in the Git setup-task spawn
+//     (Git agent, not a Code agent); no COMPLIANCE_ENABLED
+//   - code-review.md and bug-analysis.md have a COMPLIANCE: conditional line in
+//     their Git pre-flight (ensure-pr-ready) spawns — not in any Code-agent spawn
+//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance
+//   - no compiled dist/commands/*.md contains the literal COMPLIANCE: ${
+//     (interpolated JS form — would indicate a MDS escaping bug) (m11)
+//   - no compiled dist/commands/*.md contains comment-pr (retired op; m11)
 // ---------------------------------------------------------------------------
 
 describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
@@ -847,7 +849,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     ).toBe(1);
   });
 
-  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance; COMPLIANCE: {enabled sanctioned only in implement.md Git spawn (AC-32)', async () => {
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32, m11)', async () => {
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -872,6 +874,21 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
           `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
         ).not.toContain('COMPLIANCE: {enabled');
       }
+      // m11: COMPLIANCE: ${ is an interpolated JS form. In prose-only compiled files
+      // (no MDS JS fences) it would indicate a MDS escaping bug. Exempt dynamic-* files
+      // because their JS fences legitimately use ${COMPLIANCE} in Git agent spawns.
+      if (!basename.startsWith('dynamic-')) {
+        expect(
+          content,
+          `${basename}.md must not contain COMPLIANCE: $\{ (interpolated JS form — MDS escaping bug)`,
+        ).not.toContain('COMPLIANCE: ${');
+      }
+      // m11: comment-pr was retired; post-review-summary replaces it.
+      // No compiled command should reference the old op.
+      expect(
+        content,
+        `${basename}.md must not contain comment-pr (retired operation)`,
+      ).not.toContain('comment-pr');
     }
   });
 });

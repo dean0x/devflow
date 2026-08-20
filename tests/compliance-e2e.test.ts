@@ -502,6 +502,46 @@ describe.skipIf(!distExists)('S11: legacy manifest with devflow-compliance → p
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
+  it('S11-notice: full init with legacy devflow-compliance manifest emits migration notice (M3)', async () => {
+    // Craft a legacy manifest that includes devflow-compliance as a plugin.
+    const legacyManifest = {
+      version: '2.0.0',
+      scope: 'user',
+      installedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      plugins: ['devflow-core-skills', 'devflow-implement', 'devflow-compliance'],
+      features: {
+        ambient: false,
+        memory: false,
+        learning: false,
+        knowledge: false,
+        hud: false,
+        rules: false,
+        proxy: false,
+        compliance: { enabled: false, frameworks: [] },
+      },
+    };
+    await fs.writeFile(
+      path.join(devflowDir, 'manifest.json'),
+      JSON.stringify(legacyManifest, null, 2),
+      'utf-8',
+    );
+
+    // Run a FULL init (no --plugin flag) — this triggers the legacy plugin detection notice
+    // added by M3 (before installViaFileCopy).
+    const result = run('init', '--recommended');
+    expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
+
+    // The output must contain the migration notice explaining that compliance moved from
+    // a plugin to a built-in feature (printed only when existingManifest.plugins includes
+    // 'devflow-compliance'). Combine stdout+stderr — clack directs log messages to stdout
+    // but non-TTY CI environments may buffer differently.
+    expect(
+      result.stdout + result.stderr,
+      'output must contain the legacy plugin migration notice (M3)',
+    ).toContain('Compliance has moved from a plugin to a built-in feature');
+  });
+
   it('S11: devflow-compliance in manifest.plugins is pruned by DELETED_PLUGIN_NAMES on init', async () => {
     // Craft a legacy manifest that includes devflow-compliance as a plugin.
     // Must include `version` and `scope` — readManifest returns null without them,
@@ -843,5 +883,65 @@ describe.skipIf(!distExists)('S18: fresh non-TTY --enable with no prior framewor
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
     expect(features.compliance).toEqual({ enabled: true, frameworks: [] });
+  });
+});
+
+// ── S19 ───────────────────────────────────────────────────────────────────────
+describe.skipIf(!distExists)('S19: manifest writeback deduplicates frameworks (m15)', () => {
+  // normalizeFrameworks is applied at manifest writeback time so that a hand-edited
+  // or migrated manifest with duplicate framework IDs is cleaned up on the next init.
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s19-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S19: init with duplicate frameworks in seed manifest writes deduplicated manifest (m15)', async () => {
+    // Write a manifest with duplicate framework IDs — simulates a hand-edited manifest
+    // or migration artifact that normalizeFrameworks.dedup must clean up.
+    const legacyManifest = {
+      version: '2.0.0',
+      scope: 'user',
+      installedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      plugins: ['devflow-core-skills', 'devflow-implement'],
+      features: {
+        ambient: false,
+        memory: false,
+        learning: false,
+        knowledge: false,
+        hud: false,
+        rules: false,
+        proxy: false,
+        compliance: { enabled: true, frameworks: ['gdpr', 'soc2', 'gdpr', 'gdpr'] },
+      },
+    };
+    await fs.writeFile(
+      path.join(devflowDir, 'manifest.json'),
+      JSON.stringify(legacyManifest, null, 2),
+      'utf-8',
+    );
+
+    // Run full init — manifest writeback applies normalizeFrameworks (m15 fix)
+    const result = run('init', '--recommended');
+    expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
+
+    // The written manifest.features.compliance.frameworks must have no duplicates
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    const compliance = features.compliance as { enabled: boolean; frameworks: string[] };
+    expect(compliance.enabled).toBe(true);
+    // After dedup: ['gdpr', 'soc2'] — each appears exactly once, insertion order preserved
+    expect(compliance.frameworks).toEqual(['gdpr', 'soc2']);
   });
 });

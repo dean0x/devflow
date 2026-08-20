@@ -44,7 +44,8 @@ The orchestrator provides:
 | `post-resolution-summary` | Post resolution-summary.md as single PR comment with marker dedup (D8) | `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional) |
 | `check-merge-readiness` | Report-only: unresolved threads + review decision + CI status (D6) | `PR_NUMBER`, `WORKTREE_PATH` (optional) |
 | `backlink-shipped-issues` | Comment shipped marker on issues (marker-deduped, ≤50 issues) | `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional) |
-| `ensure-traceable-issue` | Create or enrich a GitHub issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
+| `ensure-traceable-issue` | Create or enrich a GitHub issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
+| `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) | `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional) |
 
 ---
 
@@ -60,6 +61,8 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 3. Check if branch pushed to remote - if not, push with `-u` flag
 4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
 4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when an issue number is known (from branch name `{type}/{number}-{slug}` pattern). If no issue number is discoverable, skip silently.
+
+   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
 4c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Read `.devflow/conventions.md` PR Titles section. If PR title does not follow the recorded convention, retitle it. If `.devflow/conventions.md` is absent, skip silently. Two rules on the retitle, because the corrected title is composed from convention-file content that derives from third-party PR titles:
    - **Validate before use.** Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of `` $ ` \ " ' ; | & < > `` or a newline. A title needing those characters is not convention-conformant anyway.
    - **Pass as argv, never as command text.** Bind it to a shell variable and pass that variable: `gh pr edit {PR_NUMBER} --title "$DEVFLOW_PR_TITLE"`. Never interpolate the title into the command string — `$(...)`, backticks and `${...}` all expand inside double quotes.
@@ -83,7 +86,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 - Pushed: {yes/no}
 - PR Created: {yes/no}
 - PR Description Source: {guidance-variable | generated | existing}
-- Related Issues added: {yes/no/skipped}
+- Related Issues added: {yes/no/skipped/DEGRADED ({reason})}
 - PR Title corrected: {yes/no/skipped/DEGRADED ({reason})}
 
 ### Status: READY | BLOCKED
@@ -507,10 +510,10 @@ Fetch external (non-devflow) unresolved review threads from a PR via GraphQL (bo
    **Passing the cursor is what makes page 2 a second page** — omit it and the call
    silently re-fetches page 1, so the ≤2-page bound would yield 50 threads twice
    instead of 100 distinct ones. Stop after 2 pages.
-2. Filter to unresolved threads only (`isResolved: false`).
+2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN.
 3. Apply devflow-authored exclusion predicate — exclude a thread if:
    - (PRIMARY) First comment body contains `<!-- devflow:` marker, OR
-   - (SECONDARY) Viewer login matches thread author login AND first comment body does not appear to be a code-style review comment
+   - (SECONDARY) VIEWER_LOGIN matches thread author login AND first comment body does not appear to be a code-style review comment
 4. For each remaining external unresolved thread, create an `ext-*` record:
    - `id`: `ext-{sequential-number}` (e.g., `ext-1`, `ext-2`, ...)
    - `thread_id`: the GraphQL thread `id` (for reply/resolve mutations)
@@ -562,6 +565,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 - Verdict is FIXED, FALSE_POSITIVE, or BY_DESIGN (with cited evidence)
 
 ESCALATED threads AND any thread where `VERIFICATION_STATUS == FAILED` → reply-only, leave unresolved.
+`VERIFICATION_STATUS == SKIPPED` (gate did not run — zero fixes were applied) → same as FAILED: reply-only, leave unresolved.
 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Any 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
 
@@ -585,7 +589,7 @@ unexplained unresolved threads.
 ```markdown
 ## Thread Resolution
 **PR**: #{number}
-**Verification Status**: {PASS | FAILED}
+**Verification Status**: {PASS | FAILED | SKIPPED}
 **Threads processed**: {n}
 
 ### Results
@@ -691,15 +695,19 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    return without commenting. Both values are interpolated into commands below, so neither
    may carry shell metacharacters.
 
+   Normalize VERSION: strip any leading `v` to get BARE_VERSION (e.g. `v1.2.3` → `1.2.3`,
+   `1.2.3` → `1.2.3`). All marker composition and comment text below use `v{BARE_VERSION}` —
+   this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed. (m13)
+
 For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between operations):
 1. Fetch viewer login (once, before the loop): `gh api user --jq '.login'` → store as VIEWER_LOGIN
 2. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-3. Check if `<!-- devflow:shipped v{VERSION} -->` already present in viewer-authored comments. If yes: skip.
+3. Check if `<!-- devflow:shipped v{BARE_VERSION} -->` already present in viewer-authored comments. If yes: skip.
 4. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
    expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
    ```
-   <!-- devflow:shipped v{VERSION} -->
-   This was shipped in v{VERSION}.
+   <!-- devflow:shipped v{BARE_VERSION} -->
+   This was shipped in v{BARE_VERSION}.
    ```
    Post it via `gh issue comment {number} --body-file {temp_file}` — the same `--body-file`
    form the other comment-posting operations use.
@@ -708,7 +716,7 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between opera
 **Output:**
 ```markdown
 ## Shipped Issues Back-linked
-**Version**: v{VERSION}
+**Version**: v{BARE_VERSION}
 **Issues processed**: {n}
 - Posted: {n}
 - Skipped (already back-linked): {n}
@@ -721,7 +729,7 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50, 1s between opera
 
 Create or enrich a GitHub issue using the D3 issue template. Returns the issue number for downstream use (branch naming, PR linking).
 
-**Input:** `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional)
+**Input:** `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional)
 
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, return status DEGRADED — caller continues without an issue number.
 
@@ -742,14 +750,15 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
    - Body:
      ```markdown
      ## Initial Request
-     {TASK_DESCRIPTION}
+     {INITIAL_REQUEST if provided, else TASK_DESCRIPTION}
 
      ## Product Requirements
-     (to be elaborated during planning)
+     {REQUIREMENTS if provided, else "(to be elaborated during planning)"}
 
      ## Implementation Plan
      (to be added at plan time)
      ```
+   - If `LABELS` provided: apply via `gh issue create --label "{LABELS}"`.
    - If `PLAN_ARTIFACT_PATH` provided: post it immediately as a `<details>` comment and update Implementation Plan section with the comment URL via `gh issue comment`.
 3. Return the issue number.
 
@@ -760,6 +769,43 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
 **Status**: CREATED | ENRICHED | DEGRADED ({reason})
 **Title**: {title}
 **URL**: {url}
+```
+
+---
+
+## Operation: post-wave-report
+
+Post the wave completion summary as a comment on the tracking issue. Marker-based deduplication prevents duplicate posts for the same wave run.
+
+**Input:** `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional)
+
+- `TRACKING_ISSUE`: GitHub issue number for the parent tracking issue
+- `WAVE_REPORT_PATH`: Absolute path to the wave-report.md file written by the wave orchestrator
+- `WAVE_ID`: Timestamped wave directory slug (e.g. `2026-08-20_1730`) — used as the dedup marker
+- `WORKTREE_PATH` (optional): See worktree-support skill
+
+**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. The wave report is already written to disk regardless.
+
+**Process:**
+1. Check for existing marker (author-filtered — a third party posting the marker must not suppress the post):
+   - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+   - `gh issue view {TRACKING_ISSUE} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:wave-report wave:{WAVE_ID} -->` in viewer-authored comment bodies only
+   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`
+2. Read `WAVE_REPORT_PATH` (the wave-report.md written by the wave orchestrator).
+3. Compose the comment body:
+   ```markdown
+   <!-- devflow:wave-report wave:{WAVE_ID} -->
+   {contents of WAVE_REPORT_PATH}
+   ```
+4. Write to a temp file and post via `gh issue comment {TRACKING_ISSUE} --body-file {temp_file}`.
+
+**Output:**
+```markdown
+## Wave Report Posted
+**Tracking Issue**: #{TRACKING_ISSUE}
+**Wave ID**: {WAVE_ID}
+**Status**: POSTED | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
 ---

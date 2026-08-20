@@ -191,7 +191,7 @@ Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning c
 **Produces:** BATCHES
 **Requires:** TRIAGE_RESULTS
 
-If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, display results (Phase 10).
+If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, run thread resolution + resolution comment (Phase 9b), run merge readiness (Phase 9c), display results (Phase 10).
 
 Otherwise, batch FIX_NOW issues for Code agent execution:
 - **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
@@ -258,7 +258,7 @@ Simplify and refine the fixes for clarity and consistency"
 **Produces:** VERIFICATION_STATUS
 **Requires:** CODE_AGENT_RESULTS
 
-If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → skip: "No fixes applied — skipping Verification Gate."
+If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."
 
 Otherwise, spawn Validate agent:
 
@@ -299,7 +299,7 @@ Push all commits to remote once (Code agents and validation-fix Code agents ran 
 git -C {worktree} push
 ```
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt) then Phase 10 (report).
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report).
 
 ### Phase 8: CI Status Gate (Conditional)
 

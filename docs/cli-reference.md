@@ -107,8 +107,8 @@ Manage regulatory compliance framework reference files installed in the complian
 npx devflow-kit compliance --status                    # Show installed frameworks and skill state
 npx devflow-kit compliance --enable                    # Enable compliance feature (install skill + rule)
 npx devflow-kit compliance --disable                   # Disable compliance feature
-npx devflow-kit compliance --enable-framework gdpr     # Install GDPR reference file
-npx devflow-kit compliance --disable-framework gdpr    # Remove GDPR reference file
+npx devflow-kit compliance --set gdpr,hipaa            # Set active frameworks (comma-separated IDs)
+npx devflow-kit compliance --set ""                    # Clear all active frameworks
 ```
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`

@@ -75,9 +75,19 @@ function normalizeId(s: string): string {
  * Unlike `parseFrameworkList` this never errors — unknown IDs are dropped silently,
  * so a manifest written by a newer devflow (or hand-edited) degrades to the subset
  * this build understands instead of failing the install.
+ *
+ * Deduplication: first occurrence wins, subsequent occurrences of the same ID are
+ * dropped. This preserves the user's intended ordering while ensuring each framework
+ * appears exactly once in installed artifacts (AC-m14).
  */
 export function normalizeFrameworks(frameworks: readonly string[]): string[] {
-  return frameworks.map(normalizeId).filter(id => REGISTRY_SET.has(id));
+  const seen = new Set<string>();
+  return frameworks.map(normalizeId).filter(id => {
+    if (!REGISTRY_SET.has(id)) return false;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /**
@@ -140,9 +150,13 @@ export function normalizeComplianceFeature(
 /**
  * Stamp the compliance rule file content with the selected frameworks.
  *
- * Replaces ${DEVFLOW_COMPLIANCE_FRAMEWORKS} placeholder with:
- *   - Comma-joined static registry labels (e.g. "GDPR, SOC 2") — for non-empty lists
- *   - "none declared — generic controls only" — for empty framework list
+ * Replaces ${DEVFLOW_COMPLIANCE_FRAMEWORKS} with a full self-contained clause:
+ *   - "Active frameworks: GDPR, SOC 2 — their controls are binding." (non-empty list)
+ *   - "Active frameworks: none declared — generic controls only."    (empty list)
+ *
+ * The trailing clause lives here, not in the rule template, so the template line
+ * stays slim (`- ${DEVFLOW_COMPLIANCE_FRAMEWORKS}`) and the stamp is always a
+ * coherent sentence regardless of how the rule file is structured. (M10)
  *
  * If the placeholder is absent (e.g. a user shadow without it), content is returned
  * unchanged — no-op stamp.
@@ -164,8 +178,8 @@ export function stampComplianceRule(content: string, frameworks: readonly string
     .filter((label): label is string => label !== undefined);
 
   const stamp = labels.length === 0
-    ? 'none declared — generic controls only'
-    : labels.join(', ');
+    ? 'Active frameworks: none declared — generic controls only.'
+    : `Active frameworks: ${labels.join(', ')} — their controls are binding.`;
 
   return content.replace(/\$\{DEVFLOW_COMPLIANCE_FRAMEWORKS\}/g, stamp);
 }

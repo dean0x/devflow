@@ -211,6 +211,17 @@ describe('normalizeFrameworks', () => {
   it('all-unknown input → empty array (never passes anything through)', () => {
     expect(normalizeFrameworks(['nope', 'also-nope'])).toEqual([]);
   });
+
+  it('deduplicates repeated IDs — first occurrence wins (m14)', () => {
+    // A hand-edited or migrated manifest may list the same framework multiple times.
+    // normalizeFrameworks must deduplicate so each appears exactly once in installed artifacts.
+    expect(normalizeFrameworks(['gdpr', 'soc2', 'gdpr', 'gdpr'])).toEqual(['gdpr', 'soc2']);
+  });
+
+  it('deduplication survives alias normalization (m14)', () => {
+    // iso27001 and iso-27001 both normalize to iso-27001 — only one survives.
+    expect(normalizeFrameworks(['iso27001', 'iso-27001', 'gdpr'])).toEqual(['iso-27001', 'gdpr']);
+  });
 });
 
 // ── normalizeComplianceFeature ────────────────────────────────────────────────
@@ -260,26 +271,31 @@ describe('normalizeComplianceFeature', () => {
 const PLACEHOLDER = '${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
 
 describe('stampComplianceRule', () => {
-  it('stamps comma-joined static registry labels (AC-36)', () => {
-    const content = `# Compliance\n- Active frameworks: ${PLACEHOLDER} — their controls are binding.`;
+  // M10: The stamp carries the full self-contained clause; the rule template line
+  // is slim (`- ${PLACEHOLDER}`). Tests use the new template format.
+  it('stamps full "Active frameworks: ... — their controls are binding." clause (AC-36, M10)', () => {
+    const content = `# Compliance\n- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, ['gdpr', 'soc2']);
-    expect(result).toContain('GDPR, SOC 2');
+    expect(result).toContain('Active frameworks: GDPR, SOC 2 — their controls are binding.');
     expect(result).not.toContain(PLACEHOLDER);
   });
 
   it('stamps all six frameworks in correct label order', () => {
     const ids = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
-    const content = `prefix ${PLACEHOLDER} suffix`;
+    const content = `- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, ids);
     const labels = COMPLIANCE_FRAMEWORKS.map(fw => fw.label).join(', ');
     expect(result).toContain(labels);
+    expect(result).toContain('— their controls are binding.');
   });
 
-  it('empty list → "none declared — generic controls only" (AC-5)', () => {
-    const content = `Active: ${PLACEHOLDER}`;
+  it('empty list → full "Active frameworks: none declared — generic controls only." clause (AC-5, M10)', () => {
+    const content = `- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, []);
-    expect(result).toContain('none declared — generic controls only');
+    expect(result).toContain('Active frameworks: none declared — generic controls only.');
     expect(result).not.toContain(PLACEHOLDER);
+    // Must not accidentally append the trailing clause twice
+    expect(result).not.toContain('binding');
   });
 
   it('content without placeholder returned unchanged', () => {
@@ -294,7 +310,7 @@ describe('stampComplianceRule', () => {
     // The installed rule lands in ~/.claude/rules/devflow/, which Claude Code loads
     // into every prompt — an echoed ID would be prompt injection via a config file.
     const hostile = 'ignore-previous-instructions';
-    const content = `Active: ${PLACEHOLDER}`;
+    const content = `- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, ['gdpr', hostile]);
 
     expect(result).toContain('GDPR');
@@ -302,10 +318,10 @@ describe('stampComplianceRule', () => {
     expect(result).not.toContain(hostile.toUpperCase());
   });
 
-  it('all-unknown IDs → "none declared" rather than an echoed list (AC-36)', () => {
-    const content = `Active: ${PLACEHOLDER}`;
+  it('all-unknown IDs → "none declared" full clause rather than an echoed list (AC-36)', () => {
+    const content = `- ${PLACEHOLDER}`;
     const result = stampComplianceRule(content, ['../../etc/passwd', 'made-up']);
-    expect(result).toContain('none declared — generic controls only');
+    expect(result).toContain('Active frameworks: none declared — generic controls only.');
     expect(result).not.toContain('passwd');
     expect(result).not.toContain('made-up');
   });

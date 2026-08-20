@@ -25,7 +25,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -47,7 +47,7 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
-import { parseFrameworkList, COMPLIANCE_FRAMEWORKS } from '../../core/compliance.js';
+import { parseFrameworkList, COMPLIANCE_FRAMEWORKS, normalizeFrameworks } from '../../core/compliance.js';
 import { convergeComplianceArtifacts } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
@@ -1217,6 +1217,17 @@ export const initCommand = new Command('init')
       );
     }
 
+    // Legacy plugin migration notice (M3): devflow-compliance was a selectable plugin
+    // in earlier releases; it is now a built-in feature (devflow compliance --enable/--disable).
+    // If the prior manifest still lists it as a plugin, emit a one-line notice so the user
+    // understands the sweep report and knows the correct CLI going forward.
+    if (existingManifest?.plugins?.includes('devflow-compliance')) {
+      p.log.info(
+        'Compliance has moved from a plugin to a built-in feature — ' +
+        'use `devflow compliance --enable/--disable` to manage it.',
+      );
+    }
+
     // Install via file copy
     let installReport: InstallReport;
     try {
@@ -1792,7 +1803,17 @@ export const initCommand = new Command('init')
 
     // Orphan-sweep reporting: removals are silent deletions from ~/.claude/, and a
     // failed removal leaves a retired asset live. Both must surface.
-    for (const line of formatSweepSummary(installReport)) {
+    // FEATURE_OWNED_SKILLS (e.g. 'compliance') are excluded from the sweep's knownNames by
+    // design (they are managed by convergeComplianceArtifacts, not the orphan sweep), but
+    // the sweep still reports them as orphaned. Filter them out before surfacing to the user
+    // so the report reflects assets that genuinely need attention. (M3)
+    const filteredSweepReport = {
+      ...installReport,
+      sweptOrphans: installReport.sweptOrphans.filter(
+        o => !(o.kind === 'skill' && (FEATURE_OWNED_SKILLS as readonly string[]).includes(o.name)),
+      ),
+    };
+    for (const line of formatSweepSummary(filteredSweepReport)) {
       if (line.level === 'warn') p.log.warn(line.message);
       else p.log.info(line.message);
     }
@@ -1876,7 +1897,8 @@ export const initCommand = new Command('init')
         proxy: proxyEnabled,
         // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.
-        compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks },
+        // normalizeFrameworks: dedup + filter unknowns before persisting (m15).
+        compliance: { enabled: complianceEnabled, frameworks: normalizeFrameworks(complianceFrameworks) },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
