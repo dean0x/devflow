@@ -76,7 +76,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
+4a. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
 4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
    b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
@@ -172,7 +172,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 - `PLAN_ARTIFACT_PATH` (optional): Path to plan document; forwarded to `ensure-traceable-issue` in step 1c so the plan is attached to the traceability issue as a collapsed `<details>` comment
 
 **Process:**
-1. Record current branch as BASE_BRANCH for later PR targeting
+1a. Record current branch as BASE_BRANCH for later PR targeting
 1b. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Load branch naming convention:
    - Read `.devflow/conventions.md` Branch Naming section. If file absent, invoke `learn-conventions` first (write the file), then read the result.
    - Branch naming derived in step 3 MUST follow the recorded convention.
@@ -405,7 +405,7 @@ Create a GitHub release with version tag.
 **Degradation carve-out for primary-effect ops:** The global D4 "never abort" clause does NOT apply to the primary release effects in steps 1–6 below. A failed tag push or release create is a hard failure — report it and stop. Only the traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment and the `backlink-shipped-issues` call) degrade per D4 (emit `TRACEABILITY: DEGRADED ({reason})`, warn, continue).
 
 **Process:**
-1. Validate version format (semver: X.Y.Z) — fail loudly on mismatch
+1a. Validate version format (semver: X.Y.Z) — fail loudly on mismatch
 1b. Conventions: if `.devflow/conventions.md` exists, read the `## Version Names` and `## Version PR Titles` sections. Use the detected tag format when creating the annotated tag in step 3 and when composing the release title in step 5 (defaults when file is absent: tag `v{VERSION}`, title `v{VERSION}`).
 2. Verify clean working directory — fail loudly if dirty
 3. Create annotated tag with changelog content (using the tag format from step 1b) — fail loudly on error
