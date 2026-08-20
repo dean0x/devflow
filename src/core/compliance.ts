@@ -136,7 +136,7 @@ export function normalizeComplianceFeature(
  * Stamps static registry labels only — no user-supplied string is ever written
  * to installed artifacts. (AC-35, AC-36)
  */
-export function stampComplianceRule(content: string, frameworks: string[]): string {
+export function stampComplianceRule(content: string, frameworks: readonly string[]): string {
   if (!content.includes(COMPLIANCE_RULE_PLACEHOLDER)) {
     return content;
   }
