@@ -25,6 +25,7 @@ import {
   applyUserSecurityDenyList,
   loadTemplateDenyEntries,
   ensureDevflowGitignore,
+  computeDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
@@ -381,6 +382,55 @@ describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
     const contentAfterSecondRun = await read();
 
     expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
+  });
+});
+
+describe('computeDevflowGitignore — branch-order and byte-identity', () => {
+  const V2_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
+  const V3_SENTINEL = '!.devflow/conventions.md';
+  const V2_BLOCK = [
+    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+    '.devflow/*',
+    '!.devflow/features/',
+    '.devflow/features/*',
+    '!.devflow/features/index.md',
+    '!.devflow/features/*/',
+    '.devflow/features/*/*',
+    V2_SENTINEL,
+  ].join('\n');
+
+  // Issue 1 (branch-order): /.devflow/ wins over v2 sentinel when both present
+  it('branch-order: /.devflow/ wins over v2 sentinel when both present → null (no-op)', () => {
+    // A file with BOTH /.devflow/ (user-authored) AND the v2 sentinel.
+    // TS checks /.devflow/ BEFORE v2 — must return null (same as shell after fix).
+    const content = `/.devflow/\n${V2_BLOCK}\n`;
+    expect(computeDevflowGitignore(content)).toBeNull();
+  });
+
+  // Issue 2 (byte-identity): v2→v3 upgrade preserves trailing newlines
+  it('byte-identity: v2→v3 upgrade appends after existing trailing newline (no trimEnd)', () => {
+    // A file ending with a single newline — upgrade must preserve that newline,
+    // not collapse it. Shell uses `tail -c 1` guard (same behavior).
+    const input = `${V2_BLOCK}\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
+  });
+
+  it('byte-identity: v2→v3 upgrade preserves extra trailing newlines', () => {
+    // A file ending with two newlines — both preserved (trimEnd would collapse to one).
+    const input = `${V2_BLOCK}\n\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n`);
+  });
+
+  it('byte-identity: v2→v3 upgrade adds newline separator when file lacks trailing newline', () => {
+    // A file with no trailing newline — upgrade must add one before the sentinel.
+    const input = V2_BLOCK; // no trailing newline
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
   });
 });
 

@@ -100,8 +100,10 @@ export function computeDevflowGitignore(existingContent: string): string | null 
   if (trimmed.some(l => l === '/.devflow/')) return null;
 
   // v2→v3 upgrade: v2 sentinel present, v3 sentinel absent → append the missing line only.
+  // Preserve existing trailing newlines byte-for-byte (matches shell twin's tail -c 1 guard).
   if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V2)) {
-    return `${existingContent.trimEnd()}\n${DEVFLOW_GITIGNORE_SENTINEL_V3}\n`;
+    const sep = existingContent.endsWith('\n') ? '' : '\n';
+    return `${existingContent}${sep}${DEVFLOW_GITIGNORE_SENTINEL_V3}\n`;
   }
 
   const append = (body: string): string =>
