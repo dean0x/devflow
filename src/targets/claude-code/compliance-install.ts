@@ -13,7 +13,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, rulesDir } from '../../core/assets.js';
-import { stampComplianceRule } from '../../core/compliance.js';
+import { normalizeFrameworks, stampComplianceRule } from '../../core/compliance.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -24,7 +24,14 @@ export interface ConvergeComplianceArtifactsOptions {
   /** Path to the devflow config dir (e.g. ~/.devflow). */
   devflowDir: string;
   enabled: boolean;
-  /** Validated framework IDs from parseFrameworkList. */
+  /**
+   * Framework IDs. NOT trusted — `convergeComplianceArtifacts` re-validates them
+   * against the registry before any of them becomes an fs path segment or is
+   * written into an installed artifact. Callers that read the manifest
+   * (`devflow init`, `devflow rules --enable`, `devflow compliance --enable`)
+   * pass through `normalizeComplianceFeature`, which type-checks but cannot
+   * reject unknown IDs.
+   */
   frameworks: string[];
   rulesEnabled: boolean;
   warn: (msg: string) => void;
@@ -114,16 +121,20 @@ async function installSkillDir(
     // SKILL.md (shadow or canonical)
     await fs.copyFile(skillMdSrc, path.join(tmpTarget, 'SKILL.md'));
 
-    // Always-present references from the canonical source
+    // Reference files from the canonical source. Every ID here is a registry ID
+    // (convergeComplianceArtifacts filtered them), so each is a bare basename —
+    // no separator, no traversal — and resolves inside refDst.
+    //
+    // PF-009: each copy is isolated. A skill dir missing one reference still works;
+    // aborting the whole install because one reference file is unreadable would
+    // take out SKILL.md too. Failures warn and the remaining refs still install.
     const refSrc = path.join(canonicalSrc, 'references');
-    for (const ref of ALWAYS_PRESENT_REFS) {
-      await fs.copyFile(path.join(refSrc, ref), path.join(refDst, ref));
-    }
-
-    // Selected framework references from the canonical source
-    for (const fw of frameworks) {
-      const ref = `${fw}.md`;
-      await fs.copyFile(path.join(refSrc, ref), path.join(refDst, ref));
+    for (const ref of [...ALWAYS_PRESENT_REFS, ...frameworks.map(fw => `${fw}.md`)]) {
+      try {
+        await fs.copyFile(path.join(refSrc, ref), path.join(refDst, ref));
+      } catch (err) {
+        warn(`compliance: reference "${ref}" not installed — ${String(err)}`);
+      }
     }
 
     // Atomically swap: remove old target, rename tmp into place.
@@ -195,6 +206,13 @@ export async function convergeComplianceArtifacts(
 ): Promise<ConvergeComplianceArtifactsResult> {
   const { claudeDir, devflowDir, enabled, frameworks, rulesEnabled, warn } = opts;
 
+  // Trust boundary. `frameworks` reaches here straight from the manifest on every
+  // caller's bare --enable path, and normalizeComplianceFeature only type-checks it.
+  // Filtering to registry IDs here — before any path.join or stamp — is what makes
+  // AC-35/AC-36 true for ALL callers rather than only the ones that happened to run
+  // parseFrameworkList. Unknown IDs are dropped, never turned into a path segment.
+  const safeFrameworks = normalizeFrameworks(frameworks);
+
   // ── Disable path ─────────────────────────────────────────────────────────
   if (!enabled) {
     // Detect pre-existing artifacts BEFORE removal (to set removedPreexisting).
@@ -240,10 +258,10 @@ export async function convergeComplianceArtifacts(
   // An error in installSkillDir is caught internally and reported via warn,
   // so execution always continues to the rule step.
 
-  await installSkillDir(claudeDir, devflowDir, frameworks, warn);
+  await installSkillDir(claudeDir, devflowDir, safeFrameworks, warn);
 
   if (rulesEnabled) {
-    await installRuleFile(claudeDir, devflowDir, frameworks, warn);
+    await installRuleFile(claudeDir, devflowDir, safeFrameworks, warn);
   } else {
     // Rules disabled: remove any stale rule left from a prior enabled run.
     // Ignore ENOENT (force: true) — absence is the desired end state.

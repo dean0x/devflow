@@ -61,9 +61,23 @@ function normalizeId(s: string): string {
 // Exported functions
 // ---------------------------------------------------------------------------
 
-/** Normalize an array of framework strings without validation. */
-export function normalizeFrameworks(frameworks: string[]): string[] {
-  return frameworks.map(normalizeId);
+/**
+ * Tolerant parser: normalize an array of framework strings and DROP anything
+ * that is not a registry ID.
+ *
+ * This is the trust boundary for framework IDs that did not come through
+ * `parseFrameworkList` — most importantly `manifest.features.compliance.frameworks`,
+ * which `normalizeComplianceFeature` only type-checks (it cannot reject unknown IDs
+ * without violating the ADR-014 self-heal contract). Every framework ID that is about
+ * to become an fs path segment or be written into an installed artifact must pass
+ * through here first (AC-35, AC-36).
+ *
+ * Unlike `parseFrameworkList` this never errors — unknown IDs are dropped silently,
+ * so a manifest written by a newer devflow (or hand-edited) degrades to the subset
+ * this build understands instead of failing the install.
+ */
+export function normalizeFrameworks(frameworks: readonly string[]): string[] {
+  return frameworks.map(normalizeId).filter(id => REGISTRY_SET.has(id));
 }
 
 /**
@@ -141,16 +155,17 @@ export function stampComplianceRule(content: string, frameworks: readonly string
     return content;
   }
 
-  let stamp: string;
-  if (frameworks.length === 0) {
-    stamp = 'none declared — generic controls only';
-  } else {
-    // Look up static labels in order of the input frameworks array.
-    // Unknown IDs silently fall back to uppercase ID — parseFrameworkList
-    // validates before reaching this function in the install path.
-    const labels = frameworks.map(id => LABEL_BY_ID.get(id) ?? id.toUpperCase());
-    stamp = labels.join(', ');
-  }
+  // Look up static labels in order of the input frameworks array. Unknown IDs are
+  // DROPPED, never echoed — this function is the last writer before the rule lands
+  // in ~/.claude/rules/devflow/, which Claude Code loads into every prompt, so an
+  // unvalidated ID must not be able to inject text there (AC-35, AC-36).
+  const labels = frameworks
+    .map(id => LABEL_BY_ID.get(id))
+    .filter((label): label is string => label !== undefined);
+
+  const stamp = labels.length === 0
+    ? 'none declared — generic controls only'
+    : labels.join(', ');
 
   return content.replace(/\$\{DEVFLOW_COMPLIANCE_FRAMEWORKS\}/g, stamp);
 }

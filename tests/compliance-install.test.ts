@@ -470,3 +470,88 @@ describe('PF-009: failures warn via injected warn, never throw', () => {
     ).resolves.not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Step 8: framework IDs are registry-validated before becoming fs paths (AC-35)
+// ---------------------------------------------------------------------------
+
+describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
+  // `frameworks` arrives here straight from manifest.features.compliance.frameworks
+  // on the bare --enable path of init, `rules --enable` and `compliance --enable`.
+  // normalizeComplianceFeature only type-checks it, so convergeComplianceArtifacts
+  // itself must filter to registry IDs before any path.join.
+
+  it('a traversal ID cannot write outside the skill dir', async () => {
+    const warn = vi.fn();
+
+    // Chosen so the copy would SUCCEED without the filter — this probe is not vacuous:
+    //   src  = <assets>/skills/compliance/references/../../../rules/compliance.md  (exists)
+    //   dst  = <claudeDir>/skills/devflow:compliance.tmp/references/../../../rules/compliance.md
+    //        = <claudeDir>/rules/compliance.md                (parent dir exists per beforeEach)
+    const traversalId = '../../../rules/compliance';
+    const escapeTarget = path.join(claudeDir, 'rules', 'compliance.md');
+
+    await convergeComplianceArtifacts({
+      claudeDir,
+      devflowDir,
+      enabled: true,
+      frameworks: ['gdpr', traversalId],
+      rulesEnabled: true,
+      warn,
+    });
+
+    // Nothing was written outside the skill dir.
+    await expect(fs.access(escapeTarget)).rejects.toThrow();
+
+    // …and the valid part of the selection still installed normally: one bad ID in a
+    // manifest must degrade to "that framework is dropped", not "no skill installed".
+    expect(await skillExists()).toBe(true);
+    expect(await listSkillFiles()).toEqual([
+      'SKILL.md',
+      'references/detection.md',
+      'references/gdpr.md',
+      'references/sources.md',
+    ]);
+  });
+
+  it('an unknown ID is dropped and the rule is stamped without it', async () => {
+    const warn = vi.fn();
+
+    await convergeComplianceArtifacts({
+      claudeDir,
+      devflowDir,
+      enabled: true,
+      frameworks: ['hipaa', 'not-a-real-framework'],
+      rulesEnabled: true,
+      warn,
+    });
+
+    const rule = await fs.readFile(await ruleTargetPath(), 'utf-8');
+    expect(rule).toContain('HIPAA');
+    expect(rule).not.toContain('not-a-real-framework');
+    expect(rule).not.toContain('NOT-A-REAL-FRAMEWORK');
+    expect(rule).not.toContain(COMPLIANCE_RULE_PLACEHOLDER);
+  });
+
+  it('an all-unknown selection still installs the skill (generic controls)', async () => {
+    const warn = vi.fn();
+
+    await convergeComplianceArtifacts({
+      claudeDir,
+      devflowDir,
+      enabled: true,
+      frameworks: ['bogus-one', 'bogus-two'],
+      rulesEnabled: true,
+      warn,
+    });
+
+    expect(await skillExists()).toBe(true);
+    expect(await listSkillFiles()).toEqual([
+      'SKILL.md',
+      'references/detection.md',
+      'references/sources.md',
+    ]);
+    const rule = await fs.readFile(await ruleTargetPath(), 'utf-8');
+    expect(rule).toContain('none declared — generic controls only');
+  });
+});

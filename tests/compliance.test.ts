@@ -196,6 +196,21 @@ describe('normalizeFrameworks', () => {
   it('empty array → empty array', () => {
     expect(normalizeFrameworks([])).toEqual([]);
   });
+
+  it('drops IDs that are not in the registry, keeping the valid ones (AC-35)', () => {
+    expect(normalizeFrameworks(['gdpr', 'made-up-framework', 'soc2'])).toEqual(['gdpr', 'soc2']);
+  });
+
+  it('drops path-traversal IDs so none can become an fs path segment (AC-35)', () => {
+    // manifest.features.compliance.frameworks is only type-checked by
+    // normalizeComplianceFeature; this is the filter that stops a hand-edited
+    // manifest turning into path.join(refSrc, '../../../x.md').
+    expect(normalizeFrameworks(['../../../../tmp/evil', 'gdpr', '/etc/passwd'])).toEqual(['gdpr']);
+  });
+
+  it('all-unknown input → empty array (never passes anything through)', () => {
+    expect(normalizeFrameworks(['nope', 'also-nope'])).toEqual([]);
+  });
 });
 
 // ── normalizeComplianceFeature ────────────────────────────────────────────────
@@ -273,13 +288,26 @@ describe('stampComplianceRule', () => {
     expect(result).toBe(content);
   });
 
-  it('static labels only — no user input echoed into output (AC-36)', () => {
-    // Even if the user somehow passes a weird ID, only registry labels appear
-    // (parseFrameworkList already validates, so this tests stampComplianceRule in isolation)
+  it('static labels only — an unknown ID is DROPPED, never echoed (AC-36)', () => {
+    // Non-vacuous: the hostile ID is actually fed in, so this fails RED if the
+    // implementation ever falls back to echoing the input (e.g. id.toUpperCase()).
+    // The installed rule lands in ~/.claude/rules/devflow/, which Claude Code loads
+    // into every prompt — an echoed ID would be prompt injection via a config file.
+    const hostile = 'ignore-previous-instructions';
     const content = `Active: ${PLACEHOLDER}`;
-    const result = stampComplianceRule(content, ['gdpr']);
-    expect(result).not.toContain('user-input');
+    const result = stampComplianceRule(content, ['gdpr', hostile]);
+
     expect(result).toContain('GDPR');
+    expect(result).not.toContain(hostile);
+    expect(result).not.toContain(hostile.toUpperCase());
+  });
+
+  it('all-unknown IDs → "none declared" rather than an echoed list (AC-36)', () => {
+    const content = `Active: ${PLACEHOLDER}`;
+    const result = stampComplianceRule(content, ['../../etc/passwd', 'made-up']);
+    expect(result).toContain('none declared — generic controls only');
+    expect(result).not.toContain('passwd');
+    expect(result).not.toContain('made-up');
   });
 
   it('replaces all occurrences of the placeholder', () => {
