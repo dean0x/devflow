@@ -27,6 +27,19 @@ The orchestrator provides:
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
 - **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
+## Publication gate (D10)
+
+Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.
+
+**Step order inside each summary op:**
+1. Dedup check (D7/D8 marker — unchanged, stays first).
+2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: SKIPPED (publication disabled)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
+3. Probe once: `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
+4. Compose body (full content in FULL mode; stub template in STUB mode — defined per op).
+5. Scrub per D11 (both modes — the stub is also scrubbed).
+6. Re-check 60000-char cap **after** the scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+7. Post; 5xx retry-once (unchanged).
+
 ## Comment-sink scrub (D11)
 
 Applies **unconditionally** to every op that posts or edits a body to GitHub — never gated on visibility, config, or compliance mode.
@@ -54,7 +67,7 @@ Each posting op names its own temp-file variables; see per-op "Scrub per D11" st
 | `setup-task` | Create feature branch and optionally fetch/create issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional), `COMPLIANCE` (optional), `PLAN_ARTIFACT_PATH` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_NUMBERS` |
-| `post-review-summary` | Post consolidated review-summary comment per review run (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional) |
+| `post-review-summary` | Post consolidated review-summary comment per review run (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional) |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `check-ci-status` | Check CI/PR check status for a branch | `PR_NUMBER` (optional), `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT`, `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional) |
@@ -62,7 +75,7 @@ Each posting op names its own temp-file variables; see per-op "Scrub per D11" st
 | `learn-conventions` | Bounded scan → write .devflow/conventions.md once (D1) | `WORKTREE_PATH` (optional) |
 | `fetch-review-threads` | GraphQL reviewThreads, filter devflow-authored, return ext-* records (D2) | `PR_NUMBER`, `WORKTREE_PATH` (optional) |
 | `resolve-review-threads` | Reply to and optionally resolve external review threads (D2, D9) | `THREAD_MAP`, `VERIFICATION_STATUS`, `PR_NUMBER`, `WORKTREE_PATH` (optional) |
-| `post-resolution-summary` | Post resolution-summary.md as single PR comment with marker dedup (D8) | `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional) |
+| `post-resolution-summary` | Post resolution-summary.md as single PR comment with marker dedup (D8) | `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional) |
 | `check-merge-readiness` | Report-only: unresolved threads + review decision + CI status (D6) | `PR_NUMBER`, `WORKTREE_PATH` (optional) |
 | `backlink-shipped-issues` | Comment shipped marker on issues (marker-deduped, ≤50 issues) | `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional) |
 | `ensure-traceable-issue` | Create or enrich a GitHub issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
@@ -81,6 +94,7 @@ Each posting op names its own temp-file variables; see per-op "Scrub per D11" st
 | D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
 | D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
 | D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
+| D10 | Publication gate — probe repo visibility before posting summary comments; fail-closed to STUB on public repo or any error (`post-review-summary` and `post-resolution-summary` only) |
 | D11 | Comment-sink scrub — unconditional secret redaction on every body-posting op; fail-closed (`TRACEABILITY: DEGRADED (redaction unavailable)`) on scrubber error or missing script |
 
 ---
@@ -308,7 +322,7 @@ Fetch multiple GitHub issues for multi-issue planning flows.
 
 Post a consolidated code review summary as a single PR comment per review run (D7). Marker-based deduplication — if the marker for this cycle+timestamp pair already exists, skip; never edit after posting.
 
-**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional)
+**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
 
 - `REVIEW_TIMESTAMP`: the review directory timestamp slug (e.g., `2026-08-20_1030`); identifies the specific review run within a cycle so a re-review in the same cycle posts its own comment while a true re-run of the same review deduplicates
 
@@ -320,24 +334,36 @@ Post a consolidated code review summary as a single PR comment per review run (D
    - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
    - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
-2. Read `REVIEW_SUMMARY_PATH` (the review-summary.md file written by the Synthesize agent)
-3. Compose comment body:
-   ```
-   <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
-   ## Code Review — Cycle {CYCLE_NUMBER}
+2. Resolve `REVIEW_PUBLICATION` (D10): `off` → report `**Publication**: SKIPPED (publication disabled)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
+3. Probe visibility (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
+4. Read `REVIEW_SUMMARY_PATH` (the review-summary.md file written by the Synthesize agent).
+5. Compose body:
+   - **FULL mode:**
+     ```
+     <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
+     ## Code Review — Cycle {CYCLE_NUMBER}
 
-   {full content of review-summary.md}
+     {full content of review-summary.md}
 
-   ---
-   *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
-   ```
-   Cap the composed body at 60000 characters (GitHub rejects comments over 65536 with a
-   422, which the 4xx rule would silently skip — the summary would never be posted). If
-   the composed body exceeds the cap, truncate lowest-value sections first (Suggestions,
-   then Pre-existing), keeping the counts table and every Blocking entry; end with
-   `…truncated — full report in the local review artifact {REVIEW_SUMMARY_PATH} (not committed; ask the author)`.
-4. Scrub per D11: write composed body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
-5. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-review-summary)`, warn, return.
+     ---
+     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
+     ```
+   - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections, merge recommendation):
+     ```
+     <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
+     ## Code Review — Cycle {CYCLE_NUMBER}
+
+     Full summary withheld (public repository).
+
+     {counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."}
+
+     Full report: {REVIEW_SUMMARY_PATH} (not committed; ask the author)
+     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
+     ```
+   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip). Truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {REVIEW_SUMMARY_PATH} (not committed; ask the author)`.
+6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
+7. Re-check 60000-char cap after scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+8. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-review-summary)`, warn, return.
 
 **Output:**
 ```markdown
@@ -345,6 +371,7 @@ Post a consolidated code review summary as a single PR comment per review run (D
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)
 **Status**: POSTED | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
@@ -672,7 +699,7 @@ unexplained unresolved threads.
 
 Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
 
-**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional)
+**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
 
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
@@ -682,30 +709,41 @@ Post the resolution summary as a single PR comment. Marker-based deduplication �
    - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:resolution-summary ts:` in the viewer-authored comment bodies only
    - If found: skip — report `Skipped: resolution summary already posted`
-2. Read `RESOLUTION_SUMMARY_PATH` (resolution-summary.md written by Phase 5/9)
-3. Compose comment body:
-   ```
-   <!-- devflow:resolution-summary ts:{TS} -->
-   {full content of resolution-summary.md}
+2. Resolve `REVIEW_PUBLICATION` (D10): `off` → report `**Publication**: SKIPPED (publication disabled)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
+3. Probe visibility (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
+4. Read `RESOLUTION_SUMMARY_PATH` (resolution-summary.md written by Phase 5/9).
+5. Compose body (where `{TS}` = current UTC timestamp, ISO 8601):
+   - **FULL mode:**
+     ```
+     <!-- devflow:resolution-summary ts:{TS} -->
+     {full content of resolution-summary.md}
 
-   ---
-   *Posted by [devflow](https://github.com/dean0x/devflow)*
-   ```
-   where `{TS}` = current UTC timestamp (ISO 8601)
-   The resolution summary describes external review threads. It MUST NOT reproduce
-   verbatim content from any `<external-thread>` body — cite only internal evidence
-   (commit SHAs, file:line from this codebase, ADR IDs) and the thread's `ext-{N}` id.
-   Cap the composed body at 60000 characters (GitHub rejects over 65536 with a 422, which
-   the 4xx rule would silently skip); if larger, truncate lowest-value sections first
-   (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry, and end with
-   `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
-4. Scrub per D11: write composed body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
-5. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
+     ---
+     *Posted by [devflow](https://github.com/dean0x/devflow)*
+     ```
+     The resolution summary describes external review threads. It MUST NOT reproduce verbatim content from any `<external-thread>` body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs) and the thread's `ext-{N}` id.
+   - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections):
+     ```
+     <!-- devflow:resolution-summary ts:{TS} -->
+     ## Resolution Summary
+
+     Full summary withheld (public repository).
+
+     {counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."}
+
+     Full report: {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)
+     *Posted by [devflow](https://github.com/dean0x/devflow)*
+     ```
+   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip); truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
+6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
+7. Re-check 60000-char cap after scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+8. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
 
 **Output:**
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)
 **Status**: POSTED | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
