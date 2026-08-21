@@ -52,15 +52,13 @@ function shannonEntropy(s) {
   if (s.length === 0) return 0;
   /** @type {Record<string, number>} */
   const freq = Object.create(null);
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    freq[ch] = (freq[ch] === undefined ? 0 : freq[ch]) + 1;
+  for (const ch of s) {
+    freq[ch] = (freq[ch] ?? 0) + 1;
   }
   let h = 0;
   const len = s.length;
-  const values = Object.values(freq);
-  for (let i = 0; i < values.length; i++) {
-    const p = values[i] / len;
+  for (const count of Object.values(freq)) {
+    const p = count / len;
     h -= p * Math.log2(p);
   }
   return h;
@@ -94,6 +92,27 @@ function shouldSkip(candidate) {
   if (/^(null|undefined|true|false|none|changeme|example)$/i.test(candidate)) return true;
 
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Replace callback factory
+//
+// Returns a replacement function for String.prototype.replace that applies
+// shouldSkip, increments counts[slug], and returns the canonical marker.
+// Used by all pattern-matched rules (1a–7) to eliminate repeated boilerplate.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {string} slug  Rule identifier used in the redaction marker and counts key.
+ * @param {Record<string, number>} counts  Shared redaction count map from scrub().
+ * @returns {(match: string) => string}
+ */
+function makeRedactor(slug, counts) {
+  return (match) => {
+    if (shouldSkip(match)) return match;
+    counts[slug] = (counts[slug] || 0) + 1;
+    return '[REDACTED:' + slug + ']';
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -150,11 +169,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----[\s\S]{0,20000}?-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['private-key'] = (counts['private-key'] || 0) + 1;
-      return '[REDACTED:private-key]';
-    },
+    makeRedactor('private-key', counts),
   );
 
   // ------------------------------------------------------------------
@@ -166,11 +181,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----[^\r\n]*/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['private-key'] = (counts['private-key'] || 0) + 1;
-      return '[REDACTED:private-key]';
-    },
+    makeRedactor('private-key', counts),
   );
 
   // ------------------------------------------------------------------
@@ -178,11 +189,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /github_pat_[A-Za-z0-9_]{20,}/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['github-pat'] = (counts['github-pat'] || 0) + 1;
-      return '[REDACTED:github-pat]';
-    },
+    makeRedactor('github-pat', counts),
   );
 
   // ------------------------------------------------------------------
@@ -190,11 +197,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /gh[pousr]_[A-Za-z0-9]{20,}/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['github-token'] = (counts['github-token'] || 0) + 1;
-      return '[REDACTED:github-token]';
-    },
+    makeRedactor('github-token', counts),
   );
 
   // ------------------------------------------------------------------
@@ -202,11 +205,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /\b(AKIA|ASIA)[A-Z0-9]{16}\b/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['aws-key'] = (counts['aws-key'] || 0) + 1;
-      return '[REDACTED:aws-key]';
-    },
+    makeRedactor('aws-key', counts),
   );
 
   // ------------------------------------------------------------------
@@ -214,11 +213,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /xox[abprs]-[A-Za-z0-9-]{10,}/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['slack-token'] = (counts['slack-token'] || 0) + 1;
-      return '[REDACTED:slack-token]';
-    },
+    makeRedactor('slack-token', counts),
   );
 
   // ------------------------------------------------------------------
@@ -226,11 +221,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /sk-(ant-)?[A-Za-z0-9_-]{16,}/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['api-key'] = (counts['api-key'] || 0) + 1;
-      return '[REDACTED:api-key]';
-    },
+    makeRedactor('api-key', counts),
   );
 
   // ------------------------------------------------------------------
@@ -238,11 +229,7 @@ function scrub(content) {
   // ------------------------------------------------------------------
   result = result.replace(
     /AIza[A-Za-z0-9_-]{35}/g,
-    (match) => {
-      if (shouldSkip(match)) return match;
-      counts['google-api-key'] = (counts['google-api-key'] || 0) + 1;
-      return '[REDACTED:google-api-key]';
-    },
+    makeRedactor('google-api-key', counts),
   );
 
   // ------------------------------------------------------------------
@@ -385,26 +372,26 @@ function main(argv) {
 // (PF-014: single synchronous write, no pending cleanup, no buffered output)
 // ---------------------------------------------------------------------------
 
-let _exitCode = 0;
-let _scrubLine = /** @type {string | null} */ (null);
+let exitCode = 0;
+let scrubLine = /** @type {string | null} */ (null);
 
 try {
   const mainResult = main(process.argv);
   if (typeof mainResult === 'number') {
-    _exitCode = mainResult;
+    exitCode = mainResult;
   } else {
-    _scrubLine = mainResult.scrubLine;
-    _exitCode = 0;
+    scrubLine = mainResult.scrubLine;
+    exitCode = 0;
   }
 } catch (/** @type {any} */ err) {
   process.stderr.write('redact-secrets: internal error: ' + err.message + '\n');
-  _exitCode = 4;
+  exitCode = 4;
 }
 
 // Synchronous stdout write (must complete before process exits)
-if (_scrubLine !== null) {
-  process.stdout.write(_scrubLine + '\n');
+if (scrubLine !== null) {
+  process.stdout.write(scrubLine + '\n');
 }
 
 // Set exitCode (preferred over process.exit() — does not bypass event loop cleanup)
-process.exitCode = _exitCode;
+process.exitCode = exitCode;

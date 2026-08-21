@@ -401,9 +401,9 @@ describe('entropy negatives — must not be redacted', () => {
     },
   ];
 
-  for (const { name, fixture } of negatives) {
+  for (const [idx, { name, fixture }] of negatives.entries()) {
     it(`does not redact: ${name}`, () => {
-      const r = runWithContent(fixture, tmpDir, `neg-${negatives.indexOf({ name, fixture })}.txt`);
+      const r = runWithContent(fixture, tmpDir, `neg-${idx}.txt`);
       expect(r.exitCode).toBe(0);
       // Output must be byte-identical to input
       expect(r.outputContent).toBe(fixture);
