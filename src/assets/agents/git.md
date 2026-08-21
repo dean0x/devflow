@@ -49,14 +49,14 @@ Applies **unconditionally** to every op that posts or edits a body to GitHub —
 node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh …
 ```
-A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` only.
+A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` only. Where a step must run between scrub and post (the summary ops' cap re-check), read the scrubber's exit code before that step and abort the post on non-zero.
 
 - Non-zero scrubber exit OR script missing → **DO NOT POST**; emit `TRACEABILITY: DEGRADED (redaction unavailable)` for that item and continue per D4.
 - Scrubber stdout: `SCRUB: N [type:count,…]` — echo it into op output; it never contains secret bytes.
 - When N > 0: report `SECRET-EXPOSED (rotate {type} credential — the source file still holds it)`. A leaked secret requires credential ROTATION; editing or deleting a comment is cleanup, not remediation (GitHub retains edit history and notifications already fired).
 - **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**
 
-Each posting op names its own temp-file variables; see per-op "Scrub per D11" steps.
+Create both temp files per invocation — `DEVFLOW_BODY_RAW="$(mktemp)"` and `DEVFLOW_BODY="$(mktemp)"` — never a fixed path: Git agents run in parallel across worktrees and share the filesystem.
 
 ## Operations
 
@@ -109,7 +109,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4a. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
+4a. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose the PR body via the `devflow:git` template to `$DEVFLOW_BODY_RAW` — a PR body is published at the repository's visibility, so it is a D11 sink like any comment. Scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr create … --body-file "$DEVFLOW_BODY"`.
 4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
    b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
@@ -361,8 +361,8 @@ Post a consolidated code review summary as a single PR comment per review run (D
      *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
      ```
    Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip). Truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {REVIEW_SUMMARY_PATH} (not committed; ask the author)`.
-6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
-7. Re-check 60000-char cap after scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` — non-zero exit or missing script → DO NOT POST, `TRACEABILITY: DEGRADED (redaction unavailable)`.
+7. Re-check the 60000-char cap on the SCRUBBED body (redaction markers may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence), then post: `gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 8. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-review-summary)`, warn, return.
 
 **Output:**
@@ -674,7 +674,7 @@ unexplained unresolved threads.
    - **BY_DESIGN**: `This is intentional: {evidence}. No code change needed.`
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
-2. Write reply to `$DEVFLOW_BODY_RAW`; scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (non-zero exit → DEGRADED for that thread, continue per D4). Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form, replaces `-f body="$VAR"`).
+2. Write reply to `$DEVFLOW_BODY_RAW`; scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (non-zero exit → DEGRADED for that thread, continue per D4). Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
 3. Apply the D9 gate above: resolve via `resolveReviewThread` if VERIFICATION_STATUS == PASS AND verdict FIXED AND commit_sha non-empty; all other cases → reply-only, leave unresolved.
 4. Wait 1s between operations
 
@@ -735,8 +735,8 @@ Post the resolution summary as a single PR comment. Marker-based deduplication �
      *Posted by [devflow](https://github.com/dean0x/devflow)*
      ```
    Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip); truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
-6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
-7. Re-check 60000-char cap after scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+6. Scrub per D11: write body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` — non-zero exit or missing script → DO NOT POST, `TRACEABILITY: DEGRADED (redaction unavailable)`.
+7. Re-check the 60000-char cap on the SCRUBBED body (redaction markers may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence), then post: `gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 8. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
 
 **Output:**

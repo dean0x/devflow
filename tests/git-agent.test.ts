@@ -380,6 +380,38 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toHaveLength(0);
   });
 
+  it('D11: no gh call passes a body inline — every body reaches GitHub through a scrubbed file (bypass guard)', () => {
+    // The forward guard above only inspects ops that ALREADY use --body-file, so it is
+    // blind to a bypass: `gh pr create --body "…"` posts an unscrubbed body and would
+    // never be visited. This guard is the reverse check — it fails on any inline body
+    // form anywhere in git.md, which is exactly how a new sink escapes D11 (PF-023).
+    const INLINE_BODY_RE = /gh (?:pr|issue) [a-z-]+[^`\n]*--body[ "]|-f body=/g;
+    const offenders = content.match(INLINE_BODY_RE) ?? [];
+    expect(
+      offenders,
+      `D11 bypass: inline body form(s) found — route the body through the scrubber and post with --body-file / -F body=@: ${offenders.join(' | ')}`,
+    ).toHaveLength(0);
+
+    // Non-vacuous: the pattern must actually match the shape it is guarding against.
+    expect(
+      'gh pr create --title "x" --body "unscrubbed"'.match(INLINE_BODY_RE),
+      'bypass guard regex no longer matches a known-bad inline body form — the guard is inert',
+    ).not.toBeNull();
+  });
+
+  it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {
+    const sec = extractOpSection(content, 'ensure-pr-ready');
+    expect(sec.length, 'ensure-pr-ready section not found — guard is vacuous (PF-018)').toBeGreaterThan(0);
+    expect(
+      sec,
+      'ensure-pr-ready: gh pr create must post --body-file "$DEVFLOW_BODY" — a PR body is published at repo visibility like any comment',
+    ).toContain('gh pr create … --body-file "$DEVFLOW_BODY"');
+    expect(
+      sec,
+      'ensure-pr-ready: PR creation must reference the scrubber (D11)',
+    ).toContain('redact-secrets.cjs');
+  });
+
   it('D11: erasure guidance — rotation (/rotat/i) and edit-history retention are documented', () => {
     expect(content, 'D11: rotation guidance (/rotat/i) missing — a found live secret requires rotation, not just deletion').toMatch(/rotat/i);
     expect(content, 'D11: "edit history" retention note missing — GitHub retains edit history; deletion is not remediation').toContain('edit history');
