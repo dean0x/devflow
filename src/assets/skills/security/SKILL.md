@@ -57,6 +57,12 @@ const token = crypto.randomBytes(32).toString('hex');  // not: Math.random()
 Password hashing: Argon2id (preferred) or bcrypt cost ≥12 [24]. Encrypt with AES-256-GCM
 (authenticated). Compare secrets with `crypto.timingSafeEqual`, never `===` [25].
 
+**Reporting a found secret**: cite `file:line` and the type slug — never quote the full value.
+Use `{first ≤4 chars}…[REDACTED:{type}]` (e.g. `AKID…[REDACTED:aws-key]`).
+A found live credential is ALREADY COMPROMISED — the remediation is rotation
+(revoke and regenerate the exposed credential) plus moving to env vars or a secret store,
+not just removal from code.
+
 ### 4. Configuration & Headers [10][15][16]
 
 ```typescript
