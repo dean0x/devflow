@@ -92,6 +92,30 @@ describe('composeScripts', () => {
       'sentinel key was wiped — composeScripts must use wx (exclusive-create) for package.json',
     ).toBe(true);
   });
+
+  it('copies redact-secrets.cjs to the target alongside hud.sh (install path pin)', async () => {
+    // composeScripts copies src/assets/scripts/ verbatim (hooks/ + top-level entry scripts)
+    // via copyDirectory. A top-level redact-secrets.cjs is picked up automatically — no
+    // installer code changes required. This test pins the install path so a future rename
+    // or move of the script fails RED immediately.
+    //
+    // PF-018: assert file exists AND is non-empty (guards against an empty sentinel being
+    // accidentally installed in place of the real script).
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    const scrubberPath = path.join(target, 'redact-secrets.cjs');
+    await expect(
+      fs.access(scrubberPath),
+      'redact-secrets.cjs not found in compose output — must land at top level of scripts dir (sibling of hud.sh)',
+    ).resolves.toBeUndefined();
+
+    const content = await fs.readFile(scrubberPath, 'utf-8');
+    expect(
+      content.length,
+      'redact-secrets.cjs must be non-empty after install (PF-018)',
+    ).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
