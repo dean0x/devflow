@@ -231,4 +231,157 @@ describe('git agent — static content guards (PF-018)', () => {
       'resolution-summary dedup: missing "devflow:resolution-summary ts:" marker — changing this format breaks idempotency for existing comments',
     ).toContain('devflow:resolution-summary ts:');
   });
+
+  // ── Guard 6: D10 publication visibility gate ─────────────────────────────
+
+  it('D10: ## Publication gate (D10) section exists', () => {
+    expect(
+      content,
+      'git.md is missing "## Publication gate (D10)" section — silent removal breaks the visibility-gated posting contract',
+    ).toContain('## Publication gate (D10)');
+  });
+
+  it('D10: gh repo view --json visibility probe command is present', () => {
+    expect(
+      content,
+      'D10: missing "gh repo view --json visibility" — the visibility probe is the sole mechanism for determining FULL vs STUB mode',
+    ).toContain('gh repo view --json visibility');
+  });
+
+  it('D10: PRIVATE, INTERNAL, and PUBLIC visibility values are all named in the gate logic', () => {
+    // All three canonical GitHub visibility values must appear; removing one silently disables a gate branch
+    expect(content, 'D10: PRIVATE not documented').toContain('PRIVATE');
+    expect(content, 'D10: INTERNAL not documented').toContain('INTERNAL');
+    expect(content, 'D10: PUBLIC not documented').toContain('PUBLIC');
+  });
+
+  it('D10: fail-closed rule "treat as PUBLIC" is present', () => {
+    expect(
+      content,
+      'D10: missing "treat as PUBLIC" fail-closed rule — any probe error must default to STUB (not FULL)',
+    ).toContain('treat as PUBLIC');
+  });
+
+  it('D10: stub-withheld sentence is present', () => {
+    expect(
+      content,
+      'D10: missing "Full summary withheld (public repository)." — changing this line alters the stub template seen by PR reviewers',
+    ).toContain('Full summary withheld (public repository).');
+  });
+
+  it('D10: review-summary dedup marker appears ≥2× in post-review-summary (full mode + stub template)', () => {
+    const sec = extractOpSection(content, 'post-review-summary');
+    const matches = sec.match(/devflow:review-summary cycle:/g);
+    expect(
+      matches,
+      'post-review-summary: "devflow:review-summary cycle:" must appear ≥2 times (full body + stub template)',
+    ).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('D10: resolution-summary dedup marker appears ≥2× in post-resolution-summary (full mode + stub template)', () => {
+    const sec = extractOpSection(content, 'post-resolution-summary');
+    const matches = sec.match(/devflow:resolution-summary ts:/g);
+    expect(
+      matches,
+      'post-resolution-summary: "devflow:resolution-summary ts:" must appear ≥2 times (full body + stub template)',
+    ).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
+    expect(content, 'D10: REVIEW_PUBLICATION not documented').toContain('REVIEW_PUBLICATION');
+    expect(content, 'D10: "auto" value not documented').toContain('auto');
+    expect(content, 'D10: "full" value not documented').toContain('full');
+    expect(content, 'D10: "off" value not documented').toContain('off');
+  });
+
+  it('D10: publication output enum line is present in git.md', () => {
+    expect(
+      content,
+      'D10: missing publication output enum line — removing it breaks the caller\'s ability to parse publication status',
+    ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)');
+  });
+
+  it('D10: gh repo view appears ONLY in post-review-summary and post-resolution-summary (scope boundary, non-vacuous)', () => {
+    // Negative scope guard: extract all ## Operation: sections; only the two summary ops may probe visibility
+    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+    expect(
+      opNames.length,
+      `corpus is only ${opNames.length} ops — expected > 2 for a non-vacuous scope check (PF-018)`,
+    ).toBeGreaterThan(2);
+
+    const ghRepoViewOps: string[] = [];
+    for (const op of opNames) {
+      const sec = extractOpSection(content, op);
+      if (sec.includes('gh repo view')) ghRepoViewOps.push(op);
+    }
+    expect(
+      ghRepoViewOps.sort(),
+      'D10 scope violation: gh repo view must appear ONLY in post-review-summary and post-resolution-summary',
+    ).toEqual(['post-resolution-summary', 'post-review-summary']);
+  });
+
+  // ── Guard 7: D11 comment-sink scrub ─────────────────────────────────────
+
+  it('D11: ## Comment-sink scrub (D11) section exists', () => {
+    expect(
+      content,
+      'git.md is missing "## Comment-sink scrub (D11)" section — silent removal disables unconditional secret redaction',
+    ).toContain('## Comment-sink scrub (D11)');
+  });
+
+  it('D11: redact-secrets.cjs script path with DEVFLOW_DIR prefix is present', () => {
+    expect(content, 'D11: redact-secrets.cjs not referenced').toContain('redact-secrets.cjs');
+    expect(
+      content,
+      'D11: ${DEVFLOW_DIR:-$HOME/.devflow}/scripts/ prefix not present — changing the install path silently breaks the scrubber invocation',
+    ).toContain('${DEVFLOW_DIR:-$HOME/.devflow}/scripts/');
+  });
+
+  it('D11: DO NOT POST and TRACEABILITY: DEGRADED (redaction unavailable) are present', () => {
+    expect(content, 'D11: "DO NOT POST" directive missing').toContain('DO NOT POST');
+    expect(
+      content,
+      'D11: "TRACEABILITY: DEGRADED (redaction unavailable)" missing — callers need this exact string to detect scrubber failure',
+    ).toContain('TRACEABILITY: DEGRADED (redaction unavailable)');
+  });
+
+  it('D11: no-pipeline clause is present (&&-chain discipline, never pipelines)', () => {
+    // A pipeline swallows scrubber crashes (fail-open); the &&-chain is the fail-closed mechanism
+    expect(
+      content,
+      'D11: "never pipelines" discipline clause missing — without it, pipeline exits mask scrubber failures',
+    ).toContain('never pipelines');
+  });
+
+  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
+    // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11 (PF-018)
+    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+
+    const postingOps: string[] = [];
+    const postingOpsWithoutD11: string[] = [];
+
+    for (const op of opNames) {
+      const sec = extractOpSection(content, op);
+      if (sec.includes('--body-file') || sec.includes('-F body=@')) {
+        postingOps.push(op);
+        if (!sec.includes('D11')) postingOpsWithoutD11.push(op);
+      }
+    }
+
+    expect(
+      postingOps.length,
+      `D11 forward guard: expected ≥ 8 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(8);
+    expect(
+      postingOpsWithoutD11,
+      `D11 forward guard: posting ops missing D11 reference: [${postingOpsWithoutD11.join(', ')}]`,
+    ).toHaveLength(0);
+  });
+
+  it('D11: erasure guidance — rotation (/rotat/i) and edit-history retention are documented', () => {
+    expect(content, 'D11: rotation guidance (/rotat/i) missing — a found live secret requires rotation, not just deletion').toMatch(/rotat/i);
+    expect(content, 'D11: "edit history" retention note missing — GitHub retains edit history; deletion is not remediation').toContain('edit history');
+  });
 });

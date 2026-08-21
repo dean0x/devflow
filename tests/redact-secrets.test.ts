@@ -86,9 +86,9 @@ afterEach(() => {
 
 // ---------------------------------------------------------------------------
 // Slug vocabulary — independent literal pin (PF-018 static declaration)
-// A later phase cross-checks these literals against review.md's masking
-// vocabulary — do not reference review.md here; it does not carry the
-// vocabulary yet.
+// Phase D cross-artifact check: a test inside describe('slug vocabulary')
+// reads src/assets/agents/review.md and asserts every slug from EXPECTED_SLUGS
+// appears in the ## Secret Handling in Findings section (commit 8 added it).
 // ---------------------------------------------------------------------------
 
 const EXPECTED_SLUGS: readonly string[] = [
@@ -145,6 +145,28 @@ describe('slug vocabulary', () => {
 
     const sortedExpected = [...EXPECTED_SLUGS].sort();
     expect(seenSlugs).toEqual(sortedExpected);
+  });
+
+  it('every expected slug appears in review.md § Secret Handling in Findings (cross-artifact pin)', () => {
+    // Phase D cross-check: review.md now carries the vocabulary — pin it against EXPECTED_SLUGS.
+    // Strongest check the content supports: all 8 slugs are listed individually in the section.
+    const reviewPath = path.resolve(import.meta.dirname, '../src/assets/agents/review.md');
+    const reviewContent = fs.readFileSync(reviewPath, 'utf-8');
+
+    // Extract the § Secret Handling in Findings section (from heading to next ## heading)
+    const sectionMarker = '## Secret Handling in Findings';
+    const sectionStart = reviewContent.indexOf(sectionMarker);
+    expect(sectionStart, `review.md is missing "${sectionMarker}" section`).toBeGreaterThan(-1);
+    const nextSection = reviewContent.indexOf('\n## ', sectionStart + sectionMarker.length);
+    const section = nextSection === -1 ? reviewContent.slice(sectionStart) : reviewContent.slice(sectionStart, nextSection);
+
+    // Each slug from EXPECTED_SLUGS must appear in the section (non-vacuous: EXPECTED_SLUGS.length = 8)
+    for (const slug of EXPECTED_SLUGS) {
+      expect(section, `review.md § Secret Handling in Findings is missing slug "${slug}"`).toContain(slug);
+    }
+
+    // Also pin the masking scheme marker present in the section
+    expect(section, 'review.md § Secret Handling in Findings missing [REDACTED: marker').toContain('[REDACTED:');
   });
 });
 
