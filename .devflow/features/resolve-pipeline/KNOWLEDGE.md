@@ -301,7 +301,7 @@ Three test files provide static content guards that fail loudly when load-bearin
 
 - PF-018 (real-path tests): git-agent.test.ts guard suite reads the source file directly for bounds and literal contracts
 - PF-019 (verdict-not-evidence): Triage agent must provide cited evidence (grep/file:line/ADR) not just verdicts; D9 propagates evidence through resolve-review-threads reply composition
-- PF-020 (parallel coder staging): same-file Code agent batches must be sequential; distinct-file batches parallel
+- PF-020 (parallel Code-agent staging): same-file Code agent batches must be sequential; distinct-file batches parallel
 - PF-024 (spawn↔op seams): caller spawn blocks pass inputs only — they do not restate what the operation writes (marker literals, internal formats); the operation owns its output
 - ADR-003 (leave-the-end-state): Resolver retired with zero tombstones; its installed file is pruned by the registry-diff orphan sweep
 - PF-002 (skill re-entrancy): Triage agent skills are loaded via frontmatter — never body-instructed via `Skill()` calls
