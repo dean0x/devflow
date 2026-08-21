@@ -93,10 +93,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 10 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 11 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(10);
+    expect(partialFiles).toHaveLength(11);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -1210,5 +1210,80 @@ describe('Phase F traceability — release.md evidence + dynamic-build complianc
       content,
       'dynamic-build.md must contain conventions.md (branch naming authority, Step 2.11)',
     ).toContain('conventions.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
+//      code-review.md and resolve.md must expand publication_gate()
+//      and pass REVIEW_PUBLICATION only in their Git post-*-summary spawns (PF-024)
+// ---------------------------------------------------------------------------
+
+describe('publication_gate adoption in compiled host commands (Phase C)', () => {
+  const PUBLICATION_HOSTS: Record<string, string> = {
+    'code-review': DIST_COMMANDS,
+    'resolve':     DIST_COMMANDS,
+  };
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('code-review.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      const content = await fs.readFile(outputPath, 'utf-8');
+      scanned++;
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain REVIEW_PUBLICATION (publication gate expansion)`,
+      ).toContain('REVIEW_PUBLICATION');
+    }
+    expect(scanned, 'scanned zero publication hosts — guard is vacuous (PF-018)').toBeGreaterThan(0);
+  });
+
+  it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      scanned++;
+
+      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
+      let match;
+      const violations: string[] = [];
+
+      while ((match = fencePattern.exec(content)) !== null) {
+        const block = match[0];
+        if (!/^REVIEW_PUBLICATION:/m.test(block)) continue;
+        const hasGit =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!hasGit) {
+          violations.push(`${basename}.md: fence at offset ${match.index}`);
+        }
+      }
+
+      expect(
+        violations,
+        `REVIEW_PUBLICATION: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+      ).toHaveLength(0);
+    }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous (PF-018)').toBeGreaterThan(0);
   });
 });

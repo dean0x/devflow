@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { publication_gate } from "./_partials/_publication.mds"
 
 # Code Review Command
 
@@ -135,6 +136,15 @@ MAX_REVIEW_CYCLES = 10
 | denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
 | fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
 
+#### Step 0f: Resolve Publication Mode (Per Worktree)
+
+**Produces:** REVIEW_PUBLICATION
+**Requires:** WORKTREES
+
+For each reviewable worktree, call:
+
+{publication_gate()}
+
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEW_FOCUS_LIST
@@ -254,6 +264,7 @@ PR_NUMBER: {pr_number}
 REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
 CYCLE_NUMBER: {cycle_number}
 REVIEW_TIMESTAMP: {timestamp}
+REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Posts the consolidated review-summary comment (marker-deduped by the operation on the cycle+timestamp pair)."
 ```
@@ -268,6 +279,7 @@ Per worktree, after successful completion:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
    - Review comment status: POSTED / SKIPPED (D7 dedup) / DEGRADED (from Git)
+   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled) (from Git agent)
    - Artifact paths
 
 In multi-worktree mode, report results per worktree.
@@ -283,7 +295,8 @@ In multi-worktree mode, report results per worktree.
 │  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
 │  ├─ Step 0d: Incremental detection + timestamp setup per worktree
 │  ├─ Step 0e-i: Load prior resolution-summary.md
-│  └─ Step 0e-ii: Convergence assessment (warn if FP ratio > 70%)
+│  ├─ Step 0e-ii: Convergence assessment (warn if FP ratio > 70%)
+│  └─ Step 0f: Resolve REVIEW_PUBLICATION per worktree (publication gate)
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │
@@ -298,7 +311,7 @@ In multi-worktree mode, report results per worktree.
 │  │
 │  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
 │  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
-│  │  └─ Step 3b: Git agent (post-review-summary, D7 marker-dedup)
+│  │  └─ Step 3b: Git agent (post-review-summary, D7 marker-dedup, REVIEW_PUBLICATION)
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
 ```
@@ -323,6 +336,8 @@ In multi-worktree mode, report results per worktree.
 | `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
 | Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0e-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
+| Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
+| `reviewPublication: off` | Git agent skips posting the review comment (SKIPPED) |
 
 ## Backwards Compatibility
 

@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { publication_gate } from "./_partials/_publication.mds"
 
 # Resolve Command
 
@@ -101,6 +102,9 @@ This produces a compact index of active ADR/PF entries written at render time �
 Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
 {compliance_gate()}
+Reuse this result for every worktree.
+
+{publication_gate()}
 Reuse this result for every worktree.
 
 ### Phase 1: Parse Issues
@@ -383,6 +387,7 @@ Agent(subagent_type="Git"):
 "OPERATION: post-resolution-summary
 PR_NUMBER: {pr_number}
 RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
+REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Posts the consolidated resolution-summary comment (marker-deduped by the operation)."
 ```
@@ -447,6 +452,9 @@ Final gate: {PASS | FAILED after N attempts}
 ### Tech Debt Added
 - {n} items added to backlog
 
+### Publication (from Git agent)
+{FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)}
+
 ### Merge Readiness (if compliance enabled)
 {READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
 
@@ -467,7 +475,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
 │  ├─ Step 0c: Target latest review directory per worktree
-│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + COMPLIANCE_SKILL_INSTALLED
+│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + COMPLIANCE_SKILL_INSTALLED + REVIEW_PUBLICATION
 │
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
 │
@@ -497,7 +505,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │
 ├─ Phase 9b: Thread resolution + resolution comment
 │  ├─ Step 9b-1: Git agent (resolve-review-threads) — compliance-gated
-│  └─ Step 9b-2: Git agent (post-resolution-summary) — always-on
+│  └─ Step 9b-2: Git agent (post-resolution-summary, REVIEW_PUBLICATION) — always-on
 │
 ├─ Phase 9c: Git agent (check-merge-readiness) — compliance-gated, report-only
 │
@@ -525,6 +533,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | COMPLIANCE_SKILL_INSTALLED false | Phases 1b, 9b-step-1, and 9c are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
 | THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
+| Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
+| `reviewPublication: off` | Git agent skips posting the resolution comment (SKIPPED) |
 
 ## Principles
 

@@ -1,0 +1,7 @@
+@define publication_gate():
+**Resolve `REVIEW_PUBLICATION` per worktree:** Read the current worktree's `.devflow/config.json` (a single, direct file read — multi-worktree repos may have different publication settings per worktree root). If the file exists and `reviewPublication` is one of `auto`, `full`, or `off`, set `REVIEW_PUBLICATION` to that value; otherwise set `REVIEW_PUBLICATION = "auto"`.
+
+Note: `auto` is NOT fail-open — under `auto`, the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB).
+@end
+
+@export publication_gate
