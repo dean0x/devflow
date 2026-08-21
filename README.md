@@ -119,6 +119,8 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 
+**PR-comment publication for `/code-review` and `/resolve`**: On public repositories, Devflow posts a counts-only stub comment by default (visibility is probed at run time; the gate fails closed to the stub on any error). Set `reviewPublication: full` in `.devflow/config.json` to post the full report regardless of repo visibility, or `off` to disable comment posting entirely (`auto` is the default). Every body posted to GitHub — whether a full report or a stub — is run through the `redact-secrets.cjs` scrubber unconditionally; if the scrubber is missing (stale `~/.devflow` before running `devflow init`) or exits non-zero, the post is suppressed and `TRACEABILITY: DEGRADED (redaction unavailable)` is reported rather than publishing unredacted content.
+
 ## Language Support
 
 Optional plugins add language-specific patterns for TypeScript, React, Go, Python, Java, Rust, accessibility, and UI design.
