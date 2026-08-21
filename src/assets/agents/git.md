@@ -27,6 +27,24 @@ The orchestrator provides:
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
 - **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
+## Comment-sink scrub (D11)
+
+Applies **unconditionally** to every op that posts or edits a body to GitHub — never gated on visibility, config, or compliance mode.
+
+**Shell discipline — `&&` chains, never pipelines:**
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh …
+```
+A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` only.
+
+- Non-zero scrubber exit OR script missing → **DO NOT POST**; emit `TRACEABILITY: DEGRADED (redaction unavailable)` for that item and continue per D4.
+- Scrubber stdout: `SCRUB: N [type:count,…]` — echo it into op output; it never contains secret bytes.
+- When N > 0: report `SECRET-EXPOSED (rotate {type} credential — the source file still holds it)`. A leaked secret requires credential ROTATION; editing or deleting a comment is cleanup, not remediation (GitHub retains edit history and notifications already fired).
+- **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**
+
+Each posting op names its own temp-file variables; see per-op "Scrub per D11" steps.
+
 ## Operations
 
 | Operation | Purpose | Key Parameters |
@@ -63,6 +81,7 @@ The orchestrator provides:
 | D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
 | D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
 | D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
+| D11 | Comment-sink scrub — unconditional secret redaction on every body-posting op; fail-closed (`TRACEABILITY: DEGRADED (redaction unavailable)`) on scrubber error or missing script |
 
 ---
 
@@ -81,7 +100,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
    b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
 
-   Compose the updated PR body (existing body + `## Related Issues` section) to a temp file and apply with `gh pr edit {PR_NUMBER} --body-file {temp_file}`. The existing PR body is third-party-editable — never interpolate it into a command string.
+   Compose the updated PR body (existing body + `## Related Issues` section) to `$DEVFLOW_BODY_RAW`. The existing PR body is third-party-editable — never interpolate it into a command string. Scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 
    If no verified issue number is discoverable, skip silently.
    On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
@@ -317,7 +336,7 @@ Post a consolidated code review summary as a single PR comment per review run (D
    the composed body exceeds the cap, truncate lowest-value sections first (Suggestions,
    then Pre-existing), keeping the counts table and every Blocking entry; end with
    `…truncated — full report in the local review artifact {REVIEW_SUMMARY_PATH} (not committed; ask the author)`.
-4. Write composed body to a temp file; post via `gh pr comment {PR_NUMBER} --body-file {temp_file}`
+4. Scrub per D11: write composed body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
 5. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-review-summary)`, warn, return.
 
 **Output:**
@@ -346,7 +365,7 @@ Update tech debt backlog with deferred issues from resolution and pre-existing i
    - Pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)
-6. Update issue body with changes
+6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue edit {number} --body-file "$DEVFLOW_BODY"`
 7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
 
 **Output:**
@@ -415,7 +434,7 @@ Create a GitHub release with version tag.
    - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and {n} more commits` line (D4 degrade if enrichment fails)
    - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line (D4 degrade if enrichment fails)
    - Cap the composed body at 60000 characters (GitHub's limit is 65536); if it would exceed that, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`
-6. Create GitHub release via `gh release create` with the composed notes body — fail loudly on error
+6. Scrub release notes per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES"` (non-zero exit → fail loudly — release notes with unredacted secrets must not be published). Create GitHub release via `gh release create {tag} --notes-file "$DEVFLOW_NOTES"` — fail loudly on error.
 
 **Output:**
 ```markdown
@@ -628,7 +647,7 @@ unexplained unresolved threads.
    - **BY_DESIGN**: `This is intentional: {evidence}. No code change needed.`
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
-2. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation
+2. Write reply to `$DEVFLOW_BODY_RAW`; scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (non-zero exit → DEGRADED for that thread, continue per D4). Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form, replaces `-f body="$VAR"`).
 3. Apply the D9 gate above: resolve via `resolveReviewThread` if VERIFICATION_STATUS == PASS AND verdict FIXED AND commit_sha non-empty; all other cases → reply-only, leave unresolved.
 4. Wait 1s between operations
 
@@ -680,7 +699,7 @@ Post the resolution summary as a single PR comment. Marker-based deduplication �
    the 4xx rule would silently skip); if larger, truncate lowest-value sections first
    (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry, and end with
    `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
-4. Write body to temp file; post via `gh pr comment {PR_NUMBER} --body-file {temp_file}`
+4. Scrub per D11: write composed body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`
 5. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
 
 **Output:**
@@ -753,14 +772,13 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED ({n} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
 1. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
 2. Check if `<!-- devflow:shipped v{BARE_VERSION} -->` already present in viewer-authored comments. If yes: skip.
-3. Write the two-line body to a temp file — a real newline, not a `\n` escape (bash does not
+3. Write the two-line body to `$DEVFLOW_BODY_RAW` — a real newline, not a `\n` escape (bash does not
    expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
    ```
    <!-- devflow:shipped v{BARE_VERSION} -->
    This was shipped in v{BARE_VERSION}.
    ```
-   Post it via `gh issue comment {number} --body-file {temp_file}` — the same `--body-file`
-   form the other comment-posting operations use.
+   Scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue comment {number} --body-file "$DEVFLOW_BODY"`
 4. Wait 1s between issues.
 
 **Output:**
@@ -790,20 +808,20 @@ Create or enrich a GitHub issue using the D3 issue template. Returns the issue n
 
 **Process:**
 1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
-   - Post a structured comment (NEVER rewrite the issue body):
+   - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue comment {number} --body-file "$DEVFLOW_BODY"`. Comment template:
      ```markdown
      ## Devflow Traceability Update
      **Initial Request**: {TASK_DESCRIPTION or "(see issue body)"}
      **Status**: Linked to branch for implementation
      ```
-   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), post as a collapsed `<details>` comment via `gh issue comment {number} --body-file {temp_file}`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; scrub per D11 and post as a collapsed `<details>` comment via `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue comment {number} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
-   - Compose the issue body to a temp file (`DEVFLOW_BODY_FILE`) using the D3 template from the devflow:git skill (loaded via frontmatter — see "Traceability Issue Template (D3)" section). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string.
-   - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
-   - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY_FILE"`.
-   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), write to a temp file and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file {temp_file}`; then reference the comment URL in a follow-up comment to the issue.
+   - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template from the devflow:git skill (loaded via frontmatter — see "Traceability Issue Template (D3)" section). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Scrub per D11: `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (non-zero exit → DEGRADED, do not create issue).
+   - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
+   - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY"`.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; scrub per D11 and post as a collapsed `<details>` comment via `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue comment {number} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
 3. Return the issue number.
 
 **Output:**
@@ -844,7 +862,7 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
    ```
    Cap the composed body at 60000 characters; if larger, truncate and end with
    `…truncated — full report in the local wave artifact {WAVE_REPORT_PATH} (not committed; ask the author)`.
-4. Write to a temp file and post via `gh issue comment {TRACKING_ISSUE} --body-file {temp_file}`.
+4. Scrub per D11: write composed body to `$DEVFLOW_BODY_RAW`; `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh issue comment {TRACKING_ISSUE} --body-file "$DEVFLOW_BODY"`.
 
 **Output:**
 ```markdown
