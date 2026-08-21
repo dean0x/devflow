@@ -235,7 +235,7 @@ describe('init-seed — compliance defaults', () => {
       },
     });
     // Even with a projectConfig, compliance comes from manifest
-    const result = resolveSeedFeatures(manifest, { memory: false, learning: false, knowledge: false });
+    const result = resolveSeedFeatures(manifest, { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const });
     expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
   });
 });

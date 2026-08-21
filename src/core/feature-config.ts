@@ -2,16 +2,29 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { getFeatureConfigPath } from './project-paths.js';
 
+export type ReviewPublication = 'auto' | 'full' | 'off';
+
 export interface FeatureConfig {
   memory: boolean;
   learning: boolean;
   knowledge: boolean;
+  reviewPublication: ReviewPublication;
 }
+
+/**
+ * The keys of FeatureConfig whose value type is boolean.
+ * Used to restrict updateFeature / isFeatureEnabled to boolean-typed fields only —
+ * reviewPublication must not be togglable as a boolean.
+ */
+export type BooleanFeature = {
+  [K in keyof FeatureConfig]: FeatureConfig[K] extends boolean ? K : never;
+}[keyof FeatureConfig];
 
 export const DEFAULT_CONFIG: FeatureConfig = {
   memory: true,
   learning: true,
   knowledge: true,
+  reviewPublication: 'auto',
 };
 
 export function getConfigPath(projectRoot: string): string {
@@ -41,10 +54,16 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
   if (typeof p.learning === 'boolean') learning = p.learning;
   if (typeof p.decisions === 'boolean') learning = p.decisions; // decisions wins
 
+  // Coerce reviewPublication: any invalid or absent value → 'auto' (self-heal, ADR-014 idiom).
+  const rp = p.reviewPublication;
+  const reviewPublication: ReviewPublication =
+    rp === 'auto' || rp === 'full' || rp === 'off' ? rp : 'auto';
+
   return {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
     learning,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
+    reviewPublication,
   };
 }
 
@@ -92,7 +111,7 @@ export async function writeConfig(projectRoot: string, config: FeatureConfig): P
  */
 export async function updateFeature(
   projectRoot: string,
-  feature: keyof FeatureConfig,
+  feature: BooleanFeature,
   enabled: boolean,
 ): Promise<void> {
   const config = await readConfig(projectRoot);
@@ -104,7 +123,7 @@ export async function updateFeature(
  */
 export async function isFeatureEnabled(
   projectRoot: string,
-  feature: keyof FeatureConfig,
+  feature: BooleanFeature,
 ): Promise<boolean> {
   const config = await readConfig(projectRoot);
   return config[feature];

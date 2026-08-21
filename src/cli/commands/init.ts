@@ -1688,10 +1688,12 @@ export const initCommand = new Command('init')
     // commands — it is a one-time setup action. See D1 in feature-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
+      const existingConfig = await readConfigIfPresent(gitRoot);
       await writeConfig(gitRoot, {
         memory: memoryEnabled,
         learning: learningEnabled,
         knowledge: knowledgeEnabled,
+        reviewPublication: existingConfig?.reviewPublication ?? 'auto',
       });
 
       // Drain orphaned queue files when memory is disabled so stale turns
