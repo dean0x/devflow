@@ -9,7 +9,7 @@
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
- *  5. Script happy-path exit — build:mds exits 0 and produces all 13+2=15 outputs in dist/commands/.
+ *  5. Script happy-path exit — build:mds exits 0 and at least one compiled .md lands in dist/commands/ (exact cardinality is pinned by scenario 6).
  *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic outputs present.
  *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
@@ -792,6 +792,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     // creeps back into the authored script body. Pin the loop construct's absence too.
     expect(compiled).not.toContain('for (let cycle');
     expect(compiled).toContain('The pass runs exactly ONCE');
+    // Unique-block pins — avoids PF-018 (deleting either block leaves test green without these)
+    // Invariant #7 unique: appears only in engine_invariants() block, not in review_pass() prose
+    expect(compiled).toContain('Never author additional cycles or a delta re-review of fix commits');
+    // review_pass() prose unique: appears only in the review → verify → fix doctrine, not in invariant #7
+    expect(compiled).toContain('Budget scales roster and verification votes, NEVER the number of passes');
   });
 
   it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
@@ -838,6 +843,39 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 
   it('C9: no unauthorized GitHub side-effects doctrine', () => {
     expect(compiled).toContain('No unauthorized GitHub side-effects');
+  });
+
+  it('C10: post-wave-report Git spawn survived the dynamic-wave removal', () => {
+    // The block was REWRITTEN this cycle — pin the current load-bearing literals.
+    // Each literal verified against dist/commands/dynamic-build.md after npm run build:mds.
+    expect(compiled).toContain('OPERATION: post-wave-report');
+    expect(compiled).toContain('TRACKING_ISSUE:');
+    expect(compiled).toContain('WAVE_REPORT_PATH: .devflow/docs/waves/');
+    expect(compiled).toContain('WAVE_ID:');
+    expect(compiled).toContain('WORKTREE_PATH:');  // new this cycle
+    // WAVE-mode guard sentence
+    expect(compiled).toContain('skip this step entirely in SINGLE mode');
+    // DEGRADED-visibility literal when no tracking issue was resolved
+    expect(compiled).toContain('TRACEABILITY: DEGRADED (no tracking issue for this run)');
+    // Dedup marker — verified present in the current compiled artifact
+    expect(compiled).toContain('<!-- devflow:wave-report wave:');
+  });
+
+  it('meta.phases matches every phase("…") call site', () => {
+    // Two phases: arrays exist in the compiled file: a placeholder ["..."] in the
+    // Workflow runtime contract example and the real SINGLE-mode meta declaration.
+    // Filter to the real declaration (does not contain '"..."').
+    // The WAVE skeleton uses the same phases conceptually but does not declare its own
+    // meta block with a phases array — scoped to SINGLE-mode by design.
+    const phasesMatches = [...compiled.matchAll(/phases:\s*(\[[^\]]*\])/g)];
+    const realMatch = phasesMatches.find(m => !m[1].includes('"..."'));
+    expect(realMatch, 'real SINGLE-mode meta.phases not found in compiled output').toBeDefined();
+    const declared = JSON.parse(realMatch![1].replace(/'/g, '"')) as string[];
+    // Use trailing-comma regex to exclude the prose mention of phase("…") at the pre-flight
+    // checklist (no comma follows the closing paren there), which is NOT a call site.
+    const called = [...compiled.matchAll(/\bphase\("([^"]+)",/g)].map(m => m[1] as string);
+    expect(declared.length, 'phases array is empty — guard is vacuous').toBeGreaterThan(0);
+    expect(new Set(called)).toEqual(new Set(declared));
   });
 });
 
