@@ -144,33 +144,6 @@ function replaceToken(content: string, token: string, replacement: string): stri
   return content.split(token).join(replacement);
 }
 
-/**
- * Strip unknown ${DEVFLOW_COMPLIANCE_...} tokens from content and collect warnings.
- * The FRAMEWORKS token is excluded from stripping (handled by stampComplianceRule).
- */
-function stripUnknownTokens(
-  content: string,
-  warnings: string[],
-  prefix: string,
-  preserveFrameworksToken = false,
-): string {
-  const TOKEN_RE = /\$\{DEVFLOW_COMPLIANCE_[A-Z_]+\}/g;
-  const known = new Set<string>([
-    ...COMPLIANCE_SKILL_TOKENS,
-    ...COMPLIANCE_RULE_TOKENS,
-    '${DEVFLOW_COMPLIANCE_FRAMEWORKS}',
-  ]);
-
-  const stripped = content.replace(TOKEN_RE, match => {
-    if (known.has(match)) return match; // not unknown
-    if (preserveFrameworksToken && match === '${DEVFLOW_COMPLIANCE_FRAMEWORKS}') return match;
-    warnings.push(`${prefix}: unknown token "${match}" stripped`);
-    return '';
-  });
-
-  return stripped;
-}
-
 // ── Composition helpers ────────────────────────────────────────────────────────
 
 /**
@@ -286,13 +259,12 @@ function buildMappingSection(
 function buildChecklist(
   activeFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
-  warnings: string[],
 ): string {
   const items: string[] = [];
   for (const id of activeFrameworks) {
     const fragment = fragments.get(id);
     if (!fragment) {
-      // Warning already emitted; skip silently here
+      // Warning already emitted in buildActiveSection; skip silently here
       continue;
     }
     items.push(...fragment.checklistItems);
@@ -307,12 +279,12 @@ function buildChecklist(
 function buildReferences(
   activeFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
-  warnings: string[],
 ): string {
   const rows: string[] = [];
   for (const id of activeFrameworks) {
     const fragment = fragments.get(id);
     if (!fragment) {
+      // Warning already emitted in buildActiveSection; skip silently here
       continue;
     }
     rows.push(`| \`references/${id}.md\` | ${fragment.referenceBlurb} |`);
@@ -453,8 +425,8 @@ export function composeComplianceSkill(
   const scope = buildScope(activeFrameworks);
   const active = buildActiveSection(activeFrameworks, fragments, warnings);
   const mapping = buildMappingSection(activeFrameworks, fragments, warnings);
-  const checklist = buildChecklist(activeFrameworks, fragments, warnings);
-  const references = buildReferences(activeFrameworks, fragments, warnings);
+  const checklist = buildChecklist(activeFrameworks, fragments);
+  const references = buildReferences(activeFrameworks, fragments);
 
   let content = template;
   content = replaceToken(content, '${DEVFLOW_COMPLIANCE_SCOPE}', scope);
@@ -516,9 +488,7 @@ export function composeComplianceRule(
     bullets.push(fragment.ruleBullet);
   }
 
-  // Replace RULE_BULLETS token
-  const bulletsContent = bullets.join('\n');
-  let content = replaceToken(template, '${DEVFLOW_COMPLIANCE_RULE_BULLETS}', bulletsContent);
+  let content = replaceToken(template, '${DEVFLOW_COMPLIANCE_RULE_BULLETS}', bullets.join('\n'));
 
   // C3: strip remaining unknown tokens EXCEPT ${DEVFLOW_COMPLIANCE_FRAMEWORKS}
   // (preserved for stampComplianceRule below)
