@@ -184,7 +184,7 @@ using one of the eight vocabulary slugs:
 `api-key`, `google-api-key`, `secret-assignment`.
 
 Mask the value as: `{first ≤4 chars}…[REDACTED:{type}]`
-Example: `ghp_…[REDACTED:github-pat]`
+Example: `ghp_…[REDACTED:github-token]`
 
 Apply masking everywhere the value could appear — Problem text, Fix suggestions, and code fences.
 Never quote the full credential value, even inside a code block.

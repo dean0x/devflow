@@ -290,10 +290,11 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
-    expect(content, 'D10: REVIEW_PUBLICATION not documented').toContain('REVIEW_PUBLICATION');
-    expect(content, 'D10: "auto" value not documented').toContain('auto');
-    expect(content, 'D10: "full" value not documented').toContain('full');
-    expect(content, 'D10: "off" value not documented').toContain('off');
+    const sec = extractOpSection(content, 'post-review-summary');
+    expect(sec, 'D10: REVIEW_PUBLICATION not documented in post-review-summary').toContain('REVIEW_PUBLICATION');
+    expect(sec, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
+    expect(sec, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
+    expect(sec, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
   });
 
   it('D10: publication output enum line is present in git.md', () => {
