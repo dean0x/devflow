@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
+  DEFAULT_CONFIG,
   getConfigPath,
   readConfig,
   readConfigIfPresent,
@@ -435,10 +436,12 @@ describe('reviewPublication coercion', () => {
     expect(config.reviewPublication).toBe('off');
   });
 
-  it('DEFAULT_CONFIG has reviewPublication "auto"', () => {
-    // Non-vacuous: verify DEFAULT_CONFIG shape includes the field (PF-018).
-    const rp: ReviewPublication = 'auto';
-    expect(rp).toBe('auto'); // type guard: if ReviewPublication type is missing 'auto', this fails to compile
+  it('DEFAULT_CONFIG has reviewPublication "auto" (the fail-closed default)', () => {
+    // Assert on the shipped constant, not on a locally-declared literal — a local
+    // `const rp: ReviewPublication = 'auto'` passes even if DEFAULT_CONFIG says
+    // 'full', which is exactly the type-only vacuity PF-018 warns about.
+    const rp: ReviewPublication = DEFAULT_CONFIG.reviewPublication;
+    expect(rp, 'DEFAULT_CONFIG.reviewPublication must stay "auto" — "full" would publish full reports on public repos by default').toBe('auto');
   });
 });
 

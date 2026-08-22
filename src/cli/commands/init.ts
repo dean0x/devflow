@@ -1688,12 +1688,15 @@ export const initCommand = new Command('init')
     // commands — it is a one-time setup action. See D1 in feature-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
-      const existingConfig = await readConfigIfPresent(gitRoot);
       await writeConfig(gitRoot, {
         memory: memoryEnabled,
         learning: learningEnabled,
         knowledge: knowledgeEnabled,
-        reviewPublication: existingConfig?.reviewPublication ?? 'auto',
+        // reviewPublication has no prompt, so it is carried over from the
+        // reset-gated snapshot rather than re-read from disk: seedConfig is null
+        // under --reset, which is what collapses the field back to 'auto' with
+        // every other feature (PF-015 — read the post-gate binding, not the file).
+        reviewPublication: seedConfig?.reviewPublication ?? 'auto',
       });
 
       // Drain orphaned queue files when memory is disabled so stale turns
