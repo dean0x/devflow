@@ -135,12 +135,12 @@ Combine into: user needs, similar features, constraints, failure modes"
 
 #### Phase 5: Gap Analysis (Parallel)
 
-**Produces:** GAP_OUTPUTS, COMPLIANCE_ENABLED
+**Produces:** GAP_OUTPUTS, COMPLIANCE_SKILL_INSTALLED
 **Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
 {compliance_gate()}
 
-**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_ENABLED**):
+**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_SKILL_INSTALLED**):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -148,9 +148,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 | architecture | Pattern violations, missing integration points, layering issues |
 | security | Auth gaps, input validation, secret handling, OWASP |
 | performance | N+1 patterns, missing caching, concurrency, query patterns |
-| compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_ENABLED) |
+| compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_SKILL_INSTALLED) |
 
-**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_ENABLED**; same 4/5 plus):
+**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_SKILL_INSTALLED**; same 4/5 plus):
 
 | Focus | What it checks |
 |-------|----------------|
@@ -399,23 +399,42 @@ Required sections:
 
 ### Reviewer Focus Areas
 {areas needing careful review, with reasons}
+
+### Related Issues
+Closes #{issue number}
 ```
 
-**Create GitHub issue (optional):**
+**Create or enrich GitHub issue:**
 
-If the feature does not already have a GitHub issue:
-- Create via `gh issue create`
-- Title: feature name
-- Body: problem statement, user stories, v1 scope, acceptance criteria, link to design artifact path
-- Labels: feature, priority level
+When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
 
-Skip if issue number was provided as input.
+When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a GitHub issue for this plan?" — skip the spawn entirely if the user declines.
+
+Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: ensure-traceable-issue
+ISSUE_INPUT: {issue_number_from_arguments if /plan invoked with #N, else omit}
+TASK_DESCRIPTION: {Gate 0 confirmed scope — one-line title}
+INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
+REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
+PLAN_ARTIFACT_PATH: {the design artifact path written above}
+LABELS: feature
+The Git agent will create a GitHub issue (or enrich an existing one) using the D3 template,
+post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.
+Return the issue number."
+```
+
+Capture `ISSUE_NUMBER` from the Git agent output for use in the completion report and the `/implement` hand-off suggestion.
+
+Surface any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent output in the report.
 
 **Report:**
 
 Display completion summary:
 - Design artifact path
-- Issue URL (if created or if pre-existing)
+- Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Suggested next step: `/implement \{artifact-path\}` or `/implement #\{issue-number\}`
@@ -447,7 +466,7 @@ Display completion summary:
 │  │  ├─ Design agent: architecture
 │  │  ├─ Design agent: security
 │  │  ├─ Design agent: performance
-│  │  ├─ Design agent: compliance (plugin-gated — only when COMPLIANCE_ENABLED)
+│  │  ├─ Design agent: compliance (only when COMPLIANCE_SKILL_INSTALLED)
 │  │  ├─ Design agent: consistency (multi-issue only)
 │  │  └─ Design agent: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis

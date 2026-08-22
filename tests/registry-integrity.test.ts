@@ -77,7 +77,10 @@ describe('Guard 1 (forward): every declared asset exists on disk', () => {
 
 describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin', () => {
   it('every dir in src/assets/skills/ is declared in DEVFLOW_PLUGINS', async () => {
-    const referencedSkills = new Set(getAllSkillNames());
+    // Union FEATURE_OWNED skills — compliance asset stays in src/assets/skills/ but is
+    // managed by the feature system, not any plugin (step 1.5 de-registration).
+    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    const referencedSkills = new Set([...getAllSkillNames(), 'compliance']);
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
 
     const orphans = skillDirs.filter(dir => !referencedSkills.has(dir));
@@ -104,7 +107,10 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
   });
 
   it('every file in src/assets/rules/ is declared in DEVFLOW_PLUGINS', async () => {
-    const referencedRules = new Set(getAllRuleNames());
+    // Union FEATURE_OWNED rules — compliance rule stays in src/assets/rules/ but is
+    // managed by the feature system, not any plugin (step 1.5 de-registration).
+    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    const referencedRules = new Set([...getAllRuleNames(), 'compliance']);
     const ruleFiles = await fs.readdir(path.join(ASSETS_DIR, 'rules'));
 
     const orphans = ruleFiles
@@ -260,6 +266,10 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
   // Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
   const SPAWN_RE = /subagent_type[=:]\s*"([^"]+)"/gi;
 
+  // Also matches agentType: "Name" (used by dynamic-* Workflow commands).
+  // Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
+  const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
+
   // Built-in agent not backed by a src/assets/agents/ file — excluded from all checks.
   const EXCLUDED_AGENTS_NORMALIZED = new Set(['explore']);
 
@@ -305,15 +315,20 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
         continue; // dist file absent — Guard 4 dist-check catches this
       }
 
-      // Collect all spawned agent names (normalized, deduplicated)
+      // Collect all spawned agent names (normalized, deduplicated).
+      // Harvest both subagent_type= / subagent_type: AND agentType: so that dynamic-*
+      // Workflow commands (which use agentType) are covered without a blanket exemption.
       const spawned = new Set<string>();
       for (const m of content.matchAll(SPAWN_RE)) {
         const norm = normalize(m[1]);
         if (!EXCLUDED_AGENTS_NORMALIZED.has(norm)) spawned.add(norm);
       }
+      for (const m of content.matchAll(AGENT_TYPE_RE)) {
+        const norm = normalize(m[1]);
+        if (!EXCLUDED_AGENTS_NORMALIZED.has(norm)) spawned.add(norm);
+      }
 
-      // If the command uses no subagent_type syntax at all, skip both checks
-      // (it uses a different spawn mechanism, e.g. agentType in dynamic-* commands)
+      // If the command uses no known spawn syntax at all, skip both checks.
       if (spawned.size === 0) continue;
 
       const declaredAgents = new Set(plugin.agents.map(normalize));
@@ -336,10 +351,11 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
     // Reverse: declared → spawned (per-plugin aggregate).
     // Checks that each declared agent is spawned in AT LEAST ONE of the plugin's
     // compiled commands — not necessarily every command.
-    // Naturally skips plugins that use only agentType: syntax (never entered the map above).
+    // Both subagent_type and agentType are now harvested, so dynamic-* agents that use
+    // agentType (Workflow runtime) are covered without a blanket plugin exemption.
     for (const plugin of DEVFLOW_PLUGINS) {
       const aggregate = pluginAggregateSpawned.get(plugin.name);
-      if (aggregate === undefined) continue; // no subagent_type syntax in any command — skip
+      if (aggregate === undefined) continue; // no known spawn syntax in any command — skip
 
       const declaredAgents = new Set(plugin.agents.map(normalize));
       for (const agentNorm of declaredAgents) {
@@ -354,6 +370,118 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
     expect(
       violations,
       `Agent spawn mismatches (fix agents[] in src/core/plugins.ts):\n  ${violations.join('\n  ')}`,
+    ).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard 6: Build-gated operation contract — OPERATION: values in Git-agent
+//   spawn blocks ↔ ## Operation: headings in git.md
+//
+// Forward:  every OPERATION: X inside a Git-agent spawn block in a compiled
+//           command is declared as `## Operation: X` in git.md.
+// Reverse:  every `## Operation: X` in git.md is referenced by name in at
+//           least one compiled command, OR is listed in INTERNAL_OPS.
+//
+// INTERNAL_OPS: operations that are invoked by other git.md operations rather
+// than directly from a compiled command. Each entry must have a comment
+// explaining why it is exempt from the reverse caller check.
+// ---------------------------------------------------------------------------
+
+describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: declarations', () => {
+  const distCommandsDir = path.join(ROOT, 'dist', 'commands');
+  const gitAgentPath = path.join(ROOT, 'src', 'assets', 'agents', 'git.md');
+
+  // Operations that are not directly invoked from compiled commands.
+  // Each entry must have a comment explaining the exemption.
+  const INTERNAL_OPS = new Set([
+    // Invoked by setup-task step 1b when .devflow/conventions.md is absent — internal
+    // to the Git agent; no compiled command calls it directly.
+    'learn-conventions',
+    // Declared for multi-issue planning flows; not yet wired to any compiled command.
+    // A future command (e.g. a batch-plan flow) will call it directly when built.
+    'fetch-issues-batch',
+  ]);
+
+  it('spawned OPERATION: values match git.md declarations (fail-loud when dist absent)', async () => {
+    const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
+    // FAIL-LOUD: a guard that silently skips on a missing build artifact is not a guard.
+    expect(
+      distExists,
+      'dist/commands/ is absent — run `npm run build:mds` first (Guard 6 cannot verify without compiled files)',
+    ).toBe(true);
+
+    // --- Parse declared operations from git.md ---
+    const gitContent = await fs.readFile(gitAgentPath, 'utf-8');
+    const declaredOps = new Set<string>();
+    for (const m of gitContent.matchAll(/^## Operation: (\S+)/gm)) {
+      declaredOps.add(m[1]);
+    }
+    expect(
+      declaredOps.size,
+      'git.md must declare at least one ## Operation: heading — is the file empty or renamed?',
+    ).toBeGreaterThan(0);
+
+    // --- Scan compiled commands ---
+    const distFiles = await fs.readdir(distCommandsDir);
+    const violations: string[] = [];
+
+    // Forward check state: ops seen in Git-agent spawn blocks across all compiled commands.
+    const calledOpsInGitBlocks = new Set<string>();
+
+    // Reverse check state: op names found anywhere in compiled command content.
+    // This catches both OPERATION: block calls and prose references (e.g. "spawn Git with
+    // `gather-release-evidence` operation"). Operations that genuinely have NO reference
+    // in any compiled command must be in INTERNAL_OPS.
+    const opNameFoundInAnyFile = new Map<string, boolean>();
+    for (const op of declaredOps) opNameFoundInAnyFile.set(op, false);
+
+    for (const file of distFiles.filter(f => f.endsWith('.md'))) {
+      const content = await fs.readFile(path.join(distCommandsDir, file), 'utf-8');
+
+      // Reverse check: mark any declared op whose name appears anywhere in this file.
+      for (const op of declaredOps) {
+        if (content.includes(op)) opNameFoundInAnyFile.set(op, true);
+      }
+
+      // Forward check: scan code fence blocks for Git-agent spawns.
+      // A fence is a Git-agent block if it contains Agent(subagent_type="Git") or agentType: "Git".
+      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
+      let match;
+      while ((match = fencePattern.exec(content)) !== null) {
+        const block = match[0];
+        const isGitBlock =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!isGitBlock) continue;
+
+        // Parse OPERATION: lines (at start of line within the fence).
+        for (const opMatch of block.matchAll(/^OPERATION: (\S+)/gm)) {
+          const opName = opMatch[1];
+          calledOpsInGitBlocks.add(opName);
+          if (!declaredOps.has(opName)) {
+            violations.push(
+              `${file}: Git-agent spawn calls OPERATION: ${opName} but git.md has no ## Operation: ${opName} heading`,
+            );
+          }
+        }
+      }
+    }
+
+    // Reverse check: every declared op must be referenced in at least one compiled
+    // command (by name, in any context) or be explicitly internal.
+    for (const op of declaredOps) {
+      if (!opNameFoundInAnyFile.get(op) && !INTERNAL_OPS.has(op)) {
+        violations.push(
+          `git.md declares ## Operation: ${op} but no compiled command references it ` +
+          `(add to INTERNAL_OPS if this op is invoked internally by another git.md operation)`,
+        );
+      }
+    }
+
+    expect(
+      violations,
+      `Operation contract violations (fix src/assets/agents/git.md or caller commands):\n  ${violations.join('\n  ')}`,
     ).toHaveLength(0);
   });
 });

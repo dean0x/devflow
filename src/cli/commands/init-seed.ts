@@ -18,6 +18,7 @@ import { resolveExistingViewMode, FLAG_REGISTRY, type ClaudeCodeFlag, type ViewM
 import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
 import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
+import { type ComplianceFeatureState } from '../../core/compliance.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,12 @@ export interface FeatureSeed {
   rules: boolean;
   /** External model routing. Advanced-init only; never part of Recommended defaults. */
   proxy: boolean;
+  /**
+   * Compliance feature seed — seeded from the manifest (manifest-group, like proxy).
+   * Full init wiring (framework multi-select, CLI toggle) is a later phase.
+   * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
+   */
+  compliance: ComplianceFeatureState;
 }
 
 /** Registry defaults — all features enabled except proxy (advanced-only, off by default). */
@@ -42,6 +49,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   learning: true,
   rules: true,
   proxy: false,
+  compliance: { enabled: false, frameworks: [] },
 };
 
 /** The complete initial state passed from the hoisted-reads block to init prompts. */
@@ -72,12 +80,17 @@ export function resolveSeedFeatures(
   manifest: ManifestData | null,
   projectConfig: FeatureConfig | null,
 ): FeatureSeed {
-  // ambient/hud/rules/proxy: manifest is the source; fall back to registry defaults.
-  // proxy follows the manifest group (like ambient) per ADR-001 — it is NOT config.json-gated.
+  // ambient/hud/rules/proxy/compliance: manifest is the source; fall back to registry defaults.
+  // proxy and compliance follow the manifest group (like ambient) per ADR-001 — NOT config.json-gated.
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
   const proxy = manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy;
+  // Return a fresh object so callers never hold a reference to FEATURE_DEFAULTS.compliance.
+  // Without the spread, `manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance` returns
+  // the module-level default by reference — downstream mutation would corrupt it process-wide.
+  const rawCompliance = manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance;
+  const compliance = { ...rawCompliance, frameworks: [...rawCompliance.frameworks] };
 
   // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
   // Helper eliminates the repeated projectConfig !== null ternary pattern.
@@ -90,7 +103,7 @@ export function resolveSeedFeatures(
   const knowledge = fromConfig('knowledge');
   const learning = fromConfig('learning');
 
-  return { ambient, memory, hud, knowledge, learning, rules, proxy };
+  return { ambient, memory, hud, knowledge, learning, rules, proxy, compliance };
 }
 
 /**
@@ -288,5 +301,6 @@ export function applyCliToggles(
     learning: toggles.learning ?? base.learning,
     rules: toggles.rules ?? base.rules,
     proxy: toggles.proxy ?? base.proxy,
+    compliance: toggles.compliance ?? base.compliance,
   };
 }

@@ -186,7 +186,7 @@ Auto-resolved decisions: ${JSON.stringify(resolved && resolved.autoResolved)}
 Decisions needed: ${JSON.stringify(resolved && resolved.decisionsNeeded)}
 Output directory: ${OUTDIR}
 
-For each ticket, write ${OUTDIR}/\{ticket-slug\}-plan.md containing:
+For each ticket, write ${OUTDIR}/{ticket-slug}-plan.md containing:
 - ## Implementation Plan
 - The plan body (incorporate cross-plan amendments)
 - ## Acceptance Criteria (numbered, positive + negative)

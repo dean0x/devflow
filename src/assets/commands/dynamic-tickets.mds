@@ -161,7 +161,7 @@ For each ticket in the revised set, write a file to ${OUTDIR}/{slug}.md using th
 Then write ${OUTDIR}/tracking-issue.md:
 - H1 title: initiative name + "(N tickets)"
 - ## Context: 1–2 paragraphs — what this initiative delivers and why
-- ## Execution order: wave-structured checklist, one line per ticket with wave + dependency note
+- ## Execution order: wave-structured checklist, one line per ticket with wave + dependency note (format: "- [ ] **[Wave N]** Ticket Name — one-line description")
 - ## Ticket index: one line per ticket — what it delivers, in user terms
 - ## Explicitly excluded: items the initiative deliberately excludes (decisions, not oversights)
 - ## Invariants: cross-cutting constraints that bind every ticket

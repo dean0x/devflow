@@ -72,7 +72,9 @@ describe('no orphaned declarations', () => {
 
   it('all skills in src/assets/skills/ are referenced by at least one plugin', async () => {
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
-    const referencedSkills = new Set(getAllSkillNames());
+    // Union FEATURE_OWNED: compliance asset stays but is feature-managed (step 1.5)
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const referencedSkills = new Set([...getAllSkillNames(), 'compliance']);
 
     for (const dir of skillDirs) {
       expect(referencedSkills.has(dir), `src/assets/skills/${dir} is not referenced by any plugin`).toBe(true);

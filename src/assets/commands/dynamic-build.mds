@@ -4,6 +4,7 @@ argument-hint: "[ticket | issue-url | plan-doc]"
 output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
@@ -42,6 +43,13 @@ Before authoring, verify:
 ### Pre-authoring setup
 
 Before you write the workflow script:
+
+**0. Resolve compliance context**
+
+{compliance_gate()}
+Reuse this result for every ticket in the wave.
+
+When authoring the workflow script, include the resolved value as a constant: `COMPLIANCE = COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"`. Pass `COMPLIANCE: \{COMPLIANCE\}` to Git agent spawns (setup-task and branch-creation). When compliance-gated (`COMPLIANCE_SKILL_INSTALLED === true`), branch names follow the `.devflow/conventions.md` Branch Naming convention if that file exists; degrade gracefully if absent.
 
 **1. Apply decisions context**
 
@@ -92,15 +100,16 @@ const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLow
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
+const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied; dynamic-wave threads in the tracking-issue number
+const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
-// Phase 1: Git setup
+// Phase 1: Git setup — declare the operation; the agent owns the process
 const gitSetup = await phase("setup", () =>
-  agent(`Set up the git branch for this ticket:
-- Create branch: ${BRANCH} from current HEAD
-- Ensure working tree is clean before starting
-- Report the base commit SHA
-
-Ticket: ${TICKET}`, { agentType: "Git" })
+  agent(`OPERATION: setup-task
+BASE_BRANCH: ${args.baseBranch || "HEAD"}
+TASK_DESCRIPTION: ${TICKET}
+COMPLIANCE: ${COMPLIANCE}
+${ISSUE_NUMBER && ISSUE_NUMBER !== "(none)" ? "ISSUE_INPUT: " + ISSUE_NUMBER : ""}`.trim(), { agentType: "Git" })
 );
 
 // Phase 2: Implement
@@ -113,6 +122,8 @@ ${PLAN ? `Implementation plan:\n${PLAN}` : "No plan provided — use best judgme
 
 Relevant architectural decisions (apply devflow:apply-decisions algorithm):
 ${DECISIONS_CONTEXT}
+
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 
 When you build or run tests to verify your work, use your "Long-running commands" discipline (background-Bash + Monitor poll) for anything that may run silent >120s, and prefer package-scoped commands.
 
@@ -134,6 +145,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the validation failures on branch ${BRANCH}:
 ${validation.details}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -175,6 +187,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
       // after the review loop is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluate agent panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Code" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -191,6 +204,7 @@ Cover: functionality, API contracts, performance. Report: PASS or FAIL per scena
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Code" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -316,6 +330,7 @@ Return exactly: {"sha": "<40-hex-commit-sha>"}`, { agentType: "Git" });
         const r = await agent(`Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
         chunkResults.push({ chunk, result: r });
@@ -365,6 +380,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the final validation failures on branch ${BRANCH}:
 ${validation.details}
+ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -476,10 +492,10 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      const engineResult = await runSingleTicketEngine(ticketId, INTEGRATION_BRANCH, plans, DECISIONS_CONTEXT);
+      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
       if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
-        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
+        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
       } else {
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
       }

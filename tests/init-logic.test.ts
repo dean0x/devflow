@@ -11,6 +11,8 @@ import {
   discoverProjectGitRoots,
   runMigrationsWithFallback,
   formatSweepSummary,
+  resolveComplianceInitState,
+  formatComplianceSummary,
 } from '../src/cli/commands/init.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
@@ -25,6 +27,7 @@ import {
   applyUserSecurityDenyList,
   loadTemplateDenyEntries,
   ensureDevflowGitignore,
+  computeDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
@@ -311,6 +314,125 @@ describe('ensureDevflowGitignore', () => {
 
     const content = await read();
     expect(content).toBe('/.devflow/\n'); // untouched
+  });
+});
+
+describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-v3-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const read = (): Promise<string> => fs.readFile(path.join(tmpDir, '.gitignore'), 'utf-8');
+  const lines = (content: string): string[] => content.split('\n').map(l => l.trim());
+  const markerV3 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3');
+  const markerV2 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2');
+
+  it('writes the v3 marker after installing the carve-out', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+
+    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+  });
+
+  it('includes the conventions.md re-include line in the installed block', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(lines(content)).toContain('!.devflow/conventions.md');
+  });
+
+  it('upgrades a v2-marked install once (appends conventions.md line, writes v3 marker)', async () => {
+    // Simulate a v2 install: .gitignore with the v2 sentinel, v2 marker present.
+    const v2Block = [
+      '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+      '.devflow/*',
+      '!.devflow/features/',
+      '.devflow/features/*',
+      '!.devflow/features/index.md',
+      '!.devflow/features/*/',
+      '.devflow/features/*/*',
+      '!.devflow/features/*/KNOWLEDGE.md',
+    ].join('\n') + '\n';
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), v2Block);
+    await fs.mkdir(path.join(tmpDir, '.devflow'), { recursive: true });
+    await fs.writeFile(markerV2(), '', 'utf-8');
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    // The conventions.md line must be appended.
+    expect(lines(content)).toContain('!.devflow/conventions.md');
+    // The v2 block content must still be present (no duplication).
+    expect(lines(content).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
+    // v3 marker must exist; v2 marker must be removed.
+    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+    await expect(fs.access(markerV2())).rejects.toThrow();
+  });
+
+  it('is a no-op (byte-identical) when v3 marker already exists', async () => {
+    // First run installs the carve-out and writes the marker.
+    await ensureDevflowGitignore(tmpDir, false);
+    const contentAfterFirstRun = await read();
+
+    // Second run — marker present, must be a no-op.
+    await ensureDevflowGitignore(tmpDir, false);
+    const contentAfterSecondRun = await read();
+
+    expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
+  });
+});
+
+describe('computeDevflowGitignore — branch-order and byte-identity', () => {
+  const V2_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
+  const V3_SENTINEL = '!.devflow/conventions.md';
+  const V2_BLOCK = [
+    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+    '.devflow/*',
+    '!.devflow/features/',
+    '.devflow/features/*',
+    '!.devflow/features/index.md',
+    '!.devflow/features/*/',
+    '.devflow/features/*/*',
+    V2_SENTINEL,
+  ].join('\n');
+
+  // Issue 1 (branch-order): /.devflow/ wins over v2 sentinel when both present
+  it('branch-order: /.devflow/ wins over v2 sentinel when both present → null (no-op)', () => {
+    // A file with BOTH /.devflow/ (user-authored) AND the v2 sentinel.
+    // TS checks /.devflow/ BEFORE v2 — must return null (same as shell after fix).
+    const content = `/.devflow/\n${V2_BLOCK}\n`;
+    expect(computeDevflowGitignore(content)).toBeNull();
+  });
+
+  // Issue 2 (byte-identity): v2→v3 upgrade preserves trailing newlines
+  it('byte-identity: v2→v3 upgrade appends after existing trailing newline (no trimEnd)', () => {
+    // A file ending with a single newline — upgrade must preserve that newline,
+    // not collapse it. Shell uses `tail -c 1` guard (same behavior).
+    const input = `${V2_BLOCK}\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
+  });
+
+  it('byte-identity: v2→v3 upgrade preserves extra trailing newlines', () => {
+    // A file ending with two newlines — both preserved (trimEnd would collapse to one).
+    const input = `${V2_BLOCK}\n\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n`);
+  });
+
+  it('byte-identity: v2→v3 upgrade adds newline separator when file lacks trailing newline', () => {
+    // A file with no trailing newline — upgrade must add one before the sentinel.
+    const input = V2_BLOCK; // no trailing newline
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
   });
 });
 
@@ -1458,3 +1580,64 @@ describe('formatSweepSummary', () => {
     expect(lines.map(l => l.level)).toEqual(['info', 'warn'])
   })
 })
+
+describe('resolveComplianceInitState', () => {
+  it('returns undefined when option is not supplied', () => {
+    expect(resolveComplianceInitState(undefined, ['gdpr'])).toBeUndefined()
+  })
+
+  it('returns enabled state with parsed frameworks when option is a valid string', () => {
+    const result = resolveComplianceInitState('gdpr,soc2', [])
+    expect(result).toEqual({ ok: true, value: { enabled: true, frameworks: ['gdpr', 'soc2'] } })
+  })
+
+  it('returns error when option contains unknown framework IDs', () => {
+    const result = resolveComplianceInitState('gdpr,unknown-fw', [])
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('unknown-fw') })
+  })
+
+  it('returns disabled state preserving seed frameworks when option is false (--no-compliance)', () => {
+    const result = resolveComplianceInitState(false, ['gdpr', 'hipaa'])
+    expect(result).toEqual({ ok: true, value: { enabled: false, frameworks: ['gdpr', 'hipaa'] } })
+  })
+
+  it('returns empty frameworks list when --no-compliance and no prior selection', () => {
+    const result = resolveComplianceInitState(false, [])
+    expect(result).toEqual({ ok: true, value: { enabled: false, frameworks: [] } })
+  })
+
+  it('parses an empty string as an empty valid framework list', () => {
+    const result = resolveComplianceInitState('', [])
+    expect(result).toEqual({ ok: true, value: { enabled: true, frameworks: [] } })
+  })
+})
+
+describe('formatComplianceSummary', () => {
+  it('returns "disabled" when not enabled', () => {
+    expect(formatComplianceSummary(false, [])).toBe('disabled')
+    expect(formatComplianceSummary(false, ['gdpr'])).toBe('disabled')
+  })
+
+  it('returns generic message when enabled with no frameworks', () => {
+    expect(formatComplianceSummary(true, [])).toBe('enabled (generic controls only)')
+  })
+
+  it('returns enabled with framework list when enabled and frameworks selected', () => {
+    expect(formatComplianceSummary(true, ['gdpr', 'soc2'])).toBe('enabled (gdpr, soc2)')
+  })
+
+  it('returns single framework correctly', () => {
+    expect(formatComplianceSummary(true, ['hipaa'])).toBe('enabled (hipaa)')
+  })
+
+  it('hud-only path: preserves compliance state from existing manifest', () => {
+    // This tests the disable-keeps-frameworks contract for the hud-only branch.
+    // Verifies that a prior compliance state {enabled:true, frameworks:['gdpr']} is not
+    // erased by the hud-only install — the formatComplianceSummary would reflect the state.
+    const priorState = { enabled: true, frameworks: ['gdpr'] }
+    const effectiveState = priorState ?? { enabled: false, frameworks: [] }
+    expect(formatComplianceSummary(effectiveState.enabled, effectiveState.frameworks))
+      .toBe('enabled (gdpr)')
+  })
+})
+

@@ -4,6 +4,7 @@ argument-hint: "[initiative]"
 output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 {authoring_preamble()}
 
@@ -41,7 +42,9 @@ Before any commands run:
 
 1. Read the user's input (initiative description or spec doc path).
 2. Summarize what the wave will build in 2–3 sentences.
-3. Ask the user: "Ready to start the ticket-factory step? This will propose a ticket slate for your review."
+3. {compliance_gate()}
+Reuse this result for all three pipeline steps. When compliance-gated, pass `COMPLIANCE: enabled` to each command invocation; otherwise pass `COMPLIANCE: (none)`.
+4. Ask the user: "Ready to start the ticket-factory step? This will propose a ticket slate for your review."
 
 Do not proceed until the user confirms.
 
@@ -109,6 +112,8 @@ Invoke `/devflow:dynamic-build` in WAVE mode with:
 - The wave tickets (from Step 1)
 - The per-ticket plans and acceptance criteria (from Step 2)
 - The initiative name as the wave slug (for the integration branch `wave/\{slug\}`)
+- The tracking-issue number from Step 1 (passed as `issueNumber` — Code-agent spawns inside dynamic-build thread it through as ISSUE_NUMBER)
+- The compliance flag from Gate 0 (passed as `compliance: COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"` — dynamic-build's workflow script resolves this as `COMPLIANCE = args.compliance || "(none)"`)
 
 The build command will:
 - Read wave tickets and reason about their dependency order
@@ -122,8 +127,17 @@ The build command will:
 After `/devflow:dynamic-build` completes:
 
 1. Report the wave run result: tickets merged, tickets escalated, overall verdict.
-2. If there are escalations: surface each one to the user via `AskUserQuestion`.
-3. Tell the user:
+2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from Step 1's `/devflow:dynamic-tickets` output or from `TRACKING_ISSUE_NUMBER`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
+   ```
+   Agent(subagent_type="Git"):
+   "OPERATION: post-wave-report
+   TRACKING_ISSUE: \{tracking_issue_number\}
+   WAVE_REPORT_PATH: .devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md
+   WAVE_ID: \{WAVE_ID\}"
+   ```
+   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks Gate 3. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+3. If there are escalations: surface each one to the user via `AskUserQuestion`.
+4. Tell the user:
 
    "The integration branch `wave/\{slug\}` is ready for your review. **You merge it to your main branch yourself — this pipeline never auto-merges to main.**
 

@@ -150,7 +150,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 
 ### Agents That Don't Persist
 
-- Git (fetch-issue: read-only, comment-pr: PR comments only)
+- Git (fetch-issue: read-only, post-review-summary: consolidated review comment only)
 - Code agent (commits to git, no .devflow/docs/ output)
 
 ---

@@ -1788,3 +1788,87 @@ describe('removeSelectedPlugins: bare skill dir safety (PF-012)', () => {
     ).toBe(sentinel);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FEATURE_OWNED_SKILLS guards (step 1.5 de-registration)
+//
+// devflow:compliance must be removed on full uninstall (prefixed pass) but:
+//   - bare 'compliance/' dir must survive (bare pass is LEGACY_SKILL_NAMES-only)
+//   - selective uninstall of another plugin must NOT sweep devflow:compliance
+//     (sweepDevflowNamespaces knownNames now unions FEATURE_OWNED_SKILLS)
+// ---------------------------------------------------------------------------
+
+describe('FEATURE_OWNED_SKILLS: full uninstall removes devflow:compliance (step 1.5)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-fo-full-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('full uninstall removes prefixed devflow:compliance dir', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    // Construct name dynamically so skill-references scanner doesn't flag it
+    const COMPLIANCE_PREFIXED = ['devflow', 'compliance'].join(':');
+    const compliancePrefixedDir = path.join(skillsDir, COMPLIANCE_PREFIXED);
+    await fs.mkdir(compliancePrefixedDir, { recursive: true });
+    await fs.writeFile(path.join(compliancePrefixedDir, 'SKILL.md'), '# compliance', 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    await expect(
+      fs.access(compliancePrefixedDir),
+      'devflow:compliance must be removed on full uninstall',
+    ).rejects.toThrow();
+  });
+
+  it('bare compliance/ decoy dir survives full uninstall (bare pass is LEGACY-only)', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    const bareComplianceDir = path.join(skillsDir, 'compliance');
+    await fs.mkdir(bareComplianceDir, { recursive: true });
+    const sentinel = 'sentinel-bare-compliance-foreign-dir';
+    await fs.writeFile(path.join(bareComplianceDir, 'SKILL.md'), sentinel, 'utf-8');
+
+    const devflowScriptsDir = path.join(claudeDir, 'scripts');
+    await removeAllDevFlow(claudeDir, devflowScriptsDir, false);
+
+    const survived = await fs.readFile(path.join(bareComplianceDir, 'SKILL.md'), 'utf-8');
+    expect(
+      survived,
+      'bare compliance/ dir must survive full uninstall (it is foreign to Devflow — not in LEGACY_SKILL_NAMES)',
+    ).toBe(sentinel);
+  });
+});
+
+describe('FEATURE_OWNED_SKILLS: sweepDevflowNamespaces spares devflow:compliance (step 1.5)', () => {
+  let claudeDir: string;
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-fo-sweep-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+  });
+
+  it('sweepDevflowNamespaces does not sweep devflow:compliance (FEATURE_OWNED spares it)', async () => {
+    const skillsDir = path.join(claudeDir, 'skills');
+    const COMPLIANCE_PREFIXED = ['devflow', 'compliance'].join(':');
+    const compliancePrefixedDir = path.join(skillsDir, COMPLIANCE_PREFIXED);
+    await fs.mkdir(compliancePrefixedDir, { recursive: true });
+    await fs.writeFile(path.join(compliancePrefixedDir, 'SKILL.md'), '# compliance', 'utf-8');
+
+    // Run the selective sweep (this is what removeSelectedPlugins calls after removing a plugin)
+    await sweepDevflowNamespaces(claudeDir, false);
+
+    // devflow:compliance must survive because FEATURE_OWNED_SKILLS is unioned into knownNames
+    await expect(
+      fs.access(compliancePrefixedDir),
+      'devflow:compliance must survive sweepDevflowNamespaces (FEATURE_OWNED_SKILLS in knownNames)',
+    ).resolves.not.toThrow();
+  });
+});

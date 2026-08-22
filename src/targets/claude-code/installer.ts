@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
 import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
@@ -428,9 +428,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // (avoids PF-012: those lists are deletion manifests for pre-namespace paths and
   // must not be modified). Shadow dirs (~/.devflow/skills/) are keyed by bare
   // registry name and are unaffected by this sweep.
+  // knownNames unions FEATURE_OWNED_SKILLS so feature-owned skills (e.g. devflow:compliance)
+  // are never swept here. Their lifecycle is managed by convergeComplianceArtifacts, which
+  // runs after installViaFileCopy in init.ts. Before I09 the compliance skill was swept and
+  // then re-materialized by converge, creating a false-orphan report on every install.
   recordSweep(report, 'skill', await sweepOrphanedAssets(
     path.join(claudeDir, 'skills'),
-    new Set(getAllSkillNames()),
+    new Set([...getAllSkillNames(), ...FEATURE_OWNED_SKILLS]),
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   ));
 

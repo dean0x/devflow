@@ -147,14 +147,40 @@ const COMMAND_REFS = new Set([
 ]);
 
 /**
+ * HTML comment marker tokens that share the devflow: prefix but are neither skills
+ * nor commands. Examples:
+ *   <!-- devflow:review-summary cycle:{N} -->
+ *   <!-- devflow:wave-report wave:{ID} -->
+ *   <!-- devflow:shipped v{VERSION} -->
+ *   <!-- devflow:resolution-summary -->
+ *
+ * These legitimately appear in compiled command files and test infrastructure, but
+ * are NOT valid in agent frontmatter or skill cross-reference checks — keep those
+ * contexts strict by using filterNonSkillRefs without this set.
+ */
+const MARKER_REFS = new Set([
+  'review-summary',
+  'wave-report',
+  'shipped',
+  'resolution-summary',
+]);
+
+/**
  * Plugin names (without devflow- prefix) that might appear as devflow:NAME
  * references in documentation but are not skills.
  */
 const PLUGIN_NAMES = new Set(DEVFLOW_PLUGINS.map(p => p.name.replace(/^devflow-/, '')));
 
-/** Filter a list of extracted names: remove command refs and plugin-name-only refs. */
-function filterNonSkillRefs(names: string[]): string[] {
-  return names.filter(name => !COMMAND_REFS.has(name) && !PLUGIN_NAMES.has(name));
+/**
+ * Filter a list of extracted names: remove command refs, plugin-name-only refs,
+ * and optionally an extra allowed set (e.g. MARKER_REFS for contexts where HTML
+ * markers legitimately appear — compiled commands, test infrastructure).
+ * Strict callers omit extraAllowed (agent frontmatter, skill cross-references).
+ */
+function filterNonSkillRefs(names: string[], extraAllowed?: ReadonlySet<string>): string[] {
+  return names.filter(
+    name => !COMMAND_REFS.has(name) && !(extraAllowed?.has(name)) && !PLUGIN_NAMES.has(name),
+  );
 }
 
 // Format 1 (plugin manifests) removed — plugin.json files were deleted in the src/ restructure.
@@ -207,7 +233,10 @@ describe('Format 2: Agent frontmatter skills', () => {
 
 describe('Format 3: Install path references', () => {
   it('all install paths in shared agents are canonical', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
+    // code.md references ~/.claude/skills/devflow:compliance/SKILL.md for the conditional
+    // compliance gate. Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const agentsDir = path.join(ROOT, 'src', 'assets', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
@@ -231,7 +260,10 @@ describe('Format 3: Install path references', () => {
   });
 
   it('all install paths in compiled command files are canonical', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration
+    // (compiled commands reference devflow:compliance/SKILL.md for the compliance gate).
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const distCommandsDir = path.join(ROOT, 'dist', 'commands');
     // Fail-loud: requireDistFiles() throws when dist is absent — not a skip.
     const files = requireDistFiles();
@@ -382,7 +414,10 @@ describe('Format 5: Hook script skill references', () => {
 
 describe('Format 6: Compiled command file skill references', () => {
   it('all devflow:NAME references in dist/commands/*.md are canonical or command refs', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
+    // compiled commands reference devflow:compliance and it is no longer in PLUGIN_NAMES.
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const distCommandsDir = path.join(ROOT, 'dist', 'commands');
     // Fail-loud: requireDistFiles() throws when dist is absent — not a skip.
     const files = requireDistFiles();
@@ -391,7 +426,9 @@ describe('Format 6: Compiled command file skill references', () => {
       const filePath = path.join(distCommandsDir, file);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);
-      const skillRefs = filterNonSkillRefs(allRefs);
+      // MARKER_REFS allowed here: compiled commands embed HTML markers such as
+      // <!-- devflow:review-summary -->, <!-- devflow:shipped v... -->, etc.
+      const skillRefs = filterNonSkillRefs(allRefs, MARKER_REFS);
 
       for (const ref of skillRefs) {
         expect(
@@ -434,7 +471,10 @@ describe('Format 7: Documentation table skill references', () => {
 
 describe('Format 8: Skill cross-references within src/assets/skills/', () => {
   it('all devflow:NAME references in SKILL.md files are canonical or command refs', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
+    // gap-analysis/SKILL.md references devflow:compliance and it is no longer in PLUGIN_NAMES.
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const skillsDir = path.join(ROOT, 'src', 'assets', 'skills');
     const skillDirs = readdirSync(skillsDir);
 
@@ -460,7 +500,9 @@ describe('Format 8: Skill cross-references within src/assets/skills/', () => {
   });
 
   it('all devflow:NAME references in skill references/ files are canonical or command refs', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration.
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const skillsDir = path.join(ROOT, 'src', 'assets', 'skills');
     const skillDirs = readdirSync(skillsDir);
 
@@ -573,7 +615,10 @@ function collectTsFiles(dir: string, baseDir: string): string[] {
 
 describe('Test infrastructure skill references', () => {
   it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', () => {
-    const canonicalSkills = new Set(getAllSkillNames());
+    // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
+    // test files (e.g. build.test.ts) reference devflow:compliance in test descriptions.
+    // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
     const testsDir = path.join(ROOT, 'tests');
     const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
       // Exclude this file itself — it contains regex patterns and jsdoc that produce false positives
@@ -590,7 +635,9 @@ describe('Test infrastructure skill references', () => {
       const filePath = path.join(testsDir, relFile);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);
-      const skillRefs = filterNonSkillRefs(allRefs);
+      // MARKER_REFS allowed here: test files (e.g. build-mds.test.ts) assert that
+      // compiled commands contain HTML marker strings like devflow:review-summary.
+      const skillRefs = filterNonSkillRefs(allRefs, MARKER_REFS);
 
       for (const ref of skillRefs) {
         expect(

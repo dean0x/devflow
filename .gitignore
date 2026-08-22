@@ -54,3 +54,4 @@ install.log
 
 # Competitive analysis codenames (private)
 .competitive-codenames.json
+!.devflow/conventions.md

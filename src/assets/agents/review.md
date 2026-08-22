@@ -143,7 +143,7 @@ Report format for `{output_path}`:
 **{Issue}** - `file.ts:123`
 **Confidence**: {n}%
 - Problem: {description}
-- Fix: {suggestion with code}
+- Fix: {suggestion with code — mask any credential value per § Secret Handling in Findings}
 
 **{Issue Title} ({N} occurrences)** — Confidence: {n}%
 - `file1.ts:12`, `file2.ts:45`, `file3.ts:89`
@@ -176,6 +176,21 @@ Report format for `{output_path}`:
 **Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
 ```
 
+## Secret Handling in Findings
+
+When a finding involves a secret or credential value, cite `file:line` and the secret TYPE
+using one of the eight vocabulary slugs:
+`private-key`, `github-pat`, `github-token`, `aws-key`, `slack-token`,
+`api-key`, `google-api-key`, `secret-assignment`.
+
+Mask the value as: `{first ≤4 chars}…[REDACTED:{type}]`
+Example: `ghp_…[REDACTED:github-token]`
+
+Apply masking everywhere the value could appear — Problem text, Fix suggestions, and code fences.
+Never quote the full credential value, even inside a code block.
+The skip marker `[REDACTED:` is recognized by `redact-secrets.cjs` for idempotency;
+use the same prefix so values are not double-masked.
+
 ## Principles
 
 1. **Changed lines first** - Developer introduced these, they're responsible
@@ -202,4 +217,4 @@ Report format for `{output_path}`:
 | java | If .java files changed |
 | python | If .py files changed |
 | rust | If .rs files changed |
-| compliance | If devflow-compliance plugin installed (orchestrator-gated) |
+| compliance | If `~/.claude/skills/devflow:compliance/SKILL.md` exists and diff touches regulated surface |

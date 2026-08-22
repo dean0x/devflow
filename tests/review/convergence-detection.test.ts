@@ -61,39 +61,43 @@ describe('review.md — convergence inputs', () => {
 describe('code-review.md — convergence gate', () => {
   const content = loadFile('dist/commands/code-review.md')
 
-  it('has Step 0d-i (Load Prior Resolution)', () => {
-    expect(content).toContain('Step 0d-i')
+  it('has Step 0e-i (Load Prior Resolution)', () => {
+    expect(content).toContain('Step 0e-i')
     expect(content).toMatch(/[Ll]oad [Pp]rior [Rr]esolution/)
   })
 
-  it('has Step 0d-ii (Convergence Assessment)', () => {
-    expect(content).toContain('Step 0d-ii')
+  it('has Step 0e-ii (Convergence Assessment)', () => {
+    expect(content).toContain('Step 0e-ii')
     expect(content).toMatch(/[Cc]onvergence [Aa]ssessment/)
   })
 
-  it('Step 0d is after Step 0c and before Phase 1', () => {
-    const idx0c = content.indexOf('Step 0c')
+  it('convergence steps (0e-i, 0e-ii) are after Step 0d and before Phase 1', () => {
     const idx0d = content.indexOf('Step 0d')
+    const idx0ei = content.indexOf('Step 0e-i')
+    const idx0eii = content.indexOf('Step 0e-ii')
     const idxPhase1 = content.indexOf('### Phase 1:')
-    expect(idx0c).not.toBe(-1)
     expect(idx0d).not.toBe(-1)
+    expect(idx0ei).not.toBe(-1)
+    expect(idx0eii).not.toBe(-1)
     expect(idxPhase1).not.toBe(-1)
-    expect(idx0d).toBeGreaterThan(idx0c)
-    expect(idx0d).toBeLessThan(idxPhase1)
+    expect(idx0ei).toBeGreaterThan(idx0d)
+    expect(idx0eii).toBeGreaterThan(idx0d)
+    expect(idx0ei).toBeLessThan(idxPhase1)
+    expect(idx0eii).toBeLessThan(idxPhase1)
   })
 
-  it('Step 0d-ii documents fp_ratio formula with correct denominator', () => {
-    const step0d = extractSection(content, 'Step 0d-ii', '### Phase 1:')
+  it('Step 0e-ii documents fp_ratio formula with correct denominator', () => {
+    const step0d = extractSection(content, 'Step 0e-ii', '### Phase 1:')
     expect(step0d).toMatch(/fp_count\s*\/\s*\(fp_count\s*\+\s*fixed_count\s*\+\s*deferred_count\)/)
   })
 
-  it('Step 0d-i documents --full loading PRIOR_RESOLUTIONS', () => {
-    const step0d = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
+  it('Step 0e-i documents --full loading PRIOR_RESOLUTIONS', () => {
+    const step0d = extractSection(content, 'Step 0e-i', 'Step 0e-ii')
     expect(step0d).toContain('--full')
   })
 
-  it('Step 0d-i documents (none) default for first review', () => {
-    const step0d = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
+  it('Step 0e-i documents (none) default for first review', () => {
+    const step0d = extractSection(content, 'Step 0e-i', 'Step 0e-ii')
     expect(step0d).toContain('(none)')
   })
 
@@ -180,13 +184,13 @@ describe('Cross-cutting convergence consistency', () => {
     expect(synthesizeAgent).toMatch(/[Cc]onvergence/)
   })
 
-  it('--full documented in Step 0d-i of code-review', () => {
-    const crStep0di = extractSection(codeReview, 'Step 0d-i', 'Step 0d-ii')
+  it('--full documented in Step 0e-i of code-review', () => {
+    const crStep0di = extractSection(codeReview, 'Step 0e-i', 'Step 0e-ii')
     expect(crStep0di).toContain('--full')
   })
 
   it('no AskUserQuestion in convergence section of code-review', () => {
-    const crStep0dii = extractSection(codeReview, 'Step 0d-ii', '### Phase 1:')
+    const crStep0dii = extractSection(codeReview, 'Step 0e-ii', '### Phase 1:')
     expect(crStep0dii).not.toContain('AskUserQuestion')
   })
 })

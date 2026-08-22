@@ -48,11 +48,11 @@ you: add rate limiting to the /api/upload endpoint
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Always-on rules.** 13 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust), plus a global compliance rule when the devflow-compliance plugin is installed. Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
+**Always-on rules.** 13 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust), plus a compliance rule when compliance is enabled. Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md` or `devflow rules shadow <name>`.
 
 **Full lifecycle.** `/devflow:plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/devflow:implement`. `/devflow:implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/devflow:debug` investigates bugs with competing hypotheses in parallel. `/devflow:self-review` runs Simplify + Scrutinize quality passes.
 
-**Everything is composable.** 22 plugins (12 core + 10 optional). Install only what you need.
+**Everything is composable.** 21 plugins (12 core + 9 optional). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
@@ -62,9 +62,9 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-**Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when the devflow-compliance plugin is installed). Every finding gets validated and resolved automatically.
+**Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). Every finding gets validated and resolved automatically.
 
-**41 skills.** Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
+**41 skills** (40 universal + 1 feature-owned compliance skill, installed when compliance is enabled). Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
 
@@ -118,6 +118,8 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 | `/dynamic-wave` | Full-pipeline wave driver: tickets → plan → build |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
+
+**PR-comment publication for `/code-review` and `/resolve`**: On public repositories, Devflow posts a counts-only stub comment by default (visibility is probed at run time; the gate fails closed to the stub on any error). Set `reviewPublication: full` in `.devflow/config.json` to post the full report regardless of repo visibility, or `off` to disable comment posting entirely (`auto` is the default). Every body posted to GitHub — whether a full report or a stub — is run through the `redact-secrets.cjs` scrubber unconditionally; if the scrubber is missing (stale `~/.devflow` before running `devflow init`) or exits non-zero, the post is suppressed and `TRACEABILITY: DEGRADED (redaction unavailable)` is reported rather than publishing unredacted content.
 
 ## Language Support
 

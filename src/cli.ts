@@ -19,6 +19,7 @@ import { securityCommand } from './cli/commands/security.js';
 import { safeDeleteCommand } from './cli/commands/safe-delete.js';
 import { proxyCommand } from './cli/commands/proxy.js';
 import { agentsCommand } from './cli/commands/agents.js';
+import { complianceCommand } from './cli/commands/compliance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,6 +54,7 @@ program.addCommand(securityCommand);
 program.addCommand(safeDeleteCommand);
 program.addCommand(proxyCommand);
 program.addCommand(agentsCommand);
+program.addCommand(complianceCommand);
 
 // Handle no command (bare `devflow`) or unknown subcommand.
 // When Commander sees an unrecognised first argument it does not route to any

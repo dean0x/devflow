@@ -77,7 +77,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose', proxy: false },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose', proxy: false, compliance: { enabled: false, frameworks: [] } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -956,5 +956,104 @@ describe('knownFlags / knownPlugins schema', () => {
     expect(result!.features.knownFlags).toEqual(['tui']);
     expect(result!.features.viewMode).toBe('verbose');
     expect(result!.features.security).toBe('user');
+  });
+});
+
+describe('compliance feature field', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-compliance-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('self-heals absent compliance field to {enabled:false, frameworks:[]}', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('self-heals malformed compliance field', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false, compliance: 'bad' },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('preserves compliance: {enabled:true, frameworks:["gdpr"]}', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false, compliance: { enabled: true, frameworks: ['gdpr'] } },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
+  });
+
+  it('disable-keeps-frameworks: {enabled:false, frameworks:["hipaa"]} preserved', async () => {
+    // Disabling compliance must preserve the selected frameworks so re-enable
+    // restores them without requiring re-selection.
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], proxy: false, compliance: { enabled: false, frameworks: ['hipaa'] } },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.compliance).toEqual({ enabled: false, frameworks: ['hipaa'] });
+  });
+
+  it('compliance field round-trips through writeManifest/readManifest', async () => {
+    const data: ManifestData = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true,
+        memory: true,
+        hud: false,
+        knowledge: false,
+        learning: false,
+        rules: true,
+        flags: [],
+        proxy: false,
+        compliance: { enabled: true, frameworks: ['gdpr', 'sox'] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'sox'] });
   });
 });

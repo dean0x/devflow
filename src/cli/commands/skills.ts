@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../../core/plugins.js';
+import { getAllSkillNames, prefixSkillName, unprefixSkillName, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
 import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../../targets/claude-code/installer.js';
 
 /**
@@ -58,7 +58,9 @@ export const skillsCommand = new Command('skills')
   .action(async (action: string, name: string | undefined) => {
     const devflowDir = getDevFlowDirectory();
     const claudeDir = getClaudeDirectory();
-    const allSkills = getAllSkillNames();
+    // Union FEATURE_OWNED_SKILLS (compliance) so shadow/unshadow/list cover feature-managed
+    // skills that left the plugin registry but still live in src/assets/skills/ (step 1.5).
+    const allSkills = [...getAllSkillNames(), ...FEATURE_OWNED_SKILLS];
 
     if (action === 'shadow') {
       if (!name) {

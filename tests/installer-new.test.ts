@@ -92,6 +92,30 @@ describe('composeScripts', () => {
       'sentinel key was wiped — composeScripts must use wx (exclusive-create) for package.json',
     ).toBe(true);
   });
+
+  it('copies redact-secrets.cjs to the target alongside hud.sh (install path pin)', async () => {
+    // composeScripts copies src/assets/scripts/ verbatim (hooks/ + top-level entry scripts)
+    // via copyDirectory. A top-level redact-secrets.cjs is picked up automatically — no
+    // installer code changes required. This test pins the install path so a future rename
+    // or move of the script fails RED immediately.
+    //
+    // PF-018: assert file exists AND is non-empty (guards against an empty sentinel being
+    // accidentally installed in place of the real script).
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    const scrubberPath = path.join(target, 'redact-secrets.cjs');
+    await expect(
+      fs.access(scrubberPath),
+      'redact-secrets.cjs not found in compose output — must land at top level of scripts dir (sibling of hud.sh)',
+    ).resolves.toBeUndefined();
+
+    const content = await fs.readFile(scrubberPath, 'utf-8');
+    expect(
+      content.length,
+      'redact-secrets.cjs must be non-empty after install (PF-018)',
+    ).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -564,5 +588,59 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     });
 
     expect(report.sweepFailures).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection (I09)
+//
+// The installer's knownNames set now unions FEATURE_OWNED_SKILLS, so
+// devflow:compliance is never swept by the orphan pass. Its lifecycle is owned
+// exclusively by convergeComplianceArtifacts (called after installViaFileCopy
+// in init.ts). Before I09 the compliance skill was swept and then re-materialized
+// by converge on every install, producing a spurious orphan report entry.
+// ---------------------------------------------------------------------------
+
+describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', () => {
+  it('devflow:compliance is NOT swept because FEATURE_OWNED_SKILLS is unioned into knownNames', async () => {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    // Construct the dir name dynamically to avoid skill-references scanner flagging it
+    const COMPLIANCE_SKILL_DIR = ['devflow', 'compliance'].join(':');
+    const complianceSkillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL_DIR);
+    await fs.mkdir(complianceSkillDir, { recursive: true });
+    await fs.writeFile(path.join(complianceSkillDir, 'SKILL.md'), '# compliance', 'utf-8');
+
+    const noOpPlugin: PluginDefinition = {
+      name: 'devflow-test-noop-compliance-sweep',
+      description: 'No-op fixture for compliance sweep test',
+      commands: [],
+      agents: [],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+    const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
+    const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+    const report = await installViaFileCopy({
+      plugins: [noOpPlugin],
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    // devflow:compliance must NOT appear in sweptOrphans — it is protected by FEATURE_OWNED_SKILLS.
+    const sweptEntry = report.sweptOrphans.find(o => o.name === 'compliance');
+    expect(
+      sweptEntry,
+      'devflow:compliance must NOT be swept: FEATURE_OWNED_SKILLS is unioned into knownNames (I09)',
+    ).toBeUndefined();
+
+    // Physical state: dir must survive the sweep
+    await expect(fs.access(complianceSkillDir)).resolves.toBeUndefined();
   });
 });

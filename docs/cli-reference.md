@@ -25,6 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
+| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; wizard step is Advanced-only) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -69,7 +70,6 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-java` | Language | Java patterns |
 | `devflow-rust` | Language | Rust patterns |
 | `devflow-dynamic` | Optional | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline |
-| `devflow-compliance` | Optional | Regulatory compliance patterns — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX |
 
 ## Ambient Mode
 
@@ -99,6 +99,22 @@ npx devflow-kit knowledge --enable          # Enable feature knowledge
 npx devflow-kit knowledge --disable         # Disable feature knowledge
 npx devflow-kit knowledge --status          # Show current status
 ```
+
+## Compliance
+
+Manage regulatory compliance framework reference files installed in the compliance skill.
+
+```bash
+npx devflow-kit compliance --status                    # Show installed frameworks and skill state
+npx devflow-kit compliance --enable                    # Enable compliance feature (install skill + rule)
+npx devflow-kit compliance --disable                   # Disable compliance feature
+npx devflow-kit compliance --set gdpr,hipaa            # Set active frameworks (comma-separated IDs)
+npx devflow-kit compliance --set ""                    # Clear all active frameworks
+```
+
+Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
+
+The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
 
 ## Rules
 
@@ -158,6 +174,8 @@ vim ~/.devflow/rules/security.md                 # Edit your override
 npx devflow-kit rules list                       # List all rules with install status and shadow state
 npx devflow-kit rules unshadow security          # Remove override
 ```
+
+The `compliance` rule is the only templated rule — it contains a `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` placeholder that `devflow compliance --set` stamps with your active frameworks at install time. If you shadow `compliance` and remove that placeholder, `devflow compliance --set` stops updating the line; you own it entirely.
 
 ## Feature Flags
 

@@ -93,10 +93,10 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 10 partials (no output-dir:)', async () => {
+  it('commands/_partials/ contains exactly 11 partials (no output-dir:)', async () => {
     const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
     const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(10);
+    expect(partialFiles).toHaveLength(11);
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -138,9 +138,14 @@ describe('output-dir: stripped from compiled outputs', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('no compiled output contains output-dir:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -149,14 +154,17 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue; // not present — the subprocess test above covers presence
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not contain output-dir:`,
       ).not.toMatch(/^output-dir:/m);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('every compiled output that has frontmatter still has description:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -165,6 +173,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       // Only check files that have a frontmatter block
       if (/^---\r?\n/.test(content)) {
         expect(
@@ -173,9 +182,11 @@ describe('output-dir: stripped from compiled outputs', () => {
         ).toMatch(/^description:/m);
       }
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('dynamic compiled outputs preserve argument-hint:', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(DYNAMIC_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -184,6 +195,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       if (/^---\r?\n/.test(content)) {
         expect(
           content,
@@ -191,6 +203,7 @@ describe('output-dir: stripped from compiled outputs', () => {
         ).toMatch(/^argument-hint:/m);
       }
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -201,6 +214,7 @@ describe('output-dir: stripped from compiled outputs', () => {
 describe('partial expansion in compiled knowledge outputs', () => {
   it('no compiled knowledge command contains un-expanded {knowledge_*()} call sites', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -209,14 +223,17 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         callSitePattern.test(content),
         `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled knowledge command references feature-knowledge.cjs', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -225,14 +242,17 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not reference feature-knowledge.cjs`,
       ).not.toContain('feature-knowledge.cjs');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled output contains a literal @import line', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -241,11 +261,53 @@ describe('partial expansion in compiled knowledge outputs', () => {
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not contain unexpanded @import lines`,
       ).not.toMatch(/^@import /m);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3a. Escape-regression guard — no dist file contains literal backslash-brace
+//     MDS does NOT process \{ escapes inside plain ``` fences; they ship verbatim.
+//     Escapes belong only in prose outside fences. This guard catches the whole class.
+// ---------------------------------------------------------------------------
+
+describe('escape-regression guard: no dist command contains literal backslash-brace (\\{)', () => {
+  beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      scanned++;
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
+      ).not.toContain('\\{');
+    }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -261,9 +323,14 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -273,14 +340,17 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
         // file missing — covered by the command-set guard above; skip here
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
       ).toContain('.devflow/learning/index.md');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -289,11 +359,13 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       } catch {
         continue;
       }
+      scanned++;
       expect(
         content,
         `${destRelDir}/${basename}.md must not reference decisions-index.cjs`,
       ).not.toContain('decisions-index.cjs');
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -384,6 +456,10 @@ describe('expected-command-set guard (C2)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('all 9 knowledge command outputs exist post-build', async () => {
@@ -604,6 +680,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
     compiled = await fs.readFile(
       path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
@@ -647,10 +727,15 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
+    let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       let content: string;
@@ -659,11 +744,13 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       } catch {
         continue;
       }
+      scanned++;
       expect(
         callSitePattern.test(content),
         `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -683,6 +770,10 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
     compiled = await fs.readFile(
       path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
       'utf-8',
@@ -758,6 +849,10 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
   it('dynamic-build, plan, tickets, wave do NOT contain --dry-run', async () => {
@@ -777,19 +872,25 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. compliance_gate wiring in compiled host commands
+// 14. compliance wiring in compiled host commands (installed-skill gate)
 //
-// Guards that the compliance_gate() partial was not silently dropped from
-// the three host commands that import it. A forgotten call site compiles
-// cleanly but leaves the gate absent; asserting COMPLIANCE_ENABLED (the
-// gate's canonical output variable) catches the regression before it ships.
+// Current compliance guard state:
+//   - code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED
+//     and the skill path (the gate's canonical variable and file-existence target)
+//   - implement.md has exactly one COMPLIANCE: line — in the Git setup-task spawn
+//     (Git agent, not a Code agent); no COMPLIANCE_ENABLED
+//   - code-review.md and bug-analysis.md have a COMPLIANCE: conditional line in
+//     their Git pre-flight (ensure-pr-ready) spawns — not in any Code-agent spawn
+//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance
+//   - no compiled dist/commands/*.md contains the literal COMPLIANCE: ${
+//     (interpolated JS form — would indicate a MDS escaping bug)
+//   - no compiled dist/commands/*.md contains comment-pr (retired op)
 // ---------------------------------------------------------------------------
 
-describe('compliance_gate wiring in compiled host commands', () => {
-  const COMPLIANCE_GATE_HOSTS: Record<string, string> = {
+describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
+  const SKILL_CHECK_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
     'plan':        DIST_COMMANDS,
-    'implement':   DIST_COMMANDS,
   };
 
   beforeAll(() => {
@@ -799,17 +900,390 @@ describe('compliance_gate wiring in compiled host commands', () => {
       timeout: 60_000,
     });
     if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
   });
 
-  it('code-review, plan, and implement compiled outputs each contain COMPLIANCE_ENABLED', async () => {
-    for (const [basename, destRelDir] of Object.entries(COMPLIANCE_GATE_HOSTS)) {
+  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
+    for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain COMPLIANCE_ENABLED — ` +
-          `compliance_gate() call site may be missing from ${basename}.mds`,
-      ).toContain('COMPLIANCE_ENABLED');
+        `${destRelDir}/${basename}.md must contain COMPLIANCE_SKILL_INSTALLED`,
+      ).toContain('COMPLIANCE_SKILL_INSTALLED');
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain the compliance skill path`,
+      ).toContain('skills/devflow:compliance/SKILL.md');
     }
+  });
+
+  it('implement.md contains ISSUE_NUMBER and COMPLIANCE setup-task wiring; no COMPLIANCE_ENABLED (Phase E, AC-32)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    // Positive: issue-first threading — ISSUE_NUMBER must appear in Code-agent spawns
+    expect(
+      content,
+      'implement.md must contain ISSUE_NUMBER (issue-first threading, Phase E)',
+    ).toContain('ISSUE_NUMBER');
+    // Positive: setup-task Git-input COMPLIANCE line (AC-32 sanctioned — Git spawn only)
+    expect(
+      content,
+      'implement.md must contain COMPLIANCE setup-task wiring (Git-input, AC-32 sanctioned)',
+    ).toContain('COMPLIANCE: {enabled');
+    // Negative: COMPLIANCE_ENABLED variable must not appear anywhere
+    expect(
+      content,
+      'implement.md must not contain COMPLIANCE_ENABLED — compliance machinery removed in Part 1',
+    ).not.toContain('COMPLIANCE_ENABLED');
+    // Narrow AC-32: the sanctioned COMPLIANCE: line appears ONLY in the Git setup-task spawn —
+    // never in any Code-agent (subagent_type="Code") spawn block
+    const complianceLines = content.split('\n').filter(l => /^COMPLIANCE:/.test(l));
+    expect(
+      complianceLines.length,
+      'implement.md must have exactly one COMPLIANCE: line (Git setup-task spawn only, AC-32)',
+    ).toBe(1);
+  });
+
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32)', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      scanned++;
+      expect(
+        content,
+        `${basename}.md must not contain COMPLIANCE_ENABLED`,
+      ).not.toContain('COMPLIANCE_ENABLED');
+      expect(
+        content,
+        `${basename}.md must not contain devflow-compliance`,
+      ).not.toContain('devflow-compliance');
+      // COMPLIANCE: {enabled is sanctioned only in implement.md (Git setup-task spawn, AC-32).
+      // All other files must not contain it.
+      if (basename !== 'implement') {
+        expect(
+          content,
+          `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
+        ).not.toContain('COMPLIANCE: {enabled');
+      }
+      // comment-pr was retired; post-review-summary replaces it.
+      expect(
+        content,
+        `${basename}.md must not contain comment-pr (retired operation)`,
+      ).not.toContain('comment-pr');
+    }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+  });
+
+  it('every COMPLIANCE: line in every dist command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
+    // Asserts that no COMPLIANCE: key appears in a prose or JS fence block whose agent is
+    // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
+    // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
+    // verify the fence also references "Git" as the agent type.
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      scanned++;
+
+      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
+      let match;
+      const violations: string[] = [];
+
+      while ((match = fencePattern.exec(content)) !== null) {
+        const block = match[0];
+        if (!/^COMPLIANCE:/m.test(block)) continue;
+        const hasGit =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!hasGit) {
+          violations.push(`fence at offset ${match.index}`);
+        }
+      }
+
+      expect(
+        violations,
+        `${basename}.md: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+      ).toHaveLength(0);
+    }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §15  Phase D traceability op guards — code-review (Part 2, Step 2.3)
+//      post-review-summary replaces retired comment-pr; REVIEW_TIMESTAMP input wired (I44 dedup fix)
+//      Guard change (I16/I44): The old guard pinned the devflow:review-summary marker literal in the
+//      compiled command. Per the corrected contract, callers pass op inputs — they do not restate what
+//      the op writes internally. §15 now asserts that REVIEW_TIMESTAMP is passed as an input to the
+//      post-review-summary spawn. The marker literal check is dropped from the compiled-command surface
+//      (the marker contract is verified on the agent side via git.md — see post-review-summary D7 section).
+// ---------------------------------------------------------------------------
+
+describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('code-review.md contains post-review-summary and passes REVIEW_TIMESTAMP input', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'code-review.md must reference the post-review-summary Git op',
+    ).toContain('post-review-summary');
+    // I44: caller must pass REVIEW_TIMESTAMP so the op can dedup on cycle+timestamp pair,
+    // not cycle alone. A re-review in the same cycle posts its own comment; a re-run of
+    // the same review (same timestamp) still deduplicates.
+    expect(
+      content,
+      'code-review.md must pass REVIEW_TIMESTAMP to post-review-summary spawn (I44 cycle+ts dedup)',
+    ).toContain('REVIEW_TIMESTAMP');
+  });
+
+  it('code-review.md does not contain comment-pr (retired op)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'code-review.md must not reference the retired comment-pr op',
+    ).not.toContain('comment-pr');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §16  Phase D traceability op guards — resolve (Part 2, Step 2.4)
+//      fetch-review-threads, resolve-review-threads, post-resolution-summary,
+//      check-merge-readiness, Third-Party Threads section, COMPLIANCE wiring
+// ---------------------------------------------------------------------------
+
+describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('resolve.md contains Phase D traceability ops', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(content, 'resolve.md must contain fetch-review-threads op').toContain('fetch-review-threads');
+    expect(content, 'resolve.md must contain resolve-review-threads op').toContain('resolve-review-threads');
+    expect(content, 'resolve.md must contain post-resolution-summary op').toContain('post-resolution-summary');
+    expect(content, 'resolve.md must contain check-merge-readiness op').toContain('check-merge-readiness');
+    expect(content, 'resolve.md must contain Third-Party Threads section').toContain('Third-Party Threads');
+  });
+
+  it('resolve.md contains COMPLIANCE_SKILL_INSTALLED check (Step 0d compliance wiring)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'resolve.md must contain COMPLIANCE_SKILL_INSTALLED from Step 0d wiring',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(
+      content,
+      'resolve.md must contain the compliance skill path',
+    ).toContain('skills/devflow:compliance/SKILL.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §17  Phase E traceability — implement.mds (2.5) + plan.mds (2.6) guards
+//      implement.md: ISSUE_NUMBER in Code-agent spawns, COMPLIANCE in Git spawn
+//      plan.md: ensure-traceable-issue replaces inline gh issue create
+// ---------------------------------------------------------------------------
+
+describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('plan.md contains ensure-traceable-issue (Phase 14 Git-agent spawn, Step 2.6)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'plan.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'plan.md must reference ensure-traceable-issue Git op (replaces inline gh issue create)',
+    ).toContain('ensure-traceable-issue');
+  });
+
+  it('implement.md contains COMPLIANCE_SKILL_INSTALLED check (Step 2.5)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'implement.md must contain COMPLIANCE_SKILL_INSTALLED (setup-task compliance resolution)',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §18  Phase F release evidence (Step 2.9) + dynamic pipeline COMPLIANCE +
+//      ISSUE_NUMBER (Step 2.11)
+//      release.md: COMMIT_LIST, SHIPPED_ISSUES, backlink-shipped-issues
+//      dynamic-build.md: COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, conventions.md
+// ---------------------------------------------------------------------------
+
+describe('Phase F traceability — release.md evidence + dynamic-build compliance (Steps 2.9, 2.11)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'release.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'release.md must contain COMMIT_LIST (release evidence, Step 2.9)',
+    ).toContain('COMMIT_LIST');
+    expect(
+      content,
+      'release.md must contain SHIPPED_ISSUES (release evidence, Step 2.9)',
+    ).toContain('SHIPPED_ISSUES');
+    expect(
+      content,
+      'release.md must contain backlink-shipped-issues Git op (Step 2.9)',
+    ).toContain('backlink-shipped-issues');
+  });
+
+  it('dynamic-build.md contains COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, and conventions.md (Step 2.11)', async () => {
+    const outputPath = path.join(ROOT, DIST_COMMANDS, 'dynamic-build.md');
+    const content = await fs.readFile(outputPath, 'utf-8');
+    expect(
+      content,
+      'dynamic-build.md must contain COMPLIANCE_SKILL_INSTALLED (pre-authoring compliance step, Step 2.11)',
+    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(
+      content,
+      'dynamic-build.md must contain ISSUE_NUMBER (Code-agent issue threading, Step 2.11)',
+    ).toContain('ISSUE_NUMBER');
+    expect(
+      content,
+      'dynamic-build.md must contain conventions.md (branch naming authority, Step 2.11)',
+    ).toContain('conventions.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
+//      code-review.md and resolve.md must expand publication_gate()
+//      and pass REVIEW_PUBLICATION only in their Git post-*-summary spawns (PF-024)
+// ---------------------------------------------------------------------------
+
+describe('publication_gate adoption in compiled host commands (Phase C)', () => {
+  const PUBLICATION_HOSTS: Record<string, string> = {
+    'code-review': DIST_COMMANDS,
+    'resolve':     DIST_COMMANDS,
+  };
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('code-review.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      const content = await fs.readFile(outputPath, 'utf-8');
+      scanned++;
+      expect(
+        content,
+        `${destRelDir}/${basename}.md must contain REVIEW_PUBLICATION (publication gate expansion)`,
+      ).toContain('REVIEW_PUBLICATION');
+    }
+    expect(scanned, 'scanned zero publication hosts — guard is vacuous (PF-018)').toBeGreaterThan(0);
+  });
+
+  it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
+    let scanned = 0;
+    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(outputPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      scanned++;
+
+      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
+      let match;
+      const violations: string[] = [];
+
+      while ((match = fencePattern.exec(content)) !== null) {
+        const block = match[0];
+        if (!/^REVIEW_PUBLICATION:/m.test(block)) continue;
+        const hasGit =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!hasGit) {
+          violations.push(`${basename}.md: fence at offset ${match.index}`);
+        }
+      }
+
+      expect(
+        violations,
+        `REVIEW_PUBLICATION: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+      ).toHaveLength(0);
+    }
+    expect(scanned, 'scanned zero dist commands — guard is vacuous (PF-018)').toBeGreaterThan(0);
   });
 });

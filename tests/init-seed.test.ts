@@ -76,11 +76,12 @@ describe('resolveSeedFeatures', () => {
       learning: false,
       rules: false,
       proxy: false,
+      compliance: { enabled: false, frameworks: [] },
     });
   });
 
   it('projectConfig present, no manifest → memory/learning/knowledge from config; ambient/hud/rules from defaults', () => {
-    const config = { memory: false, learning: false, knowledge: false };
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(null, config);
     expect(result.memory).toBe(false);
     expect(result.learning).toBe(false);
@@ -104,7 +105,7 @@ describe('resolveSeedFeatures', () => {
         flags: [],
       },
     });
-    const config = { memory: false, learning: false, knowledge: false };
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(manifest, config);
     // config wins for memory/learning/knowledge
     expect(result.memory).toBe(false);
@@ -121,7 +122,7 @@ describe('resolveSeedFeatures', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, learning: false },
     });
-    const config = { memory: true, learning: true, knowledge: true };
+    const config = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(manifest, config);
     expect(result.learning).toBe(true);
   });
@@ -327,7 +328,7 @@ describe('resolveInitSeed', () => {
         viewMode: 'verbose',
       },
     });
-    const config = { memory: true, learning: true, knowledge: false };
+    const config = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' as const };
     const settings = '{}';
 
     const seed1 = resolveInitSeed(manifest, config, settings, DEVFLOW_PLUGINS);
@@ -457,7 +458,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
 describe('resolveResetGatedInputs', () => {
   it('reset=false: passes manifest, config, and settings through unchanged', () => {
     const manifest = makeManifest();
-    const config = { memory: false, learning: false, knowledge: true };
+    const config = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' as const };
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
@@ -471,7 +472,7 @@ describe('resolveResetGatedInputs', () => {
 
   it('reset=true: discards manifest, config, and settings snapshot', () => {
     const manifest = makeManifest();
-    const config = { memory: false, learning: false, knowledge: false };
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(

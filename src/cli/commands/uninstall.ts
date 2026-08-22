@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, prefixSkillName, unprefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -441,10 +441,12 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
 
   // 2. Skills: enumerate ALL removal candidates that exist on disk.
   // Mirrors removeAllDevFlow's split-pass approach (avoids PF-012 + PF-018):
-  //   Prefixed: live registry ∪ LEGACY_SKILL_NAMES
+  //   Prefixed: live registry ∪ LEGACY_SKILL_NAMES ∪ FEATURE_OWNED_SKILLS
   //   Bare: LEGACY_SKILL_NAMES only — shared skills/ dir; live-registry bare
   //         dirs are by construction foreign to Devflow.
-  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
+  // FEATURE_OWNED_SKILLS (compliance) is included so full uninstall removes
+  // devflow:compliance even though it left the plugin registry (step 1.5).
+  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
   for (const skillName of prefixedSkillNames) {
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
@@ -959,7 +961,19 @@ export const uninstallCommand = new Command('uninstall')
     // Parse plugin selection
     let selectedPluginNames: string[] = [];
     if (options.plugin) {
-      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      // Friendly redirect for retired feature plugins (e.g. devflow-compliance → `devflow compliance`).
+      // Strip retired names, emit the notice, and continue with the remaining plugins so that a
+      // mixed list like `devflow-implement,devflow-compliance` still uninstalls devflow-implement.
+      // Exit 0 only when nothing non-retired remains (compliance-only invocation).
+      const rawNames = options.plugin.split(',').map((s: string) => s.trim());
+      const redirect = resolveFeatureRedirect(rawNames);
+      if (redirect.notice) {
+        p.log.info(redirect.notice);
+      }
+      if (redirect.remaining.length === 0) {
+        process.exit(0);
+      }
+      const { selected, invalid } = parsePluginSelection(redirect.remaining.join(','), DEVFLOW_PLUGINS);
       selectedPluginNames = selected;
       if (invalid.length > 0) {
         p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
@@ -1118,12 +1132,15 @@ export async function removeAllDevFlow(
   // ~/.claude/skills/ is shared with other tools; the two passes use different
   // name sets to avoid deleting foreign dirs (avoids PF-012):
   //
-  //   Prefixed pass (devflow:name): live registry ∪ LEGACY_SKILL_NAMES.
+  //   Prefixed pass (devflow:name): live registry ∪ LEGACY_SKILL_NAMES ∪ FEATURE_OWNED_SKILLS.
   //     prefixSkillName() is idempotent for already-prefixed legacy entries.
+  //     FEATURE_OWNED_SKILLS (compliance) is included so full uninstall removes
+  //     devflow:compliance even though it left the plugin registry (step 1.5).
   //   Bare pass (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
   //     A bare dir whose name matches a live-registry skill is by construction
   //     foreign to Devflow (the devflow: namespace shipped in dcecda3, 2026-03-30).
-  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
+  //     A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES) — PF-012.
+  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
 
   let skillsRemoved = 0;
@@ -1196,9 +1213,13 @@ export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean
     new Set(getAllCommandNames()),
     mdEntryName,
   );
+  // FEATURE_OWNED_SKILLS (compliance) unioned into knownNames so a selective
+  // uninstall of another plugin does not sweep devflow:compliance — nothing
+  // converges after selective uninstall (only installViaFileCopy + convergeComplianceArtifacts
+  // on full/partial init re-materialize it). D-FO-1 applies.
   const skillsSweep = await sweepOrphanedAssets(
     skillsDir,
-    new Set(getAllSkillNames()),
+    new Set([...getAllSkillNames(), ...FEATURE_OWNED_SKILLS]),
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   );
 

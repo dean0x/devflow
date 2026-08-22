@@ -387,6 +387,7 @@ If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: append "Note: High false-positive
 5. **Accurate counts** - Issue counts must match reality (review mode)
 6. **Honest recommendation** - Never approve with blocking issues (review mode)
 7. **Be decisive** - Make confident synthesis choices
+8. **Never un-mask** - Masked values (`[REDACTED:…]`) from Review agents pass through untouched; if a live unmasked secret arrives in any input, mask it as `{first ≤4 chars}…[REDACTED:{type}]` before it enters any output (review mode)
 
 ## Boundaries
 

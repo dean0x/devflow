@@ -16,13 +16,11 @@ Regulatory compliance review for code that touches regulated data. Use alongside
 > Regulated data crossing a code path without classification, minimization, encryption,
 > or an audit trail is a compliance gap — regardless of framework. No exceptions.
 
-## Project Framework Declaration
+## Active Frameworks
 
-Read the project CLAUDE.md `## Compliance` section before reviewing:
-- `Frameworks: GDPR, SOC 2` → apply generic controls + load `references/{framework}.md` (case-insensitive)
-- `Frameworks: none` → all compliance integrations disabled for this project; skip review
-- Absent → generic controls only; suggest declaring (LOW, at most once) when regulated data is clearly present
-- Unknown framework name → generic controls + explicit coverage-gap note; never fabricate framework specifics
+The frameworks whose `references/{id}.md` files are present in this installed skill are active. Apply generic controls always. Load each active framework's reference file and apply its specific controls.
+
+NEVER fabricate framework-specific guidance for absent `references/{id}.md` files. If no reference file is present for a framework, apply generic controls only.
 
 ## Scope Boundary
 
@@ -97,7 +95,7 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 | **CRITICAL** | Plaintext regulated data exposed; public IaC exposure of regulated stores |
 | **HIGH** | Missing audit trail on regulated mutations; PII in logs or errors |
 | **MEDIUM** | Missing retention/erasure paths; weak traceability (no actor/purpose) |
-| **LOW** | Missing framework declaration; documentation/annotation gaps |
+| **LOW** | No active framework reference files installed; documentation/annotation gaps |
 
 ## Framework Mapping
 
@@ -112,7 +110,7 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 
 ## Checklist
 
-- [ ] CLAUDE.md `## Compliance` section read; declared frameworks applied
+- [ ] Active frameworks identified from installed `references/{id}.md` files; controls applied
 - [ ] No PII/PHI/payment data in logs, errors, or analytics events
 - [ ] Regulated data encrypted in transit (TLS 1.2+) and at rest
 - [ ] Every regulated mutation has an append-only audit entry (actor, purpose, timestamp)

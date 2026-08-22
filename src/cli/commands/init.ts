@@ -25,7 +25,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -47,6 +47,8 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
+import { parseFrameworkList, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
@@ -190,6 +192,47 @@ export function shouldRetry(attempt: number, maxAttempts: number, accepted: bool
 }
 
 /**
+ * Parse the --compliance / --no-compliance CLI option into a compliance override.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ *
+ * Returns:
+ *   {ok: true, value}  — override state derived from the option
+ *   {ok: false, error} — invalid framework IDs (caller handles exit)
+ *   undefined          — option was not supplied; no override
+ *
+ * Respects the disable-keeps-frameworks contract: --no-compliance preserves
+ * the seed's framework list so re-enable can restore them.
+ */
+export function resolveComplianceInitState(
+  complianceOption: string | false | undefined,
+  seedFrameworks: string[],
+): { ok: true; value: ComplianceFeatureState } | { ok: false; error: string } | undefined {
+  if (typeof complianceOption === 'string') {
+    const parsed = parseFrameworkList(complianceOption);
+    if (!parsed.ok) {
+      return { ok: false, error: parsed.error };
+    }
+    return { ok: true, value: { enabled: true, frameworks: parsed.value } };
+  }
+  if (complianceOption === false) {
+    return { ok: true, value: { enabled: false, frameworks: seedFrameworks } };
+  }
+  return undefined;
+}
+
+/**
+ * Format compliance state for the Recommended-mode summary line.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function formatComplianceSummary(enabled: boolean, frameworks: string[]): string {
+  if (!enabled) return 'disabled';
+  if (frameworks.length > 0) return `enabled (${frameworks.join(', ')})`;
+  return 'enabled (generic controls only)';
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -204,6 +247,13 @@ interface InitOptions {
   rules?: boolean;
   /** External model routing. Advanced-only; never part of Recommended defaults. */
   proxy?: boolean;
+  /**
+   * Compliance framework list (comma-separated IDs from parseFrameworkList).
+   * string → --compliance <list> (enable with these frameworks)
+   * false  → --no-compliance (disable compliance; frameworks remembered)
+   * undefined → not passed; seed value used
+   */
+  compliance?: string | false;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -230,6 +280,8 @@ export const initCommand = new Command('init')
   .option('--no-rules', 'Disable rules')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
   .option('--no-proxy', 'Disable external model routing')
+  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
+  .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -312,6 +364,13 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
+      // Read existing manifest to preserve user-set compliance state (disable-keeps-frameworks
+      // contract: the hud-only path must not erase frameworks the user previously selected).
+      let existingHudManifest: ManifestData | null = null;
+      try {
+        existingHudManifest = await readManifest(devflowDir);
+      } catch { /* absent on fresh install — existingHudManifest stays null */ }
+
       // Write minimal manifest
       const now = new Date().toISOString();
       try {
@@ -319,7 +378,11 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false, flags: [], proxy: false },
+          features: {
+            ambient: false, memory: false, hud: true, knowledge: false,
+            learning: false, rules: false, flags: [], proxy: false,
+            compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
+          },
           installedAt: now,
           updatedAt: now,
         });
@@ -364,10 +427,39 @@ export const initCommand = new Command('init')
     );
     const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
 
+    // Early validation: parse --compliance <list> at the boundary before any prompts (PF-parse-at-boundary).
+    // options.compliance: string → --compliance <list>; false → --no-compliance; undefined → not passed
+    let cliComplianceOverride: ComplianceFeatureState | undefined;
+    {
+      const complianceStateResult = resolveComplianceInitState(
+        options.compliance,
+        seed.features.compliance.frameworks,
+      );
+      if (complianceStateResult !== undefined) {
+        if (!complianceStateResult.ok) {
+          p.log.error(complianceStateResult.error);
+          process.exit(1);
+        }
+        cliComplianceOverride = complianceStateResult.value;
+      }
+    }
+
     // Select plugins to install
     let selectedPlugins: string[] = [];
     if (options.plugin) {
-      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      // Friendly redirect for retired feature plugins (e.g. devflow-compliance → `devflow compliance`).
+      // Strip retired names, emit the notice, and continue with the remaining plugins so that a
+      // mixed list like `devflow-implement,devflow-compliance` still installs devflow-implement.
+      // Exit 0 only when nothing non-retired remains (compliance-only invocation).
+      const rawNames = options.plugin.split(',').map((s: string) => s.trim());
+      const redirect = resolveFeatureRedirect(rawNames);
+      if (redirect.notice) {
+        p.log.info(redirect.notice);
+      }
+      if (redirect.remaining.length === 0) {
+        process.exit(0);
+      }
+      const { selected, invalid } = parsePluginSelection(redirect.remaining.join(','), DEVFLOW_PLUGINS);
       selectedPlugins = selected;
 
       if (invalid.length > 0) {
@@ -396,7 +488,6 @@ export const initCommand = new Command('init')
         'devflow-java': 'Java patterns',
         'devflow-python': 'Python patterns',
         'devflow-rust': 'Rust patterns',
-        'devflow-compliance': 'GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX',
       };
 
       const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
@@ -527,6 +618,10 @@ export const initCommand = new Command('init')
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
     // --reset → false (resolveResetGatedInputs null-seeds the manifest).
     let proxyEnabled = seed.features.proxy;
+    // compliance: manifest-group (like proxy); seed from prior manifest value.
+    // CLI override applied below in both Recommended and Advanced paths.
+    let complianceEnabled = seed.features.compliance.enabled;
+    let complianceFrameworks = seed.features.compliance.frameworks;
     let enabledFlags = seed.flags;
     let viewMode: ViewMode = seed.viewMode;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
@@ -564,6 +659,7 @@ export const initCommand = new Command('init')
         learning: options.learning,
         rules: options.rules,
         proxy: options.proxy,
+        compliance: cliComplianceOverride,
       });
       ambientEnabled = effectiveFeatures.ambient;
       memoryEnabled = effectiveFeatures.memory;
@@ -572,6 +668,8 @@ export const initCommand = new Command('init')
       learningEnabled = effectiveFeatures.learning;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
+      complianceEnabled = effectiveFeatures.compliance.enabled;
+      complianceFrameworks = effectiveFeatures.compliance.frameworks;
       // enabledFlags and viewMode are already initialised to seed values above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -600,6 +698,7 @@ export const initCommand = new Command('init')
 
       // Print summary
       const defaultFlagCount = enabledFlags.length;
+      const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
@@ -608,6 +707,7 @@ export const initCommand = new Command('init')
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
+        `Compliance:      ${complianceSummary}`,
         `View mode:       ${viewMode}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -739,7 +839,7 @@ export const initCommand = new Command('init')
           'Rules are ultra-condensed engineering principles (~10-15 lines each).\n' +
           'Language rules only load for matching files (e.g., TypeScript rules\n' +
           'activate for .ts files) — minimal token cost. The compliance rule is\n' +
-          'global (always-on) when devflow-compliance is selected.',
+          'always available via `devflow compliance`.',
           'Rules',
         );
         const rulesChoice = await p.confirm({
@@ -777,6 +877,49 @@ export const initCommand = new Command('init')
         proxyEnabled = proxyChoice;
       }
 
+      // Compliance feature (Advanced-only wizard step; after proxy, before flags)
+      if (cliComplianceOverride !== undefined) {
+        // --compliance or --no-compliance passed explicitly — honour without prompting
+        complianceEnabled = cliComplianceOverride.enabled;
+        complianceFrameworks = cliComplianceOverride.frameworks;
+      } else {
+        p.note(
+          'Stamps the compliance rule with active framework labels and installs\n' +
+          'framework reference files into the compliance skill. Only the\n' +
+          'frameworks you select are included — zero selection = generic controls.\n\n' +
+          'Valid framework IDs:\n' +
+          COMPLIANCE_FRAMEWORKS.map(fw => `  ${fw.id.padEnd(10)} — ${fw.hint}`).join('\n'),
+          'Compliance',
+        );
+        const complianceChoice = await p.confirm({
+          message: 'Enable compliance?',
+          initialValue: seed.features.compliance.enabled,
+        });
+        if (p.isCancel(complianceChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        complianceEnabled = complianceChoice;
+
+        if (complianceEnabled) {
+          const frameworkSelection = await p.multiselect({
+            message: 'Select compliance frameworks (Enter to skip — generic controls only)',
+            options: COMPLIANCE_FRAMEWORKS.map(fw => ({
+              value: fw.id,
+              label: fw.label,
+              hint: fw.hint,
+            })),
+            initialValues: seed.features.compliance.frameworks,
+            required: false,
+          });
+          if (p.isCancel(frameworkSelection)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+          complianceFrameworks = frameworkSelection as string[];
+        }
+      }
+
       // Claude Code flags multiselect (advanced only)
       const recommended = FLAG_REGISTRY.filter(f => f.defaultEnabled);
       const optional = FLAG_REGISTRY.filter(f => !f.defaultEnabled);
@@ -811,7 +954,7 @@ export const initCommand = new Command('init')
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      enabledFlags = (flagSelection as string[]).filter(id => id !== '_separator');
+      enabledFlags = flagSelection.filter(id => id !== '_separator');
 
       // View mode selector (advanced only)
       p.note(
@@ -1124,6 +1267,28 @@ export const initCommand = new Command('init')
       );
     }
 
+    // devflow-compliance was a selectable plugin in earlier releases; it is now a built-in
+    // feature (devflow compliance --enable/--disable). If the prior manifest still lists it
+    // as a plugin, emit a one-line notice so the user understands the sweep report and
+    // knows the correct CLI going forward.
+    if (existingManifest?.plugins?.includes('devflow-compliance')) {
+      p.log.info(
+        'Compliance has moved from a plugin to a built-in feature — ' +
+        'use `devflow compliance --enable/--disable` to manage it.',
+      );
+    }
+
+    // I41: probe the compliance rule target BEFORE installViaFileCopy wipes the rules dir.
+    // On a full (non-partial) install, installViaFileCopy removes rules/devflow/ before
+    // reinstalling, so by the time convergeComplianceArtifacts runs the rule file is already
+    // gone. Probing here captures the pre-install state so the legacy-upgrade notice can fire
+    // even when the only surviving artifact was the rule file.
+    let hadComplianceRule = false;
+    try {
+      await fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'));
+      hadComplianceRule = true;
+    } catch { /* absent — no legacy artifact */ }
+
     // Install via file copy
     let installReport: InstallReport;
     try {
@@ -1141,6 +1306,36 @@ export const initCommand = new Command('init')
       s.stop('Installation failed');
       p.log.error(`${error}`);
       process.exit(1);
+    }
+
+    // Converge compliance artifacts (PF-015: always converge, never short-circuit).
+    // Called unconditionally so that enabling/disabling compliance during init
+    // is reflected in the installed artifacts without a separate devflow compliance run.
+    // Wrapped in its own try/catch (PF-009: warn-not-abort).
+    let convergeResult: Awaited<ReturnType<typeof convergeFromManifest>> | null = null;
+    try {
+      convergeResult = await convergeFromManifest({
+        claudeDir,
+        devflowDir,
+        manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
+        warn: (msg) => p.log.warn(msg),
+      });
+      // I41: emit legacy-upgrade notice when compliance is disabled AND pre-existing artifacts
+      // were found. After I09, the skill dir survives the orphan sweep (knownNames now unions
+      // FEATURE_OWNED_SKILLS), so convergeResult.removedPreexisting correctly fires for the
+      // skill path. hadComplianceRule covers the rule path (wiped by installViaFileCopy before
+      // converge probes on full installs).
+      if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
+        p.log.info(
+          'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
+          'run `devflow compliance --enable` to re-enable with your framework selection.',
+        );
+      }
+    } catch (err) {
+      p.log.warn(
+        `Compliance artifact convergence failed — install succeeded but compliance artifacts may be stale: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     // Clean up stale skills from previous installations
@@ -1497,6 +1692,11 @@ export const initCommand = new Command('init')
         memory: memoryEnabled,
         learning: learningEnabled,
         knowledge: knowledgeEnabled,
+        // reviewPublication has no prompt, so it is carried over from the
+        // reset-gated snapshot rather than re-read from disk: seedConfig is null
+        // under --reset, which is what collapses the field back to 'auto' with
+        // every other feature (PF-015 — read the post-gate binding, not the file).
+        reviewPublication: seedConfig?.reviewPublication ?? 'auto',
       });
 
       // Drain orphaned queue files when memory is disabled so stale turns
@@ -1673,6 +1873,8 @@ export const initCommand = new Command('init')
 
     // Orphan-sweep reporting: removals are silent deletions from ~/.claude/, and a
     // failed removal leaves a retired asset live. Both must surface.
+    // After I09, the installer's knownNames set unions FEATURE_OWNED_SKILLS, so
+    // devflow:compliance is never swept here — no suppression predicate is needed.
     for (const line of formatSweepSummary(installReport)) {
       if (line.level === 'warn') p.log.warn(line.message);
       else p.log.info(line.message);
@@ -1755,6 +1957,10 @@ export const initCommand = new Command('init')
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,
+        // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
+        // and Advanced wizard selection. convergeComplianceArtifacts was called above.
+        // normalizeFrameworks: dedup + filter unknowns before persisting.
+        compliance: { enabled: complianceEnabled, frameworks: normalizeFrameworks(complianceFrameworks) },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,

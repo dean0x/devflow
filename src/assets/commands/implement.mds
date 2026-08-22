@@ -45,11 +45,13 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, COMPLIANCE_ENABLED
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
+
+{compliance_gate()}
 
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 
@@ -59,6 +61,8 @@ Agent(subagent_type="Git"):
 BASE_BRANCH: {current branch name}
 ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
 TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number or .md path, otherwise omit}
+COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}
+PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
@@ -66,7 +70,7 @@ Return the branch setup summary."
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
-- `ISSUE_NUMBER`: GitHub issue number (if provided)
+- `ISSUE_NUMBER`: GitHub issue number (if provided or created by the issue-first gate in step 1c)
 - `ISSUE_CONTENT`: Full issue body including description (if provided)
 - `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 
@@ -86,8 +90,6 @@ If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or t
 Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 
 {knowledge_load()}
-
-{compliance_gate()}
 
 ### Phase 2: Implement
 
@@ -121,8 +123,8 @@ CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: {enabled|(none)}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {issue number or (none)}"
 ```
 
 ---
@@ -143,8 +145,8 @@ CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {issue number or (none)}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -163,8 +165,8 @@ PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: {enabled|(none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {issue number or (none)}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -188,8 +190,8 @@ CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: {enabled|(none)}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {issue number or (none)}"
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -201,8 +203,8 @@ CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-COMPLIANCE: {enabled|(none)}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {issue number or (none)}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODE_AGENTS):
@@ -237,8 +239,8 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    OPERATION: validation-fix
    VALIDATION_FAILURES: \{parsed failures from Validate agent\}
    SCOPE: Fix only the listed failures, no other changes
-   COMPLIANCE: \{enabled|(none)\}
-   CREATE_PR: false"
+   CREATE_PR: false
+   ISSUE_NUMBER: \{issue number or (none)\}"
    ```
    - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
@@ -327,8 +329,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    OPERATION: alignment-fix
    MISALIGNMENTS: \{structured misalignments from Evaluate agent\}
    SCOPE: Fix only the listed misalignments, no other changes
-   COMPLIANCE: \{enabled|(none)\}
-   CREATE_PR: false"
+   CREATE_PR: false
+   ISSUE_NUMBER: \{issue number or (none)\}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
@@ -370,8 +372,8 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    OPERATION: qa-fix
    QA_FAILURES: \{structured failures from Test agent\}
    SCOPE: Fix only the listed failures, no other changes
-   COMPLIANCE: \{enabled|(none)\}
-   CREATE_PR: false"
+   CREATE_PR: false
+   ISSUE_NUMBER: \{issue number or (none)\}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
@@ -408,13 +410,17 @@ Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), sk
 
 If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Code agent Responsibility 7 for field-to-section mapping).
 
-**For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true).
+When `ISSUE_NUMBER` is known, ensure the PR body includes a `## Related Issues` section with `Closes #\{ISSUE_NUMBER\}`.
+
+**For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true) — the Code agent's Responsibility 7 handles Related Issues inclusion when ISSUE_NUMBER is provided.
 
 ### Phase 11: Report
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
 Display completion summary with phase status, PR info, and next steps.
+
+If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 {knowledge_writeback()}
 

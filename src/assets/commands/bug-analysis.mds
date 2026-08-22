@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { compliance_gate } from "./_partials/_compliance.mds"
 
 # Bug Analysis Command
 
@@ -21,13 +22,17 @@ Run a proactive bug analysis on the current branch by combining static analysis 
 
 ### Phase 1: Pre-flight
 
-**Produces:** BRANCH_INFO, PR_DESCRIPTION
+**Produces:** BRANCH_INFO, PR_DESCRIPTION, COMPLIANCE_SKILL_INSTALLED
+
+{compliance_gate()}
+Reuse this result for every downstream phase.
 
 Spawn Git agent:
 
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
+COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
