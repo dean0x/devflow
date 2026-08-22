@@ -1056,6 +1056,61 @@ describe('S21: all-six frameworks → SKILL.md fully composed; rule bullets with
   });
 });
 
+// ── S22 ───────────────────────────────────────────────────────────────────────
+describe('S22: --status flags composition-skipped skill shadow', () => {
+  // A skill shadow whose SKILL.md has NO ${DEVFLOW_COMPLIANCE_...} tokens passes through
+  // byte-identical (C1). The --status output must warn the user that per-framework sections
+  // are absent from the installed skill, so they know why framework-specific guidance is missing.
+  let tmpHome: string;
+  let devflowDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s22-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    const claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S22a: skill shadow with tokens → --status shows [shadowed] (composition runs)', async () => {
+    // Shadow contains a token → composition runs normally → "shadowed" label only.
+    const shadowSkillDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.mkdir(shadowSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(shadowSkillDir, 'SKILL.md'),
+      '# Shadow compliance\n${DEVFLOW_COMPLIANCE_SCOPE}\n',
+      'utf-8',
+    );
+
+    const result = run('compliance', '--status');
+    expect(result.status, `compliance --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/shadowed/i);
+    expect(out).not.toMatch(/composition skipped/i);
+  });
+
+  it('S22b: token-free skill shadow → --status warns "composition skipped"', async () => {
+    // Shadow has NO tokens → C1 passthrough → per-framework sections absent.
+    const shadowSkillDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.mkdir(shadowSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(shadowSkillDir, 'SKILL.md'),
+      '# Custom static compliance skill — no composition tokens',
+      'utf-8',
+    );
+
+    const result = run('compliance', '--status');
+    expect(result.status, `compliance --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/composition skipped/i);
+  });
+});
+
 // ── S20 ───────────────────────────────────────────────────────────────────────
 describe('S20: compliance skill lifecycle is managed by converge, not the orphan sweep', () => {
   // After I09: the installer's knownNames unions FEATURE_OWNED_SKILLS, so devflow:compliance
