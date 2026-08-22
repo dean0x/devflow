@@ -185,7 +185,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
-    commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile', '/dynamic-wave'],
+    commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
     agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     optional: true,
@@ -531,14 +531,14 @@ export const LEGACY_RULE_NAMES: string[] = [];
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
  * code-review → resolve → self-review → bug-analysis → debug → release →
- * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-wave → dynamic-profile).
+ * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-profile).
  * Export so init.ts can import it rather than keeping a local copy.
  */
 export const WORKFLOW_ORDER: string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
   '/debug', '/release',
-  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
+  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile',
 ];
 
 /**

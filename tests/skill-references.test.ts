@@ -184,7 +184,6 @@ const COMMAND_REFS = new Set([
   'dynamic-plan',
   'dynamic-build',
   'dynamic-profile',
-  'dynamic-wave',
 ]);
 
 /**

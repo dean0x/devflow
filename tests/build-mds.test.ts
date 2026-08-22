@@ -4,13 +4,13 @@
  * Covers the unified frontmatter-driven MDS build pipeline.
  *
  * Scenario coverage:
- *  1. Discovery == 14 — discoverHosts() finds exactly the 14 expected basenames.
+ *  1. Discovery == 13 — discoverHosts() finds exactly the 13 expected basenames.
  *  2. output-dir stripped — compiled outputs contain no output-dir: key.
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
- *  5. Script happy-path exit — build:mds exits 0 and produces all 14+2=16 outputs in dist/commands/.
- *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 5 dynamic outputs present.
+ *  5. Script happy-path exit — build:mds exits 0 and produces all 13+2=15 outputs in dist/commands/.
+ *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic outputs present.
  *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
  *  9. Ignored-dir walk (P3) — a .mds with output-dir: under node_modules/ is not compiled.
@@ -46,13 +46,12 @@ const KNOWLEDGE_HOSTS: Record<string, string> = {
   'debug':        DIST_COMMANDS,
 };
 
-/** The 5 dynamic hosts: basename → expected output dir (all compile to dist/commands) */
+/** The 4 dynamic hosts: basename → expected output dir (all compile to dist/commands) */
 const DYNAMIC_HOSTS: Record<string, string> = {
   'dynamic-build':   DIST_COMMANDS,
   'dynamic-plan':    DIST_COMMANDS,
   'dynamic-profile': DIST_COMMANDS,
   'dynamic-tickets': DIST_COMMANDS,
-  'dynamic-wave':    DIST_COMMANDS,
 };
 
 const ALL_HOSTS = { ...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS };
@@ -75,12 +74,12 @@ async function ensureInit(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('MDS host discovery', () => {
-  it('commands/ contains exactly 14 host .mds files (9 knowledge + 5 dynamic)', async () => {
+  it('commands/ contains exactly 13 host .mds files (9 knowledge + 4 dynamic)', async () => {
     const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
     const hostFiles = entries.filter(
       e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
     );
-    expect(hostFiles).toHaveLength(14);
+    expect(hostFiles).toHaveLength(13);
   });
 
   it('each expected host .mds exists in commands/', async () => {
@@ -472,7 +471,7 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('all 5 dynamic command outputs exist post-build', async () => {
+  it('all 4 dynamic command outputs exist post-build', async () => {
     for (const [basename, destRelDir] of Object.entries(DYNAMIC_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       await expect(
@@ -482,14 +481,14 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('dist/commands/ contains exactly 15 .md files (14 compiled + 1 hand-authored)', async () => {
+  it('dist/commands/ contains exactly 14 .md files (13 compiled + 1 hand-authored)', async () => {
     // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
     const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
     const mdFiles = files.filter(f => f.endsWith('.md'));
     expect(
       mdFiles.length,
-      `Expected 15 .md files in dist/commands/ (14 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
-    ).toBe(15);
+      `Expected 14 .md files in dist/commands/ (13 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+    ).toBe(14);
   });
 });
 
@@ -640,7 +639,7 @@ describe('ignored-dir walk (P3)', () => {
       // Also create a valid host that would succeed to test the walk doesn't crash.
       // (No valid plugin exists in tmpRoot, so if the stray is discovered, exit code = 1.
       //  If only the stray exists and is skipped, hosts.length == 0 → also exit 1 with
-      //  "expected 14 hosts". Either way the compiled output must not exist.)
+      //  "expected 13 hosts". Either way the compiled output must not exist.)
       const scriptPath = path.join(ROOT, 'scripts', 'build-mds.ts');
       const result = spawnSync(TSX_BIN, [scriptPath], {
         cwd: tmpRoot,
@@ -839,7 +838,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 // ---------------------------------------------------------------------------
 
 describe('compiled dynamic commands: --dry-run removal (C7)', () => {
-  const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets', 'dynamic-wave'] as const;
+  const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const;
   const DYNAMIC_DIR = path.join(ROOT, 'dist', 'commands');
 
   beforeAll(() => {
@@ -855,7 +854,7 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
     ).toBe(0);
   });
 
-  it('dynamic-build, plan, tickets, wave do NOT contain --dry-run', async () => {
+  it('dynamic-build, plan, tickets do NOT contain --dry-run', async () => {
     for (const basename of DRY_RUN_ABSENT) {
       const content = await fs.readFile(path.join(DYNAMIC_DIR, `${basename}.md`), 'utf-8');
       expect(

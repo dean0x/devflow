@@ -100,7 +100,7 @@ const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLow
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
-const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied; dynamic-wave threads in the tracking-issue number
+const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied tracking-issue number, when one exists
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
@@ -515,8 +515,17 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 A workflow cannot pause mid-run. After the build/wave workflow returns, you (the main model) surface anything that needs a human decision — all at once:
 
 1. Read the wave report (`.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`) for its **escalations** (quarantined/blocked tickets and why), and read any `DECISIONS-NEEDED.md` left by a prior `/devflow:dynamic-plan` run for this initiative.
-2. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
-3. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
+2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from the wave input or from `TRACKING_ISSUE_NUMBER`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
+   ```
+   Agent(subagent_type="Git"):
+   "OPERATION: post-wave-report
+   TRACKING_ISSUE: \{tracking_issue_number\}
+   WAVE_REPORT_PATH: .devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md
+   WAVE_ID: \{WAVE_ID\}"
+   ```
+   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+3. Surface escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
+4. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
 
 Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only WRITES the report; you read it and ask.
 

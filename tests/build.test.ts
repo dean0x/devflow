@@ -149,7 +149,7 @@ describe('agent frontmatter compliance contract', () => {
 // on a clean checkout before build:mds has run — the only reliable contract
 // (applies ADR-019).
 //
-// A dynamic host rename (e.g. dynamic-wave.mds → dynamic-orchestrate.mds)
+// A dynamic host rename (e.g. dynamic-plan.mds → dynamic-orchestrate.mds)
 // without updating plugins.ts would fail this test, surfacing the drift before
 // it ships.
 // ---------------------------------------------------------------------------
