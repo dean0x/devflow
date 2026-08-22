@@ -33,28 +33,18 @@ const DIST_COMMANDS = 'dist/commands';
 /** Path to the local tsx binary (avoids npx install in temp dirs). */
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 
-/** The 9 knowledge hosts: basename → expected output dir (all compile to dist/commands) */
-const KNOWLEDGE_HOSTS: Record<string, string> = {
-  'implement':    DIST_COMMANDS,
-  'plan':         DIST_COMMANDS,
-  'resolve':      DIST_COMMANDS,
-  'code-review':  DIST_COMMANDS,
-  'self-review':  DIST_COMMANDS,
-  'research':     DIST_COMMANDS,
-  'bug-analysis': DIST_COMMANDS,
-  'explore':      DIST_COMMANDS,
-  'debug':        DIST_COMMANDS,
-};
+/** The 9 knowledge host basenames (all compile to dist/commands). */
+const KNOWLEDGE_HOSTS = [
+  'implement', 'plan', 'resolve', 'code-review', 'self-review',
+  'research', 'bug-analysis', 'explore', 'debug',
+] as const;
 
-/** The 4 dynamic hosts: basename → expected output dir (all compile to dist/commands) */
-const DYNAMIC_HOSTS: Record<string, string> = {
-  'dynamic-build':   DIST_COMMANDS,
-  'dynamic-plan':    DIST_COMMANDS,
-  'dynamic-profile': DIST_COMMANDS,
-  'dynamic-tickets': DIST_COMMANDS,
-};
+/** The 4 dynamic host basenames (all compile to dist/commands). */
+const DYNAMIC_HOSTS = [
+  'dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets',
+] as const;
 
-const ALL_HOSTS = { ...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS };
+const ALL_HOSTS = [...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS] as const;
 
 // ---------------------------------------------------------------------------
 // Shared MDS initialisation — required before compile calls
@@ -83,7 +73,7 @@ describe('MDS host discovery', () => {
   });
 
   it('each expected host .mds exists in commands/', async () => {
-    for (const basename of Object.keys(ALL_HOSTS)) {
+    for (const basename of ALL_HOSTS) {
       const sourcePath = path.join(COMMANDS_DIR, `${basename}.mds`);
       await expect(
         fs.access(sourcePath),
@@ -107,7 +97,7 @@ describe('MDS host discovery', () => {
   });
 
   it('every host .mds declares a non-empty output-dir: as its last frontmatter key', async () => {
-    for (const basename of Object.keys(ALL_HOSTS)) {
+    for (const basename of ALL_HOSTS) {
       const content = await fs.readFile(path.join(COMMANDS_DIR, `${basename}.mds`), 'utf-8');
       const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content);
       expect(fmMatch, `${basename}.mds must have a frontmatter block`).not.toBeNull();
@@ -145,8 +135,8 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('no compiled output contains output-dir:', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -156,7 +146,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must not contain output-dir:`,
+        `${DIST_COMMANDS}/${basename}.md must not contain output-dir:`,
       ).not.toMatch(/^output-dir:/m);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -164,8 +154,8 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('every compiled output that has frontmatter still has description:', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -177,7 +167,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       if (/^---\r?\n/.test(content)) {
         expect(
           content,
-          `${destRelDir}/${basename}.md must preserve description:`,
+          `${DIST_COMMANDS}/${basename}.md must preserve description:`,
         ).toMatch(/^description:/m);
       }
     }
@@ -186,8 +176,8 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('dynamic compiled outputs preserve argument-hint:', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(DYNAMIC_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of DYNAMIC_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -198,7 +188,7 @@ describe('output-dir: stripped from compiled outputs', () => {
       if (/^---\r?\n/.test(content)) {
         expect(
           content,
-          `${destRelDir}/${basename}.md must preserve argument-hint:`,
+          `${DIST_COMMANDS}/${basename}.md must preserve argument-hint:`,
         ).toMatch(/^argument-hint:/m);
       }
     }
@@ -214,8 +204,8 @@ describe('partial expansion in compiled knowledge outputs', () => {
   it('no compiled knowledge command contains un-expanded {knowledge_*()} call sites', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of KNOWLEDGE_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -225,7 +215,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
       scanned++;
       expect(
         callSitePattern.test(content),
-        `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
+        `${DIST_COMMANDS}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -233,8 +223,8 @@ describe('partial expansion in compiled knowledge outputs', () => {
 
   it('no compiled knowledge command references feature-knowledge.cjs', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of KNOWLEDGE_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -244,7 +234,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must not reference feature-knowledge.cjs`,
+        `${DIST_COMMANDS}/${basename}.md must not reference feature-knowledge.cjs`,
       ).not.toContain('feature-knowledge.cjs');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -252,8 +242,8 @@ describe('partial expansion in compiled knowledge outputs', () => {
 
   it('no compiled output contains a literal @import line', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -263,7 +253,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must not contain unexpanded @import lines`,
+        `${DIST_COMMANDS}/${basename}.md must not contain unexpanded @import lines`,
       ).not.toMatch(/^@import /m);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -292,8 +282,8 @@ describe('escape-regression guard: no dist command contains literal backslash-br
 
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -303,7 +293,7 @@ describe('escape-regression guard: no dist command contains literal backslash-br
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
+        `${DIST_COMMANDS}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
       ).not.toContain('\\{');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -330,8 +320,8 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
 
   it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of KNOWLEDGE_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -342,7 +332,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
+        `${DIST_COMMANDS}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
       ).toContain('.devflow/learning/index.md');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -350,8 +340,8 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
 
   it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of KNOWLEDGE_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -361,7 +351,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       scanned++;
       expect(
         content,
-        `${destRelDir}/${basename}.md must not reference decisions-index.cjs`,
+        `${DIST_COMMANDS}/${basename}.md must not reference decisions-index.cjs`,
       ).not.toContain('decisions-index.cjs');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -430,9 +420,9 @@ describe('build-mds.ts script subprocess contract', () => {
 
   it('produces at least one .md command file after the script runs', async () => {
     let foundAtLeastOne = false;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
+    for (const basename of ALL_HOSTS) {
       try {
-        await fs.access(path.join(ROOT, destRelDir, `${basename}.md`));
+        await fs.access(path.join(ROOT, DIST_COMMANDS, `${basename}.md`));
         foundAtLeastOne = true;
         break;
       } catch {
@@ -462,21 +452,21 @@ describe('expected-command-set guard (C2)', () => {
   });
 
   it('all 9 knowledge command outputs exist post-build', async () => {
-    for (const [basename, destRelDir] of Object.entries(KNOWLEDGE_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of KNOWLEDGE_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       await expect(
         fs.access(outputPath),
-        `Expected compiled output missing: ${destRelDir}/${basename}.md`,
+        `Expected compiled output missing: ${DIST_COMMANDS}/${basename}.md`,
       ).resolves.toBeUndefined();
     }
   });
 
   it('all 4 dynamic command outputs exist post-build', async () => {
-    for (const [basename, destRelDir] of Object.entries(DYNAMIC_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of DYNAMIC_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       await expect(
         fs.access(outputPath),
-        `Expected compiled output missing: ${destRelDir}/${basename}.md`,
+        `Expected compiled output missing: ${DIST_COMMANDS}/${basename}.md`,
       ).resolves.toBeUndefined();
     }
   });
@@ -700,13 +690,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Gate 1 #2');
   });
 
-  it('does NOT run Gate 1 (Validate/Simplify/Scrutinize) inside the review pass', () => {
-    expect(compiled).not.toContain('Gate 1 only — no Gate 2 for review-fixes');
-    expect(compiled).not.toContain('Simplify recent fixes');
-    expect(compiled).not.toContain('9-pillar review of recent fixes');
-  });
-
   it('spawns Simplify and Scrutinize exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
+    // applies ADR-003: obsolete-forever strings ('Gate 1 only — no Gate 2 for review-fixes',
+    // 'Simplify recent fixes', '9-pillar review of recent fixes') dropped; count assertions
+    // are the real structural guard under the new single-pass architecture.
     const simplifyCount = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
     const scrutinizeCount = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
     expect(simplifyCount, 'Simplify should run only in the two Gate-1 passes').toBe(2);
@@ -735,8 +722,8 @@ describe('compiled knowledge commands — no stale call-site references', () => 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -746,7 +733,7 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       scanned++;
       expect(
         callSitePattern.test(content),
-        `${destRelDir}/${basename}.md must not contain un-expanded MDS call sites`,
+        `${DIST_COMMANDS}/${basename}.md must not contain un-expanded MDS call sites`,
       ).toBe(false);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -792,6 +779,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     // creeps back into the authored script body. Pin the loop construct's absence too.
     expect(compiled).not.toContain('for (let cycle');
     expect(compiled).toContain('The pass runs exactly ONCE');
+    // rename-guard: the old review_loop export token and prose phrase must be absent
+    // after the review_loop → review_pass rename (ADR-003). Grep confirms these are
+    // absent in dist today; these assertions would fire if a stray partial re-introduced them.
+    expect(compiled).not.toContain('review_loop');
+    expect(compiled).not.toMatch(/review[- ]loop/i);
     // Unique-block pins — avoids PF-018 (deleting either block leaves test green without these)
     // Invariant #7 unique: appears only in engine_invariants() block, not in review_pass() prose
     expect(compiled).toContain('Never author additional cycles or a delta re-review of fix commits');
@@ -997,8 +989,8 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
 
   it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32)', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1037,8 +1029,8 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1301,8 +1293,8 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
     let scanned = 0;
-    for (const [basename, destRelDir] of Object.entries(ALL_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+    for (const basename of ALL_HOSTS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
