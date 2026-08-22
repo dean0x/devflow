@@ -140,7 +140,7 @@ describe('agent frontmatter compliance contract', () => {
 // ---------------------------------------------------------------------------
 // devflow-dynamic declared commands ↔ src/assets/commands/*.mds source parity
 //
-// Ties the 5 command names declared in DEVFLOW_PLUGINS to the 5 dynamic-*.mds
+// Ties the 4 command names declared in DEVFLOW_PLUGINS to the 4 dynamic-*.mds
 // host files in src/assets/commands/ whose basename starts with 'dynamic-'.
 // In the restructured layout all hosts output to dist/commands/ (single target),
 // so the dynamic hosts are identified by name prefix, not by output-dir content.
