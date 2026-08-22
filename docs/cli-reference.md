@@ -179,7 +179,7 @@ The `compliance` skill and rule are dynamically composed at install time from pe
 
 | Token | Resolved to |
 |-------|------------|
-| `${DEVFLOW_COMPLIANCE_SCOPE}` | Comma-joined active framework labels injected into the `description:` frontmatter line |
+| `${DEVFLOW_COMPLIANCE_SCOPE}` | Framework clause (`under GDPR, SOC 2`, or `under active compliance frameworks` at zero) appended to the opening body sentence |
 | `${DEVFLOW_COMPLIANCE_ACTIVE}` | Active Frameworks section body listing the selected frameworks |
 | `${DEVFLOW_COMPLIANCE_MAPPING}` | Full Framework Mapping table (header + one row per selected framework) |
 | `${DEVFLOW_COMPLIANCE_CHECKLIST}` | Per-framework checklist items appended to the Checklist section |
