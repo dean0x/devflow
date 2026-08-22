@@ -300,7 +300,6 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
         stdio: ['pipe', 'pipe', 'pipe'],
       }).toString();
     } catch {
-      // If npm pack fails (e.g. pre-build environment without dist/), skip gracefully.
       packFilesCache = [];
       return packFilesCache;
     }

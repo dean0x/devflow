@@ -351,7 +351,6 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
       if (claimedFixed && unresolved.length === 0) {
         fixedFindings.push(...chunk.map(f => ({ ...f, status: "fixed", commitShas: result.commitShas })));
       } else if (claimedFixed) {
-        // Agent named work it could not finish — carry the whole chunk forward rather than guessing which findings the strings map to.
         notAddressed.push(...chunk.map(f => ({ ...f, unresolvedNote: unresolved.join("; ") })));
       } else {
         notAddressed.push(...chunk);
