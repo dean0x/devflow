@@ -6,7 +6,7 @@ output-dir: dist/commands
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
-@import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
+@import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_pass, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 
@@ -57,7 +57,7 @@ Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded pe
 
 **2. Read budget**
 
-Note the `budget` value from the Workflow tool context (or default to "medium" if not provided). This governs Review agent roster size, review cycle count, and verification vote count.
+Note the `budget` value from the Workflow tool context (or default to "medium" if not provided). This governs Review agent roster size and verification vote count.
 
 **3. Detect mode: SINGLE or WAVE**
 
@@ -90,7 +90,7 @@ Author a workflow script shaped like:
 export const meta = {
   name: "devflow-dynamic-build",
   description: "Single-ticket build: implement → Gate 1 → Gate 2 → review → verify → fix",
-  phases: ["setup", "implement", "gate1", "gate2", "review-loop", "gate1-final", "report"]
+  phases: ["setup", "implement", "gate1", "gate2", "review", "gate1-final", "report"]
 };
 
 // SINGLE mode: one ticket, one branch, full engine
@@ -213,75 +213,60 @@ Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor 
   return { evaluateVerdict: evalVerdict, testVerdict };
 });
 
-// Phase 5: Review → verify → fix loop
-const reviewResult = await phase("review-loop", async () => {
-  const changedFiles = implResult.filesChanged || [];
-  const maxCycles = changedFiles.length <= 20 ? 2 : 3;  // judgment heuristic, budget-scaled
-
-  // Track reviewBaseSha for delta-scoped review cycles
-  let reviewBaseSha = gitSetup?.baseSha || null;
-  let cyclesRun = 0;
-  let survivingFindings = [];
-  let fixedFindings = [];
-  let allCoverageGaps = [];
+// Phase 5: Review → verify → fix (single pass)
+const reviewResult = await phase("review", async () => {
+  // Review scope: the entire branch diff (base SHA → HEAD). The pass runs exactly ONCE.
+  const reviewScope = `Review the full branch diff on branch ${BRANCH} (base to HEAD).`;
 
   // Review agent focus list (order = index mapping for dead-reviewer detection)
   const reviewFocuses = ["security", "architecture", "performance", "complexity", "consistency", "regression", "testing", "reliability"];
 
-  for (let cycle = 1; cycle <= maxCycles; cycle++) {
-    cyclesRun = cycle;
-
-    // Cycle 1 = full branch diff; cycles 2+ = DELTA REVIEW of fix commits only.
-    // If reviewBaseSha is falsy (base unrecorded), fall back to full-branch scope — never interpolate null.
-    const reviewScope = (cycle === 1 || !reviewBaseSha)
-      ? `Review the full branch diff on branch ${BRANCH} (base to HEAD).`
-      : `DELTA REVIEW: review only the fix commits from ${reviewBaseSha} to HEAD on branch ${BRANCH}. Verify those fixes are sound; do not re-review unchanged code.`;
-
-    // Spawn Review agents in staggered chunks of 5 to avoid 429 batch death
-    const chunkSize = 5;
-    const reviewThunks = reviewFocuses.map(focus =>
-      () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
+  // Spawn Review agents in staggered chunks of 5 to avoid 429 batch death
+  const chunkSize = 5;
+  const reviewThunks = reviewFocuses.map(focus =>
+    () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
 Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" })
-    );
+  );
 
-    let rawReviews = [];
-    for (let i = 0; i < reviewThunks.length; i += chunkSize) {
-      const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));
-      rawReviews = rawReviews.concat(chunk);
-    }
+  let rawReviews = [];
+  for (let i = 0; i < reviewThunks.length; i += chunkSize) {
+    const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));
+    rawReviews = rawReviews.concat(chunk);
+  }
 
-    // Dead-Review-agent detection — retry once; record coverageGaps
-    const coverageGaps = [];
-    const liveReviews = [];
-    for (let i = 0; i < rawReviews.length; i++) {
-      const r = rawReviews[i];
-      const focus = reviewFocuses[i];
-      if (!r || r.reviewed !== true) {
-        // Dead Review agent: retry once sequentially
-        const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
-        if (!retry || retry.reviewed !== true) {
-          coverageGaps.push(focus);
-          log(`review coverage incomplete: ${focus}`);
-        } else {
-          liveReviews.push(retry);
-        }
+  // Dead-Review-agent detection — retry once; record coverageGaps
+  const coverageGaps = [];
+  const liveReviews = [];
+  for (let i = 0; i < rawReviews.length; i++) {
+    const r = rawReviews[i];
+    const focus = reviewFocuses[i];
+    if (!r || r.reviewed !== true) {
+      // Dead Review agent: retry once sequentially
+      const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
+      if (!retry || retry.reviewed !== true) {
+        coverageGaps.push(focus);
+        log(`review coverage incomplete: ${focus}`);
       } else {
-        liveReviews.push(r);
+        liveReviews.push(retry);
       }
+    } else {
+      liveReviews.push(r);
     }
-    allCoverageGaps = allCoverageGaps.concat(coverageGaps);
+  }
 
-    const allFindings = liveReviews.flatMap(r => r.findings || []);
-    // Early exit requires BOTH no findings AND no coverage gaps
-    if (allFindings.length === 0 && coverageGaps.length === 0) break;
+  const allFindings = liveReviews.flatMap(r => r.findings || []);
+  // Early exit when no findings and no coverage gaps — clean pass
+  if (allFindings.length === 0 && coverageGaps.length === 0) {
+    return { survivingFindings: [], fixedFindings: [], coverageGaps };
+  }
 
-    // Adversarial verification — bounded 2-3 agent panel, majority-survives
-    // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
-    // A finding survives if >50% of panel agents CONFIRM it.
-    const VERIFY_PANEL = 3;
-    const panels = await parallel(
-      Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
-        agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
+  // Adversarial verification — bounded 2-3 agent panel, majority-survives
+  // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
+  // A finding survives if >50% of panel agents CONFIRM it.
+  const VERIFY_PANEL = 3;
+  const panels = await parallel(
+    Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
+      agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
 Lens ${lens + 1} of ${VERIFY_PANEL}:
 ${["Does each finding actually reproduce in the current code? Hunt for findings that describe patterns not present in the diff.",
    "Is each finding a real issue or a false positive in context? Consider intent, surrounding code, and project conventions.",
@@ -292,84 +277,71 @@ Return: { verdicts: [ { index: number, verdict: "CONFIRMED"|"FALSE_POSITIVE", ra
 
 Findings:
 ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.description, file: f.file || "unknown" })))}`, { agentType: "Review" })
-      )
-    );
+    )
+  );
 
-    const confirmedFindings = allFindings.filter((_, i) =>
-      panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
-    );
+  const confirmedFindings = allFindings.filter((_, i) =>
+    panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
+  );
 
-    if (confirmedFindings.length === 0 && coverageGaps.length === 0) break;  // early exit — clean review
+  // No confirmed findings and no coverage gaps — clean pass
+  if (confirmedFindings.length === 0 && coverageGaps.length === 0) {
+    return { survivingFindings: [], fixedFindings: [], coverageGaps };
+  }
 
-    // Record preFixSha before fixes (defines next cycle's DELTA REVIEW scope).
-    // Pin the return contract so shape drift doesn't silently widen scope back to full-branch.
-    const preFixAgent = await agent(`Run git rev-parse HEAD on branch ${BRANCH}.
-Return exactly: {"sha": "<40-hex-commit-sha>"}`, { agentType: "Git" });
-    // Accept only a valid 40-hex SHA — if shape drifts, widen to prior base (never narrow the review window)
-    const preFixSha = /^[0-9a-f]{40}$/.test(preFixAgent?.sha) ? preFixAgent.sha : reviewBaseSha;
+  // Batched fix Code agents — one file per set of sub-batches; max 5 findings per sub-batch.
+  // Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently —
+  // concurrent same-file edits cause index contention and lost fixes).
+  // Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine).
+  // A finding with no file field gets its own singleton group (unknown scope — never mix with known files).
+  const MAX_BATCH = 5;  // max 5 findings per sub-batch
+  const fileGroups = {};
+  for (let fi = 0; fi < confirmedFindings.length; fi++) {
+    const f = confirmedFindings[fi];
+    const key = f.file || `__nofile_${fi}`;  // singletons for unknown-file findings
+    if (!fileGroups[key]) fileGroups[key] = [];
+    fileGroups[key].push(f);
+  }
 
-    // Batched fix Code agents — one file per set of sub-batches; max 5 findings per sub-batch.
-    // Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently —
-    // concurrent same-file edits cause index contention and lost fixes).
-    // Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine).
-    // A finding with no file field gets its own singleton group (unknown scope — never mix with known files).
-    const MAX_BATCH = 5;  // max 5 findings per sub-batch
-    const fileGroups = {};
-    for (let fi = 0; fi < confirmedFindings.length; fi++) {
-      const f = confirmedFindings[fi];
-      const key = f.file || `__nofile_${fi}`;  // singletons for unknown-file findings
-      if (!fileGroups[key]) fileGroups[key] = [];
-      fileGroups[key].push(f);
-    }
-
-    // One entry per distinct file; each entry runs its sub-batches sequentially
-    const fixResults = await parallel(Object.entries(fileGroups).map(([fileKey, findings]) => async () => {
-      const chunkResults = [];
-      for (let i = 0; i < findings.length; i += MAX_BATCH) {
-        const chunk = findings.slice(i, i + MAX_BATCH);
-        const r = await agent(`Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
+  // One entry per distinct file; each entry runs its sub-batches sequentially
+  const fixResults = await parallel(Object.entries(fileGroups).map(([fileKey, findings]) => async () => {
+    const chunkResults = [];
+    for (let i = 0; i < findings.length; i += MAX_BATCH) {
+      const chunk = findings.slice(i, i + MAX_BATCH);
+      const r = await agent(`Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
-        chunkResults.push({ chunk, result: r });
-      }
-      return chunkResults;
-    }));
+      chunkResults.push({ chunk, result: r });
+    }
+    return chunkResults;
+  }));
 
-    // Update reviewBaseSha for next cycle's DELTA REVIEW
-    reviewBaseSha = preFixSha;
-
-    // Track findings disposition — FIXED vs SURVIVING
-    // fixResults is an array of chunkResults arrays (one per distinct file); flatten to disposition.
-    const fixedThisCycle = [];
-    const notAddressed = [];
-    for (const fileChunkResults of (fixResults || [])) {
-      for (const { chunk, result } of (fileChunkResults || [])) {
-        // Check the explicit status field returned by the fix Code agent — never rely on an absent `failed` flag
-        if (result?.status === "fixed") {
-          fixedThisCycle.push(...chunk.map(f => ({
-            ...f, status: "fixed", fixedInCycle: cycle,
-            commitShas: result?.commitShas || []
-          })));
-        } else {
-          notAddressed.push(...chunk);
-        }
+  // Track findings disposition — FIXED vs SURVIVING
+  // fixResults is an array of chunkResults arrays (one per distinct file); flatten to disposition.
+  const fixedFindings = [];
+  const notAddressed = [];
+  for (const fileChunkResults of (fixResults || [])) {
+    for (const { chunk, result } of (fileChunkResults || [])) {
+      // Check the explicit status field returned by the fix Code agent — never rely on an absent `failed` flag
+      if (result?.status === "fixed") {
+        fixedFindings.push(...chunk.map(f => ({
+          ...f, status: "fixed",
+          commitShas: result?.commitShas || []
+        })));
+      } else {
+        notAddressed.push(...chunk);
       }
     }
-    fixedFindings = fixedFindings.concat(fixedThisCycle);
-    // survivingFindings accumulates findings NOT addressed across ALL cycles (fix Code agent dead/failed
-    // or deferred). A delta cycle only re-reviews fix commits, so an earlier unaddressed finding can
-    // never re-surface — overwriting here would silently drop it and let overallVerdict falsely read PASS.
-    survivingFindings = survivingFindings.concat(notAddressed);
   }
 
-  return { cyclesRun, survivingFindings, fixedFindings, coverageGaps: allCoverageGaps };
+  return { survivingFindings: notAddressed, fixedFindings, coverageGaps };
 });
 
 // Phase 5.5: Gate 1 #2 — FINAL post-fix gate (full Validate agent → Simplify agent → Scrutinize agent).
-// Runs ONCE, after the review loop. Between cycles the Code agent self-verified its own fixes;
+// Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
 // this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).
@@ -409,10 +381,10 @@ return phase("report", () =>
 - Implementation summary
 - Gate 1 (#1 post-implementation) result
 - Gate 2 result: ${JSON.stringify(gate2)}
-- Review cycles: ${reviewResult.cyclesRun}
+- Review: single pass (full branch diff)
 - Final Gate 1 (#2 post-fix): ${JSON.stringify(gate1Final)}
 - Findings disposition:
-  - FIXED: ${reviewResult.fixedFindings?.length || 0} findings fixed across cycles (trusted by design; do NOT present as outstanding; never cite pre-fix line numbers)
+  - FIXED: ${reviewResult.fixedFindings?.length || 0} findings fixed (trusted by design; do NOT present as outstanding; never cite pre-fix line numbers)
   - SURVIVING: ${reviewResult.survivingFindings?.length || 0} findings not addressed (fix Code agent failed or deferred): ${JSON.stringify(reviewResult.survivingFindings)}
 - Overall verdict: ${overallVerdict}
 
@@ -434,7 +406,7 @@ Write a concise report. Present only surviving findings as outstanding — never
 
 {acceptance_criteria_contract()}
 
-{review_loop()}
+{review_pass()}
 
 {engine_invariants()}
 

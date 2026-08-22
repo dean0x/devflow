@@ -700,7 +700,7 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Gate 1 #2');
   });
 
-  it('does NOT run Gate 1 (Validate/Simplify/Scrutinize) between review cycles', () => {
+  it('does NOT run Gate 1 (Validate/Simplify/Scrutinize) inside the review pass', () => {
     expect(compiled).not.toContain('Gate 1 only — no Gate 2 for review-fixes');
     expect(compiled).not.toContain('Simplify recent fixes');
     expect(compiled).not.toContain('9-pillar review of recent fixes');
@@ -779,9 +779,13 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     );
   });
 
-  it('C1: delta-review scope — DELTA REVIEW prose and reviewBaseSha tracking', () => {
-    expect(compiled).toContain('DELTA REVIEW');
-    expect(compiled).toContain('reviewBaseSha');
+  it('C1: single-pass review — DELTA REVIEW and multi-cycle machinery absent, single-pass invariant present', () => {
+    expect(compiled).toContain('The review pass runs exactly ONCE');
+    expect(compiled).not.toContain('DELTA REVIEW');
+    expect(compiled).not.toContain('reviewBaseSha');
+    expect(compiled).not.toContain('maxCycles');
+    expect(compiled).not.toContain('cyclesRun');
+    expect(compiled).not.toContain('fixedInCycle');
   });
 
   it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {

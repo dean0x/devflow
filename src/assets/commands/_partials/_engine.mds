@@ -17,15 +17,15 @@ Depth scales to change size + budget: a trivial one-line fix warrants a lighter 
 
 **Cadence — Gate 1 runs at exactly TWO points per ticket:**
 1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`).
-2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review loop have completed.
+2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed.
 
-It does NOT run between review cycles, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_loop()` and the Code agent's "Long-running commands" discipline). The final Gate 1 #2 is the invariant that all written code passes before merge.
+It does NOT run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_pass()` and the Code agent's "Long-running commands" discipline). The final Gate 1 #2 is the invariant that all written code passes before merge.
 @end
 
 @define gate2_acceptance():
 ### GATE 2 — Acceptance gate (per ticket, plan-scoped — fires ONCE at implementation acceptance)
 
-Gate 2 fires ONCE: after the implement-bundle and BEFORE the review loop. It does NOT re-run after review-fixes (those get Gate 1 only).
+Gate 2 fires ONCE: after the implement-bundle and BEFORE the review pass. It does NOT re-run after review-fixes (those get Gate 1 only).
 
 Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — the acceptance criteria and test plan written for the Evaluate agent and Test agent.
 
@@ -65,7 +65,7 @@ The standard implementation unit for one ticket. Run in order:
 ```
 Code(agentType:"Code", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
   → gate1_postcode()
-  → gate2_acceptance()   ← Gate 2 runs HERE — before the review loop, not after
+  → gate2_acceptance()   ← Gate 2 runs HERE — before the review pass, not after
 ```
 
 The Code agent prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (from `.devflow/learning/index.md`), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
@@ -73,16 +73,14 @@ The Code agent prompt must include: task description, implementation plan (if on
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
 @end
 
-@define review_loop():
-### Review → verify → fix loop (bounded)
+@define review_pass():
+### Review → verify → fix (single pass)
 
-Cycle count = LLM judgment, not a formula. Heuristic: files changed ≤ ~20 → 2 cycles; > ~20 → 3 cycles. Scale to budget. Always early-exit on a clean review (no surviving findings).
-
-For each cycle:
+The review pass runs exactly ONCE per ticket. One full-branch review → one adversarial verification → one batched fix phase → final Gate 1 (#2). Budget scales roster and verification votes, NEVER the number of passes.
 
 **Step 1 — Spawn Review agents in parallel (one agent() per focus)**
 
-**Review scope:** Cycle 1 reviews the entire branch diff (base SHA → HEAD). Cycles 2+ perform a DELTA REVIEW — review only the fix commits from `reviewBaseSha..HEAD` and verify those fixes are sound; do not re-review unchanged code. `reviewBaseSha` is updated after each fix phase (see Step 3). When the pre-fix SHA from the prior cycle is missing or was not recorded, the review scope falls back to the wider prior base (the un-advanced scope from the previous cycle) rather than a narrower delta — scope never regresses to a narrower window.
+**Review scope:** the entire branch diff (base SHA → HEAD).
 
 Core Review agents (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
@@ -100,9 +98,9 @@ Conditional by file type detected in the diff (add these when relevant):
 
 **Spawn pacing:** launch Review agents in staggered chunks of 4–6 (sequential groups of parallel spawns) — the full roster is preserved, paced to avoid 429 batch death.
 
-**Review agent result contract:** every Review agent MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. Each item in `findings` must carry: `file` (path of the primary file the finding relates to, or `null` if scope is unknown), `description` (one-sentence issue statement), and `severity` (`critical | high | medium | low`). A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD Review agent is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A cycle with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
+**Review agent result contract:** every Review agent MUST return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. Each item in `findings` must carry: `file` (path of the primary file the finding relates to, or `null` if scope is unknown), `description` (one-sentence issue statement), and `severity` (`critical | high | medium | low`). A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD Review agent is NEVER treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A pass with any coverage gaps can never early-exit as clean, and the run verdict can NEVER be PASS; escalate with message "review coverage incomplete: <focus>".
 
-Each Review agent gets `agentType: "Review"` with its focus baked into the prompt. Total: 8–19 Review agents per cycle.
+Each Review agent gets `agentType: "Review"` with its focus baked into the prompt. Total: 8–19 Review agents per pass.
 
 **Step 2 — Adversarial finding verification**
 
@@ -115,9 +113,9 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 **Step 3 — Early exit or fix**
 
-If no surviving findings and `coverageGaps` is empty: break (early exit — do not run unnecessary cycles).
+If no surviving findings and `coverageGaps` is empty: return early (no fixes needed — clean pass).
 
-If survivors remain: before the fix phase, record `preFixSha` (run `git rev-parse HEAD` via a haiku Git agent — pin the return to `\{"sha": "<40-hex>"\}` and validate the shape before using it; fall back to the wider prior base if the SHA is absent or malformed, never narrow) — this SHA defines the next cycle's delta-review scope. Then batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `\{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]\}` — check `result.status === "fixed"` to decide disposition, never an absent `failed` flag. After fixes: update `reviewBaseSha = preFixSha`. Findings addressed by the fix Code agents are reported FIXED (with `fixedInCycle` + commit SHAs), trusted by design; note that cycles 2+ DELTA REVIEW re-checks earlier fixes for free. `survivingFindings` = only findings NOT addressed (fix Code agent dead/failed/blocked or deferred). The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `\{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]\}` — check `result.status === "fixed"` to decide disposition, never an absent `failed` flag. Findings addressed by the fix Code agents are reported FIXED (with commit SHAs), trusted by design. `survivingFindings` = only findings NOT addressed (fix Code agent dead/failed/blocked or deferred). The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's "Long-running commands" discipline). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -185,7 +183,6 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   "ticket": "string — ticket ID or description",
   "branch": "string — branch name for this ticket",
   "verdict": "PASS | FAIL | ESCALATED",
-  "cyclesRun": "number — review cycles completed",
   "survivingFindings": [
     {
       "focus": "string — Review agent focus area",
@@ -202,7 +199,6 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
       "description": "string — one-sentence issue statement",
       "severity": "critical | high | medium | low",
       "status": "fixed",
-      "fixedInCycle": "number — cycle when fixed",
       "commitShas": ["string — commit SHAs from the fix Code agent"]
     }
   ],
@@ -235,13 +231,14 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
 5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
 6. **No unauthorized GitHub side-effects.** Sub-agents NEVER create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. Proposed follow-ups go in the run report.
+7. **The review pass runs exactly ONCE per ticket.** Never author additional cycles or a delta re-review of fix commits. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2. Budget scales roster size and verification votes, never pass count.
 @end
 
 @export gate1_postcode
 @export gate2_acceptance
 @export evaluator_panel
 @export implement_bundle
-@export review_loop
+@export review_pass
 @export concurrency_doctrine
 @export build_execution_doctrine
 @export engine_output_schema
