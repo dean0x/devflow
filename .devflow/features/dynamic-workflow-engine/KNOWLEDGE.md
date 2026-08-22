@@ -100,15 +100,15 @@ Gate 2 fires **once**, at implementation acceptance (before the review pass), no
 
 The review pass runs **exactly ONCE** per ticket. Budget scales roster size and verification votes, never the number of passes.
 
-1. **Review scope**: the entire branch diff (base SHA → HEAD). Full-branch, no delta scoping.
+1. **Review scope**: the entire branch diff from the base branch to HEAD. No base SHA is tracked — Review agents compute the merge-base with the default branch at review time. Full-branch, no delta scoping.
 2. Spawn Review agents in staggered **chunks of ~5** (sequential groups of parallel spawns) to avoid 429 rate-limit death
 3. 8 core focuses always: security, architecture, performance, complexity, consistency, regression, testing, reliability; conditional focuses added by detected file type (.ts, .go, .py, etc.)
-4. **Dead-Review-agent handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. A pass with any coverage gap can never early-exit clean, and the run verdict can never be PASS.
+4. **Dead-Review-agent handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. Coverage gaps block the PASS verdict downstream — they do NOT block the early exit (which triggers on zero findings alone).
 5. **Adversarial verification**: 3-lens panel (reproduces?, real vs false positive?, rule actually applies here?) majority-survives (>50% confirm = surviving finding). Unconfirmed findings are stripped.
-6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently). Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine). A finding with no `file` field is a singleton batch. Never hand one Code agent an unbounded list.
-7. Findings addressed by fix Code agents are FIXED and trusted. Unaddressed findings become `survivingFindings`.
+6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently). Sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5 (`FIX_CHUNK = 5`, same pacing bar as the Review spawn path) — not all at once. A finding with no `file` field is a singleton batch. Never hand one Code agent an unbounded list.
+7. **Evidence-gated disposition**: a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty. A non-empty `unresolved` list means the agent named work it could not complete — the whole chunk moves into `survivingFindings` (never guess which findings the strings map to). `survivingFindings` = findings not addressed: fix Code agent dead/failed/blocked OR committed but left work named in `unresolved`.
 
-Early exit when `allFindings.length === 0 && coverageGaps.length === 0` — return immediately without entering the fix phase.
+Early exit when `allFindings.length === 0` — return immediately. Any `coverageGaps` are carried in the return and block a PASS verdict downstream, not the early exit itself.
 
 ### Wave execution (dynamic-build, WAVE mode)
 
@@ -121,7 +121,9 @@ Early exit when `allFindings.length === 0 && coverageGaps.length === 0` — retu
 7. When nothing is ready but tickets remain: re-ask once with the vacuous-truth rule quoted verbatim. If the re-read names a specific blocker per ticket: declare deadlock with specific reasons. Otherwise continue.
 8. `MAX_ROUNDS = ticket_count * 2 + 5` (minimum 10) — always finite.
 
-Integration branch is `wave/<initiative>` — **never main or master**.
+Integration branch is `wave/<initiative>` (the initiative slug, `{slug}`) — **never main or master**.
+
+**Post-wave-report and traceability** (WAVE mode only): Before authoring the workflow, the main model resolves an optional tracking-issue number — checking the user's input first, then `/dynamic-tickets`'s `tracking-issue.md` at `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`. After the workflow returns, if a tracking-issue number was resolved and the wave report exists, the main model spawns a Git agent with `OPERATION: post-wave-report`, `TRACKING_ISSUE: <n>`, `WAVE_REPORT_PATH: <repo-relative path>` (resolved against `WORKTREE_PATH` when the wave ran in a linked worktree), `WAVE_ID: <ts>`, and `WORKTREE_PATH` when applicable. The Git agent deduplicates via a `<!-- devflow:wave-report wave:{WAVE_ID} -->` marker and degrades gracefully on API failure (`TRACEABILITY: DEGRADED (<reason>)`). If no tracking issue was resolved: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary — never skip silently.
 
 ### Ticket-factory pipeline (dynamic-tickets)
 
@@ -200,7 +202,7 @@ Default: **sequential**. Parallel is the rare, tightly-gated exception — only 
 - **Running Gate 1 inside the review pass**: the cadence is twice per ticket only. Inside the pass, fix Code agents self-verify their own builds.
 - **Re-running Gate 2 after review fixes**: Gate 2 fires once. The review pass is Gate-1-only after Gate 2 has fired.
 - **Treating a DEAD Review agent as a clean pass**: a null/thrown/guard-string result means coverage gap, not clean. `filter(Boolean)` before mapping over agent results is crash-safety, never a coverage-to-success converter.
-- **Authoring deterministic feature code in the script body**: no parsers, schedulers, topological-sort, cycle counters. All scheduling decisions are LLM judgment at runtime (ADR-008 Iron Rule from CLAUDE.md).
+- **Authoring deterministic feature code in the script body**: no parsers, schedulers, no topological-sort, no dependency-graph helpers, no confidence formulas. ALL issue reading, dependency reasoning, and scheduling decisions are LLM judgment at runtime (ADR-008 Iron Rule from CLAUDE.md).
 - **Adding extra review passes or delta re-reviews**: the pass runs exactly once per ticket. Never author a second pass, DELTA REVIEW, or budget-scaled pass count. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2.
 - **Merging to main or master from the workflow**: the workflow targets `wave/<initiative>` only. The user merges to main themselves.
 - **Asking questions mid-workflow**: F4 constraint — a workflow cannot pause. `AskUserQuestion` always happens at the command boundary after the workflow returns.
@@ -256,6 +258,10 @@ A criterion is not acceptable if: vague ("the feature should work correctly"), i
 ### Per-ticket branch branching time
 
 Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the moment the ticket becomes **ready**, not at wave start. This ensures the ticket branch already contains all merged dependencies when it starts.
+
+### Gate 1 #2 retry tracks latest failure details
+
+In the SINGLE mode workflow's final Gate 1 (#2, `gate1-final` phase), retry attempt 2 receives the **latest** recheck failure details — the Gate 1 #2 loop updates `failureDetails = recheck.details || failureDetails` after each recheck. This means the Code agent on attempt 2 sees a failure description that reflects any partial progress from attempt 1's fixes. Gate 1 #1 (inside `gate1`) does not update failure details between attempts — only Gate 1 #2 does.
 
 ## Key Files
 
