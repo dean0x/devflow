@@ -311,7 +311,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
 
   it('tarball contains no plugins/ or shared/ paths (source-tree dirs must not be published)', () => {
     const files = getPackFiles();
-    if (files.length === 0) return; // pre-build: skip
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
     const forbidden = files.filter(f => f.startsWith('plugins/') || f.startsWith('shared/'));
     expect(
       forbidden,
@@ -322,7 +325,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
 
   it('tarball contains exactly 14 dist/commands/*.md files (AC-C3)', () => {
     const files = getPackFiles();
-    if (files.length === 0) return; // pre-build: skip
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
     const commandMds = files.filter(f => /^dist\/commands\/[^/]+\.md$/.test(f));
     expect(
       commandMds,
