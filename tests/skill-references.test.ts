@@ -86,6 +86,47 @@ function extractRelativeSkillRefs(content: string): string[] {
 }
 
 /**
+ * Collect all markdown files in a skill's reference directories (references/ and
+ * frameworks/**), returning entries with filePath and displayPath relative to skillBasePath.
+ *
+ * Scans both the flat references/ dir and the nested frameworks/{id}/ subdirectories
+ * so that compliance-style per-framework reference/fragment files are included.
+ */
+function collectSkillRefFiles(
+  skillBasePath: string,
+): { filePath: string; displayPath: string }[] {
+  const results: { filePath: string; displayPath: string }[] = [];
+
+  // Traditional flat references/ directory
+  const refsDir = path.join(skillBasePath, 'references');
+  if (existsSync(refsDir)) {
+    for (const file of readdirSync(refsDir).filter(f => f.endsWith('.md'))) {
+      results.push({
+        filePath: path.join(refsDir, file),
+        displayPath: `references/${file}`,
+      });
+    }
+  }
+
+  // Nested frameworks/{id}/ directories (compliance-style per-framework files)
+  const frameworksDir = path.join(skillBasePath, 'frameworks');
+  if (existsSync(frameworksDir)) {
+    for (const fwId of readdirSync(frameworksDir)) {
+      const fwDir = path.join(frameworksDir, fwId);
+      if (!statSync(fwDir).isDirectory()) continue;
+      for (const file of readdirSync(fwDir).filter(f => f.endsWith('.md'))) {
+        results.push({
+          filePath: path.join(fwDir, file),
+          displayPath: `frameworks/${fwId}/${file}`,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Scan a single file for stale V2-renamed skill name occurrences.
  *
  * Returns an array of violation strings (one per match) of the form
@@ -499,7 +540,7 @@ describe('Format 8: Skill cross-references within src/assets/skills/', () => {
     }
   });
 
-  it('all devflow:NAME references in skill references/ files are canonical or command refs', () => {
+  it('all devflow:NAME references in skill references/ and frameworks/ files are canonical or command refs', () => {
     // Union 'compliance' — skill is feature-managed after step 1.5 de-registration.
     // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
     const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
@@ -507,16 +548,11 @@ describe('Format 8: Skill cross-references within src/assets/skills/', () => {
     const skillDirs = readdirSync(skillsDir);
 
     for (const skillDir of skillDirs) {
-      const refsDir = path.join(skillsDir, skillDir, 'references');
-      let refFiles: string[];
-      try {
-        refFiles = readdirSync(refsDir).filter(f => f.endsWith('.md'));
-      } catch {
-        continue; // No references/ directory
-      }
+      // collectSkillRefFiles walks both references/ and frameworks/{id}/ subdirs
+      const skillBasePath = path.join(skillsDir, skillDir);
+      const refEntries = collectSkillRefFiles(skillBasePath);
 
-      for (const file of refFiles) {
-        const filePath = path.join(refsDir, file);
+      for (const { filePath, displayPath } of refEntries) {
         const content = readFileSync(filePath, 'utf-8');
         const allRefs = extractPrefixedRefs(content);
         const skillRefs = filterNonSkillRefs(allRefs);
@@ -524,7 +560,7 @@ describe('Format 8: Skill cross-references within src/assets/skills/', () => {
         for (const ref of skillRefs) {
           expect(
             canonicalSkills.has(ref),
-            `src/assets/skills/${skillDir}/references/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+            `src/assets/skills/${skillDir}/${displayPath}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
           ).toBe(true);
         }
       }
@@ -568,16 +604,11 @@ describe('Format 11: Relative skill-directory cross-references in skill referenc
     const skillDirs = readdirSync(skillsDir);
 
     for (const skillDir of skillDirs) {
-      const refsDir = path.join(skillsDir, skillDir, 'references');
-      let refFiles: string[];
-      try {
-        refFiles = readdirSync(refsDir).filter(f => f.endsWith('.md'));
-      } catch {
-        continue;
-      }
+      // collectSkillRefFiles walks both references/ and frameworks/{id}/ subdirs
+      const skillBasePath = path.join(skillsDir, skillDir);
+      const refEntries = collectSkillRefFiles(skillBasePath);
 
-      for (const file of refFiles) {
-        const filePath = path.join(refsDir, file);
+      for (const { filePath, displayPath } of refEntries) {
         const content = readFileSync(filePath, 'utf-8');
         const crossRefs = extractRelativeSkillRefs(content);
 
@@ -586,7 +617,7 @@ describe('Format 11: Relative skill-directory cross-references in skill referenc
           if (ref === skillDir) continue;
           expect(
             canonicalSkills.has(ref),
-            `src/assets/skills/${skillDir}/references/${file}: cross-reference '${ref}/references/...' — '${ref}' is not in canonical getAllSkillNames()`,
+            `src/assets/skills/${skillDir}/${displayPath}: cross-reference '${ref}/references/...' — '${ref}' is not in canonical getAllSkillNames()`,
           ).toBe(true);
         }
       }
