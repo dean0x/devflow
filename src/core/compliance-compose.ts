@@ -29,7 +29,9 @@ export const COMPLIANCE_CONTROL_COLUMNS: readonly string[] = [
 /**
  * The 5 substitution tokens in the SKILL.md template.
  * Bidirectional parity: every token here must exist in the template; every
- * template token must be listed here. Tests enforce both directions.
+ * template token must be listed here. Enforced against the SHIPPED SKILL.md by
+ * "shipped templates ↔ token registry" in tests/compliance-compose.test.ts —
+ * a typo'd token is otherwise stripped silently by C3 and never noticed.
  */
 export const COMPLIANCE_SKILL_TOKENS: readonly string[] = [
   '${DEVFLOW_COMPLIANCE_SCOPE}',
@@ -42,7 +44,8 @@ export const COMPLIANCE_SKILL_TOKENS: readonly string[] = [
 /**
  * The 1 rule substitution token beyond the existing COMPLIANCE_RULE_PLACEHOLDER.
  * Bidirectional parity: every token here must exist in the rule template; every
- * template token (beyond the existing placeholder) must be listed here.
+ * template token (beyond the existing placeholder) must be listed here. Enforced
+ * against the SHIPPED rule in tests/compliance-compose.test.ts.
  */
 export const COMPLIANCE_RULE_TOKENS: readonly string[] = [
   '${DEVFLOW_COMPLIANCE_RULE_BULLETS}',
@@ -80,6 +83,15 @@ export interface ComposeResult {
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Matches any `${DEVFLOW_COMPLIANCE_*}` token left after the known substitutions.
+ *
+ * Deliberately as permissive as the C1 admission guard (`includes('${DEVFLOW_COMPLIANCE_')`):
+ * anything that gets a template past C1 must be strippable here, or C3 ("no token
+ * residue") would be false for that shape.
+ */
+const UNKNOWN_TOKEN_PATTERN = /\$\{DEVFLOW_COMPLIANCE_[A-Z0-9_]*\}/g;
 
 /** Label lookup from the COMPLIANCE_FRAMEWORKS registry. */
 const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(
@@ -160,6 +172,28 @@ function buildScope(activeFrameworks: readonly string[]): string {
 }
 
 /**
+ * Collect C5 warnings for active frameworks that have no fragment.
+ *
+ * Emitted once, up front, by the compose entry points — never as a side effect of a
+ * section builder. Each builder skips fragment-less frameworks independently, so the
+ * warning must not depend on which builders run or in what order.
+ */
+function collectMissingFragmentWarnings(
+  fnName: string,
+  activeFrameworks: readonly string[],
+  fragments: ReadonlyMap<string, ComplianceFragment>,
+  omitted: string,
+): string[] {
+  const warnings: string[] = [];
+  for (const id of activeFrameworks) {
+    if (!fragments.has(id)) {
+      warnings.push(`${fnName}: no fragment for "${id}" — ${omitted}`);
+    }
+  }
+  return warnings;
+}
+
+/**
  * Build the ${DEVFLOW_COMPLIANCE_ACTIVE} substitution — the body of the
  * Active Frameworks section.
  *
@@ -167,11 +201,12 @@ function buildScope(activeFrameworks: readonly string[]): string {
  * Zero: informs that generic controls only apply.
  *
  * File presence corroborates: note preserved so the agent keeps checking files.
+ *
+ * C5: a framework with no fragment still appears here — only its mapping row,
+ * checklist item and reference row are omitted.
  */
 function buildActiveSection(
   activeFrameworks: readonly string[],
-  fragments: ReadonlyMap<string, ComplianceFragment>,
-  warnings: string[],
 ): string {
   if (activeFrameworks.length === 0) {
     return [
@@ -186,13 +221,6 @@ function buildActiveSection(
   const labelList = labels.map(l => `**${l}**`).join(', ');
 
   const refList = activeFrameworks.map(id => `\`references/${id}.md\``).join(' and ');
-
-  // Warn for frameworks without a fragment (C5 — but the framework still appears here)
-  for (const id of activeFrameworks) {
-    if (!fragments.has(id)) {
-      warnings.push(`composeComplianceSkill: no fragment for "${id}" — mapping row and reference row omitted`);
-    }
-  }
 
   return [
     `**Active: ${labels.join(', ')}.**`,
@@ -217,7 +245,6 @@ function buildActiveSection(
 function buildMappingSection(
   activeFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
-  warnings: string[],
 ): string {
   if (activeFrameworks.length === 0) {
     return '';
@@ -231,7 +258,7 @@ function buildMappingSection(
     const label = LABEL_BY_ID.get(id) ?? id;
     const fragment = fragments.get(id);
     if (!fragment) {
-      // C5: framework appears but contributes no row (warning already emitted in buildActiveSection)
+      // C5: framework appears in scope/active but contributes no row.
       continue;
     }
     const cells = [label, ...fragment.mappingCells];
@@ -263,10 +290,8 @@ function buildChecklist(
   const items: string[] = [];
   for (const id of activeFrameworks) {
     const fragment = fragments.get(id);
-    if (!fragment) {
-      // Warning already emitted in buildActiveSection; skip silently here
-      continue;
-    }
+    // C5: fragment-less frameworks contribute no checklist item.
+    if (!fragment) continue;
     items.push(...fragment.checklistItems);
   }
   return items.join('\n');
@@ -283,10 +308,8 @@ function buildReferences(
   const rows: string[] = [];
   for (const id of activeFrameworks) {
     const fragment = fragments.get(id);
-    if (!fragment) {
-      // Warning already emitted in buildActiveSection; skip silently here
-      continue;
-    }
+    // C5: fragment-less frameworks contribute no reference row.
+    if (!fragment) continue;
     rows.push(`| \`references/${id}.md\` | ${fragment.referenceBlurb} |`);
   }
   return rows.join('\n');
@@ -421,10 +444,19 @@ export function composeComplianceSkill(
     return true;
   });
 
+  // C5: warn once per fragment-less framework, before any section is built — the
+  // builders below each skip such frameworks independently and emit nothing.
+  warnings.push(...collectMissingFragmentWarnings(
+    'composeComplianceSkill',
+    activeFrameworks,
+    fragments,
+    'mapping row, checklist item and reference row omitted',
+  ));
+
   // Build substitution values (C6: activeFrameworks is in caller order after filter)
   const scope = buildScope(activeFrameworks);
-  const active = buildActiveSection(activeFrameworks, fragments, warnings);
-  const mapping = buildMappingSection(activeFrameworks, fragments, warnings);
+  const active = buildActiveSection(activeFrameworks);
+  const mapping = buildMappingSection(activeFrameworks, fragments);
   const checklist = buildChecklist(activeFrameworks, fragments);
   const references = buildReferences(activeFrameworks, fragments);
 
@@ -435,8 +467,11 @@ export function composeComplianceSkill(
   content = replaceToken(content, '${DEVFLOW_COMPLIANCE_CHECKLIST}', checklist);
   content = replaceToken(content, '${DEVFLOW_COMPLIANCE_REFERENCES}', references);
 
-  // C3: strip remaining unknown tokens with warning
-  content = content.replace(/\$\{DEVFLOW_COMPLIANCE_[A-Z_]+\}/g, match => {
+  // C3: strip remaining unknown tokens with warning. The character class must cover
+  // every shape the C1 guard admits (it keys on the `${DEVFLOW_COMPLIANCE_` prefix
+  // alone) — digits included — or a token like ${DEVFLOW_COMPLIANCE_SOC2} in a user
+  // shadow would survive into the installed skill as literal residue.
+  content = content.replace(UNKNOWN_TOKEN_PATTERN, match => {
     // Known tokens have already been replaced above
     warnings.push(`composeComplianceSkill: unknown token "${match}" stripped`);
     return '';
@@ -477,14 +512,20 @@ export function composeComplianceRule(
     return true;
   });
 
+  // C5: warn once per fragment-less framework — the framework still reaches the
+  // ${DEVFLOW_COMPLIANCE_FRAMEWORKS} stamp below, only its bullet is omitted.
+  warnings.push(...collectMissingFragmentWarnings(
+    'composeComplianceRule',
+    activeFrameworks,
+    fragments,
+    'rule bullet omitted',
+  ));
+
   // Build per-framework rule bullets (C6: caller order; C7: bounded by frameworks)
   const bullets: string[] = [];
   for (const id of activeFrameworks) {
     const fragment = fragments.get(id);
-    if (!fragment) {
-      warnings.push(`composeComplianceRule: no fragment for "${id}" — rule bullet omitted (C5)`);
-      continue;
-    }
+    if (!fragment) continue;
     bullets.push(fragment.ruleBullet);
   }
 
@@ -492,7 +533,7 @@ export function composeComplianceRule(
 
   // C3: strip remaining unknown tokens EXCEPT ${DEVFLOW_COMPLIANCE_FRAMEWORKS}
   // (preserved for stampComplianceRule below)
-  content = content.replace(/\$\{DEVFLOW_COMPLIANCE_[A-Z_]+\}/g, match => {
+  content = content.replace(UNKNOWN_TOKEN_PATTERN, match => {
     if (match === '${DEVFLOW_COMPLIANCE_FRAMEWORKS}') return match; // handled next
     warnings.push(`composeComplianceRule: unknown token "${match}" stripped`);
     return '';
