@@ -86,7 +86,7 @@ devflow/
 │       ├── skills/         # 41 skills
 │       ├── agents/         # 16 agents
 │       ├── rules/          # 13 rules (flat .md files)
-│       ├── commands/       # MDS command sources (14 hosts + 9 partials in _partials/; 1 static .md)
+│       ├── commands/       # MDS command sources (13 hosts + 11 partials in _partials/; 1 static .md)
 │       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts)
@@ -130,7 +130,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only), `npm run build:mds` (compile all 14 MDS host commands from `src/assets/commands/` to `dist/commands/`)
+**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only), `npm run build:mds` (compile all 13 MDS host commands from `src/assets/commands/` to `dist/commands/`)
 
 ## Documentation Artifacts
 
@@ -156,7 +156,7 @@ All generated docs live under `.devflow/docs/` in the project root:
 │   └── {YYYY-MM-DD_HHMM}/            # Timestamped ticket directory
 │       ├── {ticket-slug}.md           # Individual ticket files
 │       └── tracking-issue.md          # Tracking issue body (GitHub sync)
-├── waves/{slug}/                      # Wave run reports from /dynamic-wave
+├── waves/{slug}/                      # Wave run reports from /dynamic-build
 │   └── {YYYY-MM-DD_HHMM}/            # Timestamped wave directory
 │       └── wave-report.md             # Wave run summary and status
 └── research/{topic-slug}/             # Research artifacts per topic

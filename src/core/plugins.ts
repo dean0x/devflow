@@ -185,7 +185,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
-    commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile', '/dynamic-wave'],
+    commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
     agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     optional: true,
@@ -280,7 +280,7 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
  * reinstalls — the full-reinstall path writes installedPluginNames directly
  * and cannot carry a deleted name. Entries can be removed after 2 major versions.
  */
-export const DELETED_PLUGIN_NAMES: string[] = [
+export const DELETED_PLUGIN_NAMES: readonly string[] = [
   'devflow-audit-claude',
   'devflow-compliance', // D-B2: converted to built-in feature (devflow compliance); skill/rule assets stay in src/assets/ under feature system management
 ];
@@ -386,7 +386,7 @@ export function parsePluginSelection(
  * Deprecated command names from old installations.
  * Used during init to clean up stale command files on upgrade.
  */
-export const LEGACY_COMMAND_NAMES: string[] = [
+export const LEGACY_COMMAND_NAMES: readonly string[] = [
   'review',
   'specify',
   'specify-teams',
@@ -525,20 +525,20 @@ export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> 
  *
  * Pruning: entries can be removed after 2 major versions.
  */
-export const LEGACY_RULE_NAMES: string[] = [];
+export const LEGACY_RULE_NAMES: readonly string[] = [];
 
 /**
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
  * code-review → resolve → self-review → bug-analysis → debug → release →
- * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-wave → dynamic-profile).
+ * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-profile).
  * Export so init.ts can import it rather than keeping a local copy.
  */
-export const WORKFLOW_ORDER: string[] = [
+export const WORKFLOW_ORDER: readonly string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
   '/debug', '/release',
-  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
+  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile',
 ];
 
 /**

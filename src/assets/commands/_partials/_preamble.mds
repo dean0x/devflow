@@ -58,7 +58,7 @@ Then run a cheap syntax gate: write the authored script to a fresh, run-unique s
 
 ### Budget scaling
 
-The `budget` global governs depth. Scale Review agent roster, review cycle count, and verification votes to `budget`. A low-budget run uses a leaner roster and fewer cycles; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
+The `budget` global governs depth. Scale Review agent roster and verification votes to `budget`. A low-budget run uses a leaner roster and fewer verification votes; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
@@ -72,7 +72,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent wr
 
 ### IRON RULE (ADR-008: LLM-vs-plumbing)
 
-**Author ZERO deterministic feature code.** No parsers, no schedulers, no topological-sort, no dependency-graph helpers, no cycle-counters, no confidence formulas. ALL issue reading, dependency reasoning, scheduling decisions, and cycle counts are LLM judgment at runtime, performed by the workflow's agents. The recipe is instructions. The workflow script Claude authors IS the runtime logic — keep it free of hand-coded feature algorithms.
+**Author ZERO deterministic feature code.** No parsers, no schedulers, no topological-sort, no dependency-graph helpers, no confidence formulas. ALL issue reading, dependency reasoning, and scheduling decisions are LLM judgment at runtime, performed by the workflow's agents. The recipe is instructions. The workflow script Claude authors IS the runtime logic — keep it free of hand-coded feature algorithms.
 
 ### SAFETY BANNER
 

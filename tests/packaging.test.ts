@@ -278,7 +278,7 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  * AC-C3: The published tarball must:
  *  (a) Contain no plugins/ or shared/ source-tree paths — these directories
  *      only exist in the git repo and must never be published.
- *  (b) Contain exactly 15 dist/commands/*.md files — one per registered command.
+ *  (b) Contain exactly 14 dist/commands/*.md files — one per registered command.
  *      If the count changes, this guard forces an intentional update.
  *
  * Per PF-008: assert on parsed `npm pack --dry-run --json` output (structured
@@ -300,7 +300,6 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
         stdio: ['pipe', 'pipe', 'pipe'],
       }).toString();
     } catch {
-      // If npm pack fails (e.g. pre-build environment without dist/), skip gracefully.
       packFilesCache = [];
       return packFilesCache;
     }
@@ -311,7 +310,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
 
   it('tarball contains no plugins/ or shared/ paths (source-tree dirs must not be published)', () => {
     const files = getPackFiles();
-    if (files.length === 0) return; // pre-build: skip
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
     const forbidden = files.filter(f => f.startsWith('plugins/') || f.startsWith('shared/'));
     expect(
       forbidden,
@@ -320,15 +322,18 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toHaveLength(0);
   });
 
-  it('tarball contains exactly 15 dist/commands/*.md files (AC-C3)', () => {
+  it('tarball contains exactly 14 dist/commands/*.md files (AC-C3)', () => {
     const files = getPackFiles();
-    if (files.length === 0) return; // pre-build: skip
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
     const commandMds = files.filter(f => /^dist\/commands\/[^/]+\.md$/.test(f));
     expect(
       commandMds,
-      `Expected 15 dist/commands/*.md files in tarball, got ${commandMds.length}.\n` +
+      `Expected 14 dist/commands/*.md files in tarball, got ${commandMds.length}.\n` +
       `Files found: ${commandMds.join(', ')}\n` +
       `If a command was added or removed, update this count intentionally.`,
-    ).toHaveLength(15);
+    ).toHaveLength(14);
   });
 });

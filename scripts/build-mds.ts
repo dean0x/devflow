@@ -210,7 +210,7 @@ async function main(): Promise<void> {
 
   if (hosts.length === 0) {
     console.error(
-      "ERROR: No MDS host files discovered — expected 14 hosts. " +
+      "ERROR: No MDS host files discovered. " +
       "Ensure src/assets/commands/*.mds files declare output-dir: in their frontmatter.",
     );
     process.exit(1);

@@ -1,13 +1,12 @@
 ---
 feature: dynamic-workflow-engine
 name: Dynamic Workflow Engine
-description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-wave, dynamic-profile), the shared engine/wave/preamble/factory MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-wave, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review loop, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds."
+description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile), the shared engine/wave/preamble/factory MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review pass, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds."
 category: architecture
 directories:
   - src/assets/commands/dynamic-build.mds
   - src/assets/commands/dynamic-plan.mds
   - src/assets/commands/dynamic-tickets.mds
-  - src/assets/commands/dynamic-wave.mds
   - src/assets/commands/dynamic-profile.mds
   - src/assets/commands/_partials/_engine.mds
   - src/assets/commands/_partials/_wave.mds
@@ -19,20 +18,20 @@ directories:
   - dist/commands
   - tests/build-mds.test.ts
 created: 2026-07-07
-updated: 2026-07-15
+updated: 2026-08-22
 ---
 
 # Dynamic Workflow Engine
 
 ## Overview
 
-The dynamic workflow engine is the `devflow-dynamic` plugin — a pipeline that turns a rough initiative description into fully reviewed, merged code on an integration branch. It operates in three sequential stages, each driven by a Claude Code dynamic Workflow script that the main session authors inline and passes to the `Workflow` tool: **tickets** (decompose an initiative into a wave-structured ticket slate), **plan** (write per-ticket implementation plans with acceptance criteria and a cross-plan conflict audit), and **build** (implement, review, and verify each ticket with a bounded gate structure). The `dynamic-wave` command is a thin driver that sequences these three commands with human-review gates between them; `dynamic-profile` is a standalone agent that mines session history to build a decision-preference profile consumed by `dynamic-plan`.
+The dynamic workflow engine is the `devflow-dynamic` plugin — a pipeline that turns a rough initiative description into fully reviewed, merged code on an integration branch. It operates in three sequential stages, each driven by a Claude Code dynamic Workflow script that the main session authors inline and passes to the `Workflow` tool: **tickets** (decompose an initiative into a wave-structured ticket slate), **plan** (write per-ticket implementation plans with acceptance criteria and a cross-plan conflict audit), and **build** (implement, review, and verify each ticket with a bounded gate structure). `dynamic-profile` is a standalone agent that mines session history to build a decision-preference profile consumed by `dynamic-plan`.
 
 The commands are **authored as MDS sources** in `src/assets/commands/` and compiled to `dist/commands/` at build time. Seven shared MDS partials in `src/assets/commands/_partials/` define the canonical engine doctrine, wave protocol, workflow runtime contract, agent roster, plan–Gate-2 contract, ticket-factory shape, and ticket body template. Each partial exports named blocks that host commands import and inline-expand at compile time — the compiled `.md` files are the deployed artifacts, and the test suite pins exact doctrine literals in the compiled output.
 
 ## System Context
 
-The four commands form a delivery pipeline:
+The three commands form a delivery pipeline:
 
 ```
 /devflow:dynamic-tickets  →  [Gate: user reviews ticket slate]
@@ -40,7 +39,7 @@ The four commands form a delivery pipeline:
 /devflow:dynamic-build    →  [Gate: user reviews wave-report.md and merges to main]
 ```
 
-`dynamic-wave` sequences these by invoking them in turn with `AskUserQuestion` at each gate. A workflow cannot pause mid-run (F4 constraint), so all human-decision surfacing happens at the command boundary — after the workflow returns — never inside the script.
+A workflow cannot pause mid-run (F4 constraint), so all human-decision surfacing happens at the command boundary — after the workflow returns — never inside the script.
 
 ## Component Architecture
 
@@ -51,11 +50,10 @@ src/assets/commands/
   dynamic-build.mds         # host: imports all engine + wave partials
   dynamic-plan.mds          # host: imports authoring_preamble + roster + plan_contract
   dynamic-tickets.mds       # host: imports authoring_preamble + roster + factory + ticket_template
-  dynamic-wave.mds          # host: thin driver, imports only authoring_preamble
   dynamic-profile.mds       # host: standalone agent spawn, imports only authoring_preamble
   _partials/
     _engine.mds             # gate1_postcode, gate2_acceptance, evaluator_panel,
-                            # implement_bundle, review_loop, concurrency_doctrine,
+                            # implement_bundle, review_pass, concurrency_doctrine,
                             # build_execution_doctrine, engine_output_schema, engine_invariants
     _wave.mds               # wave_loop, branch_merge_model, merge_doctrine, escalation_model
     _preamble.mds           # authoring_preamble (workflow runtime contract, pre-flight checklist,
@@ -70,10 +68,13 @@ Partials declare **no** `output-dir:` frontmatter key. Host files declare it as 
 
 ### Compiled output and test pinning
 
-`scripts/build-mds.ts` compiles all 14 host files (9 knowledge + 5 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
+`scripts/build-mds.ts` compiles all 13 host files (9 knowledge + 4 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
 - `Simplify` and `Scrutinize` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
-- `DELTA REVIEW`, `reviewBaseSha`, `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
-- `--dry-run` absent from build/plan/tickets/wave compiled outputs, present only in dynamic-profile
+- **C1 (single-pass review):** presence: `The review pass runs exactly ONCE`, `The pass runs exactly ONCE`, `Never author additional cycles or a delta re-review of fix commits` (invariant #7 unique), `Budget scales roster and verification votes, NEVER the number of passes` (review_pass prose unique); absence: `DELTA REVIEW`, `reviewBaseSha`, `preFixSha`, `maxCycles`, `cyclesRun`, `fixedInCycle`, `allCoverageGaps`, `for (let cycle` (skeleton guard), `review_loop`, `/review[- ]loop/i`
+- `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
+- **C10 (post-wave-report block):** `OPERATION: post-wave-report`, `TRACKING_ISSUE:`, `WAVE_REPORT_PATH: .devflow/docs/waves/`, `WAVE_ID:`, `WORKTREE_PATH:`, `skip this step entirely in SINGLE mode`, `TRACEABILITY: DEGRADED (no tracking issue for this run)`, `<!-- devflow:wave-report wave:`
+- **meta.phases↔phase() agreement:** phases array in SINGLE-mode meta matches every `phase("…",` call site (structural check, not a literal pin)
+- `--dry-run` absent from build/plan/tickets compiled outputs, present only in dynamic-profile
 
 ## Component Interactions
 
@@ -85,29 +86,29 @@ The engine for one ticket runs these phases in order:
 setup (Git)
   → implement (Code agent: full task + plan + DECISIONS_CONTEXT)
   → gate1 #1 (Validate → Code retries ≤2 → Simplify → Scrutinize → re-Validate if Scrutinize changed code)
-  → gate2 (Evaluate panel + Test — fires ONCE before review loop; fix-and-continue with FAIL-FIXED verdict)
-  → review-loop (cycles until clean or maxCycles — see below)
-  → gate1-final #2 (same Validate→Simplify→Scrutinize sequence, post-all-fixes)
+  → gate2 (Evaluate panel + Test — fires ONCE before review pass; fix-and-continue with FAIL-FIXED verdict)
+  → review (single pass — see below)
+  → gate1-final #2 (same Validate→Simplify→Scrutinize sequence, post-review-pass)
   → report (Synthesize)
 ```
 
-Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-loop fixes are done. It never runs between review cycles — fix Code agents self-verify their own builds instead.
+Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-pass fixes are done. It never runs inside the review pass — fix Code agents self-verify their own builds instead.
 
-Gate 2 fires **once**, at implementation acceptance (before the review loop), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
+Gate 2 fires **once**, at implementation acceptance (before the review pass), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
 
-### Review loop
+### Review pass
 
-Each cycle:
-1. Spawn Review agents in staggered **chunks of ~5** (sequential groups of parallel spawns) to avoid 429 rate-limit death
-2. 8 core focuses always: security, architecture, performance, complexity, consistency, regression, testing, reliability; conditional focuses added by detected file type (.ts, .go, .py, etc.)
-3. **Dead-Review-agent handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. A cycle with any coverage gap can never early-exit clean, and the run verdict can never be PASS.
-4. **Adversarial verification**: 3-lens panel (reproduces?, real vs false positive?, rule actually applies here?) majority-survives (>50% confirm = surviving finding). Unconfirmed findings are stripped.
-5. **preFixSha**: record `git rev-parse HEAD` via haiku Git agent before each fix phase. This SHA defines the next cycle's delta-review scope. Missing preFixSha → fall back to wider full-branch scope, never narrower.
-6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently). Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine). A finding with no `file` field is a singleton batch. Never hand one Code agent an unbounded list.
-7. `survivingFindings` **accumulates** across cycles (never overwritten). Findings addressed by fix Code agents are FIXED and trusted; a delta review in cycle N+1 re-checks earlier fixes for free.
-8. **Scope**: Cycle 1 = full branch diff. Cycles 2+ = DELTA REVIEW (`reviewBaseSha..HEAD`) — only the fix commits are re-reviewed.
+The review pass runs **exactly ONCE** per ticket. Budget scales roster size and verification votes, never the number of passes.
 
-Early exit only when `allFindings.length === 0 && coverageGaps.length === 0`.
+1. **Review scope**: the entire branch diff from the base branch to HEAD. No base SHA is tracked — Review agents compute the merge-base with the default branch at review time. Full-branch, no delta scoping.
+2. Spawn Review agents in staggered **chunks of ~5** (sequential groups of parallel spawns) to avoid 429 rate-limit death
+3. 8 core focuses always: security, architecture, performance, complexity, consistency, regression, testing, reliability; conditional focuses added by detected file type (.ts, .go, .py, etc.)
+4. **Dead-Review-agent handling**: a result is DEAD if null, threw, returned a guard string, or `reviewed !== true`. Retry once sequentially. If still dead: record in `coverageGaps`. Coverage gaps block the PASS verdict downstream — they do NOT block the early exit (which triggers on zero findings alone).
+5. **Adversarial verification**: 3-lens panel (reproduces?, real vs false positive?, rule actually applies here?) majority-survives (>50% confirm = surviving finding). Unconfirmed findings are stripped.
+6. **Fix batching**: group confirmed findings by file — one file per set of sub-batches, chunked at max 5 per sub-batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently). Sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5 (`FIX_CHUNK = 5`, same pacing bar as the Review spawn path) — not all at once. A finding with no `file` field is a singleton batch. Never hand one Code agent an unbounded list.
+7. **Evidence-gated disposition**: a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty. A non-empty `unresolved` list means the agent named work it could not complete — the whole chunk moves into `survivingFindings` (never guess which findings the strings map to). `survivingFindings` = findings not addressed: fix Code agent dead/failed/blocked OR committed but left work named in `unresolved`.
+
+Early exit when `allFindings.length === 0` — return immediately. Any `coverageGaps` are carried in the return and block a PASS verdict downstream, not the early exit itself.
 
 ### Wave execution (dynamic-build, WAVE mode)
 
@@ -120,7 +121,9 @@ Early exit only when `allFindings.length === 0 && coverageGaps.length === 0`.
 7. When nothing is ready but tickets remain: re-ask once with the vacuous-truth rule quoted verbatim. If the re-read names a specific blocker per ticket: declare deadlock with specific reasons. Otherwise continue.
 8. `MAX_ROUNDS = ticket_count * 2 + 5` (minimum 10) — always finite.
 
-Integration branch is `wave/<initiative>` — **never main or master**.
+Integration branch is `wave/<initiative>` (the initiative slug, `{slug}`) — **never main or master**.
+
+**Post-wave-report and traceability** (WAVE mode only): Before authoring the workflow, the main model resolves an optional tracking-issue number — checking the user's input first, then `/dynamic-tickets`'s `tracking-issue.md` at `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`. After the workflow returns, if a tracking-issue number was resolved and the wave report exists, the main model spawns a Git agent with `OPERATION: post-wave-report`, `TRACKING_ISSUE: <n>`, `WAVE_REPORT_PATH: <repo-relative path>` (resolved against `WORKTREE_PATH` when the wave ran in a linked worktree), `WAVE_ID: <ts>`, and `WORKTREE_PATH` when applicable. The Git agent deduplicates via a `<!-- devflow:wave-report wave:{WAVE_ID} -->` marker and degrades gracefully on API failure (`TRACEABILITY: DEGRADED (<reason>)`). If no tracking issue was resolved: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary — never skip silently.
 
 ### Ticket-factory pipeline (dynamic-tickets)
 
@@ -182,6 +185,7 @@ The script body has ONLY these hooks: `agent()`, `parallel()`, `pipeline()`, `ph
 4. Gate 2 runs once, at implementation acceptance. It does not re-run after review fixes.
 5. NEVER auto-merge to main or master. All merges target the integration branch. The user merges to main themselves.
 6. No unauthorized GitHub side-effects. Sub-agents never create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action.
+7. The review pass runs exactly ONCE per ticket. Never author additional cycles or a delta re-review of fix commits. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2. Budget scales roster size and verification votes, never pass count.
 
 ### Concurrency doctrine
 
@@ -189,17 +193,17 @@ Default: **sequential**. Parallel is the rare, tightly-gated exception — only 
 
 ### Budget scaling
 
-`budget` (available as a script global) governs Review-agent roster size, review cycle count, and verification vote count. Never hardcode a roster size — let budget guide it.
+`budget` (available as a script global) governs Review-agent roster size and verification vote count. Never hardcode a roster size — let budget guide it. Budget never changes the number of review passes — it is always exactly one.
 
 ## Anti-Patterns
 
 - **Passing `opts.model` with `agentType`**: always wrong — overrides the agent's own model tier and defeats specialization.
 - **Batching multiple focuses into one Review call**: defeats parallel specialization. One `agent()` call per focus area.
-- **Running Gate 1 between review cycles**: the cadence is twice per ticket only. Between cycles, fix Code agents self-verify their own builds.
-- **Re-running Gate 2 after review fixes**: Gate 2 fires once. The review loop is Gate-1-only after Gate 2 has fired.
+- **Running Gate 1 inside the review pass**: the cadence is twice per ticket only. Inside the pass, fix Code agents self-verify their own builds.
+- **Re-running Gate 2 after review fixes**: Gate 2 fires once. The review pass is Gate-1-only after Gate 2 has fired.
 - **Treating a DEAD Review agent as a clean pass**: a null/thrown/guard-string result means coverage gap, not clean. `filter(Boolean)` before mapping over agent results is crash-safety, never a coverage-to-success converter.
-- **Authoring deterministic feature code in the script body**: no parsers, schedulers, topological-sort, cycle counters. All scheduling decisions are LLM judgment at runtime (ADR-008 Iron Rule from CLAUDE.md).
-- **Overwriting survivingFindings each cycle**: findings from past cycles where the Code agent failed or deferred must accumulate. A delta review does not re-surface them; overwriting would silently drop them and let the verdict falsely read PASS.
+- **Authoring deterministic feature code in the script body**: no parsers, schedulers, no topological-sort, no dependency-graph helpers, no confidence formulas. ALL issue reading, dependency reasoning, and scheduling decisions are LLM judgment at runtime (ADR-008 Iron Rule from CLAUDE.md).
+- **Adding extra review passes or delta re-reviews**: the pass runs exactly once per ticket. Never author a second pass, DELTA REVIEW, or budget-scaled pass count. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2.
 - **Merging to main or master from the workflow**: the workflow targets `wave/<initiative>` only. The user merges to main themselves.
 - **Asking questions mid-workflow**: F4 constraint — a workflow cannot pause. `AskUserQuestion` always happens at the command boundary after the workflow returns.
 
@@ -241,7 +245,7 @@ When the Design agent reader returns an empty ready set but tickets remain, the 
 
 ### `--dry-run` only in dynamic-profile
 
-The `--dry-run` flag is present ONLY in `dynamic-profile.mds`. It was removed from `dynamic-build`, `dynamic-plan`, `dynamic-tickets`, and `dynamic-wave` (C7 of PR #252). The test suite pins its absence. Do not re-add it to those commands.
+The `--dry-run` flag is present ONLY in `dynamic-profile.mds`. It was removed from `dynamic-build`, `dynamic-plan`, and `dynamic-tickets` (C7 of PR #252). The test suite pins its absence. Do not re-add it to those commands.
 
 ### Skill re-entrancy in Review and Evaluate agents
 
@@ -255,9 +259,13 @@ A criterion is not acceptable if: vague ("the feature should work correctly"), i
 
 Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the moment the ticket becomes **ready**, not at wave start. This ensures the ticket branch already contains all merged dependencies when it starts.
 
+### Gate 1 #2 retry tracks latest failure details
+
+In the SINGLE mode workflow's final Gate 1 (#2, `gate1-final` phase), retry attempt 2 receives the **latest** recheck failure details — the Gate 1 #2 loop updates `failureDetails = recheck.details || failureDetails` after each recheck. This means the Code agent on attempt 2 sees a failure description that reflects any partial progress from attempt 1's fixes. Gate 1 #1 (inside `gate1`) does not update failure details between attempts — only Gate 1 #2 does.
+
 ## Key Files
 
-- `src/assets/commands/_partials/_engine.mds` — canonical Gate 1, Gate 2, review loop, concurrency, build execution doctrine (source of truth for all engine behavior)
+- `src/assets/commands/_partials/_engine.mds` — canonical Gate 1, Gate 2, review pass, concurrency, build execution doctrine (source of truth for all engine behavior)
 - `src/assets/commands/_partials/_wave.mds` — wave loop, branch/merge model, conflict resolution doctrine, escalation model
 - `src/assets/commands/_partials/_preamble.mds` — workflow runtime contract, pre-flight checklist, IRON RULE (no deterministic feature code), SAFETY BANNER (never merge to main)
 - `src/assets/commands/_partials/_roster.mds` — valid agentType values, model tiers, agent caveats
@@ -267,10 +275,10 @@ Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the m
 - `src/assets/commands/dynamic-build.mds` — main build command source with inline SINGLE + WAVE workflow scripts
 - `dist/commands/dynamic-build.md` — compiled artifact pinned by test suite
 - `tests/build-mds.test.ts` — doctrine-literal pinning tests (sections 10, 12, 13)
-- `scripts/build-mds.ts` — unified MDS compiler (14 hosts → compiled .md files)
+- `scripts/build-mds.ts` — unified MDS compiler (13 hosts → compiled .md files)
 
 ## Related
 
 - ADR-003 (leave-the-end-state): applies to compiled output — when removing or renaming doctrine blocks, strip residue (tombstone comments, `*_old` names, guards for now-impossible states). The test suite pins the current doctrine literals; outdated pinned strings that remain after a partial rename fail tests rather than silently passing.
 - PF-002 (skill re-entrancy guard-string bail): relevant to every `agent()` call with `agentType: "Review"` or `"Evaluate"` — never instruct these agents to invoke via Skill tool the same skill their frontmatter preloads.
-- `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 5 dynamic commands.
+- `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 4 dynamic commands.

@@ -11,7 +11,7 @@ directories:
   - src/assets/commands/_partials
   - scripts/build-mds.ts
 created: 2026-06-21
-updated: 2026-07-15
+updated: 2026-08-22
 ---
 
 # Feature Knowledge Base System
@@ -57,7 +57,7 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 |-----------|------|------|
 | MDS partial module | `src/assets/commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
 | Host command sources (9) | `src/assets/commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
-| Host command sources (5 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
+| Host command sources (4 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
 | Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md`; hard-fails on any error |
 | Author agent | `src/assets/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
@@ -106,7 +106,7 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 5. Writes `{basename}.md` to the declared `output-dir` (per-file clean; no dir wipe)
 6. Hard-fails on any compile error — no stale command ever ships
 
-14 hosts total: 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 5 dynamic hosts (`src/assets/commands/dynamic-*.mds`).
+13 hosts total: 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`).
 Partials in `src/assets/commands/_partials/` have no `output-dir:` and are skipped automatically.
 
 ## Integration Patterns
@@ -185,7 +185,7 @@ compiled output.
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
-- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers all 14 host `.mds` files by `output-dir:` key; validates plugin dirs; hard-fails on any compile error
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers all 13 host `.mds` files by `output-dir:` key; validates plugin dirs; hard-fails on any compile error
 - `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness

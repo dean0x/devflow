@@ -102,7 +102,7 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
 
 ## Long-running commands (self-verifying builds/tests that may run >120s)
 
-You run builds and tests to verify your own work — including **self-verifying that each fix compiles** when no separate Validate agent runs between review cycles. A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any build/test that may run silent longer than ~120s (cold `cargo build`/`cargo test`, large `tsc`, `gradle`, `go build ./...`), do NOT run it as one silent foreground command. Instead:
+You run builds and tests to verify your own work — including **self-verifying that each fix compiles** when no separate Validate agent runs inside the review pass. A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any build/test that may run silent longer than ~120s (cold `cargo build`/`cargo test`, large `tsc`, `gradle`, `go build ./...`), do NOT run it as one silent foreground command. Instead:
 
 0. **Pre-load Monitor** before launching any background task: `ToolSearch(query="select:Monitor")`.
 1. Run it in the BACKGROUND with the Bash tool (`run_in_background: true`), capturing output + exit code under a unique `<slug>` reused in steps 1–3, e.g. `BASE=/tmp/df-build-<slug>`:

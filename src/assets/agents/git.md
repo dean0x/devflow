@@ -878,7 +878,7 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
 **Input:** `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional)
 
 - `TRACKING_ISSUE`: GitHub issue number for the parent tracking issue
-- `WAVE_REPORT_PATH`: Absolute path to the wave-report.md file written by the wave orchestrator
+- `WAVE_REPORT_PATH`: Repo-relative or absolute path to the wave-report.md file written by the wave orchestrator (repo-relative paths are resolved against WORKTREE_PATH when supplied, else the current worktree root)
 - `WAVE_ID`: Timestamped wave directory slug (e.g. `2026-08-20_1730`) — used as the dedup marker
 - `WORKTREE_PATH` (optional): See worktree-support skill
 
@@ -890,7 +890,7 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
    - `gh issue view {TRACKING_ISSUE} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:wave-report wave:{WAVE_ID} -->` in viewer-authored comment bodies only
    - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`
-2. Read `WAVE_REPORT_PATH` (the wave-report.md written by the wave orchestrator).
+2. Resolve and read `WAVE_REPORT_PATH`: if absolute, use as-is; if repo-relative, resolve against WORKTREE_PATH when supplied, else against cwd. Read the resulting file (the wave-report.md written by the wave orchestrator).
 3. Compose the comment body:
    ```markdown
    <!-- devflow:wave-report wave:{WAVE_ID} -->

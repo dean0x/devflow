@@ -47,7 +47,7 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │   └── {YYYY-MM-DD_HHMM}/             # Timestamped ticket directory
 │       ├── {ticket-slug}.md            # Individual ticket files
 │       └── tracking-issue.md           # Tracking issue body (GitHub sync)
-├── waves/{slug}/                       # Wave run reports from /dynamic-wave
+├── waves/{slug}/                       # Wave run reports from /dynamic-build
 │   └── {YYYY-MM-DD_HHMM}/             # Timestamped wave directory
 │       └── wave-report.md              # Wave run summary and status
 ├── research/{topic-slug}/              # Research artifacts per topic

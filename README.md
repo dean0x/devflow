@@ -115,7 +115,6 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 | `/dynamic-plan` | Parallel wave planning with acceptance criteria and test plans |
 | `/dynamic-build` | Dependency-aware build engine for a ticket or wave |
 | `/dynamic-profile` | Distill session transcripts into a decision-preference profile |
-| `/dynamic-wave` | Full-pipeline wave driver: tickets → plan → build |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 

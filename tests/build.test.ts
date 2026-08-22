@@ -140,7 +140,7 @@ describe('agent frontmatter compliance contract', () => {
 // ---------------------------------------------------------------------------
 // devflow-dynamic declared commands ↔ src/assets/commands/*.mds source parity
 //
-// Ties the 5 command names declared in DEVFLOW_PLUGINS to the 5 dynamic-*.mds
+// Ties the 4 command names declared in DEVFLOW_PLUGINS to the 4 dynamic-*.mds
 // host files in src/assets/commands/ whose basename starts with 'dynamic-'.
 // In the restructured layout all hosts output to dist/commands/ (single target),
 // so the dynamic hosts are identified by name prefix, not by output-dir content.
@@ -149,7 +149,7 @@ describe('agent frontmatter compliance contract', () => {
 // on a clean checkout before build:mds has run — the only reliable contract
 // (applies ADR-019).
 //
-// A dynamic host rename (e.g. dynamic-wave.mds → dynamic-orchestrate.mds)
+// A dynamic host rename (e.g. dynamic-plan.mds → dynamic-orchestrate.mds)
 // without updating plugins.ts would fail this test, surfacing the drift before
 // it ships.
 // ---------------------------------------------------------------------------
