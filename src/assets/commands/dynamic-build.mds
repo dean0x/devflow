@@ -264,8 +264,8 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
   }
 
   const allFindings = liveReviews.flatMap(r => r.findings || []);
-  // Early exit when no findings and no coverage gaps — clean pass
-  if (allFindings.length === 0 && coverageGaps.length === 0) {
+  // Early exit when no findings — coverageGaps carry forward and block PASS downstream
+  if (allFindings.length === 0) {
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
@@ -293,8 +293,8 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
   );
 
-  // No confirmed findings and no coverage gaps — clean pass
-  if (confirmedFindings.length === 0 && coverageGaps.length === 0) {
+  // No confirmed findings — coverageGaps carry forward and block PASS downstream; also eliminates the empty-batch parallel() path
+  if (confirmedFindings.length === 0) {
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
@@ -334,12 +334,16 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
   const notAddressed = [];
   for (const fileChunkResults of (fixResults || [])) {
     for (const { chunk, result } of (fileChunkResults || [])) {
-      // Check the explicit status field returned by the fix Code agent — never rely on an absent `failed` flag
-      if (result?.status === "fixed") {
-        fixedFindings.push(...chunk.map(f => ({
-          ...f, status: "fixed",
-          commitShas: result?.commitShas || []
-        })));
+      // FIXED requires: status "fixed" AND non-empty commitShas AND empty unresolved (ISS-07 + ISS-20).
+      // A non-empty unresolved list means the agent named work it could not finish — carry the whole
+      // chunk into survivingFindings rather than guessing which findings the strings map to.
+      const unresolved = Array.isArray(result?.unresolved) ? result.unresolved : [];
+      const claimedFixed = result?.status === "fixed" && (result?.commitShas || []).length > 0;
+      if (claimedFixed && unresolved.length === 0) {
+        fixedFindings.push(...chunk.map(f => ({ ...f, status: "fixed", commitShas: result.commitShas })));
+      } else if (claimedFixed) {
+        // Agent named work it could not finish — carry the whole chunk forward rather than guessing which findings the strings map to.
+        notAddressed.push(...chunk.map(f => ({ ...f, unresolvedNote: unresolved.join("; ") })));
       } else {
         notAddressed.push(...chunk);
       }
@@ -382,7 +386,7 @@ Self-verify your fix compiles. Commit fixes with conventional-commit message.`, 
 
 // PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
 const coverageGaps = reviewResult.coverageGaps || [];
-const overallVerdict = reviewResult.survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";
+const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";
 
 // Phase 6: Report
 return phase("report", () =>
