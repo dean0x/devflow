@@ -98,6 +98,34 @@ const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(
   COMPLIANCE_FRAMEWORKS.map(fw => [fw.id, fw.label]),
 );
 
+/** A framework ID paired with its registry label. Only the registry can produce one. */
+interface RegistryFramework {
+  id: string;
+  label: string;
+}
+
+/**
+ * Resolve IDs to {id, label} pairs, DROPPING anything absent from the registry.
+ *
+ * Fail-safe restatement of the C2 filter that the compose entry points already apply:
+ * every section builder resolves through here independently, so an ID that is not in
+ * LABEL_BY_ID contributes nothing at all — no label, no `references/{id}.md` path, no
+ * table row. If the C2 filter above is ever moved, weakened, or dropped, the failure
+ * mode is a missing row rather than an unvalidated ID echoed into an installed
+ * artifact that Claude Code loads into every prompt (AC-35, AC-36).
+ *
+ * Never `?? id`: falling back to the raw ID is exactly the echo C2 exists to prevent.
+ */
+function resolveRegistryFrameworks(ids: readonly string[]): RegistryFramework[] {
+  const resolved: RegistryFramework[] = [];
+  for (const id of ids) {
+    const label = LABEL_BY_ID.get(id);
+    if (label === undefined) continue;
+    resolved.push({ id, label });
+  }
+  return resolved;
+}
+
 /**
  * Extract `## Heading` sections from markdown content.
  * Returns a map of heading → section body (text after the heading, before the next
@@ -162,13 +190,16 @@ function replaceToken(content: string, token: string, replacement: string): stri
  * Build the ${DEVFLOW_COMPLIANCE_SCOPE} substitution.
  * Active frameworks: "under GDPR, SOC 2"
  * Zero frameworks:   "under active compliance frameworks"
+ *
+ * Frameworks the registry cannot label degrade to the zero-framework wording rather
+ * than being named (see resolveRegistryFrameworks).
  */
 function buildScope(activeFrameworks: readonly string[]): string {
-  if (activeFrameworks.length === 0) {
+  const resolved = resolveRegistryFrameworks(activeFrameworks);
+  if (resolved.length === 0) {
     return 'under active compliance frameworks';
   }
-  const labels = activeFrameworks.map(id => LABEL_BY_ID.get(id) ?? id);
-  return `under ${labels.join(', ')}`;
+  return `under ${resolved.map(fw => fw.label).join(', ')}`;
 }
 
 /**
@@ -204,11 +235,15 @@ function collectMissingFragmentWarnings(
  *
  * C5: a framework with no fragment still appears here — only its mapping row,
  * checklist item and reference row are omitted.
+ *
+ * Frameworks the registry cannot label are dropped entirely: neither the label nor the
+ * `references/{id}.md` path is emitted (see resolveRegistryFrameworks).
  */
 function buildActiveSection(
   activeFrameworks: readonly string[],
 ): string {
-  if (activeFrameworks.length === 0) {
+  const resolved = resolveRegistryFrameworks(activeFrameworks);
+  if (resolved.length === 0) {
     return [
       'No framework-specific reference files are active. Apply generic controls only.',
       '',
@@ -217,10 +252,8 @@ function buildActiveSection(
     ].join('\n');
   }
 
-  const labels = activeFrameworks.map(id => LABEL_BY_ID.get(id) ?? id);
-  const labelList = labels.map(l => `**${l}**`).join(', ');
-
-  const refList = activeFrameworks.map(id => `\`references/${id}.md\``).join(' and ');
+  const labels = resolved.map(fw => fw.label);
+  const refList = resolved.map(fw => `\`references/${fw.id}.md\``).join(' and ');
 
   return [
     `**Active: ${labels.join(', ')}.**`,
@@ -241,21 +274,19 @@ function buildActiveSection(
  *
  * The section is omitted entirely at zero frameworks (plan: "section omitted
  * entirely at zero frameworks"). C4 blank-line hygiene handles the gap.
+ *
+ * Row labels come only from the registry — an unlabelable framework yields no row
+ * rather than a row headed by its raw ID (see resolveRegistryFrameworks).
  */
 function buildMappingSection(
   activeFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
 ): string {
-  if (activeFrameworks.length === 0) {
-    return '';
-  }
-
   const header = ['Framework', ...COMPLIANCE_CONTROL_COLUMNS];
   const separator = header.map(() => '---');
 
   const rows: string[] = [];
-  for (const id of activeFrameworks) {
-    const label = LABEL_BY_ID.get(id) ?? id;
+  for (const { id, label } of resolveRegistryFrameworks(activeFrameworks)) {
     const fragment = fragments.get(id);
     if (!fragment) {
       // C5: framework appears in scope/active but contributes no row.
@@ -265,7 +296,8 @@ function buildMappingSection(
     rows.push(`| ${cells.join(' | ')} |`);
   }
 
-  // If ALL fragments were missing, omit the section entirely
+  // No rows — zero frameworks, or every one of them unlabelable or fragment-less.
+  // Omit the section entirely; C4 blank-line hygiene closes the gap.
   if (rows.length === 0) {
     return '';
   }
@@ -288,7 +320,7 @@ function buildChecklist(
   fragments: ReadonlyMap<string, ComplianceFragment>,
 ): string {
   const items: string[] = [];
-  for (const id of activeFrameworks) {
+  for (const { id } of resolveRegistryFrameworks(activeFrameworks)) {
     const fragment = fragments.get(id);
     // C5: fragment-less frameworks contribute no checklist item.
     if (!fragment) continue;
@@ -306,7 +338,7 @@ function buildReferences(
   fragments: ReadonlyMap<string, ComplianceFragment>,
 ): string {
   const rows: string[] = [];
-  for (const id of activeFrameworks) {
+  for (const { id } of resolveRegistryFrameworks(activeFrameworks)) {
     const fragment = fragments.get(id);
     // C5: fragment-less frameworks contribute no reference row.
     if (!fragment) continue;
@@ -521,9 +553,10 @@ export function composeComplianceRule(
     'rule bullet omitted',
   ));
 
-  // Build per-framework rule bullets (C6: caller order; C7: bounded by frameworks)
+  // Build per-framework rule bullets (C6: caller order; C7: bounded by frameworks).
+  // Resolved through the registry so an unlabelable ID contributes no bullet.
   const bullets: string[] = [];
-  for (const id of activeFrameworks) {
+  for (const { id } of resolveRegistryFrameworks(activeFrameworks)) {
     const fragment = fragments.get(id);
     if (!fragment) continue;
     bullets.push(fragment.ruleBullet);
