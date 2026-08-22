@@ -786,6 +786,12 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).not.toContain('maxCycles');
     expect(compiled).not.toContain('cyclesRun');
     expect(compiled).not.toContain('fixedInCycle');
+    expect(compiled).not.toContain('preFixSha');
+    expect(compiled).not.toContain('allCoverageGaps');
+    // Skeleton guard: the doctrine prose above can stay intact while a cycle loop
+    // creeps back into the authored script body. Pin the loop construct's absence too.
+    expect(compiled).not.toContain('for (let cycle');
+    expect(compiled).toContain('The pass runs exactly ONCE');
   });
 
   it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
@@ -837,7 +843,7 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 
 // ---------------------------------------------------------------------------
 // 13. --dry-run removal (C7)
-// dynamic-build, plan, tickets, wave must NOT contain --dry-run.
+// dynamic-build, plan, tickets must NOT contain --dry-run.
 // dynamic-profile must still contain it (untouched per plan).
 // ---------------------------------------------------------------------------
 

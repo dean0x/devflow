@@ -58,7 +58,7 @@ Then run a cheap syntax gate: write the authored script to a fresh, run-unique s
 
 ### Budget scaling
 
-The `budget` global governs depth. Scale Review agent roster and verification votes to `budget`. A low-budget run uses a leaner roster; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
+The `budget` global governs depth. Scale Review agent roster and verification votes to `budget`. A low-budget run uses a leaner roster and fewer verification votes; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 

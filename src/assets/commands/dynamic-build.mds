@@ -104,7 +104,7 @@ const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied tracking-
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
-const gitSetup = await phase("setup", () =>
+await phase("setup", () =>
   agent(`OPERATION: setup-task
 BASE_BRANCH: ${args.baseBranch || "HEAD"}
 TASK_DESCRIPTION: ${TICKET}
@@ -113,7 +113,7 @@ ${ISSUE_NUMBER && ISSUE_NUMBER !== "(none)" ? "ISSUE_INPUT: " + ISSUE_NUMBER : "
 );
 
 // Phase 2: Implement
-const implResult = await phase("implement", () =>
+await phase("implement", () =>
   agent(`Implement the following ticket on branch ${BRANCH}:
 
 ${TICKET}
@@ -487,7 +487,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 A workflow cannot pause mid-run. After the build/wave workflow returns, you (the main model) surface anything that needs a human decision — all at once:
 
 1. Read the wave report (`.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`) for its **escalations** (quarantined/blocked tickets and why), and read any `DECISIONS-NEEDED.md` left by a prior `/devflow:dynamic-plan` run for this initiative.
-2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (from the wave input or from `TRACKING_ISSUE_NUMBER`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
+2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (the `ISSUE_NUMBER` threaded through this run — i.e. `args.issueNumber` was supplied and is not `(none)`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
    ```
    Agent(subagent_type="Git"):
    "OPERATION: post-wave-report

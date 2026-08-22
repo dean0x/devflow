@@ -92,7 +92,7 @@ setup (Git)
 
 Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-pass fixes are done. It never runs inside the review pass — fix Code agents self-verify their own builds instead.
 
-Gate 2 fires **once**, at implementation acceptance (before the review loop), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
+Gate 2 fires **once**, at implementation acceptance (before the review pass), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
 
 ### Review pass
 
@@ -181,6 +181,7 @@ The script body has ONLY these hooks: `agent()`, `parallel()`, `pipeline()`, `ph
 4. Gate 2 runs once, at implementation acceptance. It does not re-run after review fixes.
 5. NEVER auto-merge to main or master. All merges target the integration branch. The user merges to main themselves.
 6. No unauthorized GitHub side-effects. Sub-agents never create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action.
+7. The review pass runs exactly ONCE per ticket. Never author additional cycles or a delta re-review of fix commits. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2. Budget scales roster size and verification votes, never pass count.
 
 ### Concurrency doctrine
 
