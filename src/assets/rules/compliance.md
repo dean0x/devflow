@@ -10,5 +10,6 @@ paths: []
 - Encrypt regulated data in transit (TLS 1.2+) and at rest — no plaintext exports, dumps, or backups
 - Collect the minimum: every stored field needs a purpose, a retention period, and a deletion path
 - Least privilege and segregation of duties — no shared accounts, no self-approval of changes
-<!-- Stamped by stampComplianceRule at install time. Keep this placeholder so `devflow compliance --set` can update the active frameworks line. Remove it and your shadow owns that line entirely. -->
+<!-- Stamped at install time: RULE_BULLETS (per-framework "Apply ..." bullets) and FRAMEWORKS (active-framework clause) below. Keep the two ${DEVFLOW_COMPLIANCE_...} placeholder lines so `devflow compliance --set` keeps the rule current. Remove them and your shadow owns those lines entirely. -->
+${DEVFLOW_COMPLIANCE_RULE_BULLETS}
 - ${DEVFLOW_COMPLIANCE_FRAMEWORKS}

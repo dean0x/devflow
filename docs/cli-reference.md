@@ -25,7 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
-| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; wizard step is Advanced-only) |
+| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -114,7 +114,7 @@ npx devflow-kit compliance --set ""                    # Clear all active framew
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
-The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
+The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory. SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments — only the selected frameworks appear in the installed artifacts. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough).
 
 ## Rules
 
@@ -175,7 +175,21 @@ npx devflow-kit rules list                       # List all rules with install s
 npx devflow-kit rules unshadow security          # Remove override
 ```
 
-The `compliance` rule is the only templated rule — it contains a `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` placeholder that `devflow compliance --set` stamps with your active frameworks at install time. If you shadow `compliance` and remove that placeholder, `devflow compliance --set` stops updating the line; you own it entirely.
+The `compliance` skill and rule are dynamically composed at install time from per-framework fragment files. The skill template uses five tokens:
+
+| Token | Resolved to |
+|-------|------------|
+| `${DEVFLOW_COMPLIANCE_SCOPE}` | Framework clause (`under GDPR, SOC 2`, or `under active compliance frameworks` at zero) appended to the opening body sentence |
+| `${DEVFLOW_COMPLIANCE_ACTIVE}` | Active Frameworks section body listing the selected frameworks |
+| `${DEVFLOW_COMPLIANCE_MAPPING}` | Full Framework Mapping table (header + one row per selected framework) |
+| `${DEVFLOW_COMPLIANCE_CHECKLIST}` | Per-framework checklist items appended to the Checklist section |
+| `${DEVFLOW_COMPLIANCE_REFERENCES}` | Per-framework `references/{id}.md` rows in the Extended References table |
+
+The rule template uses one token: `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` (per-framework `Apply ...` bullets). The active-framework clause `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` is a separate placeholder handled by `stampComplianceRule`.
+
+If you shadow `compliance`, the shadow's own tokens are replaced at install time; removing the placeholders makes `devflow compliance --set` a no-op for those lines (you own them entirely). Similarly, shadowing the compliance skill without the `${DEVFLOW_COMPLIANCE_...}` tokens bypasses per-framework composition — `devflow compliance --status` will show `[shadowed, composition skipped]`.
+
+**Caveat**: a rule shadow seeded by copying the *installed* rule (rather than the source template) carries the already-composed content (tokens already replaced). Composition still runs against it — blank-line hygiene fires — but `--set` has no effect on the framework bullets or labels because those tokens are no longer present in the shadow.
 
 ## Feature Flags
 

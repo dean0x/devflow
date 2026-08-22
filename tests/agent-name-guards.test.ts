@@ -241,7 +241,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['review/reviewer/'],
   },
   {
-    path: 'src/assets/skills/compliance/references/sox.md',
+    path: 'src/assets/skills/compliance/frameworks/sox/reference.md',
     name: 'Reviewer',
     reason:
       '"reviewer" — generic human code-review role in SOX control description; ' +

@@ -13,7 +13,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, rulesDir } from '../../core/assets.js';
-import { ALWAYS_PRESENT_REFS, normalizeFrameworks, stampComplianceRule, type ComplianceFeatureState } from '../../core/compliance.js';
+import { ALWAYS_PRESENT_REFS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -80,6 +81,41 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+// ── Fragment loader ────────────────────────────────────────────────────────
+
+/**
+ * Load and parse per-framework fragment files from the canonical source.
+ *
+ * Fragments always come from the canonical source (not user-overridable) — they carry
+ * registry-owned content (mapping cells, reference blurbs, checklist items, rule bullets).
+ *
+ * PF-009: parse errors and unreadable files are reported via warn; the framework is
+ * silently omitted from the result map (C5 in composeComplianceSkill handles the gap).
+ */
+async function loadComplianceFragments(
+  canonicalSrc: string,
+  frameworks: readonly string[],
+  warn: (msg: string) => void,
+): Promise<ReadonlyMap<string, ComplianceFragment>> {
+  const map = new Map<string, ComplianceFragment>();
+  // C7: loop bounded by frameworks array (already registry-validated by caller)
+  for (const fw of frameworks) {
+    const fragPath = path.join(canonicalSrc, 'frameworks', fw, 'fragment.md');
+    try {
+      const raw = await fs.readFile(fragPath, 'utf-8');
+      const result = parseComplianceFragment(fw, raw);
+      if (result.ok) {
+        map.set(fw, result.value);
+      } else {
+        warn(`compliance: fragment "${fw}" parse error — ${result.error}`);
+      }
+    } catch (err) {
+      warn(`compliance: fragment "${fw}" unreadable — ${String(err)}`);
+    }
+  }
+  return map;
+}
+
 // ── Skill installer ────────────────────────────────────────────────────────
 
 /**
@@ -91,6 +127,9 @@ async function pathExists(p: string): Promise<boolean> {
  * Reference files installed: ALWAYS_PRESENT_REFS + one {id}.md per selected framework.
  * References always come from the canonical source — framework refs are not user-overridable.
  *
+ * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
+ * installer — the SKILL.md and the rule compose from the same parsed set.
+ *
  * Applies PF-011: build under a .tmp sibling, remove old target, rename.
  * Applies PF-009: unexpected I/O failures are reported via warn; never thrown.
  */
@@ -98,6 +137,7 @@ async function installSkillDir(
   claudeDir: string,
   devflowDir: string,
   frameworks: readonly string[],
+  fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
 ): Promise<void> {
   const canonicalSrc = path.join(skillsDir(), 'compliance');
@@ -120,22 +160,43 @@ async function installSkillDir(
     const refDst = path.join(tmpTarget, 'references');
     await fs.mkdir(refDst, { recursive: true });
 
-    // SKILL.md (shadow or canonical)
-    await fs.copyFile(skillMdSrc, path.join(tmpTarget, 'SKILL.md'));
+    // SKILL.md: compose from template (shadow or canonical) + fragments.
+    // C1: a shadow without tokens passes through byte-identical.
+    const templateContent = await fs.readFile(skillMdSrc, 'utf-8');
+    const { content: composedSkill, warnings: skillWarnings } = composeComplianceSkill(
+      templateContent,
+      frameworks,
+      fragments,
+    );
+    for (const w of skillWarnings) warn(`compliance: ${w}`);
+    await fs.writeFile(path.join(tmpTarget, 'SKILL.md'), composedSkill, 'utf-8');
 
-    // Reference files from the canonical source. Every ID here is a registry ID
-    // (convergeComplianceArtifacts filtered them), so each is a bare basename —
-    // no separator, no traversal — and resolves inside refDst.
+    // Always-present reference files (detection.md, sources.md) from the canonical
+    // references/ directory — these are not framework-specific.
     //
     // PF-009: each copy is isolated. A skill dir missing one reference still works;
-    // aborting the whole install because one reference file is unreadable would
-    // take out SKILL.md too. Failures warn and the remaining refs still install.
-    const refSrc = path.join(canonicalSrc, 'references');
-    for (const ref of [...ALWAYS_PRESENT_REFS, ...frameworks.map(fw => `${fw}.md`)]) {
+    // aborting the whole install because one file is unreadable would take out
+    // SKILL.md too. Failures warn and the remaining refs still install.
+    const alwaysPresentSrc = path.join(canonicalSrc, 'references');
+    for (const ref of ALWAYS_PRESENT_REFS) {
       try {
-        await fs.copyFile(path.join(refSrc, ref), path.join(refDst, ref));
+        await fs.copyFile(path.join(alwaysPresentSrc, ref), path.join(refDst, ref));
       } catch (err) {
         warn(`compliance: reference "${ref}" not installed — ${String(err)}`);
+      }
+    }
+
+    // Per-framework reference files: source is frameworks/{id}/reference.md,
+    // destination is references/{id}.md (installed artifact layout unchanged — C1
+    // for consumers). Every id here is a registry-validated bare name — no separator,
+    // no traversal — from normalizeFrameworks in convergeComplianceArtifacts.
+    for (const fw of frameworks) {
+      const srcRef = path.join(canonicalSrc, 'frameworks', fw, 'reference.md');
+      const dstRef = path.join(refDst, `${fw}.md`);
+      try {
+        await fs.copyFile(srcRef, dstRef);
+      } catch (err) {
+        warn(`compliance: reference "${fw}.md" not installed — ${String(err)}`);
       }
     }
 
@@ -152,13 +213,19 @@ async function installSkillDir(
 // ── Rule installer ─────────────────────────────────────────────────────────
 
 /**
- * Install the compliance rule file, stamped with the active frameworks.
+ * Install the compliance rule file, composed with per-framework bullets and stamped
+ * with the active frameworks.
  *
  * Rule source: shadow at {devflowDir}/rules/compliance.md (when valid),
  * otherwise canonical src/assets/rules/compliance.md.
  *
- * stampComplianceRule() replaces the ${DEVFLOW_COMPLIANCE_FRAMEWORKS} placeholder
- * with the static labels of the selected frameworks (AC-35, AC-36).
+ * composeComplianceRule() replaces ${DEVFLOW_COMPLIANCE_RULE_BULLETS} with per-framework
+ * rule bullets and delegates ${DEVFLOW_COMPLIANCE_FRAMEWORKS} to stampComplianceRule
+ * (AC-35, AC-36). C1: a shadow without tokens passes through byte-identical.
+ *
+ * `fragments` is loaded once by convergeComplianceArtifacts from the canonical skill
+ * source (never the shadow — fragments are registry-owned) and shared with the skill
+ * installer.
  *
  * Applies PF-009: I/O failures are reported via warn; never thrown.
  */
@@ -166,21 +233,24 @@ async function installRuleFile(
   claudeDir: string,
   devflowDir: string,
   frameworks: readonly string[],
+  fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
 ): Promise<void> {
   const ruleShadowFile = path.join(devflowDir, 'rules', 'compliance.md');
-  const canonicalSrc = path.join(rulesDir(), 'compliance.md');
+  const canonicalRuleSrc = path.join(rulesDir(), 'compliance.md');
   const target = ruleTarget(claudeDir);
 
   try {
     const shadowState = await validateRuleShadow(ruleShadowFile);
-    const sourcePath = shadowState === 'valid' ? ruleShadowFile : canonicalSrc;
+    const sourcePath = shadowState === 'valid' ? ruleShadowFile : canonicalRuleSrc;
 
-    const content = await fs.readFile(sourcePath, 'utf-8');
-    const stamped = stampComplianceRule(content, frameworks);
+    const templateContent = await fs.readFile(sourcePath, 'utf-8');
+
+    const { content: composed, warnings } = composeComplianceRule(templateContent, frameworks, fragments);
+    for (const w of warnings) warn(`compliance: ${w}`);
 
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, stamped, 'utf-8');
+    await fs.writeFile(target, composed, 'utf-8');
   } catch (err) {
     warn(`compliance: rule install failed — ${String(err)}`);
   }
@@ -277,10 +347,19 @@ export async function convergeComplianceArtifacts(
   // An error in installSkillDir is caught internally and reported via trackingWarn,
   // so execution always continues to the rule step.
 
-  await installSkillDir(claudeDir, devflowDir, safeFrameworks, trackingWarn);
+  // Fragments are read and parsed once per convergence and shared by both artifacts:
+  // they are the same registry-owned files either way, so parsing twice would only
+  // duplicate the I/O and report each malformed fragment twice.
+  const fragments = await loadComplianceFragments(
+    path.join(skillsDir(), 'compliance'),
+    safeFrameworks,
+    trackingWarn,
+  );
+
+  await installSkillDir(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
 
   if (rulesEnabled) {
-    await installRuleFile(claudeDir, devflowDir, safeFrameworks, trackingWarn);
+    await installRuleFile(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
   } else {
     // Rules disabled: remove any stale rule left from a prior enabled run.
     // Ignore ENOENT (force: true) — absence is the desired end state.

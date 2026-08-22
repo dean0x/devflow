@@ -169,6 +169,19 @@ describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
     );
     expect(ruleContent).toContain('GDPR, SOC 2');
 
+    // Composed SKILL.md: no unresolved tokens; framework refs present.
+    const skillContent = await fs.readFile(
+      path.join(skillDir, 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(skillContent).toContain('references/gdpr.md');
+    expect(skillContent).toContain('references/soc2.md');
+    // Rule: per-framework bullets composed; no unresolved tokens.
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    expect(ruleContent).toContain('Apply GDPR');
+    expect(ruleContent).toContain('Apply SOC 2');
+
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
     expect(features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'soc2'] });
@@ -215,6 +228,19 @@ describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA 
     expect(ruleContent).toContain('HIPAA');
     expect(ruleContent).not.toContain('GDPR');
     expect(ruleContent).not.toContain('SOC 2');
+
+    // Composed SKILL.md: only hipaa ref; gdpr/soc2 refs absent; no unresolved tokens.
+    const skillContent = await fs.readFile(
+      path.join(skillDir, 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(skillContent).toContain('references/hipaa.md');
+    expect(skillContent).not.toContain('references/gdpr.md');
+    expect(skillContent).not.toContain('references/soc2.md');
+    // Rule: HIPAA bullet present; no unresolved tokens.
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    expect(ruleContent).toContain('Apply HIPAA');
 
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
@@ -295,6 +321,17 @@ describe('S5: from S4 state + --enable → hipaa restored exactly', () => {
     );
     expect(ruleContent).toContain('HIPAA');
 
+    // Composed SKILL.md: hipaa refs present; no unresolved tokens.
+    const skillContent = await fs.readFile(
+      path.join(skillDir, 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(skillContent).toContain('references/hipaa.md');
+    // Rule: HIPAA bullet composed; no unresolved tokens.
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    expect(ruleContent).toContain('Apply HIPAA');
+
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
     expect(features.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
@@ -373,6 +410,10 @@ describe('S7: from S6 state + rules --enable → compliance rule restored with G
       'utf-8',
     );
     expect(ruleContent).toContain('GDPR, SOC 2');
+    // Per-framework bullets composed by composeComplianceRule (not just stampComplianceRule).
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    expect(ruleContent).toContain('Apply GDPR');
+    expect(ruleContent).toContain('Apply SOC 2');
   });
 });
 
@@ -627,10 +668,115 @@ describe('S12: from S2 state + init --reset → compliance off, artifacts gone',
   });
 });
 
-// ── S13: SKIPPED (TTY limitation) ─────────────────────────────────────────────
-// S13 requires an interactive TTY to drive the Advanced wizard. The seeding layer
-// (resolveInitSeed + applyCliToggles + resolveSeedFeatures compliance passthrough)
-// is covered by tests/init-seed.test.ts and tests/compliance-cli.test.ts.
+// ── S13: Non-TTY guard + CLI-flag promptless contracts ────────────────────────
+// S13a: --advanced requires a TTY — exits 1 in non-TTY environments.
+// S13b: --recommended re-init preserves prior compliance state (no wizard prompt).
+// S13c: --recommended --compliance hipaa applies framework without any wizard prompt.
+
+describe('S13a: --advanced in non-TTY exits 1', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13a-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    // Establish a fresh install so seedManifest is non-null (re-init path)
+    expect(run('init', '--recommended').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13a: --advanced in a non-TTY env → exit 1 with clear error message', () => {
+    // makeRunner uses spawnSync (no TTY) with CI=1 → process.stdin.isTTY = false.
+    // The guard at init.ts rejects --advanced and directs the user to --recommended.
+    const result = run('init', '--advanced');
+    expect(result.status, `Expected exit 1 but got ${result.status}:\n${result.stderr}`).toBe(1);
+    expect(result.stderr + result.stdout).toContain('interactive terminal');
+  });
+});
+
+describe('S13b: --recommended re-init preserves prior compliance state (promptless)', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13b-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    // Install, then enable compliance with two frameworks
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr,sox').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13b: second --recommended does not reset compliance — state preserved from manifest seed', async () => {
+    // shouldRunComplianceStep returns false (--recommended flag → modePromptShown=false)
+    // so the wizard step is skipped. The manifest seed carries the prior enabled/frameworks.
+    const result = run('init', '--recommended');
+    expect(result.status, `re-init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect(features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'sox'] });
+  });
+});
+
+describe('S13c: --recommended --compliance hipaa → framework applied without prompts', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13c-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13c: --compliance hipaa applies on first install without a wizard prompt', async () => {
+    // cliComplianceOverride is set → shouldRunComplianceStep returns false (hasCliOverride=true)
+    // → the wizard is bypassed entirely; the CLI flag alone configures the feature.
+    const result = run('init', '--recommended', '--compliance', 'hipaa');
+    expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect(features.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
+
+    // Compliance skill should be installed
+    const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
+    await expect(
+      fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL)),
+      'compliance skill must be installed when --compliance is passed',
+    ).resolves.not.toThrow();
+  });
+
+  it('S13c: --no-compliance disables from an already-enabled manifest (promptless)', async () => {
+    // First install with compliance enabled
+    expect(run('init', '--recommended', '--compliance', 'hipaa').status).toBe(0);
+    // Re-init with --no-compliance: hasCliOverride=true → wizard skipped, compliance disabled
+    const result = run('init', '--recommended', '--no-compliance');
+    expect(result.status, `re-init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect((features.compliance as Record<string, unknown>).enabled).toBe(false);
+  });
+});
 
 // ── S14 ───────────────────────────────────────────────────────────────────────
 describe('S14: from S2 state + uninstall --plugin=devflow-plan → compliance retained', () => {
@@ -891,6 +1037,22 @@ describe('S18: fresh non-TTY --enable with no prior frameworks → generic-only'
     );
     expect(ruleContent).toContain('none declared');
 
+    // Composed SKILL.md: zero-framework case — no tokens, no framework refs.
+    const skillContent = await fs.readFile(
+      path.join(claudeDir, 'skills', COMPLIANCE_SKILL, 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    // No per-framework reference rows (zero frameworks selected)
+    for (const id of ['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox']) {
+      expect(skillContent, `references/${id}.md must not appear in zero-framework SKILL.md`).not.toContain(`references/${id}.md`);
+    }
+    // Rule: no per-framework bullets (empty), no unresolved tokens.
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    // Zero frameworks → no "Apply ..." bullets at all
+    const bulletLines = ruleContent.split('\n').filter(l => l.startsWith('- Apply '));
+    expect(bulletLines, 'zero-framework rule must have no per-framework "Apply ..." bullets').toHaveLength(0);
+
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
     expect(features.compliance).toEqual({ enabled: true, frameworks: [] });
@@ -954,6 +1116,110 @@ describe('S19: manifest writeback deduplicates frameworks', () => {
     expect(compliance.enabled).toBe(true);
     // After dedup: ['gdpr', 'soc2'] — each appears exactly once, insertion order preserved
     expect(compliance.frameworks).toEqual(['gdpr', 'soc2']);
+  });
+});
+
+// ── S21 ───────────────────────────────────────────────────────────────────────
+describe('S21: all-six frameworks → SKILL.md fully composed; rule bullets within budget', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s21-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    expect(run('init', '--recommended').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S21: --set all-six → SKILL.md tokens resolved; rule has 6 bullets each ≤200 chars', async () => {
+    const result = run('compliance', '--set', 'gdpr,hipaa,pci-dss,soc2,iso-27001,sox');
+    expect(result.status, `compliance --set failed:\n${result.stderr}`).toBe(0);
+
+    const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
+    const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
+
+    // Skill: no unresolved tokens; all 6 framework refs present.
+    const skillContent = await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf-8');
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    for (const fw of ['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox']) {
+      expect(skillContent, `missing references/${fw}.md in composed SKILL.md`).toContain(`references/${fw}.md`);
+    }
+
+    // Rule: no unresolved tokens; exactly 6 "Apply ..." bullets, each ≤200 chars.
+    const ruleContent = await fs.readFile(
+      path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
+      'utf-8',
+    );
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    const bulletLines = ruleContent.split('\n').filter(l => l.startsWith('- Apply '));
+    expect(bulletLines, 'rule must have exactly 6 per-framework "Apply ..." bullets').toHaveLength(6);
+    for (const bullet of bulletLines) {
+      expect(
+        bullet.length,
+        `Rule bullet exceeds 200-char budget: "${bullet}"`,
+      ).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// ── S22 ───────────────────────────────────────────────────────────────────────
+describe('S22: --status flags composition-skipped skill shadow', () => {
+  // A skill shadow whose SKILL.md has NO ${DEVFLOW_COMPLIANCE_...} tokens passes through
+  // byte-identical (C1). The --status output must warn the user that per-framework sections
+  // are absent from the installed skill, so they know why framework-specific guidance is missing.
+  let tmpHome: string;
+  let devflowDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s22-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    const claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S22a: skill shadow with tokens → --status shows [shadowed] (composition runs)', async () => {
+    // Shadow contains a token → composition runs normally → "shadowed" label only.
+    const shadowSkillDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.mkdir(shadowSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(shadowSkillDir, 'SKILL.md'),
+      '# Shadow compliance\n${DEVFLOW_COMPLIANCE_SCOPE}\n',
+      'utf-8',
+    );
+
+    const result = run('compliance', '--status');
+    expect(result.status, `compliance --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/shadowed/i);
+    expect(out).not.toMatch(/composition skipped/i);
+  });
+
+  it('S22b: token-free skill shadow → --status warns "composition skipped"', async () => {
+    // Shadow has NO tokens → C1 passthrough → per-framework sections absent.
+    const shadowSkillDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.mkdir(shadowSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(shadowSkillDir, 'SKILL.md'),
+      '# Custom static compliance skill — no composition tokens',
+      'utf-8',
+    );
+
+    const result = run('compliance', '--status');
+    expect(result.status, `compliance --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/composition skipped/i);
   });
 });
 

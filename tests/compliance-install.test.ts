@@ -108,6 +108,15 @@ describe('selective reference install', () => {
       'references/sources.md',
     ]);
     expect(warn).not.toHaveBeenCalled();
+
+    // Composed SKILL.md must have no unresolved tokens and contain active framework refs.
+    const skillContent = await fs.readFile(
+      path.join(claudeDir, 'skills', SKILL_NAME, 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(skillContent).toContain('references/gdpr.md');
+    expect(skillContent).toContain('references/soc2.md');
   });
 
   it('all six frameworks → all six ref files present plus detection+sources', async () => {
@@ -164,9 +173,10 @@ describe('selective reference install', () => {
 
     expect(await ruleExists()).toBe(true);
     const ruleContent = await fs.readFile(await ruleTargetPath(), 'utf-8');
-    // Placeholder replaced by label
+    // Placeholder replaced by label; per-framework bullet present; no unresolved tokens.
     expect(ruleContent).toContain('GDPR');
     expect(ruleContent).not.toContain(COMPLIANCE_RULE_PLACEHOLDER);
+    expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
   });
 
   it('rule NOT installed when enabled+!rulesEnabled', async () => {
@@ -208,6 +218,18 @@ describe('recompose exactness (--set semantics)', () => {
     expect(files).toContain('references/detection.md');
     expect(files).toContain('references/sources.md');
     expect(files).toContain('SKILL.md');
+
+    // Composed SKILL.md reflects the new selection.
+    const skillContent = await fs.readFile(
+      path.join(claudeDir, 'skills', SKILL_NAME, 'SKILL.md'),
+      'utf-8',
+    );
+    // Dynamic sections mention only the active framework.
+    expect(skillContent).toContain('**Active: HIPAA.**');
+    expect(skillContent).toContain('references/hipaa.md');
+    // GDPR-specific references must not appear in dynamic sections.
+    expect(skillContent).not.toContain('references/gdpr.md');
+    expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
   });
 
   it('recompose does not leave stale files from prior install', async () => {

@@ -28,7 +28,7 @@ export interface ComplianceFeatureState {
 // ---------------------------------------------------------------------------
 
 export interface ComplianceFramework {
-  /** Registry ID — matches the reference file basename under compliance/references/. */
+  /** Registry ID — matches the framework source directory under compliance/frameworks/. */
   id: string;
   /** Human-readable label stamped into artifacts (static, never echoes user input). */
   label: string;
@@ -38,7 +38,7 @@ export interface ComplianceFramework {
 
 /**
  * Canonical compliance framework registry.
- * IDs match reference file basenames: src/assets/skills/compliance/references/{id}.md
+ * IDs match framework source directories: src/assets/skills/compliance/frameworks/{id}/
  * Labels are stamped verbatim into installed artifacts — no user input is ever written.
  * (AC-35, AC-36: no unvalidated ID reaches an fs path; no user-supplied string in artifacts)
  */

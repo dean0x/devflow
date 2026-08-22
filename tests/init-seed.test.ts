@@ -579,3 +579,115 @@ describe('proxy seeding', () => {
     expect(seed.features.proxy).toBe(true);
   });
 });
+
+// ── compliance seeding (resolveSeedFeatures + applyCliToggles) ────────────────
+// Canonical home for init-seed compliance coverage (moved from compliance-cli.test.ts).
+// Compliance is manifest-gated (like proxy), never config.json-gated (ADR-001).
+
+describe('compliance seeding', () => {
+  /** Manifest fixture with explicit compliance field (required by ManifestData.features). */
+  function makeComplianceManifest(compliance: { enabled: boolean; frameworks: string[] }): ManifestData {
+    return makeManifest({
+      features: {
+        ...makeManifest().features,
+        compliance,
+      },
+    });
+  }
+
+  it('FEATURE_DEFAULTS.compliance is {enabled:false, frameworks:[]} (opt-in, never auto-enabled)', () => {
+    expect(FEATURE_DEFAULTS.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('fresh install (null manifest) → compliance defaults to disabled', () => {
+    const result = resolveSeedFeatures(null, null);
+    expect(result.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('manifest.features.compliance=enabled → seeded as enabled (manifest-group, not config-gated)', () => {
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr', 'hipaa'] });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'hipaa'] });
+  });
+
+  it('manifest.features.compliance=disabled → seeded as disabled', () => {
+    const manifest = makeComplianceManifest({ enabled: false, frameworks: [] });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('projectConfig has no effect on compliance (manifest-gated, not config-gated)', () => {
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(null, config);
+    expect(result.compliance).toEqual({ enabled: false, frameworks: [] }); // FEATURE_DEFAULTS wins
+  });
+
+  it('populated manifest wins over projectConfig: compliance comes from manifest, not FEATURE_DEFAULTS', () => {
+    // The removed compliance-cli.test.ts variant: both a populated manifest AND a projectConfig are
+    // present; compliance must come from the manifest (manifest-group), not from config or FEATURE_DEFAULTS.
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['sox'] });
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(manifest, config);
+    expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
+  });
+
+  it('disable-keeps-frameworks: disabled manifest with non-empty frameworks → seeded with frameworks', () => {
+    const manifest = makeComplianceManifest({ enabled: false, frameworks: ['sox', 'hipaa'] });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.compliance).toEqual({ enabled: false, frameworks: ['sox', 'hipaa'] });
+  });
+
+  it('resolveSeedFeatures: compliance seed is a defensive copy (not a reference to manifest.features.compliance)', () => {
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.compliance.frameworks).not.toBe(manifest.features.compliance!.frameworks);
+  });
+
+  it('--reset (null seedManifest) → compliance falls back to FEATURE_DEFAULTS', () => {
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr', 'sox', 'hipaa'] });
+    const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+
+  it('--no-reset preserves existing manifest compliance', () => {
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['pci-dss'] });
+    const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['pci-dss'] });
+  });
+
+  it('applyCliToggles: --compliance gdpr,soc2 → {enabled:true, frameworks:[gdpr,soc2]}', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, compliance: { enabled: false, frameworks: [] } };
+    const result = applyCliToggles(seed, { compliance: { enabled: true, frameworks: ['gdpr', 'soc2'] } });
+    expect(result.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'soc2'] });
+    // Other fields untouched
+    expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
+    expect(result.proxy).toBe(FEATURE_DEFAULTS.proxy);
+  });
+
+  it('applyCliToggles: --no-compliance preserves existing frameworks (disable-keeps-frameworks)', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, compliance: { enabled: true, frameworks: ['gdpr'] } };
+    const result = applyCliToggles(seed, { compliance: { enabled: false, frameworks: ['gdpr'] } });
+    expect(result.compliance.enabled).toBe(false);
+    expect(result.compliance.frameworks).toEqual(['gdpr']);
+  });
+
+  it('applyCliToggles: --compliance "" (zero frameworks) → {enabled:true, frameworks:[]}', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, compliance: { enabled: false, frameworks: [] } };
+    const result = applyCliToggles(seed, { compliance: { enabled: true, frameworks: [] } });
+    expect(result.compliance).toEqual({ enabled: true, frameworks: [] });
+  });
+
+  it('applyCliToggles: undefined compliance toggle → seed compliance unchanged', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, compliance: { enabled: true, frameworks: ['sox'] } };
+    const result = applyCliToggles(seed, {}); // no compliance toggle
+    expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
+  });
+
+  it('resolveInitSeed: compliance included in features result', () => {
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
+    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
+  });
+});

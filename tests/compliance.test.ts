@@ -18,34 +18,50 @@ import { rulesDir, skillsDir } from '../src/core/assets.js';
 // ── Registry ↔ disk bidirectional guards ──────────────────────────────────────
 
 describe('COMPLIANCE_FRAMEWORKS registry ↔ disk (AC-38)', () => {
+  // After A8.2: framework reference files live at frameworks/{id}/reference.md.
+  // The always-present refs (detection.md, sources.md) remain in references/.
+  const FRAMEWORKS_DIR = path.join(skillsDir(), 'compliance', 'frameworks');
   const REFERENCES_DIR = path.join(skillsDir(), 'compliance', 'references');
-  const EXCLUDED_REFS = new Set(['detection.md', 'sources.md']);
 
-  it('every registry ID has a reference file on disk', async () => {
+  it('every registry ID has a reference.md and fragment.md under frameworks/{id}/', async () => {
     for (const fw of COMPLIANCE_FRAMEWORKS) {
-      const refPath = path.join(REFERENCES_DIR, `${fw.id}.md`);
-      await expect(fs.access(refPath)).resolves.toBeUndefined();
+      const refPath = path.join(FRAMEWORKS_DIR, fw.id, 'reference.md');
+      const fragPath = path.join(FRAMEWORKS_DIR, fw.id, 'fragment.md');
+      await expect(fs.access(refPath), `${fw.id}/reference.md missing`).resolves.toBeUndefined();
+      await expect(fs.access(fragPath), `${fw.id}/fragment.md missing`).resolves.toBeUndefined();
     }
   });
 
-  it('every framework reference file on disk (excluding detection/sources) has a registry entry', async () => {
-    const files = await fs.readdir(REFERENCES_DIR);
-    const frameworkFiles = files.filter(f => f.endsWith('.md') && !EXCLUDED_REFS.has(f));
+  it('every frameworks/ subdirectory on disk has a registry entry', async () => {
+    const entries = await fs.readdir(FRAMEWORKS_DIR, { withFileTypes: true });
+    const diskIds = entries.filter(e => e.isDirectory()).map(e => e.name);
     const registryIds = new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id));
-    for (const file of frameworkFiles) {
-      const id = file.replace(/\.md$/, '');
-      expect(registryIds.has(id), `Disk file ${file} has no registry entry — id "${id}" not in COMPLIANCE_FRAMEWORKS`).toBe(true);
+    for (const id of diskIds) {
+      expect(registryIds.has(id), `Disk directory frameworks/${id} has no registry entry — "${id}" not in COMPLIANCE_FRAMEWORKS`).toBe(true);
     }
   });
 
   it('registry and disk framework IDs are an exact match (no extras in either direction)', async () => {
-    const files = await fs.readdir(REFERENCES_DIR);
-    const frameworkFiles = files
-      .filter(f => f.endsWith('.md') && !EXCLUDED_REFS.has(f))
-      .map(f => f.replace(/\.md$/, ''))
+    const entries = await fs.readdir(FRAMEWORKS_DIR, { withFileTypes: true });
+    const diskIds = entries
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
       .sort();
     const registryIds = COMPLIANCE_FRAMEWORKS.map(fw => fw.id).sort();
-    expect(frameworkFiles).toEqual(registryIds);
+    expect(diskIds).toEqual(registryIds);
+  });
+
+  it('source references/ contains EXACTLY detection.md and sources.md (no per-framework files)', async () => {
+    // After A8.2, per-framework reference files moved to frameworks/{id}/reference.md.
+    // Only the two always-present files should remain in source references/.
+    const entries = await fs.readdir(REFERENCES_DIR, { withFileTypes: true });
+    const fileNames = entries
+      .filter(e => e.isFile())
+      .map(e => e.name)
+      .sort();
+    expect(fileNames, 'source references/ must contain exactly detection.md and sources.md').toEqual(
+      ['detection.md', 'sources.md'],
+    );
   });
 });
 
@@ -340,5 +356,11 @@ describe('compliance.md source rule placeholder guard', () => {
     const rulePath = path.join(rulesDir(), 'compliance.md');
     const content = await fs.readFile(rulePath, 'utf-8');
     expect(content).toContain('${DEVFLOW_COMPLIANCE_FRAMEWORKS}');
+  });
+
+  it('src/assets/rules/compliance.md contains ${DEVFLOW_COMPLIANCE_RULE_BULLETS} placeholder', async () => {
+    const rulePath = path.join(rulesDir(), 'compliance.md');
+    const content = await fs.readFile(rulePath, 'utf-8');
+    expect(content).toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
   });
 });

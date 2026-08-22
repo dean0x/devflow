@@ -21,9 +21,11 @@ import {
   parseFrameworkList,
   type ComplianceFeatureState,
 } from '../../core/compliance.js';
+import { frameworkChoices, FRAMEWORK_SELECT_MESSAGE } from './compliance-prompts.js';
+import { COMPLIANCE_SKILL_TOKENS } from '../../core/compliance-compose.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { validateRuleShadow } from '../../targets/claude-code/installer.js';
+import { validateRuleShadow, validateSkillShadow } from '../../targets/claude-code/installer.js';
 import {
   getClaudeDirectory,
   getDevFlowDirectory,
@@ -193,6 +195,30 @@ async function ruleShadowed(devflowDir: string): Promise<boolean> {
   return state === 'valid';
 }
 
+/**
+ * Returns the shadow state for the compliance skill:
+ *   'none'               — no valid shadow present
+ *   'shadowed'           — shadow present and contains composition tokens (composed normally)
+ *   'composition-skipped'— shadow present but token-free (C1 passthrough, no per-framework sections)
+ *
+ * D: reported in --status so users know their shadow suppresses dynamic composition.
+ */
+async function skillShadowState(
+  devflowDir: string,
+): Promise<'none' | 'shadowed' | 'composition-skipped'> {
+  const shadowDir = path.join(devflowDir, 'skills', 'compliance');
+  const state = await validateSkillShadow(shadowDir);
+  if (state !== 'valid') return 'none';
+
+  try {
+    const skillMd = await fs.readFile(path.join(shadowDir, 'SKILL.md'), 'utf-8');
+    const hasTokens = COMPLIANCE_SKILL_TOKENS.some(tok => skillMd.includes(tok));
+    return hasTokens ? 'shadowed' : 'composition-skipped';
+  } catch {
+    return 'none';
+  }
+}
+
 // ── CLI action ─────────────────────────────────────────────────────────────────
 
 interface ComplianceOptions {
@@ -255,11 +281,12 @@ export const complianceCommand = new Command('compliance')
         : color.dim('none declared');
 
       const rulesEnabled = manifest.features.rules;
-      const [skillOk, refIds, ruleOk, isRuleShadowed] = await Promise.all([
+      const [skillOk, refIds, ruleOk, isRuleShadowed, skillShadow] = await Promise.all([
         skillInstalled(claudeDir),
         installedRefIds(claudeDir),
         ruleInstalled(claudeDir),
         ruleShadowed(devflowDir),
+        skillShadowState(devflowDir),
       ]);
 
       // Detect framework drift: manifest says X, installed refs say Y.
@@ -275,7 +302,12 @@ export const complianceCommand = new Command('compliance')
         `State:      ${enabledLabel}`,
         `Frameworks: ${fwLabel}`,
         '',
-        `Skill:      ${skillOk ? color.green('installed') : color.dim('not installed')}`,
+        `Skill:      ${skillOk ? color.green('installed') : color.dim('not installed')}` +
+          (skillShadow === 'composition-skipped'
+            ? color.yellow(' [shadowed, composition skipped — per-framework sections absent]')
+            : skillShadow === 'shadowed'
+              ? color.green(' [shadowed]')
+              : ''),
         `Rule:       ${ruleOk ? color.green('installed') : color.dim('not installed')}` +
           (!ruleOk && current.enabled && !rulesEnabled
             ? color.yellow(' (withheld — rules disabled)')
@@ -322,12 +354,8 @@ export const complianceCommand = new Command('compliance')
           'Available Frameworks',
         );
         const selected = await p.multiselect({
-          message: 'Select compliance frameworks (Enter to skip — generic controls only)',
-          options: COMPLIANCE_FRAMEWORKS.map(fw => ({
-            value: fw.id,
-            label: fw.label,
-            hint: fw.hint,
-          })),
+          message: FRAMEWORK_SELECT_MESSAGE,
+          options: frameworkChoices(),
           initialValues: current.frameworks,
           required: false,
         });
