@@ -209,16 +209,6 @@ Scans Claude Code session transcripts from all known projects, extracts repeated
 /dynamic-profile
 ```
 
-## /dynamic-wave
-
-Full-pipeline wave driver — sequence dynamic-tickets → dynamic-plan → dynamic-build with human gates between runs.
-
-Orchestrates the full dynamic workflow pipeline in sequence: ticket generation, parallel planning, and dependency-aware build. Places a human confirmation gate between each phase so you can review and edit the output before proceeding to the next stage.
-
-```
-/dynamic-wave <initiative-description-or-file>
-```
-
 ## Ambient Mode
 
 Not a command — a two-hook orchestrator system (git repos only):

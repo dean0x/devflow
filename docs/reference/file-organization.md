@@ -55,7 +55,7 @@ devflow/
 │       │   ├── security.md
 │       │   └── ...
 │       ├── commands/                 # Command sources
-│       │   ├── *.mds                 # 14 MDS host files (compiled to dist/commands/ by build:mds)
+│       │   ├── *.mds                 # 13 MDS host files (compiled to dist/commands/ by build:mds)
 │       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # 9 MDS partial files (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
