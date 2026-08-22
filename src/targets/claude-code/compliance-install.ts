@@ -127,6 +127,9 @@ async function loadComplianceFragments(
  * Reference files installed: ALWAYS_PRESENT_REFS + one {id}.md per selected framework.
  * References always come from the canonical source — framework refs are not user-overridable.
  *
+ * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
+ * installer — the SKILL.md and the rule compose from the same parsed set.
+ *
  * Applies PF-011: build under a .tmp sibling, remove old target, rename.
  * Applies PF-009: unexpected I/O failures are reported via warn; never thrown.
  */
@@ -134,6 +137,7 @@ async function installSkillDir(
   claudeDir: string,
   devflowDir: string,
   frameworks: readonly string[],
+  fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
 ): Promise<void> {
   const canonicalSrc = path.join(skillsDir(), 'compliance');
@@ -155,10 +159,6 @@ async function installSkillDir(
     // Build the new directory tree under the tmp sibling (PF-011).
     const refDst = path.join(tmpTarget, 'references');
     await fs.mkdir(refDst, { recursive: true });
-
-    // Load per-framework fragments from the canonical source (always canonical —
-    // fragments are registry-owned and not user-overridable).
-    const fragments = await loadComplianceFragments(canonicalSrc, frameworks, warn);
 
     // SKILL.md: compose from template (shadow or canonical) + fragments.
     // C1: a shadow without tokens passes through byte-identical.
@@ -223,17 +223,21 @@ async function installSkillDir(
  * rule bullets and delegates ${DEVFLOW_COMPLIANCE_FRAMEWORKS} to stampComplianceRule
  * (AC-35, AC-36). C1: a shadow without tokens passes through byte-identical.
  *
+ * `fragments` is loaded once by convergeComplianceArtifacts from the canonical skill
+ * source (never the shadow — fragments are registry-owned) and shared with the skill
+ * installer.
+ *
  * Applies PF-009: I/O failures are reported via warn; never thrown.
  */
 async function installRuleFile(
   claudeDir: string,
   devflowDir: string,
   frameworks: readonly string[],
+  fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
 ): Promise<void> {
   const ruleShadowFile = path.join(devflowDir, 'rules', 'compliance.md');
   const canonicalRuleSrc = path.join(rulesDir(), 'compliance.md');
-  const canonicalSkillSrc = path.join(skillsDir(), 'compliance');
   const target = ruleTarget(claudeDir);
 
   try {
@@ -241,9 +245,6 @@ async function installRuleFile(
     const sourcePath = shadowState === 'valid' ? ruleShadowFile : canonicalRuleSrc;
 
     const templateContent = await fs.readFile(sourcePath, 'utf-8');
-
-    // Load fragments from canonical skill source (always canonical — not shadow-overridable).
-    const fragments = await loadComplianceFragments(canonicalSkillSrc, frameworks, warn);
 
     const { content: composed, warnings } = composeComplianceRule(templateContent, frameworks, fragments);
     for (const w of warnings) warn(`compliance: ${w}`);
@@ -346,10 +347,19 @@ export async function convergeComplianceArtifacts(
   // An error in installSkillDir is caught internally and reported via trackingWarn,
   // so execution always continues to the rule step.
 
-  await installSkillDir(claudeDir, devflowDir, safeFrameworks, trackingWarn);
+  // Fragments are read and parsed once per convergence and shared by both artifacts:
+  // they are the same registry-owned files either way, so parsing twice would only
+  // duplicate the I/O and report each malformed fragment twice.
+  const fragments = await loadComplianceFragments(
+    path.join(skillsDir(), 'compliance'),
+    safeFrameworks,
+    trackingWarn,
+  );
+
+  await installSkillDir(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
 
   if (rulesEnabled) {
-    await installRuleFile(claudeDir, devflowDir, safeFrameworks, trackingWarn);
+    await installRuleFile(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
   } else {
     // Rules disabled: remove any stale rule left from a prior enabled run.
     // Ignore ENOENT (force: true) — absence is the desired end state.
