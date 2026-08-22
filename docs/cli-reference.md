@@ -175,7 +175,21 @@ npx devflow-kit rules list                       # List all rules with install s
 npx devflow-kit rules unshadow security          # Remove override
 ```
 
-The `compliance` rule is dynamically composed at install time — per-framework `Apply ...` bullets come from `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` and the active-framework clause from `${DEVFLOW_COMPLIANCE_FRAMEWORKS}`. If you shadow `compliance`, the shadow's own tokens are replaced at install time; removing both placeholders makes `devflow compliance --set` a no-op for those lines (you own them entirely). Similarly, shadowing the compliance skill without the `${DEVFLOW_COMPLIANCE_...}` tokens bypasses per-framework composition — `devflow compliance --status` will show `[shadowed, composition skipped]`.
+The `compliance` skill and rule are dynamically composed at install time from per-framework fragment files. The skill template uses five tokens:
+
+| Token | Resolved to |
+|-------|------------|
+| `${DEVFLOW_COMPLIANCE_SCOPE}` | Comma-joined active framework labels injected into the `description:` frontmatter line |
+| `${DEVFLOW_COMPLIANCE_ACTIVE}` | Active Frameworks section body listing the selected frameworks |
+| `${DEVFLOW_COMPLIANCE_MAPPING}` | Full Framework Mapping table (header + one row per selected framework) |
+| `${DEVFLOW_COMPLIANCE_CHECKLIST}` | Per-framework checklist items appended to the Checklist section |
+| `${DEVFLOW_COMPLIANCE_REFERENCES}` | Per-framework `references/{id}.md` rows in the Extended References table |
+
+The rule template uses one token: `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` (per-framework `Apply ...` bullets). The active-framework clause `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` is a separate placeholder handled by `stampComplianceRule`.
+
+If you shadow `compliance`, the shadow's own tokens are replaced at install time; removing the placeholders makes `devflow compliance --set` a no-op for those lines (you own them entirely). Similarly, shadowing the compliance skill without the `${DEVFLOW_COMPLIANCE_...}` tokens bypasses per-framework composition — `devflow compliance --status` will show `[shadowed, composition skipped]`.
+
+**Caveat**: a rule shadow seeded by copying the *installed* rule (rather than the source template) carries the already-composed content (tokens already replaced). Composition still runs against it — blank-line hygiene fires — but `--set` has no effect on the framework bullets or labels because those tokens are no longer present in the shadow.
 
 ## Feature Flags
 

@@ -137,8 +137,8 @@ Shared helpers for the compliance step in `devflow init`. All prompt-rendering l
 
 **Integration in `init.ts`:**
 - `modePromptShown` is set to `true` only inside the `else` branch where `p.select` for mode actually runs
-- Advanced path uses `runComplianceStep` directly (replacing the prior inline `p.confirm` pattern)
-- Recommended path gates via `shouldRunComplianceStep`, then calls `runComplianceStep` if true
+- Both the Recommended path and the Advanced path gate on `shouldRunComplianceStep`; on the Advanced path `isTTY` is guaranteed true (the non-TTY guard already exited with code 1 at the top of the Advanced block), so the predicate reduces to the CLI-override check (`hasCliOverride`)
+- Recommended path: `shouldRunComplianceStep` additionally requires `modePromptShown` (when `mode === 'recommended'`), which is `false` under `--recommended` — preserving the promptless contract
 - `--compliance`/`--no-compliance` flags populate `cliComplianceOverride`, which bypasses the wizard (`hasCliOverride=true`)
 
 ### Rule template and seedRuleShadow
