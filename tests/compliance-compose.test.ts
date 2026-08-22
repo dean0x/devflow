@@ -638,14 +638,14 @@ describe('composeComplianceSkill — C2: unknown ID dropped, C7: loops bounded',
     expect(result.content).toContain('GDPR');
   });
 
-  it('C7: emitted framework mapping rows ≤ frameworks.length (loops bounded)', () => {
-    // Assert a bound against a duplicate-heavy input: the composer may repeat rows but
-    // cannot produce MORE mapping rows than framework IDs it was given.
+  it('C7: duplicate IDs deduplicated by resolveRegistryFrameworks (first-wins)', () => {
+    // resolveRegistryFrameworks must dedup before any section builder runs, mirroring
+    // the upstream normalizeFrameworks contract. Exact count is pinned, not merely bounded.
     const input = ['gdpr', 'gdpr', 'gdpr'];
     const result = composeComplianceSkill(SKILL_TEMPLATE, input, makeAllFragments());
     // Count rows that start with a framework label cell (produced by DEVFLOW_COMPLIANCE_MAPPING).
     const frameworkRows = result.content.split('\n').filter(l => l.startsWith('| GDPR |'));
-    expect(frameworkRows.length).toBeLessThanOrEqual(input.length);
+    expect(frameworkRows).toHaveLength(1); // exactly 1 GDPR row — dedup is enforced
   });
 });
 

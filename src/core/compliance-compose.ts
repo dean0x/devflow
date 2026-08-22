@@ -118,9 +118,12 @@ interface RegistryFramework {
  */
 function resolveRegistryFrameworks(ids: readonly string[]): RegistryFramework[] {
   const resolved: RegistryFramework[] = [];
+  const seen = new Set<string>();
   for (const id of ids) {
+    if (seen.has(id)) continue; // first-wins dedup — mirrors normalizeFrameworks upstream
     const label = LABEL_BY_ID.get(id);
     if (label === undefined) continue;
+    seen.add(id);
     resolved.push({ id, label });
   }
   return resolved;
