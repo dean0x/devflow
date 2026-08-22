@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import * as path from 'path';
 import {
   COMPLIANCE_CONTROL_COLUMNS,
   COMPLIANCE_SKILL_TOKENS,
@@ -18,7 +20,8 @@ import {
   composeComplianceRule,
   type ComplianceFragment,
 } from '../src/core/compliance-compose.js';
-import { COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
+import { COMPLIANCE_FRAMEWORKS, COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { rulesDir, skillsDir } from '../src/core/assets.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -873,6 +876,237 @@ describe('composeComplianceSkill — frontmatter integrity', () => {
 });
 
 // ── Unknown ID never echoed (AC-35/36) ────────────────────────────────────────
+
+describe('composeComplianceSkill — C3 covers every shape C1 admits', () => {
+  it('a token containing digits is stripped, not left as residue', () => {
+    // C1 admits any template containing the literal `${DEVFLOW_COMPLIANCE_` prefix, so
+    // C3's strip pattern must cover the same shapes. A digit-bearing token in a user
+    // shadow used to survive composition and land in the installed skill verbatim.
+    const template = `${SKILL_TEMPLATE}\n\${DEVFLOW_COMPLIANCE_ISO27001}\n`;
+    const result = composeComplianceSkill(template, ['gdpr'], makeAllFragments());
+    expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(result.warnings.some(w => w.includes('ISO27001'))).toBe(true);
+  });
+
+  it('a digit-bearing token in the rule template is stripped too', () => {
+    const template = `${RULE_TEMPLATE}\n\${DEVFLOW_COMPLIANCE_PCI4}\n`;
+    const result = composeComplianceRule(template, ['gdpr'], makeAllFragments());
+    expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(result.warnings.some(w => w.includes('PCI4'))).toBe(true);
+  });
+});
+
+// ── Shipped artifacts as the oracle (PF-018) ──────────────────────────────────
+//
+// Every test above composes a SYNTHETIC template. That proves the composer, not the
+// thing devflow installs. These tests use the shipped SKILL.md / rule / fragment.md
+// files as the oracle so a typo'd or dropped token in a shipped template goes red —
+// C3 strips unknown tokens silently, so "no ${DEVFLOW_COMPLIANCE_ residue" alone can
+// never catch `${DEVFLOW_COMPLIANCE_MAPPPING}`.
+
+const SHIPPED_SKILL_SRC = path.join(skillsDir(), 'compliance', 'SKILL.md');
+const SHIPPED_RULE_SRC = path.join(rulesDir(), 'compliance.md');
+
+/** Matches `${DEVFLOW_COMPLIANCE_*}` tokens — mirrors the strip pattern in the composer. */
+const TOKEN_RE = /\$\{DEVFLOW_COMPLIANCE_[A-Z0-9_]*\}/g;
+
+/** Registry label for a framework ID (test-local lookup — never the composer's map). */
+function labelOf(id: string): string {
+  const fw = COMPLIANCE_FRAMEWORKS.find(f => f.id === id);
+  if (!fw) throw new Error(`test bug: "${id}" is not a registry framework`);
+  return fw.label;
+}
+
+/** Read + parse all six shipped fragment.md files through the production parser. */
+function loadShippedFragments(): Map<string, ComplianceFragment> {
+  const map = new Map<string, ComplianceFragment>();
+  for (const fw of COMPLIANCE_FRAMEWORKS) {
+    const raw = readFileSync(
+      path.join(skillsDir(), 'compliance', 'frameworks', fw.id, 'fragment.md'),
+      'utf-8',
+    );
+    const result = parseComplianceFragment(fw.id, raw);
+    if (result.ok) map.set(fw.id, result.value);
+  }
+  return map;
+}
+
+describe('shipped templates ↔ token registry (bidirectional parity)', () => {
+  it('every COMPLIANCE_SKILL_TOKENS entry is present in the shipped SKILL.md', () => {
+    const content = readFileSync(SHIPPED_SKILL_SRC, 'utf-8');
+    for (const token of COMPLIANCE_SKILL_TOKENS) {
+      expect(content, `shipped SKILL.md is missing ${token}`).toContain(token);
+    }
+  });
+
+  it('every token in the shipped SKILL.md is a registered token (catches typos)', () => {
+    const content = readFileSync(SHIPPED_SKILL_SRC, 'utf-8');
+    const found = content.match(TOKEN_RE) ?? [];
+    expect(found.length, 'shipped SKILL.md should carry all 5 tokens').toBe(
+      COMPLIANCE_SKILL_TOKENS.length,
+    );
+    for (const token of found) {
+      expect(
+        COMPLIANCE_SKILL_TOKENS.includes(token),
+        `shipped SKILL.md contains unregistered token ${token} — it would be silently stripped at install time`,
+      ).toBe(true);
+    }
+  });
+
+  it('the shipped rule carries RULE_BULLETS plus the FRAMEWORKS placeholder', () => {
+    const content = readFileSync(SHIPPED_RULE_SRC, 'utf-8');
+    for (const token of [...COMPLIANCE_RULE_TOKENS, COMPLIANCE_RULE_PLACEHOLDER]) {
+      expect(content, `shipped compliance rule is missing ${token}`).toContain(token);
+    }
+  });
+
+  it('every token in the shipped rule is a registered token (catches typos)', () => {
+    const content = readFileSync(SHIPPED_RULE_SRC, 'utf-8');
+    const known = [...COMPLIANCE_RULE_TOKENS, COMPLIANCE_RULE_PLACEHOLDER];
+    for (const token of content.match(TOKEN_RE) ?? []) {
+      expect(
+        known.includes(token),
+        `shipped compliance rule contains unregistered token ${token} — it would be silently stripped at install time`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('shipped fragments parse through the production parser', () => {
+  it('every registry framework has a fragment.md that parses cleanly', () => {
+    for (const fw of COMPLIANCE_FRAMEWORKS) {
+      const raw = readFileSync(
+        path.join(skillsDir(), 'compliance', 'frameworks', fw.id, 'fragment.md'),
+        'utf-8',
+      );
+      const result = parseComplianceFragment(fw.id, raw);
+      expect(
+        result.ok,
+        `shipped fragment ${fw.id}/fragment.md failed to parse: ${result.ok ? '' : result.error}`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('shipped SKILL.md composed across all 64 subsets', () => {
+  const allIds = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
+  const shipped = readFileSync(SHIPPED_SKILL_SRC, 'utf-8');
+  const fragments = loadShippedFragments();
+
+  function* allSubsets(): Generator<string[]> {
+    for (let mask = 0; mask < (1 << allIds.length); mask++) {
+      const subset: string[] = [];
+      for (let bit = 0; bit < allIds.length; bit++) {
+        if (mask & (1 << bit)) subset.push(allIds[bit]);
+      }
+      yield subset;
+    }
+  }
+
+  it('no token residue, no triple blank lines, and no warnings', () => {
+    for (const subset of allSubsets()) {
+      const result = composeComplianceSkill(shipped, subset, fragments);
+      expect(result.content, `subset [${subset.join(',')}]: token residue`).not.toContain(
+        '${DEVFLOW_COMPLIANCE_',
+      );
+      expect(result.content, `subset [${subset.join(',')}]: triple blank lines`).not.toMatch(/\n{3,}/);
+      expect(result.warnings, `subset [${subset.join(',')}]: unexpected warnings`).toEqual([]);
+    }
+  });
+
+  it('reference rows track the selection exactly', () => {
+    // NOTE: framework LABELS are not a valid discriminator for the shipped template —
+    // the frontmatter `description:` and the static `references/sources.md` row both
+    // name all six frameworks by design (the description drives skill activation and
+    // must stay selection-independent). `references/{id}.md` is what actually varies.
+    for (const subset of allSubsets()) {
+      const selected = new Set(subset);
+      const result = composeComplianceSkill(shipped, subset, fragments);
+      for (const id of allIds) {
+        const marker = `references/${id}.md`;
+        if (selected.has(id)) {
+          expect(result.content, `subset [${subset.join(',')}]: expected ${marker}`).toContain(marker);
+        } else {
+          expect(result.content, `subset [${subset.join(',')}]: unexpected ${marker}`).not.toContain(marker);
+        }
+      }
+    }
+  });
+
+  it('the Framework Mapping table is present iff frameworks are selected, one row each', () => {
+    for (const subset of allSubsets()) {
+      const result = composeComplianceSkill(shipped, subset, fragments);
+      if (subset.length === 0) {
+        expect(result.content).not.toContain('## Framework Mapping');
+        continue;
+      }
+      expect(result.content, `subset [${subset.join(',')}]: mapping section missing`).toContain(
+        '## Framework Mapping',
+      );
+      const rows = result.content
+        .split('\n')
+        .filter(l => subset.some(id => l.startsWith(`| ${labelOf(id)} |`)));
+      expect(rows, `subset [${subset.join(',')}]: one mapping row per framework`).toHaveLength(
+        subset.length,
+      );
+      for (const row of rows) {
+        // `| Label | c1 | ... | c6 |` → 8 pipes, 7 payload cells
+        const cells = row.split('|').slice(1, -1);
+        expect(cells, `mapping row has label + one cell per control column: ${row}`).toHaveLength(
+          COMPLIANCE_CONTROL_COLUMNS.length + 1,
+        );
+      }
+    }
+  });
+});
+
+describe('shipped compliance rule composed across all 64 subsets', () => {
+  const allIds = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
+  const shipped = readFileSync(SHIPPED_RULE_SRC, 'utf-8');
+  const fragments = loadShippedFragments();
+
+  function* allSubsets(): Generator<string[]> {
+    for (let mask = 0; mask < (1 << allIds.length); mask++) {
+      const subset: string[] = [];
+      for (let bit = 0; bit < allIds.length; bit++) {
+        if (mask & (1 << bit)) subset.push(allIds[bit]);
+      }
+      yield subset;
+    }
+  }
+
+  it('no residue, no warnings, and one per-framework bullet per selected framework', () => {
+    for (const subset of allSubsets()) {
+      const result = composeComplianceRule(shipped, subset, fragments);
+      // Match on token SHAPE, not the bare prefix: the shipped rule's HTML comment
+      // documents the placeholders as `${DEVFLOW_COMPLIANCE_...}` (literal dots), which
+      // is prose for shadow authors and is meant to survive composition.
+      expect(result.content.match(TOKEN_RE), `subset [${subset.join(',')}]: token residue`).toBeNull();
+      expect(result.warnings, `subset [${subset.join(',')}]: unexpected warnings`).toEqual([]);
+      const bullets = result.content.split('\n').filter(l => l.startsWith('- Apply '));
+      expect(bullets, `subset [${subset.join(',')}]: bullet count`).toHaveLength(subset.length);
+      for (const bullet of bullets) {
+        expect(bullet.length, `rule bullet over budget: ${bullet}`).toBeLessThanOrEqual(200);
+      }
+    }
+  });
+
+  it('inactive framework labels never appear in the composed rule', () => {
+    // Unlike the skill, the rule template names no framework statically — so label
+    // absence IS the right invariant here.
+    for (const subset of allSubsets()) {
+      const selected = new Set(subset);
+      const result = composeComplianceRule(shipped, subset, fragments);
+      for (const fw of COMPLIANCE_FRAMEWORKS) {
+        if (selected.has(fw.id)) continue;
+        expect(
+          result.content,
+          `subset [${subset.join(',')}]: inactive label "${fw.label}" leaked into the rule`,
+        ).not.toContain(fw.label);
+      }
+    }
+  });
+});
 
 describe('unknown framework ID never echoed in composed output', () => {
   it('path-traversal ID never appears in skill output', () => {
