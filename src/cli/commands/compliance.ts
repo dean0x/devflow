@@ -21,6 +21,7 @@ import {
   parseFrameworkList,
   type ComplianceFeatureState,
 } from '../../core/compliance.js';
+import { frameworkChoices, FRAMEWORK_SELECT_MESSAGE } from './compliance-prompts.js';
 import { COMPLIANCE_SKILL_TOKENS } from '../../core/compliance-compose.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
@@ -353,12 +354,8 @@ export const complianceCommand = new Command('compliance')
           'Available Frameworks',
         );
         const selected = await p.multiselect({
-          message: 'Select compliance frameworks (Enter to skip — generic controls only)',
-          options: COMPLIANCE_FRAMEWORKS.map(fw => ({
-            value: fw.id,
-            label: fw.label,
-            hint: fw.hint,
-          })),
+          message: FRAMEWORK_SELECT_MESSAGE,
+          options: frameworkChoices(),
           initialValues: current.frameworks,
           required: false,
         });

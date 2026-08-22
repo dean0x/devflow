@@ -47,7 +47,15 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
-import { parseFrameworkList, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import {
+  formatComplianceSummary,
+  frameworkChoices,
+  FRAMEWORK_SELECT_MESSAGE,
+  shouldRunComplianceStep,
+  runComplianceStep,
+  buildClackCompliancePrompts,
+} from './compliance-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
@@ -221,16 +229,9 @@ export function resolveComplianceInitState(
   return undefined;
 }
 
-/**
- * Format compliance state for the Recommended-mode summary line.
- *
- * Pure function — no I/O, no side effects; extracted for testability.
- */
-export function formatComplianceSummary(enabled: boolean, frameworks: string[]): string {
-  if (!enabled) return 'disabled';
-  if (frameworks.length > 0) return `enabled (${frameworks.join(', ')})`;
-  return 'enabled (generic controls only)';
-}
+// Re-export formatComplianceSummary from compliance-prompts.ts so existing test imports
+// (tests/init-logic.test.ts:1615 — imports from '../src/cli/commands/init.js') keep resolving.
+export { formatComplianceSummary } from './compliance-prompts.js';
 
 /**
  * Options for the init command parsed by Commander.js
@@ -579,6 +580,11 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
+    // modePromptShown: true only when the Setup-mode p.select actually ran (i.e. the user
+    // was shown a live interactive prompt and made an active choice). Used by
+    // shouldRunComplianceStep to preserve the promptless contracts of --recommended and !isTTY
+    // without re-checking the mode name (per PF-029).
+    let modePromptShown = false;
     let useRecommended: boolean;
     if (options.recommended) {
       useRecommended = true;
@@ -604,6 +610,8 @@ export const initCommand = new Command('init')
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
+      // The mode prompt ran and completed — record that the user made an active choice.
+      modePromptShown = true;
       useRecommended = modeChoice === 'recommended';
     }
 
@@ -646,10 +654,35 @@ export const initCommand = new Command('init')
     const profilePath = getProfilePath(shell);
 
     if (useRecommended) {
-      // ── Recommended path: apply all defaults silently ──
+      // ── Recommended path ──
+
+      // B4: compliance wizard step — runs only when the Setup-mode prompt actually ran
+      // (modePromptShown=true), preserving the promptless contracts of --recommended and !isTTY.
+      // shouldRunComplianceStep gates on modePromptShown rather than the mode name (PF-029).
+      // Re-init never routes here (seedManifest !== null → banner path → Advanced), so this path
+      // always sees fresh-install defaults.
+      let wizardCompliance: ComplianceFeatureState | undefined;
+      if (shouldRunComplianceStep({
+        mode: 'recommended',
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: cliComplianceOverride !== undefined,
+      })) {
+        const complianceStep = await runComplianceStep({
+          seed: seed.features.compliance,
+          prompts: buildClackCompliancePrompts(),
+        });
+        if (complianceStep.kind === 'cancelled') {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        wizardCompliance = complianceStep.state;
+        // Step messages not emitted here — the Recommended summary note (below) already
+        // prints the Compliance line from complianceSummary via formatComplianceSummary.
+      }
 
       // Apply explicit CLI toggles on top of the seed.
-      // Precedence: explicit CLI flag > seed value (which already encodes: prior state > registry default).
+      // Precedence: explicit CLI flag > wizard result > seed value (prior state > registry default).
       // proxy is included: --proxy/--no-proxy CLI flags override the seed in non-interactive mode.
       const effectiveFeatures = applyCliToggles(seed.features, {
         ambient: options.ambient,
@@ -659,7 +692,7 @@ export const initCommand = new Command('init')
         learning: options.learning,
         rules: options.rules,
         proxy: options.proxy,
-        compliance: cliComplianceOverride,
+        compliance: cliComplianceOverride ?? wizardCompliance,
       });
       ambientEnabled = effectiveFeatures.ambient;
       memoryEnabled = effectiveFeatures.memory;
@@ -877,46 +910,29 @@ export const initCommand = new Command('init')
         proxyEnabled = proxyChoice;
       }
 
-      // Compliance feature (Advanced-only wizard step; after proxy, before flags)
+      // Compliance feature (after proxy, before flags — runs in both Advanced and re-init paths)
       if (cliComplianceOverride !== undefined) {
         // --compliance or --no-compliance passed explicitly — honour without prompting
         complianceEnabled = cliComplianceOverride.enabled;
         complianceFrameworks = cliComplianceOverride.frameworks;
       } else {
-        p.note(
-          'Stamps the compliance rule with active framework labels and installs\n' +
-          'framework reference files into the compliance skill. Only the\n' +
-          'frameworks you select are included — zero selection = generic controls.\n\n' +
-          'Valid framework IDs:\n' +
-          COMPLIANCE_FRAMEWORKS.map(fw => `  ${fw.id.padEnd(10)} — ${fw.hint}`).join('\n'),
-          'Compliance',
-        );
-        const complianceChoice = await p.confirm({
-          message: 'Enable compliance?',
-          initialValue: seed.features.compliance.enabled,
+        // runComplianceStep: note with "Current setting:" header (legible on re-init per PF-029),
+        // labeled Yes/No select (immune to Enter-through muscle memory), and framework multiselect.
+        // Returns {kind:'cancelled'} on Escape — caller owns the cancel idiom (PF-014).
+        const complianceStep = await runComplianceStep({
+          seed: { enabled: complianceEnabled, frameworks: complianceFrameworks },
+          prompts: buildClackCompliancePrompts(),
         });
-        if (p.isCancel(complianceChoice)) {
+        if (complianceStep.kind === 'cancelled') {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        complianceEnabled = complianceChoice;
-
-        if (complianceEnabled) {
-          const frameworkSelection = await p.multiselect({
-            message: 'Select compliance frameworks (Enter to skip — generic controls only)',
-            options: COMPLIANCE_FRAMEWORKS.map(fw => ({
-              value: fw.id,
-              label: fw.label,
-              hint: fw.hint,
-            })),
-            initialValues: seed.features.compliance.frameworks,
-            required: false,
-          });
-          if (p.isCancel(frameworkSelection)) {
-            p.cancel('Installation cancelled.');
-            process.exit(0);
-          }
-          complianceFrameworks = frameworkSelection as string[];
+        complianceEnabled = complianceStep.state.enabled;
+        complianceFrameworks = complianceStep.state.frameworks;
+        // Advanced path has no end-of-wizard summary recap (unlike Recommended) — emit outcome line.
+        for (const msg of complianceStep.messages) {
+          if (msg.level === 'success') p.log.success(msg.text);
+          else p.log.info(msg.text);
         }
       }
 
