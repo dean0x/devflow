@@ -695,7 +695,7 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Monitor');
   });
 
-  it('runs ONE final Gate 1 (#2) after the review loop', () => {
+  it('runs ONE final Gate 1 (#2) after the review pass', () => {
     expect(compiled).toContain('gate1-final');
     expect(compiled).toContain('Gate 1 #2');
   });

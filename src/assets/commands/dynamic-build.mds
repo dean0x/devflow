@@ -164,7 +164,7 @@ Commit fixes with conventional-commit message.`, { agentType: "Code" });
   return { verdict: "PASS" };
 });
 
-// Phase 4: Gate 2 — acceptance gate (once, before review loop)
+// Phase 4: Gate 2 — acceptance gate (once, before review pass)
 const gate2 = await phase("gate2", async () => {
   if (!PLAN && !CRITERIA) {
     return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED", skipReasons: ["No plan and no criteria provided"] };
@@ -184,7 +184,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
     evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
       // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
-      // after the review loop is the build gate before the branch is handed back.
+      // after the review pass is the build gate before the branch is handed back.
       await agent(`Fix the alignment issues identified by the Evaluate agent panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
 ISSUE_NUMBER: ${ISSUE_NUMBER}

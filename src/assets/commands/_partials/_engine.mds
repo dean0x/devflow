@@ -31,7 +31,7 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 
 **Evaluate agent panel** (only if a plan exists):
 - Run `evaluator_panel()` — see that block for the panel composition
-- If any critical lens returns MISALIGNED: fix-and-continue — the demanded fixes are applied by a Code agent that self-verifies its own build (batched per the review-loop batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds.
+- If any critical lens returns MISALIGNED: fix-and-continue — the demanded fixes are applied by a Code agent that self-verifies its own build (batched per the review-pass batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds.
 
 **Test agent** (only if acceptance criteria exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
