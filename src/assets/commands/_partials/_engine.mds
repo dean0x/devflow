@@ -80,7 +80,7 @@ The review pass runs exactly ONCE per ticket. One full-branch review → one adv
 
 **Step 1 — Spawn Review agents in parallel (one agent() per focus)**
 
-**Review scope:** the entire branch diff (base SHA → HEAD).
+**Review scope:** the entire branch diff from the base branch to HEAD (no base SHA is tracked — the reviewing agent diffs the branch against its merge-base with the default branch).
 
 Core Review agents (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
@@ -115,7 +115,7 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 If no surviving findings: return early (no fixes needed). Any coverageGaps are carried in the return — they block a PASS verdict downstream, not the early exit.
 
-If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `\{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]\}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's "Long-running commands" discipline). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5, same pacing bar as the Review spawn path (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `\{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]\}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's "Long-running commands" discipline). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -212,7 +212,6 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
       "description": "string"
     }
   ],
-  "filesChanged": ["string — list of modified file paths"],
   "gate2": {
     "evaluateVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
     "testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",

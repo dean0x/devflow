@@ -224,8 +224,10 @@ Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor 
 
 // Phase 5: Review → verify → fix (single pass)
 const reviewResult = await phase("review", async () => {
-  // Review scope: the entire branch diff (base SHA → HEAD). The pass runs exactly ONCE.
-  const reviewScope = `Review the full branch diff on branch ${BRANCH} (base to HEAD).`;
+  // Review scope: the entire branch diff from the base branch to HEAD. No base SHA is tracked —
+  // Review agents diff the branch against its merge-base with the default branch.
+  // The pass runs exactly ONCE.
+  const reviewScope = `Review the full branch diff on branch ${BRANCH}. Diff the branch against its merge-base with the default branch (do not guess a base SHA — compute the merge-base from git).`;
 
   // Review agent focus list (order = index mapping for dead-reviewer detection)
   const reviewFocuses = ["security", "architecture", "performance", "complexity", "consistency", "regression", "testing", "reliability"];
@@ -312,8 +314,11 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     fileGroups[key].push(f);
   }
 
-  // One entry per distinct file; each entry runs its sub-batches sequentially
-  const fixResults = await parallel(Object.entries(fileGroups).map(([fileKey, findings]) => async () => {
+  // One entry per distinct file; each entry runs its sub-batches sequentially.
+  // Distinct-file groups are paced in chunks of FIX_CHUNK — same pacing bar as the Review spawn
+  // path — to avoid launching all Code agents at once on a large branch (reliability: explicit bound).
+  const FIX_CHUNK = 5;
+  const fixThunks = Object.entries(fileGroups).map(([fileKey, findings]) => async () => {
     const chunkResults = [];
     for (let i = 0; i < findings.length; i += MAX_BATCH) {
       const chunk = findings.slice(i, i + MAX_BATCH);
@@ -326,7 +331,11 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
       chunkResults.push({ chunk, result: r });
     }
     return chunkResults;
-  }));
+  });
+  let fixResults = [];
+  for (let i = 0; i < fixThunks.length; i += FIX_CHUNK) {
+    fixResults = fixResults.concat(await parallel(fixThunks.slice(i, i + FIX_CHUNK)));
+  }
 
   // Track findings disposition — FIXED vs SURVIVING
   // fixResults is an array of chunkResults arrays (one per distinct file); flatten to disposition.
@@ -362,13 +371,15 @@ For any build/test that may run silent >120s, use the background-Bash + Monitor 
 Report: PASS or FAIL with details.`, { agentType: "Validate" });
 
   if (validation.verdict === "FAIL") {
+    let failureDetails = validation.details;
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the final validation failures on branch ${BRANCH}:
-${validation.details}
+${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
+      failureDetails = recheck.details || failureDetails;
       if (attempt === 2) return { verdict: "ESCALATED", reason: "Final Gate 1 validation exhausted after 2 Code agent fix attempts" };
     }
   }
