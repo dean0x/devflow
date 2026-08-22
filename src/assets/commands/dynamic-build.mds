@@ -517,12 +517,13 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    "OPERATION: post-wave-report
    TRACKING_ISSUE: \{ISSUE_NUMBER\}
    WAVE_REPORT_PATH: .devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md
-   WAVE_ID: \{WAVE_ID\}"
+   WAVE_ID: \{WAVE_ID\}
+   WORKTREE_PATH: \{integration worktree root, when the wave ran in a linked worktree; omit if cwd\}"
    ```
    The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
 
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
-3. Surface escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
+3. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
 4. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
 
 Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only WRITES the report; you read it and ask.
