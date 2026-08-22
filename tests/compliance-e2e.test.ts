@@ -1043,8 +1043,15 @@ describe('S18: fresh non-TTY --enable with no prior frameworks → generic-only'
       'utf-8',
     );
     expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    // No per-framework reference rows (zero frameworks selected)
+    for (const id of ['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox']) {
+      expect(skillContent, `references/${id}.md must not appear in zero-framework SKILL.md`).not.toContain(`references/${id}.md`);
+    }
     // Rule: no per-framework bullets (empty), no unresolved tokens.
     expect(ruleContent).not.toContain('${DEVFLOW_COMPLIANCE_RULE_BULLETS}');
+    // Zero frameworks → no "Apply ..." bullets at all
+    const bulletLines = ruleContent.split('\n').filter(l => l.startsWith('- Apply '));
+    expect(bulletLines, 'zero-framework rule must have no per-framework "Apply ..." bullets').toHaveLength(0);
 
     const manifest = await readManifest(devflowDir);
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;

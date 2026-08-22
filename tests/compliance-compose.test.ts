@@ -475,14 +475,17 @@ Generic compliance rule.
 
 describe('composeComplianceSkill — C1 identity passthrough', () => {
   it('returns byte-identical content when template has no ${DEVFLOW_COMPLIANCE_ tokens', () => {
-    const noTokenTemplate = '# Compliance\nNo tokens here.';
+    // Use a fixture with 4+ consecutive newlines — hygiene would collapse them if it ran.
+    // Byte-identical output proves C1 skips hygiene entirely (not that hygiene is lenient).
+    const noTokenTemplate = '# Compliance\n\n\n\nNo tokens here.';
     const result = composeComplianceSkill(noTokenTemplate, ['gdpr'], makeAllFragments());
     expect(result.content).toBe(noTokenTemplate);
     expect(result.warnings).toHaveLength(0);
   });
 
   it('identity passthrough with empty frameworks', () => {
-    const noTokenTemplate = '# No tokens present.';
+    // Same reasoning — triple blank lines distinguish passthrough from hygiene-ran.
+    const noTokenTemplate = '# No tokens present.\n\n\n';
     const result = composeComplianceSkill(noTokenTemplate, [], makeAllFragments());
     expect(result.content).toBe(noTokenTemplate);
     expect(result.warnings).toHaveLength(0);
@@ -625,13 +628,24 @@ describe('composeComplianceSkill — C2: unknown ID dropped, C7: loops bounded',
 
   it('unknown framework ID produces exactly one warning', () => {
     const result = composeComplianceSkill(SKILL_TEMPLATE, ['gdpr', 'not-a-framework'], makeAllFragments());
-    expect(result.warnings.length).toBeGreaterThanOrEqual(1);
-    expect(result.warnings.some(w => w.includes('not-a-framework'))).toBe(true);
+    // Exact count — a double-warning regression must fail.
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('not-a-framework');
   });
 
   it('valid framework still composed when mixed with unknown IDs (C5 isolation)', () => {
     const result = composeComplianceSkill(SKILL_TEMPLATE, ['gdpr', 'bogus'], makeAllFragments());
     expect(result.content).toContain('GDPR');
+  });
+
+  it('C7: emitted framework mapping rows ≤ frameworks.length (loops bounded)', () => {
+    // Assert a bound against a duplicate-heavy input: the composer may repeat rows but
+    // cannot produce MORE mapping rows than framework IDs it was given.
+    const input = ['gdpr', 'gdpr', 'gdpr'];
+    const result = composeComplianceSkill(SKILL_TEMPLATE, input, makeAllFragments());
+    // Count rows that start with a framework label cell (produced by DEVFLOW_COMPLIANCE_MAPPING).
+    const frameworkRows = result.content.split('\n').filter(l => l.startsWith('| GDPR |'));
+    expect(frameworkRows.length).toBeLessThanOrEqual(input.length);
   });
 });
 
@@ -659,6 +673,9 @@ describe('composeComplianceSkill — C5: degraded fragment (missing fragment →
     expect(result.content).toContain('GDPR');
     // No token residue
     expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
+    // Missing fragment → no mapping row, no checklist item contributed by the fragment
+    expect(result.content).not.toContain('| GDPR |');
+    expect(result.content).not.toContain('GDPR checklist item');
   });
 
   it('missing fragment emits exactly one warning (never aborts others)', () => {
@@ -672,10 +689,14 @@ describe('composeComplianceSkill — C5: degraded fragment (missing fragment →
     expect(result.content).toContain('GDPR');
     expect(result.content).toContain('HIPAA');
 
-    // At least one warning about missing gdpr fragment
-    expect(result.warnings.some(w => w.toLowerCase().includes('gdpr'))).toBe(true);
+    // Exactly one warning about missing gdpr fragment — exact count so double-warning regression fails.
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].toLowerCase()).toContain('gdpr');
     // No token residue
     expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
+    // Missing GDPR fragment → no GDPR mapping row, no GDPR checklist item
+    expect(result.content).not.toContain('| GDPR |');
+    expect(result.content).not.toContain('GDPR checklist item');
   });
 
   it('HIPAA mapping row present even when GDPR fragment is missing', () => {
@@ -831,11 +852,15 @@ describe('composeComplianceRule — C5: degraded fragment (missing fragment → 
     expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
   });
 
-  it('missing fragment emits one warning, never throws', () => {
+  it('missing fragment emits exactly one warning, never throws, and omits the bullet', () => {
     const emptyFragments = new Map<string, ComplianceFragment>();
     expect(() => composeComplianceRule(RULE_TEMPLATE, ['gdpr'], emptyFragments)).not.toThrow();
     const result = composeComplianceRule(RULE_TEMPLATE, ['gdpr'], emptyFragments);
-    expect(result.warnings.length).toBeGreaterThanOrEqual(1);
+    // Exact count — a double-warning regression must fail.
+    expect(result.warnings).toHaveLength(1);
+    // Missing fragment → no rule bullet contributed
+    expect(result.content).not.toContain('gdpr rule bullet');
+    expect(result.content).not.toContain('- Apply ');
   });
 
   it('valid framework bullet present when another framework has no fragment', () => {
@@ -843,8 +868,10 @@ describe('composeComplianceRule — C5: degraded fragment (missing fragment → 
     partialFragments.set('hipaa', makeFragment('hipaa', 'HIPAA'));
 
     const result = composeComplianceRule(RULE_TEMPLATE, ['gdpr', 'hipaa'], partialFragments);
-    // HIPAA bullet should be present
+    // HIPAA bullet should be present (fragment exists)
     expect(result.content).toContain('hipaa rule bullet');
+    // GDPR bullet must be absent (no fragment → no bullet contributed)
+    expect(result.content).not.toContain('gdpr rule bullet');
     // No token residue
     expect(result.content).not.toContain('${DEVFLOW_COMPLIANCE_');
   });
@@ -1105,6 +1132,17 @@ describe('shipped compliance rule composed across all 64 subsets', () => {
         ).not.toContain(fw.label);
       }
     }
+  });
+
+  it('all-six shipped rule: ≤ 26 lines and ≤ 2048 bytes (budget against the installed artifact)', () => {
+    // This asserts the budget against the SHIPPED rule + SHIPPED fragments, not a synthetic fixture.
+    // A typo'd template token that bloats the composed output would fail here.
+    const allIds = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
+    const result = composeComplianceRule(shipped, allIds, fragments);
+    const lineCount = result.content.split('\n').length;
+    expect(lineCount, `all-six shipped rule should be ≤ 26 lines (got ${lineCount})`).toBeLessThanOrEqual(26);
+    const byteCount = Buffer.byteLength(result.content, 'utf-8');
+    expect(byteCount, `all-six shipped rule should be ≤ 2048 bytes (got ${byteCount})`).toBeLessThanOrEqual(2048);
   });
 });
 

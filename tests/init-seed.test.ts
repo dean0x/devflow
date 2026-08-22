@@ -622,6 +622,15 @@ describe('compliance seeding', () => {
     expect(result.compliance).toEqual({ enabled: false, frameworks: [] }); // FEATURE_DEFAULTS wins
   });
 
+  it('populated manifest wins over projectConfig: compliance comes from manifest, not FEATURE_DEFAULTS', () => {
+    // The removed compliance-cli.test.ts variant: both a populated manifest AND a projectConfig are
+    // present; compliance must come from the manifest (manifest-group), not from config or FEATURE_DEFAULTS.
+    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['sox'] });
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(manifest, config);
+    expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
+  });
+
   it('disable-keeps-frameworks: disabled manifest with non-empty frameworks → seeded with frameworks', () => {
     const manifest = makeComplianceManifest({ enabled: false, frameworks: ['sox', 'hipaa'] });
     const result = resolveSeedFeatures(manifest, null);

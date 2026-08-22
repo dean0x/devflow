@@ -21,6 +21,7 @@ describe('COMPLIANCE_FRAMEWORKS registry ↔ disk (AC-38)', () => {
   // After A8.2: framework reference files live at frameworks/{id}/reference.md.
   // The always-present refs (detection.md, sources.md) remain in references/.
   const FRAMEWORKS_DIR = path.join(skillsDir(), 'compliance', 'frameworks');
+  const REFERENCES_DIR = path.join(skillsDir(), 'compliance', 'references');
 
   it('every registry ID has a reference.md and fragment.md under frameworks/{id}/', async () => {
     for (const fw of COMPLIANCE_FRAMEWORKS) {
@@ -48,6 +49,19 @@ describe('COMPLIANCE_FRAMEWORKS registry ↔ disk (AC-38)', () => {
       .sort();
     const registryIds = COMPLIANCE_FRAMEWORKS.map(fw => fw.id).sort();
     expect(diskIds).toEqual(registryIds);
+  });
+
+  it('source references/ contains EXACTLY detection.md and sources.md (no per-framework files)', async () => {
+    // After A8.2, per-framework reference files moved to frameworks/{id}/reference.md.
+    // Only the two always-present files should remain in source references/.
+    const entries = await fs.readdir(REFERENCES_DIR, { withFileTypes: true });
+    const fileNames = entries
+      .filter(e => e.isFile())
+      .map(e => e.name)
+      .sort();
+    expect(fileNames, 'source references/ must contain exactly detection.md and sources.md').toEqual(
+      ['detection.md', 'sources.md'],
+    );
   });
 });
 
