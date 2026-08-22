@@ -80,6 +80,15 @@ Extract or note:
 
 If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
 
+**5. Resolve tracking-issue number (optional)**
+
+Check, in priority order:
+- An explicit issue number or GitHub issue URL in the user's input (e.g., `#42`, `42`, or `https://github.com/…/issues/42`)
+- The tracking-issue reference in the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets` at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`)
+- Otherwise: none
+
+If a number is found, record it as the command-level `ISSUE_NUMBER` and pass it as `issueNumber: <number>` when invoking the workflow (the Code agent threads it through as `ISSUE_NUMBER`). If none is found, pass nothing — `ISSUE_NUMBER` defaults to `"(none)"` in the workflow script.
+
 ---
 
 ### SINGLE mode workflow structure
@@ -100,7 +109,7 @@ const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLow
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
-const ISSUE_NUMBER = args.issueNumber || "(none)";  // caller-supplied tracking-issue number, when one exists
+const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
@@ -428,7 +437,7 @@ When WAVE mode is detected, author a workflow that wraps the single-ticket engin
 
 **Wave workflow structure (author after the SINGLE engine blocks above):**
 
-The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` (or the user's current branch). Per-ticket branches are `ticket/<slug>`. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validate agent (build + test). Escalations accumulate in a list; the final report lists all of them.
+The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` — the initiative slug, referenced below as `\{slug\}` — (or the user's current branch). Per-ticket branches are `ticket/<slug>`. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validate agent (build + test). Escalations accumulate in a list; the final report lists all of them.
 
 Wave skeleton — compact reference (see `wave_loop()` doctrine for full semantics):
 
@@ -487,15 +496,17 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 A workflow cannot pause mid-run. After the build/wave workflow returns, you (the main model) surface anything that needs a human decision — all at once:
 
 1. Read the wave report (`.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`) for its **escalations** (quarantined/blocked tickets and why), and read any `DECISIONS-NEEDED.md` left by a prior `/devflow:dynamic-plan` run for this initiative.
-2. **Post wave-report as tracking-issue comment** (always-on, DEGRADED-tolerant): If a tracking-issue number is known (the `ISSUE_NUMBER` threaded through this run — i.e. `args.issueNumber` was supplied and is not `(none)`), define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
+2. **Post wave-report as tracking-issue comment** (WAVE mode only — skip this step entirely in SINGLE mode; SINGLE runs produce no wave report): In WAVE mode, if a tracking-issue number was resolved in Pre-authoring step 5 (`ISSUE_NUMBER` is not `(none)`) AND `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md` exists, define `WAVE_ID` as the timestamped wave directory slug (the `\{ts\}` component, e.g. `2026-08-20_1730`), then spawn:
    ```
    Agent(subagent_type="Git"):
    "OPERATION: post-wave-report
-   TRACKING_ISSUE: \{tracking_issue_number\}
+   TRACKING_ISSUE: \{ISSUE_NUMBER\}
    WAVE_REPORT_PATH: .devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md
    WAVE_ID: \{WAVE_ID\}"
    ```
    The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+
+   In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
 3. Surface escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
 4. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
 
