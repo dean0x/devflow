@@ -114,7 +114,7 @@ npx devflow-kit compliance --set ""                    # Clear all active framew
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
-The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory.
+The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory. SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments — only the selected frameworks appear in the installed artifacts. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough).
 
 ## Rules
 
@@ -175,7 +175,7 @@ npx devflow-kit rules list                       # List all rules with install s
 npx devflow-kit rules unshadow security          # Remove override
 ```
 
-The `compliance` rule is the only templated rule — it contains a `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` placeholder that `devflow compliance --set` stamps with your active frameworks at install time. If you shadow `compliance` and remove that placeholder, `devflow compliance --set` stops updating the line; you own it entirely.
+The `compliance` rule is dynamically composed at install time — per-framework `Apply ...` bullets come from `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` and the active-framework clause from `${DEVFLOW_COMPLIANCE_FRAMEWORKS}`. If you shadow `compliance`, the shadow's own tokens are replaced at install time; removing both placeholders makes `devflow compliance --set` a no-op for those lines (you own them entirely). Similarly, shadowing the compliance skill without the `${DEVFLOW_COMPLIANCE_...}` tokens bypasses per-framework composition — `devflow compliance --status` will show `[shadowed, composition skipped]`.
 
 ## Feature Flags
 

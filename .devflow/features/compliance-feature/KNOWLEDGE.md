@@ -40,7 +40,7 @@ State lives in `manifest.features.compliance: ComplianceFeatureState` — a name
 
 ### Framework registry (`src/core/compliance.ts` — pure, no I/O)
 
-Six frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. Each has a static `label` (used verbatim in stamped artifacts) and an `id` (matches the reference file basename in `compliance/references/`).
+Six frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. Each has a static `label` (used verbatim in stamped artifacts) and an `id` (matches the source directory under `compliance/frameworks/{id}/` and the installed reference file basename `references/{id}.md`).
 
 Key exports:
 
@@ -52,7 +52,21 @@ Key exports:
 | `normalizeFrameworks(ids)` | **Tolerant** — drops unknowns silently; deduplicates (first wins) |
 | `parseFrameworkList(input)` | **Strict** — rejects unknowns with an error naming every unknown and every valid ID |
 | `normalizeComplianceFeature(raw)` | Self-heal: absent/malformed → `{enabled:false, frameworks:[]}` |
-| `stampComplianceRule(content, ids)` | Replaces `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` with static labels only |
+| `stampComplianceRule(content, ids)` | Replaces `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` with static labels only (delegated-to by `composeComplianceRule`) |
+
+### Dynamic composition (`src/core/compliance-compose.ts` — pure, no I/O)
+
+Introduced in A8 to compose SKILL.md and the rule file from per-framework fragments rather than shipping static all-six blobs.
+
+**Fragment format** (`src/assets/skills/compliance/frameworks/{id}/fragment.md`): 4 required sections — `## Mapping` (1 table row, 6 cells), `## Reference` (single-line blurb), `## Checklist` (0–2 items), `## Rule` (1 bullet, ≤200 chars).
+
+**5 skill tokens** resolved into the SKILL.md template: `${DEVFLOW_COMPLIANCE_SCOPE}`, `${DEVFLOW_COMPLIANCE_ACTIVE}`, `${DEVFLOW_COMPLIANCE_MAPPING}`, `${DEVFLOW_COMPLIANCE_CHECKLIST}`, `${DEVFLOW_COMPLIANCE_REFERENCES}`.
+
+**1 rule token** resolved into the rule template: `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` (per-framework `Apply ...` bullets); `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` is then delegated to `stampComplianceRule`.
+
+**C1 passthrough**: if the template contains no `${DEVFLOW_COMPLIANCE_` tokens (e.g. a user shadow with static content), the function returns the content byte-identical. This is deliberately flagged by `--status` as `[shadowed, composition skipped]`.
+
+**Source layout vs installed layout**: reference files live at `frameworks/{id}/reference.md` in source, but are installed as `references/{id}.md` (installed artifact layout is unchanged from pre-A8 installs).
 
 `normalizeFrameworks` is the trust boundary used inside `convergeComplianceArtifacts`, ensuring no user-supplied or manifest-sourced ID ever becomes an fs path segment or is written into an installed artifact without registry validation (AC-35, AC-36).
 
@@ -80,7 +94,7 @@ Key exports:
 
 **PF-011:** `installSkillDir` builds the new tree under `{target}.tmp`, then atomically removes old → renames. Orphaned `.tmp` directories from prior crashes are cleaned up at the start of each run.
 
-**Shadow semantics:** SKILL.md source resolves as shadow → canonical (validates via `validateSkillShadow`). Reference files (`{id}.md`, `detection.md`, `sources.md`) always come from canonical source — framework refs are not user-overridable. Rule source resolves as shadow → canonical (validates via `validateRuleShadow`), and `stampComplianceRule` runs on whichever source is selected.
+**Shadow semantics:** SKILL.md source resolves as shadow → canonical (validates via `validateSkillShadow`). Reference files (`{id}.md`, `detection.md`, `sources.md`) always come from canonical source — framework refs are not user-overridable. Fragment files are always loaded from canonical source even when SKILL.md comes from a shadow (fragments are registry-owned content). Rule source resolves as shadow → canonical (validates via `validateRuleShadow`), then `composeComplianceRule` (which delegates `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` to `stampComplianceRule`) is called. C1 passthrough: a token-free shadow passes through byte-identical without composition.
 
 **Installer sweep and FEATURE_OWNED_SKILLS:** `installViaFileCopy` unions `FEATURE_OWNED_SKILLS` into the known-names set for its orphan sweep. This means `devflow:compliance` is never incorrectly swept as an orphan. The formerly exported `shouldSurfaceFeatureOwnedSkillOrphan` and `filteredSweepReport` functions have been deleted — no caller needed them after the union approach.
 
@@ -92,13 +106,15 @@ Disable-keeps-frameworks: `disable` sets `enabled: false` but leaves `frameworks
 
 Interactive TTY path: when `--enable` is called on a TTY with no prior frameworks, the CLI presents a `@clack/prompts` multiselect before falling through to the `set` action.
 
+`--status` shadow detection: the `skillShadowState()` helper reads the shadow SKILL.md and checks for any `${DEVFLOW_COMPLIANCE_...}` token. Returns `'none'` (no shadow), `'shadowed'` (shadow with tokens — composition runs), or `'composition-skipped'` (token-free shadow — C1 passthrough). The Skill line in `--status` shows `[shadowed]` or `[shadowed, composition skipped — per-framework sections absent]` accordingly.
+
 ### Rule template and seedRuleShadow
 
-`src/assets/rules/compliance.md` contains `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` as a placeholder line. `stampComplianceRule` replaces it with one of:
-- `Active frameworks: GDPR, SOC 2 — their controls are binding.` (non-empty)
-- `Active frameworks: none declared — generic controls only.` (empty)
+`src/assets/rules/compliance.md` is a composition template with two dynamic tokens:
+- `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` — replaced with per-framework `Apply ...` bullets (one per selected framework)
+- `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` — delegated to `stampComplianceRule` → `Active frameworks: GDPR, SOC 2 — their controls are binding.` (non-empty) or `Active frameworks: none declared — generic controls only.` (empty)
 
-`seedRuleShadow` in `rules.ts` uses a two-tier strategy for `FEATURE_OWNED_RULES`: it **skips Tier 1** (the installed file) and goes directly to **Tier 2** (canonical source at `src/assets/rules/compliance.md`). This preserves the `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` placeholder in the shadow — if Tier 1 were used, the already-stamped file (placeholder replaced with label text) would permanently disable framework stamping whenever the shadow was applied.
+`seedRuleShadow` in `rules.ts` uses a two-tier strategy for `FEATURE_OWNED_RULES`: it **skips Tier 1** (the installed file) and goes directly to **Tier 2** (canonical source at `src/assets/rules/compliance.md`). This preserves both placeholders in the shadow — if Tier 1 were used, the already-composed file (tokens replaced) would permanently disable per-framework composition whenever the shadow was applied.
 
 ### COMPLIANCE_SKILL_INSTALLED gate (partial-based)
 
@@ -214,7 +230,9 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 
 **Disable keeps frameworks in manifest.** `enabled: false` does not clear `frameworks: [...]`. Re-enabling restores the prior selection. If you add a flow that resets frameworks on disable, you break the restore behaviour verified by e2e S4/S5.
 
-**Shadow overrides SKILL.md only; refs always canonical.** A skill shadow replaces SKILL.md in the installed directory, but reference files (`references/*.md`) are always sourced from `src/assets/skills/compliance/references/`. There is no user-overridable path for framework reference files.
+**Shadow overrides SKILL.md only; refs and fragments always canonical.** A skill shadow replaces SKILL.md in the installed directory, but reference files (`references/*.md`) are always sourced from the canonical `frameworks/{id}/reference.md` — and fragments (`frameworks/{id}/fragment.md`) are always loaded from canonical source even when the shadow provides SKILL.md. There is no user-overridable path for framework reference or fragment files.
+
+**Token-free skill shadow suppresses composition.** If a skill shadow's SKILL.md has no `${DEVFLOW_COMPLIANCE_` tokens, `composeComplianceSkill` returns it byte-identical (C1 passthrough). The installed SKILL.md will have no per-framework sections (mapping, active list, checklist, references). `devflow compliance --status` flags this with `[shadowed, composition skipped]`.
 
 **Step 0b ordering is load-bearing in code-review.** `compliance_gate()` (Step 0b) must execute before Step 0c spawns the Git ensure-pr-ready agent. The Git agent receives `COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}`.
 
@@ -235,8 +253,11 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 | File | Purpose |
 |---|---|
 | `src/core/compliance.ts` | Framework registry, `ComplianceFeatureState`, `ALWAYS_PRESENT_REFS`, tolerant/strict parsers, self-heal normalizer, rule stamper |
-| `src/targets/claude-code/compliance-install.ts` | `convergeComplianceArtifacts` (returns `{removedPreexisting, converged}`), `convergeFromManifest` wrapper, claudeDir guard |
-| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, status/drift detection |
+| `src/core/compliance-compose.ts` | Pure composition: `parseComplianceFragment`, `composeComplianceSkill`, `composeComplianceRule`; `COMPLIANCE_SKILL_TOKENS`, `COMPLIANCE_RULE_TOKENS`, `COMPLIANCE_CONTROL_COLUMNS` |
+| `src/assets/skills/compliance/frameworks/{id}/fragment.md` | Per-framework composition inputs (6 files): Mapping, Reference, Checklist, Rule sections |
+| `src/assets/skills/compliance/frameworks/{id}/reference.md` | Per-framework reference content (source location; installed as `references/{id}.md`) |
+| `src/targets/claude-code/compliance-install.ts` | `convergeComplianceArtifacts` (returns `{removedPreexisting, converged}`), `convergeFromManifest` wrapper, claudeDir guard, `loadComplianceFragments` |
+| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, status/drift detection, `skillShadowState` |
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
 | `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |
