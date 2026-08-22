@@ -351,6 +351,82 @@ describe('secret-assignment rule', () => {
     expect(r.outputContent).not.toContain('x9J2mQ8vL4pR7wN3kT6y');
     expect(r.stdout.trim()).toBe('SCRUB: 1 [secret-assignment:1]');
   });
+
+  // A secret quoted in a review finding arrives as an EXCERPT of source, so it is
+  // indented, declarator-prefixed, dotted or JSON-quoted — not as a bare column-0
+  // assignment. Each shape below is a distinct prefix form the rule must reach.
+  const assignmentShapes: Array<{ name: string; fixture: string; secret: string }> = [
+    {
+      name: 'indented const declaration (code excerpt inside a fence)',
+      fixture: '  const apiSecret = "x9J2mQ8vL4pR7wN3kT6y";',
+      secret: 'x9J2mQ8vL4pR7wN3kT6y',
+    },
+    {
+      name: 'indented bare assignment',
+      fixture: '    password = "hQ7vN2mK9pL4wR8t"',
+      secret: 'hQ7vN2mK9pL4wR8t',
+    },
+    {
+      name: 'quoted JSON key',
+      fixture: '"api_key": "x9J2mQ8vL4pR7wN3kT6y",',
+      secret: 'x9J2mQ8vL4pR7wN3kT6y',
+    },
+    {
+      name: 'dotted member assignment',
+      fixture: 'this.apiToken = "x9J2mQ8vL4pR7wN3kT6y"',
+      secret: 'x9J2mQ8vL4pR7wN3kT6y',
+    },
+    {
+      name: 'two declarator keywords (export const)',
+      fixture: 'export const DB_PASSWORD = "hQ7vN2mK9pL4wR8t"',
+      secret: 'hQ7vN2mK9pL4wR8t',
+    },
+    {
+      name: 'hyphenated YAML key',
+      fixture: 'api-key: x9J2mQ8vL4pR7wN3kT6y',
+      secret: 'x9J2mQ8vL4pR7wN3kT6y',
+    },
+  ];
+
+  for (const [idx, { name, fixture, secret }] of assignmentShapes.entries()) {
+    it(`redacts the value in: ${name}`, () => {
+      const r = runWithContent(fixture, tmpDir, `shape-${idx}.txt`);
+      expect(r.exitCode).toBe(0);
+      expect(r.outputContent).not.toContain(secret);
+      expect(r.outputContent).toContain('[REDACTED:secret-assignment]');
+      expect(r.stdout.trim()).toBe('SCRUB: 1 [secret-assignment:1]');
+    });
+  }
+
+  it('preserves indentation and surrounding syntax exactly', () => {
+    const r = runWithContent('  const apiSecret = "x9J2mQ8vL4pR7wN3kT6y";', tmpDir, 'shape-indent.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.outputContent).toBe('  const apiSecret = "[REDACTED:secret-assignment]";');
+  });
+
+  it('does not redact prose that merely mentions a secret keyword (key-scoped, not line-scoped)', () => {
+    // The KEY must carry the signal. A review narrative line like this one has a
+    // high-entropy, digit-bearing value and would be mangled by a line-scoped match.
+    const fixture = '  Fix: use AWS Secrets Manager and rotate the key within 24 hours today';
+    const r = runWithContent(fixture, tmpDir, 'prose-neg.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.outputContent).toBe(fixture);
+    expect(r.stdout.trim()).toBe('SCRUB: 0 []');
+  });
+
+  it('declarator alternation does not backtrack — 50 KB of near-miss keywords completes within 2 seconds', () => {
+    // `export export export … =` exercises the bounded {0,3} declarator group against
+    // a line the regex can never complete a match on.
+    const line = '  ' + 'export '.repeat(7_000) + 'password = ';
+    expect(line.length, 'corpus is empty — guard is vacuous (PF-018)').toBeGreaterThan(49_000);
+
+    const start = Date.now();
+    const r = runWithContent(line, tmpDir, 'assign-adversarial.txt');
+    const elapsed = Date.now() - start;
+
+    expect(r.exitCode).toBe(0);
+    expect(elapsed).toBeLessThan(2000);
+  });
 });
 
 // ---------------------------------------------------------------------------

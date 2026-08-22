@@ -239,29 +239,43 @@ function scrub(content) {
   //   KEY = "value"   KEY: "value"   KEY="value"   KEY='value'
   //   KEY = value     (unquoted — captured with no close-quote backreference)
   //
+  // The prefix tolerates the shapes a quoted code excerpt actually arrives in:
+  // leading indentation, up to three declarator keywords (`export const …`), a
+  // quoted key (`"api_key": …`), and dotted/hyphenated key names
+  // (`this.apiToken`, `api-key`). Without these the rule only ever fired on a
+  // bare column-0 assignment, which is the rarest form inside a review finding.
+  // The declarator group is bounded {0,3} and each iteration must consume a
+  // literal keyword, so the added alternation cannot backtrack (PF-018).
+  //
   // Conditions for replacement (all must hold):
-  //   (a) The line's key name matches SECRET_KEY_RE
+  //   (a) The KEY matches SECRET_KEY_RE — not merely the line, so a prose line
+  //       that happens to mention "credential" (`Fix: rotate the credential …`)
+  //       is never treated as an assignment
   //   (b) The value is ≥ 16 characters with no embedded quotes or newlines
   //   (c) shouldSkip(value) is false
   //   (d) Shannon entropy of the value ≥ 3.5
   //   (e) The value contains both at least one letter and at least one digit
   //
-  // Only the VALUE is replaced; key name, separator, and quote chars are
-  // preserved exactly.
+  // Only the VALUE is replaced; indentation, key name, separator, and quote
+  // chars are preserved exactly.
   // ------------------------------------------------------------------
-  const ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*\s*[:=]\s*)(['"]?)([^\r\n'"]{16,})\2(.*)$/;
+  const ASSIGN_RE =
+    /^([ \t]*(?:(?:const|let|var|export|public|private|protected|static|final|readonly)[ \t]+){0,3}["']?([A-Za-z_][A-Za-z0-9_.-]*)["']?[ \t]*[:=][ \t]*)(['"]?)([^\r\n'"]{16,})\3(.*)$/;
 
   const lines = result.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Quick pre-filter: skip lines without a secret-ish keyword (perf + false-positive reduction)
+    // Quick pre-filter: skip lines without a secret-ish keyword (perf)
     if (!SECRET_KEY_RE.test(line)) continue;
     const m = ASSIGN_RE.exec(line);
     if (!m) continue;
     const prefix = m[1];
-    const openQuote = m[2];
-    const value = m[3];
-    const trailing = m[4];
+    const key = m[2];
+    const openQuote = m[3];
+    const value = m[4];
+    const trailing = m[5];
+    // The KEY carries the signal — a prose line merely mentioning a secret keyword is not an assignment
+    if (!SECRET_KEY_RE.test(key)) continue;
     if (shouldSkip(value)) continue;
     if (shannonEntropy(value) < 3.5) continue;
     if (!hasMixedAlphanumerics(value)) continue;
