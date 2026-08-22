@@ -278,8 +278,8 @@ Per worktree, after successful completion:
 2. Display results from all agents:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
-   - Review comment status: POSTED / SKIPPED (D7 dedup) / DEGRADED (from Git)
-   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled) (from Git agent)
+   - Review comment status: POSTED / POSTED+TRUNCATED (body exceeded 60k after redaction) / SKIPPED (D7 dedup) / DEGRADED (from Git)
+   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) (from Git agent)
    - Artifact paths
 
 In multi-worktree mode, report results per worktree.
@@ -337,7 +337,7 @@ In multi-worktree mode, report results per worktree.
 | Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0e-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
-| `reviewPublication: off` | Git agent skips posting the review comment (SKIPPED) |
+| `reviewPublication: off` | Git agent skips posting the review comment (OFF) |
 
 ## Backwards Compatibility
 

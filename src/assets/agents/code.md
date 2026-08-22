@@ -96,6 +96,8 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
 
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 
+   **D11 scrub (PR body is a GitHub-visible sink):** Compose the final PR body to `$DEVFLOW_BODY_RAW` (`DEVFLOW_BODY_RAW="$(mktemp)"`); scrub via `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (where `DEVFLOW_BODY="$(mktemp)"`). On success: create PR with `gh pr create … --body-file "$DEVFLOW_BODY"`. **On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable — but with a minimal body containing only the task reference, plan path (if available), and issue link (if ISSUE_NUMBER provided), plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`. Never post `$DEVFLOW_BODY_RAW`.
+
 8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Code agent (see Output section).
 
 ## Long-running commands (self-verifying builds/tests that may run >120s)

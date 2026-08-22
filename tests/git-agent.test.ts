@@ -301,7 +301,7 @@ describe('git agent — static content guards (PF-018)', () => {
     expect(
       content,
       'D10: missing publication output enum line — removing it breaks the caller\'s ability to parse publication status',
-    ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)');
+    ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)');
   });
 
   it('D10: gh repo view appears ONLY in post-review-summary and post-resolution-summary (scope boundary, non-vacuous)', () => {
@@ -367,7 +367,7 @@ describe('git agent — static content guards (PF-018)', () => {
       const sec = extractOpSection(content, op);
       if (sec.includes('--body-file') || sec.includes('-F body=@')) {
         postingOps.push(op);
-        if (!sec.includes('D11')) postingOpsWithoutD11.push(op);
+        if (!sec.includes('Comment-sink scrub (D11)')) postingOpsWithoutD11.push(op);
       }
     }
 
@@ -377,7 +377,30 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toBeGreaterThanOrEqual(8);
     expect(
       postingOpsWithoutD11,
-      `D11 forward guard: posting ops missing D11 reference: [${postingOpsWithoutD11.join(', ')}]`,
+      `D11 forward guard: posting ops missing Comment-sink scrub (D11) named reference: [${postingOpsWithoutD11.join(', ')}]`,
+    ).toHaveLength(0);
+  });
+
+  it('D11: every op that references the Comment-sink scrub also has a posting call (reverse guard)', () => {
+    // Ensures the named reference is never orphaned — every D11 reference must pair with an actual posting
+    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+    expect(
+      opNames.length,
+      `reverse guard is vacuous: found ${opNames.length} ops (expected > 0)`,
+    ).toBeGreaterThan(0);
+
+    const d11OpsWithoutPost: string[] = [];
+    for (const op of opNames) {
+      const sec = extractOpSection(content, op);
+      if (sec.includes('Comment-sink scrub (D11)')) {
+        if (!sec.includes('--body-file') && !sec.includes('-F body=@') && !sec.includes('--notes-file')) {
+          d11OpsWithoutPost.push(op);
+        }
+      }
+    }
+    expect(
+      d11OpsWithoutPost,
+      `D11 reverse guard: ops referencing Comment-sink scrub without a posting call: [${d11OpsWithoutPost.join(', ')}]`,
     ).toHaveLength(0);
   });
 
@@ -409,8 +432,8 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('gh pr create … --body-file "$DEVFLOW_BODY"');
     expect(
       sec,
-      'ensure-pr-ready: PR creation must reference the scrubber (D11)',
-    ).toContain('redact-secrets.cjs');
+      'ensure-pr-ready: PR creation must reference the Comment-sink scrub (D11)',
+    ).toContain('Comment-sink scrub (D11)');
   });
 
   it('D11: erasure guidance — rotation (/rotat/i) and edit-history retention are documented', () => {

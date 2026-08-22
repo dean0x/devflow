@@ -453,7 +453,7 @@ Final gate: {PASS | FAILED after N attempts}
 - {n} items added to backlog
 
 ### Publication (from Git agent)
-{FULL (private repo) | FULL (config override) | STUB (public repository) | SKIPPED (publication disabled)}
+{FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}
 
 ### Merge Readiness (if compliance enabled)
 {READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
@@ -534,7 +534,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
-| `reviewPublication: off` | Git agent skips posting the resolution comment (SKIPPED) |
+| `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) |
 
 ## Principles
 
