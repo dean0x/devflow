@@ -7,9 +7,9 @@ allowed-tools: Read, Grep, Glob
 
 # Compliance Patterns
 
-<!-- Composition tokens: ${DEVFLOW_COMPLIANCE_SCOPE} ${DEVFLOW_COMPLIANCE_ACTIVE} ${DEVFLOW_COMPLIANCE_MAPPING} ${DEVFLOW_COMPLIANCE_CHECKLIST} ${DEVFLOW_COMPLIANCE_REFERENCES}
-     Dynamic sections compose from src/assets/skills/compliance/frameworks/{id}/fragment.md at install time.
-     Shadow SKILL.md without these tokens passes through unchanged (C1). -->
+<!-- Composition tokens (5): DEVFLOW_COMPLIANCE_SCOPE, DEVFLOW_COMPLIANCE_ACTIVE,
+     DEVFLOW_COMPLIANCE_MAPPING, DEVFLOW_COMPLIANCE_CHECKLIST, DEVFLOW_COMPLIANCE_REFERENCES.
+     Dynamic sections compose from frameworks/{id}/fragment.md at install time (C1: token-free shadows pass through). -->
 
 Regulatory compliance review for code that touches regulated data ${DEVFLOW_COMPLIANCE_SCOPE}. Use alongside `devflow:security` for complete coverage.
 
