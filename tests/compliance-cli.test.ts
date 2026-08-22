@@ -1,58 +1,23 @@
 /**
  * Tests for src/cli/commands/compliance.ts
  *
- * Step 1.4 — TDD: write failing tests first.
- *
  * Covers:
  *   - resolveComplianceCliAction pure resolver matrix
  *   - parseFrameworkList "Commander parse pin" (error message names every valid ID)
- *   - init-seed compliance: defaults, applyCliToggles, --reset
- *   - runRulesEnable: compliance rule stamped when compliance.enabled
+ *   - classifyDriftMissing invalid-ID classification
+ *
+ * Init-seed compliance seeding coverage (resolveSeedFeatures, applyCliToggles,
+ * resolveResetGatedInputs) lives in tests/init-seed.test.ts — compliance seeding section.
  */
 import { describe, it, expect } from 'vitest';
 import {
   resolveComplianceCliAction,
   classifyDriftMissing,
-  type ComplianceCliAction,
 } from '../src/cli/commands/compliance.js';
 import {
   COMPLIANCE_FRAMEWORKS,
   parseFrameworkList,
 } from '../src/core/compliance.js';
-import {
-  applyCliToggles,
-  FEATURE_DEFAULTS,
-  resolveSeedFeatures,
-  resolveResetGatedInputs,
-  resolveInitSeed,
-  type FeatureSeed,
-} from '../src/cli/commands/init-seed.js';
-import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { type ManifestData } from '../src/core/manifest.js';
-
-// ── Fixtures ──────────────────────────────────────────────────────────────────
-
-function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
-  return {
-    version: '2.0.0',
-    plugins: ['devflow-implement'],
-    scope: 'user',
-    features: {
-      ambient: true,
-      memory: true,
-      hud: true,
-      knowledge: true,
-      learning: true,
-      rules: true,
-      proxy: false,
-      flags: [],
-      compliance: { enabled: false, frameworks: [] },
-    },
-    installedAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides,
-  };
-}
 
 // ── resolveComplianceCliAction ────────────────────────────────────────────────
 
@@ -198,110 +163,6 @@ describe('parseFrameworkList (Commander parse pin)', () => {
     if (result.ok) {
       expect(result.value).toEqual(['iso-27001']);
     }
-  });
-});
-
-// ── init-seed compliance ──────────────────────────────────────────────────────
-
-describe('init-seed — compliance defaults', () => {
-  it('FEATURE_DEFAULTS.compliance = {enabled:false, frameworks:[]}', () => {
-    expect(FEATURE_DEFAULTS.compliance).toEqual({ enabled: false, frameworks: [] });
-  });
-
-  it('resolveSeedFeatures with null manifest → compliance defaults', () => {
-    const result = resolveSeedFeatures(null, null);
-    expect(result.compliance).toEqual({ enabled: false, frameworks: [] });
-  });
-
-  it('resolveSeedFeatures reads compliance from manifest (manifest-group, NOT config.json)', () => {
-    const manifest = makeManifest({
-      features: {
-        ambient: true, memory: true, hud: true, knowledge: true, learning: true, rules: true,
-        proxy: false, flags: [],
-        compliance: { enabled: true, frameworks: ['gdpr', 'hipaa'] },
-      },
-    });
-    const result = resolveSeedFeatures(manifest, null);
-    expect(result.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'hipaa'] });
-  });
-
-  it('resolveSeedFeatures: compliance NOT overridden by projectConfig (manifest-group)', () => {
-    // compliance belongs to the manifest-group (like proxy), so projectConfig does NOT win
-    const manifest = makeManifest({
-      features: {
-        ambient: true, memory: true, hud: true, knowledge: true, learning: true, rules: true,
-        proxy: false, flags: [],
-        compliance: { enabled: true, frameworks: ['sox'] },
-      },
-    });
-    // Even with a projectConfig, compliance comes from manifest
-    const result = resolveSeedFeatures(manifest, { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const });
-    expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
-  });
-});
-
-describe('applyCliToggles — compliance', () => {
-  const base: FeatureSeed = {
-    ...FEATURE_DEFAULTS,
-    compliance: { enabled: false, frameworks: ['gdpr'] },
-  };
-
-  it('undefined compliance toggle → base compliance unchanged', () => {
-    const result = applyCliToggles(base, {});
-    expect(result.compliance).toEqual({ enabled: false, frameworks: ['gdpr'] });
-  });
-
-  it('--compliance gdpr,soc2 → {enabled:true, frameworks:[gdpr,soc2]}', () => {
-    const result = applyCliToggles(base, {
-      compliance: { enabled: true, frameworks: ['gdpr', 'soc2'] },
-    });
-    expect(result.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'soc2'] });
-  });
-
-  it('--no-compliance (disable, keep frameworks) → {enabled:false, frameworks from base}', () => {
-    // Caller passes { enabled: false, frameworks: base.compliance.frameworks }
-    // to preserve frameworks (the disable-keeps-frameworks contract)
-    const result = applyCliToggles(base, {
-      compliance: { enabled: false, frameworks: base.compliance.frameworks },
-    });
-    expect(result.compliance.enabled).toBe(false);
-    expect(result.compliance.frameworks).toEqual(['gdpr']); // preserved from base
-  });
-
-  it('--compliance "" (zero frameworks) → {enabled:true, frameworks:[]}', () => {
-    const result = applyCliToggles(base, {
-      compliance: { enabled: true, frameworks: [] },
-    });
-    expect(result.compliance).toEqual({ enabled: true, frameworks: [] });
-  });
-});
-
-describe('resolveResetGatedInputs — compliance', () => {
-  it('--reset null-seeds the manifest → compliance falls back to FEATURE_DEFAULTS', () => {
-    const manifest = makeManifest({
-      features: {
-        ambient: true, memory: true, hud: true, knowledge: true, learning: true, rules: true,
-        proxy: false, flags: [],
-        compliance: { enabled: true, frameworks: ['gdpr', 'sox', 'hipaa'] },
-      },
-    });
-    const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
-    // reset → seedManifest = null → resolveSeedFeatures falls back to FEATURE_DEFAULTS
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
-    expect(seed.features.compliance).toEqual({ enabled: false, frameworks: [] });
-  });
-
-  it('--no-reset preserves existing manifest compliance', () => {
-    const manifest = makeManifest({
-      features: {
-        ambient: true, memory: true, hud: true, knowledge: true, learning: true, rules: true,
-        proxy: false, flags: [],
-        compliance: { enabled: true, frameworks: ['pci-dss'] },
-      },
-    });
-    const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
-    expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['pci-dss'] });
   });
 });
 

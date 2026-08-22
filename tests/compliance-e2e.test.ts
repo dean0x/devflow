@@ -668,10 +668,115 @@ describe('S12: from S2 state + init --reset → compliance off, artifacts gone',
   });
 });
 
-// ── S13: SKIPPED (TTY limitation) ─────────────────────────────────────────────
-// S13 requires an interactive TTY to drive the Advanced wizard. The seeding layer
-// (resolveInitSeed + applyCliToggles + resolveSeedFeatures compliance passthrough)
-// is covered by tests/init-seed.test.ts and tests/compliance-cli.test.ts.
+// ── S13: Non-TTY guard + CLI-flag promptless contracts ────────────────────────
+// S13a: --advanced requires a TTY — exits 1 in non-TTY environments.
+// S13b: --recommended re-init preserves prior compliance state (no wizard prompt).
+// S13c: --recommended --compliance hipaa applies framework without any wizard prompt.
+
+describe('S13a: --advanced in non-TTY exits 1', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13a-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    // Establish a fresh install so seedManifest is non-null (re-init path)
+    expect(run('init', '--recommended').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13a: --advanced in a non-TTY env → exit 1 with clear error message', () => {
+    // makeRunner uses spawnSync (no TTY) with CI=1 → process.stdin.isTTY = false.
+    // The guard at init.ts rejects --advanced and directs the user to --recommended.
+    const result = run('init', '--advanced');
+    expect(result.status, `Expected exit 1 but got ${result.status}:\n${result.stderr}`).toBe(1);
+    expect(result.stderr + result.stdout).toContain('interactive terminal');
+  });
+});
+
+describe('S13b: --recommended re-init preserves prior compliance state (promptless)', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13b-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+    // Install, then enable compliance with two frameworks
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr,sox').status).toBe(0);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13b: second --recommended does not reset compliance — state preserved from manifest seed', async () => {
+    // shouldRunComplianceStep returns false (--recommended flag → modePromptShown=false)
+    // so the wizard step is skipped. The manifest seed carries the prior enabled/frameworks.
+    const result = run('init', '--recommended');
+    expect(result.status, `re-init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect(features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'sox'] });
+  });
+});
+
+describe('S13c: --recommended --compliance hipaa → framework applied without prompts', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let claudeDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s13c-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S13c: --compliance hipaa applies on first install without a wizard prompt', async () => {
+    // cliComplianceOverride is set → shouldRunComplianceStep returns false (hasCliOverride=true)
+    // → the wizard is bypassed entirely; the CLI flag alone configures the feature.
+    const result = run('init', '--recommended', '--compliance', 'hipaa');
+    expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect(features.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
+
+    // Compliance skill should be installed
+    const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
+    await expect(
+      fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL)),
+      'compliance skill must be installed when --compliance is passed',
+    ).resolves.not.toThrow();
+  });
+
+  it('S13c: --no-compliance disables from an already-enabled manifest (promptless)', async () => {
+    // First install with compliance enabled
+    expect(run('init', '--recommended', '--compliance', 'hipaa').status).toBe(0);
+    // Re-init with --no-compliance: hasCliOverride=true → wizard skipped, compliance disabled
+    const result = run('init', '--recommended', '--no-compliance');
+    expect(result.status, `re-init failed:\n${result.stderr}`).toBe(0);
+
+    const manifest = await readManifest(devflowDir);
+    const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
+    expect((features.compliance as Record<string, unknown>).enabled).toBe(false);
+  });
+});
 
 // ── S14 ───────────────────────────────────────────────────────────────────────
 describe('S14: from S2 state + uninstall --plugin=devflow-plan → compliance retained', () => {

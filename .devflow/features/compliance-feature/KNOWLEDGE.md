@@ -104,9 +104,42 @@ Introduced in A8 to compose SKILL.md and the rule file from per-framework fragme
 
 Disable-keeps-frameworks: `disable` sets `enabled: false` but leaves `frameworks` unchanged. `enable` restores those frameworks. Only `set` replaces the framework list.
 
-Interactive TTY path: when `--enable` is called on a TTY with no prior frameworks, the CLI presents a `@clack/prompts` multiselect before falling through to the `set` action.
+Interactive TTY path: when `--enable` is called on a TTY with no prior frameworks, the CLI presents a `@clack/prompts` multiselect before falling through to the `set` action. The multiselect options and prompt message are now imported from `compliance-prompts.ts` (`frameworkChoices()` and `FRAMEWORK_SELECT_MESSAGE`).
 
 `--status` shadow detection: the `skillShadowState()` helper reads the shadow SKILL.md and checks for any `${DEVFLOW_COMPLIANCE_...}` token. Returns `'none'` (no shadow), `'shadowed'` (shadow with tokens — composition runs), or `'composition-skipped'` (token-free shadow — C1 passthrough). The Skill line in `--status` shows `[shadowed]` or `[shadowed, composition skipped — per-framework sections absent]` accordingly.
+
+### Init wizard (`src/cli/commands/compliance-prompts.ts`)
+
+Shared helpers for the compliance step in `devflow init`. All prompt-rendering logic lives here (ADR-013: CLI-layer code in `src/cli/commands/`).
+
+**`shouldRunComplianceStep(input)`** — pure gate predicate (PF-029):
+- `hasCliOverride` → `false` (CLI flags bypass wizard entirely)
+- `!isTTY` → `false` (non-interactive contract)
+- `mode === 'advanced'` → `true` (always run in Advanced path)
+- `mode === 'recommended'` → `modePromptShown` (only when the mode-select prompt actually ran — `--recommended` flag never sets this)
+
+**`runComplianceStep({ seed, prompts })`** — injectable runner (PF-014: never calls `process.exit()`, never throws):
+- Emits a clack note with "Current setting: {state}" for re-init legibility
+- `p.select` (Yes/No) for enable — `p.confirm` was replaced to avoid Enter-through ambiguity
+- If Yes: `p.multiselect` for framework selection (seeded from prior state)
+- Returns `{ kind: 'resolved', state, messages }` or `{ kind: 'cancelled' }`
+- All arrays are defensively copied (no alias of seed arrays)
+
+**`CompliancePromptIO`** — injectable interface (mirrors `ProxyPreflightDeps`):
+- `note(message, title)`, `select(opts)`, `multiselect(opts)` — each returns `PromptOutcome<T>`
+- `buildClackCompliancePrompts()` builds the real (clack) adapter
+
+**Shared constants** used by both `init.ts` and `compliance.ts`:
+- `FRAMEWORK_SELECT_MESSAGE` — the canonical multiselect message string
+- `frameworkChoices()` — maps `COMPLIANCE_FRAMEWORKS` → `{value, label, hint}` options array
+- `formatFrameworkCatalogue()` — padded catalogue string for the wizard note
+- `formatComplianceSummary(enabled, frameworks)` — canonical summary for re-export in `init.ts`
+
+**Integration in `init.ts`:**
+- `modePromptShown` is set to `true` only inside the `else` branch where `p.select` for mode actually runs
+- Advanced path uses `runComplianceStep` directly (replacing the prior inline `p.confirm` pattern)
+- Recommended path gates via `shouldRunComplianceStep`, then calls `runComplianceStep` if true
+- `--compliance`/`--no-compliance` flags populate `cliComplianceOverride`, which bypasses the wizard (`hasCliOverride=true`)
 
 ### Rule template and seedRuleShadow
 
@@ -257,7 +290,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 | `src/assets/skills/compliance/frameworks/{id}/fragment.md` | Per-framework composition inputs (6 files): Mapping, Reference, Checklist, Rule sections |
 | `src/assets/skills/compliance/frameworks/{id}/reference.md` | Per-framework reference content (source location; installed as `references/{id}.md`) |
 | `src/targets/claude-code/compliance-install.ts` | `convergeComplianceArtifacts` (returns `{removedPreexisting, converged}`), `convergeFromManifest` wrapper, claudeDir guard, `loadComplianceFragments` |
-| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, status/drift detection, `skillShadowState` |
+| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, status/drift detection, `skillShadowState`; imports shared choices/message from `compliance-prompts.ts` |
+| `src/cli/commands/compliance-prompts.ts` | Shared wizard helpers: `shouldRunComplianceStep`, `runComplianceStep`, `CompliancePromptIO`, `buildClackCompliancePrompts`, `frameworkChoices`, `FRAMEWORK_SELECT_MESSAGE`, `formatComplianceSummary` |
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
 | `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |

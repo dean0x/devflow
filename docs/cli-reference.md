@@ -25,7 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
-| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; wizard step is Advanced-only) |
+| `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
