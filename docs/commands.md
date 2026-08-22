@@ -168,6 +168,21 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 /bug-analysis --full         # Full analysis (ignore previous runs)
 ```
 
+## Running the full pipeline
+
+The three dynamic commands form a sequential delivery pipeline — each stage produces output consumed by the next:
+
+```
+/dynamic-tickets <initiative>   # decompose initiative into tickets
+                                # ↓ review the ticket slate
+/dynamic-plan <ticket-dir>      # plan + challenge each ticket
+                                # ↓ answer DECISIONS-NEEDED.md
+/dynamic-build <ticket-dir>     # implement, review, and verify
+                                # ↓ review wave-report.md and merge
+```
+
+The command boundary is the human gate: each stage returns to you before the next begins — there is no automatic hand-off between them.
+
 ## /dynamic-tickets
 
 Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
@@ -192,7 +207,9 @@ Takes a ticket slate (from `/dynamic-tickets`) and runs a parallel planning pass
 
 Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents.
 
-Executes the devflow implement→review→verify loop for one ticket or all tickets in a wave, respecting dependency order. Each ticket runs as a separate Code agent on a feature branch; cross-ticket dependencies block until their prerequisites are merged.
+Executes the devflow implement→review→verify pipeline for one ticket or all tickets in a wave, respecting dependency order. Each ticket runs as a separate Code agent on a feature branch; cross-ticket dependencies block until their prerequisites are merged.
+
+**Tracking-issue argument (optional)**: pass an explicit GitHub issue number, or the command picks it up automatically from the `tracking-issue.md` written by `/dynamic-tickets`. When resolved, the issue number threads through as `ISSUE_NUMBER` and the Git agent posts the wave-report as a comment on that issue for traceability. If no issue number is found, the run continues and notes `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the summary.
 
 ```
 /dynamic-build <ticket-dir>          # Build all tickets in a wave

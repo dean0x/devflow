@@ -77,6 +77,32 @@ devflow has no `plan` agent (only a `/plan` command).
 **Re-check on each major Claude Code upgrade** — a new built-in can
 silently shadow a devflow agent and no in-repo guard can detect it.
 
+#### `/dynamic-wave` command removed
+
+The thin full-pipeline driver command is removed. Run the three stages directly:
+
+```
+/dynamic-tickets <initiative>   # 1. decompose initiative into tickets
+/dynamic-plan <ticket-dir>      # 2. plan + challenge each ticket
+/dynamic-build <ticket-dir>     # 3. implement, review, and verify
+```
+
+The `post-wave-report` Git-agent spawn that `/dynamic-wave` formerly handled is
+now owned by `/dynamic-build`, which also owns `.devflow/docs/waves/{slug}/`
+output. The stale installed command file is removed automatically by the orphan
+sweep on the next `devflow init`.
+
+#### Single-pass review in `/dynamic-build`
+
+The review pass now runs exactly **once** per ticket. The following context
+variables and machinery are removed: `maxCycles`, `reviewBaseSha`, `preFixSha`,
+`cyclesRun`, `fixedInCycle`, and DELTA REVIEW. Fix commits are covered by the
+fixing Code agent's self-verification and the final Gate 1 #2.
+
+**Custom MDS host migration**: the `review_loop` export in `_engine.mds` is
+renamed `review_pass`. Any custom MDS host that imports `_engine.mds` and calls
+`{review_loop()}` must update the call site to `{review_pass()}`.
+
 ### Added
 - **External model routing** (`devflow proxy --enable/--disable/--status`): Routes Devflow agents through GPT models (via an OpenAI/Codex subscription) using a local relay that intercepts Claude Code's model requests by injecting `ANTHROPIC_BASE_URL` into `settings.json`. `--enable` runs a four-check preflight in order — ① relay binary resolvable from Devflow's `node_modules`, ② Codex auth present at `~/.codex/auth.json`, ③ target port free or already occupied by a Devflow relay (adopted path skips spawn), ④ `settings.json` parseable with no foreign `ANTHROPIC_BASE_URL` — then spawns the relay with a 50×100ms bounded probe loop, then runs a post-spawn doctor verification gate; on doctor failure the relay is killed (self-spawned only — an adopted relay is never killed) and the enable rolls back. `--disable` strips `ANTHROPIC_BASE_URL` from `settings.json`, reverts installed agent frontmatter to Claude defaults, and emits a `kill <pid>` hint; the relay process is intentionally left running for in-flight sessions. `--status` shows relay identity, port, Codex auth content (expiry and account, not just file existence), external-mapped agent count, and the cached routable model registry. The `ensure-proxy` hook (registered on both `SessionStart` and `UserPromptSubmit`) auto-revives a down relay at session start; the `UserPromptSubmit` path exits before any proxy-state I/O to avoid per-prompt overhead. Feature state is manifest-gated (`manifest.features.proxy`); runtime authority lives in `~/.devflow/proxy.json`. Default OFF; Advanced init only. New dependency: `subswitch@0.2.0` (exact-pinned). **Upgrade**: run `devflow init` (Advanced path) to configure, or `devflow proxy --enable` after install.
 - **Per-agent model and effort configuration** (`devflow agents`): Interactive TUI and CLI (`--list`, `--set <agent> --model <model>`, `--set <agent> --effort <level>`, `--reset`) for assigning models and effort levels to individual Devflow agents. Overrides are stored deviations-only in `~/.devflow/agent-models.json`; absent entries resolve to shipped defaults read live from agent source files. The routable model catalog is discovered live from the relay binary and cached at `~/.devflow/cache/models/` (24h TTL, at most 3 versioned entries keyed by runtime version, stale entries serve as fallback on discovery failure) — there is no hardcoded model list. Model aliases (e.g. `sol`, `terra`, `luna`) auto-track current model generations. GPT model assignments are **dormant** while routing is disabled — saved to disk but not materialized into agent frontmatter until `devflow proxy --enable`. Effort overrides (`low`/`medium`/`high`/`xhigh`/`max`) are orthogonal to dormancy and apply regardless of proxy state. `reapplyAgentMapping` re-applies all saved overrides after every `devflow init` so customizations survive reinstalls.
@@ -100,6 +126,7 @@ silently shadow a devflow agent and no in-repo guard can detect it.
 - **`devflow init` (Advanced path)**: A proxy prompt (external model routing, default OFF) is now offered after the Claude Code flags selector. On enable during init, the same four-check preflight runs but no relay is spawned and no doctor runs — the first session's `ensure-proxy` hook starts the relay; preflight failure warns and forces proxy off without aborting init. `reapplyAgentMapping` now runs after every post-install file-copy to re-apply saved agent model overrides to freshly installed agent files.
 - **`devflow uninstall`**: Now removes proxy artifacts on uninstall — `ensure-proxy` hook registrations, `ANTHROPIC_BASE_URL` from `settings.json`, and the model discovery cache (`~/.devflow/cache/models/`) — in addition to standard command/agent/skill/rule removal.
 - **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (`triage`, `design`, `simplify`, `scrutinize`, `review`) Read full entry bodies on demand via `devflow:apply-decisions` and `devflow:apply-feature-knowledge`. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
+- **Multi-cycle review loop in `/dynamic-build`** (BREAKING): the review pass now runs exactly once per ticket. `maxCycles`, `reviewBaseSha`, `preFixSha`, `cyclesRun`, `fixedInCycle`, and DELTA REVIEW machinery are removed; the `review_loop` MDS export is renamed `review_pass` (custom MDS hosts importing `review_loop` must update the call site). Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2. See Breaking Changes for the migration path.
 - **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
 - **Learning**: Raised procedural thresholds from 2 to 3 observations with 24h+ temporal spread for both types
 - **Learning**: Reduced default `max_daily_runs` from 10 to 5
@@ -107,6 +134,7 @@ silently shadow a devflow agent and no in-repo guard can detect it.
 - **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
 
 ### Removed
+- **`/dynamic-wave` command** (BREAKING): the thin full-pipeline driver is removed. Run the three stages directly: `/dynamic-tickets` → `/dynamic-plan` → `/dynamic-build`. The `post-wave-report` Git-agent spawn moved into `dynamic-build`, which now owns `.devflow/docs/waves/{slug}/` output. The stale installed command file is removed automatically by the orphan sweep on the next `devflow init`. See Breaking Changes for the migration path.
 - **`devflow-audit-claude` plugin and `/audit-claude` command** (BREAKING): The CLAUDE.md audit plugin is removed. `--plugin=audit-claude` is now rejected by `devflow init`; stale `devflow-audit-claude` entries in existing manifests are silently pruned by `DELETED_PLUGIN_NAMES` on the next partial reinstall. The `claude-md-auditor` agent and `audit-claude.md` command are deleted; the orphan sweep removes any previously installed copies automatically.
 - **Non-selectable optional carry mechanism**: `resolveNonSelectableOptionalCarry` and `applyNonSelectableCarry` deleted from `init-seed.ts`. The carry was guarding a now-impossible state (the only non-selectable optional plugin was `devflow-audit-claude`). A structural invariant test (`EXCLUDED ∩ optional === ∅`) ensures this state stays impossible. No behavior change for users.
 - **1.x migration registry and helper modules** (BREAKING): all 20 run-once 1.x upgrade migrations removed from `MIGRATIONS`; helper modules `legacy-decisions-purge.ts`, `decisions-ledger-migration.ts`, `marketplace-cleanup.ts`, and `mkdir-lock.ts` deleted. The migration framework stays for future 2.x entries. No 1.x → 2.0 upgrade path.

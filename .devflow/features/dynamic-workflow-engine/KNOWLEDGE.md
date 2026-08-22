@@ -18,7 +18,7 @@ directories:
   - dist/commands
   - tests/build-mds.test.ts
 created: 2026-07-07
-updated: 2026-07-15
+updated: 2026-08-22
 ---
 
 # Dynamic Workflow Engine
@@ -70,8 +70,10 @@ Partials declare **no** `output-dir:` frontmatter key. Host files declare it as 
 
 `scripts/build-mds.ts` compiles all 13 host files (9 knowledge + 4 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
 - `Simplify` and `Scrutinize` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
-- `The review pass runs exactly ONCE` present; `DELTA REVIEW`, `reviewBaseSha`, `maxCycles`, `cyclesRun`, `fixedInCycle` absent
+- **C1 (single-pass review):** presence: `The review pass runs exactly ONCE`, `The pass runs exactly ONCE`, `Never author additional cycles or a delta re-review of fix commits` (invariant #7 unique), `Budget scales roster and verification votes, NEVER the number of passes` (review_pass prose unique); absence: `DELTA REVIEW`, `reviewBaseSha`, `preFixSha`, `maxCycles`, `cyclesRun`, `fixedInCycle`, `allCoverageGaps`, `for (let cycle` (skeleton guard), `review_loop`, `/review[- ]loop/i`
 - `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
+- **C10 (post-wave-report block):** `OPERATION: post-wave-report`, `TRACKING_ISSUE:`, `WAVE_REPORT_PATH: .devflow/docs/waves/`, `WAVE_ID:`, `WORKTREE_PATH:`, `skip this step entirely in SINGLE mode`, `TRACEABILITY: DEGRADED (no tracking issue for this run)`, `<!-- devflow:wave-report wave:`
+- **meta.phases↔phase() agreement:** phases array in SINGLE-mode meta matches every `phase("…",` call site (structural check, not a literal pin)
 - `--dry-run` absent from build/plan/tickets compiled outputs, present only in dynamic-profile
 
 ## Component Interactions
@@ -273,4 +275,4 @@ Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the m
 
 - ADR-003 (leave-the-end-state): applies to compiled output — when removing or renaming doctrine blocks, strip residue (tombstone comments, `*_old` names, guards for now-impossible states). The test suite pins the current doctrine literals; outdated pinned strings that remain after a partial rename fail tests rather than silently passing.
 - PF-002 (skill re-entrancy guard-string bail): relevant to every `agent()` call with `agentType: "Review"` or `"Evaluate"` — never instruct these agents to invoke via Skill tool the same skill their frontmatter preloads.
-- `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 5 dynamic commands.
+- `feature-knowledge-system` KB — covers the MDS build pipeline (`scripts/build-mds.ts`), the 9 knowledge host commands, and the `knowledge_load`/`knowledge_writeback` partials that share the MDS compilation infrastructure with the 4 dynamic commands.

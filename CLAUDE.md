@@ -86,7 +86,7 @@ devflow/
 │       ├── skills/         # 41 skills
 │       ├── agents/         # 16 agents
 │       ├── rules/          # 13 rules (flat .md files)
-│       ├── commands/       # MDS command sources (13 hosts + 9 partials in _partials/; 1 static .md)
+│       ├── commands/       # MDS command sources (13 hosts + 11 partials in _partials/; 1 static .md)
 │       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts)
