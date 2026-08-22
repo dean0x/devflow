@@ -910,12 +910,17 @@ export const initCommand = new Command('init')
         proxyEnabled = proxyChoice;
       }
 
-      // Compliance feature (after proxy, before flags — runs in both Advanced and re-init paths)
-      if (cliComplianceOverride !== undefined) {
-        // --compliance or --no-compliance passed explicitly — honour without prompting
-        complianceEnabled = cliComplianceOverride.enabled;
-        complianceFrameworks = cliComplianceOverride.frameworks;
-      } else {
+      // Compliance feature (after proxy, before flags — runs in both Advanced and re-init paths).
+      // Gated by the same shouldRunComplianceStep predicate as the Recommended path so the
+      // documented gate table is the single authority for both — the two paths cannot drift.
+      // Here isTTY is guaranteed true (the non-TTY guard above exit-1'd), so the predicate
+      // reduces to "no --compliance/--no-compliance override".
+      if (shouldRunComplianceStep({
+        mode: 'advanced',
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: cliComplianceOverride !== undefined,
+      })) {
         // runComplianceStep: note with "Current setting:" header (legible on re-init per PF-029),
         // labeled Yes/No select (immune to Enter-through muscle memory), and framework multiselect.
         // Returns {kind:'cancelled'} on Escape — caller owns the cancel idiom (PF-014).
@@ -934,7 +939,14 @@ export const initCommand = new Command('init')
           if (msg.level === 'success') p.log.success(msg.text);
           else p.log.info(msg.text);
         }
+      } else if (cliComplianceOverride !== undefined) {
+        // --compliance or --no-compliance passed explicitly — honour without prompting.
+        complianceEnabled = cliComplianceOverride.enabled;
+        complianceFrameworks = cliComplianceOverride.frameworks;
       }
+      // No third case in practice: on this path the predicate only returns false for a
+      // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
+      // did, the seed values assigned at declaration stand — which is the right default.
 
       // Claude Code flags multiselect (advanced only)
       const recommended = FLAG_REGISTRY.filter(f => f.defaultEnabled);
