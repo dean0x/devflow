@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 // test function synchronous (simpler assertions, no `await` boilerplate).
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as path from 'path';
-import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { getAllSkillNames, getAllCommandNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { requireDistFiles, requireDistFile } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -169,22 +169,17 @@ function findStaleNameOccurrences(
 
 /**
  * References that appear with devflow: prefix but are NOT skills —
- * they are command names or slash-command shortcuts.
+ * they are command names or slash-command shortcuts. Derived from the
+ * plugin registry so removals (e.g. dynamic-wave) are reflected automatically
+ * without hand-editing this set.
+ *
+ * D-DESIGN: 'review' and 'pipeline' were previously hand-listed here but have
+ * zero remaining referents in the scanned corpus (src/assets/, docs/, dist/).
+ * They appear only in src/targets/claude-code/legacy.ts (migration cleanup),
+ * which is not scanned by these tests. Removed to prevent dangling allowlist
+ * drift — the exact failure this registry-derived approach is designed to prevent.
  */
-const COMMAND_REFS = new Set([
-  'code-review',
-  'resolve',
-  'debug',
-  'implement',
-  'self-review',
-  'plan',
-  'review',
-  'pipeline',
-  'dynamic-tickets',
-  'dynamic-plan',
-  'dynamic-build',
-  'dynamic-profile',
-]);
+const COMMAND_REFS = new Set(getAllCommandNames());
 
 /**
  * HTML comment marker tokens that share the devflow: prefix but are neither skills
