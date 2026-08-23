@@ -22,7 +22,7 @@
     "build:mds": "npx tsx scripts/build-mds.ts",
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
-    "prepublishOnly": "rm -rf dist && npm run build:cli && npm run build:mds",
+    "prepublishOnly": "rm -rf dist && npm run build:cli && npm run build:mds && chmod +x dist/cli.js",
     "version:bump": "npx tsx scripts/bump-version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
