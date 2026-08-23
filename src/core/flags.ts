@@ -1,151 +1,315 @@
 /**
- * Claude Code flag registry.
+ * Claude Code flag registry — typed, extensible mechanism for managing
+ * Claude Code feature flags and settings.
  *
- * Typed, extensible mechanism for managing Claude Code feature flags.
- * Pure functions: applyFlags, stripFlags, getDefaultFlags — no I/O.
+ * Pure functions: applyFlags, stripFlags, getDefaultFlagsRecord — no I/O.
+ *
+ * D14: Typed registry — flags carry kind (boolean|enum|number|string), target
+ * (env|setting), and per-kind defaultValue. Neutral values delete their target
+ * key; active values write the appropriate payload. Number 0 is ACTIVE. Sink
+ * validation via coerceFlagValue (applies PF-023: validate at the convergence
+ * point every caller reaches). applyFlags(settingsJson, FlagsRecord) is the
+ * new API; call sites that still pass string[] use legacyIdsToRecord (applies
+ * ADR-014 transition contract for the manifest heal in Phase 2).
  */
 
-export interface ClaudeCodeFlag {
-  id: string;
-  label: string;
-  description: string;
-  hint: string;
-  target:
-    | { type: 'env'; key: string; value: string }
-    | { type: 'setting'; key: string; value: boolean | string };
-  defaultEnabled: boolean;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type FlagKind = 'boolean' | 'enum' | 'number' | 'string';
+
+/** A concrete flag value (never null). */
+export type FlagValue = boolean | number | string;
+
+/**
+ * A flag record value: the flag's value or null.
+ * null = known + deliberately unset (neutral = delete the target key).
+ */
+export type FlagsRecordValue = FlagValue | null;
+
+/**
+ * The complete flag state record. Keys are flag IDs; values are the current
+ * value or null (neutral). Unknown keys are forward-compatible (skipped by
+ * applyFlags). Absent keys are NOT the same as null — absent = unknown to
+ * this install (adopted on next seed per ADR-014 semantics).
+ */
+export type FlagsRecord = Record<string, FlagsRecordValue>;
+
+/** Where the flag's value is written in settings.json. */
+export type FlagTarget =
+  | { readonly type: 'env'; readonly key: string }
+  | { readonly type: 'setting'; readonly key: string };
+
+// ── Per-kind interfaces ────────────────────────────────────────────────────────
+
+interface FlagDefCommon {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  /** One-line what + why hint shown in the UI (keep ≤ ~76 cols). */
+  readonly hint: string;
+  /** UI partitioning only: true = recommended section; false = optional section. */
+  readonly recommended: boolean;
+  readonly target: FlagTarget;
 }
 
+/** A boolean on/off flag. `onPayload` is written when the flag is enabled. */
+export interface BooleanFlagDef extends FlagDefCommon {
+  readonly kind: 'boolean';
+  /** The value written to the target when the flag is ON. Env targets must use strings. */
+  readonly onPayload: string | boolean;
+  /** Default value; false = neutral for booleans (key is deleted when false). */
+  readonly defaultValue: boolean;
+}
+
+/** An enum flag. `neutralValue` is the value that means "no preference" (key is deleted). */
+export interface EnumFlagDef extends FlagDefCommon {
+  readonly kind: 'enum';
+  readonly values: readonly string[];
+  readonly valueHints?: Readonly<Partial<Record<string, string>>>;
+  /** When set, this value is neutral — applying it removes the target key. */
+  readonly neutralValue?: string;
+  readonly defaultValue: string | undefined;
+}
+
+/** A numeric flag. null = neutral. Number 0 is ACTIVE (not neutral). */
+export interface NumberFlagDef extends FlagDefCommon {
+  readonly kind: 'number';
+  readonly defaultValue: number | undefined;
+  readonly min?: number;
+  readonly max?: number;
+  readonly integer?: boolean;
+  /** Upstream default (for informational display). */
+  readonly upstreamDefault?: number;
+}
+
+/**
+ * A string flag. null = neutral.
+ * `wrapKey` — if set, the value is written as `{ [wrapKey]: value }` (e.g. spellcheck).
+ */
+export interface StringFlagDef extends FlagDefCommon {
+  readonly kind: 'string';
+  readonly defaultValue: string | undefined;
+  readonly wrapKey?: string;
+  readonly maxLength?: number;
+}
+
+/** Discriminated union of all flag types. Discriminant: `kind`. */
+export type ClaudeCodeFlag = BooleanFlagDef | EnumFlagDef | NumberFlagDef | StringFlagDef;
+
+// ─── Registry ─────────────────────────────────────────────────────────────────
+
+// Phase 0 probe findings (2026-08-23, Claude Code 2.1.241):
+//   keybindingFlavor:      CUT — domain unverifiable; 'emacs'/'readline'/'classic'
+//                          appear in binary but in unrelated contexts (Node.js module
+//                          names, VS Code terminal settings). Behavioral probes via
+//                          claude --version produced no validation output.
+//   workflowSizeGuideline: domain small|medium|large|unrestricted — verified from binary
+//                          strings at a 4-value cluster adjacent to each other and the
+//                          Workflows feature description.
+//   New env var names all confirmed present in the binary:
+//     CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH,
+//     CLAUDE_CODE_ENABLE_TODO_TOOLS, CLAUDE_CODE_GOAL_CHECKIN_MINUTES,
+//     ANTHROPIC_DEFAULT_MODEL.
+
 export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
-  // === Recommended (default ON) ===
+
+  // ══ Recommended (default ON) ══════════════════════════════════════════════
+
   {
     id: 'tui',
     label: 'Fullscreen terminal UI',
     description: 'Flicker-free fullscreen rendering',
-    hint: 'Modern fullscreen interface',
-    target: { type: 'setting', key: 'tui', value: 'fullscreen' },
-    defaultEnabled: true,
+    hint: 'Enables fullscreen mode — flicker-free and cursor-stable',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'tui' },
+    onPayload: 'fullscreen',
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'tool-search',
     label: 'Deferred tool loading',
     description: 'Load tool schemas on demand instead of all at startup',
-    hint: 'Faster startup',
-    target: { type: 'env', key: 'ENABLE_TOOL_SEARCH', value: 'true' },
-    defaultEnabled: true,
+    hint: 'Defers tool schema loading to first use — smaller initial context',
+    kind: 'boolean',
+    target: { type: 'env', key: 'ENABLE_TOOL_SEARCH' },
+    onPayload: 'true',
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'lsp',
     label: 'LSP support',
     description: 'Enable Language Server Protocol integration',
-    hint: 'Code intelligence from your editor',
-    target: { type: 'env', key: 'ENABLE_LSP_TOOL', value: 'true' },
-    defaultEnabled: true,
+    hint: 'Activates LSP tool so Claude can query your editor code intelligence',
+    kind: 'boolean',
+    target: { type: 'env', key: 'ENABLE_LSP_TOOL' },
+    onPayload: 'true',
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'prompt-caching-1h',
     label: 'Extended prompt cache',
     description: 'Extend prompt cache TTL from 5min to 1h',
-    hint: 'Cheaper long sessions',
-    target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H', value: 'true' },
-    defaultEnabled: true,
+    hint: 'Extends cache TTL from 5 min to 1 hr — cheaper long sessions',
+    kind: 'boolean',
+    target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H' },
+    onPayload: 'true',
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'show-turn-duration',
     label: 'Show turn duration',
     description: 'Display timing info after each turn',
-    hint: 'See how long each response takes',
-    target: { type: 'setting', key: 'showTurnDuration', value: true },
-    defaultEnabled: true,
+    hint: 'Shows wall-clock time for each turn — useful for spotting slow paths',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'showTurnDuration' },
+    onPayload: true,
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'clear-context-on-plan',
     label: 'Clear context on plan accept',
     description: 'Clear context window when accepting a plan',
-    hint: 'Clean slate after planning',
-    target: { type: 'setting', key: 'showClearContextOnPlanAccept', value: true },
-    defaultEnabled: true,
+    hint: 'Clears context on plan accept so implementation starts with full budget',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'showClearContextOnPlanAccept' },
+    onPayload: true,
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'disable-bundled-skills',
     label: 'Disable bundled skills',
     description: "Remove Claude Code's built-in skills and workflows (devflow provides its own)",
-    hint: 'Cleaner skill list',
-    target: { type: 'setting', key: 'disableBundledSkills', value: true },
-    defaultEnabled: true,
+    hint: "Removes Claude Code's built-in skills — devflow installs its own set",
+    kind: 'boolean',
+    target: { type: 'setting', key: 'disableBundledSkills' },
+    onPayload: true,
+    recommended: true,
+    defaultValue: true,
   },
   {
     id: 'pin-sonnet-4-6',
     label: 'Pin Sonnet to 4.6',
     description: 'Pin the default Sonnet model to claude-sonnet-4-6',
-    hint: 'Stable, deterministic Sonnet version',
-    target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL', value: 'claude-sonnet-4-6' },
-    defaultEnabled: true,
+    hint: 'Pins Sonnet to 4.6 — stable, deterministic alias across model updates',
+    kind: 'boolean',
+    target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL' },
+    onPayload: 'claude-sonnet-4-6',
+    recommended: true,
+    defaultValue: true,
   },
-  // === Optional (default OFF) — skip these if you're unsure ===
+  {
+    // Devflow fan-outs routinely exceed the upstream default of 20.
+    // Set to 40 by default so parallel Code/Review/Research waves don't
+    // silently queue. upstreamDefault recorded for display. (applies PF-023 bounds)
+    id: 'max-concurrent-subagents',
+    label: 'Max concurrent subagents',
+    description: 'Maximum number of subagents Claude Code will spawn concurrently',
+    hint: 'Sets concurrent subagent cap; upstream default is 20 — devflow uses 40',
+    kind: 'number',
+    target: { type: 'env', key: 'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS' },
+    recommended: true,
+    defaultValue: 40,
+    min: 1,
+    max: 100,         // devflow sanity bound (applies PF-023)
+    integer: true,
+    upstreamDefault: 20,
+  },
+
+  // ══ Optional (default OFF) — skip these if you're unsure ══════════════════
+
   {
     id: 'brief',
     label: 'Brief output mode',
     description: 'Reduce verbosity of Claude Code output',
-    hint: 'Shorter responses',
-    target: { type: 'env', key: 'CLAUDE_CODE_BRIEF', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Reduces output verbosity — shorter responses, less explanation',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_BRIEF' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'thinking-summaries',
     label: 'Thinking summaries',
     description: 'Show thinking summaries during reasoning',
-    hint: 'See reasoning previews',
-    target: { type: 'setting', key: 'showThinkingSummaries', value: true },
-    defaultEnabled: false,
+    hint: 'Surfaces condensed reasoning previews during extended thinking',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'showThinkingSummaries' },
+    onPayload: true,
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'subprocess-env-scrub',
     label: 'Subprocess env scrub',
     description: 'Strip cloud credentials from subprocesses',
-    hint: 'Security: strip cloud creds from subprocesses',
-    target: { type: 'env', key: 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB', value: '1' },
-    defaultEnabled: false,
+    hint: 'Strips cloud credentials (AWS, GCP, Azure) from subprocess env',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' },
+    onPayload: '1',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'disable-nonessential-traffic',
     label: 'Disable non-essential traffic',
     description: 'Suppress usage metrics telemetry',
-    hint: 'No telemetry',
-    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Suppresses usage telemetry sent back to Anthropic',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'forked-subagents',
     label: 'Forked subagents',
     description: 'Better subagent perf on external builds',
-    hint: 'Faster parallel agents (experimental)',
-    target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT', value: '1' },
-    defaultEnabled: false,
+    hint: 'Enables forked subagent model — faster parallel agents (experimental)',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT' },
+    onPayload: '1',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'disable-adaptive-thinking',
     label: 'Disable adaptive thinking',
     description: 'Disable adaptive reasoning on Opus/Sonnet 4.6',
-    hint: 'Fixed thinking budget',
-    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Disables adaptive thinking budget — fixes compute per turn',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'always-thinking',
     label: 'Always enable thinking',
     description: 'Enable extended thinking by default',
-    hint: 'Thinking on every turn',
-    target: { type: 'setting', key: 'alwaysThinkingEnabled', value: true },
-    defaultEnabled: false,
+    hint: 'Forces extended thinking on every turn, including non-complex ones',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'alwaysThinkingEnabled' },
+    onPayload: true,
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'disable-git-instructions',
     label: 'Disable git instructions',
     description: 'Remove git workflow instructions from system prompt',
-    hint: 'Smaller system prompt',
-    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Removes git workflow from system prompt — saves tokens in each turn',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   // NOTE: DISABLE_COMPACT and DISABLE_AUTOUPDATER intentionally omit the CLAUDE_CODE_ prefix —
   // these names are defined by upstream Claude Code and must match exactly.
@@ -153,65 +317,510 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-compact',
     label: 'Disable auto-compaction',
     description: 'Disable automatic context compaction',
-    hint: 'Keep full context (uses more tokens)',
-    target: { type: 'env', key: 'DISABLE_COMPACT', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Disables auto-compaction — retains full context at the cost of more tokens',
+    kind: 'boolean',
+    target: { type: 'env', key: 'DISABLE_COMPACT' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
+    // v2.1.223 semantics: disables the 1M-token context window experiment and
+    // falls back to the standard context budget for the model.
     id: 'disable-1m-context',
     label: 'Disable 1M context window',
-    description: 'Use standard context window instead of extended 1M',
-    hint: 'Use smaller context window',
-    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_1M_CONTEXT', value: 'true' },
-    defaultEnabled: false,
+    description: 'Disable the 1M-token context window experiment (v2.1.223+)',
+    hint: 'Opts out of the 1M context experiment — uses standard context budget',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_1M_CONTEXT' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'disable-autoupdater',
     label: 'Disable auto-updater',
     description: 'Prevent automatic update checks',
-    hint: 'No automatic updates',
-    target: { type: 'env', key: 'DISABLE_AUTOUPDATER', value: 'true' },
-    defaultEnabled: false,
+    hint: 'Prevents automatic update checks — manage updates manually',
+    kind: 'boolean',
+    target: { type: 'env', key: 'DISABLE_AUTOUPDATER' },
+    onPayload: 'true',
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'agent-teams',
     label: 'Agent Teams (experimental)',
     description: 'Enable Claude Code experimental Agent Teams',
-    hint: 'Peer agents / teammate mode — experimental',
-    target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', value: '1' },
-    defaultEnabled: false,
+    hint: 'Enables peer-agent teammate mode — experimental, may change any release',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' },
+    onPayload: '1',
+    recommended: false,
+    defaultValue: false,
     // Note: the legacy `teammateMode:"auto"` settings key is stripped by
     // src/core/teammate-mode-cleanup.ts during uninstall (stripDevflowTeammateModeFromJson).
     // The env var above is the only surface managed by FLAG_REGISTRY for this flag.
   },
+
+  // ── New valued flags (Phase 1) ────────────────────────────────────────────
+
+  {
+    // Domain: unset by default; set only when users want a non-default spawn depth.
+    // upstreamDefault: 3 (recorded for display). PF-023 bounds: max 10.
+    id: 'subagent-spawn-depth',
+    label: 'Max subagent spawn depth',
+    description: 'Maximum depth of nested subagent spawning',
+    hint: 'Caps nested spawn depth; upstream default is 3 — raise only when needed',
+    kind: 'number',
+    target: { type: 'env', key: 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH' },
+    recommended: false,
+    defaultValue: undefined,
+    min: 1,
+    max: 10,          // devflow sanity bound (applies PF-023)
+    integer: true,
+    upstreamDefault: 3,
+  },
+  {
+    // Phase 0: domain verified small|medium|large|unrestricted from binary
+    // (4-value cluster at adjacent string offsets, adjacent to Workflows feature text).
+    id: 'workflow-size-guideline',
+    label: 'Workflow size guideline',
+    description: 'Guide Claude on the expected size of workflow plans',
+    hint: 'Hints preferred plan scale: small/medium/large/unrestricted',
+    kind: 'enum',
+    target: { type: 'setting', key: 'workflowSizeGuideline' },
+    values: ['small', 'medium', 'large', 'unrestricted'],
+    recommended: false,
+    defaultValue: undefined,
+  },
+  {
+    id: 'default-model',
+    label: 'Default model',
+    description: 'Override the default model for Claude Code',
+    hint: 'Sets ANTHROPIC_DEFAULT_MODEL — overrides session-level model selection',
+    kind: 'string',
+    target: { type: 'env', key: 'ANTHROPIC_DEFAULT_MODEL' },
+    recommended: false,
+    defaultValue: undefined,
+    maxLength: 64,
+  },
+  {
+    // Upstream: restores Todo/TaskCreate tools removed by default in Opus 4.8+,
+    // Sonnet 5+, and Fable 5+. Set to '1' to re-enable.
+    id: 'enable-todo-tools',
+    label: 'Enable todo/task tools',
+    description: 'Restore Todo and TaskCreate tools removed by default in newer models',
+    hint: 'Re-enables Todo/TaskCreate tools on Opus 4.8+ / Sonnet 5+ / Fable 5+',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
+    onPayload: '1',
+    recommended: false,
+    defaultValue: false,
+  },
+  {
+    // Upstream default: 30 min. 0 = disabled (still ACTIVE — written to env).
+    // PF-023 bounds: max 1440 (24h). min 0 (0 = off, explicit value not neutral).
+    id: 'goal-checkin-minutes',
+    label: 'Goal check-in interval',
+    description: 'Interval in minutes for Claude to check in on task goals',
+    hint: 'Periodic goal check-ins every N min; 0 = off; upstream default is 30',
+    kind: 'number',
+    target: { type: 'env', key: 'CLAUDE_CODE_GOAL_CHECKIN_MINUTES' },
+    recommended: false,
+    defaultValue: undefined,
+    min: 0,           // 0 = off (ACTIVE, not neutral — written as "0")
+    max: 1440,        // devflow sanity bound: 24 hours (applies PF-023)
+    integer: true,
+    upstreamDefault: 30,
+  },
+  {
+    // Writes as { command: value } per Claude Code spellcheck setting shape.
+    id: 'spellcheck',
+    label: 'Spellcheck command',
+    description: 'Custom spellcheck command for Claude Code',
+    hint: 'Sets the external spell-check command (written as {command: ...})',
+    kind: 'string',
+    target: { type: 'setting', key: 'spellcheck' },
+    recommended: false,
+    defaultValue: undefined,
+    wrapKey: 'command',
+    maxLength: 256,   // devflow sanity bound (applies PF-023)
+  },
+  {
+    // viewMode fold-in: view-mode replaces the separate applyViewMode/stripViewMode API.
+    // neutralValue 'default' → applying 'default' removes the viewMode key.
+    // VIEW_MODES, ViewMode, resolveExistingViewMode, and resolveFinalViewMode are
+    // kept verbatim for call sites that haven't migrated yet (Phase 6 removes them).
+    id: 'view-mode',
+    label: 'View mode',
+    description: 'Interface view mode (default / verbose / focus)',
+    hint: "Controls view mode; 'default' removes the key (Claude Code native default)",
+    kind: 'enum',
+    target: { type: 'setting', key: 'viewMode' },
+    values: ['default', 'verbose', 'focus'],
+    valueHints: {
+      default: 'Standard view (no override)',
+      verbose: 'Show all tool output and reasoning',
+      focus: 'Minimal UI — hides secondary panels',
+    },
+    neutralValue: 'default',
+    recommended: false,
+    defaultValue: 'default',
+  },
 ];
 
+// Pre-built lookup for O(1) flag-by-id access in applyFlags.
+const FLAG_REGISTRY_MAP = new Map<string, ClaudeCodeFlag>(
+  FLAG_REGISTRY.map(f => [f.id, f]),
+);
+
+// ─── Core value helpers ───────────────────────────────────────────────────────
+
 /**
- * Return IDs of all flags that are enabled by default.
+ * Returns the neutral value for a flag — the value that means "no preference"
+ * (applying neutral deletes the target key).
+ *
+ * - boolean: false (false = off = no key written)
+ * - enum: neutralValue if defined, else null
+ * - number: null (no number, including 0, is neutral — 0 is ACTIVE)
+ * - string: null
  */
-export function getDefaultFlags(): string[] {
-  return FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
+export function neutralValueOf(flag: ClaudeCodeFlag): FlagsRecordValue {
+  switch (flag.kind) {
+    case 'boolean': return false;
+    case 'enum': return flag.neutralValue ?? null;
+    case 'number': return null;
+    case 'string': return null;
+  }
 }
 
 /**
- * Apply enabled flags to a settings JSON string.
- * Sets env vars for env-type flags and top-level keys for setting-type flags.
- * Ignores unknown flag IDs (forward-compatible with old manifests).
+ * Returns true when `value` is the neutral value for `flag`.
+ * null is always neutral. Number 0 is NOT neutral.
  */
-export function applyFlags(settingsJson: string, flagIds: string[]): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  const flagMap = new Map(FLAG_REGISTRY.map(f => [f.id, f]));
+export function isNeutral(flag: ClaudeCodeFlag, value: FlagsRecordValue): boolean {
+  if (value === null) return true;
+  return value === neutralValueOf(flag);
+}
 
-  for (const id of flagIds) {
-    const flag = flagMap.get(id);
-    if (!flag) continue;
+/**
+ * Validate and coerce `raw` to a safe value for `flag` at the sink.
+ * Returns null when the value is invalid (hostile-value defence — applies PF-023).
+ *
+ * Number invariants: finite, within [min, max], integer when required.
+ * String invariants: within maxLength, no control characters.
+ * Enum invariants: value must be in the declared values array.
+ * Boolean invariants: must be a boolean.
+ */
+export function coerceFlagValue(flag: ClaudeCodeFlag, raw: unknown): FlagsRecordValue {
+  if (raw === null || raw === undefined) return null;
 
-    if (flag.target.type === 'env') {
-      settings.env ??= {};
-      (settings.env as Record<string, string>)[flag.target.key] = flag.target.value;
-    } else {
-      settings[flag.target.key] = flag.target.value;
+  switch (flag.kind) {
+    case 'boolean': {
+      if (typeof raw !== 'boolean') return null;
+      return raw;
     }
+    case 'enum': {
+      if (typeof raw !== 'string') return null;
+      if (!(flag.values as readonly string[]).includes(raw)) return null;
+      return raw;
+    }
+    case 'number': {
+      if (typeof raw !== 'number') return null;
+      if (!Number.isFinite(raw)) return null; // rejects Infinity, NaN, 1e309
+      if (flag.min !== undefined && raw < flag.min) return null;
+      if (flag.max !== undefined && raw > flag.max) return null;
+      if (flag.integer === true && !Number.isInteger(raw)) return null;
+      return raw;
+    }
+    case 'string': {
+      if (typeof raw !== 'string') return null;
+      if (flag.maxLength !== undefined && raw.length > flag.maxLength) return null;
+      // Reject ASCII control chars except \t (horizontal tab is benign in commands)
+      if (/[\x00-\x08\x0b-\x1f\x7f]/.test(raw)) return null;
+      return raw;
+    }
+  }
+}
+
+/**
+ * Parse a CLI text input to a FlagsRecordValue.
+ * 'unset' (literal) → null for any flag.
+ */
+export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRecordValue {
+  if (text === 'unset') return null;
+  switch (flag.kind) {
+    case 'boolean': {
+      if (text === 'true') return true;
+      if (text === 'false') return false;
+      return null;
+    }
+    case 'enum':
+      return coerceFlagValue(flag, text);
+    case 'number': {
+      const n = Number(text);
+      return coerceFlagValue(flag, n);
+    }
+    case 'string':
+      return coerceFlagValue(flag, text);
+  }
+}
+
+/**
+ * Format a flag value for display.
+ * null → 'unset', active values → their string representation.
+ */
+export function formatFlagValue(flag: ClaudeCodeFlag, value: FlagsRecordValue): string {
+  if (value === null || isNeutral(flag, value)) return 'unset';
+  if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
+  return String(value);
+}
+
+/**
+ * Count flags in `record` that have active (non-neutral) values.
+ * Unknown IDs are counted if their value is truthy.
+ */
+export function countActiveFlags(record: FlagsRecord): number {
+  let count = 0;
+  for (const [id, value] of Object.entries(record)) {
+    if (value === null) continue;
+    const flag = FLAG_REGISTRY_MAP.get(id);
+    if (flag) {
+      if (!isNeutral(flag, value)) count++;
+    } else if (value) {
+      // Unknown flag ID: count if truthy
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Read the view-mode from a FlagsRecord.
+ * Returns 'default' when the entry is absent, null, or unrecognised.
+ */
+export function readViewMode(record: FlagsRecord): ViewMode {
+  const v = record['view-mode'];
+  if (typeof v === 'string' && (VIEW_MODES as readonly string[]).includes(v)) {
+    return v as ViewMode;
+  }
+  return 'default';
+}
+
+/**
+ * Sanitize a FlagsRecord by coercing each known flag's value through
+ * coerceFlagValue. Invalid values become null. Unknown IDs pass through.
+ */
+export function sanitizeFlagsRecord(record: FlagsRecord): FlagsRecord {
+  const result: FlagsRecord = {};
+  for (const [id, value] of Object.entries(record)) {
+    const flag = FLAG_REGISTRY_MAP.get(id);
+    if (flag) {
+      result[id] = coerceFlagValue(flag, value);
+    } else {
+      result[id] = value; // unknown id: pass through unchanged
+    }
+  }
+  return result;
+}
+
+// ─── Record builders ──────────────────────────────────────────────────────────
+
+/**
+ * Return a FlagsRecord with every registered flag set to its defaultValue.
+ * Flags with undefined defaultValue get null.
+ * This record has an entry for EVERY flag — use it for initial seeding.
+ */
+export function getDefaultFlagsRecord(): FlagsRecord {
+  const result: FlagsRecord = {};
+  for (const flag of FLAG_REGISTRY) {
+    if (flag.kind === 'boolean') {
+      result[flag.id] = flag.defaultValue;
+    } else {
+      result[flag.id] = flag.defaultValue ?? null;
+    }
+  }
+  return result;
+}
+
+/**
+ * Return IDs of all flags where `recommended: true`.
+ */
+export function getRecommendedFlagIds(): string[] {
+  return FLAG_REGISTRY.filter(f => f.recommended).map(f => f.id);
+}
+
+// ─── Migration helper ─────────────────────────────────────────────────────────
+
+/**
+ * Migrate a legacy (string-array) enabled-flags manifest to a typed FlagsRecord.
+ *
+ * This is the Phase 1 → Phase 2 bridge used by manifest.ts once the manifest
+ * format changes. Phase 2 wires it in; Phase 1 just ships and unit-tests it.
+ *
+ * Contract (applies ADR-014 transition semantics):
+ * - knownIds defined   → knownSet = knownIds ∪ enabledIds
+ * - knownIds undefined → knownSet = full current registry ∪ enabledIds
+ *   (pre-knownFlags manifests: all flags known, so adopt-nothing is expressed
+ *   as value = enabledIds.includes(id) rather than absent entry)
+ * - Boolean registry flags in knownSet → value = enabledIds.includes(id)
+ * - Registry flags NOT in knownSet → NO entry (adopted on next seed)
+ * - Unknown enabled IDs (not in registry) → `true` preserved
+ * - viewMode fold: 'view-mode' = legacyViewMode ?? 'default'
+ */
+export function migrateLegacyFlagsToRecord(
+  enabledIds: string[],
+  knownIds?: string[],
+  legacyViewMode?: ViewMode,
+): FlagsRecord {
+  const enabledSet = new Set(enabledIds);
+
+  const knownSet: Set<string> =
+    knownIds !== undefined
+      ? new Set([...knownIds, ...enabledIds])
+      : new Set([...FLAG_REGISTRY.map(f => f.id), ...enabledIds]);
+
+  const result: FlagsRecord = {};
+
+  for (const flag of FLAG_REGISTRY) {
+    // view-mode is handled separately at the end
+    if (flag.id === 'view-mode') continue;
+
+    if (!knownSet.has(flag.id)) {
+      // Not known at last install → NO entry (will be adopted on next seed)
+      continue;
+    }
+
+    if (flag.kind === 'boolean') {
+      result[flag.id] = enabledSet.has(flag.id);
+    } else {
+      // Valued flags: legacy string arrays never contain them; null = neutral
+      result[flag.id] = null;
+    }
+  }
+
+  // Unknown enabled IDs (not in any registry) preserved as true
+  for (const id of enabledIds) {
+    if (!FLAG_REGISTRY_MAP.has(id)) {
+      result[id] = true;
+    }
+  }
+
+  // viewMode fold: always written so the view-mode entry is explicit
+  result['view-mode'] = legacyViewMode ?? 'default';
+
+  return result;
+}
+
+// ─── Compile bridge shim ──────────────────────────────────────────────────────
+
+/**
+ * Convert a legacy enabled-IDs string array to a FlagsRecord for use with
+ * the new applyFlags(settingsJson, FlagsRecord) API.
+ *
+ * @deprecated Compile bridge — will be removed when call sites are migrated in Phase 2.
+ *
+ * For known boolean flags: in ids → true, not in ids → false (neutral = delete).
+ * For known valued flags: null (neutral; legacy arrays never contain them).
+ * For unknown IDs in the array: true (forward-compat preservation).
+ */
+export function legacyIdsToRecord(ids: string[]): FlagsRecord {
+  const enabledSet = new Set(ids);
+  const result: FlagsRecord = {};
+
+  for (const flag of FLAG_REGISTRY) {
+    if (flag.kind === 'boolean') {
+      // false is neutral for booleans — key is deleted; true applies onPayload
+      result[flag.id] = enabledSet.has(flag.id);
+    } else {
+      // Valued flags: null = don't touch them (they're not in legacy arrays)
+      result[flag.id] = null;
+    }
+  }
+
+  // Unknown IDs in the legacy array: preserve as true (forward compat)
+  for (const id of ids) {
+    if (!FLAG_REGISTRY_MAP.has(id)) {
+      result[id] = true;
+    }
+  }
+
+  return result;
+}
+
+// ─── Apply / Strip ────────────────────────────────────────────────────────────
+
+/** Compute the value to write to settings.json for an active flag. */
+function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
+  switch (flag.kind) {
+    case 'boolean':
+      return flag.onPayload;
+    case 'enum':
+      return value as string;
+    case 'number':
+      // Env targets receive string values; setting targets receive numbers.
+      return flag.target.type === 'env' ? String(value as number) : value;
+    case 'string': {
+      const s = value as string;
+      return flag.wrapKey ? { [flag.wrapKey]: s } : s;
+    }
+  }
+}
+
+/**
+ * Apply a FlagsRecord to a settings JSON string.
+ *
+ * - Unknown flag IDs are skipped (forward-compatible with future flags).
+ * - `coerceFlagValue` is called at the sink before applying (applies PF-023).
+ * - Neutral values delete their target key.
+ * - Env payloads for number flags are stringified ('40', never 40).
+ * - Setting payloads for string flags with wrapKey are shaped ({ command: v }).
+ * - env object is created on demand; deleted when it becomes empty.
+ * - `__proto__`, `constructor`, `prototype` keys are silently skipped.
+ */
+export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+
+  for (const [id, value] of Object.entries(flags)) {
+    // Prototype pollution guard
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
+
+    const flag = FLAG_REGISTRY_MAP.get(id);
+    if (!flag) continue; // unknown id — skip for forward compat
+
+    // Coerce at the sink (applies PF-023: validate at the convergence point)
+    const safe = coerceFlagValue(flag, value);
+
+    if (isNeutral(flag, safe)) {
+      // Neutral → delete the target key
+      if (flag.target.type === 'env') {
+        const env = settings.env as Record<string, unknown> | undefined;
+        if (env) delete env[flag.target.key];
+      } else {
+        delete settings[flag.target.key];
+      }
+    } else {
+      const payload = buildPayload(flag, safe as FlagValue);
+      if (flag.target.type === 'env') {
+        if (
+          typeof settings.env !== 'object' ||
+          settings.env === null ||
+          Array.isArray(settings.env)
+        ) {
+          settings.env = {};
+        }
+        (settings.env as Record<string, unknown>)[flag.target.key] = payload;
+      } else {
+        settings[flag.target.key] = payload;
+      }
+    }
+  }
+
+  // Clean up empty env object
+  const env = settings.env as Record<string, unknown> | undefined;
+  if (env && Object.keys(env).length === 0) {
+    delete settings.env;
   }
 
   return JSON.stringify(settings, null, 2) + '\n';
@@ -219,19 +828,17 @@ export function applyFlags(settingsJson: string, flagIds: string[]): string {
 
 /**
  * Strip all flag-managed keys from a settings JSON string.
- * Removes env vars and top-level settings controlled by the flag registry.
- * Cleans up empty env object when last entry is removed.
+ * Registry-driven unconditional delete. Now covers viewMode (via view-mode
+ * registry entry) and object-valued settings (spellcheck → key deleted).
+ * Cleans up empty env object. Strip-then-apply idempotence preserved (INV-1).
  */
 export function stripFlags(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-
   const env = settings.env as Record<string, unknown> | undefined;
 
   for (const flag of FLAG_REGISTRY) {
     if (flag.target.type === 'env') {
-      if (env) {
-        delete env[flag.target.key];
-      }
+      if (env) delete env[flag.target.key];
     } else {
       delete settings[flag.target.key];
     }
@@ -244,6 +851,8 @@ export function stripFlags(settingsJson: string): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
+// ─── viewMode helpers (kept verbatim) ─────────────────────────────────────────
+
 const VIEW_MODE_KEY = 'viewMode';
 
 /** All valid view mode values. Used for validation at manifest read boundaries. */
@@ -251,31 +860,6 @@ export const VIEW_MODES = ['default', 'verbose', 'focus'] as const;
 
 /** The viewMode field type — a narrowed union of the three supported modes. */
 export type ViewMode = (typeof VIEW_MODES)[number];
-
-/**
- * Apply a view mode to a settings JSON string.
- * 'default' removes the viewMode key (Claude Code default behaviour);
- * 'verbose' and 'focus' set the key explicitly.
- */
-export function applyViewMode(settingsJson: string, mode: ViewMode): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  if (mode === 'default') {
-    delete settings[VIEW_MODE_KEY];
-  } else {
-    settings[VIEW_MODE_KEY] = mode;
-  }
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Strip the viewMode key from a settings JSON string.
- * Used during uninstall / flag strip to restore Claude Code defaults.
- */
-export function stripViewMode(settingsJson: string): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  delete settings[VIEW_MODE_KEY];
-  return JSON.stringify(settings, null, 2) + '\n';
-}
 
 /**
  * Extract the non-default view mode from a settings JSON string.
@@ -311,20 +895,11 @@ export function resolveExistingViewMode(settingsJson: string): ViewMode | undefi
 
 /**
  * Resolve the final view mode to write, combining an existing settings value,
- * an init-prompt-selected value, and whether the selection was explicit (via
- * CLI flag) or implicit (prompt default / recommended path).
- *
- * @param current  - Existing viewMode from settings.json (resolveExistingViewMode).
- *                   undefined means no opinion in the current settings.
- * @param selected - What the init prompt (or recommended path) would use.
- * @param explicit - true when the user made an explicit interactive selection in
- *                   the Advanced init prompt, or when --reset was passed (which
- *                   forces viewMode back to 'default' and sets explicit=true so
- *                   that 'default' wins over any externally-set value).
+ * an init-prompt-selected value, and whether the selection was explicit.
  *
  * Rules:
  *   1. explicit ⇒ selected wins (user intent is unambiguous, even 'default')
- *   2. non-default current ⇒ current wins (preserve externally-set mode, e.g. /focus)
+ *   2. non-default current ⇒ current wins (preserve externally-set mode)
  *   3. else ⇒ selected
  */
 export function resolveFinalViewMode(
@@ -335,4 +910,46 @@ export function resolveFinalViewMode(
   if (explicit) return selected;
   if (current !== undefined && current !== 'default') return current;
   return selected;
+}
+
+// ─── Deprecated shims (compile bridge — Phase 2/6 removes these) ──────────────
+
+/**
+ * Return IDs of all flags that have a non-neutral default value and are recommended.
+ *
+ * @deprecated Use getDefaultFlagsRecord() instead. Will be removed in Phase 2.
+ */
+export function getDefaultFlags(): string[] {
+  return FLAG_REGISTRY
+    .filter(f => f.recommended && !isNeutral(f, f.defaultValue ?? null))
+    .map(f => f.id);
+}
+
+/**
+ * Apply a view mode to a settings JSON string.
+ * 'default' removes the viewMode key; 'verbose' and 'focus' set it explicitly.
+ *
+ * @deprecated Use applyFlags with { 'view-mode': mode }. Will be removed in Phase 6.
+ */
+export function applyViewMode(settingsJson: string, mode: ViewMode): string {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  if (mode === 'default') {
+    delete settings[VIEW_MODE_KEY];
+  } else {
+    settings[VIEW_MODE_KEY] = mode;
+  }
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
+ * Strip the viewMode key from a settings JSON string.
+ * stripFlags now covers viewMode via the view-mode registry entry; this wrapper
+ * is a no-op when called after stripFlags.
+ *
+ * @deprecated stripFlags now covers viewMode. Will be removed in Phase 6.
+ */
+export function stripViewMode(settingsJson: string): string {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  delete settings[VIEW_MODE_KEY];
+  return JSON.stringify(settings, null, 2) + '\n';
 }

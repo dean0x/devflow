@@ -131,7 +131,7 @@ export function resolveSeedFlags(
 ): string[] {
   // Fresh install → all default-ON flags from the registry
   if (enabledFlags === null) {
-    return registry.filter(f => f.defaultEnabled).map(f => f.id);
+    return registry.filter(f => f.kind === 'boolean' && f.defaultValue === true).map(f => f.id);
   }
 
   // Old manifest without a knownFlags snapshot → adopt nothing new
@@ -143,7 +143,7 @@ export function resolveSeedFlags(
   const knownSet = new Set(knownFlags);
   const result = new Set(enabledFlags);
   for (const flag of registry) {
-    if (flag.defaultEnabled && !knownSet.has(flag.id)) {
+    if (flag.kind === 'boolean' && flag.defaultValue === true && !knownSet.has(flag.id)) {
       result.add(flag.id);
     }
   }

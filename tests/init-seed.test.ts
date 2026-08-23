@@ -38,12 +38,12 @@ function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
   };
 }
 
-// Synthetic flag registry for isolated flag tests
+// Synthetic flag registry for isolated flag tests (BooleanFlagDef shape post Phase 1)
 const MOCK_FLAGS: ClaudeCodeFlag[] = [
-  { id: 'flag-a', label: 'A', description: '', hint: '', target: { type: 'setting', key: 'a', value: true }, defaultEnabled: true },
-  { id: 'flag-b', label: 'B', description: '', hint: '', target: { type: 'setting', key: 'b', value: true }, defaultEnabled: true },
-  { id: 'flag-c', label: 'C', description: '', hint: '', target: { type: 'setting', key: 'c', value: false }, defaultEnabled: false },
-  { id: 'flag-d', label: 'D', description: '', hint: '', target: { type: 'setting', key: 'd', value: true }, defaultEnabled: true },
+  { kind: 'boolean', id: 'flag-a', label: 'A', description: '', hint: '', recommended: true, target: { type: 'setting', key: 'a' }, onPayload: true, defaultValue: true },
+  { kind: 'boolean', id: 'flag-b', label: 'B', description: '', hint: '', recommended: true, target: { type: 'setting', key: 'b' }, onPayload: true, defaultValue: true },
+  { kind: 'boolean', id: 'flag-c', label: 'C', description: '', hint: '', recommended: false, target: { type: 'setting', key: 'c' }, onPayload: false, defaultValue: false },
+  { kind: 'boolean', id: 'flag-d', label: 'D', description: '', hint: '', recommended: true, target: { type: 'setting', key: 'd' }, onPayload: true, defaultValue: true },
 ];
 
 // ── resolveSeedFeatures ───────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ describe('resolveInitSeed', () => {
     // features: FEATURE_DEFAULTS
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
     // flags: all default-ON from real registry
-    const expectedFlags = FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
+    const expectedFlags = FLAG_REGISTRY.filter(f => f.kind === 'boolean' && f.defaultValue === true).map(f => f.id);
     expect(seed.flags.sort()).toEqual(expectedFlags.sort());
     // viewMode: 'default' (nothing in settings, no manifest)
     expect(seed.viewMode).toBe('default');

@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode } from '../../core/flags.js';
+import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode, legacyIdsToRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -949,8 +949,8 @@ export const initCommand = new Command('init')
       // did, the seed values assigned at declaration stand — which is the right default.
 
       // Claude Code flags multiselect (advanced only)
-      const recommended = FLAG_REGISTRY.filter(f => f.defaultEnabled);
-      const optional = FLAG_REGISTRY.filter(f => !f.defaultEnabled);
+      const recommended = FLAG_REGISTRY.filter(f => f.recommended);
+      const optional = FLAG_REGISTRY.filter(f => !f.recommended);
       const flagChoices = [
         ...recommended.map(f => ({
           value: f.id,
@@ -1662,7 +1662,7 @@ export const initCommand = new Command('init')
 
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
-      content = applyFlags(content, enabledFlags);
+      content = applyFlags(content, legacyIdsToRecord(enabledFlags));
 
       // Resolve the final viewMode to write.
       // - explicit=true (interactive selection or --reset): selected value always wins

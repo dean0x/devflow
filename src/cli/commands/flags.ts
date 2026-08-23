@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { FLAG_REGISTRY, applyFlags, stripFlags, getDefaultFlags } from '../../core/flags.js';
+import { FLAG_REGISTRY, applyFlags, stripFlags, getDefaultFlags, legacyIdsToRecord } from '../../core/flags.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 
 /**
@@ -32,7 +32,7 @@ async function updateSettingsFlags(claudeDir: string, flagIds: string[]): Promis
     content = '{}';
   }
   const stripped = stripFlags(content);
-  const updated = applyFlags(stripped, flagIds);
+  const updated = applyFlags(stripped, legacyIdsToRecord(flagIds));
   await fs.writeFile(settingsPath, updated, 'utf-8');
 }
 
