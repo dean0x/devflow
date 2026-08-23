@@ -4,7 +4,7 @@
  * Computes the initial state (seed) for init prompts from:
  * - The existing manifest (from a prior install)
  * - The project feature config (.devflow/config.json)
- * - The current settings.json snapshot (for viewMode)
+ * - The current settings.json snapshot (for view-mode resolution)
  * - The plugin registry
  *
  * All exported functions are pure — no I/O, no side effects.
@@ -17,7 +17,6 @@
 import {
   resolveExistingViewMode,
   FLAG_REGISTRY,
-  coerceFlagValue,
   readViewMode,
   type ClaudeCodeFlag,
   type FlagsRecord,
@@ -41,7 +40,6 @@ export interface FeatureSeed {
   proxy: boolean;
   /**
    * Compliance feature seed — seeded from the manifest (manifest-group, like proxy).
-   * Full init wiring (framework multi-select, CLI toggle) is a later phase.
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
   compliance: ComplianceFeatureState;
@@ -300,8 +298,7 @@ export function resolveResetGatedInputs(
  * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;
  * undefined means "user did not specify this flag, keep the seed value".
  *
- * Used in Phase 4 to honour --ambient/--no-ambient etc. passed alongside
- * --recommended.
+ * Applies explicit --ambient/--no-ambient etc. passed alongside --recommended.
  */
 export function applyCliToggles(
   base: FeatureSeed,

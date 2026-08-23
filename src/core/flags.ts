@@ -362,7 +362,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     // The env var above is the only surface managed by FLAG_REGISTRY for this flag.
   },
 
-  // ── New valued flags (Phase 1) ────────────────────────────────────────────
+  // ── Valued flags (number/enum/string) ────────────────────────────────────
 
   {
     // Domain: unset by default; set only when users want a non-default spawn depth.
@@ -447,10 +447,9 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     maxLength: 256,   // devflow sanity bound (applies PF-023)
   },
   {
-    // viewMode fold-in: view-mode replaces the separate applyViewMode/stripViewMode API.
-    // neutralValue 'default' → applying 'default' removes the viewMode key.
-    // VIEW_MODES, ViewMode, resolveExistingViewMode, and resolveFinalViewMode are
-    // kept verbatim for call sites that haven't migrated yet (Phase 6 removes them).
+    // view-mode folded into the registry; neutralValue 'default' deletes the viewMode key.
+    // VIEW_MODES, ViewMode, resolveExistingViewMode, and resolveFinalViewMode remain exported
+    // for init.ts and other callers that read/resolve view-mode in the settings pipeline.
     id: 'view-mode',
     label: 'View mode',
     description: 'Interface view mode (default / verbose / focus)',
@@ -657,9 +656,7 @@ export function getRecommendedFlagIds(): string[] {
 
 /**
  * Migrate a legacy (string-array) enabled-flags manifest to a typed FlagsRecord.
- *
- * This is the Phase 1 → Phase 2 bridge used by manifest.ts once the manifest
- * format changes. Phase 2 wires it in; Phase 1 just ships and unit-tests it.
+ * Called by manifest.ts self-healing when it encounters an old string-array manifest.
  *
  * Contract (applies ADR-014 transition semantics):
  * - knownIds defined   → knownSet = knownIds ∪ enabledIds
@@ -817,7 +814,7 @@ export function stripFlags(settingsJson: string): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
-// ─── viewMode helpers (kept verbatim) ─────────────────────────────────────────
+// ─── viewMode helpers ─────────────────────────────────────────────────────────
 
 const VIEW_MODE_KEY = 'viewMode';
 

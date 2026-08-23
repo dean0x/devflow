@@ -44,23 +44,21 @@ export interface ManifestData {
     learning: boolean;
     rules: boolean;
     /**
-     * Phase 2: typed flag state record (was string[]).
+     * Typed flag state record (keyed by flag id).
      * Absent key = unknown to this install (adopted on next seed per ADR-014).
      * Null value = known + deliberately unset (neutral).
      * Boolean value = known + explicitly enabled (true) or disabled (false).
-     * Reads from old string[] manifests are auto-migrated via migrateLegacyFlagsToRecord.
+     * Old string[] manifests are auto-migrated via migrateLegacyFlagsToRecord on read.
      */
     flags: FlagsRecord;
     /**
-     * @deprecated Phase 2 — folded into flags['view-mode'] on readManifest.
-     * Kept in type so init.ts (Phase 6 rewrite target) still compiles.
-     * Phase 6 removes these writes; readManifest strips the field from results.
+     * @deprecated Folded into FlagsRecord key-presence on readManifest (self-heal).
+     * readManifest strips this field from results; init.ts no longer writes it.
      */
     knownFlags?: string[];
     /**
-     * @deprecated Phase 2 — folded into flags['view-mode'] on readManifest.
-     * Kept in type so init.ts (Phase 6 rewrite target) still compiles.
-     * Phase 6 removes these writes; readManifest strips the field from results.
+     * @deprecated Folded into flags['view-mode'] on readManifest (self-heal).
+     * readManifest strips this field from results; init.ts no longer writes it.
      */
     viewMode?: ViewMode;
     /**
@@ -162,8 +160,8 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       // Case B: already a FlagsRecord. Spread to avoid mutating the parsed value.
       flagsRecord = { ...(rawFlags as Record<string, unknown>) } as FlagsRecord;
       // Fold lingering viewMode into flags['view-mode'] when the record lacks a
-      // non-default value (e.g. when written by Phase 2 init.ts via legacyIdsToRecord
-      // which sets view-mode:null, with viewMode written as a separate deprecated field).
+      // non-default value (e.g. a manifest written by an older init that stored viewMode
+      // as a separate deprecated field alongside a FlagsRecord with view-mode:null).
       const rawViewMode = features.viewMode;
       if (typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)) {
         const existing = flagsRecord['view-mode'];
@@ -203,12 +201,11 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: sanitizedFlags,
         // knownFlags and viewMode are NOT carried into the result.
-        // - knownFlags: its semantic (which flags are "known") is now encoded in
+        // - knownFlags: its semantic (which flags are "known") is encoded in
         //   FlagsRecord key-presence (present key = known, absent = new/adopt-on-seed).
         // - viewMode: folded into flags['view-mode'] above.
-        // init.ts still writes both fields (Phase 6 removes those writes); leaving
-        // them out of the returned manifest prevents them from being echoed back on
-        // the next write and causing a spurious needsHeal on every read.
+        // Leaving them out prevents them from being echoed back on the next write
+        // and causing a spurious needsHeal on every read.
         security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
           ? features.security as SecurityMode
           : undefined,

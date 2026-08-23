@@ -1,9 +1,7 @@
 /**
  * Shared TUI cell helpers — shared by agents-view and flags-view.
  *
- * Moved from src/cli/agents-view/render.ts (avoids PF-017: generify, not copy-adapt).
- * agents-view/render.ts imports these instead of defining them locally.
- *
+ * Applies PF-017: generified into a shared module rather than copy-adapted per consumer.
  * Pure functions, no I/O.
  */
 

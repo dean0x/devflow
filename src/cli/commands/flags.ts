@@ -4,15 +4,14 @@
  * D-P3-1: Typed flags CLI rewrite (Phase 3).
  *   - createFlagsCommand() factory — fresh Commander instance per call;
  *     used by tests; src/cli.ts consumes the flagsCommand singleton export.
- *   - Eliminates the legacyIdsToRecord bridge call site (was Phase 2 bridge).
  *   - Persist pipeline: stripFlags → applyFlags(stripped, record) — reuses
  *     core helpers; no hand-rolled env/setting key writes.
  *   - PF-014 (process.exit swallows async work): all error paths set
  *     process.exitCode = 1 and return; never call process.exit().
  *   - PF-015 (multi-artifact fan-out): compute record first; settings write
  *     and manifest write handled independently with their own error paths.
- *   - PF-022 (applies-on-restart): bare invocation surfaces the Phase 5 seam
- *     with a note to the user.
+ *   - PF-022 (applies-on-restart): bare non-TTY invocation prints status table
+ *     with a note that changes apply on restart.
  *   - PF-023 (validate at the sink): parseFlagValueInput → coerceFlagValue
  *     runs inside the core helpers before any write.
  */
@@ -141,11 +140,10 @@ function collectSet(val: string, prev: string[]): string[] {
  * Call this in tests to get a clean Commander instance per test case — avoids
  * Commander's internal option-value state leaking across tests.
  *
- * Phase 5 wires runFlagsTui here:
- *   - The bare-invocation TTY branch below has a `// Phase 5 wires runFlagsTui here`
- *     comment marking the exact location for the lazy `await import` swap-in.
- *   - The bare branch must be structured as: check process.stdout.isTTY, then
- *     either run the TUI or print the status table + note + exitCode 1.
+ * Bare invocation (no subcommand):
+ *   - TTY: launches the interactive flags TUI (lazy import keeps TTY machinery
+ *     out of --list/--status code paths).
+ *   - non-TTY: prints status table to stdout + note to stderr + exitCode 1.
  */
 export function createFlagsCommand(): Command {
   return new Command('flags')
@@ -464,10 +462,8 @@ export function createFlagsCommand(): Command {
 
       // ── Bare invocation ───────────────────────────────────────────────────────
       //
-      // D-P5-1: runFlagsTui wired here (Phase 5 seam resolved).
-      //   TTY path: launch the interactive flags TUI (lazy import keeps TTY
-      //     machinery out of --list/--status code paths).
-      //   non-TTY path: status table to stdout + note to stderr + exitCode 1.
+      // D-P5-1: TTY path launches the interactive flags TUI via lazy import;
+      // non-TTY path prints a status table + note to stderr + exitCode 1.
       const manifest = await readManifest(devflowDir);
       const record: FlagsRecord = manifest?.features.flags ?? {};
 
