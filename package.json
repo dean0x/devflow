@@ -1,6 +1,6 @@
 {
   "name": "devflow-kit",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A meta-harness for Claude Code — turns a single coding agent into an engineering team: orchestration, parallel review, persistent memory, self-learning, and graph workflows",
   "type": "module",
   "bin": {

@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.1] - 2026-08-23
 
 ### Changed
 - **Release workflow hardening**: the version-bump commit stages `package.json`, `package-lock.json`, and `CHANGELOG.md` explicitly instead of `git add -A` (the 2.0.0 release committed the `release-notes.md` CI artifact this way; the file is now also gitignored), and `actions/checkout`/`actions/setup-node` are bumped v4 → v7 to clear the Node 20 runtime deprecation.
@@ -1163,6 +1163,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[2.0.1]: https://github.com/dean0x/devflow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dean0x/devflow/compare/v1.8.3...v2.0.0
 [1.8.3]: https://github.com/dean0x/devflow/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/dean0x/devflow/compare/v1.8.1...v1.8.2
