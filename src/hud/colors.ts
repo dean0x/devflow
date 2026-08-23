@@ -54,6 +54,9 @@ export function bgYellow(s: string): string {
 export function bgRed(s: string): string {
   return `${ESC}41m${s}${RESET}`;
 }
+export function inverse(s: string): string {
+  return `${ESC}7m${s}${RESET}`;
+}
 
 export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '\u2026' : s;

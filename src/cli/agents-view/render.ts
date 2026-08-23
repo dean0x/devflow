@@ -30,9 +30,9 @@ import {
   yellow,
   cyan,
   gray,
-  truncate,
   stripAnsi,
 } from '../../hud/colors.js';
+import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import {
   isDirtyModel,
   isDirtyEffort,
@@ -91,42 +91,6 @@ export function formatAgentName(name: string): string {
 // ---------------------------------------------------------------------------
 // Cell renderers (pure, return styled string)
 // ---------------------------------------------------------------------------
-
-function padToVisible(s: string, width: number): string {
-  // Pad by visible length (strip ANSI, then pad with spaces).
-  const visible = stripAnsi(s);
-  const padding = Math.max(0, width - visible.length);
-  return s + ' '.repeat(padding);
-}
-
-function truncateVisible(s: string, maxWidth: number): string {
-  const raw = stripAnsi(s);
-  if (raw.length <= maxWidth) return s;
-  // Re-truncate the unstyled version and rebuild — simpler than ANSI-aware slice.
-  return truncate(raw, maxWidth);
-}
-
-/** Layout-breaking whitespace that stripAnsi deliberately preserves. */
-const LAYOUT_BREAKING_WS = /[\t\n]/g;
-
-/**
- * Sanitize an untrusted string for a fixed-width TUI cell.
- *
- * stripAnsi strips escape sequences and C0 controls but, by contract, KEEPS
- * TAB (\x09) and LF (\x0a) — correct for its own callers, wrong for a cell in
- * a fixed-width frame. Orphan row names are arbitrary JSON keys read from
- * agent-models.json, so neither is hypothetical:
- *   - LF  emits a newline inside a frame line, breaking renderFrame's
- *     one-string-per-terminal-line contract and desyncing terminal.ts's
- *     cursor arithmetic (it writes ERASE_EOL + '\n' per returned line).
- *   - TAB measures as one character in padToVisible but occupies up to eight
- *     terminal columns, so every column to its right is misaligned.
- * Both collapse to a single space; the raw key is untouched, so the save-path
- * merge still targets the real mapping key.
- */
-function sanitizeCell(s: string): string {
-  return stripAnsi(s).replace(LAYOUT_BREAKING_WS, ' ');
-}
 
 /** Options for renderModelCell — named to prevent silent argument transposition. */
 interface RenderModelCellOptions {

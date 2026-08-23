@@ -464,34 +464,40 @@ export function createFlagsCommand(): Command {
 
       // ── Bare invocation ───────────────────────────────────────────────────────
       //
-      // TTY path: print status table + Phase 5 note.
-      // non-TTY path: status table to stdout + note to stderr + exitCode 1.
-      //
-      // Phase 5 wires runFlagsTui here:
-      //   Replace the TTY branch body with:
-      //     const { runFlagsTui } = await import('../flags-view/terminal.js');
-      //     await runFlagsTui();
-      //   The lazy import keeps TTY machinery out of --list/--status paths.
+      // D-P5-1: runFlagsTui wired here (Phase 5 seam resolved).
+      //   TTY path: launch the interactive flags TUI (lazy import keeps TTY
+      //     machinery out of --list/--status code paths).
+      //   non-TTY path: status table to stdout + note to stderr + exitCode 1.
       const manifest = await readManifest(devflowDir);
       const record: FlagsRecord = manifest?.features.flags ?? {};
 
       if (process.stdout.isTTY) {
-        p.intro(color.bgCyan(color.black(' Claude Code Flags ')));
-        for (const flag of FLAG_REGISTRY) {
-          const value = Object.prototype.hasOwnProperty.call(record, flag.id)
-            ? record[flag.id]
-            : undefined;
-          const displayValue = value !== undefined
-            ? formatFlagValue(flag, value)
-            : color.dim('not adopted');
-          p.log.info(`${flag.id.padEnd(28)} ${displayValue}`);
+        // ── Read settings before launching TUI (needed for persist on save) ──
+        const settingsPath = path.join(claudeDir, 'settings.json');
+        const settingsResult = await readSettingsSafe(settingsPath);
+        if (!settingsResult.ok) {
+          p.log.error(settingsResult.reason);
+          process.exitCode = 1;
+          return;
         }
-        // Phase 5 wires runFlagsTui here (replace note below with the lazy import):
-        p.note(
-          'Interactive flags editor coming in Phase 5 (flags-view TUI).\n' +
-          'Use --enable/--disable/--set/--unset/--status/--list for now.',
-          'Tip',
-        );
+
+        // ── Build initial rows from registry + current record ──────────────
+        const { runFlagsTui, buildFlagRows, collectFlagRecord } =
+          await import('../flags-view/index.js');
+        const initialRows = buildFlagRows(FLAG_REGISTRY, record);
+
+        // ── Launch TUI ────────────────────────────────────────────────────
+        const result = await runFlagsTui(initialRows);
+
+        if (result.action === 'save') {
+          const newRecord = collectFlagRecord(result.rows);
+          await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+          if (process.exitCode === 0) {
+            process.stdout.write('Flags saved.\n');
+          }
+        } else {
+          process.stdout.write('No changes made.\n');
+        }
       } else {
         // non-TTY: status table to stdout, note to stderr
         for (const flag of FLAG_REGISTRY) {
