@@ -1599,3 +1599,134 @@ describe('terminateRelay — kill path (integration)', () => {
     await expect(fsAsync.access(lockPath)).rejects.toThrow();
   }, 15_000);
 });
+
+// ─── Phase 4: CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT ────────────
+//
+// Proxy models trigger surprise context-window compaction because Claude Code
+// does not recognise them as Claude models and enforces a conservative limit.
+// The fix: pair ANTHROPIC_BASE_URL with CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT
+// so the enforcement is lifted for the relay session.
+//
+// Strip gate: ownership is determined solely by ANTHROPIC_BASE_URL matching our
+// managed relay URL.  The window-enforcement var is always stripped/preserved
+// together with the URL — never independently.
+
+const WINDOW_ENV = 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT';
+
+describe('Phase 4 / applyProxyEnv: sets UNKNOWN_MODEL_WINDOW_ENV', () => {
+  it('sets CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT to "1"', () => {
+    const result = JSON.parse(applyProxyEnv(JSON.stringify({}), DEFAULT_PORT));
+    expect((result.env as Record<string, string>)[WINDOW_ENV]).toBe('1');
+  });
+
+  it('idempotent re-apply: window var stays "1" on second call', () => {
+    const once = applyProxyEnv(JSON.stringify({}), DEFAULT_PORT);
+    const twice = applyProxyEnv(once, DEFAULT_PORT);
+    expect(JSON.parse(twice).env[WINDOW_ENV]).toBe('1');
+  });
+
+  it('preserves unrelated env keys alongside both relay vars', () => {
+    const input = JSON.stringify({ env: { MY_VAR: 'keep' } });
+    const result = JSON.parse(applyProxyEnv(input, DEFAULT_PORT));
+    const env = result.env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBe(OUR_URL);
+    expect(env[WINDOW_ENV]).toBe('1');
+    expect(env.MY_VAR).toBe('keep');
+  });
+
+  it('port-change re-apply: ANTHROPIC_BASE_URL updates; window var stays "1"', () => {
+    const afterFirst = applyProxyEnv(JSON.stringify({}), 4141);
+    const afterSecond = applyProxyEnv(afterFirst, 5000);
+    const env = JSON.parse(afterSecond).env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:5000');
+    expect(env[WINDOW_ENV]).toBe('1');
+  });
+});
+
+describe('Phase 4 / stripProxyEnv: ownership-gated strip of both relay vars', () => {
+  it('ownership match: removes BOTH ANTHROPIC_BASE_URL and the window var', () => {
+    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: OUR_URL, [WINDOW_ENV]: '1' } });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
+    // Both proxy vars removed; env cleaned up entirely
+    expect(result.env).toBeUndefined();
+  });
+
+  it('ownership match with extra env: removes both vars, preserves unrelated', () => {
+    const input = JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: OUR_URL, [WINDOW_ENV]: '1', EXTRA: 'keep' },
+    });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
+    const env = result.env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env[WINDOW_ENV]).toBeUndefined();
+    expect(env.EXTRA).toBe('keep');
+  });
+
+  it('foreign URL: window var NOT removed (touch-nothing gate)', () => {
+    const input = JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: 'https://foreign.example.com', [WINDOW_ENV]: '1' },
+    });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
+    const env = result.env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://foreign.example.com');
+    expect(env[WINDOW_ENV]).toBe('1');
+  });
+
+  it('absent URL with orphan window var: window var preserved (self-heals on next enable)', () => {
+    // No ANTHROPIC_BASE_URL → ownership gate blocks strip entirely
+    const input = JSON.stringify({ env: { [WINDOW_ENV]: '1' } });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
+    expect((result.env as Record<string, string>)[WINDOW_ENV]).toBe('1');
+  });
+
+  it('ours-other-port URL with window var: neither removed (different managed port)', () => {
+    const otherPortUrl = 'http://127.0.0.1:5000'; // not managed by DEFAULT_PORT (4141)
+    const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: otherPortUrl, [WINDOW_ENV]: '1' } });
+    const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
+    const env = result.env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBe(otherPortUrl);
+    expect(env[WINDOW_ENV]).toBe('1');
+  });
+});
+
+describe('Phase 4 / T7-extended: fully-enabled state includes UNKNOWN_MODEL_WINDOW_ENV', () => {
+  /** Fully-enabled settings: hooks + ANTHROPIC_BASE_URL + window-enforcement var. */
+  function buildFullyEnabledSettingsP4(extraEnv?: Record<string, string>): Settings {
+    const s: Settings = {};
+    addProxyHooks(s, DEVFLOW_DIR);
+    (s as Record<string, unknown>).env = {
+      ANTHROPIC_BASE_URL: OUR_URL,
+      [WINDOW_ENV]: '1',
+      ...extraEnv,
+    };
+    return s;
+  }
+
+  it('PF-015 whole-end-state: applyDisableToSettings removes hooks, relay URL, AND window var', () => {
+    const s = buildFullyEnabledSettingsP4({ EXTRA: 'keep' });
+    const changed = applyDisableToSettings(s, DEFAULT_PORT);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(s)).toBe(false);
+    const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env?.[WINDOW_ENV]).toBeUndefined();
+    // Unrelated env vars survive
+    expect(env?.EXTRA).toBe('keep');
+  });
+
+  it('env block removed entirely when both relay vars are the only env keys', () => {
+    const s = buildFullyEnabledSettingsP4(); // no extras
+    applyDisableToSettings(s, DEFAULT_PORT);
+
+    expect(hasProxyHooks(s)).toBe(false);
+    expect((s as Record<string, unknown>).env).toBeUndefined();
+  });
+
+  it('applyProxyEnv produces a fully-enabled env containing both relay vars', () => {
+    const result = JSON.parse(applyProxyEnv(JSON.stringify({}), DEFAULT_PORT));
+    const env = result.env as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toBe(OUR_URL);
+    expect(env[WINDOW_ENV]).toBe('1');
+  });
+});
