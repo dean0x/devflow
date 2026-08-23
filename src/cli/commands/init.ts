@@ -381,7 +381,7 @@ export const initCommand = new Command('init')
           scope,
           features: {
             ambient: false, memory: false, hud: true, knowledge: false,
-            learning: false, rules: false, flags: [], proxy: false,
+            learning: false, rules: false, flags: {}, proxy: false,
             compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
           },
           installedAt: now,
@@ -1977,9 +1977,11 @@ export const initCommand = new Command('init')
         knowledge: knowledgeEnabled,
         learning: learningEnabled,
         rules: rulesEnabled,
-        flags: enabledFlags,
-        // Snapshot of known flag ids at this install — used by resolveSeedFlags on next init
-        // to detect new default-ON flags and auto-adopt them.
+        // Phase 2 bridge: legacyIdsToRecord converts enabledFlags string[] to FlagsRecord.
+        // Phase 6 will rewrite this block to work directly with FlagsRecord.
+        flags: legacyIdsToRecord(enabledFlags),
+        // @deprecated — Phase 6 removes this write. knownFlags semantics are now encoded
+        // in FlagsRecord key-presence (present = known, absent = new/adopt-on-seed).
         knownFlags: FLAG_REGISTRY.map(f => f.id),
         viewMode,
         security: securityMode,

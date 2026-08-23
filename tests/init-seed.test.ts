@@ -29,8 +29,8 @@ function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
       learning: true,
       rules: true,
       proxy: false,
-      flags: ['tui', 'lsp', 'tool-search'],
-      viewMode: 'default',
+      // Phase 2: FlagsRecord (was string[]); no deprecated viewMode field
+      flags: { tui: true, lsp: true, 'tool-search': true },
     },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -130,14 +130,16 @@ describe('resolveSeedFeatures', () => {
 
 // ── resolveSeedFlags ──────────────────────────────────────────────────────────
 
+// Phase 2: resolveSeedFlags(manifestFlags: FlagsRecord | null, registry?)
+// FlagsRecord key-presence encodes "known": present key = known, absent = new → adopt default.
 describe('resolveSeedFlags', () => {
-  it('fresh (null enabledFlags) → all default-ON flags from registry', () => {
-    const result = resolveSeedFlags(null, undefined, MOCK_FLAGS);
+  it('fresh (null manifestFlags) → all default-ON flags from registry', () => {
+    const result = resolveSeedFlags(null, MOCK_FLAGS);
     expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
   });
 
   it('fresh uses real FLAG_REGISTRY when no registry override provided', () => {
-    const result = resolveSeedFlags(null, undefined);
+    const result = resolveSeedFlags(null);
     // Hard-coded: the 8 default-ON flags as of the current registry.
     // If this test fails after a registry change, update both the registry
     // and this list explicitly — that is the point of pinning it.
@@ -154,48 +156,44 @@ describe('resolveSeedFlags', () => {
     expect(result.sort()).toEqual(EXPECTED_DEFAULT_ON.sort());
   });
 
-  it('knownFlags === undefined (old manifest) → return enabledFlags as-is, adopt nothing', () => {
-    const enabled = ['flag-a'];
-    const result = resolveSeedFlags(enabled, undefined, MOCK_FLAGS);
+  it('all registry flags present in record → only enabled (true) flags returned', () => {
+    // All keys present → all flags known; return only the true ones
+    const record = { 'flag-a': true, 'flag-b': false, 'flag-c': false, 'flag-d': false };
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
     expect(result).toEqual(['flag-a']);
   });
 
-  it('re-init with knownFlags → union of existing + new default-ON not in knownFlags', () => {
-    // flag-d is new (not in knownFlags), default-ON → gets adopted
-    const enabled = ['flag-a', 'flag-b'];
-    const known = ['flag-a', 'flag-b']; // flag-d was added to registry after last install
-    const result = resolveSeedFlags(enabled, known, MOCK_FLAGS);
+  it('partial record (absent flags = new) → existing respected + absent default-ON adopted', () => {
+    // flag-d is absent (not yet known to this install) → adopt its default-ON
+    const record = { 'flag-a': true, 'flag-b': true };
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
     expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
   });
 
-  it('disabled default-ON flag stays disabled when it is in knownFlags', () => {
-    // flag-a was known at last install, user disabled it → should NOT be re-added
-    const enabled = ['flag-b']; // flag-a absent (user disabled it)
-    const known = ['flag-a', 'flag-b', 'flag-d'];
-    const result = resolveSeedFlags(enabled, known, MOCK_FLAGS);
+  it('disabled default-ON flag stays disabled when explicitly false in record', () => {
+    // flag-a was known at last install, user disabled it → stays disabled
+    const record = { 'flag-a': false, 'flag-b': true, 'flag-d': false };
+    // flag-c absent → adopt default-OFF → not included
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
     expect(result).toEqual(['flag-b']); // flag-a stays disabled
   });
 
-  it('default-OFF flag is never auto-added even when absent from knownFlags', () => {
-    // flag-c is default-OFF and not in knownFlags → must NOT be added
-    const enabled = ['flag-a'];
-    const known = ['flag-a']; // flag-c not in known, flag-b and flag-d are new
-    const result = resolveSeedFlags(enabled, known, MOCK_FLAGS);
+  it('default-OFF flag is never auto-added when absent from record', () => {
+    // flag-c is default-OFF; not in record → must NOT be added
+    const record = { 'flag-a': true }; // flag-b, flag-c, flag-d all absent → adopt defaults
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
     expect(result).not.toContain('flag-c');
   });
 
-  it('duplicate-safe: existing flag already in result is not duplicated', () => {
-    // flag-a is in both enabledFlags and would be "newly adopted" — should appear once
-    const enabled = ['flag-a', 'flag-b'];
-    const known = []; // all flags are "new" — but enabledFlags already has flag-a
-    const result = resolveSeedFlags(enabled, known, MOCK_FLAGS);
+  it('duplicate-safe: flag appears at most once in output', () => {
+    const record = { 'flag-a': true, 'flag-b': true };
+    // flag-d absent → adopted; result should have no duplicates
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
     expect(result.filter(f => f === 'flag-a')).toHaveLength(1);
   });
 
-  it('empty enabledFlags + knownFlags → only new default-ON flags adopted', () => {
-    const enabled: string[] = [];
-    const known: string[] = [];
-    const result = resolveSeedFlags(enabled, known, MOCK_FLAGS);
+  it('empty record → adopt all default-ON flags (all absent = all new)', () => {
+    const result = resolveSeedFlags({}, MOCK_FLAGS);
     expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
   });
 });
@@ -295,27 +293,30 @@ describe('resolveInitSeed', () => {
   });
 
   it('viewMode: settings.json non-default wins over manifest', () => {
-    const manifest = makeManifest({ features: { ...makeManifest().features, viewMode: 'verbose' } });
+    // Phase 2: viewMode lives in flags['view-mode'], not deprecated features.viewMode
+    const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'focus' });
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
     expect(seed.viewMode).toBe('focus'); // settings beats manifest
   });
 
   it('viewMode: manifest used when settings.json has no viewMode or "default"', () => {
-    const manifest = makeManifest({ features: { ...makeManifest().features, viewMode: 'verbose' } });
+    // Phase 2: viewMode lives in flags['view-mode'], not deprecated features.viewMode
+    const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'default' });
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
     expect(seed.viewMode).toBe('verbose'); // settings 'default' → fall through to manifest
   });
 
   it('viewMode: falls back to "default" when neither settings nor manifest has one', () => {
-    const manifest = makeManifest(); // viewMode: 'default' in fixture
+    const manifest = makeManifest(); // no 'view-mode' in flags → resolves to 'default'
     const settings = '{}';
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
     expect(seed.viewMode).toBe('default');
   });
 
   it('re-init round-trip: re-resolving from the same manifest+config produces the same seed', () => {
+    // Phase 2: FlagsRecord (was string[] + viewMode); view-mode in flags record
     const manifest = makeManifest({
       features: {
         ambient: false,
@@ -324,8 +325,8 @@ describe('resolveInitSeed', () => {
         knowledge: false,
         learning: true,
         rules: false,
-        flags: ['tui', 'lsp'],
-        viewMode: 'verbose',
+        proxy: false,
+        flags: { tui: true, lsp: true, 'view-mode': 'verbose' },
       },
     });
     const config = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' as const };

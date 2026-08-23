@@ -1,8 +1,15 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_PLUGIN_NAMES, DELETED_PLUGIN_NAMES } from './plugins.js';
-import { VIEW_MODES, ViewMode } from './flags.js';
+import {
+  VIEW_MODES,
+  type ViewMode,
+  type FlagsRecord,
+  migrateLegacyFlagsToRecord,
+  sanitizeFlagsRecord,
+} from './flags.js';
 import { normalizeComplianceFeature, type ComplianceFeatureState } from './compliance.js';
+import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -36,14 +43,25 @@ export interface ManifestData {
     /** Renamed from decisions — self-healed from features.decisions on read */
     learning: boolean;
     rules: boolean;
-    flags: string[];
     /**
-     * Snapshot of all FLAG_REGISTRY ids written at the last install.
-     * Used by resolveSeedFlags to detect new default-ON flags added to the
-     * registry since the previous install and auto-adopt them.
-     * Absent in pre-7b manifests — readManifest self-heals to undefined.
+     * Phase 2: typed flag state record (was string[]).
+     * Absent key = unknown to this install (adopted on next seed per ADR-014).
+     * Null value = known + deliberately unset (neutral).
+     * Boolean value = known + explicitly enabled (true) or disabled (false).
+     * Reads from old string[] manifests are auto-migrated via migrateLegacyFlagsToRecord.
+     */
+    flags: FlagsRecord;
+    /**
+     * @deprecated Phase 2 — folded into flags['view-mode'] on readManifest.
+     * Kept in type so init.ts (Phase 6 rewrite target) still compiles.
+     * Phase 6 removes these writes; readManifest strips the field from results.
      */
     knownFlags?: string[];
+    /**
+     * @deprecated Phase 2 — folded into flags['view-mode'] on readManifest.
+     * Kept in type so init.ts (Phase 6 rewrite target) still compiles.
+     * Phase 6 removes these writes; readManifest strips the field from results.
+     */
     viewMode?: ViewMode;
     /**
      * Security deny list location. 'user' = ~/.claude/settings.json,
@@ -70,6 +88,18 @@ export interface ManifestData {
 
 /**
  * Read and parse the manifest file. Returns null if missing or corrupt.
+ *
+ * Self-heals the following on-disk inconsistencies (applies ADR-014):
+ * - features.kb → features.knowledge rename
+ * - features.decisions → features.learning rename
+ * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
+ * - features.viewMode folded into flags['view-mode'] and stripped from result
+ * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
+ * - features.proxy absent → false
+ * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
+ *
+ * D39: heal-write failure returns the migrated in-memory manifest (not null).
+ * The on-disk format remains unhealed; next read triggers another attempt.
  */
 export async function readManifest(devflowDir: string): Promise<ManifestData | null> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
@@ -90,6 +120,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     ) {
       return null;
     }
+
     // Self-heal: rename features.kb → features.knowledge on disk
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
@@ -99,17 +130,64 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const learning = typeof features.learning === 'boolean' ? features.learning
       : typeof features.decisions === 'boolean' ? features.decisions as boolean
       : false;
-    const needsHeal = features.kb !== undefined || features.decisions !== undefined;
-
-    const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
     const asStringArray = (val: unknown): string[] | undefined =>
       Array.isArray(val) && (val as unknown[]).every(e => typeof e === 'string')
         ? (val as string[])
         : undefined;
-    const knownFlags = asStringArray(features.knownFlags);
     const knownPlugins = asStringArray(data.knownPlugins);
+    // knownFlags is consumed here for migration; NOT carried into the returned manifest
+    const knownFlags = asStringArray(features.knownFlags);
+
+    // ── Parse flags ────────────────────────────────────────────────────────────
+    // Three cases:
+    //   A) Array → legacy format: migrate to FlagsRecord (fold viewMode in)
+    //   B) Object → already a FlagsRecord: fold lingering viewMode if present
+    //   C) Other → default to empty record
+    let flagsRecord: FlagsRecord;
+    const rawFlags = features.flags;
+
+    if (Array.isArray(rawFlags)) {
+      // Case A: string[] → FlagsRecord migration.
+      // Filter to strings only (malformed elements are silently dropped).
+      const enabledIds = (rawFlags as unknown[]).filter(e => typeof e === 'string') as string[];
+      // Extract legacyViewMode for the migration fold.
+      const rawViewMode = features.viewMode;
+      const legacyViewMode = typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)
+        ? rawViewMode as ViewMode
+        : undefined;
+      flagsRecord = migrateLegacyFlagsToRecord(enabledIds, knownFlags, legacyViewMode);
+    } else if (rawFlags !== null && typeof rawFlags === 'object') {
+      // Case B: already a FlagsRecord. Spread to avoid mutating the parsed value.
+      flagsRecord = { ...(rawFlags as Record<string, unknown>) } as FlagsRecord;
+      // Fold lingering viewMode into flags['view-mode'] when the record lacks a
+      // non-default value (e.g. when written by Phase 2 init.ts via legacyIdsToRecord
+      // which sets view-mode:null, with viewMode written as a separate deprecated field).
+      const rawViewMode = features.viewMode;
+      if (typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)) {
+        const existing = flagsRecord['view-mode'];
+        if (existing === null || existing === undefined || existing === 'default') {
+          flagsRecord['view-mode'] = rawViewMode as ViewMode;
+        }
+      }
+    } else {
+      // Case C: missing/malformed → empty record
+      flagsRecord = {};
+    }
+
+    // PF-023 + D39: sanitize all values; block prototype pollution keys.
+    const sanitizedFlags = sanitizeFlagsRecord(flagsRecord);
+
+    // needsHeal when any legacy artifact is present on disk
+    const needsHeal =
+      features.kb !== undefined ||
+      features.decisions !== undefined ||
+      Array.isArray(features.flags) ||
+      features.knownFlags !== undefined ||
+      features.viewMode !== undefined;
+
+    const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
     const manifest: ManifestData = {
       version: data.version as string,
@@ -123,18 +201,20 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         knowledge,
         learning,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
-        flags: Array.isArray(features.flags) ? features.flags as string[] : [],
-        knownFlags,
-        viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)
-          ? features.viewMode as ViewMode
-          : undefined,
+        flags: sanitizedFlags,
+        // knownFlags and viewMode are NOT carried into the result.
+        // - knownFlags: its semantic (which flags are "known") is now encoded in
+        //   FlagsRecord key-presence (present key = known, absent = new/adopt-on-seed).
+        // - viewMode: folded into flags['view-mode'] above.
+        // init.ts still writes both fields (Phase 6 removes those writes); leaving
+        // them out of the returned manifest prevents them from being echoed back on
+        // the next write and causing a spurious needsHeal on every read.
         security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
           ? features.security as SecurityMode
           : undefined,
         // Self-heal: absent proxy field defaults to false (applies ADR-014 self-heal idiom)
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
-        // (applies ADR-014 self-heal idiom; normalizeComplianceFeature is in TOLERANT section)
         compliance: normalizeComplianceFeature(features.compliance),
       },
       installedAt: data.installedAt as string,
@@ -142,7 +222,14 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     };
 
     if (needsHeal) {
-      await writeManifest(devflowDir, manifest);
+      // D39: wrap the heal-write in its own try/catch so a write failure does NOT
+      // propagate to the caller. The migrated in-memory manifest is returned even
+      // when the on-disk heal fails. The next read will retry the heal.
+      try {
+        await writeManifest(devflowDir, manifest);
+      } catch {
+        // heal-write failed — return migrated in-memory manifest unchanged
+      }
     }
 
     return manifest;
@@ -152,12 +239,15 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
 }
 
 /**
- * Write manifest to disk. Creates parent directory if needed.
+ * Write manifest to disk atomically. Creates parent directory if needed.
+ *
+ * Uses writeFileAtomicExclusive (tmp+rename) to prevent readers from seeing
+ * partial writes. Applies D34 atomic-write semantics across all manifest updates.
  */
 export async function writeManifest(devflowDir: string, data: ManifestData): Promise<void> {
   await fs.mkdir(devflowDir, { recursive: true });
   const manifestPath = path.join(devflowDir, 'manifest.json');
-  await fs.writeFile(manifestPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+  await writeFileAtomicExclusive(manifestPath, JSON.stringify(data, null, 2) + '\n');
 }
 
 /**

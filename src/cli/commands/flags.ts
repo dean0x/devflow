@@ -9,11 +9,16 @@ import { readManifest, writeManifest } from '../../core/manifest.js';
 
 /**
  * Resolve current enabled flags from manifest (falls back to defaults if no manifest).
+ * Phase 2 bridge: extracts boolean-true entries from FlagsRecord back to string[].
+ * Phase 6 will rewrite the flags CLI to work directly with FlagsRecord.
  */
 async function resolveEnabledFlags(devflowDir: string): Promise<string[]> {
   const manifest = await readManifest(devflowDir);
   if (manifest) {
-    return manifest.features.flags;
+    // Phase 2 bridge: FlagsRecord → string[] of enabled-true ids
+    return Object.entries(manifest.features.flags)
+      .filter(([, v]) => v === true)
+      .map(([k]) => k);
   }
   return getDefaultFlags();
 }
@@ -42,7 +47,8 @@ async function updateSettingsFlags(claudeDir: string, flagIds: string[]): Promis
 async function updateManifestFlags(devflowDir: string, flagIds: string[]): Promise<void> {
   const manifest = await readManifest(devflowDir);
   if (!manifest) return;
-  manifest.features.flags = flagIds;
+  // Phase 2 bridge: convert string[] back to FlagsRecord for storage
+  manifest.features.flags = legacyIdsToRecord(flagIds);
   manifest.updatedAt = new Date().toISOString();
   await writeManifest(devflowDir, manifest);
 }

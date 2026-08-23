@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, type ManifestData } from '../src/core/manifest.js';
+import { makeManifest } from './helpers.js';
 
 describe('readManifest', () => {
   let tmpDir: string;
@@ -73,11 +74,13 @@ describe('readManifest', () => {
   });
 
   it('returns parsed manifest for valid data (without teams)', async () => {
+    // Phase 2: use FlagsRecord (not string[]) and no deprecated viewMode field
+    // so the round-trip is heal-free and the result deeply equals the input.
     const data: ManifestData = {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: [], viewMode: 'verbose', proxy: false, compliance: { enabled: false, frameworks: [] } },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, compliance: { enabled: false, frameworks: [] } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -137,7 +140,8 @@ describe('readManifest', () => {
     expect(result!.features.knowledge).toBe(false);
     expect(result!.features.learning).toBe(false);
     expect(result!.features.rules).toBe(true);
-    expect(result!.features.flags).toEqual([]);
+    // Phase 2: flags migrated from absent (no flags in old JSON) → empty FlagsRecord
+    expect(result!.features.flags).toEqual({});
     // learn field no longer exists in manifest
     expect((result!.features as Record<string, unknown>).learn).toBeUndefined();
   });
@@ -221,7 +225,9 @@ describe('readManifest', () => {
       await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
       const result = await readManifest(tmpDir);
       expect(result).not.toBeNull();
-      expect(result!.features.viewMode).toBe(mode);
+      // Phase 2: viewMode folded into flags['view-mode']; deprecated field stripped
+      expect(result!.features.flags['view-mode']).toBe(mode);
+      expect(result!.features.viewMode).toBeUndefined();
     }
   });
 
@@ -811,7 +817,8 @@ describe('knownFlags / knownPlugins schema', () => {
       knowledge: false,
       learning: false,
       rules: true,
-      flags: ['tui'],
+      // Phase 2: FlagsRecord (was string[])
+      flags: { tui: true },
     },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -825,7 +832,9 @@ describe('knownFlags / knownPlugins schema', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('round-trips knownFlags through write+read', async () => {
+  it('write manifest with knownFlags — readManifest strips it (Phase 2 heal)', async () => {
+    // Phase 2: knownFlags semantics are encoded in FlagsRecord key-presence.
+    // readManifest strips the deprecated knownFlags field on read (needsHeal path).
     const data: ManifestData = {
       ...baseManifest(),
       features: { ...baseManifest().features, knownFlags: ['tui', 'lsp', 'tool-search'] },
@@ -833,7 +842,9 @@ describe('knownFlags / knownPlugins schema', () => {
     await writeManifest(tmpDir, data);
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.features.knownFlags).toEqual(['tui', 'lsp', 'tool-search']);
+    expect(result!.features.knownFlags).toBeUndefined();
+    // flags preserved (baseManifest has { tui: true })
+    expect(result!.features.flags).toEqual(expect.objectContaining({ tui: true }));
   });
 
   it('round-trips knownPlugins through write+read', async () => {
@@ -940,7 +951,9 @@ describe('knownFlags / knownPlugins schema', () => {
     expect(result!.knownPlugins).toBeUndefined();
   });
 
-  it('preserves other features fields alongside knownFlags', async () => {
+  it('write manifest with knownFlags + viewMode — readManifest strips both, folds viewMode into flags', async () => {
+    // Phase 2: knownFlags stripped; viewMode folded into flags['view-mode'].
+    // Other features fields (security) are preserved unchanged.
     const data: ManifestData = {
       ...baseManifest(),
       features: {
@@ -953,8 +966,12 @@ describe('knownFlags / knownPlugins schema', () => {
     await writeManifest(tmpDir, data);
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.features.knownFlags).toEqual(['tui']);
-    expect(result!.features.viewMode).toBe('verbose');
+    // Phase 2: knownFlags stripped (semantics encoded in FlagsRecord key-presence)
+    expect(result!.features.knownFlags).toBeUndefined();
+    // Phase 2: viewMode folded into flags['view-mode']; deprecated field stripped
+    expect(result!.features.viewMode).toBeUndefined();
+    expect(result!.features.flags['view-mode']).toBe('verbose');
+    // Non-flags features preserved
     expect(result!.features.security).toBe('user');
   });
 });
@@ -1055,5 +1072,101 @@ describe('compliance feature field', () => {
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'sox'] });
+  });
+});
+
+// ── Phase 2: FlagsRecord heal round-trip guards ───────────────────────────────
+
+describe('FlagsRecord heal round-trip (Phase 2)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-p2-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('canonical makeManifest() round-trips without triggering heal', async () => {
+    // makeManifest() uses FlagsRecord + no deprecated fields → no heal cycle → deep-equal.
+    const data = makeManifest();
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).toEqual(data);
+  });
+
+  it('FlagsRecord with false values → deliberate-disable preserved on read', async () => {
+    // A flag explicitly set to false is a deliberate user choice — must NOT be auto-enabled.
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true,
+        flags: { tui: false, lsp: true, 'tool-search': false },
+        proxy: false, compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // Deliberate-disable (false) must be preserved — PF-023 sink validation
+    expect(result!.features.flags['tui']).toBe(false);
+    expect(result!.features.flags['lsp']).toBe(true);
+    expect(result!.features.flags['tool-search']).toBe(false);
+  });
+
+  it('array→FlagsRecord migration: pre-Phase2 string[] heal is idempotent on second read', async () => {
+    // Write a pre-Phase2 manifest (flags as string array).
+    // After first read it heals to FlagsRecord; second read must NOT re-trigger heal.
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true,
+        flags: ['tui', 'lsp'],
+        proxy: false, compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+
+    // First read: heals array → FlagsRecord, writes healed manifest to disk
+    const result1 = await readManifest(tmpDir);
+    expect(result1).not.toBeNull();
+    expect(Array.isArray(result1!.features.flags)).toBe(false);
+
+    // Second read: no array → no heal cycle → result is identical
+    const result2 = await readManifest(tmpDir);
+    expect(result2).not.toBeNull();
+    expect(result2).toEqual(result1);
+  });
+
+  it('__proto__ key in flags JSON is stripped by sanitizeFlagsRecord on read', async () => {
+    // JSON.parse('{"__proto__": true}') creates an own data property on the parsed object.
+    // sanitizeFlagsRecord must skip it to prevent prototype pollution.
+    const raw = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true,
+        flags: JSON.parse('{"__proto__": true, "tui": true}'),
+        proxy: false, compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // tui preserved; __proto__ own-property stripped
+    expect(result!.features.flags['tui']).toBe(true);
+    expect(Object.hasOwn(result!.features.flags, '__proto__')).toBe(false);
   });
 });

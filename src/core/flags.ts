@@ -615,6 +615,9 @@ export function readViewMode(record: FlagsRecord): ViewMode {
 export function sanitizeFlagsRecord(record: FlagsRecord): FlagsRecord {
   const result: FlagsRecord = {};
   for (const [id, value] of Object.entries(record)) {
+    // D39: prototype pollution guard — skip dangerous own-property names that
+    // would invoke [[Set]] accessors on the result object and mutate its prototype.
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
     const flag = FLAG_REGISTRY_MAP.get(id);
     if (flag) {
       result[id] = coerceFlagValue(flag, value);

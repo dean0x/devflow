@@ -14,7 +14,15 @@
  * agent-neutral, target-agnostic utilities).
  */
 
-import { resolveExistingViewMode, FLAG_REGISTRY, type ClaudeCodeFlag, type ViewMode } from '../../core/flags.js';
+import {
+  resolveExistingViewMode,
+  FLAG_REGISTRY,
+  coerceFlagValue,
+  readViewMode,
+  type ClaudeCodeFlag,
+  type ViewMode,
+  type FlagsRecord,
+} from '../../core/flags.js';
 import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
 import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
@@ -109,45 +117,59 @@ export function resolveSeedFeatures(
 /**
  * Resolve the enabled flag set for the init seed.
  *
- * @param enabledFlags - Currently-enabled flag IDs from the manifest,
- *                       or null for a fresh install (no prior manifest).
- * @param knownFlags   - Snapshot of all flag IDs known at the last install
- *                       (manifest.features.knownFlags), or undefined when
- *                       the manifest pre-dates the snapshot feature.
- * @param registry     - Flag registry to consult; injectable for tests.
+ * Phase 2: accepts a FlagsRecord instead of the old (string[], knownFlags) pair.
+ * FlagsRecord key-presence encodes the "known" concept: present key = known at
+ * last install, absent key = new to this install (adopt on seed per ADR-014).
  *
- * Rules:
- *   - null enabledFlags (fresh) → all default-ON flags in the registry
- *   - knownFlags === undefined (old manifest, migration) → return enabledFlags
- *     as-is; adopt nothing new (safe: user's prior choices preserved)
- *   - Otherwise → enabledFlags ∪ {default-ON flags whose id ∉ knownFlags}
- *     (newly added registry entries that the user never saw before are auto-adopted)
- *   - Default-OFF flags are NEVER auto-added regardless of knownFlags
+ * @param manifestFlags - FlagsRecord from the manifest, or null for fresh install.
+ * @param registry      - Flag registry to consult; injectable for tests.
+ *
+ * Rules (boolean flags only — non-boolean flags are not represented in string[]):
+ *   - null manifestFlags (fresh install) → all default-ON boolean flags
+ *   - Entry absent from record           → adopt registry default (if true → include)
+ *   - Entry present (any value)          → coerceFlagValue; include iff coerced === true
+ *                                          NEVER resurrect default for invalid/null (PF-023)
+ *   - Unknown IDs with value === true    → included (forward-compat preservation)
+ *
+ * Applies ADR-014: absent key = unknown to this install → adoption on next seed.
+ * Applies PF-023: sink-validation via coerceFlagValue — invalid → null, never default.
+ *
+ * @deprecated InitSeed.flags stays string[] as a Phase 6 bridge for init.ts. This
+ * function produces the string[] from the FlagsRecord; Phase 6 will replace it.
  */
 export function resolveSeedFlags(
-  enabledFlags: string[] | null,
-  knownFlags: string[] | undefined,
+  manifestFlags: FlagsRecord | null,
   registry: readonly ClaudeCodeFlag[] = FLAG_REGISTRY,
 ): string[] {
-  // Fresh install → all default-ON flags from the registry
-  if (enabledFlags === null) {
+  // Fresh install → all default-ON boolean flags from registry
+  if (manifestFlags === null) {
     return registry.filter(f => f.kind === 'boolean' && f.defaultValue === true).map(f => f.id);
   }
 
-  // Old manifest without a knownFlags snapshot → adopt nothing new
-  if (knownFlags === undefined) {
-    return [...enabledFlags];
-  }
+  const registryIds = new Set(registry.map(f => f.id));
+  const result: string[] = [];
 
-  // Re-init with a knownFlags snapshot: union existing + newly-added default-ON entries
-  const knownSet = new Set(knownFlags);
-  const result = new Set(enabledFlags);
   for (const flag of registry) {
-    if (flag.kind === 'boolean' && flag.defaultValue === true && !knownSet.has(flag.id)) {
-      result.add(flag.id);
+    if (flag.kind !== 'boolean') continue; // only boolean flags appear in string[] output
+
+    if (flag.id in manifestFlags) {
+      // Entry present (any value): coerce; include only if the result is true.
+      // NEVER resurrect the registry default for null/invalid values (PF-023).
+      const coerced = coerceFlagValue(flag, manifestFlags[flag.id]);
+      if (coerced === true) result.push(flag.id);
+      // false / null → not included (deliberate disable or neutral)
+    } else {
+      // Entry absent → adopt registry default (ADR-014: absent = new/unknown)
+      if (flag.defaultValue === true) result.push(flag.id);
     }
   }
-  return [...result];
+
+  // Unknown IDs (not in registry): pass through if truthy (forward-compat)
+  for (const [id, value] of Object.entries(manifestFlags)) {
+    if (!registryIds.has(id) && value === true) result.push(id);
+  }
+
+  return result;
 }
 
 /**
@@ -233,19 +255,25 @@ export function resolveInitSeed(
 ): InitSeed {
   const features = resolveSeedFeatures(seedManifest, seedConfig);
 
-  // null for a fresh install (no manifest); string[] from manifest otherwise
-  const enabledFlags: string[] | null = seedManifest !== null ? seedManifest.features.flags : null;
-  const flags = resolveSeedFlags(enabledFlags, seedManifest?.features.knownFlags);
+  // Phase 2: features.flags is now FlagsRecord; null for fresh install (no manifest).
+  // seedManifest?.features.flags is FlagsRecord at type level; may be absent at runtime
+  // for very old manifests not yet healed — ?? null collapses to fresh-install behavior.
+  const manifestFlags: FlagsRecord | null = seedManifest?.features.flags ?? null;
+  const flags = resolveSeedFlags(manifestFlags);
 
   const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
   const { workflowPlugins, languagePlugins } = resolveSeedPlugins(
     manifestPlugins, seedManifest?.knownPlugins, plugins,
   );
 
-  // viewMode: non-default setting wins; else manifest; else 'default'
+  // viewMode: non-default settings wins; else flags['view-mode']; else 'default'.
+  // readViewMode returns 'default' when the entry is absent or null, so we treat
+  // 'default' as no-opinion and fall through to the 'default' literal.
+  // (deprecated seedManifest?.features.viewMode no longer consulted — Phase 6 removes it)
+  const resolvedManifestViewMode = manifestFlags ? readViewMode(manifestFlags) : undefined;
   const viewMode: ViewMode =
     resolveExistingViewMode(settingsSnapshot) ??
-    seedManifest?.features.viewMode ??
+    (resolvedManifestViewMode !== 'default' ? resolvedManifestViewMode : undefined) ??
     'default';
 
   return { features, flags, viewMode, workflowPlugins, languagePlugins };
