@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode, legacyIdsToRecord } from '../../core/flags.js';
+import { applyFlags, stripFlags, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -630,12 +630,12 @@ export const initCommand = new Command('init')
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
     let complianceFrameworks = seed.features.compliance.frameworks;
-    let enabledFlags = seed.flags;
-    let viewMode: ViewMode = seed.viewMode;
+    let enabledFlags: FlagsRecord = seed.flags;
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
-    // Used by resolveFinalViewMode to decide whether to clobber an externally-set /focus value.
-    // --reset forces viewMode back to 'default': resolveResetGatedInputs empties the settings snapshot
-    // so seed.viewMode collapses to 'default', and explicit=true makes that 'default' win at write time.
+    // Used by resolveFinalViewMode to decide whether the user-selected view-mode wins over
+    // an externally-set /focus value in settings.json.
+    // --reset forces view-mode back to 'default': resolveResetGatedInputs empties the settings
+    // snapshot so seed.flags['view-mode'] collapses to 'default', and explicit=true makes it win.
     let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -703,7 +703,7 @@ export const initCommand = new Command('init')
       proxyEnabled = effectiveFeatures.proxy;
       complianceEnabled = effectiveFeatures.compliance.enabled;
       complianceFrameworks = effectiveFeatures.compliance.frameworks;
-      // enabledFlags and viewMode are already initialised to seed values above.
+      // enabledFlags is already initialised to seed.flags above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -730,7 +730,7 @@ export const initCommand = new Command('init')
       }
 
       // Print summary
-      const defaultFlagCount = enabledFlags.length;
+      const defaultFlagCount = countActiveFlags(enabledFlags);
       const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
@@ -741,8 +741,8 @@ export const initCommand = new Command('init')
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
         `Compliance:      ${complianceSummary}`,
-        `View mode:       ${viewMode}`,
-        `Claude Code flags: ${defaultFlagCount} enabled`,
+        `View mode:       ${readViewMode(enabledFlags)}`,
+        `Claude Code flags: ${defaultFlagCount} configured`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
         `${safeDeleteAction !== 'skip' ? 'Safe delete:     installed' : ''}`,
       ].filter(l => l.trim()).join('\n');
@@ -948,68 +948,33 @@ export const initCommand = new Command('init')
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
 
-      // Claude Code flags multiselect (advanced only)
-      const recommended = FLAG_REGISTRY.filter(f => f.recommended);
-      const optional = FLAG_REGISTRY.filter(f => !f.recommended);
-      const flagChoices = [
-        ...recommended.map(f => ({
-          value: f.id,
-          label: f.label,
-          hint: `${f.hint} · recommended`,
-        })),
-        { value: '_separator', label: color.dim('── Optional (skip if unsure) ──'), hint: '' },
-        ...optional.map(f => ({
-          value: f.id,
-          label: f.label,
-          hint: f.hint,
-        })),
-      ];
-      p.note(
-        'Recommended flags are pre-selected. Optional flags are for\n' +
-        'advanced users — if you don\'t recognize one, skip it.',
-        'Claude Code Flags',
-      );
+      // Claude Code flags TUI (advanced only) — replaces multiselect + viewMode select.
+      // view-mode is encoded as an enum flag in the registry; the TUI handles it natively.
+      p.log.info('Opening the flags editor — enter saves, esc keeps current settings.');
+      const { runFlagsTui, buildFlagRows, collectFlagRecord } = await import('../flags-view/index.js');
+      const flagRows = buildFlagRows(FLAG_REGISTRY, enabledFlags);
+      const flagsTuiResult = await runFlagsTui(flagRows);
 
-      const flagSelection = await p.multiselect({
-        message: 'Claude Code flags',
-        options: flagChoices,
-        // Pre-seeded from prior state; fresh installs start with all default-ON flags.
-        initialValues: seed.flags,
-        required: false,
-      });
-
-      if (p.isCancel(flagSelection)) {
+      if (flagsTuiResult.action === 'abort') {
         p.cancel('Installation cancelled.');
         process.exit(0);
+      } else if (flagsTuiResult.action === 'save') {
+        enabledFlags = collectFlagRecord(flagsTuiResult.rows);
+        // Mark as explicit: user actively confirmed flags (including view-mode),
+        // so resolveFinalViewMode will let the selection win at settings write time.
+        viewModeExplicit = true;
       }
-      enabledFlags = flagSelection.filter(id => id !== '_separator');
+      // 'cancel' (esc) or 'none': keep seeded enabledFlags, viewModeExplicit unchanged.
 
-      // View mode selector (advanced only)
-      p.note(
-        'Controls how much detail Claude Code shows in the transcript.\n' +
-        '• default — normal display with expandable tool output\n' +
-        '• verbose — shows everything including thinking blocks\n' +
-        '• focus — minimal: prompt, one-line tool summaries, final response',
-        'View Mode',
-      );
-      const viewModeChoice = await p.select({
-        message: 'View mode',
-        options: [
-          { value: 'default', label: 'Default', hint: 'expandable tool output · recommended' },
-          { value: 'verbose', label: 'Verbose', hint: 'shows everything including thinking' },
-          { value: 'focus', label: 'Focus', hint: 'minimal output, one-line summaries' },
-        ],
-        // Pre-seeded from prior state (fresh installs default to 'default').
-        initialValue: seed.viewMode,
-      });
-      if (p.isCancel(viewModeChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
+      // Outcome line (PF-029): non-vacuous count so the user can confirm what was applied.
+      {
+        const activeCount = countActiveFlags(enabledFlags);
+        const defaults = getDefaultFlagsRecord();
+        const modifiedCount = Object.keys(enabledFlags).filter(
+          id => enabledFlags[id] !== defaults[id],
+        ).length;
+        p.log.info(`Flags: ${activeCount} configured, ${modifiedCount} modified from defaults`);
       }
-      viewMode = viewModeChoice as 'default' | 'verbose' | 'focus';
-      // Mark as explicit: user actively selected this mode, so resolveFinalViewMode will
-      // let it win over an externally-set /focus value.
-      viewModeExplicit = true;
 
       // .claudeignore prompt
       if (earlyGitRoot) {
@@ -1660,19 +1625,21 @@ export const initCommand = new Command('init')
       // Strip Devflow-managed teammateMode ("auto"). User-set values (e.g. "tmux") are preserved.
       content = stripDevflowTeammateModeFromJson(content);
 
-      // Claude Code flags — strip all managed keys, then re-apply selected flags
-      content = stripFlags(content);
-      content = applyFlags(content, legacyIdsToRecord(enabledFlags));
-
-      // Resolve the final viewMode to write.
-      // - explicit=true (interactive selection or --reset): selected value always wins
+      // Claude Code flags — fold view-mode before strip, then strip+apply in one pass.
+      // PF-015 (fold-before-strip): resolveExistingViewMode MUST run on the pre-strip
+      // content because stripFlags removes the viewMode key as part of the view-mode
+      // flag's onPayload cleanup. Reading after strip would always return undefined.
+      //
+      // - explicit=true (interactive TUI save or --reset): the TUI-selected view-mode wins
       // - explicit=false (recommended/non-TTY): preserve an externally-set /focus value;
-      //   otherwise use the seeded viewMode (which already reflects the prior manifest value)
-      viewMode = resolveFinalViewMode(resolveExistingViewMode(content), viewMode, viewModeExplicit);
-
-      // View mode — strip then apply for upgrade safety
-      content = stripViewMode(content);
-      content = applyViewMode(content, viewMode);
+      //   otherwise use the seeded value (which already reflects the prior manifest state)
+      enabledFlags['view-mode'] = resolveFinalViewMode(
+        resolveExistingViewMode(content),
+        readViewMode(enabledFlags),
+        viewModeExplicit,
+      );
+      content = stripFlags(content);
+      content = applyFlags(content, enabledFlags);
 
       // Proxy hooks (SessionStart + UserPromptSubmit) — strip-then-add, idempotent.
       // Parse Settings once for the hook mutation; env mutation stays in string space.
@@ -1977,13 +1944,9 @@ export const initCommand = new Command('init')
         knowledge: knowledgeEnabled,
         learning: learningEnabled,
         rules: rulesEnabled,
-        // Phase 2 bridge: legacyIdsToRecord converts enabledFlags string[] to FlagsRecord.
-        // Phase 6 will rewrite this block to work directly with FlagsRecord.
-        flags: legacyIdsToRecord(enabledFlags),
-        // @deprecated — Phase 6 removes this write. knownFlags semantics are now encoded
-        // in FlagsRecord key-presence (present = known, absent = new/adopt-on-seed).
-        knownFlags: FLAG_REGISTRY.map(f => f.id),
-        viewMode,
+        // FlagsRecord written directly — key-presence encodes "known" (ADR-014).
+        // view-mode is encoded as flags['view-mode'] (the resolved final value).
+        flags: enabledFlags,
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,

@@ -24,7 +24,7 @@ import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { stripFlags, stripViewMode } from '../../core/flags.js';
+import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 
@@ -811,8 +811,7 @@ export async function runCleanupPhase(opts: {
       settingsContent = removeDreamHook(settingsContent);
       settingsContent = removeHudStatusLine(settingsContent);
       settingsContent = removeContextHook(settingsContent);
-      settingsContent = stripFlags(settingsContent);
-      settingsContent = stripViewMode(settingsContent);
+      settingsContent = stripFlags(settingsContent); // also strips viewMode via view-mode registry entry
       settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
       // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
       // REG-1: scope the URL strip to the port Devflow manages — use the pre-captured port

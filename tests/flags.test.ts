@@ -13,17 +13,12 @@ import {
   readViewMode,
   sanitizeFlagsRecord,
   migrateLegacyFlagsToRecord,
-  legacyIdsToRecord,
   applyFlags,
   stripFlags,
   // Kept verbatim
   VIEW_MODES,
   resolveExistingViewMode,
   resolveFinalViewMode,
-  // Deprecated shims (kept for compile bridge)
-  getDefaultFlags,
-  applyViewMode,
-  stripViewMode,
   type ViewMode,
   type FlagsRecord,
   type ClaudeCodeFlag,
@@ -1095,151 +1090,7 @@ describe('migrateLegacyFlagsToRecord', () => {
   });
 });
 
-// ─── legacyIdsToRecord (compile bridge shim) ──────────────────────────────────
-
-describe('legacyIdsToRecord (compile bridge shim)', () => {
-  it('known boolean flag in ids → true', () => {
-    const record = legacyIdsToRecord(['tui', 'tool-search']);
-    expect(record['tui']).toBe(true);
-    expect(record['tool-search']).toBe(true);
-  });
-
-  it('known boolean flag NOT in ids → false (neutral)', () => {
-    const record = legacyIdsToRecord(['tui']);
-    expect(record['lsp']).toBe(false);
-  });
-
-  it('unknown id in ids → true (forward compat)', () => {
-    const record = legacyIdsToRecord(['future-flag-xyz']);
-    expect(record['future-flag-xyz']).toBe(true);
-  });
-
-  it('roundtrip: applyFlags(stripFlags(x), legacyIdsToRecord(ids)) matches old behavior', () => {
-    const base = JSON.stringify({
-      hooks: { Stop: [] },
-      env: { CUSTOM: 'value' },
-    }, null, 2);
-
-    const ids = ['tool-search', 'lsp', 'clear-context-on-plan'];
-    const result = JSON.parse(applyFlags(stripFlags(base), legacyIdsToRecord(ids)));
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(result.env.ENABLE_LSP_TOOL).toBe('true');
-    expect(result.showClearContextOnPlanAccept).toBe(true);
-    expect(result.env.CUSTOM).toBe('value');
-    expect(result.hooks).toEqual({ Stop: [] });
-  });
-});
-
-// ─── Deprecated: getDefaultFlags shim ────────────────────────────────────────
-
-describe('getDefaultFlags (deprecated shim)', () => {
-  it('returns IDs of flags where recommended: true and default value is active', () => {
-    const defaults = getDefaultFlags();
-    // Hard-coded to catch unintended changes — update intentionally
-    expect(defaults).toContain('tui');
-    expect(defaults).toContain('tool-search');
-    expect(defaults).toContain('lsp');
-    expect(defaults).toContain('prompt-caching-1h');
-    expect(defaults).toContain('show-turn-duration');
-    expect(defaults).toContain('clear-context-on-plan');
-    expect(defaults).toContain('disable-bundled-skills');
-    expect(defaults).toContain('pin-sonnet-4-6');
-    // New recommended number flag (has non-neutral default)
-    expect(defaults).toContain('max-concurrent-subagents');
-    // Not in defaults:
-    expect(defaults).not.toContain('brief');
-    expect(defaults).not.toContain('agent-teams');
-  });
-});
-
-// ─── Deprecated: applyViewMode ───────────────────────────────────────────────
-
-describe('applyViewMode (deprecated — kept as compile bridge)', () => {
-  it('sets viewMode to verbose', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'verbose'));
-    expect(result.viewMode).toBe('verbose');
-  });
-
-  it('sets viewMode to focus', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'focus'));
-    expect(result.viewMode).toBe('focus');
-  });
-
-  it('removes viewMode key when mode is default', () => {
-    const input = JSON.stringify({ hooks: {}, viewMode: 'verbose' }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'default'));
-    expect(result.viewMode).toBeUndefined();
-  });
-
-  it('does not add viewMode key when mode is default and key is absent', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'default'));
-    expect(result.viewMode).toBeUndefined();
-    expect(Object.keys(result)).not.toContain('viewMode');
-  });
-
-  it('preserves existing settings when applying view mode', () => {
-    const input = JSON.stringify({
-      hooks: { Stop: [] },
-      env: { EXISTING: 'keep' },
-    }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'focus'));
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.env.EXISTING).toBe('keep');
-    expect(result.viewMode).toBe('focus');
-  });
-
-  it('overwrites an existing viewMode value', () => {
-    const input = JSON.stringify({ viewMode: 'verbose' }, null, 2);
-    const result = JSON.parse(applyViewMode(input, 'focus'));
-    expect(result.viewMode).toBe('focus');
-  });
-});
-
-// ─── Deprecated: stripViewMode ───────────────────────────────────────────────
-
-describe('stripViewMode (deprecated — kept as compile bridge)', () => {
-  it('removes viewMode key', () => {
-    const input = JSON.stringify({ viewMode: 'verbose', hooks: {} }, null, 2);
-    const result = JSON.parse(stripViewMode(input));
-    expect(result.viewMode).toBeUndefined();
-    expect(result.hooks).toEqual({});
-  });
-
-  it('handles missing viewMode key gracefully', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(stripViewMode(input));
-    expect(result).toEqual({ hooks: {} });
-  });
-
-  it('preserves all other settings', () => {
-    const input = JSON.stringify({
-      viewMode: 'focus',
-      hooks: { Stop: [] },
-      env: { CUSTOM: 'value' },
-    }, null, 2);
-    const result = JSON.parse(stripViewMode(input));
-    expect(result.viewMode).toBeUndefined();
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.env.CUSTOM).toBe('value');
-  });
-
-  it('roundtrip: applyViewMode then stripViewMode restores original', () => {
-    const base = JSON.stringify({ hooks: { Stop: [] } }, null, 2);
-    const modes: ViewMode[] = ['verbose', 'focus', 'default'];
-    for (const mode of modes) {
-      const applied = applyViewMode(base, mode);
-      const stripped = stripViewMode(applied);
-      const result = JSON.parse(stripped);
-      expect(result.viewMode).toBeUndefined();
-      expect(result.hooks).toEqual({ Stop: [] });
-    }
-  });
-});
-
-// ─── resolveExistingViewMode (unchanged) ─────────────────────────────────────
+// ─── resolveExistingViewMode ──────────────────────────────────────────────────
 
 describe('resolveExistingViewMode', () => {
   it('returns "focus" when settings.json has viewMode: "focus"', () => {

@@ -10,7 +10,7 @@ import {
   type FeatureSeed,
 } from '../src/cli/commands/init-seed.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { FLAG_REGISTRY, type ClaudeCodeFlag } from '../src/core/flags.js';
+import { FLAG_REGISTRY, readViewMode, type ClaudeCodeFlag, type FlagsRecord } from '../src/core/flags.js';
 import { type ManifestData } from '../src/core/manifest.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
@@ -130,71 +130,86 @@ describe('resolveSeedFeatures', () => {
 
 // ── resolveSeedFlags ──────────────────────────────────────────────────────────
 
-// Phase 2: resolveSeedFlags(manifestFlags: FlagsRecord | null, registry?)
+// Phase 6: resolveSeedFlags returns FlagsRecord (not string[]).
+// ALL registry flags are present with their resolved values.
 // FlagsRecord key-presence encodes "known": present key = known, absent = new → adopt default.
 describe('resolveSeedFlags', () => {
-  it('fresh (null manifestFlags) → all default-ON flags from registry', () => {
+  it('fresh (null manifestFlags) → all registry flags at their defaults', () => {
     const result = resolveSeedFlags(null, MOCK_FLAGS);
-    expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
+    // All 4 MOCK_FLAGS present with their default values
+    expect(result['flag-a']).toBe(true);
+    expect(result['flag-b']).toBe(true);
+    expect(result['flag-c']).toBe(false);
+    expect(result['flag-d']).toBe(true);
+    expect(Object.keys(result)).toHaveLength(4);
   });
 
   it('fresh uses real FLAG_REGISTRY when no registry override provided', () => {
     const result = resolveSeedFlags(null);
-    // Hard-coded: the 8 default-ON flags as of the current registry.
-    // If this test fails after a registry change, update both the registry
-    // and this list explicitly — that is the point of pinning it.
-    const EXPECTED_DEFAULT_ON: string[] = [
-      'tui',
-      'tool-search',
-      'lsp',
-      'prompt-caching-1h',
-      'show-turn-duration',
-      'clear-context-on-plan',
-      'disable-bundled-skills',
-      'pin-sonnet-4-6',
-    ];
-    expect(result.sort()).toEqual(EXPECTED_DEFAULT_ON.sort());
+    // All registry flags are present in the record
+    expect(Object.keys(result)).toHaveLength(FLAG_REGISTRY.length);
+    // Default-ON boolean flags are true
+    expect(result['tui']).toBe(true);
+    expect(result['tool-search']).toBe(true);
+    expect(result['lsp']).toBe(true);
+    expect(result['prompt-caching-1h']).toBe(true);
+    expect(result['show-turn-duration']).toBe(true);
+    expect(result['clear-context-on-plan']).toBe(true);
+    expect(result['disable-bundled-skills']).toBe(true);
+    expect(result['pin-sonnet-4-6']).toBe(true);
+    // Default-OFF boolean flags are false
+    expect(result['brief']).toBe(false);
+    // Number flag with non-neutral default is present
+    expect(result['max-concurrent-subagents']).toBe(40);
+    // view-mode default is 'default' (neutralValue for the enum)
+    expect(result['view-mode']).toBe('default');
   });
 
-  it('all registry flags present in record → only enabled (true) flags returned', () => {
-    // All keys present → all flags known; return only the true ones
-    const record = { 'flag-a': true, 'flag-b': false, 'flag-c': false, 'flag-d': false };
+  it('all registry flags present in record → existing values kept', () => {
+    const record: FlagsRecord = { 'flag-a': true, 'flag-b': false, 'flag-c': false, 'flag-d': false };
     const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result).toEqual(['flag-a']);
+    expect(result['flag-a']).toBe(true);
+    expect(result['flag-b']).toBe(false);
+    expect(result['flag-c']).toBe(false);
+    expect(result['flag-d']).toBe(false);
   });
 
-  it('partial record (absent flags = new) → existing respected + absent default-ON adopted', () => {
-    // flag-d is absent (not yet known to this install) → adopt its default-ON
-    const record = { 'flag-a': true, 'flag-b': true };
+  it('partial record (absent flags = new) → existing kept + absent flags adopt defaults', () => {
+    // flag-c and flag-d absent → adopt defaults (false and true respectively)
+    const record: FlagsRecord = { 'flag-a': true, 'flag-b': true };
     const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
+    expect(result['flag-a']).toBe(true);
+    expect(result['flag-b']).toBe(true);
+    expect(result['flag-c']).toBe(false); // adopted default-OFF
+    expect(result['flag-d']).toBe(true);  // adopted default-ON
   });
 
   it('disabled default-ON flag stays disabled when explicitly false in record', () => {
-    // flag-a was known at last install, user disabled it → stays disabled
-    const record = { 'flag-a': false, 'flag-b': true, 'flag-d': false };
-    // flag-c absent → adopt default-OFF → not included
+    // flag-a was known at last install, user disabled it → stays false
+    const record: FlagsRecord = { 'flag-a': false, 'flag-b': true, 'flag-c': false, 'flag-d': false };
     const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result).toEqual(['flag-b']); // flag-a stays disabled
+    expect(result['flag-a']).toBe(false); // stays disabled — PF-023: no resurrection
+    expect(result['flag-b']).toBe(true);
   });
 
-  it('default-OFF flag is never auto-added when absent from record', () => {
-    // flag-c is default-OFF; not in record → must NOT be added
-    const record = { 'flag-a': true }; // flag-b, flag-c, flag-d all absent → adopt defaults
+  it('default-OFF flag present as false stays false when explicitly set', () => {
+    const record: FlagsRecord = { 'flag-a': true, 'flag-b': true, 'flag-c': false, 'flag-d': true };
     const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result).not.toContain('flag-c');
+    expect(result['flag-c']).toBe(false);
   });
 
-  it('duplicate-safe: flag appears at most once in output', () => {
-    const record = { 'flag-a': true, 'flag-b': true };
-    // flag-d absent → adopted; result should have no duplicates
-    const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result.filter(f => f === 'flag-a')).toHaveLength(1);
-  });
-
-  it('empty record → adopt all default-ON flags (all absent = all new)', () => {
+  it('empty record → adopt all registry flags at their defaults (all absent = all new)', () => {
     const result = resolveSeedFlags({}, MOCK_FLAGS);
-    expect(result.sort()).toEqual(['flag-a', 'flag-b', 'flag-d'].sort());
+    expect(result['flag-a']).toBe(true);
+    expect(result['flag-b']).toBe(true);
+    expect(result['flag-c']).toBe(false);
+    expect(result['flag-d']).toBe(true);
+  });
+
+  it('unknown IDs from old manifests pass through unchanged (forward-compat)', () => {
+    const record: FlagsRecord = { 'flag-a': true, 'future-flag-xyz': true };
+    const result = resolveSeedFlags(record, MOCK_FLAGS);
+    expect(result['future-flag-xyz']).toBe(true);
   });
 });
 
@@ -282,37 +297,40 @@ describe('resolveInitSeed', () => {
     const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS);
     // features: FEATURE_DEFAULTS
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
-    // flags: all default-ON from real registry
-    const expectedFlags = FLAG_REGISTRY.filter(f => f.kind === 'boolean' && f.defaultValue === true).map(f => f.id);
-    expect(seed.flags.sort()).toEqual(expectedFlags.sort());
-    // viewMode: 'default' (nothing in settings, no manifest)
-    expect(seed.viewMode).toBe('default');
+    // flags: FlagsRecord with all registry flags at their defaults
+    expect(typeof seed.flags).toBe('object');
+    expect(seed.flags['tui']).toBe(true);
+    expect(seed.flags['brief']).toBe(false);
+    expect(seed.flags['max-concurrent-subagents']).toBe(40);
+    expect(Object.keys(seed.flags)).toHaveLength(FLAG_REGISTRY.length);
+    // view-mode in flags (not a separate field)
+    expect(readViewMode(seed.flags)).toBe('default');
     // plugins: non-optional workflow plugins, empty language
     expect(seed.languagePlugins).toEqual([]);
     expect(seed.workflowPlugins.length).toBeGreaterThan(0);
   });
 
-  it('viewMode: settings.json non-default wins over manifest', () => {
-    // Phase 2: viewMode lives in flags['view-mode'], not deprecated features.viewMode
+  it('view-mode: settings.json non-default wins over manifest', () => {
+    // view-mode lives in flags['view-mode'] (Phase 6 — no deprecated viewMode field)
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'focus' });
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
-    expect(seed.viewMode).toBe('focus'); // settings beats manifest
+    expect(readViewMode(seed.flags)).toBe('focus'); // settings beats manifest
   });
 
-  it('viewMode: manifest used when settings.json has no viewMode or "default"', () => {
-    // Phase 2: viewMode lives in flags['view-mode'], not deprecated features.viewMode
+  it('view-mode: manifest used when settings.json has no viewMode or "default"', () => {
+    // view-mode lives in flags['view-mode'] (Phase 6)
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'default' });
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
-    expect(seed.viewMode).toBe('verbose'); // settings 'default' → fall through to manifest
+    expect(readViewMode(seed.flags)).toBe('verbose'); // settings 'default' → fall through to manifest
   });
 
-  it('viewMode: falls back to "default" when neither settings nor manifest has one', () => {
+  it('view-mode: falls back to "default" when neither settings nor manifest has one', () => {
     const manifest = makeManifest(); // no 'view-mode' in flags → resolves to 'default'
     const settings = '{}';
     const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
-    expect(seed.viewMode).toBe('default');
+    expect(readViewMode(seed.flags)).toBe('default');
   });
 
   it('re-init round-trip: re-resolving from the same manifest+config produces the same seed', () => {
@@ -422,8 +440,8 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
 
     // Features: all FEATURE_DEFAULTS (all true)
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
-    // viewMode: 'default' (no settings, no manifest)
-    expect(seed.viewMode).toBe('default');
+    // view-mode: 'default' (no settings, no manifest — encoded in flags)
+    expect(readViewMode(seed.flags)).toBe('default');
     // workflowPlugins: only non-optional workflow plugins (fresh install defaults)
     for (const name of seed.workflowPlugins) {
       const plugin = DEVFLOW_PLUGINS.find(p => p.name === name);
@@ -485,26 +503,26 @@ describe('resolveResetGatedInputs', () => {
     expect(seedSettings).toBe('');
   });
 
-  it('reset=true forces viewMode "default" even when settings.json has a non-default mode', () => {
+  it('reset=true forces view-mode "default" even when settings.json has a non-default mode', () => {
     // Regression guard: --reset must not preserve an externally-set /focus mode.
     // The bug was passing the REAL settings snapshot to resolveInitSeed under --reset,
     // which surfaced viewMode:'focus' and (with viewModeExplicit=true) survived the reset.
-    const manifest = makeManifest({ features: { ...makeManifest().features, viewMode: 'verbose' } });
+    const manifest = makeManifest({ features: { ...makeManifest().features } });
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const gated = resolveResetGatedInputs(true, manifest, null, settings);
     const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
 
-    expect(seed.viewMode).toBe('default');
+    expect(readViewMode(seed.flags)).toBe('default');
   });
 
-  it('reset=false preserves a non-default viewMode from the settings snapshot', () => {
+  it('reset=false preserves a non-default view-mode from the settings snapshot', () => {
     // Complement to the reset case: without --reset, an externally-set /focus survives seeding.
     const settings = JSON.stringify({ viewMode: 'focus' });
     const gated = resolveResetGatedInputs(false, null, null, settings);
     const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
 
-    expect(seed.viewMode).toBe('focus');
+    expect(readViewMode(seed.flags)).toBe('focus');
   });
 });
 

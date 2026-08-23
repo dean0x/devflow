@@ -9,8 +9,7 @@
  * key; active values write the appropriate payload. Number 0 is ACTIVE. Sink
  * validation via coerceFlagValue (applies PF-023: validate at the convergence
  * point every caller reaches). applyFlags(settingsJson, FlagsRecord) is the
- * new API; call sites that still pass string[] use legacyIdsToRecord (applies
- * ADR-014 transition contract for the manifest heal in Phase 2).
+ * sole API; init.ts works directly with FlagsRecord (no legacy string[] bridge).
  */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -716,42 +715,6 @@ export function migrateLegacyFlagsToRecord(
   return result;
 }
 
-// ─── Compile bridge shim ──────────────────────────────────────────────────────
-
-/**
- * Convert a legacy enabled-IDs string array to a FlagsRecord for use with
- * the new applyFlags(settingsJson, FlagsRecord) API.
- *
- * @deprecated Compile bridge — will be removed when call sites are migrated in Phase 2.
- *
- * For known boolean flags: in ids → true, not in ids → false (neutral = delete).
- * For known valued flags: null (neutral; legacy arrays never contain them).
- * For unknown IDs in the array: true (forward-compat preservation).
- */
-export function legacyIdsToRecord(ids: string[]): FlagsRecord {
-  const enabledSet = new Set(ids);
-  const result: FlagsRecord = {};
-
-  for (const flag of FLAG_REGISTRY) {
-    if (flag.kind === 'boolean') {
-      // false is neutral for booleans — key is deleted; true applies onPayload
-      result[flag.id] = enabledSet.has(flag.id);
-    } else {
-      // Valued flags: null = don't touch them (they're not in legacy arrays)
-      result[flag.id] = null;
-    }
-  }
-
-  // Unknown IDs in the legacy array: preserve as true (forward compat)
-  for (const id of ids) {
-    if (!FLAG_REGISTRY_MAP.has(id)) {
-      result[id] = true;
-    }
-  }
-
-  return result;
-}
-
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
 /** Compute the value to write to settings.json for an active flag. */
@@ -913,46 +876,4 @@ export function resolveFinalViewMode(
   if (explicit) return selected;
   if (current !== undefined && current !== 'default') return current;
   return selected;
-}
-
-// ─── Deprecated shims (compile bridge — Phase 2/6 removes these) ──────────────
-
-/**
- * Return IDs of all flags that have a non-neutral default value and are recommended.
- *
- * @deprecated Use getDefaultFlagsRecord() instead. Will be removed in Phase 2.
- */
-export function getDefaultFlags(): string[] {
-  return FLAG_REGISTRY
-    .filter(f => f.recommended && !isNeutral(f, f.defaultValue ?? null))
-    .map(f => f.id);
-}
-
-/**
- * Apply a view mode to a settings JSON string.
- * 'default' removes the viewMode key; 'verbose' and 'focus' set it explicitly.
- *
- * @deprecated Use applyFlags with { 'view-mode': mode }. Will be removed in Phase 6.
- */
-export function applyViewMode(settingsJson: string, mode: ViewMode): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  if (mode === 'default') {
-    delete settings[VIEW_MODE_KEY];
-  } else {
-    settings[VIEW_MODE_KEY] = mode;
-  }
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Strip the viewMode key from a settings JSON string.
- * stripFlags now covers viewMode via the view-mode registry entry; this wrapper
- * is a no-op when called after stripFlags.
- *
- * @deprecated stripFlags now covers viewMode. Will be removed in Phase 6.
- */
-export function stripViewMode(settingsJson: string): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  delete settings[VIEW_MODE_KEY];
-  return JSON.stringify(settings, null, 2) + '\n';
 }
