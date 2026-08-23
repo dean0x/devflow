@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Release workflow hardening**: the version-bump commit stages `package.json`, `package-lock.json`, and `CHANGELOG.md` explicitly instead of `git add -A` (the 2.0.0 release committed the `release-notes.md` CI artifact this way; the file is now also gitignored), and `actions/checkout`/`actions/setup-node` are bumped v4 → v7 to clear the Node 20 runtime deprecation.
+- **npm tarball changelog**: the bundled CHANGELOG.md now carries the corrected 2.0.0 section (the 2.0.0 tarball predated the release-notes fix).
+
+### Fixed
+- **`bump-version.ts` stale-header guard**: the script treated any pre-existing `## [{version}]` header as "already bumped" and skipped stamping `[Unreleased]` — which is how the 2.0.0 release initially shipped an aborted April bump's section as its release notes. It now fails loudly when a `## [{version}]` header coexists with a non-empty `[Unreleased]` section, and only skips when `[Unreleased]` is empty.
+
 ---
 
 ## [2.0.0] - 2026-08-23

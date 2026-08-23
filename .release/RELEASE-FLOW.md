@@ -22,6 +22,10 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 3. `CHANGELOG.md` has a non-empty `## [Unreleased]` section
 4. Local build + test via Validate agent (`npm run build`, `npm test`)
 5. `gh` authenticated (needed to dispatch the workflow)
+6. No pre-existing `## [{VERSION}]` header below a non-empty `[Unreleased]` — stale
+   aborted-bump residue ships old notes (bump-version.ts fails loudly on this since 2.0.1)
+7. `RELEASE_TOKEN` age via `gh secret list` — the fine-grained PAT expires silently and
+   kills the run at checkout ("could not read Username"); rotate before dispatch if old
 
 ## Changelog
 

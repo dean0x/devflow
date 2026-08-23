@@ -81,11 +81,23 @@ if (alreadyBumped) {
 const changelogPath = join(ROOT, 'CHANGELOG.md');
 let changelog = readFileSync(changelogPath, 'utf-8');
 
-// Skip CHANGELOG update if version header already exists (already bumped)
+// Skip the CHANGELOG update only when the version header already exists AND
+// [Unreleased] is empty — a legitimate idempotent re-run. A version header
+// coexisting with a non-empty [Unreleased] section is stale residue from an
+// aborted bump; skipping would ship the stale section as release notes
+// (this is how v2.0.0 initially shipped an April section), so fail loudly.
 const versionHeaderExists = changelog.includes(`## [${newVersion}]`);
 
 if (versionHeaderExists) {
-  process.stderr.write(`  CHANGELOG.md: already has [${newVersion}] section (skipping)\n`);
+  const unreleasedMatch = changelog.match(/^## \[Unreleased\]\n([\s\S]*?)(?=^## \[|^---$)/m);
+  const unreleasedContent = (unreleasedMatch?.[1] ?? '').trim();
+  if (unreleasedContent !== '') {
+    fail(
+      `CHANGELOG.md already has a "## [${newVersion}]" section while [Unreleased] is non-empty. ` +
+      `This is stale residue from an aborted bump — merge or delete the "## [${newVersion}]" section, then re-run.`
+    );
+  }
+  process.stderr.write(`  CHANGELOG.md: already has [${newVersion}] section and [Unreleased] is empty (skipping)\n`);
 } else {
   if (!changelog.includes('## [Unreleased]')) {
     fail('CHANGELOG.md has no [Unreleased] section');

@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # ── Setup ──────────────────────────────────
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -67,7 +67,7 @@ jobs:
 
       - name: Commit version bump (if files changed)
         run: |
-          git add -A
+          git add package.json package-lock.json CHANGELOG.md
           if git diff --cached --quiet; then
             echo "No changes to commit (version already bumped)"
           else
