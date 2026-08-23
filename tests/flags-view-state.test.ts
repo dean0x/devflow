@@ -24,6 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   reduce,
+  resizeViewport,
   buildFlagRows,
   collectFlagRecord,
   type FlagsViewState,
@@ -630,5 +631,99 @@ describe('flags-view-state — buildFlagRows', () => {
     const row = rowFor('tui', { tui: true });
     expect(row.originalValue).toBe(row.configuredValue);
     expect(row.originalValue).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edit-mode input handling (scrutinize pass)
+//
+// These pin three defects found by driving the reducer the way a user types,
+// rather than by asserting the branches the implementation happens to have.
+// ---------------------------------------------------------------------------
+
+describe('edit mode — typed input', () => {
+  /** Enter edit mode on a text row and type a sequence of normalized keys. */
+  function typeInto(id: string, keys: string[]): FlagsViewState {
+    let state = makeState([rowFor(id)]);
+    state = reduce(state, 'e').state;
+    expect(state.editing, 'expected to be in edit mode').not.toBeNull();
+    for (const k of keys) state = reduce(state, k).state;
+    return state;
+  }
+
+  it('space is inserted into the buffer, not dropped', () => {
+    // normalizeKey maps the space bar to the NAME 'space' (5 chars), so a
+    // length===1 test drops it. spellcheck holds a shell command — "aspell list"
+    // must be typable, and the drop was silent (no error, no visual cue).
+    const state = typeInto('spellcheck', [...'aspell', 'space', ...'list']);
+    expect(state.editing?.buffer).toBe('aspell list');
+    expect(state.editing?.caret).toBe('aspell list'.length);
+  });
+
+  it('a space-containing command commits successfully', () => {
+    let state = typeInto('spellcheck', [...'aspell', 'space', ...'list']);
+    state = reduce(state, 'enter').state;
+    expect(state.editing, 'commit should exit edit mode').toBeNull();
+    expect(state.rows[0].configuredValue).toBe('aspell list');
+  });
+
+  it('control characters never enter the buffer', () => {
+    // normalizeKey passes ctrl-modified keys through as their raw control byte,
+    // so this is reachable by ordinary typing. coerceFlagValue rejects any string
+    // containing one, and renderBuffer strips them for display — so a buffered
+    // control char is both uncommittable and desyncs the caret from what is drawn.
+    const state = typeInto('spellcheck', [...'aspell', '\x01', '\x1b', '\x7f']);
+    expect(state.editing?.buffer).toBe('aspell');
+    expect(state.editing?.caret).toBe(6);
+  });
+
+  it('ctrl-c aborts out of edit mode instead of being swallowed', () => {
+    // reduceEditMode has no ctrl-c case, so it used to fall through to 'none'.
+    // Raw mode suppresses the SIGINT that would otherwise rescue the user, so
+    // ctrl-c was completely dead while editing.
+    const state = typeInto('spellcheck', [...'asp']);
+    expect(reduce(state, 'ctrl-c').intent).toBe('abort');
+  });
+
+  it('escape still discards the edit without aborting', () => {
+    // Guard against over-correcting the ctrl-c fix into escape.
+    const state = typeInto('spellcheck', [...'asp']);
+    const result = reduce(state, 'escape');
+    expect(result.intent).toBe('none');
+    expect(result.state.editing).toBeNull();
+    expect(result.state.rows[0].configuredValue).toBe(rowFor('spellcheck').configuredValue);
+  });
+});
+
+describe('resizeViewport', () => {
+  const rows = buildFlagRows(FLAG_REGISTRY, {});
+
+  it('re-clamps the scroll offset so the cursor stays visible when the terminal shrinks', () => {
+    // adjustViewport otherwise only runs on up/down, so a resize changed the height
+    // without moving the offset — leaving the cursor outside the visible slice, where
+    // renderFrame draws no selection marker at all until the user pressed an arrow key.
+    const tall = makeState([...rows], { cursor: 15, viewportOffset: 0, viewportHeight: 30 });
+    const shrunk = resizeViewport(tall, 5);
+
+    expect(shrunk.viewportHeight).toBe(5);
+    expect(shrunk.cursor).toBe(15);
+    // Cursor must lie inside [offset, offset + height)
+    expect(shrunk.cursor).toBeGreaterThanOrEqual(shrunk.viewportOffset);
+    expect(shrunk.cursor).toBeLessThan(shrunk.viewportOffset + shrunk.viewportHeight);
+  });
+
+  it('does not scroll past the end when the terminal grows', () => {
+    const small = makeState([...rows], { cursor: 2, viewportOffset: 8, viewportHeight: 3 });
+    const grown = resizeViewport(small, rows.length + 10);
+
+    expect(grown.viewportOffset).toBe(0);
+    expect(grown.cursor).toBe(2);
+  });
+
+  it('is a no-op on state when the height is unchanged and the cursor is visible', () => {
+    const stable = makeState([...rows], { cursor: 1, viewportOffset: 0, viewportHeight: 10 });
+    const same = resizeViewport(stable, 10);
+    expect(same.viewportOffset).toBe(0);
+    expect(same.viewportHeight).toBe(10);
   });
 });

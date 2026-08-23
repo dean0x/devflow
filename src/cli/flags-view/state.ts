@@ -379,9 +379,22 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
   };
 }
 
+/**
+ * ASCII control characters (C0 + DEL). These must never enter the edit buffer:
+ *   - coerceFlagValue rejects any string containing them, so a buffer holding one
+ *     can only ever fail to commit — and the failure message would name length,
+ *     not the real cause.
+ *   - renderBuffer strips them for display, so the rendered string and the buffer
+ *     would have different lengths and the caret would land on the wrong character.
+ * normalizeKey passes ctrl-modified keys through as their raw control byte
+ * (e.g. ctrl-a → \x01), so this is reachable by ordinary typing, not just hostile input.
+ */
+const CONTROL_CHAR = /[\x00-\x1f\x7f]/;
+
 /** Insert a printable character at the caret position (bounded by BUFFER_MAX_LEN). */
 function insertChar(editing: EditState, char: string): EditState {
   if (editing.buffer.length >= BUFFER_MAX_LEN) return editing;
+  if (CONTROL_CHAR.test(char)) return editing; // never buffer an uncommittable char
   const { buffer, caret } = editing;
   const next = buffer.slice(0, caret) + char + buffer.slice(caret);
   return { buffer: next, caret: caret + 1, error: null };
@@ -445,6 +458,14 @@ function reduceEditMode(state: FlagsViewState, key: string): FlagsViewState {
     case 'k':
       return state;
 
+    // normalizeKey maps the space bar to the NAME 'space', not to ' '. Without this
+    // case the default branch below drops it (5 chars, not 1), so a space could never
+    // be typed — silently. spellcheck's whole purpose is to hold a shell command
+    // ("aspell list"), and default-model likewise; both were unenterable as multi-word
+    // values, with no error and no visual cue that the key had been ignored.
+    case 'space':
+      return { ...state, editing: insertChar(editing, ' ') };
+
     default: {
       // Printable character: single char, not ctrl
       if (key.length === 1) {
@@ -453,6 +474,30 @@ function reduceEditMode(state: FlagsViewState, key: string): FlagsViewState {
       return state;
     }
   }
+}
+
+/**
+ * Apply a new viewport height (terminal resize) and re-clamp the scroll offset.
+ *
+ * adjustViewport otherwise only runs on up/down, so a resize alone changed the
+ * height without moving the offset: shrinking a tall terminal with the cursor
+ * below the new fold left the cursor outside the visible slice, and renderFrame
+ * draws the `❯` marker only for rows inside that slice — so the selection marker
+ * vanished entirely until the user pressed an arrow key.
+ *
+ * Pure — returns a new state.
+ */
+export function resizeViewport(state: FlagsViewState, viewportHeight: number): FlagsViewState {
+  return {
+    ...state,
+    viewportHeight,
+    viewportOffset: adjustViewport(
+      state.cursor,
+      state.viewportOffset,
+      viewportHeight,
+      state.rows.length,
+    ),
+  };
 }
 
 // ─── reduce ───────────────────────────────────────────────────────────────────
@@ -483,8 +528,13 @@ function reduceEditMode(state: FlagsViewState, key: string): FlagsViewState {
 export function reduce(state: FlagsViewState, key: string): ReduceResult {
   const n = state.rows.length;
 
-  // Delegate to edit mode handler
+  // Delegate to edit mode handler.
+  // ctrl-c is handled BEFORE delegating: reduceEditMode has no case for it, so it
+  // would fall through to 'none' and be swallowed. Raw mode suppresses the SIGINT
+  // that would otherwise rescue the user, so ctrl-c was completely dead while
+  // editing — the only way out was to discover escape first.
   if (state.editing !== null) {
+    if (key === 'ctrl-c') return { state, intent: 'abort' };
     const next = reduceEditMode(state, key);
     return { state: next, intent: 'none' };
   }

@@ -17,11 +17,11 @@
  *  -1  Unsaved count line (blank when 0)
  *   0  Keybinding footer
  *
- * Data row columns (chars — total ≤ 78):
+ * Data row columns (chars at the 80-col reference width — total 77):
  *   PREFIX  : 2  (cursor mark "❯ " or "  ")
- *   LABEL   : 27 (flag label, padded / truncated)
- *   DIRTY   : 3  ("● " when dirty, else "  ")
- *   VALUE   : 46 (formatted value or edit buffer)
+ *   LABEL   : 27 (flag label, padded / truncated; scaled by cols/80 at other widths)
+ *   DIRTY   : 2  ("● " when dirty, else "  ")
+ *   VALUE   : 46 (formatted value or edit buffer; scaled by cols/80 at other widths)
  *
  * Edit buffer rendering:
  *   Text before caret + inverse(charAtCaret|' ') + text after caret
@@ -36,7 +36,6 @@ import {
   green,
   red,
   inverse,
-  stripAnsi,
 } from '../../hud/colors.js';
 import { padToVisible, truncateVisible } from '../tui/cells.js';
 import type { FlagsViewState, FlagRow } from './state.js';
@@ -51,7 +50,6 @@ const MIN_VIEWPORT = 1;
 
 const COL_PREFIX = 2;    // "❯ " or "  "
 const COL_LABEL = 27;    // flag label
-const COL_DIRTY = 3;     // "● " dirty indicator
 const COL_VALUE = 46;    // value or edit buffer
 
 // Pre-built flag description map
@@ -253,5 +251,3 @@ export function renderFrame(
   return out;
 }
 
-// Re-export dims type so terminal.ts needn't re-import it
-export type { RenderDims };

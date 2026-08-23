@@ -12,7 +12,7 @@
  * Bounded: MAX_KEYPRESSES = 50_000 hard limit (re-exported from src/cli/tui/terminal.ts).
  */
 
-import { reduce } from './state.js';
+import { reduce, resizeViewport } from './state.js';
 import { renderFrame, computeViewportHeight } from './render.js';
 import type { FlagsViewState, FlagRow } from './state.js';
 import type { FlagsIntent } from './state.js';
@@ -59,10 +59,9 @@ export async function runFlagsTui(
     initialState,
     reduce,
     renderFrame,
-    onResize: (state, dims) => ({
-      ...state,
-      viewportHeight: computeViewportHeight(dims.rows),
-    }),
+    // resizeViewport re-clamps viewportOffset for the new height — setting the
+    // height alone can strand the cursor outside the visible slice.
+    onResize: (state, dims) => resizeViewport(state, computeViewportHeight(dims.rows)),
     signalAction: 'abort' as FlagsIntent,
     continueIntent: 'none' as FlagsIntent,
     io,

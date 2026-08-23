@@ -88,6 +88,12 @@ async function readSettingsSafe(
  *
  * Returns true on success; sets process.exitCode = 1 and returns false on any
  * failure (avoids PF-014 — never calls process.exit).
+ *
+ * Success is tracked in LOCALS, never read back off `process.exitCode`.
+ * `process.exitCode` defaults to `undefined` (not 0) in Node, so a
+ * `process.exitCode === 0` success test is false on every clean run — it would
+ * silently suppress every confirmation message. It is also process-global, so an
+ * unrelated earlier failure would misreport this operation's outcome.
  */
 async function persistFlagConfig(
   claudeDir: string,
@@ -99,12 +105,16 @@ async function persistFlagConfig(
   const stripped = stripFlags(settingsContent);
   const updatedSettings = applyFlags(stripped, newRecord);
 
+  let settingsOk = true;
+  let manifestOk = true;
+
   // Settings write — independent error path (avoids PF-015 fan-out).
   const settingsPath = path.join(claudeDir, 'settings.json');
   try {
     await writeFileAtomicExclusive(settingsPath, updatedSettings);
   } catch (err) {
     p.log.error(`Failed to write settings.json: ${err instanceof Error ? err.message : String(err)}`);
+    settingsOk = false;
     process.exitCode = 1;
     // PF-015: still attempt the manifest write — evaluate each artifact independently.
     // (if settings failed but manifest would succeed, we still try manifest so the
@@ -120,11 +130,13 @@ async function persistFlagConfig(
       await writeManifest(devflowDir, manifest);
     } catch (err) {
       p.log.error(`Failed to write manifest.json: ${err instanceof Error ? err.message : String(err)}`);
+      manifestOk = false;
       process.exitCode = 1;
     }
   }
 
-  return process.exitCode === 0;
+  // PF-015: OR the locals afterwards — never compose required side effects with ||/&&.
+  return settingsOk && manifestOk;
 }
 
 // ─── Command factory ──────────────────────────────────────────────────────────
@@ -275,9 +287,9 @@ export function createFlagsCommand(): Command {
           newRecord[id] = true;
         }
 
-        await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
 
-        if (process.exitCode === 0) {
+        if (ok) {
           for (const id of ids) {
             p.log.success(`${id} enabled`);
           }
@@ -326,9 +338,9 @@ export function createFlagsCommand(): Command {
           newRecord[id] = false;
         }
 
-        await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
 
-        if (process.exitCode === 0) {
+        if (ok) {
           for (const id of ids) {
             p.log.success(`${id} disabled`);
           }
@@ -403,9 +415,9 @@ export function createFlagsCommand(): Command {
           newRecord[id] = value ?? neutralValueOf(flag);
         }
 
-        await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
 
-        if (process.exitCode === 0) {
+        if (ok) {
           for (const { id, value } of assignments) {
             const flag = lookupFlag(id)!;
             p.log.success(`${id} = ${formatFlagValue(flag, value)}`);
@@ -450,9 +462,9 @@ export function createFlagsCommand(): Command {
           newRecord[id] = neutralValueOf(flag);
         }
 
-        await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
 
-        if (process.exitCode === 0) {
+        if (ok) {
           for (const id of ids) {
             p.log.success(`${id} unset`);
           }
@@ -487,8 +499,8 @@ export function createFlagsCommand(): Command {
 
         if (result.action === 'save') {
           const newRecord = collectFlagRecord(result.rows);
-          await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
-          if (process.exitCode === 0) {
+          const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+          if (ok) {
             process.stdout.write('Flags saved.\n');
           }
         } else {

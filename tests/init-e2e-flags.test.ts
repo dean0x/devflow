@@ -8,7 +8,8 @@
  *
  * Test scenarios:
  *   1. OLD-FORMAT manifest (flags: []) + settings with viewMode:'focus'
- *      → FlagsRecord in manifest, viewMode preserved, no knownFlags/features.viewMode residue
+ *      → FlagsRecord in manifest, viewMode preserved, adopted flags materialised in
+ *        settings.json, deliberate prior disables preserved, no knownFlags/features.viewMode residue
  *   2. Fresh install (no manifest) + empty settings
  *      → FlagsRecord with all defaults, max-concurrent-subagents env var applied
  *   3. Idempotency — second run produces byte-stable settings (no thrash)
@@ -135,11 +136,20 @@ describe('init e2e — flags Phase 6 integration', () => {
       JSON.stringify(oldManifest, null, 2) + '\n',
     );
 
-    // Seed settings.json with viewMode + a custom env var + custom hook
+    // Seed settings.json with viewMode + a custom env var + custom hook.
+    //
+    // The hook entry MUST use Claude Code's real shape — `{ matcher, hooks: [...] }`.
+    // A flattened `{ matcher, command }` entry is not just unrealistic, it makes this
+    // test vacuous: removeCaptureHooks does `entry.hooks.some(...)`, which throws on a
+    // missing `hooks` array, and init.ts wraps its ENTIRE settings pass (ambient hooks,
+    // capture hooks, memory hooks, HUD, flags, proxy env) in one try/catch that only
+    // warns. With a malformed entry the whole pass aborts, settings.json is never
+    // touched, and every settings assertion below passes because nothing ran —
+    // the PF-018 shape: a green test that proves nothing.
     const seedSettings = {
       viewMode: 'focus',
       env: { CUSTOM_USER_VAR: 'preserved' },
-      hooks: { Stop: [{ matcher: '', command: 'echo custom-hook' }] },
+      hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: 'echo custom-hook' }] }] },
     };
     await fs.writeFile(
       path.join(tmpHome, '.claude', 'settings.json'),
@@ -148,6 +158,15 @@ describe('init e2e — flags Phase 6 integration', () => {
 
     const result = runInit(tmpHome);
     expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+
+    // PF-018 non-vacuity gate: init.ts swallows any failure in its settings pass with a
+    // warning and a zero exit code. Assert the warning is ABSENT — otherwise every
+    // settings assertion below would pass for the wrong reason (the pass never ran).
+    expect(
+      result.stdout + result.stderr,
+      'init warned that it could not configure settings.json — the settings pass aborted, ' +
+      'so the settings assertions in this test would be vacuous',
+    ).not.toContain('Could not configure settings.json');
 
     // ── Manifest assertions ──
 
@@ -179,11 +198,29 @@ describe('init e2e — flags Phase 6 integration', () => {
 
     // Custom env var preserved (Devflow only manages its own keys)
     expect((settings['env'] as Record<string, string>)?.CUSTOM_USER_VAR).toBe('preserved');
+    // The seeded user hook survives the remove-then-add hook passes
+    expect(settings['hooks']).toBeDefined();
 
-    // max-concurrent-subagents adoption verified via manifest value (env-var application
-    // on fresh install is covered by test 2; old-manifest adoption is confirmed here via
-    // the manifest record which holds the adopted default).
+    // Manifest ↔ settings convergence — the invariant this whole feature exists to hold.
+    // An adopted value in the manifest MUST have its payload materialised in settings.json;
+    // a manifest that says 40 while settings.json says nothing is exactly the desync the
+    // typed-registry work is meant to prevent.
+    const env = settings['env'] as Record<string, string>;
     expect(flagsRecord['max-concurrent-subagents']).toBe(40);
+    expect(env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS).toBe('40');
+
+    // Other adopted default-ON flags materialise too (proves applyFlags ran over the
+    // whole adopted record, not just the one flag asserted above).
+    expect(env.ENABLE_TOOL_SEARCH).toBe('true');
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-sonnet-4-6');
+
+    // Deliberate prior disables are PRESERVED, not re-adopted (ADR-014): the old manifest
+    // recorded knownFlags ['tui','lsp'] with an empty enabled list, so both stay off and
+    // neither writes its payload — while genuinely-new flags above adopt their defaults.
+    expect(flagsRecord['tui']).toBe(false);
+    expect(flagsRecord['lsp']).toBe(false);
+    expect(settings).not.toHaveProperty('tui');
+    expect(env.ENABLE_LSP_TOOL).toBeUndefined();
   });
 
   it('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied', async () => {

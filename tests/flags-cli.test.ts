@@ -40,6 +40,7 @@ vi.mock('@clack/prompts', () => ({
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -82,7 +83,6 @@ describe('flags CLI — createFlagsCommand factory', () => {
   let tmpClaudeDir: string;
   let tmpDevflowDir: string;
   let flagsCmd: Command;
-  const savedExitCode: number | string | undefined = 0;
 
   beforeEach(async () => {
     tmpClaudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'flags-cli-claude-'));
@@ -552,6 +552,84 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
       expect(process.exitCode).toBe(0);
+    });
+  });
+
+  // ─── confirmation output under the REAL initial exitCode ─────────────────────
+  //
+  // Regression guard. Every other test in this file sets `process.exitCode = 0`
+  // in beforeEach, which does not reproduce a real CLI invocation: Node starts a
+  // process with `process.exitCode === undefined`, NOT 0. The mutating paths used
+  // to gate their confirmation output on `process.exitCode === 0`, so on a real
+  // run that test was false and `devflow flags --enable X` completed silently —
+  // it wrote both artifacts and told the user nothing. The harness normalised away
+  // the exact condition under which production failed (the PF-018 shape: a green
+  // test that cannot observe the defect it is meant to guard).
+  //
+  // These tests restore exitCode to `undefined` to reproduce a real invocation and
+  // assert on the emitted confirmation rather than on the exit code.
+
+  describe('confirmation output (exitCode starts undefined, as in a real process)', () => {
+    beforeEach(() => {
+      vi.mocked(p.log.success).mockClear();
+      process.exitCode = undefined;
+    });
+
+    /** Success lines emitted by the command under test. */
+    function successLines(): string[] {
+      return vi.mocked(p.log.success).mock.calls.map(c => String(c[0]));
+    }
+
+    it('--enable emits a success line on a clean run', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
+
+      expect(successLines()).toContain('tui enabled');
+      expect(process.exitCode).toBeFalsy(); // undefined or 0 — never 1
+    });
+
+    it('--disable emits a success line on a clean run', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({ tui: true }),
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--disable', 'tui'], { from: 'user' });
+
+      expect(successLines()).toContain('tui disabled');
+    });
+
+    it('--set emits a success line on a clean run', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=25'], { from: 'user' });
+
+      expect(successLines()).toContain('max-concurrent-subagents = 25');
+    });
+
+    it('--unset emits a success line on a clean run', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({ 'max-concurrent-subagents': 40 }),
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--unset', 'max-concurrent-subagents'], { from: 'user' });
+
+      expect(successLines()).toContain('max-concurrent-subagents unset');
+    });
+
+    it("a pre-existing unrelated exitCode=1 does not suppress this run's confirmation", async () => {
+      // Success is tracked in locals, never read back off the process-global exit
+      // code — an earlier unrelated failure must not misreport this operation.
+      process.exitCode = 1;
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
+
+      expect(successLines()).toContain('tui enabled');
     });
   });
 });

@@ -210,17 +210,31 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
   }
   stdin.resume();
 
-  return new Promise<{ intent: A; state: S }>((resolve) => {
+  return new Promise<{ intent: A; state: S }>((resolve, reject) => {
     let state = spec.initialState;
     let cleaned = false;
     let keypressCount = 0;
 
-    // Apply initial resize (sets viewportHeight from actual terminal dims)
-    const initialDims = getDims(stdout);
-    if (spec.onResize) {
-      state = spec.onResize(state, initialDims);
+    // Apply initial resize (sets viewportHeight from actual terminal dims).
+    //
+    // Guarded because the terminal is ALREADY in alt-screen + raw mode + hidden
+    // cursor by this point (set above, before the Promise). A throw from onResize
+    // or renderFrame here would reject with none of that undone, leaving the user's
+    // shell in raw mode — no echo, no line editing — until they run `stty sane`.
+    // cleanup/onKeypress/onSigint/onSigterm/onResize are function declarations and
+    // are therefore hoisted, so cleanup() is callable here. removeListener on a
+    // not-yet-registered listener is a no-op.
+    try {
+      const initialDims = getDims(stdout);
+      if (spec.onResize) {
+        state = spec.onResize(state, initialDims);
+      }
+      renderToStdout(state, stdout, spec.renderFrame);
+    } catch (err) {
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
     }
-    renderToStdout(state, stdout, spec.renderFrame);
 
     // ── Cleanup (idempotent) ────────────────────────────────────────────────
     function cleanup(): void {
@@ -249,33 +263,55 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
       resolve({ intent, state: finalState });
     }
 
+    /**
+     * Tear down and reject. Used when a handler throws.
+     *
+     * A throw inside an EventEmitter listener does NOT reject the enclosing
+     * promise — it escapes as an uncaughtException and kills the process with
+     * cleanup() never having run, leaving raw mode and alt-screen set. Routing
+     * every handler failure through here keeps the PF-014 invariant (cleanup
+     * always runs) while still surfacing the error rather than swallowing it.
+     */
+    function fail(err: unknown): void {
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+
     // ── Resize handler ─────────────────────────────────────────────────────
     function onResize(): void {
-      const d = getDims(stdout);
-      if (spec.onResize) {
-        state = spec.onResize(state, d);
+      try {
+        const d = getDims(stdout);
+        if (spec.onResize) {
+          state = spec.onResize(state, d);
+        }
+        renderToStdout(state, stdout, spec.renderFrame);
+      } catch (err) {
+        fail(err);
       }
-      renderToStdout(state, stdout, spec.renderFrame);
     }
 
     // ── Keypress handler ───────────────────────────────────────────────────
     function onKeypress(str: string, key: ReadlineKey): void {
-      keypressCount++;
-      if (keypressCount > MAX_KEYPRESSES) {
-        // Hard safety bound — exit on exhaustion (avoids unbounded event loop).
-        settle(spec.signalAction, state);
-        return;
-      }
+      try {
+        keypressCount++;
+        if (keypressCount > MAX_KEYPRESSES) {
+          // Hard safety bound — exit on exhaustion (avoids unbounded event loop).
+          settle(spec.signalAction, state);
+          return;
+        }
 
-      const normalized = normalizeKey(str, key);
-      const { state: next, intent } = spec.reduce(state, normalized);
-      state = next;
+        const normalized = normalizeKey(str, key);
+        const { state: next, intent } = spec.reduce(state, normalized);
+        state = next;
 
-      if (intent !== spec.continueIntent) {
-        settle(intent, state);
-        return;
+        if (intent !== spec.continueIntent) {
+          settle(intent, state);
+          return;
+        }
+        renderToStdout(state, stdout, spec.renderFrame);
+      } catch (err) {
+        fail(err);
       }
-      renderToStdout(state, stdout, spec.renderFrame);
     }
 
     // ── Signal handlers ────────────────────────────────────────────────────
