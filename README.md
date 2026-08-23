@@ -207,7 +207,7 @@ See [docs/cli-reference.md](https://github.com/dean0x/devflow/blob/main/docs/cli
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
 | **Devflow** | Meta-Harness | Orchestrated + graph workflows, parallel review, memory, self-learning |
-| **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Karpathy optimization loops, multi-agent pipelines, DAG dependencies |
+| **[MDS](https://github.com/dean0x/mdscript)** | Prompt Engineering | Composable template language for prompts — variables, loops, conditionals, imports, compiled to clean Markdown |
 
 ## Building from Source
 
