@@ -65,6 +65,10 @@ Supports multi-worktree auto-discovery — one command reviews all active branch
 /code-review #42             # Review specific PR
 ```
 
+### PR-comment publication
+
+Applies to `/code-review` and `/resolve`. On public repositories, Devflow posts a counts-only stub comment by default (visibility is probed at run time; the gate fails closed to the stub on any error). Set `reviewPublication: full` in `.devflow/config.json` to post the full report regardless of repo visibility, or `off` to disable comment posting entirely (`auto` is the default). Every body posted to GitHub — whether a full report or a stub — is run through the `redact-secrets.cjs` scrubber unconditionally; if the scrubber is missing (stale `~/.devflow` before running `devflow init`) or exits non-zero, the post is suppressed and `TRACEABILITY: DEGRADED (redaction unavailable)` is reported rather than publishing unredacted content.
+
 ## /resolve
 
 Processes all issues from `/code-review` reports through a validation/fix split:
@@ -188,6 +192,8 @@ The command boundary is the human gate: each stage returns to you before the nex
 Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
 
 Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block and a wave assignment. Produces a tracking issue body written by the Synthesize agent.
+
+Typical flow: write a spec (`spec.md`), run `/dynamic-tickets` over it, then deliver wave by wave — `/dynamic-plan` on a wave, `/dynamic-build` on that plan, and repeat for the next wave until the spec is shipped. Suited to system-scale work; for a single feature, prefer the orchestrated `/plan` → `/implement` flow.
 
 ```
 /dynamic-tickets <initiative-description-or-file>
