@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.0] - 2026-08-23
+
 ### BREAKING CHANGES
 
 #### Agent rename — 13 agents renamed to action-verb form
@@ -120,6 +124,8 @@ renamed `review_pass`. Any custom MDS host that imports `_engine.mds` and calls
 
 - **Dynamic compliance composition** (`src/core/compliance-compose.ts`): The compliance skill (`devflow:compliance/SKILL.md`) and compliance rule are now composed at install time from per-framework fragment files (`src/assets/skills/compliance/frameworks/{id}/fragment.md`) rather than being installed as static all-six blobs. Each fragment provides `## Mapping` (6-column control row), `## Reference` (reference-table blurb), `## Checklist` (0–2 items), and `## Rule` (one ≤200-char bullet) sections that populate 5 SKILL.md tokens (`SCOPE`, `ACTIVE`, `MAPPING`, `CHECKLIST`, `REFERENCES`) and 1 rule token (`RULE_BULLETS`). The existing `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` rule placeholder is retained as a second token and handled by the existing `stampComplianceRule`. Installed artifact layout is unchanged — `references/{id}.md` basenames are preserved even though source files moved to `frameworks/{id}/reference.md`. Shadow SKILL.md without composition tokens passes through byte-identical (C1 passthrough); `devflow compliance --status` now shows `[shadowed, composition skipped — per-framework sections absent]` for such shadows (and `[shadowed]` for shadows that do contain tokens). The `--status` Skill line shows `[shadowed]` when a shadow with tokens is present.
 
+- **`devflow:explore` skill** — structured codebase exploration with optional knowledge-base creation
+
 ### Changed
 - **`devflow skills list-shadowed` renamed to `devflow skills list`** (BREAKING): `skills list` now shows all known skills with install and shadow state via `validateSkillShadow`. The `list-shadowed` subcommand is removed.
 - **`/resolve` pipeline split** (BREAKING): the monolithic Resolver agent (which both validated and fixed issues) is replaced by a Triage + Code pair. The Triage agent (opus) runs a blast-radius disposition pass; the Code agent (sonnet, `OPERATION: issue-fix`) applies fixes. Plugins that declared the `resolver` agent must update their agent list to `[git, triage, code, simplify, validate]`.
@@ -133,6 +139,9 @@ renamed `review_pass`. Any custom MDS host that imports `_engine.mds` and calls
 - **Learning**: Renamed artifact paths: `commands/learned/` → `commands/self-learning/`, `skills/learned-{name}/` → `skills/{name}/`
 - **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
 
+- **State-aware re-init** (`devflow init`): re-running init now reads the prior manifest, feature config, and `settings.json` and pre-seeds every prompt with your existing choices — your installed plugin set, feature toggles, Claude Code flags, and view mode are preserved instead of reset to defaults. The Recommended/Advanced question is skipped entirely on re-init. Use `--reset` for a factory reset that ignores all prior state (mutually exclusive with `--plugin`).
+- **`self-review` skill** renamed to `quality-gates`
+
 ### Removed
 - **`/dynamic-wave` command** (BREAKING): the thin full-pipeline driver is removed. Run the three stages directly: `/dynamic-tickets` → `/dynamic-plan` → `/dynamic-build`. The `post-wave-report` Git-agent spawn moved into `dynamic-build`, which now owns `.devflow/docs/waves/{slug}/` output. The stale installed command file is removed automatically by the orphan sweep on the next `devflow init`. See Breaking Changes for the migration path.
 - **`devflow-audit-claude` plugin and `/audit-claude` command** (BREAKING): The CLAUDE.md audit plugin is removed. `--plugin=audit-claude` is now rejected by `devflow init`; stale `devflow-audit-claude` entries in existing manifests are silently pruned by `DELETED_PLUGIN_NAMES` on the next partial reinstall. The `claude-md-auditor` agent and `audit-claude.md` command are deleted; the orphan sweep removes any previously installed copies automatically.
@@ -143,6 +152,9 @@ renamed `review_pass`. Any custom MDS host that imports `_engine.mds` and calls
 - **SHADOW_RENAMES migration machinery**: the `SHADOW_RENAMES` constant and associated migration logic for renaming skill shadow directories are removed; no active renames remain.
 - **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
 - **Resolver agent**: retired in favor of the Triage + Code split. The `resolver` agent file is removed from installs on `devflow init` by the orphan sweep.
+
+- **`implementation-patterns` skill** (merged into `patterns`)
+- **`search-first` skill** (merged into `research`)
 
 ### Fixed
 - **`devflow agents` TUI — four defects fixed**:
@@ -156,33 +168,6 @@ renamed `review_pass`. Any custom MDS host that imports `_engine.mds` and calls
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
-
----
-
-## [Unreleased]
-
----
-
-## [2.0.0] - 2026-04-05
-
-### Added
-- **EXPLORE depth classification** (GUIDED/ORCHESTRATED) with skimmer-based codebase analysis
-- **`devflow:explore`** orchestration skill for ambient EXPLORE intent
-- **TDD enforcement**: `test-driven-development` skill auto-loads for IMPLEMENT, PLAN, and CODER intents
-- **Stale skill name detector** in tests covers all renamed/deleted skills
-
-### Changed
-- **Orchestration skills**: 7 skills renamed with `:orch` suffix — `implement:orch`, `explore:orch`, `debug:orch`, `plan:orch`, `review:orch`, `resolve:orch`, `pipeline:orch`
-- **`self-review` skill** renamed to `quality-gates`
-- **`ambient-router` skill** renamed to `router`
-- **Preamble**: simplified to detection-only; skill mappings moved to router skill
-- **Output branding**: standardized to `DevFlow: INTENT/DEPTH` across all ambient outputs
-- **Integration test `hasRequiredSkills()`**: uses bounded matching instead of substring
-
-### Removed
-- **`implementation-patterns` skill** (merged into `patterns`)
-- **`search-first` skill** (merged into `research`)
-- **Dead `isFirstToolASkill()` function** from integration test helpers
 
 ---
 
@@ -1170,7 +1155,8 @@ devflow init
 
 ---
 
-[Unreleased]: https://github.com/dean0x/devflow/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/dean0x/devflow/compare/v1.8.3...v2.0.0
 [1.8.3]: https://github.com/dean0x/devflow/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/dean0x/devflow/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/dean0x/devflow/compare/v1.8.0...v1.8.1
