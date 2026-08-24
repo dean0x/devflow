@@ -32,12 +32,13 @@ import {
   bold,
   dim,
   yellow,
+  cyan,
   gray,
   green,
   red,
   inverse,
 } from '../../hud/colors.js';
-import { padToVisible, truncateVisible } from '../tui/cells.js';
+import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import type { FlagsViewState, FlagRow } from './state.js';
 import { FLAG_REGISTRY } from '../../core/flags.js';
 import type { RenderDims } from '../tui/terminal.js';
@@ -64,12 +65,26 @@ export function computeViewportHeight(termRows: number): number {
 
 // ─── Value formatting ─────────────────────────────────────────────────────────
 
-/** Format a row's configuredValue for display. */
+/**
+ * Format a row's configuredValue for display.
+ *
+ * ADR-016 vocabulary:
+ *   null            → dim 'unset'   (key absent / deliberately unset)
+ *   boolean         → green 'enabled' / yellow 'disabled'
+ *   non-boolean at devflow default → plain string
+ *   non-boolean deviating from devflow default → cyan string
+ *
+ * disk-sourced values are routed through sanitizeCell to prevent TAB/LF
+ * layout breaks inside the fixed-width TUI cell (PF-023).
+ */
 function formatValue(row: FlagRow): string {
   const v = row.configuredValue;
   if (v === null) return dim('unset');
   if (typeof v === 'boolean') return v ? green('enabled') : yellow('disabled');
-  return String(v);
+  // Non-boolean: sanitize then colour by deviation
+  const str = sanitizeCell(String(v));
+  if (!Object.is(v, row.devflowDefault)) return cyan(str);
+  return str;
 }
 
 // ─── Edit buffer rendering ────────────────────────────────────────────────────
@@ -125,7 +140,8 @@ function renderRow(
   const prefix = isCursor ? '❯ ' : '  ';
 
   const isDirty = row.configuredValue !== row.originalValue;
-  const dirtyDot = isDirty ? (isCursor ? yellow('● ') : '● ') : '  ';
+  // ADR-016: dirty dot is yellow UNCONDITIONALLY (not just on cursor)
+  const dirtyDot = isDirty ? yellow('● ') : '  ';
 
   // Sanitize label (user-defined registry label is trusted, but sanitize for safety)
   const rawLabel = row.label;
@@ -134,10 +150,18 @@ function renderRow(
     labelW,
   );
 
+  // ADR-016: chevrons mark the focused control / live edit buffer (cyan ‹ › wrapping).
+  // The chevrons take 4 visible chars (‹ + space + space + ›); budget accordingly.
+  const chevronBudget = valueW - 4;
   let valueCell: string;
   if (isCursor && isEditing) {
+    // Live edit buffer: cyan ‹ buffer ›
     const bufStr = renderBuffer(editBuffer, editCaret);
-    valueCell = truncateVisible(bufStr, valueW);
+    valueCell = cyan(`‹ ${truncateVisible(bufStr, chevronBudget)} ›`);
+  } else if (isCursor) {
+    // Focused control: cyan ‹ value ›
+    const fmtVal = formatValue(row);
+    valueCell = cyan(`‹ ${truncateVisible(fmtVal, chevronBudget)} ›`);
   } else {
     const fmtVal = formatValue(row);
     valueCell = truncateVisible(fmtVal, valueW);

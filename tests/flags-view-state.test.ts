@@ -660,6 +660,19 @@ describe('edit mode — typed input', () => {
     expect(state.editing?.caret).toBe('aspell list'.length);
   });
 
+  it('j and k are inserted literally in edit mode (not swallowed as navigation)', () => {
+    // Spec: literal q d u j k must insert in edit mode. 'j' and 'k' were grouped
+    // with up/down and returned early, so multi-word commands like "aspell check"
+    // and paths containing 'j'/'k' could not be entered without error or visual cue.
+    const stateJ = typeInto('spellcheck', [...'as', 'j', ...'ell']);
+    expect(stateJ.editing?.buffer).toBe('asjell');
+    expect(stateJ.editing?.caret).toBe(6);
+
+    const stateK = typeInto('spellcheck', [...'as', 'k', ...'ell']);
+    expect(stateK.editing?.buffer).toBe('askell');
+    expect(stateK.editing?.caret).toBe(6);
+  });
+
   it('a space-containing command commits successfully', () => {
     let state = typeInto('spellcheck', [...'aspell', 'space', ...'list']);
     state = reduce(state, 'enter').state;

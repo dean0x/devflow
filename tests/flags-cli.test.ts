@@ -531,6 +531,49 @@ describe('flags CLI — createFlagsCommand factory', () => {
     });
   });
 
+  // ─── bare non-TTY invocation ──────────────────────────────────────────────────
+  //
+  // src/cli/commands/flags.ts:509-520: when no args are passed and the terminal is not
+  // a TTY, the command prints a status table to stdout, one note to stderr, sets
+  // exitCode = 1, and writes NOTHING to disk.
+  //
+  // In the vitest environment process.stdout.isTTY is undefined (falsy) so the non-TTY
+  // branch is taken automatically when no other option flag is present.
+
+  describe('bare non-TTY invocation', () => {
+    it('zero args → status table to stdout, note to stderr, exitCode 1, zero writes', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+      const manifestBefore = await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8');
+
+      const captured = { stdout: '', stderr: '' };
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+        if (typeof c === 'string') captured.stdout += c;
+        return true;
+      });
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        if (typeof c === 'string') captured.stderr += c;
+        return true;
+      });
+
+      try {
+        await flagsCmd.parseAsync([], { from: 'user' });
+      } finally {
+        stdoutSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+
+      // Status table: one line per registry flag — stdout must contain a known flag id
+      expect(captured.stdout).toContain('tui');
+      // Exactly one stderr note line
+      expect(captured.stderr).toContain('Note:');
+      // Exit code must be 1 (non-TTY path always fails with a hint)
+      expect(process.exitCode).toBe(1);
+      // Zero writes — manifest must be byte-for-byte identical after the run
+      const manifestAfter = await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8');
+      expect(manifestAfter).toBe(manifestBefore);
+    });
+  });
+
   // ─── malformed settings.json guard ───────────────────────────────────────────
 
   describe('malformed settings.json guard', () => {
@@ -542,6 +585,18 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(process.exitCode).toBe(1);
 
       // settings.json must remain untouched (not silently clobbered with {})
+      const settingsAfter = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
+      expect(settingsAfter).toBe('not valid json at all');
+    });
+
+    it('--set aborts on malformed settings.json (never silently clobbers)', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+      await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), 'not valid json at all', 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=25'], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+
+      // settings.json must remain byte-untouched (anti-clobber guard, same as --enable)
       const settingsAfter = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
       expect(settingsAfter).toBe('not valid json at all');
     });

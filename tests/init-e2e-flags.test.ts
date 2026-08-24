@@ -21,6 +21,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
@@ -91,21 +92,20 @@ afterEach(async () => {
 
 // ── Guards ────────────────────────────────────────────────────────────────────
 
-/** PF-018 vacuous-coverage guard: skip if dist/cli.js is not built. */
-async function requireBuiltCli(): Promise<boolean> {
-  try {
-    await fs.access(CLI_PATH);
-    return true;
-  } catch {
-    return false;
-  }
-}
+/**
+ * PF-018 vacuous-coverage guard: true when dist/cli.js exists.
+ *
+ * Uses existsSync (not async access) so it can be used with it.skipIf at
+ * module evaluation time — it.skipIf requires a synchronous boolean.
+ * Silent green (early `return`) is the forbidden state; it.skipIf produces an
+ * explicit SKIP mark in the vitest output instead.
+ */
+const CLI_BUILT = existsSync(CLI_PATH);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('init e2e — flags Phase 6 integration', () => {
-  it('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
-    if (!await requireBuiltCli()) return; // skip if not built
+  it.skipIf(!CLI_BUILT)('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
 
     // PF-018: seed a REAL old-format manifest (flags as string array) and settings with viewMode.
     // Non-vacuous: if the bridge removal regressed to string[], flags would be [] in the manifest.
@@ -223,8 +223,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(env.ENABLE_LSP_TOOL).toBeUndefined();
   });
 
-  it('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied', async () => {
-    if (!await requireBuiltCli()) return;
+  it.skipIf(!CLI_BUILT)('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied', async () => {
 
     // PF-018: no manifest means fresh install — all flags adopt their defaults.
     // Non-vacuous: if adoption is broken, max-concurrent-subagents env var would be absent.
@@ -264,8 +263,10 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect((settings['env'] as Record<string, string>)?.EXISTING_VAR).toBe('keep');
   });
 
-  it('idempotency: second run produces byte-stable settings (no viewMode thrash)', async () => {
-    if (!await requireBuiltCli()) return;
+  it.skipIf(!CLI_BUILT)('idempotency: second run produces content-stable settings (no viewMode thrash)', async () => {
+    // content-stable = deep-equal parsed objects (not byte-equal strings): stripFlags
+    // removes managed keys from their original positions and applyFlags re-appends them
+    // at the end, so key order can legitimately differ between runs while content is identical.
 
     // PF-018 vacuous guard: this test catches regression where every reinit strips viewMode.
     const seedSettings = { viewMode: 'verbose', env: { CUSTOM: 'stable' } };

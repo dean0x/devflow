@@ -24,7 +24,6 @@
 
 import {
   FLAG_REGISTRY,
-  neutralValueOf,
   coerceFlagValue,
   type ClaudeCodeFlag,
   type FlagsRecord,
@@ -451,11 +450,11 @@ function reduceEditMode(state: FlagsViewState, key: string): FlagsViewState {
       return { ...state, editing: { ...editing, caret: next, error: null } };
     }
 
-    // up/down: ignored while editing
+    // up/down: ignored while editing; j/k intentionally NOT listed here so they
+    // insert literally (spec: literal q d u j k — default-model and spellcheck
+    // may contain 'j'/'k' as part of a command or path).
     case 'up':
     case 'down':
-    case 'j':
-    case 'k':
       return state;
 
     // normalizeKey maps the space bar to the NAME 'space', not to ' '. Without this

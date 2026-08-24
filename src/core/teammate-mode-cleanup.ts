@@ -2,8 +2,8 @@
  * Strip `teammateMode: "auto"` from a freshly parsed copy of the settings JSON.
  * Returns the serialised JSON string (with trailing newline).
  *
- * Pure string→string — matches the pipeline pattern used by stripFlags /
- * stripViewMode so uninstall.ts can chain it without a separate parse/stringify.
+ * Pure string→string — matches the pipeline pattern used by stripFlags so
+ * uninstall.ts can chain it without a separate parse/stringify.
  * Only removes the key when the value is exactly `"auto"`; user-set values
  * (`"tmux"`, `"in-process"`, etc.) are preserved as-is.
  *

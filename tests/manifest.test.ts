@@ -1147,6 +1147,41 @@ describe('FlagsRecord heal round-trip (Phase 2)', () => {
     expect(result2).toEqual(result1);
   });
 
+  it('D39: heal-write failure returns migrated manifest (non-null), does not throw', async () => {
+    // Write a legacy manifest (array-format flags) that triggers heal-write
+    const legacy = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true,
+        flags: ['tui', 'lsp'],  // array format → needs healing
+        proxy: false, compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(legacy), 'utf-8');
+
+    // Make directory read-only so the heal-write (tmp+rename) fails
+    await fs.chmod(tmpDir, 0o555);
+
+    let result: ManifestData | null;
+    try {
+      result = await readManifest(tmpDir);
+    } finally {
+      // Restore write permission so afterEach rm can remove the temp dir
+      await fs.chmod(tmpDir, 0o755);
+    }
+
+    // D39: heal-write failure must NOT return null — migrated in-memory manifest is returned
+    expect(result).not.toBeNull();
+    // The in-memory manifest has the migrated FlagsRecord (not the legacy array)
+    expect(Array.isArray(result!.features.flags)).toBe(false);
+    expect(result!.features.flags['tui']).toBe(true);
+    expect(result!.features.flags['lsp']).toBe(true);
+  });
+
   it('__proto__ key in flags JSON is stripped by sanitizeFlagsRecord on read', async () => {
     // JSON.parse('{"__proto__": true}') creates an own data property on the parsed object.
     // sanitizeFlagsRecord must skip it to prevent prototype pollution.

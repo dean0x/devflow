@@ -52,16 +52,6 @@ export interface ManifestData {
      */
     flags: FlagsRecord;
     /**
-     * @deprecated Folded into FlagsRecord key-presence on readManifest (self-heal).
-     * readManifest strips this field from results; init.ts no longer writes it.
-     */
-    knownFlags?: string[];
-    /**
-     * @deprecated Folded into flags['view-mode'] on readManifest (self-heal).
-     * readManifest strips this field from results; init.ts no longer writes it.
-     */
-    viewMode?: ViewMode;
-    /**
      * Security deny list location. 'user' = ~/.claude/settings.json,
      * 'managed' = system-level managed settings, 'none' = not installed.
      * Absent in pre-Phase-F manifests — readManifest defaults to undefined (unknown).

@@ -93,12 +93,31 @@ describe('flags-view-render — renderFrame basic contract', () => {
     }
   });
 
+  it('sanitizeCell: embedded \\n and \\t in a string value produce one line per row (no layout break)', () => {
+    // `devflow flags --set $'spellcheck=a\nb'` persists a LF; coerceFlagValue permits
+    // TAB/LF so the value reaches the renderer. sanitizeCell must collapse both to space
+    // so the one-string-per-terminal-line contract is preserved.
+    const rows = buildFlagRows(FLAG_REGISTRY, { spellcheck: 'aspell\tcheck\nline2' });
+    const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
+    const frameLines = renderFrame(state, DIMS_80x24);
+    // Every string in the returned array must be free of newlines and tabs
+    for (const line of frameLines) {
+      expect(line).not.toContain('\n');
+      expect(line).not.toContain('\t');
+    }
+    // And the total line count must still equal FIXED_ROWS + viewportHeight (no extra lines)
+    const viewportHeight = computeViewportHeight(DIMS_80x24.rows);
+    expect(frameLines.length).toBe(FIXED_ROWS + viewportHeight);
+  });
+
   it('renders exactly FIXED_ROWS + viewportHeight lines', () => {
     const state = makeState();
     const lines = renderFrame(state, DIMS_80x24);
-    // Total lines = FIXED_ROWS + min(visible rows, viewportHeight)
-    // But there can be blank/padding rows too — just check it's non-empty
-    expect(lines.length).toBeGreaterThan(0);
+    // FLAG_REGISTRY has more rows than the viewport can show, so the viewport is fully
+    // filled: renderedRows.length = viewportHeight, total = FIXED_ROWS + viewportHeight.
+    const viewportHeight = computeViewportHeight(DIMS_80x24.rows);
+    expect(FLAG_REGISTRY.length).toBeGreaterThan(viewportHeight); // confirm premise
+    expect(lines.length).toBe(FIXED_ROWS + viewportHeight);
   });
 
   it('no line is longer than cols visible characters (no content overflow)', () => {
@@ -405,7 +424,9 @@ describe('flags-view-render — unsaved changes section', () => {
     const state = makeState({ rows: modified });
     const lines = renderFrame(state, DIMS_80x24);
     const joined = lines.join('\n');
-    // Should show something like "1 unsaved" or "unsaved: 1"
-    expect(joined.match(/unsaved|modified|changed/i) !== null || joined.includes('1')).toBe(true);
+    // Strip ANSI escape sequences and assert the exact unsaved indicator text
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    const plain = joined.replace(ESC_PATTERN, '');
+    expect(plain).toContain('1 unsaved change');
   });
 });
