@@ -194,17 +194,49 @@ If you shadow `compliance`, the shadow's own tokens are replaced at install time
 ## Feature Flags
 
 ```bash
-npx devflow-kit flags --list           # List all flags with current state
-npx devflow-kit flags --enable <flag>  # Enable a flag
-npx devflow-kit flags --disable <flag> # Disable a flag
-npx devflow-kit flags --status         # Show enabled flags
+devflow flags                          # Interactive TUI (TTY only); non-TTY prints status table + exits 1
+devflow flags --status                 # Show current flag states (non-destructive)
+devflow flags --list                   # List all flags with kind, target, and default
+devflow flags --enable <ids>           # Enable boolean flag(s), comma-separated
+devflow flags --disable <ids>          # Disable boolean flag(s), comma-separated
+devflow flags --set <id=value>         # Set a flag value (repeatable); use 'unset' as value to clear
+devflow flags --unset <ids>            # Reset flag(s) to neutral, comma-separated
 ```
 
-Notable flags (default OFF):
+`--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `agent-teams` | OFF | Enables Claude Code's experimental Agent Teams via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`. Enable with `devflow flags --enable agent-teams`. |
+All 28 flags by kind and devflow default:
+
+| Flag ID | Kind | Target | Devflow Default |
+|---------|------|--------|-----------------|
+| `tui` | boolean | setting `tui` | `true` (fullscreen) |
+| `tool-search` | boolean | env `ENABLE_TOOL_SEARCH` | `true` |
+| `lsp` | boolean | env `ENABLE_LSP_TOOL` | `true` |
+| `prompt-caching-1h` | boolean | env `ENABLE_PROMPT_CACHING_1H` | `true` |
+| `show-turn-duration` | boolean | setting `showTurnDuration` | `true` |
+| `clear-context-on-plan` | boolean | setting `showClearContextOnPlanAccept` | `true` |
+| `disable-bundled-skills` | boolean | setting `disableBundledSkills` | `true` |
+| `pin-sonnet-4-6` | boolean | env `ANTHROPIC_DEFAULT_SONNET_MODEL` | `true` (`claude-sonnet-4-6`) |
+| `max-concurrent-subagents` | number | env `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `40` (upstream: 20) |
+| `brief` | boolean | env `CLAUDE_CODE_BRIEF` | `false` |
+| `thinking-summaries` | boolean | setting `showThinkingSummaries` | `false` |
+| `subprocess-env-scrub` | boolean | env `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | `false` |
+| `disable-nonessential-traffic` | boolean | env `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `false` |
+| `forked-subagents` | boolean | env `CLAUDE_CODE_FORK_SUBAGENT` | `false` |
+| `disable-adaptive-thinking` | boolean | env `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `false` |
+| `always-thinking` | boolean | setting `alwaysThinkingEnabled` | `false` |
+| `disable-git-instructions` | boolean | env `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | `false` |
+| `disable-compact` | boolean | env `DISABLE_COMPACT` | `false` |
+| `disable-1m-context` | boolean | env `CLAUDE_CODE_DISABLE_1M_CONTEXT` | `false` |
+| `disable-autoupdater` | boolean | env `DISABLE_AUTOUPDATER` | `false` |
+| `agent-teams` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `false` |
+| `enable-todo-tools` | boolean | env `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `false` |
+| `subagent-spawn-depth` | number | env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | unset (upstream: 3) |
+| `workflow-size-guideline` | enum | setting `workflowSizeGuideline` | unset (`small\|medium\|large\|unrestricted`) |
+| `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
+| `goal-checkin-minutes` | number | env `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` | unset (upstream: 30 min) |
+| `spellcheck` | string | setting `spellcheck` | unset |
+| `view-mode` | enum | setting `viewMode` | `default` (key omitted when default) |
 
 ## External Model Routing (Devflow Proxy)
 
