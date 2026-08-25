@@ -68,10 +68,19 @@ async function readSettingsSafe(
     return { ok: false, reason: `Cannot read settings.json: ${(err as Error).message}` };
   }
 
+  // REL-M2 + PERF-L4: single parse — validate shape and return raw string.
+  // Validate-then-discard (JSON.parse for side-effect only) was pure overhead;
+  // the plain-object guard replaces it and catches null/array roots before they
+  // reach applyFlags/stripFlags (applies PF-023 — validate at the sink, and
+  // earlier is better for actionable error messages).
+  let parsed: unknown;
   try {
-    JSON.parse(raw); // validate only
+    parsed = JSON.parse(raw);
   } catch {
     return { ok: false, reason: 'settings.json is malformed — fix it before changing flags' };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, reason: 'settings.json must be a JSON object — fix it before changing flags' };
   }
   return { ok: true, content: raw };
 }
@@ -117,6 +126,10 @@ async function persistFlagConfig(
   devflowDir: string,
   settingsContent: string,
   newRecord: FlagsRecord,
+  // ARCH-M2 + PERF-L1: caller passes the already-read manifest so this function
+  // does not re-read it (two snapshots, one write; readManifest also self-heals
+  // = extra write). null → {ok:false,reason:'no-manifest'} (C2 discriminant intact).
+  manifest: NonNullable<Awaited<ReturnType<typeof readManifest>>> | null,
   opts: { viewModeExplicit: boolean } = { viewModeExplicit: false },
 ): Promise<PersistResult> {
   // D15: convergeFlagsIntoSettings is the fold-before-strip pipeline entry point
@@ -151,7 +164,6 @@ async function persistFlagConfig(
   // An absent manifest is a FAILURE, not a no-op (TS-H2 / ARCH-H2 / REL-H2):
   // returning success here would tell the user "Flags saved." while the manifest
   // was never updated — reverted on the next `devflow init`.
-  const manifest = await readManifest(devflowDir);
   if (!manifest) {
     p.log.error('No devflow manifest found — flag selections were not recorded. Run devflow init first.');
     process.exitCode = 1;
@@ -334,7 +346,7 @@ async function handleSetBooleans(
     newRecord[id] = value;
   }
 
-  const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord);
+  const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest);
 
   if (result.ok) {
     for (const id of ids) {
@@ -417,7 +429,7 @@ async function handleSet(
   // This lets the chosen value override an externally-set /focus.
   const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
   const result = await persistFlagConfig(
-    claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
+    claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest,
     { viewModeExplicit },
   );
 
@@ -462,7 +474,7 @@ async function handleUnset(
   // viewModeExplicit: true when the user explicitly unset view-mode.
   const viewModeExplicit = ids.includes('view-mode');
   const result = await persistFlagConfig(
-    claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
+    claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest,
     { viewModeExplicit },
   );
 
@@ -494,7 +506,11 @@ async function handleBare(
   claudeDir: string,
   devflowDir: string,
 ): Promise<void> {
-  if (process.stdout.isTTY) {
+  // REL-H1: require both stdin AND stdout to be TTYs.
+  // Gating on process.stdout.isTTY alone lets `devflow flags < /dev/null` enter
+  // alt-screen while stdin ends immediately, leaving the terminal stranded with
+  // hidden cursor on exit. Precedent: agents.ts uses the same two-flag predicate.
+  if (process.stdin.isTTY && process.stdout.isTTY) {
     // ── Manifest + settings required before the TUI may launch ──────────
     // Reuses loadFlagContext — the same guard as --enable/--disable/--set/--unset.
     // If the manifest is absent or unreadable, we refuse here and settings.json
@@ -519,8 +535,22 @@ async function handleBare(
       const newRecord = collectFlagRecord(result.rows);
       // viewModeExplicit: true if the user changed the view-mode row in the TUI
       const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
+      // REL-M3: re-read settings.json AFTER the human-paced TUI session closes.
+      // The read captured before runFlagsTui is a stale snapshot by the time the
+      // user saves — any concurrent writer (proxy enable, devflow agents, Claude
+      // Code /config) that ran during the session would be silently overwritten by
+      // the atomic rename in writeFileAtomicExclusive. Re-reading rebases the flag
+      // write onto current content and ensures convergeFlagsIntoSettings sees the
+      // fresh viewMode (applies PF-022 — file state, not config state, is reality).
+      const freshSettings = await readSettingsSafe(path.join(claudeDir, 'settings.json'));
+      if (!freshSettings.ok) {
+        p.log.error(freshSettings.reason);
+        process.exitCode = 1;
+        return;
+      }
       const persistResult = await persistFlagConfig(
-        claudeDir, devflowDir, ctx.value.settingsContent, newRecord, { viewModeExplicit },
+        claudeDir, devflowDir, freshSettings.content, newRecord, ctx.value.manifest,
+        { viewModeExplicit },
       );
       if (persistResult.ok) {
         process.stdout.write('Flags saved.\n');

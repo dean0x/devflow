@@ -533,25 +533,32 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
   // ─── bare TTY invocation — manifest guard (TS-H2 / ARCH-H2 / REL-H2 pin) ──────
   //
-  // When process.stdout.isTTY is true and the manifest is absent or corrupt,
-  // handleBare must hard-refuse BEFORE importing or launching the TUI.
-  // The fix: reuse loadFlagContext (the same guard mutating handlers use) at the top
-  // of the TTY branch. settings.json must NOT be touched.
+  // When BOTH process.stdin.isTTY and process.stdout.isTTY are true and the
+  // manifest is absent or corrupt, handleBare must hard-refuse BEFORE importing
+  // or launching the TUI. The fix: reuse loadFlagContext (the same guard mutating
+  // handlers use) at the top of the TTY branch. settings.json must NOT be touched.
+  //
+  // REL-H1: the predicate now requires BOTH stdin and stdout to be TTYs.
   //
   // RED proof: before the fix, handleBare seeds from {} and proceeds into the TUI
   // import (or tries to), possibly writing settings.json; exitCode stays 0.
 
   describe('bare TTY invocation — manifest guard', () => {
-    let origIsTTY: boolean | undefined;
+    let origStdoutIsTTY: boolean | undefined;
+    let origStdinIsTTY: boolean | undefined;
 
     beforeEach(() => {
-      origIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      origStdoutIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      origStdinIsTTY = (process.stdin as { isTTY?: boolean }).isTTY;
+      // REL-H1: both stdin AND stdout must be TTYs for the interactive path to engage.
       Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
       vi.mocked(p.log.error).mockClear();
     });
 
     afterEach(() => {
-      Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
     });
 
     it('no manifest → hard-refuse, exitCode 1, p.log.error, settings.json not written', async () => {
@@ -581,6 +588,60 @@ describe('flags CLI — createFlagsCommand factory', () => {
       const settingsExists = await fs.access(path.join(tmpClaudeDir, 'settings.json'))
         .then(() => true).catch(() => false);
       expect(settingsExists, 'settings.json must not be written when manifest is unreadable').toBe(false);
+    });
+  });
+
+  // ─── bare invocation — stdout TTY but stdin non-TTY → non-TTY path (REL-H1) ──
+  //
+  // REL-H1: the TUI predicate requires BOTH stdin AND stdout to be TTYs.
+  // When only stdout is a TTY (e.g. output redirected from a script that sets
+  // process.stdout.isTTY = true but pipes stdin), the non-TTY path is taken:
+  // status table to stdout, note to stderr, exitCode = 1, zero writes.
+  //
+  // RED proof: before the fix, the predicate checked only process.stdout.isTTY,
+  // so this scenario entered the interactive branch and attempted to open the TUI.
+
+  describe('bare invocation — stdout TTY but stdin non-TTY → non-TTY path (REL-H1)', () => {
+    let origStdoutIsTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origStdoutIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      // Set stdout TTY but do NOT set stdin (stays undefined = falsy in vitest).
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
+    });
+
+    it('status table to stdout, note to stderr, exitCode 1, zero writes', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+      const manifestBefore = await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8');
+
+      const captured = { stdout: '', stderr: '' };
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+        if (typeof c === 'string') captured.stdout += c;
+        return true;
+      });
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        if (typeof c === 'string') captured.stderr += c;
+        return true;
+      });
+
+      try {
+        await flagsCmd.parseAsync([], { from: 'user' });
+      } finally {
+        stdoutSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+
+      // Non-TTY path: status table to stdout + note to stderr
+      expect(captured.stdout).toContain('tui');
+      expect(captured.stderr).toContain('Note:');
+      expect(process.exitCode).toBe(1);
+      // Zero writes — manifest must be byte-identical
+      const manifestAfter = await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8');
+      expect(manifestAfter).toBe(manifestBefore);
     });
   });
 
@@ -809,6 +870,93 @@ describe('flags CLI — createFlagsCommand factory', () => {
         await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'),
       );
       expect(settings.viewMode, '--set view-mode=verbose must override /focus').toBe('verbose');
+    });
+  });
+
+  // ─── REL-M3: concurrent settings.json write during TUI session survives ───────
+  //
+  // handleBare re-reads settings.json AFTER runFlagsTui returns, not before.
+  // A concurrent writer (e.g. `devflow proxy --enable` setting ANTHROPIC_BASE_URL)
+  // that ran while the TUI was open would be silently clobbered by the stale
+  // pre-TUI snapshot if the re-read were absent (applies PF-022).
+  //
+  // vi.doMock + vi.resetModules() isolate the mock to this describe block; the
+  // mock's runFlagsTui simulates a concurrent write before returning {action:'save'}.
+
+  describe('bare TUI save — concurrent settings.json write survives (REL-M3)', () => {
+    let origStdoutIsTTY: boolean | undefined;
+    let origStdinIsTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origStdoutIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      origStdinIsTTY = (process.stdin as { isTTY?: boolean }).isTTY;
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
+      // Remove the doMock registration and clear module cache so subsequent tests
+      // get the real flags-view implementation.
+      vi.unmock('../src/cli/flags-view/index.js');
+      vi.resetModules();
+    });
+
+    it('ANTHROPIC_BASE_URL written during TUI session is not clobbered by stale pre-TUI snapshot', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeEmptyFlagsManifest(),
+        'utf-8',
+      );
+      // settings.json starts empty — the concurrent write will add the env key.
+      await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), '{}', 'utf-8');
+
+      const settingsPath = path.join(tmpClaudeDir, 'settings.json');
+
+      // Mock flags-view so runFlagsTui simulates a concurrent write before returning.
+      // buildFlagRows/collectFlagRecord return minimal stubs; only the concurrent
+      // write timing matters for this regression.
+      vi.doMock('../src/cli/flags-view/index.js', () => ({
+        buildFlagRows: () => [],
+        collectFlagRecord: () => ({}),
+        runFlagsTui: async () => {
+          // Concurrent write — simulates `devflow proxy --enable` running while the
+          // TUI was open (applies PF-022: file state is reality, not config state).
+          await fs.writeFile(
+            settingsPath,
+            JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://localhost:9090' } }, null, 2) + '\n',
+            'utf-8',
+          );
+          return { action: 'save' as const, rows: [] as never[] };
+        },
+      }));
+      // Clear the module cache so the fresh import of flags.ts picks up the mock
+      // when its handleBare calls await import('../flags-view/index.js').
+      vi.resetModules();
+
+      const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
+      const freshCmd = createFlagsCommand();
+
+      // Suppress 'Flags saved.\n' so it does not pollute test output.
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      try {
+        await freshCmd.parseAsync([], { from: 'user' });
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+
+      // REL-M3 regression: ANTHROPIC_BASE_URL written by the concurrent writer
+      // must survive the re-read+persist in handleBare — not clobbered by the
+      // stale pre-TUI snapshot.
+      const settings = parseSettings(await fs.readFile(settingsPath, 'utf-8'));
+      expect(
+        (settings.env as Record<string, string> | undefined)?.ANTHROPIC_BASE_URL,
+        'concurrent ANTHROPIC_BASE_URL must not be clobbered by stale pre-TUI snapshot',
+      ).toBe('http://localhost:9090');
+
+      // TUI save succeeded → exitCode must not be 1.
+      expect(process.exitCode).toBeFalsy();
     });
   });
 });

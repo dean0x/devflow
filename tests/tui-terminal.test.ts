@@ -18,6 +18,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'stream';
 import { runTui, normalizeKey, type TuiIO } from '../src/cli/tui/terminal.js';
 
+// Alias for escape sequences used in bail-guard assertions
+const ENTER_ALT = '\x1b[?1049h';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -280,6 +283,67 @@ describe('renderToStdout — frame output contract (TEST-M1 / REG-S3)', () => {
 });
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// REL-H1: driver bails before alt-screen when stdin is not a TTY and no
+// spec.io.stdin was injected. This pins the guard so a future caller cannot
+// silently reintroduce the stdout-only predicate.
+//
+// In the vitest environment process.stdin.isTTY is falsy (not a real TTY).
+// Providing spec.io.stdout but NOT spec.io.stdin exercises the bail path.
+// ---------------------------------------------------------------------------
+
+describe('runTui — non-TTY stdin guard (REL-H1)', () => {
+  it('rejects before writing ENTER_ALT when no io.stdin and process.stdin is not a TTY', async () => {
+    // Intercept stdout writes to verify ENTER_ALT is never emitted.
+    const fakeStdout = new PassThrough();
+    const written: string[] = [];
+    const realWrite = fakeStdout.write.bind(fakeStdout);
+    fakeStdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+      written.push(String(chunk));
+      return (realWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+    }) as PassThrough['write'];
+    (fakeStdout as unknown as { rows: number }).rows = 24;
+    (fakeStdout as unknown as { columns: number }).columns = 80;
+
+    await expect(
+      runTui<{ n: number }, 'none' | 'done', 'none'>({
+        initialState: { n: 0 },
+        reduce: s => ({ state: s, intent: 'none' }),
+        renderFrame: () => ['frame'],
+        signalAction: 'done',
+        continueIntent: 'none',
+        // spec.io.stdout provided so the guard's "no injected stdin" branch is
+        // exercised, but spec.io.stdin is intentionally omitted — bail fires when
+        // process.stdin.isTTY is falsy (the normal vitest environment).
+        io: { stdout: fakeStdout as unknown as TuiIO['stdout'] },
+      }),
+    ).rejects.toThrow('stdin is not a TTY');
+
+    // No alt-screen escape must have been written before the guard fired.
+    expect(written.join('')).not.toContain(ENTER_ALT);
+  });
+
+  it('proceeds normally when spec.io.stdin is injected (test-stream path)', async () => {
+    // When io.stdin is injected, the guard is bypassed even if the stream's
+    // isTTY would be falsy — the caller owns the stream lifecycle.
+    const h = makeHarness();
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      renderFrame: () => ['frame'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io, // io.stdin IS injected → guard bypassed
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    const result = await tui;
+    expect(result.intent).toBe('done');
+    expect(h.written()).toContain(ENTER_ALT);
+  });
+});
 
 describe('runTui — cleanup always runs', () => {
   it('restores the terminal when the INITIAL render throws', async () => {

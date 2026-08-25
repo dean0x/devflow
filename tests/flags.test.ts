@@ -1458,3 +1458,42 @@ describe('convergeFlagsIntoSettings — REG-H1: hand-set managed keys survive', 
     expect(stripped.env?.['CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH'], 'spawn-depth removed on full sweep').toBeUndefined();
   });
 });
+
+// ─── applyFlags / stripFlags — non-object root guard (REL-M2) ────────────────
+//
+// applyFlags and stripFlags must throw a clear error (not an opaque TypeError)
+// when the settings.json root is not a plain object. This is defence-in-depth
+// for callers that bypass readSettingsSafe (init.ts, uninstall.ts). Applies
+// PF-023: put the guard at the sink that every caller passes through.
+
+describe('applyFlags — non-object root guard (REL-M2)', () => {
+  it('throws on null root', () => {
+    expect(() => applyFlags('null', {})).toThrow('applyFlags');
+  });
+
+  it('throws on array root', () => {
+    expect(() => applyFlags('[]', {})).toThrow('applyFlags');
+  });
+
+  it('throws on scalar root (number)', () => {
+    expect(() => applyFlags('5', {})).toThrow('applyFlags');
+  });
+
+  it('does NOT throw on a valid plain-object root', () => {
+    expect(() => applyFlags('{}', {})).not.toThrow();
+  });
+});
+
+describe('stripFlags — non-object root guard (REL-M2)', () => {
+  it('throws on null root', () => {
+    expect(() => stripFlags('null')).toThrow('stripFlags');
+  });
+
+  it('throws on array root', () => {
+    expect(() => stripFlags('[]')).toThrow('stripFlags');
+  });
+
+  it('does NOT throw on a valid plain-object root', () => {
+    expect(() => stripFlags('{}')).not.toThrow();
+  });
+});

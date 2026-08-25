@@ -823,7 +823,14 @@ function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
  * - `__proto__`, `constructor`, `prototype` keys are silently skipped.
  */
 export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  // REL-M2 sink guard (applies PF-023): a non-plain-object root (null, array, scalar)
+  // would cause a silent no-op or a confusing TypeError deep inside the loop.
+  // Throw early with a clear message so every caller path is self-guarding.
+  const root = JSON.parse(settingsJson);
+  if (root === null || typeof root !== 'object' || Array.isArray(root)) {
+    throw new Error('applyFlags: settings.json root must be a plain object');
+  }
+  const settings = root as Record<string, unknown>;
 
   for (const [id, value] of Object.entries(flags)) {
     // Prototype pollution guard
@@ -873,7 +880,13 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
  * Cleans up empty env object. Strip-then-apply idempotence preserved (INV-1).
  */
 export function stripFlags(settingsJson: string): string {
-  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  // REL-M2 sink guard (applies PF-023): mirror of applyFlags — throw early on a
+  // non-plain-object root so every caller path is self-guarding.
+  const root = JSON.parse(settingsJson);
+  if (root === null || typeof root !== 'object' || Array.isArray(root)) {
+    throw new Error('stripFlags: settings.json root must be a plain object');
+  }
+  const settings = root as Record<string, unknown>;
   // asPlainObject guard: "env": [] must not have its keys iterated as an object (applies TS-M3)
   const env = asPlainObject(settings.env);
 

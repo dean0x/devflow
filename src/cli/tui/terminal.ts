@@ -212,6 +212,23 @@ export async function runTui<S, A extends string, C extends A>(
   const stdin: TuiIO['stdin'] = (spec.io?.stdin ?? process.stdin) as TuiIO['stdin'];
   const stdout: TuiIO['stdout'] = (spec.io?.stdout ?? process.stdout) as TuiIO['stdout'];
 
+  // REL-H1 driver bail: reject BEFORE any terminal mutation when stdin is not a
+  // TTY and no spec.io.stdin was injected.
+  //
+  // Without this guard: alt-screen is entered, raw mode is skipped (no setRawMode
+  // on non-TTY stdin), stdin ends immediately (no keypresses), the promise never
+  // settles, the process exits, and cleanup() never runs — leaving the terminal
+  // in alt-screen with hidden cursor.
+  //
+  // spec.io?.stdin injected = test / pipe path that owns its own stream lifecycle.
+  // That path may deliberately pass a non-isTTY stream (e.g. PassThrough in tests)
+  // and is exempted from this guard.
+  if (!spec.io?.stdin && !stdin.isTTY) {
+    throw new Error(
+      'runTui: stdin is not a TTY — use process.stdin on a real TTY or inject spec.io.stdin',
+    );
+  }
+
   // ── Enable readline keypress events ─────────────────────────────────────
   readline.emitKeypressEvents(stdin);
 
