@@ -15,7 +15,7 @@ devflow/
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts, proxy.ts,
 │   │   │                             #   agents.ts, knowledge/
 │   │   ├── tui/                      # Generic TUI shell — runTui<S,A> driver, normalizeKey, cell helpers
-│   │   ├── flags-view/               # Claude Code flags editor TUI (state.ts, render.ts, terminal.ts, index.ts)
+│   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)
 │   │   └── agents-view/              # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
