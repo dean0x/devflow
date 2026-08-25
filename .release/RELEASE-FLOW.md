@@ -11,6 +11,9 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 ## Version Strategy
 
 - `semver-auto`: derive bump from conventional commits since last tag (`!`/BREAKING → major)
+  Also scan squash-commit BODIES for breaking-change sections (`## Breaking Changes`) —
+  PR templates document them there without the `!` marker; confirm major-vs-minor with
+  the user when found (2.1.0 shipped such changes as a minor by explicit user choice)
 - Tag format: `vX.Y.Z` (annotated). Release title: `vX.Y.Z`. No `v` prefix in CI input.
 - Branching model: main-only, squash merges, no version PRs. CI bot commits directly to main
   (ruleset bypass). `.devflow/conventions.md` absent — heuristics above learned from history.
@@ -33,6 +36,9 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
   done by `scripts/bump-version.ts` (idempotent: skips if version header already present)
 - Release notes = the new version's section (up to first `---`), captured from script stdout
 - CI restores a fresh `## [Unreleased]` header after the release and pushes it
+- If `[Unreleased]` is empty but commits exist since the last tag (PRs merged without
+  changelog entries — happened for 2.1.0), draft entries from the squash-commit bodies,
+  get user approval, and land as a `docs(changelog):` commit on main before dispatch
 
 ## Build & Test
 
