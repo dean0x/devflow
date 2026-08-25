@@ -41,6 +41,11 @@ import {
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { sanitizeCell } from '../tui/cells.js';
+// Static imports for pure view-state helpers — no TTY machinery (applies PF-017).
+// runFlagsTui stays lazily imported in handleBare to keep TTY module out of
+// --list/--status code paths; buildFlagRows and collectFlagRecord are pure.
+import { buildFlagRows, collectFlagRecord } from '../flags-view/state.js';
+import type { FlagsTuiResult } from '../flags-view/terminal.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -99,8 +104,9 @@ async function readSettingsSafe(
  *                         recorded. An absent manifest is a failure, not a no-op.
  *
  * Callers print success ("Flags saved.", "X enabled", …) ONLY when ok === true.
+ * Exported so applyTuiResult can reference it in its return type.
  */
-type PersistResult =
+export type PersistResult =
   | { ok: true }
   | { ok: false; failed: ReadonlyArray<'settings' | 'manifest'> }
   | { ok: false; reason: 'no-manifest' };
@@ -303,7 +309,10 @@ async function handleSetBooleans(
   ids: string[],
   value: boolean,
 ): Promise<void> {
-  // Validate: must be known boolean flags only
+  // Validate: must be known boolean flags only.
+  // Collect the validated flag definitions so the success loop can use them
+  // directly — avoids lookupFlag(id)! re-lookups after the guard (TS-S1).
+  const flagDefs: ClaudeCodeFlag[] = [];
   for (const id of ids) {
     const flag = lookupFlag(id);
     if (!flag) {
@@ -318,6 +327,7 @@ async function handleSetBooleans(
       process.exitCode = 1;
       return;
     }
+    flagDefs.push(flag);
   }
 
   // Manifest required for mutating ops (avoids settings/manifest desync)
@@ -330,21 +340,20 @@ async function handleSetBooleans(
 
   // PF-015: compute new record before any write
   const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
-  for (const id of ids) {
-    newRecord[id] = value;
+  for (const flag of flagDefs) {
+    newRecord[flag.id] = value;
   }
 
   const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest);
 
   if (result.ok) {
-    for (const id of ids) {
+    for (const flag of flagDefs) {
       if (value) {
-        p.log.success(`${id} enabled`);
+        p.log.success(`${flag.id} enabled`);
       } else {
         // Route through formatFlagValue (applies ADR-016 — one vocabulary,
         // shared with --status and TUI so the three surfaces cannot drift).
-        const flag = lookupFlag(id)!;
-        p.log.success(`${id} ${formatFlagValue(flag, false)}`);
+        p.log.success(`${flag.id} ${formatFlagValue(flag, false)}`);
       }
     }
   }
@@ -434,7 +443,10 @@ async function handleUnset(
   devflowDir: string,
   ids: string[],
 ): Promise<void> {
-  // Validate: must be known flags (any kind)
+  // Validate: must be known flags (any kind).
+  // Collect the validated flag definitions so the mutation loop can use them
+  // directly — avoids lookupFlag(id)! re-lookups after the guard (TS-S1).
+  const flagDefs: ClaudeCodeFlag[] = [];
   for (const id of ids) {
     const flag = lookupFlag(id);
     if (!flag) {
@@ -443,6 +455,7 @@ async function handleUnset(
       process.exitCode = 1;
       return;
     }
+    flagDefs.push(flag);
   }
 
   const ctx = await loadFlagContext(claudeDir, devflowDir);
@@ -454,9 +467,8 @@ async function handleUnset(
 
   // PF-015: compute new record before any write
   const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
-  for (const id of ids) {
-    const flag = lookupFlag(id)!;
-    newRecord[id] = neutralValueOf(flag);
+  for (const flag of flagDefs) {
+    newRecord[flag.id] = neutralValueOf(flag);
   }
 
   // viewModeExplicit: true when the user explicitly unset view-mode.
@@ -471,6 +483,50 @@ async function handleUnset(
       p.log.success(`${id} unset`);
     }
   }
+}
+
+/**
+ * Apply a TUI result to disk — the save/persist seam extracted from handleBare.
+ *
+ * Enables seam testing of the TUI→persist wiring without a real TTY (closes
+ * the interactive-surface coverage gap per PF-017(c)). The test drives
+ * runFlagsTui with PassThrough streams, feeds its result here, and asserts
+ * the whole post-state of both artifacts (manifest + settings.json) per PF-015.
+ *
+ * @param result       TUI result from runFlagsTui — action 'save', 'cancel', or 'abort'.
+ * @param freshSettingsContent Settings.json content re-read AFTER the TUI closed
+ *                     (see REL-M3 in handleBare — caller owns the re-read).
+ * @param manifest     Loaded manifest threaded from loadFlagContext before TUI launch.
+ * @param claudeDir    Path to ~/.claude directory (for settings.json write).
+ * @param devflowDir   Path to ~/.devflow directory (for manifest write).
+ * @returns 'saved' on successful persist, 'unchanged' for cancel/abort,
+ *          or the PersistResult error discriminant when persist fails
+ *          (persistFlagConfig already logged + set exitCode in that case).
+ */
+export async function applyTuiResult(
+  result: FlagsTuiResult,
+  freshSettingsContent: string,
+  manifest: NonNullable<Awaited<ReturnType<typeof readManifest>>>,
+  claudeDir: string,
+  devflowDir: string,
+): Promise<'saved' | 'unchanged' | Extract<PersistResult, { ok: false }>> {
+  if (result.action !== 'save') {
+    return 'unchanged';
+  }
+
+  const existingRecord: FlagsRecord = manifest.features.flags;
+  const newRecord = collectFlagRecord(result.rows);
+  // viewModeExplicit: true if the user changed the view-mode row in the TUI
+  const viewModeExplicit = newRecord['view-mode'] !== existingRecord['view-mode'];
+
+  const persistResult = await persistFlagConfig(
+    claudeDir, devflowDir, freshSettingsContent, newRecord, manifest,
+    { viewModeExplicit },
+  );
+  if (persistResult.ok) {
+    return 'saved';
+  }
+  return persistResult;
 }
 
 /**
@@ -512,17 +568,14 @@ async function handleBare(
     const record: FlagsRecord = ctx.value.manifest.features.flags;
 
     // ── Build initial rows from registry + current record ──────────────
-    const { runFlagsTui, buildFlagRows, collectFlagRecord } =
-      await import('../flags-view/index.js');
+    // buildFlagRows is a static import (pure — no TTY); only runFlagsTui is lazy.
     const initialRows = buildFlagRows(FLAG_REGISTRY, record);
 
     // ── Launch TUI ────────────────────────────────────────────────────
+    const { runFlagsTui } = await import('../flags-view/index.js');
     const result = await runFlagsTui(initialRows);
 
     if (result.action === 'save') {
-      const newRecord = collectFlagRecord(result.rows);
-      // viewModeExplicit: true if the user changed the view-mode row in the TUI
-      const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
       // REL-M3: re-read settings.json AFTER the human-paced TUI session closes.
       // The read captured before runFlagsTui is a stale snapshot by the time the
       // user saves — any concurrent writer (proxy enable, devflow agents, Claude
@@ -536,13 +589,11 @@ async function handleBare(
         process.exitCode = 1;
         return;
       }
-      const persistResult = await persistFlagConfig(
-        claudeDir, devflowDir, freshSettings.content, newRecord, ctx.value.manifest,
-        { viewModeExplicit },
-      );
-      if (persistResult.ok) {
+      const outcome = await applyTuiResult(result, freshSettings.content, ctx.value.manifest, claudeDir, devflowDir);
+      if (outcome === 'saved') {
         p.outro(color.green('Flags saved.'));
       }
+      // Error outcomes: persistFlagConfig already logged and set exitCode.
     } else {
       p.outro(color.dim('No changes made.'));
     }

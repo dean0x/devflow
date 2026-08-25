@@ -52,7 +52,7 @@ export interface FlagRow {
    * Empty for text rows (number/string) — those use text edit mode instead.
    * boolean: [true, false]
    * enum with neutralValue: [null, ...non-neutral values]
-   * enum without neutralValue: [...values as FlagsRecordValue[]]
+   * enum without neutralValue: [...values]
    */
   readonly stops: readonly FlagsRecordValue[];
   /**
@@ -152,13 +152,11 @@ function buildStops(flag: ClaudeCodeFlag): readonly FlagsRecordValue[] {
     case 'enum': {
       if (flag.neutralValue !== undefined) {
         // null is the TUI representation of neutralValue
-        const nonNeutral = (flag.values as readonly string[]).filter(
-          v => v !== flag.neutralValue,
-        );
+        const nonNeutral = flag.values.filter(v => v !== flag.neutralValue);
         return [null, ...nonNeutral];
       }
       // No neutralValue: cycle over the declared values
-      return [...flag.values] as FlagsRecordValue[];
+      return [...flag.values];
     }
     case 'number':
     case 'string':
@@ -407,9 +405,14 @@ function insertChar(editing: EditState, char: string): EditState {
   return { buffer: next, caret: caret + 1, error: null };
 }
 
-/** Handle a key while in edit mode. Returns the new state. */
-function reduceEditMode(state: FlagsViewState, key: string): FlagsViewState {
-  const editing = state.editing!;
+/**
+ * Handle a key while in edit mode. Returns the new state.
+ *
+ * `editing` is passed as a parameter so callers can pass the already-narrowed
+ * `EditState` value (callers guard `state.editing !== null` before calling),
+ * eliminating the non-null assertion (TS-S1).
+ */
+function reduceEditMode(state: FlagsViewState, key: string, editing: EditState): FlagsViewState {
 
   switch (key) {
     case 'enter':
@@ -542,7 +545,8 @@ export function reduce(state: FlagsViewState, key: string): ReduceResult {
   // editing — the only way out was to discover escape first.
   if (state.editing !== null) {
     if (key === 'ctrl-c') return { state, intent: 'abort' };
-    const next = reduceEditMode(state, key);
+    // Pass the narrowed editing (not null) — eliminates state.editing! inside reduceEditMode (TS-S1).
+    const next = reduceEditMode(state, key, state.editing);
     return { state: next, intent: 'none' };
   }
 

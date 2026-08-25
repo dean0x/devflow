@@ -45,9 +45,16 @@ import type { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { createFlagsCommand } from '../src/cli/commands/flags.js';
+import { PassThrough } from 'stream';
+import { createFlagsCommand, applyTuiResult } from '../src/cli/commands/flags.js';
 import { makeManifest } from './helpers.js';
+import { FLAG_REGISTRY } from '../src/core/flags.js';
 import type { FlagsRecord } from '../src/core/flags.js';
+import { readManifest } from '../src/core/manifest.js';
+// Direct import from terminal.js (not index.js) so the REL-M3 mock of index.js
+// does not affect the seam test's runFlagsTui reference (PF-017(c)).
+import { runFlagsTui } from '../src/cli/flags-view/terminal.js';
+import { buildFlagRows } from '../src/cli/flags-view/state.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -957,6 +964,107 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       // TUI save succeeded → exitCode must not be 1.
       expect(process.exitCode).toBeFalsy();
+    });
+  });
+
+  // ─── applyTuiResult seam — TUI→persist wiring (TEST-M5) ──────────────────────
+  //
+  // PF-017(c): an interactive surface has no automated test until a human runs it
+  // in a real TTY. applyTuiResult closes this coverage gap: the extracted save
+  // handler is called directly with a PassThrough-driven TUI result.
+  //
+  // PF-015: both save and cancel paths assert the WHOLE post-state of both
+  // artifacts (manifest.features.flags + settings.json) — not per-key picks.
+
+  describe('applyTuiResult seam — TUI→persist wiring (PF-015 + PF-017(c))', () => {
+    function makeStreams() {
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      (stdin as unknown as { isTTY: boolean }).isTTY = false;
+      (stdin as unknown as { setRawMode: (m: boolean) => void }).setRawMode = (_m: boolean) => {};
+      (stdout as unknown as { rows: number }).rows = 24;
+      (stdout as unknown as { columns: number }).columns = 80;
+      return { stdin, stdout };
+    }
+
+    function sendKey(stdin: PassThrough, key: string): void {
+      stdin.push(key);
+    }
+
+    it('save path: TUI toggle+enter → applyTuiResult → whole post-state matches expected flags', async () => {
+      // Arrange: tui=true in manifest; settings.json empty
+      const initialFlags: FlagsRecord = { tui: true };
+      const manifestContent = makeManifestWithFlags(initialFlags);
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), manifestContent, 'utf-8');
+      await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), '{}', 'utf-8');
+
+      const manifest = (await readManifest(tmpDevflowDir))!;
+
+      // Drive runFlagsTui with PassThrough streams: space toggles tui true→false,
+      // then enter on a boolean row triggers save intent.
+      const { stdin, stdout } = makeStreams();
+      const rowsIn = buildFlagRows(FLAG_REGISTRY, initialFlags);
+      const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+      await new Promise(r => setTimeout(r, 10));
+      sendKey(stdin, ' ');   // toggle tui: true → false
+      await new Promise(r => setTimeout(r, 5));
+      sendKey(stdin, '\r');  // enter on boolean row = save intent
+
+      const tuiResult = await tui;
+      expect(tuiResult.action).toBe('save');
+
+      // Act: applyTuiResult (the seam) — freshSettingsContent is the re-read value
+      // that handleBare would provide in production (caller owns the re-read per REL-M3).
+      const outcome = await applyTuiResult(tuiResult, '{}', manifest, tmpClaudeDir, tmpDevflowDir);
+      expect(outcome).toBe('saved');
+
+      // Assert whole post-state of both artifacts (PF-015)
+      const manifestAfter = JSON.parse(
+        await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'),
+      ) as { features: { flags: FlagsRecord } };
+      // tui=false is recorded in manifest (deliberately disabled — not absent)
+      expect(manifestAfter.features.flags.tui).toBe(false);
+
+      const settingsAfter = JSON.parse(
+        await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      // tui=false is the neutral value for a boolean flag → the key is deleted from settings
+      expect(settingsAfter.tui).toBeUndefined();
+    });
+
+    it('cancel path: TUI esc → applyTuiResult → returns unchanged, both artifacts untouched', async () => {
+      // Arrange: non-trivial initial state so we can verify nothing was mutated
+      const initialFlags: FlagsRecord = { tui: true };
+      const manifestContent = makeManifestWithFlags(initialFlags);
+      const settingsContent = JSON.stringify({ tui: 'fullscreen' }, null, 2) + '\n';
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), manifestContent, 'utf-8');
+      await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), settingsContent, 'utf-8');
+
+      const manifest = (await readManifest(tmpDevflowDir))!;
+
+      // Drive runFlagsTui to cancel via esc
+      const { stdin, stdout } = makeStreams();
+      const rowsIn = buildFlagRows(FLAG_REGISTRY, initialFlags);
+      const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+      await new Promise(r => setTimeout(r, 10));
+      sendKey(stdin, '\x1b');  // esc = cancel
+
+      const tuiResult = await tui;
+      expect(tuiResult.action).toBe('cancel');
+
+      // Act
+      const outcome = await applyTuiResult(tuiResult, settingsContent, manifest, tmpClaudeDir, tmpDevflowDir);
+      expect(outcome).toBe('unchanged');
+
+      // Assert whole post-state — both artifacts must be byte-identical (PF-015)
+      expect(
+        await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'),
+      ).toBe(manifestContent);
+      expect(
+        await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'),
+      ).toBe(settingsContent);
     });
   });
 });
