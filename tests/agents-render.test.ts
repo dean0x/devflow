@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderFrame, buildModelCycle, formatAgentName } from '../src/cli/agents-view/index.js';
+import { renderFrame, buildModelCycle, formatAgentName, FIXED_ROWS } from '../src/cli/agents-view/index.js';
 import { stripAnsi, yellow } from '../src/hud/colors.js';
 import type { AgentsViewState, AgentRow } from '../src/cli/agents-view/state.js';
 import { type ExternalModelCatalog } from '../src/core/model-discovery.js';
@@ -515,6 +515,32 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
     // Stripped state column = exactly 'saved-inactive' at offset 65 in the first data row
     // (index 4: title[0], blank[1], header[2], scroll-indicator[3], data[4])
     expect(stripped[4].slice(65)).toBe('saved-inactive');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// viewportHeight ownership — state.viewportHeight is the single owner (ARCH-M5)
+// ---------------------------------------------------------------------------
+
+describe('viewportHeight ownership', () => {
+  it('renders exactly state.viewportHeight data rows regardless of dims.rows', () => {
+    // dims.rows=24 would give 24-FIXED_ROWS(9)=15 rows, but state says 2.
+    // After the ARCH-M5 fix, renderFrame reads state.viewportHeight directly.
+    const rows = [
+      makeRow({ name: 'code', shippedDefault: 'sonnet' }),
+      makeRow({ name: 'design', shippedDefault: 'opus' }),
+      makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+      makeRow({ name: 'skim', shippedDefault: 'haiku' }),
+      makeRow({ name: 'git', shippedDefault: 'haiku' }),
+    ];
+    const state = makeState({
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 2,
+    });
+    const lines = renderFrame(state, { rows: 24, cols: 80 });
+    expect(lines.length).toBe(FIXED_ROWS + 2);
   });
 });
 

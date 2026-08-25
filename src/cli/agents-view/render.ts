@@ -246,10 +246,9 @@ export function renderFrame(
     modelCycle,
   } = state;
 
-  const viewportHeight = Math.max(
-    MIN_VIEWPORT,
-    dims.rows - FIXED_ROWS,
-  );
+  // state.viewportHeight is the single owner — clamped to a MIN so tests that
+  // set viewportHeight explicitly render exactly that many data rows.
+  const viewportHeight = Math.max(MIN_VIEWPORT, state.viewportHeight);
 
   // Column widths — shrink gracefully at narrow terminals.
   const totalContent = 2 + COL_AGENT + COL_MODEL + COL_EFFORT + COL_STATE; // prefix + 4 cols

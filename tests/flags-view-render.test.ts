@@ -412,6 +412,100 @@ describe('flags-view-render — narrow width', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Column header alignment (CONS-M4)
+// ---------------------------------------------------------------------------
+
+describe('flags-view-render — column header alignment', () => {
+  it('FLAG column starts at same offset as data label cell (ANSI-stripped)', () => {
+    // At 80 cols (scale=1): labelW = COL_LABEL = 27.
+    // Data row layout: prefix(2) + label(27) + dirty(2) + value
+    // Header layout must match: 2 spaces + FLAG(27) + 2 spaces + VALUE
+    // → FLAG at col 2 (same as label), VALUE at col 2+27+2=31 (same as value cell).
+    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
+    const lines = renderFrame(state, DIMS_80x24);
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    const stripped = lines.map(l => l.replace(ESC_PATTERN, ''));
+
+    // Header is the third line (index 2): title, summary, header
+    const header = stripped[2];
+    // First data row is the fifth line (index 4): title, summary, header, scroll-up-indicator, data
+    const dataRow = stripped[4];
+
+    const flagOffset = header.indexOf('FLAG');
+    const valueOffset = header.indexOf('VALUE');
+    expect(flagOffset).toBeGreaterThanOrEqual(0);
+    expect(valueOffset).toBeGreaterThanOrEqual(0);
+
+    // FLAG must start at offset 2 (matching 2-char prefix in data rows)
+    expect(flagOffset).toBe(2);
+
+    // VALUE must start at 2 + labelW + 2.
+    // At 80 cols: labelW = floor(27 * min(1, 80/80)) = 27, so VALUE at 31.
+    expect(valueOffset).toBe(31);
+
+    // Also confirm that the first non-space character in the data row label area
+    // sits at offset 2 (cursor row: '❯ ' prefix, then label).
+    // The cursor marker '❯' is at col 0, space at col 1, label starts at col 2.
+    expect(dataRow[0]).toBe('❯');
+    expect(dataRow[1]).toBe(' ');
+    // label content starts at col 2 — first char of the flag label
+    expect(flagOffset).toBe(2);
+  });
+
+  it('FLAG and VALUE columns align on narrow terminal (cols=60)', () => {
+    // At 60 cols: scale = 60/80 = 0.75, labelW = floor(27*0.75)=20, valueW = floor(46*0.75)=34.
+    // Header: 2 + labelW(20) + 2 = VALUE at col 24.
+    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
+    const lines = renderFrame(state, DIMS_60x24);
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    const stripped = lines.map(l => l.replace(ESC_PATTERN, ''));
+
+    const header = stripped[2];
+    const flagOffset = header.indexOf('FLAG');
+    const valueOffset = header.indexOf('VALUE');
+    expect(flagOffset).toBe(2);
+    // labelW at 60 cols: max(8, floor(27 * min(1, 60/80))) = max(8, floor(20.25)) = 20
+    expect(valueOffset).toBe(2 + 20 + 2); // = 24
+  });
+});
+
+// ---------------------------------------------------------------------------
+// viewportHeight ownership — state.viewportHeight is the single owner (ARCH-M5)
+// ---------------------------------------------------------------------------
+
+describe('flags-view-render — viewportHeight ownership', () => {
+  it('renders exactly state.viewportHeight data rows regardless of dims.rows', () => {
+    // dims.rows=24 would give computeViewportHeight(24)=14 rows, but state says 3.
+    // After the ARCH-M5 fix, renderFrame reads state.viewportHeight directly.
+    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const state: FlagsViewState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 3,
+      editing: null,
+    };
+    const lines = renderFrame(state, DIMS_80x24);
+    expect(lines.length).toBe(FIXED_ROWS + 3);
+  });
+
+  it('renders exactly state.viewportHeight data rows when state says 1', () => {
+    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const state: FlagsViewState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 1,
+      editing: null,
+    };
+    const lines = renderFrame(state, DIMS_80x40);
+    expect(lines.length).toBe(FIXED_ROWS + 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Unsaved changes indicator
 // ---------------------------------------------------------------------------
 

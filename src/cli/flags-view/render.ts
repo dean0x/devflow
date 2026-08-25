@@ -4,10 +4,10 @@
  * applies ADR-013: CLI-layer view module; zero fs/tty imports.
  * avoids PF-014: pure function, no process.exit(), no I/O.
  *
- * Layout (FIXED_ROWS = 10, viewport = dims.rows - 10):
+ * Layout (FIXED_ROWS = 10, viewport = state.viewportHeight — single owner):
  *   1  Title "  Devflow Flags"
  *   2  Set / modified summary
- *   3  Column header "    FLAG  VALUE"
+ *   3  Column header "  FLAG  VALUE" (scaled; offsets match data-row label/value)
  *   4  Scroll-up indicator "  ↑ N more" (blank if none)
  *   5+ Viewport rows (one per visible flag)
  *  -5  Scroll-down indicator "  ↓ N more" (blank if none)
@@ -49,7 +49,6 @@ import type { RenderDims } from '../tui/terminal.js';
 export const FIXED_ROWS = 10;
 const MIN_VIEWPORT = 1;
 
-const COL_PREFIX = 2;    // "❯ " or "  "
 const COL_LABEL = 27;    // flag label
 const COL_VALUE = 46;    // value or edit buffer
 
@@ -68,11 +67,10 @@ export function computeViewportHeight(termRows: number): number {
 /**
  * Format a row's configuredValue for display.
  *
- * ADR-016 vocabulary:
- *   null            → dim 'unset'   (key absent / deliberately unset)
- *   boolean         → green 'enabled' / yellow 'disabled'
- *   non-boolean at devflow default → plain string
- *   non-boolean deviating from devflow default → cyan string
+ * Value vocabulary (one syntax, one semantic — applies ADR-016's amendment lesson):
+ *   null → dim 'unset'; boolean → green 'enabled' / yellow 'disabled';
+ *   non-boolean at devflow default → plain string;
+ *   non-boolean deviating from devflow default → cyan string.
  *
  * disk-sourced values are routed through sanitizeCell to prevent TAB/LF
  * layout breaks inside the fixed-width TUI cell (PF-023).
@@ -121,7 +119,7 @@ function renderBuffer(buffer: string, caret: number): string {
 
 /**
  * Render a single data row.
- * Column widths at 80-col reference: see file-header table (total 77 visible chars).
+ * Column widths are passed in from renderFrame so the header and rows share one binding.
  */
 function renderRow(
   row: FlagRow,
@@ -129,26 +127,24 @@ function renderRow(
   isEditing: boolean,
   editBuffer: string,
   editCaret: number,
-  cols: number,
+  labelW: number,
+  valueW: number,
 ): string {
-  const scale = Math.min(1, cols / 80);
-  const labelW = Math.max(8, Math.floor(COL_LABEL * scale));
-  const valueW = Math.max(8, Math.floor(COL_VALUE * scale));
-
   const prefix = isCursor ? '❯ ' : '  ';
 
   const isDirty = row.configuredValue !== row.originalValue;
-  // ADR-016: dirty dot is yellow UNCONDITIONALLY (not just on cursor)
+  // Dirty dot is yellow unconditionally — dirtiness must be readable on every row,
+  // not only the cursor row.
   const dirtyDot = isDirty ? yellow('● ') : '  ';
 
-  // Sanitize label (user-defined registry label is trusted, but sanitize for safety)
-  const rawLabel = row.label;
+  // Sanitize label (registry literal; sanitizeCell prevents TAB/LF layout breaks).
+  const rawLabel = sanitizeCell(row.label);
   const labelCell = padToVisible(
     isCursor ? bold(truncateVisible(rawLabel, labelW)) : truncateVisible(rawLabel, labelW),
     labelW,
   );
 
-  // ADR-016: chevrons mark the focused control / live edit buffer (cyan ‹ › wrapping).
+  // Chevrons (cyan ‹ ›) mark the focused control / live edit buffer.
   // The chevrons take 4 visible chars (‹ + space + space + ›); budget accordingly.
   const chevronBudget = valueW - 4;
   let valueCell: string;
@@ -179,8 +175,15 @@ export function renderFrame(
   dims: RenderDims,
 ): string[] {
   const { rows, cursor, viewportOffset, editing } = state;
-  const viewportHeight = computeViewportHeight(dims.rows);
+  // state.viewportHeight is the single owner — clamped to a MIN so tests that
+  // set viewportHeight explicitly render exactly that many data rows.
+  const viewportHeight = Math.max(MIN_VIEWPORT, state.viewportHeight);
   const totalRows = rows.length;
+
+  // ── Column widths (hoisted here so header and rows share one binding) ──────
+  const scale = Math.min(1, dims.cols / 80);
+  const labelW = Math.max(8, Math.floor(COL_LABEL * scale));
+  const valueW = Math.max(8, Math.floor(COL_VALUE * scale));
 
   // ── Determine visible row range ───────────────────────────────────────────
   const lastVisible = Math.min(totalRows - 1, viewportOffset + viewportHeight - 1);
@@ -199,11 +202,11 @@ export function renderFrame(
     summaryLine += dim(` · `) + yellow(`${totalDirty} modified`);
   }
 
-  // ── Column header ─────────────────────────────────────────────────────────
+  // ── Column header (uses same labelW/valueW as rows so offsets are identical) ──
   const colHeader =
-    '    ' +
-    padToVisible(gray('FLAG'), COL_LABEL) +
-    '   ' +
+    '  ' +
+    padToVisible(gray('FLAG'), labelW) +
+    '  ' +
     gray('VALUE');
 
   // ── Scroll indicators ─────────────────────────────────────────────────────
@@ -221,7 +224,8 @@ export function renderFrame(
       isEditing,
       editing?.buffer ?? '',
       editing?.caret ?? 0,
-      dims.cols,
+      labelW,
+      valueW,
     );
   });
 
