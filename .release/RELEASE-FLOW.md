@@ -36,6 +36,9 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
   done by `scripts/bump-version.ts` (idempotent: skips if version header already present)
 - Release notes = the new version's section (up to first `---`), captured from script stdout
 - CI restores a fresh `## [Unreleased]` header after the release and pushes it
+- Version header date is stamped in CI's UTC clock — an evening/early-morning dispatch
+  (local time ahead of UTC) lands the previous day's date (2.2.0 stamped 08-25 for an
+  08-26 local dispatch). Cosmetic; accept it, or dispatch after UTC midnight if it matters
 - If `[Unreleased]` is empty but commits exist since the last tag (PRs merged without
   changelog entries — happened for 2.1.0), draft entries from the squash-commit bodies,
   get user approval, and land as a `docs(changelog):` commit on main before dispatch
