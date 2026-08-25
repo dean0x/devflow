@@ -27,6 +27,7 @@ import {
 } from '../../targets/claude-code/claude-paths.js';
 import {
   FLAG_REGISTRY,
+  findFlag,
   convergeFlagsIntoSettings,
   parseFlagValueInput,
   formatFlagValue,
@@ -41,9 +42,9 @@ import { sanitizeCell } from '../tui/cells.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/** Look up a flag by id; null when unknown. */
+/** Look up a flag by id; null when unknown. Backed by O(1) findFlag. */
 function lookupFlag(id: string): ClaudeCodeFlag | null {
-  return FLAG_REGISTRY.find(f => f.id === id) ?? null;
+  return findFlag(id) ?? null;
 }
 
 /**
@@ -358,7 +359,10 @@ export function createFlagsCommand(): Command {
 
         if (ok) {
           for (const id of ids) {
-            p.log.success(`${id} disabled`);
+            // Route through formatFlagValue (applies ADR-016 — one vocabulary,
+            // shared with --status and TUI so the three surfaces cannot drift).
+            const flag = lookupFlag(id)!;
+            p.log.success(`${id} ${formatFlagValue(flag, false)}`);
           }
         }
         return;

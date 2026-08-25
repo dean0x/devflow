@@ -468,10 +468,18 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
   },
 ];
 
-// Pre-built lookup for O(1) flag-by-id access in applyFlags.
+// Pre-built lookup for O(1) flag-by-id access.
 const FLAG_REGISTRY_MAP = new Map<string, ClaudeCodeFlag>(
   FLAG_REGISTRY.map(f => [f.id, f]),
 );
+
+/**
+ * O(1) flag lookup backed by FLAG_REGISTRY_MAP.
+ * Returns undefined when the id is not in the registry.
+ */
+export function findFlag(id: string): ClaudeCodeFlag | undefined {
+  return FLAG_REGISTRY_MAP.get(id);
+}
 
 // ─── Core value helpers ───────────────────────────────────────────────────────
 
@@ -584,11 +592,19 @@ export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRe
 
 /**
  * Format a flag value for display.
- * null → 'unset', active values → their string representation.
+ *
+ * Vocabulary (applies ADR-016 — one syntax, one semantic):
+ *   boolean true  → 'enabled'
+ *   boolean false → 'disabled'  (not 'unset' — false is a deliberate-off, not unset)
+ *   null / neutral → 'unset'
+ *   other active values → their string representation
+ *
+ * Boolean branch must win before isNeutral so that false yields 'disabled',
+ * not 'unset' (isNeutral treats false as neutral for booleans).
  */
 export function formatFlagValue(flag: ClaudeCodeFlag, value: FlagsRecordValue): string {
-  if (value === null || isNeutral(flag, value)) return 'unset';
   if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
+  if (value === null || isNeutral(flag, value)) return 'unset';
   return String(value);
 }
 
@@ -674,27 +690,27 @@ export function sanitizeFlagsRecord(record: FlagsRecord): FlagsRecord {
 // ─── Record builders ──────────────────────────────────────────────────────────
 
 /**
+ * Per-kind default-value rule (single authoritative source — CONS-M2).
+ *
+ * - boolean: flag.defaultValue (always a boolean — never collapses to null)
+ * - enum / number / string: flag.defaultValue ?? null
+ *   (undefined defaultValue → null = adopt-on-next-init semantics)
+ *
+ * Call sites: getDefaultFlagsRecord, resolveSeedFlags (init-seed.ts),
+ * buildDevflowDefault (flags-view/state.ts). Adding a fifth kind or changing
+ * the null-collapse rule requires updating only this function.
+ */
+export function defaultValueOf(flag: ClaudeCodeFlag): FlagsRecordValue {
+  return flag.kind === 'boolean' ? flag.defaultValue : (flag.defaultValue ?? null);
+}
+
+/**
  * Return a FlagsRecord with every registered flag set to its defaultValue.
  * Flags with undefined defaultValue get null.
  * This record has an entry for EVERY flag — use it for initial seeding.
  */
 export function getDefaultFlagsRecord(): FlagsRecord {
-  const result: FlagsRecord = {};
-  for (const flag of FLAG_REGISTRY) {
-    if (flag.kind === 'boolean') {
-      result[flag.id] = flag.defaultValue;
-    } else {
-      result[flag.id] = flag.defaultValue ?? null;
-    }
-  }
-  return result;
-}
-
-/**
- * Return IDs of all flags where `recommended: true`.
- */
-export function getRecommendedFlagIds(): string[] {
-  return FLAG_REGISTRY.filter(f => f.recommended).map(f => f.id);
+  return Object.fromEntries(FLAG_REGISTRY.map(f => [f.id, defaultValueOf(f)]));
 }
 
 // ─── Migration helper ─────────────────────────────────────────────────────────

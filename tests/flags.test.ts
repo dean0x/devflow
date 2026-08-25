@@ -3,7 +3,7 @@ import {
   FLAG_REGISTRY,
   // New typed exports
   getDefaultFlagsRecord,
-  getRecommendedFlagIds,
+  defaultValueOf,
   neutralValueOf,
   isNeutral,
   coerceFlagValue,
@@ -200,21 +200,69 @@ describe('getDefaultFlagsRecord', () => {
   });
 });
 
-// ─── getRecommendedFlagIds ────────────────────────────────────────────────────
+// ─── formatFlagValue — vocabulary table (CONS-H1) ────────────────────────────
 
-describe('getRecommendedFlagIds', () => {
-  it('returns recommended flag IDs', () => {
-    const ids = getRecommendedFlagIds();
-    expect(ids).toContain('tui');
-    expect(ids).toContain('tool-search');
-    expect(ids).toContain('max-concurrent-subagents');
-    expect(ids).not.toContain('brief');
-    expect(ids).not.toContain('agent-teams');
+describe('formatFlagValue — vocabulary table', () => {
+  const boolFlag = FLAG_REGISTRY.find(f => f.id === 'tui')!;
+  const enumFlag = FLAG_REGISTRY.find(f => f.id === 'view-mode')!;    // neutralValue = 'default'
+  const numFlag  = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+  const strFlag  = FLAG_REGISTRY.find(f => f.id === 'spellcheck')!;
+
+  it('boolean true → enabled', () => {
+    expect(formatFlagValue(boolFlag, true)).toBe('enabled');
   });
+  it('boolean false → disabled (not unset)', () => {
+    expect(formatFlagValue(boolFlag, false)).toBe('disabled');
+  });
+  it('boolean null → unset', () => {
+    expect(formatFlagValue(boolFlag, null)).toBe('unset');
+  });
+  it('enum neutral value → unset', () => {
+    expect(formatFlagValue(enumFlag, 'default')).toBe('unset');
+  });
+  it('enum active value → string', () => {
+    expect(formatFlagValue(enumFlag, 'verbose')).toBe('verbose');
+  });
+  it('enum null → unset', () => {
+    expect(formatFlagValue(enumFlag, null)).toBe('unset');
+  });
+  it('number null → unset', () => {
+    expect(formatFlagValue(numFlag, null)).toBe('unset');
+  });
+  it('number active value → string', () => {
+    expect(formatFlagValue(numFlag, 40)).toBe('40');
+  });
+  it('string null → unset', () => {
+    expect(formatFlagValue(strFlag, null)).toBe('unset');
+  });
+  it('string active value → string', () => {
+    expect(formatFlagValue(strFlag, 'aspell')).toBe('aspell');
+  });
+});
 
-  it('contains exactly the IDs with recommended: true', () => {
-    const expected = FLAG_REGISTRY.filter(f => f.recommended).map(f => f.id);
-    expect(getRecommendedFlagIds()).toEqual(expected);
+// ─── defaultValueOf ───────────────────────────────────────────────────────────
+
+describe('defaultValueOf', () => {
+  it('boolean flag → flag.defaultValue (boolean)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'tui')!;
+    expect(defaultValueOf(flag)).toBe(flag.defaultValue);
+    expect(typeof defaultValueOf(flag)).toBe('boolean');
+  });
+  it('enum flag with defaultValue → that value', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'view-mode')!;
+    expect(defaultValueOf(flag)).toBe('default');
+  });
+  it('number flag with defaultValue → that value', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    expect(defaultValueOf(flag)).toBe(40);
+  });
+  it('number flag without defaultValue → null', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'subagent-spawn-depth')!;
+    expect(defaultValueOf(flag)).toBeNull();
+  });
+  it('string flag without defaultValue → null', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'spellcheck')!;
+    expect(defaultValueOf(flag)).toBeNull();
   });
 });
 

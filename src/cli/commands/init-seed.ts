@@ -17,6 +17,7 @@
 import {
   resolveExistingViewMode,
   FLAG_REGISTRY,
+  defaultValueOf,
   readViewMode,
   type ClaudeCodeFlag,
   type FlagsRecord,
@@ -140,7 +141,7 @@ export function resolveSeedFlags(
   if (manifestFlags === null) {
     const result: FlagsRecord = {};
     for (const flag of registry) {
-      result[flag.id] = flag.kind === 'boolean' ? flag.defaultValue : (flag.defaultValue ?? null);
+      result[flag.id] = defaultValueOf(flag); // single default-rule source (CONS-M2)
     }
     return result;
   }
@@ -150,7 +151,7 @@ export function resolveSeedFlags(
   const result: FlagsRecord = { ...manifestFlags };
   for (const flag of registry) {
     if (flag.id in result) continue; // known → keep
-    result[flag.id] = flag.kind === 'boolean' ? flag.defaultValue : (flag.defaultValue ?? null);
+    result[flag.id] = defaultValueOf(flag); // single default-rule source (CONS-M2)
   }
   return result;
 }

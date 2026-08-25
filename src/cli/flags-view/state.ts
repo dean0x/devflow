@@ -24,6 +24,8 @@
 
 import {
   FLAG_REGISTRY,
+  findFlag,
+  defaultValueOf,
   coerceFlagValue,
   parseFlagValueInput,
   type ClaudeCodeFlag,
@@ -166,12 +168,11 @@ function buildStops(flag: ClaudeCodeFlag): readonly FlagsRecordValue[] {
 
 /** Compute the devflow default in TUI coordinates. */
 function buildDevflowDefault(flag: ClaudeCodeFlag): FlagsRecordValue {
-  if (flag.kind === 'boolean') {
-    return flag.defaultValue;
-  }
-  if (flag.defaultValue === undefined) return null;
+  const base = defaultValueOf(flag); // single default-rule source (CONS-M2)
+  if (flag.kind === 'boolean') return base;
+  if (base === null) return null; // undefined defaultValue → null
   // Apply the same neutralValue mapping used for record values
-  return recordToTui(flag, flag.defaultValue as FlagsRecordValue);
+  return recordToTui(flag, base);
 }
 
 /** Build the initial TUI value for a row from a FlagsRecord. */
@@ -225,10 +226,8 @@ export function buildFlagRows(
  */
 export function collectFlagRecord(rows: readonly FlagRow[]): FlagsRecord {
   const record: FlagsRecord = {};
-  const flagMap = new Map<string, ClaudeCodeFlag>(FLAG_REGISTRY.map(f => [f.id, f]));
-
   for (const row of rows) {
-    const flag = flagMap.get(row.id);
+    const flag = findFlag(row.id); // O(1) via FLAG_REGISTRY_MAP (PERF-L3)
     if (flag) {
       record[row.id] = tuiToRecord(flag, row.configuredValue);
     } else {
@@ -297,7 +296,7 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
   if (!editing) return state;
 
   const row = rows[cursor];
-  const flagDef = FLAG_REGISTRY.find(f => f.id === row.id);
+  const flagDef = findFlag(row.id); // O(1) via FLAG_REGISTRY_MAP (PERF-L3)
   if (!flagDef || flagDef.kind === 'boolean' || flagDef.kind === 'enum') return state;
 
   const buf = editing.buffer;
