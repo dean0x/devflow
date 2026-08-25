@@ -1607,9 +1607,9 @@ describe('terminateRelay — kill path (integration)', () => {
 // The fix: pair ANTHROPIC_BASE_URL with CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT
 // so the enforcement is lifted for the relay session.
 //
-// Strip gate: ownership is determined solely by ANTHROPIC_BASE_URL matching our
-// managed relay URL.  The window-enforcement var is always stripped/preserved
-// together with the URL — never independently.
+// Strip gate: ANTHROPIC_BASE_URL ownership (port match) gates the URL delete only.
+// UNKNOWN_MODEL_WINDOW_ENV is always removed — Devflow is its only producer so there
+// is no foreign value to protect. (applies PF-015, ADR-003)
 
 const WINDOW_ENV = 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT';
 
@@ -1662,30 +1662,55 @@ describe('Phase 4 / stripProxyEnv: ownership-gated strip of both relay vars', ()
     expect(env.EXTRA).toBe('keep');
   });
 
-  it('foreign URL: window var NOT removed (touch-nothing gate)', () => {
+  it('foreign URL: ANTHROPIC_BASE_URL NOT removed; window var IS always removed', () => {
+    // URL gate protects a foreign url value — but the window var has no foreign value;
+    // Devflow is its only producer so it is always removed. (applies PF-015, ADR-003)
     const input = JSON.stringify({
       env: { ANTHROPIC_BASE_URL: 'https://foreign.example.com', [WINDOW_ENV]: '1' },
     });
     const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     const env = result.env as Record<string, string>;
     expect(env.ANTHROPIC_BASE_URL).toBe('https://foreign.example.com');
-    expect(env[WINDOW_ENV]).toBe('1');
+    expect(env[WINDOW_ENV]).toBeUndefined();
   });
 
-  it('absent URL with orphan window var: window var preserved (self-heals on next enable)', () => {
-    // No ANTHROPIC_BASE_URL → ownership gate blocks strip entirely
+  it('absent URL with orphan window var: window var IS removed (Devflow is its only producer)', () => {
+    // No ANTHROPIC_BASE_URL → URL gate does not fire, but the window var is always ours to remove.
+    // The env block is cleaned up entirely when the window var was the only key.
     const input = JSON.stringify({ env: { [WINDOW_ENV]: '1' } });
     const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
-    expect((result.env as Record<string, string>)[WINDOW_ENV]).toBe('1');
+    expect(result.env).toBeUndefined();
   });
 
-  it('ours-other-port URL with window var: neither removed (different managed port)', () => {
+  it('ours-other-port URL with window var: URL NOT removed (different managed port), window var IS removed', () => {
     const otherPortUrl = 'http://127.0.0.1:5000'; // not managed by DEFAULT_PORT (4141)
     const input = JSON.stringify({ env: { ANTHROPIC_BASE_URL: otherPortUrl, [WINDOW_ENV]: '1' } });
     const result = JSON.parse(stripProxyEnv(input, DEFAULT_PORT));
     const env = result.env as Record<string, string>;
-    expect(env.ANTHROPIC_BASE_URL).toBe(otherPortUrl);
-    expect(env[WINDOW_ENV]).toBe('1');
+    expect(env.ANTHROPIC_BASE_URL).toBe(otherPortUrl); // URL preserved — not our port
+    expect(env[WINDOW_ENV]).toBeUndefined(); // always removed — Devflow is the only producer
+  });
+
+  // SEC-M2 regression: port-drift orphan — UNKNOWN_MODEL_WINDOW_ENV must not survive a
+  // strip attempt when ANTHROPIC_BASE_URL is present but on a different managed port.
+  // Reachable via: port drift between enable/disable, hand-edited URL, or uninstall's
+  // DEFAULT_PROXY_PORT fallback.  Both behaviors must be asserted together from a
+  // fully-enabled starting state (PF-015 stated test rule).
+  it('SEC-M2: port-mismatch strip — window var removed, mismatched ANTHROPIC_BASE_URL untouched', () => {
+    const enabledPort = DEFAULT_PORT; // 4141 — the port that was active at enable time
+    const disablePort = 9999; // different port — simulates port drift between enable and disable
+    const input = JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${enabledPort}`,
+        [WINDOW_ENV]: '1',
+      },
+    });
+    const result = JSON.parse(stripProxyEnv(input, disablePort));
+    const env = result.env as Record<string, string>;
+    // (a) window var MUST be gone — Devflow is its only producer; no foreign value to protect
+    expect(env[WINDOW_ENV]).toBeUndefined();
+    // (b) ANTHROPIC_BASE_URL MUST be untouched — port mismatch means it is not ours to remove
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${enabledPort}`);
   });
 });
 
