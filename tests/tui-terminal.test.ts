@@ -190,6 +190,96 @@ describe('runTui — frame line clamping (REL-M1)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// TEST-M1 / REG-S3: frame output contract — byte-level assertions
+//
+// renderToStdout's documented contract:
+//   HOME + line + ERASE_EOL per line, '\n' between lines but NOT after the last,
+//   then ERASE_BELOW (\x1b[0J) to clear stale content on terminal shrink.
+//
+// Both the ERASE_BELOW append and the no-trailing-newline guard are single-line
+// fixes that revert silently when deleted. The assertions below are the regression
+// guards: each would fail independently against a broken implementation.
+//
+// Failure modes:
+//   • "exact composition" assertion — toContain(expectedFrame) fails if ERASE_BELOW
+//     is deleted (the expected string ends in \x1b[0J which is absent in the output).
+//   • "no trailing newline" assertion — not.toContain('line-b\x1b[K\n\x1b[0J') fails
+//     if a '\n' is re-introduced before ERASE_BELOW.
+// ---------------------------------------------------------------------------
+
+describe('renderToStdout — frame output contract (TEST-M1 / REG-S3)', () => {
+  const HOME_SEQ = '\x1b[H';
+  const ERASE_EOL_SEQ = '\x1b[K';
+  const ERASE_BELOW_SEQ = '\x1b[0J';
+
+  it('exact escape-sequence composition for a 2-line frame: HOME + lines + ERASE_EOL + ERASE_BELOW', async () => {
+    const h = makeHarness();
+
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      renderFrame: () => ['line-a', 'line-b'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io,
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    await tui;
+
+    // Full expected frame bytes:
+    //   HOME + 'line-a' + ERASE_EOL + '\n' + 'line-b' + ERASE_EOL + ERASE_BELOW
+    // Deleting the ERASE_BELOW append makes toContain fail (ERASE_BELOW absent).
+    const expectedFrame =
+      `${HOME_SEQ}line-a${ERASE_EOL_SEQ}\nline-b${ERASE_EOL_SEQ}${ERASE_BELOW_SEQ}`;
+    expect(h.written()).toContain(expectedFrame);
+  });
+
+  it('last frame line has no trailing newline before ERASE_BELOW', async () => {
+    const h = makeHarness();
+
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      renderFrame: () => ['line-a', 'line-b'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io,
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    await tui;
+
+    // A trailing '\n' before ERASE_BELOW would scroll the alt-screen on every
+    // redraw.  Verify the '\n' is absent: re-introducing it makes this fail.
+    expect(h.written()).not.toContain(`line-b${ERASE_EOL_SEQ}\n${ERASE_BELOW_SEQ}`);
+  });
+
+  it('a 1-line frame has no newline separators', async () => {
+    const h = makeHarness();
+
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      renderFrame: () => ['solo'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io,
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    await tui;
+
+    // Single line: HOME + 'solo' + ERASE_EOL + ERASE_BELOW, no '\n' at all in the frame.
+    expect(h.written()).toContain(`${HOME_SEQ}solo${ERASE_EOL_SEQ}${ERASE_BELOW_SEQ}`);
+    expect(h.written()).not.toContain(`solo${ERASE_EOL_SEQ}\n`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 
 describe('runTui — cleanup always runs', () => {
   it('restores the terminal when the INITIAL render throws', async () => {
