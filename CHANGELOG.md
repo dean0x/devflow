@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Orchestrator charter — self-contained delegation**: added an operating rule requiring every subagent delegation to be self-contained (goal, constraints, relevant session facts, exact paths). Deliverables that draw on the conversation (issues, PRs, reports) must carry the substance in the prompt rather than a pointer to it. Charter grows from 2177 → 2452 bytes (~600 tokens), well within the 4096-byte runtime limit.
+- **Skim agent**: one-view-per-file discipline (pseudo/Read tiers), branch-scoped heatmap (`--diff`, `--window`, `--top`), PATH-first `skim` invocation with `npx rskim` fallback, prose/config skim note
 
 ---
 
