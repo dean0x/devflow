@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Typed flag registry**: the flag surface is now a discriminated-union registry of 28 Claude Code flags — `boolean`, `enum`, `number`, and `string` kinds with per-flag validation, defaults, and display metadata. Eight new upstream-verified flags including `max-concurrent-subagents` (devflow default 40; upstream 20), `subagent-spawn-depth`, `workflow-size-guideline`, `goal-checkin-minutes`, `default-model`, `spellcheck`, and `enable-todo-tools`.
+- **Flags editor TUI**: bare `devflow flags` on a TTY opens a full-keyboard settings-page editor rendering inline in the scroll buffer (no alt-screen), with effective-value display and per-flag hint blurbs. The agents view now runs on the same generic TUI shell.
+- **Typed flags CLI**: `devflow flags --list/--status/--enable/--disable/--set/--unset` with input validation; `--enable/--disable` are boolean-only — non-boolean flags route through `--set`.
+
+### Changed
+- **Init seeding**: both init paths apply seeded flag values non-interactively — fresh installs get registry defaults; re-inits preserve existing values and adopt defaults only for newly added flags. The flags editor step was removed from the Advanced wizard.
+- **`viewMode` folded into the registry** as the `view-mode` enum flag (`default|verbose|focus`); the `viewMode` settings key is written only when non-default. Old `flags: string[]` manifests heal in-reader on first read — no migration entry needed.
+
+### Fixed
+- **viewMode silently lost on re-init**: `resolveExistingViewMode` now runs before `stripFlags` in the settings apply block; the prior order stripped `viewMode` from settings before reading it (PF-015).
+- **Published bin not executable**: `prepublishOnly` now sets the execute bit on `dist/cli.js` — the bin shipped as 0644, breaking npm 6 and constrained environments (Docker non-root users, some CI runners) that do not auto-chmod on install.
+
+### Breaking Changes
+- **Bare `devflow flags` on non-TTY** now prints a status table and exits 1 (was: usage line, exit 0). Scripts should call `devflow flags --status`.
+- **Seven settings.json/env keys become Devflow-managed**: `ANTHROPIC_DEFAULT_MODEL`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, `CLAUDE_CODE_GOAL_CHECKIN_MINUTES`, `CLAUDE_CODE_ENABLE_TODO_TOOLS` (env); `workflowSizeGuideline`, `spellcheck` (settings). Hand-set values are preserved — adopted into the manifest on the next `devflow init` or flags mutation; `max-concurrent-subagents` adopts the devflow default of 40 only when the key is absent. All keys are removed on `devflow uninstall`.
+
 ---
 
 ## [2.0.1] - 2026-08-23
