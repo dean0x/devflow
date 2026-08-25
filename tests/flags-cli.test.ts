@@ -531,6 +531,77 @@ describe('flags CLI — createFlagsCommand factory', () => {
     });
   });
 
+  // ─── bare TTY invocation — manifest guard (TS-H2 / ARCH-H2 / REL-H2 pin) ──────
+  //
+  // When process.stdout.isTTY is true and the manifest is absent or corrupt,
+  // handleBare must hard-refuse BEFORE importing or launching the TUI.
+  // The fix: reuse loadFlagContext (the same guard mutating handlers use) at the top
+  // of the TTY branch. settings.json must NOT be touched.
+  //
+  // RED proof: before the fix, handleBare seeds from {} and proceeds into the TUI
+  // import (or tries to), possibly writing settings.json; exitCode stays 0.
+
+  describe('bare TTY invocation — manifest guard', () => {
+    let origIsTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      vi.mocked(p.log.error).mockClear();
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
+    });
+
+    it('no manifest → hard-refuse, exitCode 1, p.log.error, settings.json not written', async () => {
+      // No manifest.json — loadFlagContext must fire before the TUI import.
+      await flagsCmd.parseAsync([], { from: 'user' });
+
+      expect(process.exitCode).toBe(1);
+      expect(vi.mocked(p.log.error)).toHaveBeenCalledWith(
+        expect.stringContaining('No devflow installation found'),
+      );
+      // settings.json must NOT have been created — the guard fires before any write.
+      const settingsExists = await fs.access(path.join(tmpClaudeDir, 'settings.json'))
+        .then(() => true).catch(() => false);
+      expect(settingsExists, 'settings.json must not be written when manifest is absent').toBe(false);
+    });
+
+    it('corrupt manifest → hard-refuse, exitCode 1, p.log.error, settings.json not written', async () => {
+      // readManifest returns null for malformed JSON — same as absent (avoids PF-023).
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), 'not valid json', 'utf-8');
+
+      await flagsCmd.parseAsync([], { from: 'user' });
+
+      expect(process.exitCode).toBe(1);
+      expect(vi.mocked(p.log.error)).toHaveBeenCalledWith(
+        expect.stringContaining('No devflow installation found'),
+      );
+      const settingsExists = await fs.access(path.join(tmpClaudeDir, 'settings.json'))
+        .then(() => true).catch(() => false);
+      expect(settingsExists, 'settings.json must not be written when manifest is unreadable').toBe(false);
+    });
+  });
+
+  // ─── --set no-manifest: REG-SF2 pin ──────────────────────────────────────────
+  //
+  // --set must hard-error via loadFlagContext when no manifest exists, and
+  // settings.json must remain unwritten. This is REG-SF2: discriminated-result
+  // truthfulness covers the --set/--unset no-manifest surface.
+
+  describe('--set no-manifest (REG-SF2)', () => {
+    it('no manifest → exitCode 1, settings.json not written', async () => {
+      // No manifest.json — loadFlagContext must abort before any write.
+      await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=50'], { from: 'user' });
+
+      expect(process.exitCode).toBe(1);
+      const settingsExists = await fs.access(path.join(tmpClaudeDir, 'settings.json'))
+        .then(() => true).catch(() => false);
+      expect(settingsExists, 'settings.json must not be written when manifest is absent').toBe(false);
+    });
+  });
+
   // ─── bare non-TTY invocation ──────────────────────────────────────────────────
   //
   // src/cli/commands/flags.ts:509-520: when no args are passed and the terminal is not

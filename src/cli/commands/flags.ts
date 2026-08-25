@@ -77,6 +77,24 @@ async function readSettingsSafe(
 }
 
 /**
+ * Discriminated result for persistFlagConfig.
+ *
+ * Makes the absent-manifest state unrepresentable as success (TS-H2 / ARCH-H2 /
+ * REL-H2 / PF-015). Three distinct outcomes:
+ *   - ok:true          — both settings.json and manifest.json were written.
+ *   - ok:false + failed — one or both artifact writes failed; messages + exitCode
+ *                         already set inside the function (per-artifact independence).
+ *   - ok:false + reason:'no-manifest' — no manifest present; flag state not
+ *                         recorded. An absent manifest is a failure, not a no-op.
+ *
+ * Callers print success ("Flags saved.", "X enabled", …) ONLY when ok === true.
+ */
+type PersistResult =
+  | { ok: true }
+  | { ok: false; failed: ReadonlyArray<'settings' | 'manifest'> }
+  | { ok: false; reason: 'no-manifest' };
+
+/**
  * Persist a FlagsRecord to settings.json and manifest.
  *
  * Uses `convergeFlagsIntoSettings` (ARCH-H1: fold-before-strip pipeline) so the
@@ -90,14 +108,9 @@ async function readSettingsSafe(
  * Each failure is reported with its own message and exit code 1.
  * The second write is never skipped due to the first succeeding or failing.
  *
- * Returns true on success; sets process.exitCode = 1 and returns false on any
- * failure (avoids PF-014 — never calls process.exit).
- *
- * Success is tracked in LOCALS, never read back off `process.exitCode`.
- * `process.exitCode` defaults to `undefined` (not 0) in Node, so a
- * `process.exitCode === 0` success test is false on every clean run — it would
- * silently suppress every confirmation message. It is also process-global, so an
- * unrelated earlier failure would misreport this operation's outcome.
+ * Returns a discriminated PersistResult (never a boolean — avoids the two-state
+ * lie that cannot express the third "manifest absent" outcome). Success is tracked
+ * in LOCALS, never read back off `process.exitCode` (avoids PF-014, PF-015).
  */
 async function persistFlagConfig(
   claudeDir: string,
@@ -105,7 +118,7 @@ async function persistFlagConfig(
   settingsContent: string,
   newRecord: FlagsRecord,
   opts: { viewModeExplicit: boolean } = { viewModeExplicit: false },
-): Promise<boolean> {
+): Promise<PersistResult> {
   // D15: convergeFlagsIntoSettings is the fold-before-strip pipeline entry point
   // (applies PF-015, PF-017, REG-H1, ARCH-H1). ownedRecord is omitted so the
   // `newRecord` (the manifest record) serves as the owned set — a key present in
@@ -117,8 +130,8 @@ async function persistFlagConfig(
     opts,
   );
 
-  let settingsOk = true;
-  let manifestOk = true;
+  // PF-015: accumulate each artifact's failure independently; combine at the end.
+  const failed: Array<'settings' | 'manifest'> = [];
 
   // Settings write — independent error path (avoids PF-015 fan-out).
   const settingsPath = path.join(claudeDir, 'settings.json');
@@ -126,31 +139,38 @@ async function persistFlagConfig(
     await writeFileAtomicExclusive(settingsPath, updatedSettings);
   } catch (err) {
     p.log.error(`Failed to write settings.json: ${err instanceof Error ? err.message : String(err)}`);
-    settingsOk = false;
+    failed.push('settings');
     process.exitCode = 1;
     // PF-015: still attempt the manifest write — evaluate each artifact independently.
-    // (if settings failed but manifest would succeed, we still try manifest so the
-    // record is not permanently out of sync)
   }
 
   // Manifest write — independent error path (avoids PF-015 fan-out).
   // Uses foldedRecord (not newRecord) so adopted values are persisted to the
   // manifest, keeping manifest ↔ settings.json in sync.
+  //
+  // An absent manifest is a FAILURE, not a no-op (TS-H2 / ARCH-H2 / REL-H2):
+  // returning success here would tell the user "Flags saved." while the manifest
+  // was never updated — reverted on the next `devflow init`.
   const manifest = await readManifest(devflowDir);
-  if (manifest) {
-    manifest.features.flags = foldedRecord;
-    manifest.updatedAt = new Date().toISOString();
-    try {
-      await writeManifest(devflowDir, manifest);
-    } catch (err) {
-      p.log.error(`Failed to write manifest.json: ${err instanceof Error ? err.message : String(err)}`);
-      manifestOk = false;
-      process.exitCode = 1;
-    }
+  if (!manifest) {
+    p.log.error('No devflow manifest found — flag selections were not recorded. Run devflow init first.');
+    process.exitCode = 1;
+    // Return the dedicated discriminant so callers cannot accidentally suppress it.
+    return { ok: false, reason: 'no-manifest' };
+  }
+
+  manifest.features.flags = foldedRecord;
+  manifest.updatedAt = new Date().toISOString();
+  try {
+    await writeManifest(devflowDir, manifest);
+  } catch (err) {
+    p.log.error(`Failed to write manifest.json: ${err instanceof Error ? err.message : String(err)}`);
+    failed.push('manifest');
+    process.exitCode = 1;
   }
 
   // PF-015: OR the locals afterwards — never compose required side effects with ||/&&.
-  return settingsOk && manifestOk;
+  return failed.length > 0 ? { ok: false, failed } : { ok: true };
 }
 
 // ─── Shared utilities ─────────────────────────────────────────────────────────
@@ -314,9 +334,9 @@ async function handleSetBooleans(
     newRecord[id] = value;
   }
 
-  const ok = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord);
+  const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord);
 
-  if (ok) {
+  if (result.ok) {
     for (const id of ids) {
       if (value) {
         p.log.success(`${id} enabled`);
@@ -396,12 +416,12 @@ async function handleSet(
   // viewModeExplicit: true when the user explicitly assigned view-mode in --set.
   // This lets the chosen value override an externally-set /focus.
   const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
-  const ok = await persistFlagConfig(
+  const result = await persistFlagConfig(
     claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
     { viewModeExplicit },
   );
 
-  if (ok) {
+  if (result.ok) {
     for (const { id, flag, value } of assignments) {
       p.log.success(`${id} = ${formatFlagValue(flag, value)}`);
     }
@@ -441,12 +461,12 @@ async function handleUnset(
 
   // viewModeExplicit: true when the user explicitly unset view-mode.
   const viewModeExplicit = ids.includes('view-mode');
-  const ok = await persistFlagConfig(
+  const result = await persistFlagConfig(
     claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
     { viewModeExplicit },
   );
 
-  if (ok) {
+  if (result.ok) {
     for (const id of ids) {
       p.log.success(`${id} unset`);
     }
@@ -461,22 +481,31 @@ async function handleUnset(
  * CONS-M3: formatStatusRows() is the shared row formatter — non-TTY now uses
  * the longer "not adopted — default X applies on next devflow init" wording,
  * matching --status (convergence of the two divergent status surfaces).
+ *
+ * TS-H2 / ARCH-H2 / REL-H2: TTY path reuses loadFlagContext (the same guard
+ * that mutating handlers use) before importing or launching the TUI. An absent or
+ * unreadable manifest is a hard-refuse: the TUI must not launch, and settings.json
+ * must not be touched. This prevents the silent-factory-reset path (TUI seeded
+ * from {} writes settings.json; next devflow init re-adopts registry defaults and
+ * silently reverts everything the user confirmed). The non-TTY path degrades
+ * gracefully (status table only, no writes, no manifest required).
  */
 async function handleBare(
   claudeDir: string,
   devflowDir: string,
 ): Promise<void> {
-  const manifest = await readManifest(devflowDir);
-  const record: FlagsRecord = manifest?.features.flags ?? {};
-
   if (process.stdout.isTTY) {
-    // ── Read settings before launching TUI (needed for persist on save) ──
-    const settingsResult = await readSettingsSafe(path.join(claudeDir, 'settings.json'));
-    if (!settingsResult.ok) {
-      p.log.error(settingsResult.reason);
+    // ── Manifest + settings required before the TUI may launch ──────────
+    // Reuses loadFlagContext — the same guard as --enable/--disable/--set/--unset.
+    // If the manifest is absent or unreadable, we refuse here and settings.json
+    // is never touched (avoids TS-H2 / ARCH-H2 / REL-H2 silent half-write).
+    const ctx = await loadFlagContext(claudeDir, devflowDir);
+    if (!ctx.ok) {
+      p.log.error(ctx.reason);
       process.exitCode = 1;
       return;
     }
+    const record: FlagsRecord = ctx.value.manifest.features.flags;
 
     // ── Build initial rows from registry + current record ──────────────
     const { runFlagsTui, buildFlagRows, collectFlagRecord } =
@@ -490,15 +519,19 @@ async function handleBare(
       const newRecord = collectFlagRecord(result.rows);
       // viewModeExplicit: true if the user changed the view-mode row in the TUI
       const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
-      const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord, { viewModeExplicit });
-      if (ok) {
+      const persistResult = await persistFlagConfig(
+        claudeDir, devflowDir, ctx.value.settingsContent, newRecord, { viewModeExplicit },
+      );
+      if (persistResult.ok) {
         process.stdout.write('Flags saved.\n');
       }
     } else {
       process.stdout.write('No changes made.\n');
     }
   } else {
-    // non-TTY: status table to stdout, note to stderr
+    // non-TTY: status table — degrades gracefully without manifest (read-only).
+    const manifest = await readManifest(devflowDir);
+    const record: FlagsRecord = manifest?.features.flags ?? {};
     for (const row of formatStatusRows(record)) {
       process.stdout.write(`${row}\n`);
     }
