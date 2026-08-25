@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Orchestrator charter — self-contained delegation**: added an operating rule requiring every subagent delegation to be self-contained (goal, constraints, relevant session facts, exact paths). Deliverables that draw on the conversation (issues, PRs, reports) must carry the substance in the prompt rather than a pointer to it. Charter grows from 2177 → 2452 bytes (~600 tokens), well within the 4096-byte runtime limit.
+
 ---
 
 ## [2.1.0] - 2026-08-25
