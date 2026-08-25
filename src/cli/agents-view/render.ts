@@ -67,7 +67,7 @@ const COL_EFFORT = 13;
 const COL_STATE = 14;
 
 // ---------------------------------------------------------------------------
-// Name formatter — TUI only (Fix 4)
+// Name formatter — TUI only
 // ---------------------------------------------------------------------------
 
 /**
@@ -105,10 +105,10 @@ interface RenderModelCellOptions {
 /**
  * Render the model cell for a given row, considering cursor/active/dirty state.
  *
- * Three branches (Fix 1 — alias annotation removed):
+ * Three branches:
  *   1. configuredModel === 'default' → "default (shippedDefault)" [+ dormant hint]
  *   2. off-cycle pin → "model (unavailable)"
- *   3. in-cycle model → bare name (aliases already rendered as picker names by buildRow)
+ *   3. in-cycle model → bare name (aliases stored as picker names by buildRow)
  *
  * Off-cycle pin (AC-F4): when configuredModel is absent from modelCycle
  * (retired/unavailable model), show "model (unavailable)".
@@ -305,7 +305,7 @@ export function renderFrame(
     // Sanitize the name — mandatory for orphan rows (arbitrary JSON keys from
     // agent-models.json may contain escape sequences, newlines or tabs injected
     // by a hostile file).
-    // Exactly ONE call site for formatAgentName (Fix 4): TUI only; --list is lowercase.
+    // formatAgentName is TUI-only; --list uses the raw lowercase name.
     const safeName = formatAgentName(sanitizeCell(row.name));
     const nameCell = padToVisible(
       isCursor ? bold(truncateVisible(safeName, agentW)) : truncateVisible(safeName, agentW),

@@ -51,8 +51,8 @@ export async function runAgentsTui(
 ): Promise<TuiResult> {
   // C='none' makes runTui return Promise<{ intent: Exclude<Intent,'none'>; state }>.
   // Exclude<Intent,'none'> = 'save' | 'cancel', which matches TuiResult.action exactly —
-  // no casts needed, and adding a new Intent member is a compile error here (exhaustiveness
-  // enforced at the type level, replacing the deleted switch/never guard).
+  // no casts needed, and adding a new Intent member is a compile error here
+  // (exhaustiveness enforced at the type level).
   const result = await runTui<AgentsViewState, Intent, 'none'>({
     initialState,
     reduce,

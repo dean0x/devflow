@@ -49,11 +49,6 @@ import type { FlagsTuiResult } from '../flags-view/terminal.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/** Look up a flag by id; null when unknown. Backed by O(1) findFlag. */
-function lookupFlag(id: string): ClaudeCodeFlag | null {
-  return findFlag(id) ?? null;
-}
-
 /**
  * Read and parse settings.json.
  * ENOENT → returns `{ content: '{}', ok: true }`.
@@ -75,11 +70,9 @@ async function readSettingsSafe(
     return { ok: false, reason: `Cannot read settings.json: ${(err as Error).message}` };
   }
 
-  // REL-M2 + PERF-L4: single parse — validate shape and return raw string.
-  // Validate-then-discard (JSON.parse for side-effect only) was pure overhead;
-  // the plain-object guard replaces it and catches null/array roots before they
-  // reach applyFlags/stripFlags (applies PF-023 — validate at the sink, and
-  // earlier is better for actionable error messages).
+  // REL-M2 + PERF-L4: single parse — validate root shape and return raw string.
+  // The plain-object guard catches null/array roots before they reach applyFlags/stripFlags
+  // (applies PF-023 — validate at the sink; early rejection gives actionable error messages).
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -311,10 +304,10 @@ async function handleSetBooleans(
 ): Promise<void> {
   // Validate: must be known boolean flags only.
   // Collect the validated flag definitions so the success loop can use them
-  // directly — avoids lookupFlag(id)! re-lookups after the guard (TS-S1).
+  // directly — avoids findFlag(id) re-lookups after the guard (TS-S1).
   const flagDefs: ClaudeCodeFlag[] = [];
   for (const id of ids) {
-    const flag = lookupFlag(id);
+    const flag = findFlag(id);
     if (!flag) {
       p.log.error(`Unknown flag: ${color.bold(id)}`);
       p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
@@ -386,7 +379,7 @@ async function handleSet(
       return;
     }
 
-    const flag = lookupFlag(id);
+    const flag = findFlag(id);
     if (!flag) {
       p.log.error(`Unknown flag: ${color.bold(id)}`);
       p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
@@ -445,10 +438,10 @@ async function handleUnset(
 ): Promise<void> {
   // Validate: must be known flags (any kind).
   // Collect the validated flag definitions so the mutation loop can use them
-  // directly — avoids lookupFlag(id)! re-lookups after the guard (TS-S1).
+  // directly — avoids findFlag(id) re-lookups after the guard (TS-S1).
   const flagDefs: ClaudeCodeFlag[] = [];
   for (const id of ids) {
-    const flag = lookupFlag(id);
+    const flag = findFlag(id);
     if (!flag) {
       p.log.error(`Unknown flag: ${color.bold(id)}`);
       p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);

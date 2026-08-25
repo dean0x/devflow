@@ -4,8 +4,7 @@
  * applies ADR-013: impure I/O shell in CLI layer; pure logic lives in state + render.
  * avoids PF-014: cleanup wired via Promise resolve — never process.exit() inside
  *   a finally-guarded scope.
- * avoids PF-017: generify here, thin adapters per TUI — not copy-adapt (agents-view
- *   was the source; this is the generalisation).
+ * avoids PF-017: one generic shell, thin adapters per TUI — not copy-adapted per consumer.
  *
  * Bounded: MAX_KEYPRESSES = 50_000 hard limit (reliability rule — every loop bounded).
  *
@@ -126,8 +125,7 @@ export interface RunTuiSpec<S, A extends string, C extends A> {
 
 /**
  * Normalize a readline keypress event to a canonical key string.
- *
- * Gains backspace/delete/home/end (were leaking raw bytes in agents-view).
+ * Maps backspace/delete/home/end to named tokens (raw bytes otherwise).
  */
 export function normalizeKey(str: string | undefined, key: ReadlineKey | null | undefined): string {
   if (key?.ctrl && key.name === 'c') return 'ctrl-c';

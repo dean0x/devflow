@@ -634,9 +634,8 @@ export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRe
 /**
  * Returns a human-readable kind label for a flag — used by --list output.
  *
- * Exhaustive switch (no default): TypeScript narrows on `flag.kind` so the
- * per-kind casts that appeared in the previous nested ternary at the call
- * site are unnecessary here; each branch sees the narrowed subtype directly.
+ * Exhaustive switch (no default): TypeScript narrows on `flag.kind` so
+ * each branch sees the narrowed subtype directly.
  *
  * Output examples:
  *   boolean                      → 'boolean'
@@ -665,8 +664,7 @@ export function describeFlagKind(flag: ClaudeCodeFlag): string {
 /**
  * Returns the expected-input hint shown by --set when a value is invalid.
  *
- * Exhaustive switch — per-kind casts from the former triple-nested ternary
- * in flags.ts are gone; TypeScript narrows each arm directly.
+ * Exhaustive switch: TypeScript narrows each arm directly.
  *
  * Output examples:
  *   boolean → 'true|false|unset'

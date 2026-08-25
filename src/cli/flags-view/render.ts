@@ -100,8 +100,6 @@ function formatValue(row: FlagRow): string {
  * When the plain buffer length exceeds `budget`, the buffer is windowed so the
  * caret stays at or near the right edge of the visible region. The inverse()
  * marker is inserted AFTER windowing, so it always survives the size constraint.
- * (Before this fix, renderRow called truncateVisible on the styled output, which
- * stripped ANSI including the inverse escape whenever the buffer exceeded budget.)
  */
 function renderBuffer(buffer: string, caret: number, budget: number): string {
   const safe = buffer.replace(/[\x00-\x1f\x7f]/g, ''); // strip control chars from display
