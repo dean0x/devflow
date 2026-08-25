@@ -75,6 +75,57 @@ export interface ManifestData {
 }
 
 /**
+ * Parse features.flags across the three on-disk shapes; reports whether a heal is owed.
+ *
+ * Case A: string[]       — legacy format, migrated to FlagsRecord (fold viewMode in).
+ * Case B: object         — already a FlagsRecord, fold lingering viewMode if present.
+ * Case C: missing/other  — default to empty record.
+ *
+ * The returned `legacy` flag is true only for Case A (array). Callers use it as the
+ * flags-specific clause of needsHeal, keeping the legacy-artifact knowledge in one
+ * place and letting needsHeal derive from the parse result instead of re-inspecting
+ * features.flags after the fact.
+ */
+function parseManifestFlags(
+  features: Record<string, unknown>,
+  knownFlags: string[] | undefined,
+): { flags: FlagsRecord; legacy: boolean } {
+  const rawFlags = features.flags;
+
+  if (Array.isArray(rawFlags)) {
+    // Case A: string[] → FlagsRecord migration.
+    // Filter to strings only (malformed elements are silently dropped).
+    const enabledIds = (rawFlags as unknown[]).filter(e => typeof e === 'string') as string[];
+    // Extract legacyViewMode for the migration fold.
+    const rawViewMode = features.viewMode;
+    const legacyViewMode =
+      typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)
+        ? (rawViewMode as ViewMode)
+        : undefined;
+    return { flags: migrateLegacyFlagsToRecord(enabledIds, knownFlags, legacyViewMode), legacy: true };
+  }
+
+  if (rawFlags !== null && typeof rawFlags === 'object') {
+    // Case B: already a FlagsRecord. Spread to avoid mutating the parsed value.
+    const flagsRecord: FlagsRecord = { ...(rawFlags as Record<string, unknown>) } as FlagsRecord;
+    // Fold lingering viewMode into flags['view-mode'] when the record lacks a
+    // non-default value (e.g. a manifest written by an older init that stored viewMode
+    // as a separate deprecated field alongside a FlagsRecord with view-mode:null).
+    const rawViewMode = features.viewMode;
+    if (typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)) {
+      const existing = flagsRecord['view-mode'];
+      if (existing === null || existing === undefined || existing === 'default') {
+        flagsRecord['view-mode'] = rawViewMode as ViewMode;
+      }
+    }
+    return { flags: flagsRecord, legacy: false };
+  }
+
+  // Case C: missing/malformed → empty record
+  return { flags: {}, legacy: false };
+}
+
+/**
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
  * Self-heals the following on-disk inconsistencies (applies ADR-014):
@@ -129,49 +180,19 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const knownFlags = asStringArray(features.knownFlags);
 
     // ── Parse flags ────────────────────────────────────────────────────────────
-    // Three cases:
-    //   A) Array → legacy format: migrate to FlagsRecord (fold viewMode in)
-    //   B) Object → already a FlagsRecord: fold lingering viewMode if present
-    //   C) Other → default to empty record
-    let flagsRecord: FlagsRecord;
-    const rawFlags = features.flags;
-
-    if (Array.isArray(rawFlags)) {
-      // Case A: string[] → FlagsRecord migration.
-      // Filter to strings only (malformed elements are silently dropped).
-      const enabledIds = (rawFlags as unknown[]).filter(e => typeof e === 'string') as string[];
-      // Extract legacyViewMode for the migration fold.
-      const rawViewMode = features.viewMode;
-      const legacyViewMode = typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)
-        ? rawViewMode as ViewMode
-        : undefined;
-      flagsRecord = migrateLegacyFlagsToRecord(enabledIds, knownFlags, legacyViewMode);
-    } else if (rawFlags !== null && typeof rawFlags === 'object') {
-      // Case B: already a FlagsRecord. Spread to avoid mutating the parsed value.
-      flagsRecord = { ...(rawFlags as Record<string, unknown>) } as FlagsRecord;
-      // Fold lingering viewMode into flags['view-mode'] when the record lacks a
-      // non-default value (e.g. a manifest written by an older init that stored viewMode
-      // as a separate deprecated field alongside a FlagsRecord with view-mode:null).
-      const rawViewMode = features.viewMode;
-      if (typeof rawViewMode === 'string' && (VIEW_MODES as readonly string[]).includes(rawViewMode)) {
-        const existing = flagsRecord['view-mode'];
-        if (existing === null || existing === undefined || existing === 'default') {
-          flagsRecord['view-mode'] = rawViewMode as ViewMode;
-        }
-      }
-    } else {
-      // Case C: missing/malformed → empty record
-      flagsRecord = {};
-    }
+    // Delegates to parseManifestFlags (three cases: A=string[], B=object, C=missing).
+    // `flagsWereLegacy` is true only when the on-disk shape was a string[] (Case A),
+    // keeping the needsHeal predicate in lockstep with the parse branch above.
+    const { flags: parsedFlags, legacy: flagsWereLegacy } = parseManifestFlags(features, knownFlags);
 
     // PF-023 + D39: sanitize all values; block prototype pollution keys.
-    const sanitizedFlags = sanitizeFlagsRecord(flagsRecord);
+    const sanitizedFlags = sanitizeFlagsRecord(parsedFlags);
 
     // needsHeal when any legacy artifact is present on disk
     const needsHeal =
       features.kb !== undefined ||
       features.decisions !== undefined ||
-      Array.isArray(features.flags) ||
+      flagsWereLegacy ||
       features.knownFlags !== undefined ||
       features.viewMode !== undefined;
 

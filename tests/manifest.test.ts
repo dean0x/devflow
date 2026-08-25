@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1163,15 +1163,20 @@ describe('FlagsRecord heal round-trip (Phase 2)', () => {
     };
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(legacy), 'utf-8');
 
-    // Make directory read-only so the heal-write (tmp+rename) fails
-    await fs.chmod(tmpDir, 0o555);
+    // Inject failure at the seam: reject the atomic rename so the heal-write fails.
+    // This is UID-independent (avoids PF-018): the old chmod approach was vacuous under
+    // root UID — a container runner's write succeeded and the assertions proved nothing.
+    // Proof of RED: removing the try/catch in readManifest around writeManifest causes
+    // the outer catch to return null, which fails expect(result).not.toBeNull().
+    const renameSpy = vi.spyOn(fs, 'rename').mockRejectedValueOnce(
+      new Error('ENOSPC: no space left on device'),
+    );
 
     let result: ManifestData | null;
     try {
       result = await readManifest(tmpDir);
     } finally {
-      // Restore write permission so afterEach rm can remove the temp dir
-      await fs.chmod(tmpDir, 0o755);
+      renameSpy.mockRestore();
     }
 
     // D39: heal-write failure must NOT return null — migrated in-memory manifest is returned
