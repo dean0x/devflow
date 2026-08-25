@@ -241,13 +241,16 @@ export function collectFlagRecord(rows: readonly FlagRow[]): FlagsRecord {
 // ─── Cycle helpers ────────────────────────────────────────────────────────────
 
 function cycleForward(stops: readonly FlagsRecordValue[], current: FlagsRecordValue): FlagsRecordValue {
-  const idx = stops.findIndex(s => Object.is(s, current));
+  // Use === rather than Object.is: -0 vs 0 doesn't survive the JSON round-trip so the
+  // distinction is unreachable in practice. Keeps parity with render.ts dirty-detection (!==/!==).
+  const idx = stops.findIndex(s => s === current);
   if (idx === -1) return stops[0];
   return stops[(idx + 1) % stops.length];
 }
 
 function cycleBackward(stops: readonly FlagsRecordValue[], current: FlagsRecordValue): FlagsRecordValue {
-  const idx = stops.findIndex(s => Object.is(s, current));
+  // See cycleForward: === over Object.is for the same reason.
+  const idx = stops.findIndex(s => s === current);
   if (idx === -1) return stops[stops.length - 1];
   return stops[(idx - 1 + stops.length) % stops.length];
 }
@@ -259,6 +262,29 @@ function updateRow(
   patch: Partial<FlagRow>,
 ): readonly FlagRow[] {
   return rows.map((r, i) => (i === cursor ? { ...r, ...patch } : r));
+}
+
+/** Move cursor by delta (+1 = down, -1 = up) and adjust the viewport. */
+function move(state: FlagsViewState, delta: -1 | 1): ReduceResult {
+  const n = state.rows.length;
+  const newCursor = Math.max(0, Math.min(n - 1, state.cursor + delta));
+  const newOffset = adjustViewport(newCursor, state.viewportOffset, state.viewportHeight, n);
+  if (newCursor === state.cursor && newOffset === state.viewportOffset) {
+    return { state, intent: 'none' };
+  }
+  return { state: { ...state, cursor: newCursor, viewportOffset: newOffset }, intent: 'none' };
+}
+
+/** Advance or retreat the cycle stop for a cycling row. */
+function cycle(state: FlagsViewState, row: FlagRow, dir: 'forward' | 'backward'): ReduceResult {
+  const next =
+    dir === 'forward'
+      ? cycleForward(row.stops, row.configuredValue)
+      : cycleBackward(row.stops, row.configuredValue);
+  return {
+    state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: next }) },
+    intent: 'none',
+  };
 }
 
 // ─── Edit mode helpers ────────────────────────────────────────────────────────
@@ -521,123 +547,61 @@ export function reduce(state: FlagsViewState, key: string): ReduceResult {
   }
 
   // Browse mode
+  //
+  // Keys that produce an intent regardless of row count come first. escape/q and
+  // ctrl-c already had no emptiness guard; enter must still save on an empty list
+  // (the one deliberate exception — do not fold into the unified guard below).
+  if (key === 'escape' || key === 'q') return { state, intent: 'cancel' };
+  if (key === 'ctrl-c') return { state, intent: 'abort' };
+  if (key === 'enter' && n === 0) return { state, intent: 'save' };
+
+  // Unified emptiness guard: all remaining browse-mode keys are no-ops on an empty list.
+  if (n === 0) return { state, intent: 'none' };
+
+  const row = state.rows[state.cursor];
+
   switch (key) {
     case 'up':
-    case 'k': {
-      if (n === 0) return { state, intent: 'none' };
-      const newCursor = Math.max(0, state.cursor - 1);
-      const newOffset = adjustViewport(newCursor, state.viewportOffset, state.viewportHeight, n);
-      if (newCursor === state.cursor && newOffset === state.viewportOffset) {
-        return { state, intent: 'none' };
-      }
-      return {
-        state: { ...state, cursor: newCursor, viewportOffset: newOffset },
-        intent: 'none',
-      };
-    }
+    case 'k':
+      return move(state, -1);
 
     case 'down':
-    case 'j': {
-      if (n === 0) return { state, intent: 'none' };
-      const newCursor = Math.min(n - 1, state.cursor + 1);
-      const newOffset = adjustViewport(newCursor, state.viewportOffset, state.viewportHeight, n);
-      if (newCursor === state.cursor && newOffset === state.viewportOffset) {
-        return { state, intent: 'none' };
-      }
+    case 'j':
+      return move(state, +1);
+
+    case 'space':
+      return row.stops.length === 0
+        ? { state: enterEdit(state), intent: 'none' }
+        : cycle(state, row, 'forward');
+
+    case 'left':
+      return row.stops.length === 0 ? { state, intent: 'none' } : cycle(state, row, 'backward');
+
+    case 'right':
+      return row.stops.length === 0 ? { state, intent: 'none' } : cycle(state, row, 'forward');
+
+    case 'enter':
+      return row.stops.length === 0
+        ? { state: enterEdit(state), intent: 'none' }
+        : { state, intent: 'save' };
+
+    case 'e':
+      return row.stops.length === 0
+        ? { state: enterEdit(state), intent: 'none' }
+        : { state, intent: 'none' };
+
+    case 'd':
       return {
-        state: { ...state, cursor: newCursor, viewportOffset: newOffset },
+        state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: row.devflowDefault }) },
         intent: 'none',
       };
-    }
 
-    case 'space': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
-      if (row.stops.length === 0) {
-        // Text row: enter edit mode
-        return { state: enterEdit(state), intent: 'none' };
-      }
-      // Cycling row: advance forward
-      const next = cycleForward(row.stops, row.configuredValue);
-      return {
-        state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: next }) },
-        intent: 'none',
-      };
-    }
-
-    case 'left': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
-      if (row.stops.length === 0) return { state, intent: 'none' }; // text row noop
-      const next = cycleBackward(row.stops, row.configuredValue);
-      return {
-        state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: next }) },
-        intent: 'none',
-      };
-    }
-
-    case 'right': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
-      if (row.stops.length === 0) return { state, intent: 'none' }; // text row noop
-      const next = cycleForward(row.stops, row.configuredValue);
-      return {
-        state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: next }) },
-        intent: 'none',
-      };
-    }
-
-    case 'enter': {
-      if (n === 0) return { state, intent: 'save' };
-      const row = state.rows[state.cursor];
-      if (row.stops.length === 0) {
-        // Text row: enter edit mode
-        return { state: enterEdit(state), intent: 'none' };
-      }
-      // Non-text row: save
-      return { state, intent: 'save' };
-    }
-
-    case 'e': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
-      if (row.stops.length === 0) {
-        return { state: enterEdit(state), intent: 'none' };
-      }
-      return { state, intent: 'none' }; // noop on cycling rows
-    }
-
-    case 'd': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
-      return {
-        state: {
-          ...state,
-          rows: updateRow(state.rows, state.cursor, { configuredValue: row.devflowDefault }),
-        },
-        intent: 'none',
-      };
-    }
-
-    case 'u': {
-      if (n === 0) return { state, intent: 'none' };
-      const row = state.rows[state.cursor];
+    case 'u':
       if (!row.allowUnset) return { state, intent: 'none' };
       return {
-        state: {
-          ...state,
-          rows: updateRow(state.rows, state.cursor, { configuredValue: null }),
-        },
+        state: { ...state, rows: updateRow(state.rows, state.cursor, { configuredValue: null }) },
         intent: 'none',
       };
-    }
-
-    case 'escape':
-    case 'q':
-      return { state, intent: 'cancel' };
-
-    case 'ctrl-c':
-      return { state, intent: 'abort' };
 
     default:
       return { state, intent: 'none' };
