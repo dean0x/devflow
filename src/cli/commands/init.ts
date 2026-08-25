@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
+import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -631,11 +631,10 @@ export const initCommand = new Command('init')
     let complianceEnabled = seed.features.compliance.enabled;
     let complianceFrameworks = seed.features.compliance.frameworks;
     let enabledFlags: FlagsRecord = { ...seed.flags };
-    // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
-    // Used by resolveFinalViewMode to decide whether the user-selected view-mode wins over
-    // an externally-set /focus value in settings.json.
-    // --reset forces view-mode back to 'default': resolveResetGatedInputs empties the settings
-    // snapshot so seed.flags['view-mode'] collapses to 'default', and explicit=true makes it win.
+    // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
+    // seed-time view-mode win over an externally-set value in settings.json.
+    // --reset empties the settings snapshot via resolveResetGatedInputs so seed.flags['view-mode']
+    // collapses to 'default', and explicit=true makes it take effect at settings write time.
     let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -948,47 +947,14 @@ export const initCommand = new Command('init')
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
 
-      // Claude Code flags TUI (advanced only) — replaces multiselect + viewMode select.
-      // view-mode is encoded as an enum flag in the registry; the TUI handles it natively.
-      p.log.info('Opening the flags editor — enter saves, esc keeps current settings.');
-      const { runFlagsTui, buildFlagRows, collectFlagRecord } = await import('../flags-view/index.js');
-      const flagRows = buildFlagRows(enabledFlags);
-      // Wrap: runTui rejects on initial-render failure or handler throw. Init must
-      // not abort mid-run after assets are partially installed (PF-009 spirit).
-      // On rejection: log + continue with the seeded defaults already in enabledFlags.
-      let flagsTuiResult;
-      try {
-        flagsTuiResult = await runFlagsTui(flagRows);
-      } catch (err) {
-        p.log.error(`Flags editor failed: ${err instanceof Error ? err.message : String(err)}`);
-        p.log.info('Continuing with seeded flag defaults.');
-        flagsTuiResult = { action: 'cancel' as const, rows: flagRows };
-      }
-
-      if (flagsTuiResult.action === 'abort') {
-        p.cancel('Installation cancelled.');
-        // avoids PF-014: process.exit(0) would report success to wrappers and can
-        // drop buffered terminal-restore escapes when stdout is a pipe before flushing.
-        process.exitCode = 130;
-        return;
-      } else if (flagsTuiResult.action === 'save') {
-        enabledFlags = collectFlagRecord(flagsTuiResult.rows);
-        // Mark as explicit: user actively confirmed flags (including view-mode),
-        // so resolveFinalViewMode will let the selection win at settings write time.
-        viewModeExplicit = true;
-      }
-      // 'cancel' (esc) or 'none': keep seeded enabledFlags, viewModeExplicit unchanged.
-
-      // Outcome line (PF-029): non-vacuous count so the user can confirm what was applied.
+      /**
+       * D40: init applies seeded flag defaults non-interactively. Flags are customized
+       * exclusively via `devflow flags`; re-init preserves existing values and adopts
+       * registry defaults only for absent flags (ADR-014). No TUI is opened during init.
+       */
       {
         const activeCount = countActiveFlags(enabledFlags);
-        const defaults = getDefaultFlagsRecord();
-        // Restrict to known IDs (applies PF-029): forward-compat unknown IDs have
-        // defaults[id] === undefined and would inflate the count if not excluded.
-        const modifiedCount = Object.keys(enabledFlags).filter(
-          id => id in defaults && enabledFlags[id] !== defaults[id],
-        ).length;
-        p.log.info(`Flags: ${activeCount} configured, ${modifiedCount} modified from defaults`);
+        p.log.info(`Flags: ${activeCount} active — customize any time with 'devflow flags'`);
       }
 
       // .claudeignore prompt

@@ -11,8 +11,10 @@
  *      → FlagsRecord in manifest, viewMode preserved, adopted flags materialised in
  *        settings.json, deliberate prior disables preserved, no knownFlags/features.viewMode residue
  *   2. Fresh install (no manifest) + empty settings
- *      → FlagsRecord with all defaults, max-concurrent-subagents env var applied
- *   3. Idempotency — second run produces byte-stable settings (no thrash)
+ *      → FlagsRecord with all defaults, max-concurrent-subagents env var applied;
+ *        init does NOT open the flags TUI (D40); outcome line present in transcript
+ *   3. Re-init preserves a modified flag value; adopts defaults only for absent flags
+ *   4. Idempotency — second run produces byte-stable settings (no thrash)
  *
  * D-P6-E2E: These tests are the authoritative acceptance gate for the fold-before-strip
  * ordering fix and the bridge removal. Unit tests in init-seed.test.ts cover the seed
@@ -222,7 +224,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(env.ENABLE_LSP_TOOL).toBeUndefined();
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied', async () => {
+  it.skipIf(!CLI_BUILT)('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied; no TUI entered', async () => {
 
     // PF-018: no manifest means fresh install — all flags adopt their defaults.
     // Non-vacuous: if adoption is broken, max-concurrent-subagents env var would be absent.
@@ -234,10 +236,17 @@ describe('init e2e — flags Phase 6 integration', () => {
     const result = runInit(tmpHome);
     expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
 
+    // (c) D40: init must never open the flags TUI — absence of the editor banner confirms this.
+    const transcript = result.stdout + result.stderr;
+    expect(transcript, 'flags TUI must not open during init (D40)').not.toContain('Opening the flags editor');
+
+    // (c) D40: Recommended path emits the flag count in its summary note (non-interactive).
+    expect(transcript, 'Recommended summary must include the flags count').toContain('Claude Code flags:');
+
     const manifest = await readManifest(tmpHome);
     const settings = await readSettings(tmpHome);
 
-    // FlagsRecord in manifest
+    // (a) FlagsRecord in manifest — registry defaults written on fresh install
     expect(typeof manifest.features.flags).toBe('object');
     expect(Array.isArray(manifest.features.flags)).toBe(false);
 
@@ -260,6 +269,69 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(settings).not.toHaveProperty('viewMode');
     // Custom user var preserved
     expect((settings['env'] as Record<string, string>)?.EXISTING_VAR).toBe('keep');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.skipIf(!CLI_BUILT)('(b) re-init preserves a modified flag value; adopts defaults only for absent flags', async () => {
+    // Regression guard for D40/ADR-014: re-init must not overwrite a flag value the user
+    // set via `devflow flags`. The manifest already owns the flag; init preserves it and
+    // adopts registry defaults only for flags absent from the manifest record.
+
+    // Prior manifest: tui deliberately set to false (user disabled it), lsp present,
+    // max-concurrent-subagents absent (new flag added since the manifest was written).
+    const priorManifest = {
+      version: '2.0.0',
+      plugins: ['devflow-implement'],
+      scope: 'user',
+      knownPlugins: ['devflow-implement'],
+      features: {
+        ambient: true,
+        memory: true,
+        hud: true,
+        knowledge: true,
+        learning: true,
+        rules: true,
+        proxy: false,
+        flags: {
+          tui: false,          // deliberately disabled — must survive re-init
+          lsp: true,
+          'tool-search': true,
+          // max-concurrent-subagents absent → will be adopted with registry default (40)
+        },
+        security: 'user' as const,
+        compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(
+      path.join(tmpHome, '.devflow', 'manifest.json'),
+      JSON.stringify(priorManifest, null, 2) + '\n',
+    );
+    await fs.writeFile(
+      path.join(tmpHome, '.claude', 'settings.json'),
+      JSON.stringify({}) + '\n',
+    );
+
+    const result = runInit(tmpHome);
+    expect(result.status, `re-init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+
+    // Non-vacuity guard
+    expect(result.stdout + result.stderr).not.toContain('Could not configure settings.json');
+
+    const manifest = await readManifest(tmpHome);
+    const flagsRecord = manifest.features.flags as Record<string, unknown>;
+
+    // (b) Modified flag preserved: tui=false was set by user, must not revert to default (true)
+    expect(flagsRecord['tui'], 'user-set tui=false preserved after re-init').toBe(false);
+
+    // (b) Present flag preserved: lsp=true explicitly written, must not change
+    expect(flagsRecord['lsp'], 'existing lsp=true preserved').toBe(true);
+
+    // (b) Absent flag adopted: max-concurrent-subagents was absent → adopt registry default 40
+    expect(flagsRecord['max-concurrent-subagents'], 'absent flag adopts registry default').toBe(40);
+
+    // (c) Still no TUI opened
+    expect(result.stdout + result.stderr).not.toContain('Opening the flags editor');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it.skipIf(!CLI_BUILT)('REG-H1 probe: hand-set managed keys survive init when manifest never owned them', async () => {
