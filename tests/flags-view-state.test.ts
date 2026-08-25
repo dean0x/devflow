@@ -708,6 +708,101 @@ describe('edit mode — typed input', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Edit mode — caret manipulation (TEST-H1)
+//
+// Six branches in reduceEditMode had zero coverage:
+//   backspace at caret=0 (no-op), delete-at-caret, delete at end-of-buffer (no-op),
+//   home, end, left/right clamping at 0 and buffer.length.
+//
+// E1 already covers backspace at caret>0 and insertChar via the commit-path tests;
+// only the remaining boundary/branch cases are added here (applies PF-018: each
+// assertion names a concrete post-caret value so a no-op implementation fails RED).
+// ---------------------------------------------------------------------------
+
+describe('edit mode — caret manipulation (TEST-H1)', () => {
+  it('backspace at caret=0 is a no-op (buffer and caret unchanged)', () => {
+    // Enter edit mode on '40': buffer='40', caret=2; home → caret=0
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    s = reduce(s, 'home').state; // caret→0
+    expect(s.editing!.caret).toBe(0);
+    const bufBefore = s.editing!.buffer;
+    s = reduce(s, 'backspace').state;
+    expect(s.editing!.buffer).toBe(bufBefore); // buffer unchanged
+    expect(s.editing!.caret).toBe(0);          // caret still 0
+  });
+
+  it('delete at caret removes the character under the caret', () => {
+    // buffer='40', caret=0; delete removes '4' → buffer='0', caret stays 0
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    s = reduce(s, 'home').state; // caret=0
+    s = reduce(s, 'delete').state;
+    expect(s.editing!.buffer).toBe('0');
+    expect(s.editing!.caret).toBe(0); // caret stays at deletion point
+  });
+
+  it('delete at end of buffer is a no-op', () => {
+    // buffer='40', caret=2 (already at end); delete is a no-op
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    expect(s.editing!.caret).toBe(2); // sanity: at end after entering edit mode on '40'
+    const bufBefore = s.editing!.buffer;
+    s = reduce(s, 'delete').state;
+    expect(s.editing!.buffer).toBe(bufBefore); // buffer unchanged
+    expect(s.editing!.caret).toBe(2);          // caret unchanged
+  });
+
+  it('home moves caret to start of buffer', () => {
+    // buffer='40', caret=2; home → caret=0
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    expect(s.editing!.caret).toBe(2);
+    s = reduce(s, 'home').state;
+    expect(s.editing!.caret).toBe(0);
+    expect(s.editing!.buffer).toBe('40'); // buffer unchanged
+  });
+
+  it('end moves caret to end of buffer', () => {
+    // Move to start first, then end → caret should reach buffer.length
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    s = reduce(s, 'home').state; // caret=0
+    s = reduce(s, 'end').state;
+    expect(s.editing!.caret).toBe(s.editing!.buffer.length); // end of '40' = 2
+    expect(s.editing!.buffer).toBe('40'); // buffer unchanged
+  });
+
+  it('left decrements caret by one', () => {
+    // buffer='40', caret=2; left → caret=1
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    expect(s.editing!.caret).toBe(2);
+    s = reduce(s, 'left').state;
+    expect(s.editing!.caret).toBe(1);
+    expect(s.editing!.buffer).toBe('40'); // buffer unchanged
+  });
+
+  it('left at caret=0 clamps (caret stays 0)', () => {
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    s = reduce(s, 'home').state; // caret=0
+    s = reduce(s, 'left').state;
+    expect(s.editing!.caret).toBe(0); // clamped at 0
+  });
+
+  it('right increments caret by one', () => {
+    // buffer='40', caret=0 (after home); right → caret=1
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    s = reduce(s, 'home').state; // caret=0
+    s = reduce(s, 'right').state;
+    expect(s.editing!.caret).toBe(1);
+    expect(s.editing!.buffer).toBe('40'); // buffer unchanged
+  });
+
+  it('right at end of buffer clamps (caret stays at buffer.length)', () => {
+    // buffer='40', caret=2 (already at end); right clamps
+    let s = reduce(makeState([rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 })]), 'e').state;
+    expect(s.editing!.caret).toBe(2); // already at end
+    s = reduce(s, 'right').state;
+    expect(s.editing!.caret).toBe(2); // clamped at buffer.length
+  });
+});
+
 describe('resizeViewport', () => {
   const rows = buildFlagRows({});
 

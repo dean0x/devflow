@@ -78,6 +78,54 @@ function expectTerminalRestored(h: Harness, pauseSpy: ReturnType<typeof vi.spyOn
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// TEST-H1: normalizeKey — complete key table (applies PF-018)
+//
+// All 12 named entries in the switch table, plus ctrl-c and the default-branch
+// fallback, are tested via it.each. The existing TS-M5 tests cover the
+// undefined-str surface; this table covers the named-key-to-normalized-name
+// mapping for every readline key name the switch knows about.
+// ---------------------------------------------------------------------------
+
+describe('normalizeKey — complete key table (TEST-H1)', () => {
+  it.each([
+    // [key.name as emitted by readline, expected normalized string]
+    ['backspace', 'backspace'],
+    ['delete',    'delete'],
+    ['home',      'home'],
+    ['end',       'end'],
+    ['left',      'left'],
+    ['right',     'right'],
+    ['up',        'up'],
+    ['down',      'down'],
+    ['return',    'enter'],   // readline emits 'return', TUI expects 'enter'
+    ['escape',    'escape'],
+    ['space',     'space'],
+    ['tab',       'tab'],
+  ])('key.name "%s" → normalized "%s"', (keyName, expected) => {
+    // With str defined: the switch table wins over str (named keys take priority)
+    expect(normalizeKey('x', { name: keyName })).toBe(expected);
+    // With str undefined: switch table still resolves correctly
+    expect(normalizeKey(undefined, { name: keyName })).toBe(expected);
+  });
+
+  it('ctrl-c → "ctrl-c" regardless of str', () => {
+    expect(normalizeKey('c', { ctrl: true, name: 'c' })).toBe('ctrl-c');
+    expect(normalizeKey(undefined, { ctrl: true, name: 'c' })).toBe('ctrl-c');
+  });
+
+  it('default branch: returns str when key.name is not in the table', () => {
+    // For printable single chars, readline emits str='a', name='a'
+    expect(normalizeKey('a', { name: 'a' })).toBe('a');
+    expect(normalizeKey('Z', { name: 'Z' })).toBe('Z');
+  });
+
+  it('default branch: returns key.name when str is undefined and name is not in table', () => {
+    // str ?? name fallback — no str provided → name is returned
+    expect(normalizeKey(undefined, { name: 'unknownKey' })).toBe('unknownKey');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TS-M5: normalizeKey accepts undefined str (readline emits undefined for
 // non-printable escape sequences)
 // ---------------------------------------------------------------------------

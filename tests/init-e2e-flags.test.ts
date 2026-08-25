@@ -106,7 +106,6 @@ const CLI_BUILT = existsSync(CLI_PATH);
 
 describe('init e2e — flags Phase 6 integration', () => {
   it.skipIf(!CLI_BUILT)('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
-
     // PF-018: seed a REAL old-format manifest (flags as string array) and settings with viewMode.
     // Non-vacuous: if the bridge removal regressed to string[], flags would be [] in the manifest.
     const oldManifest = {
@@ -221,7 +220,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(flagsRecord['lsp']).toBe(false);
     expect(settings).not.toHaveProperty('tui');
     expect(env.ENABLE_LSP_TOOL).toBeUndefined();
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it.skipIf(!CLI_BUILT)('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied', async () => {
 
@@ -261,7 +260,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(settings).not.toHaveProperty('viewMode');
     // Custom user var preserved
     expect((settings['env'] as Record<string, string>)?.EXISTING_VAR).toBe('keep');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it.skipIf(!CLI_BUILT)('REG-H1 probe: hand-set managed keys survive init when manifest never owned them', async () => {
     // Scenario: user has an existing devflow install that predates the newly-registered flags
@@ -363,7 +362,7 @@ describe('init e2e — flags Phase 6 integration', () => {
 
     // User keys unrelated to devflow flags must survive too
     expect(env.CUSTOM_USER_VAR, 'custom user env var preserved').toBe('preserved');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it.skipIf(!CLI_BUILT)('idempotency: second run produces content-stable settings (no viewMode thrash)', async () => {
     // content-stable = deep-equal parsed objects (not byte-equal strings): stripFlags
@@ -398,5 +397,5 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(settings2).toEqual(settings1);
     // Manifest flags stable (viewMode must not thrash — the core assertion of this test)
     expect(manifest2.features.flags).toEqual(manifest1.features.flags);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });

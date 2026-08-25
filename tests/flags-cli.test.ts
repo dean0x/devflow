@@ -7,8 +7,10 @@
  *   - Fresh Command instance per test via createFlagsCommand()
  *   - Real temp files on disk; async fs operations
  *
- * Whole-post-state asserts (full JSON deep-equal, not key-picking) per PF-015:
- * both settings.json and manifest.features.flags are checked as complete objects.
+ * Whole-post-state discipline (applies PF-015 + ADR-003): ONE representative test
+ * per mutation verb (--enable, --disable, --set, --unset) asserts the COMPLETE
+ * settings.json object and COMPLETE manifest.features.flags record via toEqual.
+ * Other tests use key-picks for brevity on non-representative paths.
  *
  * Applies PF-014 (process.exitCode, never process.exit) — every error path sets
  * process.exitCode = 1 and returns; tests reset exitCode in beforeEach/afterEach.
@@ -172,13 +174,15 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // settings.json: tui=fullscreen (the onPayload for the tui boolean flag)
+      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // convergeFlagsIntoSettings always writes view-mode via resolveFinalViewMode,
+      // so the flags record also contains 'view-mode':'default' (neutral → not written
+      // to settings.json). toEqual on both artifacts catches unexpected extra writes.
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
-      expect(settings.tui).toBe('fullscreen');
+      expect(settings).toEqual({ tui: 'fullscreen' });
 
-      // manifest: flags record has tui: true
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
-      expect(flags.tui).toBe(true);
+      expect(flags).toEqual({ tui: true, 'view-mode': 'default' });
     });
 
     it('whole-post-state: enabling an already-enabled flag is idempotent', async () => {
@@ -253,13 +257,15 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--disable', 'tui'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // tui=false is neutral for boolean flags → key is deleted from settings
+      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // tui=false is neutral for boolean flags → tui key deleted from settings;
+      // empty result is {} (applyFlags cleans up empty env, same logic applies to root).
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
-      expect(settings.tui).toBeUndefined();
+      expect(settings).toEqual({});
 
-      // manifest: tui: false (recorded as deliberately disabled — not absent)
+      // manifest: tui: false (deliberately disabled — not absent)
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
-      expect(flags.tui).toBe(false);
+      expect(flags).toEqual({ tui: false, 'view-mode': 'default' });
     });
 
     it('error on valued flag via --disable', async () => {
@@ -283,12 +289,14 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=50'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // Env flag: value stringified for env target
+      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // Starting from flags:{} with no settings.json → only the env entry is written.
+      // toEqual on the full object catches any unexpected keys written or omitted.
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
-      expect((settings.env as Record<string, string>)?.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS).toBe('50');
+      expect(settings).toEqual({ env: { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '50' } });
 
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
-      expect(flags['max-concurrent-subagents']).toBe(50);
+      expect(flags).toEqual({ 'max-concurrent-subagents': 50, 'view-mode': 'default' });
     });
 
     it('whole-post-state: set an enum flag (workflow-size-guideline=large)', async () => {
@@ -494,12 +502,14 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--unset', 'max-concurrent-subagents'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
+      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // null is neutral for number flags → env key deleted; empty env block deleted too
+      // → settings becomes {} (applyFlags cleanup, line ~960-963 in flags.ts).
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
-      expect((settings.env as Record<string, string> | undefined)?.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS)
-        .toBeUndefined();
+      expect(settings).toEqual({});
 
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
-      expect(flags['max-concurrent-subagents']).toBeNull();
+      expect(flags).toEqual({ 'max-concurrent-subagents': null, 'view-mode': 'default' });
     });
 
     it('whole-post-state: unset a boolean flag → false in record, key deleted from settings', async () => {
