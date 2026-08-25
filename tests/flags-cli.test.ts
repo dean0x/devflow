@@ -48,7 +48,6 @@ import * as os from 'os';
 import { PassThrough } from 'stream';
 import { createFlagsCommand, applyTuiResult } from '../src/cli/commands/flags.js';
 import { makeManifest } from './helpers.js';
-import { FLAG_REGISTRY } from '../src/core/flags.js';
 import type { FlagsRecord } from '../src/core/flags.js';
 import { readManifest } from '../src/core/manifest.js';
 // Direct import from terminal.js (not index.js) so the REL-M3 mock of index.js
@@ -1003,7 +1002,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       // Drive runFlagsTui with PassThrough streams: space toggles tui true→false,
       // then enter on a boolean row triggers save intent.
       const { stdin, stdout } = makeStreams();
-      const rowsIn = buildFlagRows(FLAG_REGISTRY, initialFlags);
+      const rowsIn = buildFlagRows(initialFlags);
       const tui = runFlagsTui(rowsIn, { stdin, stdout });
 
       await new Promise(r => setTimeout(r, 10));
@@ -1045,7 +1044,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       // Drive runFlagsTui to cancel via esc
       const { stdin, stdout } = makeStreams();
-      const rowsIn = buildFlagRows(FLAG_REGISTRY, initialFlags);
+      const rowsIn = buildFlagRows(initialFlags);
       const tui = runFlagsTui(rowsIn, { stdin, stdout });
 
       await new Promise(r => setTimeout(r, 10));

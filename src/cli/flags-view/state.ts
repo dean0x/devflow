@@ -7,8 +7,10 @@
  * avoids PF-017: generic shell in tui/terminal.ts; this module is pure logic.
  *
  * viewMode GLUE RULE: view-mode's neutralValue ('default') maps to null in the TUI.
- * `buildFlagRows` maps record value 'default' → null; `collectFlagRecord` maps
- * null → 'default' (via neutralValueOf). Number 0 is ACTIVE — null ≠ 0.
+ * `buildFlagRows` maps record value 'default' → null via `recordToTui` (core/flags.ts);
+ * `collectFlagRecord` maps null → 'default' via `tuiToRecord` (core/flags.ts).
+ * Number 0 is ACTIVE — null ≠ 0. Both functions live next to neutralValueOf, their
+ * definition dependency (PF-017 one-shared-definition corollary).
  *
  * Strict number parsing: leading/trailing whitespace and leading zeros are
  * invalid ('007' → error, ' 8' → error). This rejects pathological inputs
@@ -20,14 +22,19 @@
  *   - boolean: false — no null stop, 'u' is noop
  *   - enum/number/string: true — 'u' sets null; enum with neutralValue includes
  *     null in the cycle as the first stop (round-trips through collectFlagRecord).
+ *
+ * FlagRow invariant: all rows are built by buildFlagRows from FLAG_REGISTRY.
+ * Every row.id maps to a known flag definition (row.def). collectFlagRecord and
+ * commitEdit rely on this — there is no unknown-flag fallback.
  */
 
 import {
   FLAG_REGISTRY,
-  findFlag,
   defaultValueOf,
   coerceFlagValue,
   parseFlagValueInput,
+  recordToTui,
+  tuiToRecord,
   type ClaudeCodeFlag,
   type FlagsRecord,
   type FlagsRecordValue,
@@ -45,6 +52,13 @@ export interface FlagRow {
   readonly id: string;
   readonly label: string;
   readonly hint: string;
+  /**
+   * The registry definition for this flag. Embedded so commitEdit and collectFlagRecord
+   * can access flag metadata (kind, bounds, neutralValue) without a module-global
+   * registry reach-back via findFlag. All rows are built from FLAG_REGISTRY, so this
+   * is always defined — no unknown-flag branch is needed at consumers (ARCH-M4).
+   */
+  readonly def: ClaudeCodeFlag;
   /** Discriminant for cycling vs text-editing behaviour. */
   readonly kind: 'boolean' | 'enum' | 'number' | 'string';
   /**
@@ -81,6 +95,17 @@ export interface EditState {
   readonly error: string | null;
 }
 
+/**
+ * The intent produced by a keypress in the TUI.
+ *
+ *   none   — stay in the event loop; no persisting action.
+ *   save   — persist the current rows to settings.json and the manifest.
+ *   cancel — user pressed esc or q; keep the seeded (original) values unchanged.
+ *   abort  — ctrl-c or OS interrupt; restore terminal state and exit immediately.
+ *
+ * The cancel vs abort distinction is load-bearing at the init.ts consumer:
+ * cancel means "no changes, continue the wizard"; abort means "terminate the process".
+ */
 export type FlagsIntent = 'none' | 'save' | 'cancel' | 'abort';
 
 /** Full TUI state — immutable by convention. */
@@ -93,6 +118,16 @@ export interface FlagsViewState {
   readonly editing: EditState | null;
 }
 
+/**
+ * The result of a single keypress through the reducer.
+ *
+ * `state` is the new TUI state (unchanged when the key has no effect).
+ * `intent` signals what the TUI loop should do next:
+ *   none   — redraw with the new state, continue the loop.
+ *   save   — exit the loop and persist the rows to disk.
+ *   cancel — exit the loop, make no writes.
+ *   abort  — exit the loop, restore terminal, terminate.
+ */
 export interface ReduceResult {
   readonly state: FlagsViewState;
   readonly intent: FlagsIntent;
@@ -115,31 +150,6 @@ function adjustViewport(
 
   const maxOffset = Math.max(0, rowCount - viewportHeight);
   return Math.max(0, Math.min(offset, maxOffset));
-}
-
-// ─── Value mapping ────────────────────────────────────────────────────────────
-
-/**
- * Map a record value to a TUI value.
- * viewMode GLUE: enum neutralValue → null in TUI.
- */
-function recordToTui(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRecordValue {
-  if (v === null) return null;
-  if (flag.kind === 'enum' && flag.neutralValue !== undefined) {
-    if (v === flag.neutralValue) return null;
-  }
-  return v;
-}
-
-/**
- * Map a TUI value back to a record value.
- * viewMode GLUE: null → neutralValue for enum flags that have one.
- */
-function tuiToRecord(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRecordValue {
-  if (v === null && flag.kind === 'enum' && flag.neutralValue !== undefined) {
-    return flag.neutralValue;
-  }
-  return v;
 }
 
 // ─── Row building ─────────────────────────────────────────────────────────────
@@ -185,17 +195,18 @@ function buildConfiguredValue(flag: ClaudeCodeFlag, record: FlagsRecord): FlagsR
 }
 
 /**
- * Build the FlagRow array from the registry and an existing record.
+ * Build the FlagRow array from FLAG_REGISTRY and an existing record.
  *
- * Row order matches FLAG_REGISTRY order.
- * viewMode GLUE: record value 'default' → configuredValue null.
+ * Row order matches FLAG_REGISTRY order. Every produced row embeds its registry
+ * definition as `row.def` — this is the FlagRow invariant: collectFlagRecord and
+ * commitEdit use row.def directly and assume all row ids are registry-derived.
+ * There is no unknown-flag fallback (ARCH-M4, CONS-S1).
+ *
+ * viewMode GLUE: record value 'default' → configuredValue null (via recordToTui).
  * devflowDefault for view-mode = null (maps from neutralValue 'default').
  */
-export function buildFlagRows(
-  registry: typeof FLAG_REGISTRY,
-  record: FlagsRecord,
-): FlagRow[] {
-  return registry.map((flag): FlagRow => {
+export function buildFlagRows(record: FlagsRecord): FlagRow[] {
+  return FLAG_REGISTRY.map((flag): FlagRow => {
     const stops = buildStops(flag);
     const allowUnset = flag.kind !== 'boolean';
     const devflowDefault = buildDevflowDefault(flag);
@@ -205,6 +216,7 @@ export function buildFlagRows(
       id: flag.id,
       label: flag.label,
       hint: flag.hint,
+      def: flag,
       kind: flag.kind,
       stops,
       allowUnset,
@@ -219,19 +231,17 @@ export function buildFlagRows(
 /**
  * Collect the current TUI row values back into a FlagsRecord.
  *
- * viewMode GLUE: null → neutralValue (e.g. 'default') for enum flags with neutralValue.
- * All other null values pass through as null.
+ * FlagRow invariant (see buildFlagRows): every row embeds its registry definition
+ * as row.def. There is no unknown-flag path — rows are always produced by
+ * buildFlagRows from FLAG_REGISTRY (ARCH-M4, CONS-S1).
+ *
+ * viewMode GLUE: null → neutralValue (e.g. 'default') for enum flags with neutralValue,
+ * via tuiToRecord (core/flags.ts). All other null values pass through as null.
  */
 export function collectFlagRecord(rows: readonly FlagRow[]): FlagsRecord {
   const record: FlagsRecord = {};
   for (const row of rows) {
-    const flag = findFlag(row.id); // O(1) via FLAG_REGISTRY_MAP (PERF-L3)
-    if (flag) {
-      record[row.id] = tuiToRecord(flag, row.configuredValue);
-    } else {
-      // Unknown flag — pass through as-is
-      record[row.id] = row.configuredValue;
-    }
+    record[row.id] = tuiToRecord(row.def, row.configuredValue);
   }
   return record;
 }
@@ -320,8 +330,9 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
   if (!editing) return state;
 
   const row = rows[cursor];
-  const flagDef = findFlag(row.id); // O(1) via FLAG_REGISTRY_MAP (PERF-L3)
-  if (!flagDef || flagDef.kind === 'boolean' || flagDef.kind === 'enum') return state;
+  // row.def is always defined — FlagRow invariant: all rows are built from FLAG_REGISTRY (ARCH-M4).
+  const flagDef = row.def;
+  if (flagDef.kind === 'boolean' || flagDef.kind === 'enum') return state;
 
   const buf = editing.buffer;
 

@@ -30,7 +30,6 @@ import {
   type FlagsViewState,
   type FlagRow,
 } from '../src/cli/flags-view/state.js';
-import { FLAG_REGISTRY } from '../src/core/flags.js';
 import type { FlagsRecord } from '../src/core/flags.js';
 
 // ---------------------------------------------------------------------------
@@ -54,7 +53,7 @@ function makeState(
 
 /** Build a single FlagRow from the registry for a given flag id. */
 function rowFor(id: string, record: FlagsRecord = {}): FlagRow {
-  const rows = buildFlagRows(FLAG_REGISTRY, record);
+  const rows = buildFlagRows(record);
   const row = rows.find(r => r.id === id);
   if (!row) throw new Error(`Flag '${id}' not found in registry`);
   return row;
@@ -551,7 +550,7 @@ describe('flags-view-state — buffer hard-bound at 64', () => {
 
 describe('flags-view-state — collectFlagRecord', () => {
   it('view-mode null maps back to canonical "default" in the record', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     // Set view-mode to null (representing 'default')
     const viewModeRow = rows.find(r => r.id === 'view-mode')!;
     const modified = rows.map(r =>
@@ -562,14 +561,14 @@ describe('flags-view-state — collectFlagRecord', () => {
   });
 
   it('collectFlagRecord preserves boolean true/false correctly', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true, brief: false });
+    const rows = buildFlagRows({ tui: true, brief: false });
     const record = collectFlagRecord(rows);
     expect(record['tui']).toBe(true);
     expect(record['brief']).toBe(false);
   });
 
   it('collectFlagRecord preserves null for number flags', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const modified = rows.map(r =>
       r.id === 'max-concurrent-subagents' ? { ...r, configuredValue: null } : r,
     );
@@ -578,7 +577,7 @@ describe('flags-view-state — collectFlagRecord', () => {
   });
 
   it('collectFlagRecord preserves enum set value', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'view-mode': 'verbose' });
+    const rows = buildFlagRows({ 'view-mode': 'verbose' });
     const record = collectFlagRecord(rows);
     expect(record['view-mode']).toBe('verbose');
   });
@@ -709,7 +708,7 @@ describe('edit mode — typed input', () => {
 });
 
 describe('resizeViewport', () => {
-  const rows = buildFlagRows(FLAG_REGISTRY, {});
+  const rows = buildFlagRows({});
 
   it('re-clamps the scroll offset so the cursor stays visible when the terminal shrinks', () => {
     // adjustViewport otherwise only runs on up/down, so a resize changed the height

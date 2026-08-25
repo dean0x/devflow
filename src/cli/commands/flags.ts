@@ -569,7 +569,7 @@ async function handleBare(
 
     // ── Build initial rows from registry + current record ──────────────
     // buildFlagRows is a static import (pure — no TTY); only runFlagsTui is lazy.
-    const initialRows = buildFlagRows(FLAG_REGISTRY, record);
+    const initialRows = buildFlagRows(record);
 
     // ── Launch TUI ────────────────────────────────────────────────────
     const { runFlagsTui } = await import('../flags-view/index.js');

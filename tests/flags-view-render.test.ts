@@ -35,7 +35,7 @@ const DIMS_60x24 = { rows: 24, cols: 60 }; // narrow
 const DIMS_80x15 = { rows: 15, cols: 80 }; // short
 
 function makeState(overrides: Partial<FlagsViewState> = {}): FlagsViewState {
-  const rows = buildFlagRows(FLAG_REGISTRY, {});
+  const rows = buildFlagRows({});
   return {
     rows,
     cursor: 0,
@@ -97,7 +97,7 @@ describe('flags-view-render — renderFrame basic contract', () => {
     // `devflow flags --set $'spellcheck=a\nb'` persists a LF; coerceFlagValue permits
     // TAB/LF so the value reaches the renderer. sanitizeCell must collapse both to space
     // so the one-string-per-terminal-line contract is preserved.
-    const rows = buildFlagRows(FLAG_REGISTRY, { spellcheck: 'aspell\tcheck\nline2' });
+    const rows = buildFlagRows({ spellcheck: 'aspell\tcheck\nline2' });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const frameLines = renderFrame(state, DIMS_80x24);
     // Every string in the returned array must be free of newlines and tabs
@@ -138,7 +138,7 @@ describe('flags-view-render — renderFrame basic contract', () => {
 
 describe('flags-view-render — per-kind value display', () => {
   it('boolean flag shows "enabled" when true', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const joined = lines.join('\n');
@@ -146,7 +146,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('boolean flag shows "disabled" when false', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: false });
+    const rows = buildFlagRows({ tui: false });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const joined = lines.join('\n');
@@ -156,7 +156,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('enum flag shows the value when set', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'view-mode': 'verbose' });
+    const rows = buildFlagRows({ 'view-mode': 'verbose' });
     // Find the index of view-mode row — scroll viewport to make it visible
     const vmIdx = rows.findIndex(r => r.id === 'view-mode');
     const state = makeState({ rows, cursor: vmIdx, viewportOffset: vmIdx });
@@ -166,7 +166,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('view-mode shows "unset" when null (default/neutral)', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {}); // view-mode absent → null
+    const rows = buildFlagRows({}); // view-mode absent → null
     const vmIdx = rows.findIndex(r => r.id === 'view-mode');
     const state = makeState({ rows, cursor: vmIdx, viewportOffset: vmIdx });
     const lines = renderFrame(state, DIMS_80x24);
@@ -175,7 +175,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('number flag shows value when set', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'max-concurrent-subagents': 40 });
+    const rows = buildFlagRows({ 'max-concurrent-subagents': 40 });
     // max-concurrent-subagents is index 8 — within first viewport (14 rows), viewportOffset=0 is fine
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
     const state = makeState({ rows, cursor: mcIdx, viewportOffset: 0 });
@@ -185,7 +185,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('number flag shows "unset" when null', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'subagent-spawn-depth': null });
+    const rows = buildFlagRows({ 'subagent-spawn-depth': null });
     const sdIdx = rows.findIndex(r => r.id === 'subagent-spawn-depth');
     const state = makeState({ rows, cursor: sdIdx, viewportOffset: sdIdx });
     const lines = renderFrame(state, DIMS_80x24);
@@ -200,7 +200,7 @@ describe('flags-view-render — per-kind value display', () => {
 
 describe('flags-view-render — dirty dot', () => {
   it('shows dirty indicator when configuredValue !== originalValue', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const rows = buildFlagRows({ tui: true });
     // Modify configuredValue but keep originalValue
     const modified = rows.map(r =>
       r.id === 'tui' ? { ...r, configuredValue: false } : r,
@@ -214,7 +214,7 @@ describe('flags-view-render — dirty dot', () => {
   });
 
   it('no dirty indicator when clean', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const joined = lines.join('\n');
@@ -249,7 +249,7 @@ describe('flags-view-render — cursor indicator', () => {
 
 describe('flags-view-render — edit mode', () => {
   it('edit mode shows buffer with inverse-video caret', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'max-concurrent-subagents': 40 });
+    const rows = buildFlagRows({ 'max-concurrent-subagents': 40 });
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
     const state = makeState({
       rows,
@@ -266,7 +266,7 @@ describe('flags-view-render — edit mode', () => {
   });
 
   it('edit mode shows error message when error is set', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents'); // index 8
     const state = makeState({
       rows,
@@ -281,7 +281,7 @@ describe('flags-view-render — edit mode', () => {
   });
 
   it('caret at start shows inverse on first char', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'max-concurrent-subagents': 40 });
+    const rows = buildFlagRows({ 'max-concurrent-subagents': 40 });
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
     const state = makeState({
       rows,
@@ -296,7 +296,7 @@ describe('flags-view-render — edit mode', () => {
   });
 
   it('empty buffer with caret shows inverse on blank space', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents'); // index 8
     const state = makeState({
       rows,
@@ -317,7 +317,7 @@ describe('flags-view-render — edit mode', () => {
 
 describe('flags-view-render — viewport overflow indicators', () => {
   it('shows scroll-up indicator when viewportOffset > 0', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 3,
@@ -338,7 +338,7 @@ describe('flags-view-render — viewport overflow indicators', () => {
   });
 
   it('shows scroll-down indicator when rows extend below viewport', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 0,
@@ -364,7 +364,7 @@ describe('flags-view-render — viewport overflow indicators', () => {
 
 describe('flags-view-render — hint zone', () => {
   it('shows hint text for the selected flag', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state = makeState({ rows, cursor: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const joined = lines.join('\n');
@@ -375,7 +375,7 @@ describe('flags-view-render — hint zone', () => {
   });
 
   it('shows hint for a different selected row', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const briefIdx = rows.findIndex(r => r.id === 'brief');
     const state = makeState({ rows, cursor: briefIdx });
     const lines = renderFrame(state, DIMS_80x24);
@@ -421,7 +421,7 @@ describe('flags-view-render — column header alignment', () => {
     // Data row layout: prefix(2) + label(27) + dirty(2) + value
     // Header layout must match: 2 spaces + FLAG(27) + 2 spaces + VALUE
     // → FLAG at col 2 (same as label), VALUE at col 2+27+2=31 (same as value cell).
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
@@ -456,7 +456,7 @@ describe('flags-view-render — column header alignment', () => {
   it('FLAG and VALUE columns align on narrow terminal (cols=60)', () => {
     // At 60 cols: scale = 60/80 = 0.75, labelW = floor(27*0.75)=20, valueW = floor(46*0.75)=34.
     // Header: 2 + labelW(20) + 2 = VALUE at col 24.
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_60x24);
     const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
@@ -479,7 +479,7 @@ describe('flags-view-render — viewportHeight ownership', () => {
   it('renders exactly state.viewportHeight data rows regardless of dims.rows', () => {
     // dims.rows=24 would give computeViewportHeight(24)=14 rows, but state says 3.
     // After the ARCH-M5 fix, renderFrame reads state.viewportHeight directly.
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 0,
@@ -492,7 +492,7 @@ describe('flags-view-render — viewportHeight ownership', () => {
   });
 
   it('renders exactly state.viewportHeight data rows when state says 1', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 0,
@@ -511,7 +511,7 @@ describe('flags-view-render — viewportHeight ownership', () => {
 
 describe('flags-view-render — unsaved changes section', () => {
   it('shows unsaved count when rows are dirty', () => {
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const rows = buildFlagRows({ tui: true });
     const modified = rows.map(r =>
       r.id === 'tui' ? { ...r, configuredValue: false as boolean | string | number | null } : r,
     );
@@ -536,7 +536,7 @@ describe('flags-view-render — ARCH-M7a: chevron composition', () => {
     //   leaving the closing chevron unstyled (ESC[0m ›).
     // After fix: cyan('‹ ') + green('enabled') + cyan(' ›') — each segment self-contained;
     //   the closing chevron is always inside its own ESC[36m ... ESC[0m span.
-    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
 
@@ -562,7 +562,7 @@ describe('flags-view-render — ARCH-M7b: caret survival beyond chevron budget',
     // Before fix: truncateVisible strips ANSI from the buffer output, discarding ESC[7m.
     // After fix: renderBuffer windows the plain buffer to budget width before inserting
     //   inverse(), so the caret escape always survives.
-    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const rows = buildFlagRows({});
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
     const longBuffer = 'a'.repeat(60); // 60 > chevronBudget(42)
     const state = makeState({
@@ -595,7 +595,7 @@ describe('flags-view-render — ARCH-M7c: deviation signal', () => {
     //
     // cursor at row 0 (not mcIdx) so the max-concurrent-subagents row is non-cursor;
     // no cyan chevrons appear on it.
-    const rows = buildFlagRows(FLAG_REGISTRY, { 'max-concurrent-subagents': 20 });
+    const rows = buildFlagRows({ 'max-concurrent-subagents': 20 });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
 

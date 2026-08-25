@@ -40,7 +40,6 @@ import {
 } from '../../core/ansi.js';
 import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import type { FlagsViewState, FlagRow } from './state.js';
-import { FLAG_REGISTRY } from '../../core/flags.js';
 import type { RenderDims } from '../tui/terminal.js';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -51,9 +50,6 @@ const MIN_VIEWPORT = 1;
 
 const COL_LABEL = 27;    // flag label
 const COL_VALUE = 46;    // value or edit buffer
-
-// Pre-built flag description map
-const FLAG_HINT_MAP = new Map<string, string>(FLAG_REGISTRY.map(f => [f.id, f.hint]));
 
 // ─── computeViewportHeight ────────────────────────────────────────────────────
 
@@ -268,7 +264,8 @@ export function renderFrame(
 
   // ── Hint zone ─────────────────────────────────────────────────────────────
   const selectedRow = rows[cursor];
-  const selectedHint = selectedRow ? (FLAG_HINT_MAP.get(selectedRow.id) ?? '') : '';
+  // row.hint is populated by buildFlagRows from flag.def.hint — no registry reach-back (ARCH-M4).
+  const selectedHint = selectedRow ? selectedRow.hint : '';
   const hintLine1 = selectedHint
     ? dim(truncateVisible(`  ${selectedHint}`, dims.cols))
     : '';

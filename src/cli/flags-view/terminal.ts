@@ -25,6 +25,19 @@ export type { TuiIO } from '../tui/terminal.js';
 // Result type
 // ---------------------------------------------------------------------------
 
+/**
+ * The result returned by runFlagsTui when the user exits the TUI.
+ *
+ *   save   — user pressed enter to persist; rows contain the final flag values.
+ *   cancel — user pressed esc or q; values unchanged from initial rows.
+ *   abort  — user pressed ctrl-c or triggered an OS interrupt; terminal is
+ *            restored and the process should exit (load-bearing distinction
+ *            at the init.ts consumer, which treats abort as a process exit signal
+ *            and cancel as "no changes, continue the wizard").
+ *
+ * `rows` is always the final TUI row state; the action discriminant tells
+ * the caller whether to persist the values or discard them.
+ */
 export interface FlagsTuiResult {
   readonly action: 'save' | 'cancel' | 'abort';
   readonly rows: readonly FlagRow[];

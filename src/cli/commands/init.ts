@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { convergeFlagsIntoSettings, FLAG_REGISTRY, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
+import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -952,7 +952,7 @@ export const initCommand = new Command('init')
       // view-mode is encoded as an enum flag in the registry; the TUI handles it natively.
       p.log.info('Opening the flags editor — enter saves, esc keeps current settings.');
       const { runFlagsTui, buildFlagRows, collectFlagRecord } = await import('../flags-view/index.js');
-      const flagRows = buildFlagRows(FLAG_REGISTRY, enabledFlags);
+      const flagRows = buildFlagRows(enabledFlags);
       const flagsTuiResult = await runFlagsTui(flagRows);
 
       if (flagsTuiResult.action === 'abort') {

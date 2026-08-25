@@ -516,6 +516,42 @@ export function isNeutral(flag: ClaudeCodeFlag, value: FlagsRecordValue): boolea
 }
 
 /**
+ * Map a record value to a TUI value.
+ *
+ * viewMode GLUE RULE (PF-017 one-shared-definition corollary): the mapping lives here,
+ * next to neutralValueOf — the definition it depends on — not across a module boundary.
+ *   enum with neutralValue: neutralValue → null in TUI (null is the TUI representation
+ *   of "use the default"; the key is deleted when persisted).
+ * All other values pass through unchanged.
+ *
+ * Consumers: flags-view/state.ts (buildFlagRows, buildDevflowDefault, collectFlagRecord).
+ */
+export function recordToTui(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRecordValue {
+  if (v === null) return null;
+  if (flag.kind === 'enum' && flag.neutralValue !== undefined) {
+    if (v === flag.neutralValue) return null;
+  }
+  return v;
+}
+
+/**
+ * Map a TUI value back to a record value.
+ *
+ * viewMode GLUE RULE (PF-017 one-shared-definition corollary): inverse of recordToTui,
+ * co-located with that function so the round-trip contract is auditable in one place.
+ *   enum with neutralValue: null → neutralValue (e.g. 'default').
+ * All other values pass through unchanged.
+ *
+ * Consumers: flags-view/state.ts (collectFlagRecord).
+ */
+export function tuiToRecord(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRecordValue {
+  if (v === null && flag.kind === 'enum' && flag.neutralValue !== undefined) {
+    return flag.neutralValue;
+  }
+  return v;
+}
+
+/**
  * Validate and coerce `raw` to a safe value for `flag` at the sink.
  * Returns null when the value is invalid (hostile-value defence — applies PF-023).
  *
