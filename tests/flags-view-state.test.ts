@@ -27,6 +27,7 @@ import {
   resizeViewport,
   buildFlagRows,
   collectFlagRecord,
+  BUFFER_MAX_LEN,
   type FlagsViewState,
   type FlagRow,
 } from '../src/cli/flags-view/state.js';
@@ -66,6 +67,19 @@ function applyKeys(state: FlagsViewState, keys: string[]): FlagsViewState {
     current = reduce(current, key).state;
   }
   return current;
+}
+
+/**
+ * Enter edit mode on a text row and type a sequence of normalized keys.
+ * Routes input through the real reducer so the keyboard→buffer path is exercised
+ * (applies PF-018 mechanism 7: proves the behaviour named by the test exists).
+ */
+function typeInto(id: string, keys: string[]): FlagsViewState {
+  let state = makeState([rowFor(id)]);
+  state = reduce(state, 'e').state;
+  expect(state.editing, 'expected to be in edit mode').not.toBeNull();
+  for (const k of keys) state = reduce(state, k).state;
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,38 +298,26 @@ describe('flags-view-state — text row enter edit mode', () => {
 
 describe('flags-view-state — edit commit valid inputs', () => {
   it('entering a valid number and pressing enter commits it', () => {
-    const row = rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 });
-    const state = makeState([row]);
-    // Enter edit mode
-    let s = reduce(state, 'e').state;
-    // Clear and type '50'
-    s = { ...s, editing: { buffer: '50', caret: 2, error: null } };
-    // Commit
+    // Routes through the real reducer (typeInto) so the keyboard→buffer path is
+    // exercised (applies PF-018 mechanism 7): enter edit mode pre-fills '40',
+    // clear with backspace, then type the new value.
+    let s = reduce(makeState([rowFor('max-concurrent-subagents')]), 'e').state;
+    // buffer = '40', caret = 2; clear with backspace then type '50'
+    s = reduce(s, 'backspace').state; // '4', caret=1
+    s = reduce(s, 'backspace').state; // '', caret=0
+    s = reduce(s, '5').state;
+    s = reduce(s, '0').state;
     s = reduce(s, 'enter').state;
     expect(s.editing).toBeNull(); // left edit mode
     expect(s.rows[0].configuredValue).toBe(50);
   });
 
   it('valid string commits correctly', () => {
-    const row = rowFor('default-model', {});
-    const state = makeState([row]);
-    let s = reduce(state, 'e').state;
-    s = { ...s, editing: { buffer: 'claude-3-5-sonnet', caret: 17, error: null } };
+    // Routes through the real reducer: default-model starts null → empty buffer.
+    let s = typeInto('default-model', [...'claude-3-5-sonnet']);
     s = reduce(s, 'enter').state;
     expect(s.editing).toBeNull();
     expect(s.rows[0].configuredValue).toBe('claude-3-5-sonnet');
-  });
-
-  it('007 is a valid input for subagent-spawn-depth — actually NO, strict parsing rejects leading zeros', () => {
-    // subagent-spawn-depth: min=1, max=10, integer
-    const row = rowFor('subagent-spawn-depth', {});
-    const state = makeState([row]);
-    let s = reduce(state, 'e').state;
-    s = { ...s, editing: { buffer: '007', caret: 3, error: null } };
-    s = reduce(s, 'enter').state;
-    // stays editing with error (leading zeros rejected)
-    expect(s.editing).not.toBeNull();
-    expect(s.editing?.error).not.toBeNull();
   });
 });
 
@@ -355,8 +357,11 @@ describe('flags-view-state — edit commit invalid inputs', () => {
     expect(s.editing?.error).not.toBeNull();
   });
 
-  it("'007' → stay editing + error (leading zeros rejected)", () => {
-    const row = rowFor('max-concurrent-subagents', { 'max-concurrent-subagents': 40 });
+  it.each([
+    ['subagent-spawn-depth'],
+    ['max-concurrent-subagents'],
+  ])('leading zeros are rejected for %s', (flagId) => {
+    const row = rowFor(flagId, {});
     const state = makeState([row]);
     let s = reduce(state, 'e').state;
     s = { ...s, editing: { buffer: '007', caret: 3, error: null } };
@@ -540,7 +545,12 @@ describe('flags-view-state — buffer hard-bound at 64', () => {
       s = reduce(s, 'a').state;
     }
     expect(s.editing).not.toBeNull();
-    expect(s.editing!.buffer.length).toBeLessThanOrEqual(64);
+    // Exact assertions: a no-op insertChar would give length 0, satisfying ≤ 64
+    // (applies PF-018 mechanism 4). Import BUFFER_MAX_LEN so the magic number is
+    // single-sourced and the test breaks if the constant changes.
+    expect(s.editing!.buffer.length).toBe(BUFFER_MAX_LEN);
+    expect(s.editing!.caret).toBe(BUFFER_MAX_LEN);
+    expect(s.editing!.buffer).toBe('a'.repeat(BUFFER_MAX_LEN));
   });
 });
 
@@ -641,15 +651,6 @@ describe('flags-view-state — buildFlagRows', () => {
 // ---------------------------------------------------------------------------
 
 describe('edit mode — typed input', () => {
-  /** Enter edit mode on a text row and type a sequence of normalized keys. */
-  function typeInto(id: string, keys: string[]): FlagsViewState {
-    let state = makeState([rowFor(id)]);
-    state = reduce(state, 'e').state;
-    expect(state.editing, 'expected to be in edit mode').not.toBeNull();
-    for (const k of keys) state = reduce(state, k).state;
-    return state;
-  }
-
   it('space is inserted into the buffer, not dropped', () => {
     // normalizeKey maps the space bar to the NAME 'space' (5 chars), so a
     // length===1 test drops it. spellcheck holds a shell command — "aspell list"

@@ -34,6 +34,11 @@ const DIMS_80x40 = { rows: 40, cols: 80 };
 const DIMS_60x24 = { rows: 24, cols: 60 }; // narrow
 const DIMS_80x15 = { rows: 15, cols: 80 }; // short
 
+/** Strip ANSI escape sequences so assertions operate on plain text. */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 function makeState(overrides: Partial<FlagsViewState> = {}): FlagsViewState {
   const rows = buildFlagRows({});
   return {
@@ -138,21 +143,27 @@ describe('flags-view-render — renderFrame basic contract', () => {
 
 describe('flags-view-render — per-kind value display', () => {
   it('boolean flag shows "enabled" when true', () => {
+    // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
+    // frame. The frame always contains 'enabled' from other default-ON flags.
     const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    expect(joined).toContain('enabled');
+    const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
+    expect(cursorRow).toBeDefined();
+    expect(stripAnsi(cursorRow)).toContain('enabled');
+    expect(stripAnsi(cursorRow)).not.toContain('disabled'); // negative control
   });
 
   it('boolean flag shows "disabled" when false', () => {
+    // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
+    // frame. The frame always contains 'disabled' from other default-OFF flags.
     const rows = buildFlagRows({ tui: false });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    // The tui row is cursor=0, should be visible
-    // "disabled" should appear somewhere in the frame
-    expect(joined).toContain('disabled');
+    const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
+    expect(cursorRow).toBeDefined();
+    expect(stripAnsi(cursorRow)).toContain('disabled');
+    expect(stripAnsi(cursorRow)).not.toContain('enabled'); // negative control
   });
 
   it('enum flag shows the value when set', () => {
@@ -166,31 +177,44 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('view-mode shows "unset" when null (default/neutral)', () => {
+    // Applies PF-018 mechanism 7: 'unset' appears in the browse-mode hint line
+    // unconditionally; assert the specific cursor row instead.
     const rows = buildFlagRows({}); // view-mode absent → null
     const vmIdx = rows.findIndex(r => r.id === 'view-mode');
     const state = makeState({ rows, cursor: vmIdx, viewportOffset: vmIdx });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    expect(joined).toContain('unset');
+    const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
+    expect(cursorRow).toBeDefined();
+    expect(stripAnsi(cursorRow)).toContain('unset');
+    expect(stripAnsi(cursorRow)).not.toContain('verbose'); // negative control
+    expect(stripAnsi(cursorRow)).not.toContain('focus');   // negative control
   });
 
   it('number flag shows value when set', () => {
+    // Applies PF-018 mechanism 7: assert the cursor row, not the joined frame.
+    // The frame always includes '40' from the devflow-default for max-concurrent-subagents.
     const rows = buildFlagRows({ 'max-concurrent-subagents': 40 });
-    // max-concurrent-subagents is index 8 — within first viewport (14 rows), viewportOffset=0 is fine
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
     const state = makeState({ rows, cursor: mcIdx, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    expect(joined).toContain('40');
+    const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
+    expect(cursorRow).toBeDefined();
+    expect(stripAnsi(cursorRow)).toContain('40');
+    expect(stripAnsi(cursorRow)).not.toContain('unset'); // negative control
   });
 
   it('number flag shows "unset" when null', () => {
+    // Applies PF-018 mechanism 7: 'unset' appears in the browse-mode hint line
+    // unconditionally; assert the specific cursor row instead.
     const rows = buildFlagRows({ 'subagent-spawn-depth': null });
     const sdIdx = rows.findIndex(r => r.id === 'subagent-spawn-depth');
     const state = makeState({ rows, cursor: sdIdx, viewportOffset: sdIdx });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    expect(joined).toContain('unset');
+    const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
+    expect(cursorRow).toBeDefined();
+    expect(stripAnsi(cursorRow)).toContain('unset');
+    expect(stripAnsi(cursorRow)).not.toContain('enabled'); // negative control
+    expect(stripAnsi(cursorRow)).not.toContain('disabled'); // negative control
   });
 });
 
@@ -214,16 +238,14 @@ describe('flags-view-render — dirty dot', () => {
   });
 
   it('no dirty indicator when clean', () => {
+    // Applies PF-018 mechanism 4: Array.isArray is satisfied by any return value.
+    // render.ts:162 pins the dirty indicator to yellow('● ') (exactly '●' in plain
+    // text), so assert its absence when configuredValue === originalValue.
     const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    // The tui row is at index 0, cursor=0. When clean, no dirty dot should appear
-    // near the row. We check that the specific dirty chars are not in the data rows.
-    // (They may still appear in the title/hint if unrelated.)
-    // Just check the overall frame doesn't have unexpected dirty markers.
-    // This is a soft check — the implementation defines the exact indicator.
-    expect(Array.isArray(lines)).toBe(true);
+    const plain = lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
+    expect(plain).not.toContain('●');
   });
 });
 
@@ -232,14 +254,17 @@ describe('flags-view-render — dirty dot', () => {
 // ---------------------------------------------------------------------------
 
 describe('flags-view-render — cursor indicator', () => {
-  it('selected row shows cursor indicator (❯ prefix or similar)', () => {
+  it('selected row shows ❯ prefix; no other row shares it', () => {
+    // Applies PF-018 mechanism 7: the browse-hint line always contains '→', making
+    // the disjunction vacuous. Assert the specific cursor row carries ❯ and that
+    // exactly one data row has it (negative control).
     const state = makeState({ cursor: 0 });
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    // Check for common cursor chars: ❯, >, →
-    expect(
-      joined.includes('❯') || joined.includes('>') || joined.includes('→'),
-    ).toBe(true);
+    // Exactly one line must start with ❯ (the cursor row)
+    const cursorLines = lines.filter(l => stripAnsi(l).startsWith('❯'));
+    expect(cursorLines).toHaveLength(1);
+    // The cursor row must name the tui flag (cursor=0 → row 0 = 'Fullscreen terminal UI')
+    expect(stripAnsi(cursorLines[0])).toContain('Fullscreen terminal UI');
   });
 });
 
@@ -317,44 +342,45 @@ describe('flags-view-render — edit mode', () => {
 
 describe('flags-view-render — viewport overflow indicators', () => {
   it('shows scroll-up indicator when viewportOffset > 0', () => {
+    // Applies PF-018 mechanism 7: '↑' appears in the footer keybinding line
+    // unconditionally. Assert lines[3] — the dedicated upIndicator slot in the
+    // frame layout — which is empty when no rows are above and populated otherwise.
+    // state.viewportHeight is the single owner (ARCH-M5 fix — see viewportHeight
+    // ownership tests); viewportHeight:3 here means exactly 3 data rows are drawn.
     const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 3,
-      viewportOffset: 3, // rows above viewport
+      viewportOffset: 3, // 3 rows above the viewport
       viewportHeight: 3,
       editing: null,
     };
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    // Some indicator: ↑, ^, ▲, or '...'
-    expect(
-      joined.includes('↑') ||
-      joined.includes('^') ||
-      joined.includes('▲') ||
-      joined.includes('...') ||
-      joined.includes('more'),
-    ).toBe(true);
+    // upIndicator is always at lines[3] (layout: title[0], summary[1], header[2], upIndicator[3])
+    expect(stripAnsi(lines[3])).toMatch(/↑ \d+ more/);
+    // Negative control: no rows are below with cursor=3, viewportOffset=3, viewportHeight=3,
+    // rows.length=28 → rowsBelow = 28 - (3+3) = 22, so downIndicator IS populated
+    // (lines[4+3]=lines[7]). Just confirm upIndicator is row-specific, not footer.
+    expect(stripAnsi(lines[lines.length - 1])).not.toMatch(/↑ \d+ more/); // footer not the indicator
   });
 
   it('shows scroll-down indicator when rows extend below viewport', () => {
+    // Applies PF-018 mechanism 7: '↓' and 'v' appear in the footer line
+    // unconditionally. Assert lines[4+viewportHeight] — the dedicated downIndicator
+    // slot — instead of the joined frame.
     const rows = buildFlagRows({});
     const state: FlagsViewState = {
       rows,
       cursor: 0,
       viewportOffset: 0,
-      viewportHeight: 3, // only show 3 rows of many
+      viewportHeight: 3, // only show 3 rows of 28
       editing: null,
     };
     const lines = renderFrame(state, DIMS_80x24);
-    const joined = lines.join('\n');
-    expect(
-      joined.includes('↓') ||
-      joined.includes('v') ||
-      joined.includes('▼') ||
-      joined.includes('...') ||
-      joined.includes('more'),
-    ).toBe(true);
+    // downIndicator is at lines[4 + viewportHeight] = lines[7]
+    expect(stripAnsi(lines[7])).toMatch(/↓ \d+ more/);
+    // Negative control: no rows are above
+    expect(stripAnsi(lines[3])).toBe(''); // upIndicator slot is empty
   });
 });
 

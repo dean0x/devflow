@@ -192,6 +192,9 @@ describe('flags-view-terminal — key routing', () => {
 
 describe('flags-view-terminal — save result', () => {
   it('cancel returns unchanged rows', async () => {
+    // Applies PF-018 mechanism 4: toBeDefined() is satisfied by any non-null
+    // value — it cannot observe "unchanged". Replace with toEqual(rowsIn) so
+    // the test actually checks the "unchanged" claim it is named for.
     const { stdin, stdout } = makeStreams();
     const record = defaultRecord();
     const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
@@ -200,7 +203,7 @@ describe('flags-view-terminal — save result', () => {
     sendKey(stdin, 'q');
     const result = await tui;
     expect(result.action).toBe('cancel');
-    expect(result.rows).toBeDefined();
+    expect(result.rows).toEqual(rowsIn); // must be deep-equal (unchanged), not merely defined
   });
 
   it('space on tui (boolean) toggles value, then enter saves', async () => {
