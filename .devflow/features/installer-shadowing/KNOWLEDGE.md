@@ -1,11 +1,11 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, sweepDevflowNamespaces, resolveProjectDataCleanup) or install-artifact cleanup, extending the CLI skills/rules management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, or modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, enumerateDryRunExtras, sweepDevflowNamespaces, resolveProjectDataCleanup, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, getPackageRoot, isContainedIn, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, SweepResult, sweepOrphans, sweepFailures, SweepFailure, mdFileName, mdEntryName, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, knownFlags, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, AnyMigration, migrations.json, compliance-prompts, shouldRunComplianceStep, CompliancePromptIO, runComplianceStep, modePromptShown."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, sweepDevflowNamespaces, resolveProjectDataCleanup) or install-artifact cleanup, extending the CLI skills/rules/flags management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, FlagsRecord, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy), working on the flags TUI (FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, effectiveDisplay, blurb, inline mode, RunTuiSpec screen) or the flags CLI (createFlagsCommand, lookupFlag, persistFlagConfig, formatFlagValue), or working on the compliance wizard step (shouldRunComplianceStep, runComplianceStep, modePromptShown, CompliancePromptIO). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, enumerateDryRunExtras, sweepDevflowNamespaces, resolveProjectDataCleanup, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, getPackageRoot, isContainedIn, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, SweepResult, sweepOrphans, sweepFailures, SweepFailure, mdFileName, mdEntryName, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, FlagsRecord, FlagsRecordValue, getDefaultFlagsRecord, parseManifestFlags, migrateLegacyFlagsToRecord, sanitizeFlagsRecord, coerceFlagValue, parseFlagValueInput, neutralValueOf, isNeutral, countActiveFlags, readViewMode, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, AnyMigration, migrations.json, compliance-prompts, shouldRunComplianceStep, CompliancePromptIO, runComplianceStep, modePromptShown, createFlagsCommand, lookupFlag, persistFlagConfig, FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, buildStops, cycleForward, cycleBackward, sanitizeCell, padToVisible, truncateVisible, effectiveDisplay, EffectiveDisplay, formatFlagValue, blurb, FlagDefCommon, INLINE_MARGIN, cursorUp, RunTuiSpec, screen, inline."
 category: architecture
-directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts, src/core/migrations.ts, src/cli/commands/compliance-prompts.ts]
+directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/commands/flags.ts, src/cli/flags-view, src/cli/tui, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts, src/core/migrations.ts, src/cli/commands/compliance-prompts.ts]
 created: 2026-07-13
-updated: 2026-08-22
+updated: 2026-08-25
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -128,14 +128,21 @@ export interface ShadowSkip {
 
 `init.ts` iterates `skippedShadows` and emits a warning per entry via an exhaustive switch on `ShadowSkipReason` (with `never` guard). Invalid shadows never cause init to exit non-zero. (applies ADR-010)
 
-### Manifest Snapshots: `knownFlags`, `knownPlugins`, and `proxy`
+### Manifest Snapshots: `flags`, `knownPlugins`, and `proxy`
 
-`manifest.ts` stores two registry snapshots at install time:
+`manifest.ts` stores the flag state and the plugin snapshot at install time:
 
-- `ManifestData.features.knownFlags?: string[]` — all `FLAG_REGISTRY` IDs at the time of the last install
-- `ManifestData.knownPlugins?: string[]` — all `DEVFLOW_PLUGINS` names at the time of the last install
+- `ManifestData.features.flags: FlagsRecord` — typed flag record (key-presence = known to this install; `null` value = deliberately unset/neutral; absent key = adopt-on-next-init per ADR-014). Replaces the former `knownFlags: string[]` field; old string[] manifests are auto-migrated by `parseManifestFlags` + `migrateLegacyFlagsToRecord` on first `readManifest`.
+- `ManifestData.knownPlugins?: string[]` — all `DEVFLOW_PLUGINS` names at the time of the last install. Absent in pre-7b manifests; `readManifest` self-heals via a local `asStringArray` helper (requires every element to pass `typeof e === 'string'`; a mixed/garbage array self-heals to `undefined`).
 
-Both are absent in pre-7b manifests; `readManifest` self-heals via a local `asStringArray` helper that requires all elements to pass `typeof e === 'string'` — a mixed/garbage array like `[1, null]` self-heals to `undefined`, not just non-arrays. These snapshots are consumed by the init seeding layer to detect newly added flags and plugins.
+**`parseManifestFlags(features, knownFlags)`** handles three on-disk shapes for `features.flags`:
+- Case A: `string[]` — legacy format; migrated to `FlagsRecord` via `migrateLegacyFlagsToRecord`, folding the separate `features.viewMode` field in. Reports `legacy: true`.
+- Case B: `object` — already a `FlagsRecord`; spread into a fresh record (avoids mutation). Reports `legacy: false`.
+- Case C: missing/other — defaults to empty record.
+
+The legacy `features.knownFlags` field from old manifests is read by `readManifest` only to feed Case A migration; it is NOT carried into the returned `ManifestData`. The "known" semantic is encoded entirely in `FlagsRecord` key-presence: a key present in the record = known to this install; an absent key = adopt-on-next-seed.
+
+`readManifest` calls `sanitizeFlagsRecord` on the parsed result to coerce any stored values back through `coerceFlagValue` — a mild defensive measure against schema drift. The `proxy` and `knownPlugins` snapshots are consumed by the init seeding layer.
 
 `ManifestData.features.proxy: boolean` tracks whether external model routing was enabled at the last install. `readManifest` self-heals absent fields to `false` (applies ADR-014 self-heal idiom). The value written to the manifest is the **final resolved value after preflight** — a preflight failure forces `proxyEnabled = false` before the manifest write, so the manifest always reflects the actual settled state.
 
@@ -243,23 +250,25 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 
 **Composition point**: `resolveInitSeed(seedManifest, seedConfig, settingsSnapshot, plugins) → InitSeed`
 
-`InitSeed` carries: `features: FeatureSeed`, `flags: string[]`, `viewMode: ViewMode`, `workflowPlugins: string[]`, `languagePlugins: string[]`.
+`InitSeed` carries: `features: FeatureSeed`, `flags: FlagsRecord`, `workflowPlugins: string[]`, `languagePlugins: string[]`. `viewMode` is encoded inside `flags['view-mode']` (PF-015: all flag state in FlagsRecord) — there is no separate `viewMode` field.
 
 **Feature seeding** (`resolveSeedFeatures`):
 - `memory / learning / knowledge`: projectConfig wins when present (ADR-001 — config.json is the source of truth); falls back to manifest; then registry defaults (all true).
 - `ambient / hud / rules / proxy`: manifest is the source; registry defaults when manifest absent. `proxy` defaults to `false` in `FEATURE_DEFAULTS` — it is Advanced-only and never part of Recommended defaults. Because proxy seeds from the manifest group (not config.json), `--reset` null-seeds the manifest and correctly resets proxy to `false`.
 
-**Flag seeding** (`resolveSeedFlags`): Fresh install → all default-ON registry flags. Old manifest (no `knownFlags`) → return existing flags as-is. Re-init with `knownFlags` → union existing ∪ {default-ON flags ∉ knownFlags}. Default-OFF flags are NEVER auto-added.
+**Flag seeding** (`resolveSeedFlags(manifestFlags: FlagsRecord | null, registry)`): Two branches — (1) `null` (fresh install): all registry flags at their `defaultValue`; (2) non-null: spread the manifest `FlagsRecord`, then for each registry flag whose key is absent from the record, adopt its `defaultValue` (ADR-014: absent key = new to this install → adopt). Unknown IDs from old manifests pass through unchanged for forward-compat. Default-OFF flags adopt `false`/`null` — they arrive in the seed as inactive, not as missing.
 
 **Plugin seeding** (`resolveSeedPlugins`): Fresh install → non-optional workflow plugins preselected, empty language list. Old manifest (no `knownPlugins`) → split existing into workflow/language buckets, adopt nothing. Re-init with `knownPlugins` → split + adopt newly-added non-optional selectable plugins ∉ knownPlugins.
 
 **Reset gate** (`resolveResetGatedInputs`): `--reset` zeroes seedManifest, seedConfig, AND settingsSnapshot.
 
-**viewMode resolution**: `resolveExistingViewMode(settingsSnapshot) ?? seedManifest?.features.viewMode ?? 'default'`. `resolveExistingViewMode` returns non-default values only — 'default' surfaces as undefined so `??` falls through.
+**viewMode resolution**: `resolveInitSeed` resolves view-mode in three-priority order — (1) `resolveExistingViewMode(settingsSnapshot)` (non-`'default'` from current settings.json wins); (2) `readViewMode(flags)` from the spread manifest record (non-`'default'` wins); (3) `'default'`. The resolved value is encoded into `flags['view-mode']` on the returned `InitSeed`. `seedManifest?.features.viewMode` is no longer consulted — that field is retired; view-mode lives entirely in `ManifestData.features.flags['view-mode']`.
 
 **CLI toggles** (`applyCliToggles`): Applies explicit CLI feature flags (e.g. `--no-learning`, `--proxy`) on top of the resolved seed. Undefined = not specified; seed value is kept.
 
 **`--reset --plugin` rejection**: Combining factory reset with a partial install is rejected before reaching seed resolution.
+
+**Flags applied non-interactively (D40)**: After `applyCliToggles`, `init.ts` applies `enabledFlags` directly — no TUI is opened in either init path. Fresh install: all registry flags at their `defaultValue`. Re-init: spread manifest record, then adopt defaults only for absent flags (ADR-014). Outcome line: `Flags: ${activeCount} active — customize any time with 'devflow flags'`. `getDefaultFlagsRecord` is not imported by init.ts; `viewModeExplicit` is exclusively `!!options.reset` (not set by any interactive input since the TUI was removed).
 
 ### Compliance Prompt Module (`src/cli/commands/compliance-prompts.ts`)
 
@@ -285,6 +294,70 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `cano
 **Shared envelope parser**: `parseAgentMappingEnvelope(filePath)` from `agent-models.ts` handles I/O, BOM-strip, JSON parse, and shape validation. It is now used by both `readAgentMapping` (in-memory canonicalisation path) and the migration (disk-rewrite path) — single parse site for the agent-models envelope.
 
 **Failure mode**: `runGlobalMigration` marks a migration applied for ANY non-throwing return. The `canonicalise-agent-keys-v1` entry catches ALL I/O failures and returns them as `warnings` — it never throws. Result: a failed write is silently marked applied and never retried. Net impact is low because `readAgentMapping` applies `canonicaliseAgentKeys` on EVERY read, so the disk file self-heals on the next write even if the one-time disk migration was lost. A future fix should make genuine I/O failure throw so the runner retries it (distinguished from "malformed file, skip it" which returns correctly). `migrations.json` is removed by `removeDevFlowInstallArtifacts` so migrations re-run cleanly on reinstall.
+
+### Flags CLI (`src/cli/commands/flags.ts`)
+
+A CLI-layer module that owns the `devflow flags` command surface. All I/O-free flag logic lives in `src/core/flags.ts`; this module owns the Commander wiring, settings I/O, and manifest persistence.
+
+Key exports:
+- **`createFlagsCommand()`** — root Commander for `devflow flags`. Bare invocation on a TTY launches the interactive TUI; on non-TTY, prints a status table and exits 1.
+- **`lookupFlag(id)`** — resolves a flag by ID from `FLAG_REGISTRY`; returns `null` for unknown IDs (callers emit an error).
+- **`readSettingsSafe(settingsPath)`** — reads settings.json, returning `{ok: true, content}` or `{ok: false, reason}` — never throws.
+- **`persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)`** — writes the `FlagsRecord` to both `manifest.json` (`features.flags`) and `settings.json` (via `applyFlags`). Returns `true` on success, `false` on I/O failure. Boolean-only flags use `--enable`/`--disable`; non-boolean flags are redirected to `--set`.
+
+**Display vocabulary** (D-EFFDV — one definition, all surfaces route through `effectiveDisplay`):
+
+- **`--enable` / `--disable` confirmation**: both call `formatFlagValue(flag, value)` which delegates to `effectiveDisplay`. Vocabulary: `true` → 'on', `false` → 'off'. The former asymmetry ('enabled' for enable, `formatFlagValue` for disable) is gone.
+- **`--set` confirmation**: active values route through `formatFlagValue`; `null` echoes literal 'unset' at the call site (the user typed that word explicitly — do not replace it with the effective default).
+- **`formatStatusRows` (non-TTY status table)**: not-adopted rows use `effectiveDisplay(flag, neutralValueOf(flag)).text` — shows what the default does rather than printing 'unset'. Format: `not adopted — default: <effective text> applies on next devflow init`.
+- **`--list` defaultLabel**: number flags with `upstreamDefault` print `upstream default: N`; otherwise `flag.defaultValue` as a string or `'none'` (never 'unset').
+
+### Flags TUI (`src/cli/flags-view/`, `src/cli/tui/`)
+
+An interactive terminal UI for editing flag state in one session. Launched exclusively by `devflow flags` bare on a TTY (D40: init no longer opens the flags editor in any path). Uses **inline mode** (see below) — renders in-place in the normal scroll buffer rather than entering the alt screen.
+
+**`src/cli/flags-view/state.ts`** — pure state machine for the TUI. Key functions:
+- `buildFlagRows(registry, record)` — produces the row list from the live `FlagsRecord`; each `FlagRow` holds `id`, `tui` value (TUI-internal representation), `hint`, `blurb` (sourced from `flag.blurb`), and display metadata.
+- `collectFlagRecord(rows)` — inverse: reconstructs a `FlagsRecord` from the row list (via `tuiToRecord` per row).
+- `buildStops(flag)` — ordered cycle stops for a flag (for enum/boolean/number cycling).
+- `cycleForward` / `cycleBackward` — advance or retreat through a flag's stop list.
+- `reduce(state, key)` — event reducer; returns `{state, done, saved}`.
+- `enterEdit` / `commitEdit` / `insertChar` / `reduceEditMode` — inline text-edit for enum and string flags.
+- `recordToTui` / `tuiToRecord` — convert between `FlagsRecord` values and TUI-internal values (TUI uses `null` as the "devflow default" stop; `tuiToRecord` maps that back to `neutralValueOf`).
+- `adjustViewport` — scrolling helper (cursor, offset, height, rowCount).
+
+**`FlagRow.blurb`** — short phrase (≤30 chars) describing what the flag does. Sourced from `flag.blurb` at `buildFlagRows` — no registry reach-back at render time. Rendered as a dim trailing column in the TUI (D-BLURB).
+
+**`src/cli/flags-view/render.ts`** — frame renderer. Column layout at 80-col reference:
+
+| Column | Width | Notes |
+|--------|-------|-------|
+| PREFIX | 2 | cursor mark `❯ ` or `  ` |
+| LABEL | 27 | flag label |
+| DIRTY | 2 | `● ` when dirty |
+| VALUE | 16 | formatted value or edit buffer |
+| BLURB | 30 | dim short phrase (HINT in column header) |
+
+VALUE+BLURB = 46, preserving the prior total from the single VALUE column. All widths scale proportionally with terminal width (`Math.min(1, cols/80)`). Column header uses `gray('VALUE')` padded to `valueW` and `gray('HINT')` for the blurb column (omitted when `blurbW === 0`).
+
+`formatValue` vocabulary (D-EFFDV — delegates to `effectiveDisplay` for null/neutral values):
+- `null` (any kind) → `dim(effectiveDisplay(flag, null).text)`, with ` (default)` appended for number flags
+- `boolean true` → `green('on')`, `boolean false` → `yellow('off')`
+- Non-boolean active value → `bold(str)` when deviating from devflow default, else plain `str`
+
+**`src/cli/tui/cells.ts`** — shared cell-rendering helpers used by the flags TUI render layer:
+- `sanitizeCell(s)` — strips control characters from cell content (avoids terminal injection).
+- `padToVisible(s, width)` — pads a string to `width` visible characters (ANSI-aware).
+- `truncateVisible(s, maxWidth)` — truncates to `maxWidth` visible characters (ANSI-aware).
+
+**`src/cli/flags-view/terminal.ts`** — flags TUI entry point. `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE) so both the bare `devflow flags` invocation and the init Advanced step render in the normal scroll buffer.
+
+**`src/cli/tui/terminal.ts`** — generic TUI driver. New additions:
+
+- **`RunTuiSpec.screen?: 'alt' | 'inline'`** — controls screen mode. Default is `'alt'` (prior behavior; agents-view uses this). `'inline'` renders in-place without entering the alt screen.
+- **Inline mode mechanics** (D-INLINE): first frame writes lines directly; subsequent frames use `cursorUp(prevLineCount - 1) + \r` then rewrite + `ERASE_BELOW`; on exit, cursor-up to frame top + `ERASE_BELOW` + `SHOW_CURSOR` erases the widget completely so the caller's clack flow continues uninterrupted.
+- **`INLINE_MARGIN = 2`** — lines reserved below the widget so the shell prompt is never clobbered. Height is clamped to `stdout.rows - INLINE_MARGIN` in inline mode.
+- **`cursorUp(n): string`** — returns `ESC[nA` for `n > 0`, empty string otherwise; callers need no guard.
 
 ## Integration Patterns
 
@@ -313,11 +386,12 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `cano
 - **Installing without `npm run build`** — commands, agents, skills, and rules all throw hard errors when their source is absent. Run `npm run build` or `build:mds` before any install.
 - **Restoring `pluginsDir` to `installAllRules` or `installRuleFile`** — rule source is exclusively `rulesDir()` (flat `src/assets/rules/`); there is no per-plugin subdirectory.
 - **Combining `--reset` with `--plugin`** — factory reset and partial install are mutually exclusive; init rejects the combination before seeding.
-- **Auto-adopting default-OFF flags in `resolveSeedFlags`** — only default-ON flags are auto-adopted when new (∉ knownFlags). Default-OFF flags must always be explicitly user-selected.
+- **Expecting `resolveSeedFlags` to only adopt default-ON flags** — it adopts ALL absent registry flags at their `defaultValue`. Default-OFF flags arrive with `false`/`null` (inactive), not as missing. The correct invariant: absent key from an old manifest → adopt registry default (whatever it is); `null` value → deliberately unset/neutral.
 - **Running `reapplyAgentMapping` before proxy preflight resolves** — must use the final `proxyEnabled` value. Running it earlier materializes GPT model lines even after a preflight failure, breaking the dormancy invariant.
 - **Putting a name in both `enumerateUserDevFlowContent` and `installArtifactPaths`** — makes the confirmation prompt untruthful (item is presented as user content, then deleted regardless of user answer). A test enforces disjointness.
 - **Importing `EXCLUDED` as an oracle in tests** — destroys the test's independent literal check and turns invariant guards into tautologies. Pin an independent literal in the test alongside the production import.
 - **Dry-run preview using only pure helpers instead of the production enumeration path** — `runDryRunPhase` (full mode) must call `enumerateDryRunExtras`, which itself calls `installArtifactPaths`. A test that exercises only the pure helper (`installArtifactPaths` in isolation) does not catch divergence between the preview and the real removal loop. (avoids PF-018)
+- **Re-deriving the display vocabulary at a render site instead of calling `effectiveDisplay`** — four render sites (TUI `formatValue`, `--enable/--disable` confirmation, `--status` not-adopted message, `--list` defaultLabel) all route through `effectiveDisplay`. Adding a fifth site that hand-codes 'on'/'off' or shows 'unset' creates vocabulary drift. Always delegate to `effectiveDisplay` (D-EFFDV) or `formatFlagValue` (which does so internally).
 
 ## Gotchas
 
@@ -341,13 +415,19 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `cano
 
 - **`resolveExistingViewMode` returns `undefined` for `'default'`.** The 'default' literal is not surfaced — it is treated as "no opinion" so the `??` chain falls through.
 
-- **`knownPlugins` is a top-level field; `knownFlags` is inside `features`.** Both snapshotted at install time. The asymmetric placement mirrors the schema: plugins are top-level in `ManifestData`, flags are nested in `ManifestData.features`.
+- **`knownPlugins` is a top-level field; there is no `knownFlags` field.** The plugin snapshot (`ManifestData.knownPlugins`) remains a top-level field. The former `features.knownFlags: string[]` field no longer exists — its semantic ("known to this install") is encoded in `ManifestData.features.flags` key-presence: present key = known, absent key = adopt-on-next-init. Old manifests that still have a `knownFlags` array are consumed inside `parseManifestFlags` during `readManifest` migration and NOT carried into `ManifestData`.
 
 - **`proxy` seeds from the manifest group, not the config group.** Unlike `memory`/`learning`/`knowledge` (config.json wins per ADR-001), `proxy` follows the same seeding path as `ambient`/`hud`/`rules` — manifest is authoritative, then registry default (`false`). Do not gate `proxy` on `readConfigIfPresent`.
 
 - **PF-018: dry-run preview must exercise the production enumeration path.** The original test (9j) tested `installArtifactPaths` in isolation. When the dry-run loop was refactored to use `enumerateDryRunExtras`, a real divergence (bare legacy skill dirs and `agent-models.json` were shown in the preview but not in the production removal path) was missed. The fix: `runDryRunPhase` (full mode) calls `enumerateDryRunExtras`, which derives from `installArtifactPaths` and the same skill-candidate sets that `removeAllDevFlow` uses. The updated test exercises `runDryRunPhase` directly, not only the pure helper.
 
 - **Compliance wizard gate keys on `modePromptShown`, never the mode name.** `shouldRunComplianceStep` uses `modePromptShown` (was the Setup-mode `p.select` actually shown?) rather than checking `mode === 'recommended'`. Gating on the mode name would break the `--recommended` promptless contract: `--recommended` resolves `mode='recommended'` but never shows the prompt, so `modePromptShown` stays `false`. Same applies to the non-TTY fallback. (PF-029)
+
+- **`--set` confirmation echoes literal 'unset' for an explicit null input.** When the user types `--set flag=unset`, `parseFlagValueInput` maps that to `null`. The `handleSet` confirmation special-cases `null → 'unset'` at the call site so the user sees their own word reflected back. Active values route through `formatFlagValue` (D-EFFDV) as normal — this is the only site where 'unset' still appears in user-facing output.
+
+- **Blurb hard-cap is enforced by a registry test, not a TypeScript type.** `flag.blurb` is typed as `string` on `FlagDefCommon` (no length constraint in the type). The ≤30-char cap lives in `tests/flags.test.ts` as a registry-walk test — adding a blurb longer than 30 chars will fail CI but not the TypeScript compiler.
+
+- **Inline mode (`screen: 'inline'`) does not enter the alt screen.** On exit it cursor-ups to the frame top and `ERASE_BELOW` — the widget is erased and the clack flow continues in the normal scroll buffer. If you attach a flags TUI test expecting `ENTER_ALT` sequences, it will fail for `runFlagsTui` (which passes `screen: 'inline'`) but pass for agents-view tests (which use the default alt mode). Use `screen: 'alt'` explicitly when testing alt-screen behavior.
 
 ## Key Files
 
@@ -357,14 +437,20 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `cano
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`; `isContainedIn(parent, candidate)` pure containment predicate (guards path-traversal in reapplyAgentMapping)
 - `src/targets/claude-code/legacy.ts` — `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
 - `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; proxy preflight block using `buildRealPreflightDeps` factory (`swallowSettingsReadError: true`); `reapplyAgentMapping` call (ordering load-bearing, guarded when mapping is empty AND proxy is off); exhaustive `ShadowSkipReason` switch with `never` guard
-- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags`, `resolveSeedPlugins`, `resolveResetGatedInputs`, `applyCliToggles`, `FEATURE_DEFAULTS` (proxy: false)
+- `src/cli/commands/init-seed.ts` — pure seeding helpers: `resolveInitSeed`, `resolveSeedFeatures`, `resolveSeedFlags(manifestFlags: FlagsRecord | null, registry)` (two-branch: null→all defaults, non-null→spread+adopt-absent), `resolveSeedPlugins`, `resolveResetGatedInputs`, `applyCliToggles`, `FEATURE_DEFAULTS` (proxy: false); `InitSeed.flags: FlagsRecord` encodes view-mode in `flags['view-mode']` — no separate `viewMode` field
 - `src/cli/commands/uninstall.ts` — exported: `removeAllDevFlow`, `removeSelectedPlugins`, `isDevFlowInstalled`, `installArtifactPaths` (SSOT for artifact list), `enumerateDryRunExtras` (derived from installArtifactPaths + skill lists), `sweepDevflowNamespaces` (named selective-path sweep step), `resolveProjectDataCleanup` (pure: cancel→preserve, no process.exit), `enumerateUserDevFlowContent` (skills/rules/preference-profile/learning.json/hud.json — NOT agent-models.json), `removeDevFlowInstallArtifacts` (uses installArtifactPaths; containment guard; `isDir === true` strict equality), `revertExternalAgents` runs on both full and selective paths, `computeAssetsToRemove`, `resolveSecurityRemovalDecision`, `resolveDevflowDirCleanup` (--keep-docs honored); phase runners: `runDryRunPhase`, `runSelectivePhaseForScope`, `runFullPhaseForScope`, `runCleanupPhase` (injected cwd + isTTY)
-- `src/core/manifest.ts` — `ManifestData` (with `knownPlugins`, `features.knownFlags`, `features.proxy`), `readManifest` (self-heals via `asStringArray`; proxy absent→false), `writeManifest`, `syncManifestFeature`, `resolvePluginList` (filters `DELETED_PLUGIN_NAMES` via in-memory filter)
+- `src/core/manifest.ts` — `ManifestData` (`features.flags: FlagsRecord` — key-presence = known, null = neutral, absent = adopt-on-init; `knownPlugins?: string[]`; `features.proxy`); `parseManifestFlags(features, knownFlags)` — three-shape migration: string[]→`migrateLegacyFlagsToRecord`, object→spread, missing→empty; `readManifest` — self-heals legacy `knownFlags` (consumed in migration, not stored), proxy absent→false, applies `sanitizeFlagsRecord`; `writeManifest`, `syncManifestFeature`, `resolvePluginList` (filters `DELETED_PLUGIN_NAMES` via in-memory filter)
 - `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS` (21 plugins — no devflow-audit-claude), `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `getAllAgentNames`, `partitionSelectablePlugins`, `EXCLUDED` (module-level export), `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`, `DELETED_PLUGIN_NAMES` (['devflow-audit-claude'])
 - `src/core/migrations.ts` — `MIGRATIONS: readonly AnyMigration[]` (one entry: `canonicalise-agent-keys-v1`, scope `'global'`); `AnyMigration = Migration<'global'> | Migration<'per-project'>` discriminated union; `canonicaliseAgentKeys` returns `{agents, didMutate, renamed, dropped, guardDropped}`; `parseAgentMappingEnvelope` shared with `readAgentMapping`; failure-as-warning means a failed write is permanently skipped (self-healed by `readAgentMapping`)
 - `src/cli/commands/proxy.ts` — `applyDisableToSettings`, `buildRealPreflightDeps`, `addProxyHooks`, `removeProxyHooks`, `applyProxyEnv`, `stripProxyEnv`
-- `src/core/flags.ts` — `FLAG_REGISTRY`, `resolveExistingViewMode`, `resolveFinalViewMode`, `applyFlags`, `stripFlags`, `getDefaultFlags`
+- `src/core/flags.ts` — `FLAG_REGISTRY` (28 flags, each with `blurb: string` on `FlagDefCommon` — ≤30 chars, hard-capped by registry test); `FlagsRecord` (`Record<string, FlagsRecordValue>`), `FlagsRecordValue` (`FlagValue | null`); `effectiveDisplay(flag, value): EffectiveDisplay` (D-EFFDV one-definition seam — never returns 'unset': boolean→'on'/'off', enum null→neutralValue, number null→devflow/upstream default, string null→'—'); `formatFlagValue` delegates to `effectiveDisplay`; `getDefaultFlagsRecord`, `sanitizeFlagsRecord`, `migrateLegacyFlagsToRecord`, `coerceFlagValue`, `parseFlagValueInput`, `neutralValueOf`, `isNeutral`, `countActiveFlags`, `readViewMode`; `applyFlags(settingsJson, FlagsRecord)`, `stripFlags`, `resolveExistingViewMode`, `resolveFinalViewMode`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
+- `src/cli/commands/flags.ts` — `createFlagsCommand` (bare TTY→TUI inline mode, bare non-TTY→status table+exit 1); `lookupFlag(id)` (null for unknown); `readSettingsSafe(settingsPath)` (Result-returning); `persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)` (writes FlagsRecord to manifest + settings.json); `formatStatusRows` uses `effectiveDisplay` for not-adopted rows; `--set` confirmation special-cases null→literal 'unset'
+- `src/cli/flags-view/state.ts` — `FlagsViewState`, `FlagRow` (includes `blurb: string` sourced from `flag.blurb`); `buildFlagRows(registry, record)`, `collectFlagRecord(rows)`; `buildStops`, `cycleForward`, `cycleBackward`; `recordToTui`/`tuiToRecord` value converters; `reduce(state, key) → {state, done, saved}`; `enterEdit`/`commitEdit`/`insertChar`/`reduceEditMode`; `adjustViewport`
+- `src/cli/flags-view/render.ts` — column layout: PREFIX 2, LABEL 27, DIRTY 2, VALUE 16, BLURB 30; `formatValue` delegates to `effectiveDisplay` for null; boolean → green 'on' / yellow 'off'; HINT column header; blurb rendered dim and truncated to `blurbW`
+- `src/cli/flags-view/terminal.ts` — `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE); sole launch path is `devflow flags` bare on a TTY (D40: init does not open the flags editor)
+- `src/cli/tui/terminal.ts` — `runTui<S,A,C>` generic driver; `RunTuiSpec.screen?: 'alt' | 'inline'` (default 'alt'; agents-view uses alt, flags uses inline); `INLINE_MARGIN = 2`; `cursorUp(n)` helper; inline mode: cursor-up repaints, ERASE_BELOW on exit, height clamped to stdout.rows - INLINE_MARGIN
+- `src/cli/tui/cells.ts` — `sanitizeCell(s)`, `padToVisible(s, width)`, `truncateVisible(s, maxWidth)` — ANSI-aware cell rendering helpers used by flags TUI render layer
 
 ## Related
 
@@ -372,7 +458,7 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has one entry: `cano
 - ADR-003: End-state not transition — governs removals and legacy cleanup; cancel/decline on uninstall falls through to `removeDevFlowInstallArtifacts` rather than `process.exit()` so cleanup always runs
 - ADR-010: Shadow tolerance — governs `installViaFileCopy` as sole install path and warn-and-install-source (not hard-fail) for invalid shadows; hard-error policy applies only to declared Devflow sources
 - ADR-013: Core/adapter boundary — governs `init-seed.ts` living in `src/cli/commands/` (CLI-init-specific logic) rather than `src/core/`
-- ADR-014: State-aware re-init — governs `readManifest` self-heal idiom (`proxy` absent→false) and the `knownFlags`/`knownPlugins` snapshot pattern for detecting newly added registry entries
+- ADR-014: State-aware re-init — governs `readManifest` self-heal idiom (`proxy` absent→false), FlagsRecord key-presence as the "known" encoding (absent key = adopt-on-init), and the `knownPlugins` snapshot pattern for detecting newly added plugins
 - PF-009: Per-item failure isolation — per-rule try/catch inside `installRuleFile`; `rules --enable` wraps `installAllRules`; proxy preflight failure warns + forces off without aborting init; `sweepOrphanedAssets` outer/inner independent catches; proxy artifact removal is per-item non-fatal; non-fatal catches can mask systematic TypeErrors when optional properties are not narrowed
 - PF-012: LEGACY_* lists deletion-risk — lists split between `src/targets/claude-code/legacy.ts` (skill) and `src/core/plugins.ts` (plugin/command/rule); both must be retained across upgrades
 - PF-014: process.exit() skips cleanup — governs the cancel/decline path in user-scope uninstall; `removeDevFlowInstallArtifacts` must execute on every non-confirm path; `resolveProjectDataCleanup` maps cancel→false (preserve) instead of process.exit()

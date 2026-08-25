@@ -1,11 +1,11 @@
 ---
 feature: external-model-routing
 name: External Model Routing & Per-Agent Model Config
-description: "Use when working on the proxy lifecycle (enable/disable/status/preflight), the ensure-proxy hook, per-agent model mapping, agent frontmatter rewriting, or the agents TUI. Keywords: proxy, external-model-routing, GPT, agent-models, ensure-proxy, frontmatter, devflow proxy, devflow agents, subswitch, ANTHROPIC_BASE_URL, dormancy, reapplyAgentMapping."
+description: "Use when working on the proxy lifecycle (enable/disable/status/preflight), the ensure-proxy hook, per-agent model mapping, agent frontmatter rewriting, or the agents TUI. Keywords: proxy, external-model-routing, GPT, agent-models, ensure-proxy, frontmatter, devflow proxy, devflow agents, subswitch, ANTHROPIC_BASE_URL, CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT, dormancy, reapplyAgentMapping, runTui, flags-view, tui."
 category: architecture
-directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/assets/scripts/hooks/ensure-proxy]
+directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/cli/tui, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
-updated: 2026-08-19
+updated: 2026-08-25
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -51,7 +51,7 @@ Hard failures at any step (steps 1–9) set `process.exitCode = 1` and return �
 
 The relay process is intentionally left running on `--disable` for any live Claude Code sessions. The disable path:
 1. Read `proxy.json` first to determine `managedPort` for the URL strip.
-2. `applyDisableToSettings(parsedSettings, managedPort)` — removes hooks AND strips `ANTHROPIC_BASE_URL` (see invariant below).
+2. `applyDisableToSettings(parsedSettings, managedPort)` — removes hooks AND strips `ANTHROPIC_BASE_URL` (port-scoped) and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` (unconditional) (see invariant below).
 3. Writes `proxy.json` `enabled:false` — **keeps** `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion` for the next enable.
 4. Syncs manifest to `proxy: false`.
 5. `revertExternalAgents()` — rewrites installed agent files to shipped default models.
@@ -62,7 +62,10 @@ Hard failures (e.g., malformed `settings.json`) set `process.exitCode = 1` and r
 ### `applyDisableToSettings` — both-operations invariant
 
 ```typescript
-// CORRECT — both operations run unconditionally; managedPort scopes the URL strip:
+// CORRECT — both operations run unconditionally; managedPort scopes only the URL strip.
+// _stripProxyEnvFromObject removes CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT
+// unconditionally (Devflow is its only producer) and removes ANTHROPIC_BASE_URL only
+// when it exactly matches http://127.0.0.1:<managedPort> (port-scoped).
 export function applyDisableToSettings(settings: Settings, managedPort: number): boolean {
   const removedHooks = removeProxyHooks(settings);
   const strippedEnv = _stripProxyEnvFromObject(settings, managedPort);
@@ -70,7 +73,7 @@ export function applyDisableToSettings(settings: Settings, managedPort: number):
 }
 ```
 
-The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)` short-circuits when hooks are present — `_stripProxyEnvFromObject` never runs, leaving `ANTHROPIC_BASE_URL` pointing at a disabled relay in new sessions. Both calls must always evaluate regardless of the other's return value.
+The regression that this guards against: `removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)` short-circuits when hooks are present — `_stripProxyEnvFromObject` never runs, leaving `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` in the settings file pointing at a disabled relay in new sessions. Both calls must always evaluate regardless of the other's return value.
 
 ### Preflight checks (4 in order, hard-gated)
 
@@ -302,13 +305,13 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 - **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to set dormancy state; `rowState()` delegates to `classifyAgentState()` (from agent-state.ts) so the TUI STATE column and `--list` share one classification vocabulary. `persistedModelFor(row)` and `persistedEffortFor(row)` are exported predicates consumed by both `rowState` (STATE column display) and `mergeTuiRowsIntoMapping` (save merge) — the two sites cannot drift on what value gets written. All types and dirty helpers exported. No I/O.
 - **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants). `COL_STATE = 14` — sized so `'saved-inactive'` (13 chars) renders unclipped at 80-column terminals; row budget is 79 chars total (2 prefix + 18 agent + 32 model + 13 effort + 14 state).
-- **`terminal.ts`** — impure shell. Manages alt-screen, raw mode, SIGINT/SIGTERM handlers, SIGWINCH resize. All cleanup wired via `resolve()` inside the Promise constructor — never `process.exit()` inside a finally-guarded scope (avoids PF-014).
+- **`terminal.ts`** — thin adapter over the shared generic `runTui` driver (`src/cli/tui/`). Calls `runTui` with `signalAction: 'cancel'`, `continueIntent: 'none'`, and an `onResize` callback (updates `viewportHeight`); no `screen` override means the default `'alt'` is used. Alt-screen management, raw mode, SIGINT/SIGTERM, SIGWINCH, and event-loop cleanup are all handled by the generic driver (avoids PF-014).
 
 **`TuiIO` injectable seam** (`terminal.ts`): `runAgentsTui(initialState, io?)` accepts an optional `TuiIO` override with fake `stdin`/`stdout` for testing. The default is `process.stdin`/`process.stdout`. Tests pass `PassThrough` streams to drive the TUI without a real TTY.
 
 **`MAX_KEYPRESSES = 50_000`**: Exported constant — hard upper bound on the event loop. Resolves with `action: 'cancel'` on exhaustion. Tests pin this value directly (agents-terminal.test.ts).
 
-**`stdin.pause()` in cleanup**: `runAgentsTui` calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves and the CLI hangs.
+**`stdin.pause()` in cleanup**: The generic `runTui` driver calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves and the CLI hangs.
 
 **`FIXED_ROWS`/`computeViewportHeight` single-sourced from `render.ts`**: `terminal.ts` imports both from render.ts — no duplication.
 
@@ -344,7 +347,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 
 - **`proxy.json` ENOENT is not an error**: `readProxyState()` returns a default disabled state when the file is missing. Callers that treat ENOENT as an error will get a false negative on fresh installs.
 - **Port adoption path**: if a relay is already accepting connections on the target port and the health check confirms our identity (`name === 'subswitch'`), preflight returns `adopted: true` and `spawnRelayAndWaitForPort` skips spawning. `spawnedPid` will be absent from `SpawnRelayResult` on this path — `runPostSpawnVerification` must never kill an adopted relay.
-- **`stripProxyEnv` is port-scoped (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`**. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
+- **`stripProxyEnv` is port-scoped for the URL, unconditional for the window var (REG-1)**: `stripProxyEnv(settingsJson, managedPort)` removes `ANTHROPIC_BASE_URL` **only when its value exactly matches `http://127.0.0.1:<managedPort>`** (protecting foreign gateways on any other port), but removes `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` unconditionally — Devflow is its sole producer, so there is no foreign value to protect. A localhost URL on any other port classifies as `'ours-other-port'` or `'foreign'` and is never touched. Callers must pass the port Devflow owns (from `proxy.json.port` or `DEFAULT_PROXY_PORT`). `readProxyEnvState` uses the pattern `^http://127\.0\.0\.1:\d+$` to classify any localhost URL as `'ours-other-port'` for display purposes only — the strip never uses that broad pattern.
 - **Remembered port on re-enable**: `--port` has no commander default. When `--port` is omitted, `portOption` is `undefined` and `resolvePort(undefined, priorPort)` returns the remembered port from `proxy.json`.
 - **Dormant TUI rows**: when proxy is off and an agent has a saved GPT model, `buildRow()` calls `isDormantExternalModel()` and sets `configuredModel='default'` with the GPT name in `dormantModel`. `persistedModelFor(row)` returns `dormantModel` for an untouched dormant row, so `mergeTuiRowsIntoMapping` preserves the GPT mapping entry byte-identical on save even though `configuredModel` shows `'default'`.
 - **`binPath` must be spawned with `node <path>`**: npm does not guarantee executable bits on installed package binaries. Always spawn as `node <binPath>`, never `<binPath>` directly.
@@ -371,7 +374,9 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - `src/cli/commands/agents.ts` — `agentsCommand`, `validateSetArgs()` (calls `isValidModelName`, zero-spawn), `applySetMapping()`, `buildListRows()`, `mergeTuiRowsIntoMapping()` (consumes `persistedModelFor`/`persistedEffortFor`)
 - `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `persistedModelFor()`, `persistedEffortFor()`, `rowState()` (delegates to `classifyAgentState`), `unsavedCount()`
 - `src/cli/agents-view/render.ts` — pure frame renderer; `COL_STATE = 14`; exports `FIXED_ROWS`, `computeViewportHeight`
-- `src/cli/agents-view/terminal.ts` — impure TUI shell, `runAgentsTui()`, `TuiIO`, `MAX_KEYPRESSES`
+- `src/cli/agents-view/terminal.ts` — thin adapter over the shared `runTui` driver (`src/cli/tui/terminal.ts`); exports `runAgentsTui()`, re-exports `TuiIO` and `MAX_KEYPRESSES` from tui/
+- `src/cli/tui/terminal.ts` — generic `runTui<S,A,C>` driver (`RunTuiSpec`: `signalAction: Exclude<A,C>`, `continueIntent: C`, `screen?: 'alt'|'inline'`), `normalizeKey`, `TuiIO`, `MAX_KEYPRESSES`, `RenderDims`, `INLINE_MARGIN`; agents-view uses `signalAction='cancel'` + default `'alt'` screen; flags-view uses `signalAction='abort'` + `'inline'` screen
+- `src/cli/tui/cells.ts` — cell helper utilities (shared across TUI modules)
 - `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook; writes `proxy.pid` after spawn; UserPromptSubmit exits before proxy-state reads; relay spawned via `env -i` 6-var allowlist
 - `src/cli/commands/init.ts` — proxy preflight block (4-check, no doctor, no spawn); `reapplyAgentMapping` guard after preflight; convergence writes `proxy.json enabled:false` on preflight failure
 

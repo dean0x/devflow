@@ -134,22 +134,39 @@ function getDevflowVersion(): string | null {
 // ─── Internal object helpers (used for single-pass atomic settings write) ────
 
 /**
- * Mutate a parsed Settings object in place: set ANTHROPIC_BASE_URL to our relay.
- * Returns true when the object was changed (used to detect if a write is needed).
+ * D-P4-1: Env var paired with ANTHROPIC_BASE_URL so Claude Code does not enforce
+ * its conservative context-window limit on relay-routed (non-Claude-model) sessions.
+ * Stripped together with the URL — always governed by URL ownership, never independently.
+ */
+const UNKNOWN_MODEL_WINDOW_ENV = 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT';
+
+/**
+ * Mutate a parsed Settings object in place: set ANTHROPIC_BASE_URL to our relay
+ * and set UNKNOWN_MODEL_WINDOW_ENV to '1'.
+ *
+ * D-P4-1: Each condition is evaluated independently (PF-015 — no short-circuit that
+ * skips the second write when the first reports no change).
+ *
+ * Returns true when the object was changed by either assignment.
  */
 function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
   const s = settings as Record<string, unknown>;
   s.env = (s.env as Record<string, unknown> | undefined) ?? {};
   const env = s.env as Record<string, unknown>;
   const newUrl = proxyBaseUrl(port);
-  if (env.ANTHROPIC_BASE_URL === newUrl) return false;
+  // D-P4-1: evaluate each condition independently before combining (avoids PF-015 short-circuit)
+  const urlChanged = env.ANTHROPIC_BASE_URL !== newUrl;
+  const windowVarChanged = env[UNKNOWN_MODEL_WINDOW_ENV] !== '1';
   env.ANTHROPIC_BASE_URL = newUrl;
-  return true;
+  env[UNKNOWN_MODEL_WINDOW_ENV] = '1';
+  return urlChanged || windowVarChanged;
 }
 
 /**
- * Mutate a parsed Settings object in place: remove ANTHROPIC_BASE_URL only when
- * its value exactly matches our relay on the given managed port.
+ * Mutate a parsed Settings object in place: remove UNKNOWN_MODEL_WINDOW_ENV
+ * unconditionally (Devflow is its only producer — there is no foreign value to protect),
+ * and remove ANTHROPIC_BASE_URL only when it exactly matches our relay on the given
+ * managed port.
  *
  * Scoped to `managedPort` so a user's own localhost gateway (LiteLLM,
  * local Ollama proxy, etc.) on ANY other port is never clobbered.
@@ -159,16 +176,34 @@ function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
  *   - enable path   → the new port being applied (followed immediately by _applyProxyEnvToObject)
  *   - uninstall     → proxy.json.port (or DEFAULT_PROXY_PORT)
  *
- * Returns true when the object was changed.
+ * D-P4-1: URL ownership gates the URL delete only; the window var is always ours to
+ * remove (applies PF-015, ADR-003). Each outcome is evaluated into a local and OR-ed
+ * afterwards — never short-circuit composed inline (PF-015).
+ *
+ * Returns true when the object was changed by either deletion.
  */
 function _stripProxyEnvFromObject(settings: Settings, managedPort: number): boolean {
   const s = settings as Record<string, unknown>;
   const env = s.env as Record<string, unknown> | undefined;
-  if (typeof env?.ANTHROPIC_BASE_URL !== 'string') return false;
-  if (env.ANTHROPIC_BASE_URL !== proxyBaseUrl(managedPort)) return false;
-  delete env.ANTHROPIC_BASE_URL;
+  if (!env) return false;
+
+  // Devflow is the only producer of this var — always remove it, regardless of whether
+  // the URL is still ours. Port-scoping protects a FOREIGN url value; there is no
+  // foreign value of this key to protect. (applies PF-015, ADR-003)
+  const hadWindowVar = env[UNKNOWN_MODEL_WINDOW_ENV] !== undefined;
+  delete env[UNKNOWN_MODEL_WINDOW_ENV];
+
+  let removedUrl = false;
+  if (
+    typeof env.ANTHROPIC_BASE_URL === 'string' &&
+    env.ANTHROPIC_BASE_URL === proxyBaseUrl(managedPort)
+  ) {
+    delete env.ANTHROPIC_BASE_URL;
+    removedUrl = true;
+  }
+
   if (Object.keys(env).length === 0) delete s.env;
-  return true;
+  return removedUrl || hadWindowVar; // OR the locals — never compose with || inline (PF-015)
 }
 
 /** Internal: add ensure-proxy hook to one event. Returns true when added. */
@@ -1640,6 +1675,9 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   await discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
 
   s.stop(color.green('External model routing enabled'));
+
+  // D-P4-1 / PF-022: applies-on-restart — env var takes effect only for new sessions
+  p.log.info(color.dim('Context-window enforcement disabled for relay-routed models — applies to new Claude Code sessions'));
 
   if (adopted) {
     p.log.info(`Relay already running on port ${port} — adopted`);

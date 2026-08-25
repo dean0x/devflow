@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode } from '../../core/flags.js';
+import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -381,7 +381,7 @@ export const initCommand = new Command('init')
           scope,
           features: {
             ambient: false, memory: false, hud: true, knowledge: false,
-            learning: false, rules: false, flags: [], proxy: false,
+            learning: false, rules: false, flags: {}, proxy: false,
             compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
           },
           installedAt: now,
@@ -630,12 +630,11 @@ export const initCommand = new Command('init')
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
     let complianceFrameworks = seed.features.compliance.frameworks;
-    let enabledFlags = seed.flags;
-    let viewMode: ViewMode = seed.viewMode;
-    // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
-    // Used by resolveFinalViewMode to decide whether to clobber an externally-set /focus value.
-    // --reset forces viewMode back to 'default': resolveResetGatedInputs empties the settings snapshot
-    // so seed.viewMode collapses to 'default', and explicit=true makes that 'default' win at write time.
+    let enabledFlags: FlagsRecord = { ...seed.flags };
+    // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
+    // seed-time view-mode win over an externally-set value in settings.json.
+    // --reset empties the settings snapshot via resolveResetGatedInputs so seed.flags['view-mode']
+    // collapses to 'default', and explicit=true makes it take effect at settings write time.
     let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -703,7 +702,7 @@ export const initCommand = new Command('init')
       proxyEnabled = effectiveFeatures.proxy;
       complianceEnabled = effectiveFeatures.compliance.enabled;
       complianceFrameworks = effectiveFeatures.compliance.frameworks;
-      // enabledFlags and viewMode are already initialised to seed values above.
+      // enabledFlags is already initialised to seed.flags above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -730,7 +729,7 @@ export const initCommand = new Command('init')
       }
 
       // Print summary
-      const defaultFlagCount = enabledFlags.length;
+      const defaultFlagCount = countActiveFlags(enabledFlags);
       const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
@@ -741,8 +740,8 @@ export const initCommand = new Command('init')
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
         `Compliance:      ${complianceSummary}`,
-        `View mode:       ${viewMode}`,
-        `Claude Code flags: ${defaultFlagCount} enabled`,
+        `View mode:       ${readViewMode(enabledFlags)}`,
+        `Claude Code flags: ${defaultFlagCount} configured`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
         `${safeDeleteAction !== 'skip' ? 'Safe delete:     installed' : ''}`,
       ].filter(l => l.trim()).join('\n');
@@ -948,68 +947,15 @@ export const initCommand = new Command('init')
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
 
-      // Claude Code flags multiselect (advanced only)
-      const recommended = FLAG_REGISTRY.filter(f => f.defaultEnabled);
-      const optional = FLAG_REGISTRY.filter(f => !f.defaultEnabled);
-      const flagChoices = [
-        ...recommended.map(f => ({
-          value: f.id,
-          label: f.label,
-          hint: `${f.hint} · recommended`,
-        })),
-        { value: '_separator', label: color.dim('── Optional (skip if unsure) ──'), hint: '' },
-        ...optional.map(f => ({
-          value: f.id,
-          label: f.label,
-          hint: f.hint,
-        })),
-      ];
-      p.note(
-        'Recommended flags are pre-selected. Optional flags are for\n' +
-        'advanced users — if you don\'t recognize one, skip it.',
-        'Claude Code Flags',
-      );
-
-      const flagSelection = await p.multiselect({
-        message: 'Claude Code flags',
-        options: flagChoices,
-        // Pre-seeded from prior state; fresh installs start with all default-ON flags.
-        initialValues: seed.flags,
-        required: false,
-      });
-
-      if (p.isCancel(flagSelection)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
+      /**
+       * D40: init applies seeded flag defaults non-interactively. Flags are customized
+       * exclusively via `devflow flags`; re-init preserves existing values and adopts
+       * registry defaults only for absent flags (ADR-014). No TUI is opened during init.
+       */
+      {
+        const activeCount = countActiveFlags(enabledFlags);
+        p.log.info(`Flags: ${activeCount} active — customize any time with 'devflow flags'`);
       }
-      enabledFlags = flagSelection.filter(id => id !== '_separator');
-
-      // View mode selector (advanced only)
-      p.note(
-        'Controls how much detail Claude Code shows in the transcript.\n' +
-        '• default — normal display with expandable tool output\n' +
-        '• verbose — shows everything including thinking blocks\n' +
-        '• focus — minimal: prompt, one-line tool summaries, final response',
-        'View Mode',
-      );
-      const viewModeChoice = await p.select({
-        message: 'View mode',
-        options: [
-          { value: 'default', label: 'Default', hint: 'expandable tool output · recommended' },
-          { value: 'verbose', label: 'Verbose', hint: 'shows everything including thinking' },
-          { value: 'focus', label: 'Focus', hint: 'minimal output, one-line summaries' },
-        ],
-        // Pre-seeded from prior state (fresh installs default to 'default').
-        initialValue: seed.viewMode,
-      });
-      if (p.isCancel(viewModeChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-      viewMode = viewModeChoice as 'default' | 'verbose' | 'focus';
-      // Mark as explicit: user actively selected this mode, so resolveFinalViewMode will
-      // let it win over an externally-set /focus value.
-      viewModeExplicit = true;
 
       // .claudeignore prompt
       if (earlyGitRoot) {
@@ -1660,19 +1606,25 @@ export const initCommand = new Command('init')
       // Strip Devflow-managed teammateMode ("auto"). User-set values (e.g. "tmux") are preserved.
       content = stripDevflowTeammateModeFromJson(content);
 
-      // Claude Code flags — strip all managed keys, then re-apply selected flags
-      content = stripFlags(content);
-      content = applyFlags(content, enabledFlags);
-
-      // Resolve the final viewMode to write.
-      // - explicit=true (interactive selection or --reset): selected value always wins
-      // - explicit=false (recommended/non-TTY): preserve an externally-set /focus value;
-      //   otherwise use the seeded viewMode (which already reflects the prior manifest value)
-      viewMode = resolveFinalViewMode(resolveExistingViewMode(content), viewMode, viewModeExplicit);
-
-      // View mode — strip then apply for upgrade safety
-      content = stripViewMode(content);
-      content = applyViewMode(content, viewMode);
+      // Claude Code flags — convergeFlagsIntoSettings is the single pipeline entry point
+      // (ARCH-H1, applies PF-015/PF-017/ADR-014): fold valued flags and view-mode from
+      // existing settings before strip, then strip all managed keys and apply the folded
+      // record. ownedRecord=existingManifest?.features.flags??null distinguishes keys
+      // devflow previously wrote (must not be overridden by fold) from keys newly adopted
+      // by resolveSeedFlags from registry defaults (may be overridden by fold to preserve
+      // user-set hand values — e.g., a hand-set concurrency of '8' survives upgrade).
+      {
+        const { settings: flaggedContent, record: foldedFlags } = convergeFlagsIntoSettings(
+          content,
+          enabledFlags,
+          {
+            viewModeExplicit,
+            ownedRecord: existingManifest?.features.flags ?? null,
+          },
+        );
+        content = flaggedContent;
+        enabledFlags = foldedFlags;
+      }
 
       // Proxy hooks (SessionStart + UserPromptSubmit) — strip-then-add, idempotent.
       // Parse Settings once for the hook mutation; env mutation stays in string space.
@@ -1977,11 +1929,9 @@ export const initCommand = new Command('init')
         knowledge: knowledgeEnabled,
         learning: learningEnabled,
         rules: rulesEnabled,
+        // FlagsRecord written directly — key-presence encodes "known" (ADR-014).
+        // view-mode is encoded as flags['view-mode'] (the resolved final value).
         flags: enabledFlags,
-        // Snapshot of known flag ids at this install — used by resolveSeedFlags on next init
-        // to detect new default-ON flags and auto-adopt them.
-        knownFlags: FLAG_REGISTRY.map(f => f.id),
-        viewMode,
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,

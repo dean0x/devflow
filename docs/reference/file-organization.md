@@ -14,12 +14,14 @@ devflow/
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts, proxy.ts,
 │   │   │                             #   agents.ts, knowledge/
-│   │   └── utils/                    # (empty — utilities moved to src/core/)
+│   │   ├── tui/                      # Generic TUI shell — runTui<S,A> driver, normalizeKey, cell helpers
+│   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)
+│   │   └── agents-view/              # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
-│   │   ├── flags.ts                  # Claude Code flag registry (20 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (28 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
@@ -223,7 +225,7 @@ Devflow claims four namespaces inside `~/.claude/`:
 | Rules | `~/.claude/rules/devflow/` | One `.md` file per rule (e.g., `security.md`) |
 | Skills | `~/.claude/skills/devflow:*/` | One directory per skill (e.g., `devflow:software-design/`) |
 
-These four namespaces hold the installed asset files. `devflow init` also writes `~/.claude/settings.json` (hook registrations, flags, view mode) and `~/.devflow/` state files (manifest, migrations tracking, proxy config). The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
+These four namespaces hold the installed asset files. `devflow init` also writes `~/.claude/settings.json` (hook registrations, flags — including the `view-mode` enum flag, whose `viewMode` settings key is written only when non-default; `neutralValue: 'default'` suppresses the key when view-mode is left at its default value) and `~/.devflow/` state files (manifest, migrations tracking, proxy config). The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
 
 ### Orphan Sweep (install and selective uninstall)
 

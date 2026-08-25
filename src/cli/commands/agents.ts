@@ -776,7 +776,16 @@ export const agentsCommand = new Command('agents')
 
     // Lazy-import terminal to avoid loading readline/tty in non-TTY paths
     const { runAgentsTui } = await import('../agents-view/terminal.js');
-    const result = await runAgentsTui(tuiState);
+    // Wrap: runTui rejects on initial-render failure or handler throw.
+    // On rejection: log and bail — no partial write (avoids PF-014 process.exit).
+    let result;
+    try {
+      result = await runAgentsTui(tuiState);
+    } catch (err) {
+      p.log.error(`Agent editor failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+      return;
+    }
 
     if (result.action === 'cancel') {
       p.outro(color.dim('No changes made.'));

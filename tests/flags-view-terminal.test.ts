@@ -1,0 +1,401 @@
+/**
+ * Tests for src/cli/flags-view/terminal.ts — TUI shell adapter.
+ *
+ * Tests-first (RED-GREEN): written before the implementation.
+ *
+ * Pinned behaviours (per execution plan):
+ *   (a) stdin.pause() called on save, cancel, and abort paths
+ *   (b) MAX_KEYPRESSES flood → resolves with cancel (via shared shell signalAction)
+ *   - Driving with PassThrough: send key bytes → TUI resolves
+ *   - esc → cancel intent, ctrl-c → abort intent
+ *   - edit sequence: enter edit mode, type value, confirm → save with new value
+ *   - Save path: save intent returns the final rows
+ *
+ * The tests use the same PassThrough pattern as agents-terminal.test.ts, injecting
+ * a fake stdout to capture output without a real TTY.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { PassThrough } from 'stream';
+import { runFlagsTui } from '../src/cli/flags-view/terminal.js';
+import { MAX_KEYPRESSES } from '../src/cli/tui/terminal.js';
+import { runTui } from '../src/cli/tui/terminal.js';
+import { buildFlagRows } from '../src/cli/flags-view/state.js';
+import { FLAG_REGISTRY } from '../src/core/flags.js';
+import { reduce } from '../src/cli/flags-view/state.js';
+import { renderFrame } from '../src/cli/flags-view/render.js';
+import type { FlagsRecord } from '../src/core/flags.js';
+
+// ENTER_ALT / LEAVE_ALT sequences for inline-mode assertion
+const ENTER_ALT = '\x1b[?1049h';
+const LEAVE_ALT = '\x1b[?1049l';
+const ERASE_BELOW = '\x1b[0J';
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+function makeStreams() {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  (stdin as unknown as { isTTY: boolean }).isTTY = false;
+  (stdin as unknown as { setRawMode: (m: boolean) => void }).setRawMode = (_m: boolean) => {};
+  (stdout as unknown as { rows: number }).rows = 24;
+  (stdout as unknown as { columns: number }).columns = 80;
+  return { stdin, stdout };
+}
+
+function sendKey(stdin: PassThrough, key: string): void {
+  stdin.push(key);
+}
+
+/** Build a default record (all flags at devflow defaults) */
+function defaultRecord(): FlagsRecord {
+  const record: FlagsRecord = {};
+  for (const flag of FLAG_REGISTRY) {
+    record[flag.id] = flag.kind === 'boolean' ? flag.defaultValue : (flag.defaultValue ?? null);
+  }
+  return record;
+}
+
+// ---------------------------------------------------------------------------
+// (a) stdin.pause() called on all exit paths
+// ---------------------------------------------------------------------------
+
+describe('flags-view-terminal — (a) stdin.pause() on exit', () => {
+  it('pause() is called when TUI resolves via esc (cancel)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const pauseSpy = vi.spyOn(stdin, 'pause');
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    // Let the first frame render
+    await new Promise(r => setTimeout(r, 10));
+
+    // Send esc → cancel
+    sendKey(stdin, '\x1b');
+    const result = await tui;
+
+    expect(result.action).toBe('cancel');
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+
+  it('pause() is called when TUI resolves via ctrl-c (abort)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const pauseSpy = vi.spyOn(stdin, 'pause');
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // ctrl-c
+    sendKey(stdin, '\x03');
+    const result = await tui;
+
+    expect(result.action).toBe('abort');
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+
+  it('pause() is called on save (enter on boolean row)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const pauseSpy = vi.spyOn(stdin, 'pause');
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Enter on first row (boolean) → save
+    sendKey(stdin, '\r');
+    const result = await tui;
+
+    expect(result.action).toBe('save');
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (b) MAX_KEYPRESSES flood → resolves with signalAction (abort)
+// ---------------------------------------------------------------------------
+
+describe('flags-view-terminal — (b) MAX_KEYPRESSES flood resolves', () => {
+  it(`exhausting ${MAX_KEYPRESSES} keypresses resolves with abort`, async () => {
+    const { stdin, stdout } = makeStreams();
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Flood with no-op keys (space on first boolean row cycles it but stays running)
+    // Use 'j' (down) to avoid cycling — it's a navigation key that stays at bottom
+    for (let i = 0; i <= MAX_KEYPRESSES; i++) {
+      sendKey(stdin, 'a'); // 'a' is unrecognized in browse mode → noop
+    }
+
+    const result = await tui;
+    expect(result.action).toBe('abort');
+  }, 30_000); // Allow up to 30s for this test (it's a large loop)
+});
+
+// ---------------------------------------------------------------------------
+// Key routing: esc → cancel
+// ---------------------------------------------------------------------------
+
+describe('flags-view-terminal — key routing', () => {
+  it('esc resolves with cancel action', async () => {
+    const { stdin, stdout } = makeStreams();
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    sendKey(stdin, '\x1b');
+    const result = await tui;
+    expect(result.action).toBe('cancel');
+  });
+
+  it('q resolves with cancel action', async () => {
+    const { stdin, stdout } = makeStreams();
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    sendKey(stdin, 'q');
+    const result = await tui;
+    expect(result.action).toBe('cancel');
+  });
+
+  it('ctrl-c resolves with abort action', async () => {
+    const { stdin, stdout } = makeStreams();
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    sendKey(stdin, '\x03');
+    const result = await tui;
+    expect(result.action).toBe('abort');
+  });
+
+  it('enter on boolean row resolves with save action', async () => {
+    const { stdin, stdout } = makeStreams();
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    sendKey(stdin, '\r');
+    const result = await tui;
+    expect(result.action).toBe('save');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Result: save returns rows with updated values
+// ---------------------------------------------------------------------------
+
+describe('flags-view-terminal — save result', () => {
+  it('cancel returns unchanged rows', async () => {
+    // Applies PF-018 mechanism 4: toBeDefined() is satisfied by any non-null
+    // value — it cannot observe "unchanged". Replace with toEqual(rowsIn) so
+    // the test actually checks the "unchanged" claim it is named for.
+    const { stdin, stdout } = makeStreams();
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    sendKey(stdin, 'q');
+    const result = await tui;
+    expect(result.action).toBe('cancel');
+    expect(result.rows).toEqual(rowsIn); // must be deep-equal (unchanged), not merely defined
+  });
+
+  it('space on tui (boolean) toggles value, then enter saves', async () => {
+    const { stdin, stdout } = makeStreams();
+    // tui defaults to enabled (true) in registry — but record may have it set
+    const record = { tui: true }; // explicitly set tui=true
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    // cursor starts at 0 = tui row
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+    await new Promise(r => setTimeout(r, 10));
+    // Space toggles tui: true → false
+    sendKey(stdin, ' ');
+    await new Promise(r => setTimeout(r, 5));
+    // Enter on boolean row = save
+    sendKey(stdin, '\r');
+    const result = await tui;
+    expect(result.action).toBe('save');
+    const tuiRow = result.rows.find(r => r.id === 'tui');
+    expect(tuiRow?.configuredValue).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline mode driver tests (D-INLINE)
+// ---------------------------------------------------------------------------
+
+describe('runTui — inline mode (D-INLINE)', () => {
+  function makeInlineSpec(stdin: PassThrough, stdout: PassThrough) {
+    const record = defaultRecord();
+    const rows = buildFlagRows(FLAG_REGISTRY, record);
+    const initialState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 10,
+      editing: null,
+    };
+    return {
+      initialState,
+      reduce,
+      renderFrame,
+      onResize: (s: typeof initialState, dims: { rows: number; cols: number }) => ({
+        ...s,
+        viewportHeight: Math.max(1, dims.rows - 2),
+      }),
+      signalAction: 'abort' as const,
+      continueIntent: 'none' as const,
+      screen: 'inline' as const,
+      io: { stdin, stdout },
+    };
+  }
+
+  it('inline mode never emits ENTER_ALT (\\x1b[?1049h)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // esc → cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(ENTER_ALT);
+  });
+
+  it('inline mode never emits LEAVE_ALT (\\x1b[?1049l)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b');
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(LEAVE_ALT);
+  });
+
+  it('inline mode repaint uses cursor-up (ESC[nA) after first frame', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+
+    // Let first frame render
+    await new Promise(r => setTimeout(r, 20));
+
+    // Send a navigation key to trigger a repaint
+    sendKey(stdin, 'j'); // down — noop at bottom but causes a repaint
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    // After the first key, at least one cursor-up must have been emitted
+    const all = written.join('');
+    const cursorUpPattern = /\x1b\[\d+A/;
+    expect(cursorUpPattern.test(all)).toBe(true);
+  });
+
+  it('inline mode exit emits ERASE_BELOW to clear widget', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel → cleanup
+    await tui;
+
+    const all = written.join('');
+    expect(all).toContain(ERASE_BELOW);
+  });
+
+  it('alt mode still emits ENTER_ALT and LEAVE_ALT (alt mode unchanged)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const record = defaultRecord();
+    const rows = buildFlagRows(FLAG_REGISTRY, record);
+    const initialState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 10,
+      editing: null,
+    };
+    const spec = {
+      initialState,
+      reduce,
+      renderFrame,
+      onResize: (s: typeof initialState, dims: { rows: number; cols: number }) => ({
+        ...s,
+        viewportHeight: Math.max(1, dims.rows - 2),
+      }),
+      signalAction: 'abort' as const,
+      continueIntent: 'none' as const,
+      // screen: 'alt' is the default; not setting it
+      io: { stdin, stdout },
+    };
+
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).toContain(ENTER_ALT);
+    expect(all).toContain(LEAVE_ALT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runFlagsTui uses inline mode (D-INLINE integration)
+// ---------------------------------------------------------------------------
+
+describe('runFlagsTui — uses inline mode by default', () => {
+  it('runFlagsTui does not emit ENTER_ALT (inline mode active)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    await new Promise(r => setTimeout(r, 20));
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(ENTER_ALT);
+    expect(all).not.toContain(LEAVE_ALT);
+  });
+});

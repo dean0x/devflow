@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
+import { type ManifestData } from '../src/core/manifest.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -52,6 +53,42 @@ export function extractSection(content: string, startAnchor: string, endAnchor: 
   const end = content.indexOf(endAnchor, start + startAnchor.length)
   if (end === -1) throw new Error(`End anchor not found after "${startAnchor}": "${endAnchor}"`)
   return content.slice(start, end)
+}
+
+/**
+ * Canonical ManifestData factory for tests.
+ *
+ * Returns a minimal but structurally complete ManifestData with:
+ * - flags: FlagsRecord (Phase 2: was string[])
+ * - No knownFlags / viewMode fields (deprecated; healed away on readManifest)
+ *
+ * Use deep-spread to override individual fields:
+ *   makeManifest({ features: { ...makeManifest().features, proxy: true } })
+ *
+ * This factory is the canonical source for ManifestData test fixtures.
+ * Tests that write to disk via writeManifest should use this factory so
+ * readManifest round-trips produce bit-identical results (no heal cycle).
+ */
+export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
+  return {
+    version: '2.0.0',
+    plugins: ['devflow-implement', 'devflow-code-review'],
+    scope: 'user',
+    features: {
+      ambient: true,
+      memory: true,
+      hud: true,
+      knowledge: true,
+      learning: true,
+      rules: true,
+      proxy: false,
+      compliance: { enabled: false, frameworks: [] },
+      flags: { tui: true, lsp: true, 'tool-search': true },
+    },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
 }
 
 /**

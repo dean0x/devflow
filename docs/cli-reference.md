@@ -194,17 +194,51 @@ If you shadow `compliance`, the shadow's own tokens are replaced at install time
 ## Feature Flags
 
 ```bash
-npx devflow-kit flags --list           # List all flags with current state
-npx devflow-kit flags --enable <flag>  # Enable a flag
-npx devflow-kit flags --disable <flag> # Disable a flag
-npx devflow-kit flags --status         # Show enabled flags
+npx devflow-kit flags                    # Interactive TUI (TTY only); non-TTY prints status table + exits 1
+npx devflow-kit flags --status           # Show current flag states (non-destructive)
+npx devflow-kit flags --list             # List all flags with kind, target, and default
+npx devflow-kit flags --enable <ids>     # Enable boolean flag(s), comma-separated
+npx devflow-kit flags --disable <ids>    # Disable boolean flag(s), comma-separated
+npx devflow-kit flags --set <id=value>   # Set a flag value (repeatable); use 'unset' as value to clear
+npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separated
 ```
 
-Notable flags (default OFF):
+`--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `agent-teams` | OFF | Enables Claude Code's experimental Agent Teams via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`. Enable with `devflow flags --enable agent-teams`. |
+All 28 flags by kind and devflow default:
+
+| Flag ID | Kind | Target | Devflow Default |
+|---------|------|--------|-----------------|
+| `tui` | boolean | setting `tui` | `true` (fullscreen) |
+| `tool-search` | boolean | env `ENABLE_TOOL_SEARCH` | `true` |
+| `lsp` | boolean | env `ENABLE_LSP_TOOL` | `true` |
+| `prompt-caching-1h` | boolean | env `ENABLE_PROMPT_CACHING_1H` | `true` |
+| `show-turn-duration` | boolean | setting `showTurnDuration` | `true` |
+| `clear-context-on-plan` | boolean | setting `showClearContextOnPlanAccept` | `true` |
+| `disable-bundled-skills` | boolean | setting `disableBundledSkills` | `true` |
+| `pin-sonnet-4-6` | boolean | env `ANTHROPIC_DEFAULT_SONNET_MODEL` | `true`¹ |
+| `max-concurrent-subagents` | number | env `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `40` (upstream: 20) |
+| `brief` | boolean | env `CLAUDE_CODE_BRIEF` | `false` |
+| `thinking-summaries` | boolean | setting `showThinkingSummaries` | `false` |
+| `subprocess-env-scrub` | boolean | env `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | `false` |
+| `disable-nonessential-traffic` | boolean | env `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `false` |
+| `forked-subagents` | boolean | env `CLAUDE_CODE_FORK_SUBAGENT` | `false` |
+| `disable-adaptive-thinking` | boolean | env `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `false` |
+| `always-thinking` | boolean | setting `alwaysThinkingEnabled` | `false` |
+| `disable-git-instructions` | boolean | env `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | `false` |
+| `disable-compact` | boolean | env `DISABLE_COMPACT` | `false` |
+| `disable-1m-context` | boolean | env `CLAUDE_CODE_DISABLE_1M_CONTEXT` | `false` |
+| `disable-autoupdater` | boolean | env `DISABLE_AUTOUPDATER` | `false` |
+| `agent-teams` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `false` |
+| `enable-todo-tools` | boolean | env `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `false` |
+| `subagent-spawn-depth` | number | env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | unset (upstream: 3) |
+| `workflow-size-guideline` | enum | setting `workflowSizeGuideline` | unset (`small\|medium\|large\|unrestricted`) |
+| `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
+| `goal-checkin-minutes` | number | env `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` | unset (upstream: 30 min) |
+| `spellcheck` | string | setting `spellcheck` | unset |
+| `view-mode` | enum | setting `viewMode` | `default` (key omitted when default) |
+
+¹ Boolean flags targeting an env var write the flag's configured string value when enabled (e.g., `claude-sonnet-4-6` for `pin-sonnet-4-6`), not `1` or `true`. The env var is deleted when the flag is disabled or unset.
 
 ## External Model Routing (Devflow Proxy)
 
@@ -221,9 +255,9 @@ npx devflow-kit proxy --enable --port <n>  # Enable on a specific port (default:
 
 | Option | Description |
 |--------|-------------|
-| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` into `settings.json`, applies saved agent model mapping |
+| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` into `settings.json`, applies saved agent model mapping |
 | `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable; the relay process is left running for live sessions (a manual `kill <pid>` hint is shown) |
-| `--status` | Show feature state (enabled/disabled, port), relay process and PID, `ANTHROPIC_BASE_URL` env state, Codex auth content (not just existence), external-mapped agent count, cached model registry, and proxy log path |
+| `--status` | Show feature state (enabled/disabled, port), relay process and PID, `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` env state, Codex auth content (not just existence), external-mapped agent count, cached model registry, and proxy log path |
 | `--port <n>` | Override the relay port (default 4141); takes effect on next enable |
 
 Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts on `SessionStart` via the `ensure-proxy` hook; `UserPromptSubmit` exits immediately with no action (SessionStart handles all relay-start and warning logic). Routing state is stored in `~/.devflow/proxy.json`; per-agent model mapping in `~/.devflow/agent-models.json`.

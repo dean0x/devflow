@@ -4,7 +4,7 @@
  * Computes the initial state (seed) for init prompts from:
  * - The existing manifest (from a prior install)
  * - The project feature config (.devflow/config.json)
- * - The current settings.json snapshot (for viewMode)
+ * - The current settings.json snapshot (for view-mode resolution)
  * - The plugin registry
  *
  * All exported functions are pure — no I/O, no side effects.
@@ -14,7 +14,15 @@
  * agent-neutral, target-agnostic utilities).
  */
 
-import { resolveExistingViewMode, FLAG_REGISTRY, type ClaudeCodeFlag, type ViewMode } from '../../core/flags.js';
+import {
+  resolveExistingViewMode,
+  FLAG_REGISTRY,
+  defaultValueOf,
+  readViewMode,
+  type ClaudeCodeFlag,
+  type FlagsRecord,
+  type ViewMode,
+} from '../../core/flags.js';
 import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
 import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
@@ -34,7 +42,6 @@ export interface FeatureSeed {
   proxy: boolean;
   /**
    * Compliance feature seed — seeded from the manifest (manifest-group, like proxy).
-   * Full init wiring (framework multi-select, CLI toggle) is a later phase.
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
   compliance: ComplianceFeatureState;
@@ -55,8 +62,8 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
 /** The complete initial state passed from the hoisted-reads block to init prompts. */
 export interface InitSeed {
   features: FeatureSeed;
-  flags: string[];
-  viewMode: ViewMode;
+  /** FlagsRecord with all registry flags at their resolved values. view-mode is encoded here. */
+  flags: FlagsRecord;
   workflowPlugins: string[];
   languagePlugins: string[];
 }
@@ -107,47 +114,46 @@ export function resolveSeedFeatures(
 }
 
 /**
- * Resolve the enabled flag set for the init seed.
+ * Resolve the flag record for the init seed.
  *
- * @param enabledFlags - Currently-enabled flag IDs from the manifest,
- *                       or null for a fresh install (no prior manifest).
- * @param knownFlags   - Snapshot of all flag IDs known at the last install
- *                       (manifest.features.knownFlags), or undefined when
- *                       the manifest pre-dates the snapshot feature.
- * @param registry     - Flag registry to consult; injectable for tests.
+ * Returns a FlagsRecord containing ALL registry flags at their resolved values.
+ * FlagsRecord key-presence encodes the "known" concept (ADR-014): present key =
+ * known at last install, absent key = new to this install → adopt default on seed.
+ *
+ * @param manifestFlags - FlagsRecord from the manifest, or null for fresh install.
+ * @param registry      - Flag registry to consult; injectable for tests.
  *
  * Rules:
- *   - null enabledFlags (fresh) → all default-ON flags in the registry
- *   - knownFlags === undefined (old manifest, migration) → return enabledFlags
- *     as-is; adopt nothing new (safe: user's prior choices preserved)
- *   - Otherwise → enabledFlags ∪ {default-ON flags whose id ∉ knownFlags}
- *     (newly added registry entries that the user never saw before are auto-adopted)
- *   - Default-OFF flags are NEVER auto-added regardless of knownFlags
+ *   - null manifestFlags (fresh install) → all flags at registry defaults
+ *   - Entry present                      → keep (coerceFlagValue is applied at read
+ *                                          time via sanitizeFlagsRecord; PF-023)
+ *   - Entry absent                       → adopt registry default (ADR-014)
+ *   - Unknown IDs from old manifest      → pass through unchanged (forward-compat)
+ *
+ * Applies ADR-014: absent key = unknown to this install → adopt default.
+ * view-mode is not set here; resolveInitSeed sets flags['view-mode'] after composing.
  */
 export function resolveSeedFlags(
-  enabledFlags: string[] | null,
-  knownFlags: string[] | undefined,
+  manifestFlags: FlagsRecord | null,
   registry: readonly ClaudeCodeFlag[] = FLAG_REGISTRY,
-): string[] {
-  // Fresh install → all default-ON flags from the registry
-  if (enabledFlags === null) {
-    return registry.filter(f => f.defaultEnabled).map(f => f.id);
-  }
-
-  // Old manifest without a knownFlags snapshot → adopt nothing new
-  if (knownFlags === undefined) {
-    return [...enabledFlags];
-  }
-
-  // Re-init with a knownFlags snapshot: union existing + newly-added default-ON entries
-  const knownSet = new Set(knownFlags);
-  const result = new Set(enabledFlags);
-  for (const flag of registry) {
-    if (flag.defaultEnabled && !knownSet.has(flag.id)) {
-      result.add(flag.id);
+): FlagsRecord {
+  // Fresh install → all flags at registry defaults
+  if (manifestFlags === null) {
+    const result: FlagsRecord = {};
+    for (const flag of registry) {
+      result[flag.id] = defaultValueOf(flag); // single default-rule source (CONS-M2)
     }
+    return result;
   }
-  return [...result];
+
+  // Existing install: copy present entries then adopt defaults for absent flags.
+  // Unknown IDs from the old manifest pass through unchanged (forward-compat).
+  const result: FlagsRecord = { ...manifestFlags };
+  for (const flag of registry) {
+    if (flag.id in result) continue; // known → keep
+    result[flag.id] = defaultValueOf(flag); // single default-rule source (CONS-M2)
+  }
+  return result;
 }
 
 /**
@@ -220,10 +226,12 @@ export function resolveSeedPlugins(
 /**
  * Compose the full init seed from manifest, project config, settings, and registry.
  *
- * viewMode priority: existing settings.json (non-default) → manifest → 'default'
+ * view-mode priority: existing settings.json (non-default) → manifest → 'default'.
+ * The resolved view mode is encoded into flags['view-mode'] so all flag state lives
+ * in one FlagsRecord (applying PF-015: fold before strip — the fold happens here).
  *
  * This is the single composition point; callers (init.ts hoist block) call this
- * once and pass `seed` down to Phase 4's prompt wiring.
+ * once and pass `seed` down to prompt wiring.
  */
 export function resolveInitSeed(
   seedManifest: ManifestData | null,
@@ -233,22 +241,34 @@ export function resolveInitSeed(
 ): InitSeed {
   const features = resolveSeedFeatures(seedManifest, seedConfig);
 
-  // null for a fresh install (no manifest); string[] from manifest otherwise
-  const enabledFlags: string[] | null = seedManifest !== null ? seedManifest.features.flags : null;
-  const flags = resolveSeedFlags(enabledFlags, seedManifest?.features.knownFlags);
+  // features.flags is FlagsRecord; null for fresh install (no manifest).
+  // seedManifest?.features.flags may be absent at runtime on very old manifests not yet
+  // healed — ?? null collapses to fresh-install behavior (all flags at registry defaults).
+  const manifestFlags: FlagsRecord | null = seedManifest?.features.flags ?? null;
+  const flags = resolveSeedFlags(manifestFlags);
 
   const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
   const { workflowPlugins, languagePlugins } = resolveSeedPlugins(
     manifestPlugins, seedManifest?.knownPlugins, plugins,
   );
 
-  // viewMode: non-default setting wins; else manifest; else 'default'
-  const viewMode: ViewMode =
-    resolveExistingViewMode(settingsSnapshot) ??
-    seedManifest?.features.viewMode ??
-    'default';
+  // Encode the resolved view mode into flags['view-mode'] (PF-015: all flag state in FlagsRecord).
+  // Priority: existing settings.json (non-default) → flags['view-mode'] from manifest → 'default'.
+  // resolveExistingViewMode returns undefined when absent or 'default' — treated as no-opinion.
+  const existingViewMode = resolveExistingViewMode(settingsSnapshot);
+  const manifestViewMode = readViewMode(flags); // already in flags via resolveSeedFlags spread
+  let resolvedViewMode: ViewMode;
+  if (existingViewMode !== undefined) {
+    resolvedViewMode = existingViewMode;        // settings.json non-default wins
+  } else if (manifestViewMode !== 'default') {
+    resolvedViewMode = manifestViewMode;        // manifest non-default wins
+  } else {
+    resolvedViewMode = 'default';              // fall back to neutral
+  }
 
-  return { features, flags, viewMode, workflowPlugins, languagePlugins };
+  // Return a fresh spread rather than mutating flags in place — keeps this function pure
+  // per the module docblock and avoids aliasing if the caller inspects seed.flags.
+  return { features, flags: { ...flags, 'view-mode': resolvedViewMode }, workflowPlugins, languagePlugins };
 }
 
 /**
@@ -286,8 +306,7 @@ export function resolveResetGatedInputs(
  * Per-key: `toggles.X ?? base.X` — an explicit CLI value (true/false) wins;
  * undefined means "user did not specify this flag, keep the seed value".
  *
- * Used in Phase 4 to honour --ambient/--no-ambient etc. passed alongside
- * --recommended.
+ * Applies explicit --ambient/--no-ambient etc. passed alongside --recommended.
  */
 export function applyCliToggles(
   base: FeatureSeed,
