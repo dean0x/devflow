@@ -524,3 +524,88 @@ describe('flags-view-render — unsaved changes section', () => {
     expect(plain).toContain('1 unsaved change');
   });
 });
+
+// ---------------------------------------------------------------------------
+// ARCH-M7a: chevron composition — closing chevron styled in its own cyan segment
+// ---------------------------------------------------------------------------
+
+describe('flags-view-render — ARCH-M7a: chevron composition', () => {
+  it('focused row with coloured value has closing chevron in cyan (not unstyled after inner RESET)', () => {
+    // tui flag (row 0) is boolean; value true → green('enabled').
+    // Before fix: cyan(`‹ ${green('enabled')} ›`) emits inner RESET before ' ›',
+    //   leaving the closing chevron unstyled (ESC[0m ›).
+    // After fix: cyan('‹ ') + green('enabled') + cyan(' ›') — each segment self-contained;
+    //   the closing chevron is always inside its own ESC[36m ... ESC[0m span.
+    const rows = buildFlagRows(FLAG_REGISTRY, { tui: true });
+    const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
+    const lines = renderFrame(state, DIMS_80x24);
+
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    const cursorRow = lines.find(l => l.replace(ESC_PATTERN, '').startsWith('❯'));
+    expect(cursorRow).toBeDefined();
+
+    // cyan(' ›') = '\x1b[36m ›\x1b[0m'; the closing chevron must be preceded by ESC[36m
+    expect(cursorRow!).toContain('\x1b[36m ›');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ARCH-M7b: caret survival — long buffer does not lose the inverse-video caret
+// ---------------------------------------------------------------------------
+
+describe('flags-view-render — ARCH-M7b: caret survival beyond chevron budget', () => {
+  it('60-char buffer with caret at end still shows inverse-video caret in 80-col frame', () => {
+    // chevronBudget at 80 cols = valueW(46) - 4 = 42.
+    // A 60-char buffer exceeds the budget; the caret at position 60 (trailing space)
+    // must still appear as ESC[7m (inverse video) in the cursor row.
+    //
+    // Before fix: truncateVisible strips ANSI from the buffer output, discarding ESC[7m.
+    // After fix: renderBuffer windows the plain buffer to budget width before inserting
+    //   inverse(), so the caret escape always survives.
+    const rows = buildFlagRows(FLAG_REGISTRY, {});
+    const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
+    const longBuffer = 'a'.repeat(60); // 60 > chevronBudget(42)
+    const state = makeState({
+      rows,
+      cursor: mcIdx,
+      viewportOffset: 0,
+      editing: { buffer: longBuffer, caret: 60, error: null }, // caret at end
+    });
+    const lines = renderFrame(state, DIMS_80x24);
+
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    const cursorRow = lines.find(l => l.replace(ESC_PATTERN, '').startsWith('❯'));
+    expect(cursorRow).toBeDefined();
+
+    // The inverse-video escape must be present in the cursor row
+    expect(cursorRow!).toContain('\x1b[7m');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ARCH-M7c: deviation signal — non-boolean deviating value uses bold, not cyan
+// ---------------------------------------------------------------------------
+
+describe('flags-view-render — ARCH-M7c: deviation signal', () => {
+  it('non-boolean deviating value on non-cursor row uses bold not cyan (applies ADR-016 amendment lesson)', () => {
+    // max-concurrent-subagents devflowDefault=40; value 20 deviates.
+    // Before fix: formatValue returns cyan('20'), conflating "focus" and "deviation"
+    //   — one colour, two semantics (ADR-016 amendment lesson).
+    // After fix: formatValue returns bold('20'); cyan = focus indicator only (chevrons).
+    //
+    // cursor at row 0 (not mcIdx) so the max-concurrent-subagents row is non-cursor;
+    // no cyan chevrons appear on it.
+    const rows = buildFlagRows(FLAG_REGISTRY, { 'max-concurrent-subagents': 20 });
+    const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
+    const lines = renderFrame(state, DIMS_80x24);
+
+    const ESC_PATTERN = /\x1b\[[0-9;]*m/g;
+    // Find the non-cursor row whose ANSI-stripped content includes the flag label
+    const mcRow = lines.find(l => l.replace(ESC_PATTERN, '').includes('Max concurrent'));
+    expect(mcRow).toBeDefined();
+
+    // The deviating value must be rendered with bold (ESC[1m), not cyan (ESC[36m).
+    expect(mcRow!).toContain('\x1b[1m');      // bold — deviation signal
+    expect(mcRow!).not.toContain('\x1b[36m'); // NOT cyan — cyan = focus only
+  });
+});

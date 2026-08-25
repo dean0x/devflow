@@ -70,32 +70,44 @@ export function computeViewportHeight(termRows: number): number {
  * Value vocabulary (one syntax, one semantic — applies ADR-016's amendment lesson):
  *   null → dim 'unset'; boolean → green 'enabled' / yellow 'disabled';
  *   non-boolean at devflow default → plain string;
- *   non-boolean deviating from devflow default → cyan string.
+ *   non-boolean deviating from devflow default → bold string.
+ *
+ * Colour vocabulary (one colour, one semantic — applies ADR-016's amendment lesson):
+ *   cyan   = focus indicator (chevron wrapper ‹ › on the cursor row only)
+ *   yellow = dirty indicator (unconditional ●) and boolean 'disabled'
+ *   green  = boolean 'enabled'
+ *   bold   = non-boolean value deviating from devflow default
  *
  * disk-sourced values are routed through sanitizeCell to prevent TAB/LF
- * layout breaks inside the fixed-width TUI cell (PF-023).
+ * layout breaks inside the fixed-width TUI cell (avoids PF-023).
  */
 function formatValue(row: FlagRow): string {
   const v = row.configuredValue;
   if (v === null) return dim('unset');
   if (typeof v === 'boolean') return v ? green('enabled') : yellow('disabled');
-  // Non-boolean: sanitize then colour by deviation
+  // Non-boolean: sanitize; bold signals deviation (cyan is reserved for focus)
   const str = sanitizeCell(String(v));
-  if (!Object.is(v, row.devflowDefault)) return cyan(str);
+  if (!Object.is(v, row.devflowDefault)) return bold(str);
   return str;
 }
 
 // ─── Edit buffer rendering ────────────────────────────────────────────────────
 
 /**
- * Render the edit buffer with an inverse-video caret marker.
+ * Render the edit buffer with an inverse-video caret marker, windowed to budget.
  *
  * Caret semantics: the caret is BETWEEN characters (text cursor position).
  *   - caret = 0: inverse on buf[0] (or space for empty buffer)
  *   - caret = n < len: inverse on buf[n]
  *   - caret = len: inverse on a trailing space (end of string)
+ *
+ * When the plain buffer length exceeds `budget`, the buffer is windowed so the
+ * caret stays at or near the right edge of the visible region. The inverse()
+ * marker is inserted AFTER windowing, so it always survives the size constraint.
+ * (Before this fix, renderRow called truncateVisible on the styled output, which
+ * stripped ANSI including the inverse escape whenever the buffer exceeded budget.)
  */
-function renderBuffer(buffer: string, caret: number): string {
+function renderBuffer(buffer: string, caret: number, budget: number): string {
   const safe = buffer.replace(/[\x00-\x1f\x7f]/g, ''); // strip control chars from display
   const safeLen = safe.length;
 
@@ -104,15 +116,31 @@ function renderBuffer(buffer: string, caret: number): string {
     return inverse(' ');
   }
 
-  if (caret <= 0) {
-    return inverse(safe[0]) + safe.slice(1);
+  // Clamp caret to [0, safeLen]; safeLen means "trailing space" (past last char).
+  const clampedCaret = Math.max(0, Math.min(caret, safeLen));
+
+  // Window the buffer to fit within budget visible chars, keeping caret visible.
+  // The window follows the caret: push it as far right as possible so the caret
+  // is at or near the right edge.
+  let windowStart = 0;
+  if (safeLen > budget) {
+    // Position caret at the rightmost slot; clamp so the window stays in bounds.
+    windowStart = Math.min(
+      Math.max(0, clampedCaret - budget + 1),
+      Math.max(0, safeLen - budget),
+    );
   }
 
-  if (caret >= safeLen) {
-    return safe + inverse(' ');
-  }
+  const windowed = safe.slice(windowStart, windowStart + budget);
+  const windowedCaret = clampedCaret - windowStart;
 
-  return safe.slice(0, caret) + inverse(safe[caret]) + safe.slice(caret + 1);
+  if (windowedCaret <= 0) {
+    return inverse(windowed[0]) + windowed.slice(1);
+  }
+  if (windowedCaret >= windowed.length) {
+    return windowed + inverse(' ');
+  }
+  return windowed.slice(0, windowedCaret) + inverse(windowed[windowedCaret]) + windowed.slice(windowedCaret + 1);
 }
 
 // ─── Row renderer ─────────────────────────────────────────────────────────────
@@ -145,17 +173,26 @@ function renderRow(
   );
 
   // Chevrons (cyan ‹ ›) mark the focused control / live edit buffer.
+  // Colour vocabulary: cyan = focus only; deviation uses bold (see formatValue).
   // The chevrons take 4 visible chars (‹ + space + space + ›); budget accordingly.
+  //
+  // Composition rule: colour AFTER measuring — each styled segment is self-contained
+  // so an inner RESET (e.g. from green('enabled')) does not kill the outer cyan.
+  //   cyan('‹ ') + <styled-or-plain content> + cyan(' ›')
+  // rather than cyan(`‹ ${content} ›`), which terminates the outer cyan at the
+  // inner RESET, leaving the closing chevron unstyled (applies ADR-016 amendment lesson).
   const chevronBudget = valueW - 4;
   let valueCell: string;
   if (isCursor && isEditing) {
-    // Live edit buffer: cyan ‹ buffer ›
-    const bufStr = renderBuffer(editBuffer, editCaret);
-    valueCell = cyan(`‹ ${truncateVisible(bufStr, chevronBudget)} ›`);
+    // Live edit buffer: renderBuffer windows to chevronBudget and inserts the
+    // inverse() caret AFTER windowing, so the caret always survives (ARCH-M7b fix).
+    const bufStr = renderBuffer(editBuffer, editCaret, chevronBudget);
+    valueCell = cyan('‹ ') + bufStr + cyan(' ›');
   } else if (isCursor) {
-    // Focused control: cyan ‹ value ›
+    // Focused control: truncateVisible is safe here — it fires on plain text only
+    // when the value exceeds budget; the chevrons are in their own cyan segments.
     const fmtVal = formatValue(row);
-    valueCell = cyan(`‹ ${truncateVisible(fmtVal, chevronBudget)} ›`);
+    valueCell = cyan('‹ ') + truncateVisible(fmtVal, chevronBudget) + cyan(' ›');
   } else {
     const fmtVal = formatValue(row);
     valueCell = truncateVisible(fmtVal, valueW);
@@ -248,10 +285,10 @@ export function renderFrame(
   }
 
   // ── Unsaved changes ───────────────────────────────────────────────────────
-  const unsaved = rows.filter(r => r.configuredValue !== r.originalValue).length;
+  // Reuse totalDirty computed above — avoids a duplicate full-array scan (PERF-L2).
   const unsavedLine =
-    unsaved > 0
-      ? `  ${yellow(`${unsaved} unsaved change${unsaved === 1 ? '' : 's'}`)}`
+    totalDirty > 0
+      ? `  ${yellow(`${totalDirty} unsaved change${totalDirty === 1 ? '' : 's'}`)}`
       : '';
 
   // ── Keybinding footer ─────────────────────────────────────────────────────
