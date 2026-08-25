@@ -5,7 +5,7 @@ description: "Use when working on the proxy lifecycle (enable/disable/status/pre
 category: architecture
 directories: [src/core/proxy-state.ts, src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/codex-auth-inspect.ts, src/core/model-discovery.ts, src/core/cache.ts, src/core/proxy-log.ts, src/cli/commands/proxy.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/cli/tui, src/assets/scripts/hooks/ensure-proxy]
 created: 2026-07-24
-updated: 2026-08-19
+updated: 2026-08-25
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -305,13 +305,13 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 
 - **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to set dormancy state; `rowState()` delegates to `classifyAgentState()` (from agent-state.ts) so the TUI STATE column and `--list` share one classification vocabulary. `persistedModelFor(row)` and `persistedEffortFor(row)` are exported predicates consumed by both `rowState` (STATE column display) and `mergeTuiRowsIntoMapping` (save merge) — the two sites cannot drift on what value gets written. All types and dirty helpers exported. No I/O.
 - **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants). `COL_STATE = 14` — sized so `'saved-inactive'` (13 chars) renders unclipped at 80-column terminals; row budget is 79 chars total (2 prefix + 18 agent + 32 model + 13 effort + 14 state).
-- **`terminal.ts`** — impure shell. Manages alt-screen, raw mode, SIGINT/SIGTERM handlers, SIGWINCH resize. All cleanup wired via `resolve()` inside the Promise constructor — never `process.exit()` inside a finally-guarded scope (avoids PF-014).
+- **`terminal.ts`** — thin adapter over the shared generic `runTui` driver (`src/cli/tui/`). Calls `runTui` with `signalAction: 'cancel'`, `continueIntent: 'none'`, and an `onResize` callback (updates `viewportHeight`); no `screen` override means the default `'alt'` is used. Alt-screen management, raw mode, SIGINT/SIGTERM, SIGWINCH, and event-loop cleanup are all handled by the generic driver (avoids PF-014).
 
 **`TuiIO` injectable seam** (`terminal.ts`): `runAgentsTui(initialState, io?)` accepts an optional `TuiIO` override with fake `stdin`/`stdout` for testing. The default is `process.stdin`/`process.stdout`. Tests pass `PassThrough` streams to drive the TUI without a real TTY.
 
 **`MAX_KEYPRESSES = 50_000`**: Exported constant — hard upper bound on the event loop. Resolves with `action: 'cancel'` on exhaustion. Tests pin this value directly (agents-terminal.test.ts).
 
-**`stdin.pause()` in cleanup**: `runAgentsTui` calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves and the CLI hangs.
+**`stdin.pause()` in cleanup**: The generic `runTui` driver calls `stdin.resume()` at startup and `stdin.pause()` in cleanup. Without `stdin.pause()`, the resumed stdin TTY handle keeps the Node event loop alive after the TUI resolves and the CLI hangs.
 
 **`FIXED_ROWS`/`computeViewportHeight` single-sourced from `render.ts`**: `terminal.ts` imports both from render.ts — no duplication.
 
@@ -375,7 +375,7 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - `src/cli/agents-view/state.ts` — pure reducer, `buildRow()`, `isDirtyModel()`, `isDirtyEffort()`, `persistedModelFor()`, `persistedEffortFor()`, `rowState()` (delegates to `classifyAgentState`), `unsavedCount()`
 - `src/cli/agents-view/render.ts` — pure frame renderer; `COL_STATE = 14`; exports `FIXED_ROWS`, `computeViewportHeight`
 - `src/cli/agents-view/terminal.ts` — thin adapter over the shared `runTui` driver (`src/cli/tui/terminal.ts`); exports `runAgentsTui()`, re-exports `TuiIO` and `MAX_KEYPRESSES` from tui/
-- `src/cli/tui/terminal.ts` — generic `runTui<S,A>` driver, `normalizeKey`, `TuiIO`, `MAX_KEYPRESSES`, `RenderDims`; shared by agents-view and flags-view
+- `src/cli/tui/terminal.ts` — generic `runTui<S,A,C>` driver (`RunTuiSpec`: `signalAction: Exclude<A,C>`, `continueIntent: C`, `screen?: 'alt'|'inline'`), `normalizeKey`, `TuiIO`, `MAX_KEYPRESSES`, `RenderDims`, `INLINE_MARGIN`; agents-view uses `signalAction='cancel'` + default `'alt'` screen; flags-view uses `signalAction='abort'` + `'inline'` screen
 - `src/cli/tui/cells.ts` — cell helper utilities (shared across TUI modules)
 - `src/assets/scripts/hooks/ensure-proxy` — SessionStart + UserPromptSubmit hook; writes `proxy.pid` after spawn; UserPromptSubmit exits before proxy-state reads; relay spawned via `env -i` 6-var allowlist
 - `src/cli/commands/init.ts` — proxy preflight block (4-check, no doctor, no spawn); `reapplyAgentMapping` guard after preflight; convergence writes `proxy.json enabled:false` on preflight failure
