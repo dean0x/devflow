@@ -263,6 +263,108 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect((settings['env'] as Record<string, string>)?.EXISTING_VAR).toBe('keep');
   });
 
+  it.skipIf(!CLI_BUILT)('REG-H1 probe: hand-set managed keys survive init when manifest never owned them', async () => {
+    // Scenario: user has an existing devflow install that predates the newly-registered flags
+    // (max-concurrent-subagents, default-model, spellcheck, workflowSizeGuideline).
+    // The user hand-set these keys in settings.json; on upgrade + reinit they must survive.
+    //
+    // Mechanism: ownedRecord = existingManifest.features.flags (no new keys)
+    // → convergeFlagsIntoSettings folds the settings values into the record
+    // → the folded record is written to manifest + applied to settings
+    // Net: concurrency stays '8' (not overridden by registry default 40).
+
+    // Existing manifest: FlagsRecord format, no new flags (pre-upgrade state)
+    const priorManifest = {
+      version: '2.0.0',
+      plugins: ['devflow-implement', 'devflow-code-review'],
+      scope: 'user',
+      knownPlugins: ['devflow-implement', 'devflow-code-review'],
+      features: {
+        ambient: true,
+        memory: true,
+        hud: true,
+        knowledge: true,
+        learning: true,
+        rules: true,
+        proxy: false,
+        flags: {
+          // Only the flags devflow previously wrote — no new valued flags
+          tui: true,
+          lsp: true,
+          'tool-search': true,
+        },
+        security: 'user' as const,
+        compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(
+      path.join(tmpHome, '.devflow', 'manifest.json'),
+      JSON.stringify(priorManifest, null, 2) + '\n',
+    );
+
+    // Settings.json with hand-set managed keys that devflow didn't previously own
+    const seedSettings = {
+      spellcheck: { command: 'hunspell' },           // string flag with wrapKey
+      workflowSizeGuideline: 'large',                 // enum flag
+      hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: 'echo hi' }] }] },
+      env: {
+        CUSTOM_USER_VAR: 'preserved',
+        CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '8',   // number flag: must stay '8', not become '40'
+        ANTHROPIC_DEFAULT_MODEL: 'claude-opus-4',    // string flag
+        CLAUDE_CODE_GOAL_CHECKIN_MINUTES: '15',      // number flag
+        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '5',   // number flag
+      },
+    };
+    await fs.writeFile(
+      path.join(tmpHome, '.claude', 'settings.json'),
+      JSON.stringify(seedSettings, null, 2) + '\n',
+    );
+
+    const result = runInit(tmpHome);
+    expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+
+    // Non-vacuity guard: settings pass must not have silently aborted
+    expect(
+      result.stdout + result.stderr,
+      'settings pass aborted — assertions below would be vacuous',
+    ).not.toContain('Could not configure settings.json');
+
+    const manifest = await readManifest(tmpHome);
+    const settings = await readSettings(tmpHome);
+    const flagsRecord = manifest.features.flags as Record<string, unknown>;
+    const env = settings['env'] as Record<string, string>;
+
+    // Whole-post-state: all six hand-set managed keys must survive
+    // concurrency: hand-set '8' must NOT become '40' (core REG-H1 probe)
+    expect(env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, 'concurrency hand-set "8" survived').toBe('8');
+    expect(flagsRecord['max-concurrent-subagents'], 'manifest concurrency is 8').toBe(8);
+
+    // default-model preserved
+    expect(env.ANTHROPIC_DEFAULT_MODEL, 'default-model "claude-opus-4" survived').toBe('claude-opus-4');
+    expect(flagsRecord['default-model'], 'manifest default-model is "claude-opus-4"').toBe('claude-opus-4');
+
+    // goal-checkin-minutes preserved
+    expect(env.CLAUDE_CODE_GOAL_CHECKIN_MINUTES, 'goal-checkin-minutes "15" survived').toBe('15');
+    expect(flagsRecord['goal-checkin-minutes'], 'manifest goal-checkin-minutes is 15').toBe(15);
+
+    // subagent-spawn-depth preserved
+    expect(env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, 'spawn-depth "5" survived').toBe('5');
+    expect(flagsRecord['subagent-spawn-depth'], 'manifest subagent-spawn-depth is 5').toBe(5);
+
+    // spellcheck preserved (wrapKey path: { command: 'hunspell' } → 'hunspell' → back to { command: 'hunspell' })
+    expect(settings['spellcheck'], 'spellcheck { command: "hunspell" } survived').toEqual({ command: 'hunspell' });
+    expect(flagsRecord['spellcheck'], 'manifest spellcheck is "hunspell"').toBe('hunspell');
+
+    // workflowSizeGuideline preserved
+    expect(settings['workflowSizeGuideline'], 'workflowSizeGuideline "large" survived').toBe('large');
+    expect(flagsRecord['workflow-size-guideline'], 'manifest workflow-size-guideline is "large"').toBe('large');
+
+    // User keys unrelated to devflow flags must survive too
+    expect(env.CUSTOM_USER_VAR, 'custom user env var preserved').toBe('preserved');
+  });
+
   it.skipIf(!CLI_BUILT)('idempotency: second run produces content-stable settings (no viewMode thrash)', async () => {
     // content-stable = deep-equal parsed objects (not byte-equal strings): stripFlags
     // removes managed keys from their original positions and applyFlags re-appends them

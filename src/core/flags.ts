@@ -931,3 +931,137 @@ export function resolveFinalViewMode(
   if (current !== undefined && current !== 'default') return current;
   return selected;
 }
+
+// ─── Fold-before-strip pipeline ───────────────────────────────────────────────
+
+/**
+ * Fold-before-strip pipeline — the single authoritative entry point for all
+ * settings.json mutation paths (applies PF-015, PF-017, ADR-014).
+ *
+ * Both `init.ts` and `persistFlagConfig` (flags.ts) MUST call this instead of
+ * invoking `stripFlags` + `applyFlags` directly; the invariant lives in the
+ * pipeline, not at call sites.
+ *
+ * Fold semantics (D15-adopt):
+ *
+ *   view-mode (Step 1): resolved via `resolveFinalViewMode` so an externally-set
+ *   `/focus` survives unless `viewModeExplicit` is true.
+ *
+ *   Valued flags — enum/number/string, excluding view-mode (Step 2):
+ *   The "claimed" set is determined by `opts.ownedRecord`:
+ *     - `undefined`  → use `record` itself (persistFlagConfig path — the manifest
+ *                      record IS what devflow claims)
+ *     - `null`       → nothing previously owned (fresh install)
+ *     - `FlagsRecord`→ the original manifest flags BEFORE seeding (init path)
+ *
+ *   A flag is "claimed" when it is present and non-null in the claimed set.
+ *   Claimed: record value wins (devflow previously set this value).
+ *   Unclaimed: fold from settings — if the user has a value in settings.json,
+ *   adopt it into the record (ADR-014 adoption, devflow takes ownership).
+ *
+ *   Boolean flags: never folded — on/off is always record-driven.
+ *
+ * The fold MUST run on pre-strip content — `stripFlags` removes the target
+ * keys, making any fold after strip vacuous.
+ *
+ * Uninstall note: `src/cli/commands/uninstall.ts` calls `stripFlags` directly
+ * with no record argument, preserving its full-sweep semantics. Do not change.
+ *
+ * Pure function: no I/O.
+ *
+ * @param settingsJson    Current settings.json content (pre-strip)
+ * @param record          FlagsRecord to fold into and apply
+ * @param opts.viewModeExplicit  true when the caller explicitly selected a view
+ *                        mode (TUI row changed or `--set view-mode=...` passed)
+ * @param opts.ownedRecord  Prior ownership set; see semantics above.
+ *                        Init path: `existingManifest?.features.flags ?? null`.
+ *                        persistFlagConfig path: omit (undefined).
+ * @returns `{ settings: updated JSON string, record: folded FlagsRecord }`
+ */
+export function convergeFlagsIntoSettings(
+  settingsJson: string,
+  record: FlagsRecord,
+  opts: {
+    viewModeExplicit: boolean;
+    ownedRecord?: FlagsRecord | null;
+  },
+): { settings: string; record: FlagsRecord } {
+  // ── Step 1: fold view-mode (must read pre-strip) ──────────────────────────
+  // PF-015: resolveExistingViewMode reads the viewMode key. stripFlags removes
+  // it as part of the view-mode registry entry. Reading after strip silently
+  // reverts an externally-set /focus.
+  const folded: FlagsRecord = {
+    ...record,
+    'view-mode': resolveFinalViewMode(
+      resolveExistingViewMode(settingsJson),
+      readViewMode(record),
+      opts.viewModeExplicit,
+    ),
+  };
+
+  // ── Step 2: fold existing values for valued flags (pre-strip) ────────────
+  // D15-adopt: for unclaimed valued flags, read the current settings value and
+  // adopt it into the record. Claimed flags (previously set by devflow) keep
+  // their record value; boolean flags are never folded.
+  //
+  // "Claimed" is determined by opts.ownedRecord:
+  //   undefined → use `record` (persistFlagConfig: manifest record = owned set)
+  //   null      → nothing claimed (fresh install)
+  //   FlagsRecord → original manifest flags before seeding (init path)
+  const claimedIn: FlagsRecord | null =
+    opts.ownedRecord !== undefined ? opts.ownedRecord : record;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(settingsJson) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  const env = asPlainObject(parsed.env);
+
+  for (const flag of FLAG_REGISTRY) {
+    if (flag.kind === 'boolean') continue;   // boolean flags: record-driven only
+    if (flag.id === 'view-mode') continue;   // already handled above
+
+    // Check whether devflow previously owned this flag's key.
+    // Any presence in claimedIn — including null (explicitly unset) — means
+    // devflow owns the slot; the record value (or its absence) wins over settings.
+    // Absence from claimedIn means devflow never wrote it → fold from settings.
+    const previouslyOwned =
+      claimedIn !== null &&
+      Object.prototype.hasOwnProperty.call(claimedIn, flag.id);
+    if (previouslyOwned) continue;
+
+    // Read the raw value from settings.json (before strip removes it)
+    const rawVal =
+      flag.target.type === 'env'
+        ? env?.[flag.target.key]
+        : parsed[flag.target.key];
+    if (rawVal === undefined) continue;
+
+    // Unwrap wrapKey-shaped values (e.g., spellcheck: { command: 'hunspell' } → 'hunspell')
+    let toCoerce: unknown = rawVal;
+    if (flag.kind === 'string' && flag.wrapKey !== undefined) {
+      const obj = asPlainObject(rawVal);
+      toCoerce = obj !== undefined ? obj[flag.wrapKey] : undefined;
+    }
+    if (toCoerce === undefined) continue;
+
+    // Env vars store numbers as strings ('8') — convert to number for coercion
+    if (flag.kind === 'number' && typeof toCoerce === 'string') {
+      const n = Number(toCoerce);
+      toCoerce = Number.isFinite(n) ? n : toCoerce;
+    }
+
+    const coerced = coerceFlagValue(flag, toCoerce);
+    if (coerced !== null) {
+      folded[flag.id] = coerced;
+    }
+  }
+
+  // ── Step 3: strip all managed keys, then apply the folded record ──────────
+  const stripped = stripFlags(settingsJson);
+  const settings = applyFlags(stripped, folded);
+
+  return { settings, record: folded };
+}

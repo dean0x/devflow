@@ -687,4 +687,57 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(successLines()).toContain('tui enabled');
     });
   });
+
+  // ─── view-mode preservation through persistFlagConfig (SEC-M3 / ARCH-H1) ─────
+  //
+  // Pinning: any mutation (--enable, --set non-view-mode) must NOT destroy a
+  // user-set viewMode:'focus' that devflow does not own (absent from manifest).
+
+  describe('view-mode preservation through persistFlagConfig', () => {
+    it('--enable brief: viewMode:"focus" survives when manifest has no view-mode entry', async () => {
+      // Scenario: user ran /focus in Claude Code → settings.json has viewMode:'focus'
+      // Manifest: no 'view-mode' key (devflow never wrote it)
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({}),   // no view-mode entry
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify({ viewMode: 'focus', hooks: {} }, null, 2) + '\n',
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--enable', 'brief'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      // whole-post-state: viewMode must survive the strip+apply pass
+      const settings = parseSettings(
+        await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'),
+      );
+      expect(settings.viewMode, 'viewMode:"focus" must survive --enable brief').toBe('focus');
+    });
+
+    it('--set view-mode=verbose: explicitly overrides the /focus-set viewMode', async () => {
+      // When the user explicitly targets view-mode, the record value wins over settings
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({}),
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify({ viewMode: 'focus', hooks: {} }, null, 2) + '\n',
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--set', 'view-mode=verbose'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(
+        await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'),
+      );
+      expect(settings.viewMode, '--set view-mode=verbose must override /focus').toBe('verbose');
+    });
+  });
 });

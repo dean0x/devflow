@@ -15,6 +15,7 @@ import {
   migrateLegacyFlagsToRecord,
   applyFlags,
   stripFlags,
+  convergeFlagsIntoSettings,
   // Kept verbatim
   VIEW_MODES,
   resolveExistingViewMode,
@@ -1260,5 +1261,152 @@ describe('VIEW_MODES', () => {
     expect(VIEW_MODES).toContain('default');
     expect(VIEW_MODES).toContain('verbose');
     expect(VIEW_MODES).toContain('focus');
+  });
+});
+
+// ─── convergeFlagsIntoSettings — SEC-M3 / ARCH-H1 / REG-H1 ──────────────────
+//
+// Pipeline invariant: valued flags found in settings.json that devflow does NOT
+// own (absent from ownedRecord) are folded into the record before strip, so they
+// survive the strip+apply pass. Whole-post-state style per PF-015.
+
+describe('convergeFlagsIntoSettings — view-mode preservation', () => {
+  const baseSettings = JSON.stringify(
+    { viewMode: 'focus', hooks: {}, env: {} },
+    null,
+    2,
+  );
+
+  it('/focus survives when viewModeExplicit=false and record says "default"', () => {
+    // Scenario: user set viewMode:'focus' via /focus (settings.json only, manifest = 'default')
+    const record: FlagsRecord = { 'view-mode': 'default' };
+    const { settings, record: out } = convergeFlagsIntoSettings(baseSettings, record, {
+      viewModeExplicit: false,
+    });
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    // viewMode 'focus' is non-neutral — key must be present
+    expect(parsed.viewMode, 'viewMode preserved as "focus"').toBe('focus');
+    expect(out['view-mode'], 'returned record reflects "focus"').toBe('focus');
+  });
+
+  it('explicit viewModeExplicit=true: record "verbose" wins over settings "focus"', () => {
+    const record: FlagsRecord = { 'view-mode': 'verbose' };
+    const { settings, record: out } = convergeFlagsIntoSettings(baseSettings, record, {
+      viewModeExplicit: true,
+    });
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed.viewMode, 'viewMode overridden to "verbose"').toBe('verbose');
+    expect(out['view-mode']).toBe('verbose');
+  });
+
+  it('settings viewMode "default" (neutral) — key absent in output', () => {
+    const settingsDefault = JSON.stringify({ hooks: {} }, null, 2);
+    const record: FlagsRecord = { 'view-mode': 'default' };
+    const { settings } = convergeFlagsIntoSettings(settingsDefault, record, {
+      viewModeExplicit: false,
+    });
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed.viewMode, 'neutral view-mode must not add viewMode key').toBeUndefined();
+  });
+});
+
+describe('convergeFlagsIntoSettings — REG-H1: hand-set managed keys survive', () => {
+  // Settings.json with six hand-set managed keys that devflow now claims in the registry
+  // but the OLD manifest never wrote (ownedRecord = null, simulating upgrade).
+  // After convergeFlagsIntoSettings the values must be preserved.
+  const makeSettings = (): string =>
+    JSON.stringify(
+      {
+        hooks: {},
+        // setting-target flags:
+        spellcheck: { command: 'hunspell' },
+        workflowSizeGuideline: 'large',
+        // env-target flags:
+        env: {
+          CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '8',
+          ANTHROPIC_DEFAULT_MODEL: 'claude-opus-4',
+          CLAUDE_CODE_GOAL_CHECKIN_MINUTES: '15',
+          CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '5',
+        },
+      },
+      null,
+      2,
+    );
+
+  it('whole post-state: all six hand-set keys survive when ownedRecord=null', () => {
+    // Simulate resolveSeedFlags adopting devflow defaults into the record:
+    const seededRecord: FlagsRecord = {
+      'max-concurrent-subagents': 40,   // registry default adopted by resolveSeedFlags
+      'spellcheck': null,               // absent in old manifest → null (unset)
+      'workflow-size-guideline': null,  // absent in old manifest → null (unset)
+    };
+
+    const { settings, record: out } = convergeFlagsIntoSettings(
+      makeSettings(),
+      seededRecord,
+      {
+        viewModeExplicit: false,
+        ownedRecord: null,   // nothing previously owned (fresh upgrade — REG-H1 probe)
+      },
+    );
+    const parsed = JSON.parse(settings) as {
+      spellcheck?: unknown;
+      workflowSizeGuideline?: unknown;
+      env?: Record<string, unknown>;
+      hooks?: unknown;
+    };
+
+    // spellcheck preserved with wrapKey unwrap → re-wrapped on write
+    expect(parsed.spellcheck, 'spellcheck preserved').toEqual({ command: 'hunspell' });
+
+    // workflowSizeGuideline preserved
+    expect(parsed.workflowSizeGuideline, 'workflowSizeGuideline preserved').toBe('large');
+
+    // env vars preserved
+    expect(parsed.env?.['CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS'], 'concurrency stays "8"').toBe('8');
+    expect(parsed.env?.['ANTHROPIC_DEFAULT_MODEL'], 'default-model preserved').toBe('claude-opus-4');
+    expect(parsed.env?.['CLAUDE_CODE_GOAL_CHECKIN_MINUTES'], 'goal-checkin preserved').toBe('15');
+    expect(parsed.env?.['CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH'], 'spawn-depth preserved').toBe('5');
+
+    // returned record also reflects adopted values
+    expect(out['max-concurrent-subagents'], 'record: concurrency is 8').toBe(8);
+    expect(out['spellcheck'], 'record: spellcheck is "hunspell"').toBe('hunspell');
+    expect(out['workflow-size-guideline'], 'record: workflow-size-guideline is "large"').toBe('large');
+    expect(out['default-model'], 'record: default-model is "claude-opus-4"').toBe('claude-opus-4');
+    expect(out['goal-checkin-minutes'], 'record: goal-checkin-minutes is 15').toBe(15);
+    expect(out['subagent-spawn-depth'], 'record: subagent-spawn-depth is 5').toBe(5);
+  });
+
+  it('previously-owned value wins over settings value', () => {
+    // devflow previously wrote max-concurrent-subagents: 40 — settings has '8'
+    // The owned record takes precedence; fold must NOT override with '8'
+    const seededRecord: FlagsRecord = { 'max-concurrent-subagents': 40 };
+    const ownedRecord: FlagsRecord = { 'max-concurrent-subagents': 40 };
+
+    const { settings, record: out } = convergeFlagsIntoSettings(
+      makeSettings(),
+      seededRecord,
+      { viewModeExplicit: false, ownedRecord },
+    );
+    const parsed = JSON.parse(settings) as { env?: Record<string, unknown> };
+    // devflow's owned value (40) wins — settings '8' is ignored
+    expect(parsed.env?.['CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS'], 'owned 40 wins').toBe('40');
+    expect(out['max-concurrent-subagents'], 'record stays 40').toBe(40);
+  });
+
+  it('uninstall full-sweep: stripFlags removes all managed keys regardless of record', () => {
+    // stripFlags(json) with no second arg — full-sweep semantics must be unchanged
+    const settings = makeSettings();
+    const stripped = JSON.parse(stripFlags(settings)) as {
+      spellcheck?: unknown;
+      workflowSizeGuideline?: unknown;
+      env?: Record<string, unknown>;
+    };
+    expect(stripped.spellcheck, 'spellcheck removed on full sweep').toBeUndefined();
+    expect(stripped.workflowSizeGuideline, 'workflowSizeGuideline removed on full sweep').toBeUndefined();
+    expect(stripped.env?.['CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS'], 'concurrency removed on full sweep').toBeUndefined();
+    expect(stripped.env?.['ANTHROPIC_DEFAULT_MODEL'], 'default-model removed on full sweep').toBeUndefined();
+    expect(stripped.env?.['CLAUDE_CODE_GOAL_CHECKIN_MINUTES'], 'goal-checkin removed on full sweep').toBeUndefined();
+    expect(stripped.env?.['CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH'], 'spawn-depth removed on full sweep').toBeUndefined();
   });
 });

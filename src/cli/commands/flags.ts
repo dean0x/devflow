@@ -4,8 +4,8 @@
  * D-P3-1: Typed flags CLI rewrite (Phase 3).
  *   - createFlagsCommand() factory — fresh Commander instance per call;
  *     used by tests; src/cli.ts consumes the flagsCommand singleton export.
- *   - Persist pipeline: stripFlags → applyFlags(stripped, record) — reuses
- *     core helpers; no hand-rolled env/setting key writes.
+ *   - Persist pipeline: convergeFlagsIntoSettings (fold-before-strip) — the
+ *     single pipeline entry point shared with init.ts (ARCH-H1, PF-015/017).
  *   - PF-014 (process.exit swallows async work): all error paths set
  *     process.exitCode = 1 and return; never call process.exit().
  *   - PF-015 (multi-artifact fan-out): compute record first; settings write
@@ -27,8 +27,7 @@ import {
 } from '../../targets/claude-code/claude-paths.js';
 import {
   FLAG_REGISTRY,
-  applyFlags,
-  stripFlags,
+  convergeFlagsIntoSettings,
   parseFlagValueInput,
   formatFlagValue,
   neutralValueOf,
@@ -79,9 +78,12 @@ async function readSettingsSafe(
 /**
  * Persist a FlagsRecord to settings.json and manifest.
  *
- * Strip-then-apply (invariant INV-1): stripFlags removes all managed keys
- * then applyFlags re-applies the full record. This keeps settings.json
- * derived unconditionally from the record, with no residual stale keys.
+ * Uses `convergeFlagsIntoSettings` (ARCH-H1: fold-before-strip pipeline) so the
+ * invariant lives in the pipeline, not at call sites. This ensures that:
+ *   - An externally-set /focus survives unless viewModeExplicit is true (PF-015).
+ *   - Valued flags not yet claimed by devflow (absent from the manifest record)
+ *     have their existing settings values preserved rather than stripped (REG-H1,
+ *     SEC-M3, ADR-014).
  *
  * PF-015: settings write and manifest write are evaluated independently.
  * Each failure is reported with its own message and exit code 1.
@@ -101,10 +103,18 @@ async function persistFlagConfig(
   devflowDir: string,
   settingsContent: string,
   newRecord: FlagsRecord,
+  opts: { viewModeExplicit: boolean } = { viewModeExplicit: false },
 ): Promise<boolean> {
-  // PF-015: compute the final settings content BEFORE any write.
-  const stripped = stripFlags(settingsContent);
-  const updatedSettings = applyFlags(stripped, newRecord);
+  // D15: convergeFlagsIntoSettings is the fold-before-strip pipeline entry point
+  // (applies PF-015, PF-017, REG-H1, ARCH-H1). ownedRecord is omitted so the
+  // `newRecord` (the manifest record) serves as the owned set — a key present in
+  // the manifest means devflow previously claimed it; absent = never written by
+  // devflow, so the existing settings value is adopted.
+  const { settings: updatedSettings, record: foldedRecord } = convergeFlagsIntoSettings(
+    settingsContent,
+    newRecord,
+    opts,
+  );
 
   let settingsOk = true;
   let manifestOk = true;
@@ -123,9 +133,11 @@ async function persistFlagConfig(
   }
 
   // Manifest write — independent error path (avoids PF-015 fan-out).
+  // Uses foldedRecord (not newRecord) so adopted values are persisted to the
+  // manifest, keeping manifest ↔ settings.json in sync.
   const manifest = await readManifest(devflowDir);
   if (manifest) {
-    manifest.features.flags = newRecord;
+    manifest.features.flags = foldedRecord;
     manifest.updatedAt = new Date().toISOString();
     try {
       await writeManifest(devflowDir, manifest);
@@ -419,7 +431,13 @@ export function createFlagsCommand(): Command {
           newRecord[id] = value ?? neutralValueOf(flag);
         }
 
-        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        // viewModeExplicit: true when the user explicitly assigned view-mode in --set.
+        // This lets the chosen value override an externally-set /focus.
+        const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
+        const ok = await persistFlagConfig(
+          claudeDir, devflowDir, settingsResult.content, newRecord,
+          { viewModeExplicit },
+        );
 
         if (ok) {
           for (const { id, value } of assignments) {
@@ -466,7 +484,12 @@ export function createFlagsCommand(): Command {
           newRecord[id] = neutralValueOf(flag);
         }
 
-        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+        // viewModeExplicit: true when the user explicitly unset view-mode.
+        const viewModeExplicit = ids.includes('view-mode');
+        const ok = await persistFlagConfig(
+          claudeDir, devflowDir, settingsResult.content, newRecord,
+          { viewModeExplicit },
+        );
 
         if (ok) {
           for (const id of ids) {
@@ -503,7 +526,9 @@ export function createFlagsCommand(): Command {
 
         if (result.action === 'save') {
           const newRecord = collectFlagRecord(result.rows);
-          const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
+          // viewModeExplicit: true if the user changed the view-mode row in the TUI
+          const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
+          const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord, { viewModeExplicit });
           if (ok) {
             process.stdout.write('Flags saved.\n');
           }

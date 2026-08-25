@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { applyFlags, stripFlags, FLAG_REGISTRY, resolveExistingViewMode, resolveFinalViewMode, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
+import { convergeFlagsIntoSettings, FLAG_REGISTRY, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -1630,24 +1630,25 @@ export const initCommand = new Command('init')
       // Strip Devflow-managed teammateMode ("auto"). User-set values (e.g. "tmux") are preserved.
       content = stripDevflowTeammateModeFromJson(content);
 
-      // Claude Code flags — fold view-mode before strip, then strip+apply in one pass.
-      // PF-015 (fold-before-strip): resolveExistingViewMode MUST run on the pre-strip
-      // content because stripFlags removes the viewMode key as part of the view-mode
-      // flag's onPayload cleanup. Reading after strip would always return undefined.
-      //
-      // - explicit=true (interactive TUI save or --reset): the TUI-selected view-mode wins
-      // - explicit=false (recommended/non-TTY): preserve an externally-set /focus value;
-      //   otherwise use the seeded value (which already reflects the prior manifest state)
-      enabledFlags = {
-        ...enabledFlags,
-        'view-mode': resolveFinalViewMode(
-          resolveExistingViewMode(content),
-          readViewMode(enabledFlags),
-          viewModeExplicit,
-        ),
-      };
-      content = stripFlags(content);
-      content = applyFlags(content, enabledFlags);
+      // Claude Code flags — convergeFlagsIntoSettings is the single pipeline entry point
+      // (ARCH-H1, applies PF-015/PF-017/ADR-014): fold valued flags and view-mode from
+      // existing settings before strip, then strip all managed keys and apply the folded
+      // record. ownedRecord=existingManifest?.features.flags??null distinguishes keys
+      // devflow previously wrote (must not be overridden by fold) from keys newly adopted
+      // by resolveSeedFlags from registry defaults (may be overridden by fold to preserve
+      // user-set hand values — e.g., a hand-set concurrency of '8' survives upgrade).
+      {
+        const { settings: flaggedContent, record: foldedFlags } = convergeFlagsIntoSettings(
+          content,
+          enabledFlags,
+          {
+            viewModeExplicit,
+            ownedRecord: existingManifest?.features.flags ?? null,
+          },
+        );
+        content = flaggedContent;
+        enabledFlags = foldedFlags;
+      }
 
       // Proxy hooks (SessionStart + UserPromptSubmit) — strip-then-add, idempotent.
       // Parse Settings once for the hook mutation; env mutation stays in string space.
