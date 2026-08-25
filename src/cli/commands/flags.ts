@@ -32,6 +32,8 @@ import {
   parseFlagValueInput,
   formatFlagValue,
   neutralValueOf,
+  describeFlagKind,
+  expectedInputFor,
   type ClaudeCodeFlag,
   type FlagsRecord,
   type FlagsRecordValue,
@@ -254,23 +256,7 @@ function formatStatusRows(record: FlagsRecord): string[] {
 async function handleList(): Promise<void> {
   p.intro(color.bgCyan(color.black(' Claude Code Flags ')));
   for (const flag of FLAG_REGISTRY) {
-    const kindLabel = flag.kind === 'boolean'
-      ? 'boolean'
-      : flag.kind === 'enum'
-        ? `enum [${(flag as import('../../core/flags.js').EnumFlagDef).values.join('|')}]`
-        : flag.kind === 'number'
-          ? (() => {
-              const nf = flag as import('../../core/flags.js').NumberFlagDef;
-              const parts: string[] = [];
-              if (nf.min !== undefined) parts.push(`min=${nf.min}`);
-              if (nf.max !== undefined) parts.push(`max=${nf.max}`);
-              if (nf.integer) parts.push('integer');
-              return `number${parts.length ? ' ' + parts.join(' ') : ''}`;
-            })()
-          : (() => {
-              const sf = flag as import('../../core/flags.js').StringFlagDef;
-              return `string${sf.maxLength !== undefined ? ` maxLen=${sf.maxLength}` : ''}`;
-            })();
+    const kindLabel = describeFlagKind(flag);
     const targetInfo = flag.target.type === 'env'
       ? `env ${flag.target.key}`
       : `setting ${flag.target.key}`;
@@ -285,6 +271,7 @@ async function handleList(): Promise<void> {
       `  ${color.dim(flag.hint)} — default: ${color.cyan(defaultLabel)}`,
     );
   }
+  p.outro(color.dim('Use --enable / --disable / --set / --unset to manage flags'));
 }
 
 /** Handle --status: read-only status table, degrades gracefully without a manifest. */
@@ -299,6 +286,7 @@ async function handleStatus(devflowDir: string): Promise<void> {
   for (const row of formatStatusRows(record)) {
     p.log.info(row);
   }
+  p.outro(color.dim('Use --enable / --disable / --set / --unset to change flags'));
 }
 
 /**
@@ -402,7 +390,7 @@ async function handleSet(
       // parseFlagValueInput returns null both for 'unset' and for invalid values.
       // If the input isn't literally 'unset', the null means invalid.
       p.log.error(`Invalid value for ${color.bold(id)}: ${color.bold(text)}`);
-      p.log.info(`Expected: ${flag.kind === 'boolean' ? 'true|false|unset' : flag.kind === 'enum' ? ((flag as import('../../core/flags.js').EnumFlagDef).values.join('|') + '|unset') : `a valid ${flag.kind} value or unset`}`);
+      p.log.info(`Expected: ${expectedInputFor(flag)}`);
       process.exitCode = 1;
       return;
     }
@@ -553,10 +541,10 @@ async function handleBare(
         { viewModeExplicit },
       );
       if (persistResult.ok) {
-        process.stdout.write('Flags saved.\n');
+        p.outro(color.green('Flags saved.'));
       }
     } else {
-      process.stdout.write('No changes made.\n');
+      p.outro(color.dim('No changes made.'));
     }
   } else {
     // non-TTY: status table — degrades gracefully without manifest (read-only).

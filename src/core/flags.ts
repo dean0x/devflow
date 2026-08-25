@@ -596,6 +596,62 @@ export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRe
 }
 
 /**
+ * Returns a human-readable kind label for a flag — used by --list output.
+ *
+ * Exhaustive switch (no default): TypeScript narrows on `flag.kind` so the
+ * per-kind casts that appeared in the previous nested ternary at the call
+ * site are unnecessary here; each branch sees the narrowed subtype directly.
+ *
+ * Output examples:
+ *   boolean                      → 'boolean'
+ *   enum [small|medium|large|…]  → 'enum [small|medium|large|…]'
+ *   number min=1 max=100 integer → 'number min=1 max=100 integer'
+ *   string maxLen=64             → 'string maxLen=64'
+ */
+export function describeFlagKind(flag: ClaudeCodeFlag): string {
+  switch (flag.kind) {
+    case 'boolean':
+      return 'boolean';
+    case 'enum':
+      return `enum [${flag.values.join('|')}]`;
+    case 'number': {
+      const parts: string[] = [];
+      if (flag.min !== undefined) parts.push(`min=${flag.min}`);
+      if (flag.max !== undefined) parts.push(`max=${flag.max}`);
+      if (flag.integer) parts.push('integer');
+      return `number${parts.length ? ' ' + parts.join(' ') : ''}`;
+    }
+    case 'string':
+      return `string${flag.maxLength !== undefined ? ` maxLen=${flag.maxLength}` : ''}`;
+  }
+}
+
+/**
+ * Returns the expected-input hint shown by --set when a value is invalid.
+ *
+ * Exhaustive switch — per-kind casts from the former triple-nested ternary
+ * in flags.ts are gone; TypeScript narrows each arm directly.
+ *
+ * Output examples:
+ *   boolean → 'true|false|unset'
+ *   enum    → 'small|medium|large|unrestricted|unset'
+ *   number  → 'a valid number value or unset'
+ *   string  → 'a valid string value or unset'
+ */
+export function expectedInputFor(flag: ClaudeCodeFlag): string {
+  switch (flag.kind) {
+    case 'boolean':
+      return 'true|false|unset';
+    case 'enum':
+      return `${flag.values.join('|')}|unset`;
+    case 'number':
+      return 'a valid number value or unset';
+    case 'string':
+      return 'a valid string value or unset';
+  }
+}
+
+/**
  * Format a flag value for display.
  *
  * Vocabulary (applies ADR-016 — one syntax, one semantic):

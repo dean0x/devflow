@@ -9,6 +9,8 @@ import {
   coerceFlagValue,
   parseFlagValueInput,
   formatFlagValue,
+  describeFlagKind,
+  expectedInputFor,
   countActiveFlags,
   readViewMode,
   sanitizeFlagsRecord,
@@ -1495,5 +1497,136 @@ describe('stripFlags — non-object root guard (REL-M2)', () => {
 
   it('does NOT throw on a valid plain-object root', () => {
     expect(() => stripFlags('{}')).not.toThrow();
+  });
+});
+
+// ─── describeFlagKind (CPLX-SF3) ─────────────────────────────────────────────
+//
+// Replaces the 4-level nested ternary in handleList. Exhaustive switch —
+// TypeScript narrows each case so no per-kind casts are needed.
+
+describe('describeFlagKind', () => {
+  it('boolean flag → "boolean"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'tui')!;
+    expect(describeFlagKind(flag)).toBe('boolean');
+  });
+
+  it('enum flag → "enum [small|medium|large|unrestricted]"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'workflow-size-guideline')!;
+    expect(describeFlagKind(flag)).toBe('enum [small|medium|large|unrestricted]');
+  });
+
+  it('enum flag with neutralValue → includes all values', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'view-mode')!;
+    expect(describeFlagKind(flag)).toBe('enum [default|verbose|focus]');
+  });
+
+  it('number flag with min, max, integer → includes all constraints', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    expect(describeFlagKind(flag)).toBe('number min=1 max=100 integer');
+  });
+
+  it('number flag with min=0 → includes min=0', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'goal-checkin-minutes')!;
+    expect(describeFlagKind(flag)).toBe('number min=0 max=1440 integer');
+  });
+
+  it('number flag with no bounds (subagent-spawn-depth has bounds) → includes them', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'subagent-spawn-depth')!;
+    expect(describeFlagKind(flag)).toBe('number min=1 max=10 integer');
+  });
+
+  it('string flag with maxLength → includes maxLen=', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'default-model')!;
+    expect(describeFlagKind(flag)).toBe('string maxLen=64');
+  });
+
+  it('string flag with larger maxLength → correct value', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'spellcheck')!;
+    expect(describeFlagKind(flag)).toBe('string maxLen=256');
+  });
+
+  it('every registry flag returns a non-empty string without throwing', () => {
+    for (const flag of FLAG_REGISTRY) {
+      const label = describeFlagKind(flag);
+      expect(typeof label, `${flag.id}: returns string`).toBe('string');
+      expect(label.length, `${flag.id}: non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it('output is byte-identical to the former ternary for all registry flags', () => {
+    // Reference implementation — the ternary that describeFlagKind replaces —
+    // preserved here as the ground truth for the regression comparison.
+    function legacyKindLabel(flag: ClaudeCodeFlag): string {
+      if (flag.kind === 'boolean') return 'boolean';
+      if (flag.kind === 'enum') return `enum [${(flag as EnumFlagDef).values.join('|')}]`;
+      if (flag.kind === 'number') {
+        const nf = flag as NumberFlagDef;
+        const parts: string[] = [];
+        if (nf.min !== undefined) parts.push(`min=${nf.min}`);
+        if (nf.max !== undefined) parts.push(`max=${nf.max}`);
+        if (nf.integer) parts.push('integer');
+        return `number${parts.length ? ' ' + parts.join(' ') : ''}`;
+      }
+      const sf = flag as StringFlagDef;
+      return `string${sf.maxLength !== undefined ? ` maxLen=${sf.maxLength}` : ''}`;
+    }
+
+    for (const flag of FLAG_REGISTRY) {
+      expect(describeFlagKind(flag), `${flag.id}: matches legacy output`).toBe(legacyKindLabel(flag));
+    }
+  });
+});
+
+// ─── expectedInputFor (CPLX-SF4) ─────────────────────────────────────────────
+//
+// Replaces the triple-nested conditional in the --set Expected: hint.
+// Output must match the former inline expression for all flag kinds.
+
+describe('expectedInputFor', () => {
+  it('boolean flag → "true|false|unset"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'tui')!;
+    expect(expectedInputFor(flag)).toBe('true|false|unset');
+  });
+
+  it('enum flag → values joined by | plus "|unset"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'workflow-size-guideline')!;
+    expect(expectedInputFor(flag)).toBe('small|medium|large|unrestricted|unset');
+  });
+
+  it('enum flag with neutralValue → all values included', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'view-mode')!;
+    expect(expectedInputFor(flag)).toBe('default|verbose|focus|unset');
+  });
+
+  it('number flag → "a valid number value or unset"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    expect(expectedInputFor(flag)).toBe('a valid number value or unset');
+  });
+
+  it('string flag → "a valid string value or unset"', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'default-model')!;
+    expect(expectedInputFor(flag)).toBe('a valid string value or unset');
+  });
+
+  it('every registry flag returns a non-empty string without throwing', () => {
+    for (const flag of FLAG_REGISTRY) {
+      const hint = expectedInputFor(flag);
+      expect(typeof hint, `${flag.id}: returns string`).toBe('string');
+      expect(hint.length, `${flag.id}: non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it('output is byte-identical to the former ternary for all registry flags', () => {
+    // Reference — the three-way conditional from handleSet preserved as ground truth.
+    function legacyExpected(flag: ClaudeCodeFlag): string {
+      if (flag.kind === 'boolean') return 'true|false|unset';
+      if (flag.kind === 'enum') return (flag as EnumFlagDef).values.join('|') + '|unset';
+      return `a valid ${flag.kind} value or unset`;
+    }
+
+    for (const flag of FLAG_REGISTRY) {
+      expect(expectedInputFor(flag), `${flag.id}: matches legacy output`).toBe(legacyExpected(flag));
+    }
   });
 });

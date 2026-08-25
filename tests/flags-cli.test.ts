@@ -938,7 +938,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
       const freshCmd = createFlagsCommand();
 
-      // Suppress 'Flags saved.\n' so it does not pollute test output.
+      // Suppress any residual process.stdout.write calls (p.outro is already mocked).
       const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       try {
         await freshCmd.parseAsync([], { from: 'user' });
