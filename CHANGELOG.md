@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] - 2026-08-25
 
 ### Added
 - **Typed flag registry**: the flag surface is now a discriminated-union registry of 28 Claude Code flags — `boolean`, `enum`, `number`, and `string` kinds with per-flag validation, defaults, and display metadata. Eight new upstream-verified flags including `max-concurrent-subagents` (devflow default 40; upstream 20), `subagent-spawn-depth`, `workflow-size-guideline`, `goal-checkin-minutes`, `default-model`, `spellcheck`, and `enable-todo-tools`.
@@ -1184,6 +1184,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[2.1.0]: https://github.com/dean0x/devflow/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/dean0x/devflow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dean0x/devflow/compare/v1.8.3...v2.0.0
 [1.8.3]: https://github.com/dean0x/devflow/compare/v1.8.2...v1.8.3
