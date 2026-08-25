@@ -153,6 +153,360 @@ async function persistFlagConfig(
   return settingsOk && manifestOk;
 }
 
+// ─── Shared utilities ─────────────────────────────────────────────────────────
+
+/** Loaded manifest + settings.json content for the mutating CLI branches. */
+interface FlagContext {
+  manifest: NonNullable<Awaited<ReturnType<typeof readManifest>>>;
+  settingsContent: string;
+}
+
+/**
+ * Load manifest and settings.json for the mutating CLI branches.
+ *
+ * Returns a discriminated result — never exits itself. The dispatcher or handler
+ * reports the reason and sets process.exitCode = 1 on failure (avoids PF-014).
+ * One shared load path means a fix lands once, not four times (applies PF-017 —
+ * the four copies of the same preamble are exactly the "fix on one site, miss the
+ * other three" shape).
+ */
+async function loadFlagContext(
+  claudeDir: string,
+  devflowDir: string,
+): Promise<{ ok: true; value: FlagContext } | { ok: false; reason: string }> {
+  const manifest = await readManifest(devflowDir);
+  if (!manifest) {
+    return { ok: false, reason: 'No devflow installation found — run devflow init first' };
+  }
+  const settingsResult = await readSettingsSafe(path.join(claudeDir, 'settings.json'));
+  if (!settingsResult.ok) {
+    return { ok: false, reason: settingsResult.reason };
+  }
+  return { ok: true, value: { manifest, settingsContent: settingsResult.content } };
+}
+
+/**
+ * Format the current FlagsRecord as a status table — one row per registry flag.
+ *
+ * Shared between --status (p.log.info sink) and bare non-TTY (process.stdout.write
+ * sink). Both call sites choose their own sink; this function produces the row
+ * strings only (CPLX-SF5, CONS-M3: the longer "not adopted — default X applies
+ * on next devflow init" wording is kept in both surfaces; the short form dropped
+ * the actionable second half).
+ *
+ * Returns plain strings — sanitizeCell strips control characters to prevent a
+ * persisted LF/TAB from reshaping the line-oriented table (applies SEC-M1).
+ */
+function formatStatusRows(record: FlagsRecord): string[] {
+  return FLAG_REGISTRY.map(flag => {
+    const value = Object.prototype.hasOwnProperty.call(record, flag.id)
+      ? record[flag.id]
+      : undefined;
+    // sanitizeCell: defence in depth — a persisted LF/TAB must not inject extra
+    // rows into the line-oriented table (applies SEC-M1).
+    const rawDisplay = value !== undefined
+      ? formatFlagValue(flag, value)
+      : `not adopted — default ${String(flag.defaultValue ?? 'unset')} applies on next devflow init`;
+    const displayValue = sanitizeCell(rawDisplay);
+    return `${flag.id.padEnd(28)} ${displayValue}`;
+  });
+}
+
+// ─── Branch handlers ──────────────────────────────────────────────────────────
+//
+// One named async handler per CLI branch — each is independently readable and
+// carries one responsibility. The dispatcher (createFlagsCommand action) is ~15
+// lines and routes without logic of its own (ARCH-M1, CPLX-H1).
+
+/** Handle --list: read-only registry dump, no manifest required. */
+async function handleList(): Promise<void> {
+  p.intro(color.bgCyan(color.black(' Claude Code Flags ')));
+  for (const flag of FLAG_REGISTRY) {
+    const kindLabel = flag.kind === 'boolean'
+      ? 'boolean'
+      : flag.kind === 'enum'
+        ? `enum [${(flag as import('../../core/flags.js').EnumFlagDef).values.join('|')}]`
+        : flag.kind === 'number'
+          ? (() => {
+              const nf = flag as import('../../core/flags.js').NumberFlagDef;
+              const parts: string[] = [];
+              if (nf.min !== undefined) parts.push(`min=${nf.min}`);
+              if (nf.max !== undefined) parts.push(`max=${nf.max}`);
+              if (nf.integer) parts.push('integer');
+              return `number${parts.length ? ' ' + parts.join(' ') : ''}`;
+            })()
+          : (() => {
+              const sf = flag as import('../../core/flags.js').StringFlagDef;
+              return `string${sf.maxLength !== undefined ? ` maxLen=${sf.maxLength}` : ''}`;
+            })();
+    const targetInfo = flag.target.type === 'env'
+      ? `env ${flag.target.key}`
+      : `setting ${flag.target.key}`;
+    const defaultLabel = flag.defaultValue !== undefined && flag.defaultValue !== null
+      ? String(flag.defaultValue)
+      : 'unset';
+    const recLabel = flag.recommended ? color.green('recommended') : color.dim('optional');
+    p.log.info(
+      `${color.bold(flag.id.padEnd(28))} ${recLabel.padEnd(20)} ${color.dim(kindLabel.padEnd(36))} ${color.dim(targetInfo)}`,
+    );
+    p.log.info(
+      `  ${color.dim(flag.hint)} — default: ${color.cyan(defaultLabel)}`,
+    );
+  }
+}
+
+/** Handle --status: read-only status table, degrades gracefully without a manifest. */
+async function handleStatus(devflowDir: string): Promise<void> {
+  p.intro(color.bgCyan(color.black(' Claude Code Flags — Status ')));
+  const manifest = await readManifest(devflowDir);
+  if (!manifest) {
+    p.log.warn('Devflow is not installed — run devflow init first');
+    p.log.info('Showing registry defaults only:');
+  }
+  const record: FlagsRecord = manifest?.features.flags ?? {};
+  for (const row of formatStatusRows(record)) {
+    p.log.info(row);
+  }
+}
+
+/**
+ * Handle --enable/--disable: set boolean flags to the given value.
+ *
+ * Collapsed from two identical 50-line branches into one handler parameterized by
+ * `value: boolean` — the only deltas were the record assignment (true vs false)
+ * and one error-message string (--set vs --unset as the suggested alternative)
+ * (CPLX-H2 — applies PF-017: one fix lands once, not twice).
+ */
+async function handleSetBooleans(
+  claudeDir: string,
+  devflowDir: string,
+  ids: string[],
+  value: boolean,
+): Promise<void> {
+  // Validate: must be known boolean flags only
+  for (const id of ids) {
+    const flag = lookupFlag(id);
+    if (!flag) {
+      p.log.error(`Unknown flag: ${color.bold(id)}`);
+      p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (flag.kind !== 'boolean') {
+      const alt = value ? `--set ${id}=value` : `--unset ${id}`;
+      p.log.error(`${color.bold(id)} is a ${flag.kind} flag — use ${color.bold(alt)} to ${value ? 'set' : 'clear'} it`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // Manifest required for mutating ops (avoids settings/manifest desync)
+  const ctx = await loadFlagContext(claudeDir, devflowDir);
+  if (!ctx.ok) {
+    p.log.error(ctx.reason);
+    process.exitCode = 1;
+    return;
+  }
+
+  // PF-015: compute new record before any write
+  const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
+  for (const id of ids) {
+    newRecord[id] = value;
+  }
+
+  const ok = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord);
+
+  if (ok) {
+    for (const id of ids) {
+      if (value) {
+        p.log.success(`${id} enabled`);
+      } else {
+        // Route through formatFlagValue (applies ADR-016 — one vocabulary,
+        // shared with --status and TUI so the three surfaces cannot drift).
+        const flag = lookupFlag(id)!;
+        p.log.success(`${id} ${formatFlagValue(flag, false)}`);
+      }
+    }
+  }
+}
+
+/** Handle --set id=value (repeatable): validate all assignments then persist. */
+async function handleSet(
+  claudeDir: string,
+  devflowDir: string,
+  setValues: string[],
+): Promise<void> {
+  // Phase: parse and validate ALL assignments before any mutation.
+  const assignments: Array<{ id: string; flag: ClaudeCodeFlag; value: FlagsRecordValue }> = [];
+
+  for (const assignment of setValues) {
+    // Split on first = only — rest is the value (e.g. spellcheck=a=b → id='spellcheck', value='a=b')
+    const eqIdx = assignment.indexOf('=');
+    if (eqIdx === -1) {
+      p.log.error(`Invalid --set format: ${color.bold(assignment)} — expected id=value`);
+      process.exitCode = 1;
+      return;
+    }
+    const id = assignment.slice(0, eqIdx);
+    const text = assignment.slice(eqIdx + 1);
+
+    // Prototype pollution guard (applies PF-023)
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') {
+      p.log.error(`Unknown flag: ${color.bold(id)}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const flag = lookupFlag(id);
+    if (!flag) {
+      p.log.error(`Unknown flag: ${color.bold(id)}`);
+      p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const value = parseFlagValueInput(flag, text);
+    if (value === null && text !== 'unset') {
+      // parseFlagValueInput returns null both for 'unset' and for invalid values.
+      // If the input isn't literally 'unset', the null means invalid.
+      p.log.error(`Invalid value for ${color.bold(id)}: ${color.bold(text)}`);
+      p.log.info(`Expected: ${flag.kind === 'boolean' ? 'true|false|unset' : flag.kind === 'enum' ? ((flag as import('../../core/flags.js').EnumFlagDef).values.join('|') + '|unset') : `a valid ${flag.kind} value or unset`}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    assignments.push({ id, flag, value });
+  }
+
+  // All assignments valid — load manifest + settings
+  const ctx = await loadFlagContext(claudeDir, devflowDir);
+  if (!ctx.ok) {
+    p.log.error(ctx.reason);
+    process.exitCode = 1;
+    return;
+  }
+
+  // PF-015: compute final record before any write
+  const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
+  for (const { id, flag, value } of assignments) {
+    // null from parseFlagValueInput for literal 'unset' → use neutral value
+    newRecord[id] = value ?? neutralValueOf(flag);
+  }
+
+  // viewModeExplicit: true when the user explicitly assigned view-mode in --set.
+  // This lets the chosen value override an externally-set /focus.
+  const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
+  const ok = await persistFlagConfig(
+    claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
+    { viewModeExplicit },
+  );
+
+  if (ok) {
+    for (const { id, flag, value } of assignments) {
+      p.log.success(`${id} = ${formatFlagValue(flag, value)}`);
+    }
+  }
+}
+
+/** Handle --unset ids: reset flags to their neutral values. */
+async function handleUnset(
+  claudeDir: string,
+  devflowDir: string,
+  ids: string[],
+): Promise<void> {
+  // Validate: must be known flags (any kind)
+  for (const id of ids) {
+    const flag = lookupFlag(id);
+    if (!flag) {
+      p.log.error(`Unknown flag: ${color.bold(id)}`);
+      p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  const ctx = await loadFlagContext(claudeDir, devflowDir);
+  if (!ctx.ok) {
+    p.log.error(ctx.reason);
+    process.exitCode = 1;
+    return;
+  }
+
+  // PF-015: compute new record before any write
+  const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
+  for (const id of ids) {
+    const flag = lookupFlag(id)!;
+    newRecord[id] = neutralValueOf(flag);
+  }
+
+  // viewModeExplicit: true when the user explicitly unset view-mode.
+  const viewModeExplicit = ids.includes('view-mode');
+  const ok = await persistFlagConfig(
+    claudeDir, devflowDir, ctx.value.settingsContent, newRecord,
+    { viewModeExplicit },
+  );
+
+  if (ok) {
+    for (const id of ids) {
+      p.log.success(`${id} unset`);
+    }
+  }
+}
+
+/**
+ * Handle bare invocation (no subcommand flags).
+ *
+ * D-P5-1: TTY path launches the interactive flags TUI via lazy import;
+ * non-TTY path prints a status table + note to stderr + exitCode 1.
+ * CONS-M3: formatStatusRows() is the shared row formatter — non-TTY now uses
+ * the longer "not adopted — default X applies on next devflow init" wording,
+ * matching --status (convergence of the two divergent status surfaces).
+ */
+async function handleBare(
+  claudeDir: string,
+  devflowDir: string,
+): Promise<void> {
+  const manifest = await readManifest(devflowDir);
+  const record: FlagsRecord = manifest?.features.flags ?? {};
+
+  if (process.stdout.isTTY) {
+    // ── Read settings before launching TUI (needed for persist on save) ──
+    const settingsResult = await readSettingsSafe(path.join(claudeDir, 'settings.json'));
+    if (!settingsResult.ok) {
+      p.log.error(settingsResult.reason);
+      process.exitCode = 1;
+      return;
+    }
+
+    // ── Build initial rows from registry + current record ──────────────
+    const { runFlagsTui, buildFlagRows, collectFlagRecord } =
+      await import('../flags-view/index.js');
+    const initialRows = buildFlagRows(FLAG_REGISTRY, record);
+
+    // ── Launch TUI ────────────────────────────────────────────────────
+    const result = await runFlagsTui(initialRows);
+
+    if (result.action === 'save') {
+      const newRecord = collectFlagRecord(result.rows);
+      // viewModeExplicit: true if the user changed the view-mode row in the TUI
+      const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
+      const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord, { viewModeExplicit });
+      if (ok) {
+        process.stdout.write('Flags saved.\n');
+      }
+    } else {
+      process.stdout.write('No changes made.\n');
+    }
+  } else {
+    // non-TTY: status table to stdout, note to stderr
+    for (const row of formatStatusRows(record)) {
+      process.stdout.write(`${row}\n`);
+    }
+    process.stderr.write('Note: interactive TUI requires a TTY. Use --enable/--disable/--set/--unset for mutations.\n');
+    process.exitCode = 1;
+  }
+}
+
 // ─── Command factory ──────────────────────────────────────────────────────────
 
 /** Accumulator for repeatable --set options. */
@@ -195,365 +549,15 @@ export function createFlagsCommand(): Command {
     }) => {
       const claudeDir = getClaudeDirectory();
       const devflowDir = getDevFlowDirectory();
+      const splitIds = (s: string): string[] => s.split(',').map(t => t.trim()).filter(Boolean);
 
-      // ── --list ───────────────────────────────────────────────────────────────
-      // Read-only: no manifest required. Content sourced from registry (PF-017 spirit).
-      if (options.list) {
-        p.intro(color.bgCyan(color.black(' Claude Code Flags ')));
-        for (const flag of FLAG_REGISTRY) {
-          const kindLabel = flag.kind === 'boolean'
-            ? 'boolean'
-            : flag.kind === 'enum'
-              ? `enum [${(flag as import('../../core/flags.js').EnumFlagDef).values.join('|')}]`
-              : flag.kind === 'number'
-                ? (() => {
-                    const nf = flag as import('../../core/flags.js').NumberFlagDef;
-                    const parts: string[] = [];
-                    if (nf.min !== undefined) parts.push(`min=${nf.min}`);
-                    if (nf.max !== undefined) parts.push(`max=${nf.max}`);
-                    if (nf.integer) parts.push('integer');
-                    return `number${parts.length ? ' ' + parts.join(' ') : ''}`;
-                  })()
-                : (() => {
-                    const sf = flag as import('../../core/flags.js').StringFlagDef;
-                    return `string${sf.maxLength !== undefined ? ` maxLen=${sf.maxLength}` : ''}`;
-                  })();
-          const targetInfo = flag.target.type === 'env'
-            ? `env ${flag.target.key}`
-            : `setting ${flag.target.key}`;
-          const defaultLabel = flag.defaultValue !== undefined && flag.defaultValue !== null
-            ? String(flag.defaultValue)
-            : 'unset';
-          const recLabel = flag.recommended ? color.green('recommended') : color.dim('optional');
-          p.log.info(
-            `${color.bold(flag.id.padEnd(28))} ${recLabel.padEnd(20)} ${color.dim(kindLabel.padEnd(36))} ${color.dim(targetInfo)}`,
-          );
-          p.log.info(
-            `  ${color.dim(flag.hint)} — default: ${color.cyan(defaultLabel)}`,
-          );
-        }
-        return;
-      }
-
-      // ── --status ─────────────────────────────────────────────────────────────
-      // Degrades gracefully when not installed (no manifest).
-      if (options.status) {
-        p.intro(color.bgCyan(color.black(' Claude Code Flags — Status ')));
-        const manifest = await readManifest(devflowDir);
-        if (!manifest) {
-          p.log.warn('Devflow is not installed — run devflow init first');
-          p.log.info('Showing registry defaults only:');
-        }
-        const record: FlagsRecord = manifest?.features.flags ?? {};
-
-        for (const flag of FLAG_REGISTRY) {
-          const value = Object.prototype.hasOwnProperty.call(record, flag.id)
-            ? record[flag.id]
-            : undefined;
-          // sanitizeCell: defence in depth — a persisted LF/TAB must not reshape the
-          // status table even if a future flag kind bypasses coerceFlagValue (applies SEC-M1).
-          const rawDisplay = value !== undefined
-            ? formatFlagValue(flag, value)
-            : color.dim(`not adopted — default ${String(flag.defaultValue ?? 'unset')} applies on next devflow init`);
-          const displayValue = sanitizeCell(rawDisplay);
-          p.log.info(`${flag.id.padEnd(28)} ${displayValue}`);
-        }
-        return;
-      }
-
-      // ── --enable ids ──────────────────────────────────────────────────────────
-      if (options.enable !== undefined) {
-        const ids = options.enable.split(',').map(s => s.trim()).filter(Boolean);
-
-        // Validate all ids before any mutation
-        for (const id of ids) {
-          const flag = lookupFlag(id);
-          if (!flag) {
-            p.log.error(`Unknown flag: ${color.bold(id)}`);
-            p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
-            process.exitCode = 1;
-            return;
-          }
-          if (flag.kind !== 'boolean') {
-            p.log.error(`${color.bold(id)} is a ${flag.kind} flag — use ${color.bold(`--set ${id}=value`)} to set it`);
-            process.exitCode = 1;
-            return;
-          }
-        }
-
-        // Manifest required for mutating ops (avoids settings/manifest desync)
-        const manifest = await readManifest(devflowDir);
-        if (!manifest) {
-          p.log.error('No devflow installation found — run devflow init first');
-          process.exitCode = 1;
-          return;
-        }
-
-        // Read settings — abort on malformed (never silently clobber)
-        const settingsPath = path.join(claudeDir, 'settings.json');
-        const settingsResult = await readSettingsSafe(settingsPath);
-        if (!settingsResult.ok) {
-          p.log.error(settingsResult.reason);
-          process.exitCode = 1;
-          return;
-        }
-
-        // PF-015: compute new record before any write
-        const newRecord: FlagsRecord = { ...manifest.features.flags };
-        for (const id of ids) {
-          newRecord[id] = true;
-        }
-
-        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
-
-        if (ok) {
-          for (const id of ids) {
-            p.log.success(`${id} enabled`);
-          }
-        }
-        return;
-      }
-
-      // ── --disable ids ─────────────────────────────────────────────────────────
-      if (options.disable !== undefined) {
-        const ids = options.disable.split(',').map(s => s.trim()).filter(Boolean);
-
-        for (const id of ids) {
-          const flag = lookupFlag(id);
-          if (!flag) {
-            p.log.error(`Unknown flag: ${color.bold(id)}`);
-            p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
-            process.exitCode = 1;
-            return;
-          }
-          if (flag.kind !== 'boolean') {
-            p.log.error(`${color.bold(id)} is a ${flag.kind} flag — use ${color.bold(`--unset ${id}`)} to clear it`);
-            process.exitCode = 1;
-            return;
-          }
-        }
-
-        const manifest = await readManifest(devflowDir);
-        if (!manifest) {
-          p.log.error('No devflow installation found — run devflow init first');
-          process.exitCode = 1;
-          return;
-        }
-
-        const settingsPath = path.join(claudeDir, 'settings.json');
-        const settingsResult = await readSettingsSafe(settingsPath);
-        if (!settingsResult.ok) {
-          p.log.error(settingsResult.reason);
-          process.exitCode = 1;
-          return;
-        }
-
-        // PF-015: compute new record before any write
-        const newRecord: FlagsRecord = { ...manifest.features.flags };
-        for (const id of ids) {
-          // false is neutral for booleans — key is deleted by applyFlags
-          newRecord[id] = false;
-        }
-
-        const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord);
-
-        if (ok) {
-          for (const id of ids) {
-            // Route through formatFlagValue (applies ADR-016 — one vocabulary,
-            // shared with --status and TUI so the three surfaces cannot drift).
-            const flag = lookupFlag(id)!;
-            p.log.success(`${id} ${formatFlagValue(flag, false)}`);
-          }
-        }
-        return;
-      }
-
-      // ── --set id=value (repeatable) ───────────────────────────────────────────
-      if (options.set && options.set.length > 0) {
-        // Phase: parse and validate ALL assignments before any mutation.
-        const assignments: Array<{ id: string; flag: ClaudeCodeFlag; value: FlagsRecordValue }> = [];
-
-        for (const assignment of options.set) {
-          // Split on first = only — rest is the value (e.g. spellcheck=a=b → id='spellcheck', value='a=b')
-          const eqIdx = assignment.indexOf('=');
-          if (eqIdx === -1) {
-            p.log.error(`Invalid --set format: ${color.bold(assignment)} — expected id=value`);
-            process.exitCode = 1;
-            return;
-          }
-          const id = assignment.slice(0, eqIdx);
-          const text = assignment.slice(eqIdx + 1);
-
-          // Prototype pollution guard (applies PF-023)
-          if (id === '__proto__' || id === 'constructor' || id === 'prototype') {
-            p.log.error(`Unknown flag: ${color.bold(id)}`);
-            process.exitCode = 1;
-            return;
-          }
-
-          const flag = lookupFlag(id);
-          if (!flag) {
-            p.log.error(`Unknown flag: ${color.bold(id)}`);
-            p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
-            process.exitCode = 1;
-            return;
-          }
-
-          const value = parseFlagValueInput(flag, text);
-          if (value === null && text !== 'unset') {
-            // parseFlagValueInput returns null both for 'unset' and for invalid values.
-            // If the input isn't literally 'unset', the null means invalid.
-            p.log.error(`Invalid value for ${color.bold(id)}: ${color.bold(text)}`);
-            p.log.info(`Expected: ${flag.kind === 'boolean' ? 'true|false|unset' : flag.kind === 'enum' ? ((flag as import('../../core/flags.js').EnumFlagDef).values.join('|') + '|unset') : `a valid ${flag.kind} value or unset`}`);
-            process.exitCode = 1;
-            return;
-          }
-
-          assignments.push({ id, flag, value });
-        }
-
-        // All assignments valid — proceed to manifest + settings
-        const manifest = await readManifest(devflowDir);
-        if (!manifest) {
-          p.log.error('No devflow installation found — run devflow init first');
-          process.exitCode = 1;
-          return;
-        }
-
-        const settingsPath = path.join(claudeDir, 'settings.json');
-        const settingsResult = await readSettingsSafe(settingsPath);
-        if (!settingsResult.ok) {
-          p.log.error(settingsResult.reason);
-          process.exitCode = 1;
-          return;
-        }
-
-        // PF-015: compute final record before any write
-        const newRecord: FlagsRecord = { ...manifest.features.flags };
-        for (const { id, flag, value } of assignments) {
-          // null from parseFlagValueInput for literal 'unset' → use neutral value
-          newRecord[id] = value ?? neutralValueOf(flag);
-        }
-
-        // viewModeExplicit: true when the user explicitly assigned view-mode in --set.
-        // This lets the chosen value override an externally-set /focus.
-        const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
-        const ok = await persistFlagConfig(
-          claudeDir, devflowDir, settingsResult.content, newRecord,
-          { viewModeExplicit },
-        );
-
-        if (ok) {
-          for (const { id, value } of assignments) {
-            const flag = lookupFlag(id)!;
-            p.log.success(`${id} = ${formatFlagValue(flag, value)}`);
-          }
-        }
-        return;
-      }
-
-      // ── --unset ids ───────────────────────────────────────────────────────────
-      if (options.unset !== undefined) {
-        const ids = options.unset.split(',').map(s => s.trim()).filter(Boolean);
-
-        for (const id of ids) {
-          const flag = lookupFlag(id);
-          if (!flag) {
-            p.log.error(`Unknown flag: ${color.bold(id)}`);
-            p.log.info(`Available: ${FLAG_REGISTRY.map(f => f.id).join(', ')}`);
-            process.exitCode = 1;
-            return;
-          }
-        }
-
-        const manifest = await readManifest(devflowDir);
-        if (!manifest) {
-          p.log.error('No devflow installation found — run devflow init first');
-          process.exitCode = 1;
-          return;
-        }
-
-        const settingsPath = path.join(claudeDir, 'settings.json');
-        const settingsResult = await readSettingsSafe(settingsPath);
-        if (!settingsResult.ok) {
-          p.log.error(settingsResult.reason);
-          process.exitCode = 1;
-          return;
-        }
-
-        // PF-015: compute new record before any write
-        const newRecord: FlagsRecord = { ...manifest.features.flags };
-        for (const id of ids) {
-          const flag = lookupFlag(id)!;
-          newRecord[id] = neutralValueOf(flag);
-        }
-
-        // viewModeExplicit: true when the user explicitly unset view-mode.
-        const viewModeExplicit = ids.includes('view-mode');
-        const ok = await persistFlagConfig(
-          claudeDir, devflowDir, settingsResult.content, newRecord,
-          { viewModeExplicit },
-        );
-
-        if (ok) {
-          for (const id of ids) {
-            p.log.success(`${id} unset`);
-          }
-        }
-        return;
-      }
-
-      // ── Bare invocation ───────────────────────────────────────────────────────
-      //
-      // D-P5-1: TTY path launches the interactive flags TUI via lazy import;
-      // non-TTY path prints a status table + note to stderr + exitCode 1.
-      const manifest = await readManifest(devflowDir);
-      const record: FlagsRecord = manifest?.features.flags ?? {};
-
-      if (process.stdout.isTTY) {
-        // ── Read settings before launching TUI (needed for persist on save) ──
-        const settingsPath = path.join(claudeDir, 'settings.json');
-        const settingsResult = await readSettingsSafe(settingsPath);
-        if (!settingsResult.ok) {
-          p.log.error(settingsResult.reason);
-          process.exitCode = 1;
-          return;
-        }
-
-        // ── Build initial rows from registry + current record ──────────────
-        const { runFlagsTui, buildFlagRows, collectFlagRecord } =
-          await import('../flags-view/index.js');
-        const initialRows = buildFlagRows(FLAG_REGISTRY, record);
-
-        // ── Launch TUI ────────────────────────────────────────────────────
-        const result = await runFlagsTui(initialRows);
-
-        if (result.action === 'save') {
-          const newRecord = collectFlagRecord(result.rows);
-          // viewModeExplicit: true if the user changed the view-mode row in the TUI
-          const viewModeExplicit = newRecord['view-mode'] !== record['view-mode'];
-          const ok = await persistFlagConfig(claudeDir, devflowDir, settingsResult.content, newRecord, { viewModeExplicit });
-          if (ok) {
-            process.stdout.write('Flags saved.\n');
-          }
-        } else {
-          process.stdout.write('No changes made.\n');
-        }
-      } else {
-        // non-TTY: status table to stdout, note to stderr
-        for (const flag of FLAG_REGISTRY) {
-          const value = Object.prototype.hasOwnProperty.call(record, flag.id)
-            ? record[flag.id]
-            : undefined;
-          // sanitizeCell: defence in depth — a persisted LF/TAB must not inject extra
-          // rows into the line-oriented table (applies SEC-M1).
-          const rawDisplay = value !== undefined ? formatFlagValue(flag, value) : 'not adopted';
-          const displayValue = sanitizeCell(rawDisplay);
-          process.stdout.write(`${flag.id.padEnd(28)} ${displayValue}\n`);
-        }
-        process.stderr.write('Note: interactive TUI requires a TTY. Use --enable/--disable/--set/--unset for mutations.\n');
-        process.exitCode = 1;
-      }
+      if (options.list) return handleList();
+      if (options.status) return handleStatus(devflowDir);
+      if (options.enable !== undefined) return handleSetBooleans(claudeDir, devflowDir, splitIds(options.enable), true);
+      if (options.disable !== undefined) return handleSetBooleans(claudeDir, devflowDir, splitIds(options.disable), false);
+      if (options.set && options.set.length > 0) return handleSet(claudeDir, devflowDir, options.set);
+      if (options.unset !== undefined) return handleUnset(claudeDir, devflowDir, splitIds(options.unset));
+      return handleBare(claudeDir, devflowDir);
     });
 }
 
