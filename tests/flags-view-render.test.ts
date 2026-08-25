@@ -142,28 +142,28 @@ describe('flags-view-render — renderFrame basic contract', () => {
 // ---------------------------------------------------------------------------
 
 describe('flags-view-render — per-kind value display', () => {
-  it('boolean flag shows "enabled" when true', () => {
+  it('boolean flag shows "on" when true', () => {
     // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
-    // frame. The frame always contains 'enabled' from other default-ON flags.
+    // frame. D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
     const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
     expect(cursorRow).toBeDefined();
-    expect(stripAnsi(cursorRow)).toContain('enabled');
-    expect(stripAnsi(cursorRow)).not.toContain('disabled'); // negative control
+    expect(stripAnsi(cursorRow)).toContain('on');
+    expect(stripAnsi(cursorRow)).not.toContain('off'); // negative control
   });
 
-  it('boolean flag shows "disabled" when false', () => {
+  it('boolean flag shows "off" when false', () => {
     // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
-    // frame. The frame always contains 'disabled' from other default-OFF flags.
+    // frame. D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
     const rows = buildFlagRows({ tui: false });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
     const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
     expect(cursorRow).toBeDefined();
-    expect(stripAnsi(cursorRow)).toContain('disabled');
-    expect(stripAnsi(cursorRow)).not.toContain('enabled'); // negative control
+    expect(stripAnsi(cursorRow)).toContain('off');
+    expect(stripAnsi(cursorRow)).not.toContain('‹ on'); // negative control: not 'on' in chevron
   });
 
   it('enum flag shows the value when set', () => {
@@ -176,18 +176,19 @@ describe('flags-view-render — per-kind value display', () => {
     expect(joined).toContain('verbose');
   });
 
-  it('view-mode shows "unset" when null (default/neutral)', () => {
-    // Applies PF-018 mechanism 7: 'unset' appears in the browse-mode hint line
-    // unconditionally; assert the specific cursor row instead.
-    const rows = buildFlagRows({}); // view-mode absent → null
+  it('view-mode shows neutralValue "default" when null (D-EFFDV: never "unset")', () => {
+    // Applies PF-018 mechanism 7: assert the specific cursor row.
+    // D-EFFDV: enum null → neutralValue text; view-mode neutralValue is 'default'.
+    const rows = buildFlagRows({}); // view-mode absent → null (TUI neutral)
     const vmIdx = rows.findIndex(r => r.id === 'view-mode');
     const state = makeState({ rows, cursor: vmIdx, viewportOffset: vmIdx });
     const lines = renderFrame(state, DIMS_80x24);
     const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
     expect(cursorRow).toBeDefined();
-    expect(stripAnsi(cursorRow)).toContain('unset');
+    expect(stripAnsi(cursorRow)).toContain('default');
     expect(stripAnsi(cursorRow)).not.toContain('verbose'); // negative control
     expect(stripAnsi(cursorRow)).not.toContain('focus');   // negative control
+    expect(stripAnsi(cursorRow)).not.toContain('unset');   // negative control: 'unset' banned
   });
 
   it('number flag shows value when set', () => {
@@ -203,18 +204,20 @@ describe('flags-view-render — per-kind value display', () => {
     expect(stripAnsi(cursorRow)).not.toContain('unset'); // negative control
   });
 
-  it('number flag shows "unset" when null', () => {
-    // Applies PF-018 mechanism 7: 'unset' appears in the browse-mode hint line
-    // unconditionally; assert the specific cursor row instead.
+  it('number flag shows upstream default with "(default)" suffix when null (D-EFFDV: never "unset")', () => {
+    // Applies PF-018 mechanism 7: assert the specific cursor row.
+    // D-EFFDV: number null → effectiveDisplay → upstreamDefault text + ' (default)' suffix.
+    // subagent-spawn-depth has no devflow defaultValue but upstreamDefault: 3.
     const rows = buildFlagRows({ 'subagent-spawn-depth': null });
     const sdIdx = rows.findIndex(r => r.id === 'subagent-spawn-depth');
     const state = makeState({ rows, cursor: sdIdx, viewportOffset: sdIdx });
     const lines = renderFrame(state, DIMS_80x24);
     const cursorRow = lines.find(l => stripAnsi(l).startsWith('❯'))!;
     expect(cursorRow).toBeDefined();
-    expect(stripAnsi(cursorRow)).toContain('unset');
-    expect(stripAnsi(cursorRow)).not.toContain('enabled'); // negative control
-    expect(stripAnsi(cursorRow)).not.toContain('disabled'); // negative control
+    expect(stripAnsi(cursorRow)).toContain('(default)');
+    expect(stripAnsi(cursorRow)).not.toContain('unset'); // negative control: 'unset' banned
+    expect(stripAnsi(cursorRow)).not.toContain('on');    // negative control
+    expect(stripAnsi(cursorRow)).not.toContain('off');   // negative control
   });
 });
 
@@ -444,9 +447,9 @@ describe('flags-view-render — narrow width', () => {
 describe('flags-view-render — column header alignment', () => {
   it('FLAG column starts at same offset as data label cell (ANSI-stripped)', () => {
     // At 80 cols (scale=1): labelW = COL_LABEL = 27.
-    // Data row layout: prefix(2) + label(27) + dirty(2) + value
-    // Header layout must match: 2 spaces + FLAG(27) + 2 spaces + VALUE
-    // → FLAG at col 2 (same as label), VALUE at col 2+27+2=31 (same as value cell).
+    // Data row layout: prefix(2) + label(27) + dirty(2) + value(16) + blurb(30)
+    // Header layout must match: 2 spaces + FLAG(padded to 27) + 2 spaces + VALUE(padded to 16) + HINT
+    // → FLAG at col 2 (same as label), VALUE at col 2+27+2=31 (same as value cell start).
     const rows = buildFlagRows({});
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
@@ -480,8 +483,8 @@ describe('flags-view-render — column header alignment', () => {
   });
 
   it('FLAG and VALUE columns align on narrow terminal (cols=60)', () => {
-    // At 60 cols: scale = 60/80 = 0.75, labelW = floor(27*0.75)=20, valueW = floor(46*0.75)=34.
-    // Header: 2 + labelW(20) + 2 = VALUE at col 24.
+    // At 60 cols: scale = 60/80 = 0.75, labelW = floor(27*0.75)=20, valueW = floor(16*0.75)=12.
+    // Header: 2 + labelW(20) + 2 = VALUE at col 24 (position depends only on labelW, not valueW).
     const rows = buildFlagRows({});
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_60x24);
@@ -557,10 +560,10 @@ describe('flags-view-render — unsaved changes section', () => {
 
 describe('flags-view-render — ARCH-M7a: chevron composition', () => {
   it('focused row with coloured value has closing chevron in cyan (not unstyled after inner RESET)', () => {
-    // tui flag (row 0) is boolean; value true → green('enabled').
-    // Before fix: cyan(`‹ ${green('enabled')} ›`) emits inner RESET before ' ›',
+    // tui flag (row 0) is boolean; value true → green('on').
+    // Before fix: cyan(`‹ ${green('on')} ›`) emits inner RESET before ' ›',
     //   leaving the closing chevron unstyled (ESC[0m ›).
-    // After fix: cyan('‹ ') + green('enabled') + cyan(' ›') — each segment self-contained;
+    // After fix: cyan('‹ ') + green('on') + cyan(' ›') — each segment self-contained;
     //   the closing chevron is always inside its own ESC[36m ... ESC[0m span.
     const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
@@ -581,7 +584,7 @@ describe('flags-view-render — ARCH-M7a: chevron composition', () => {
 
 describe('flags-view-render — ARCH-M7b: caret survival beyond chevron budget', () => {
   it('60-char buffer with caret at end still shows inverse-video caret in 80-col frame', () => {
-    // chevronBudget at 80 cols = valueW(46) - 4 = 42.
+    // chevronBudget at 80 cols = valueW(16) - 4 = 12.
     // A 60-char buffer exceeds the budget; the caret at position 60 (trailing space)
     // must still appear as ESC[7m (inverse video) in the cursor row.
     //
@@ -590,7 +593,7 @@ describe('flags-view-render — ARCH-M7b: caret survival beyond chevron budget',
     //   inverse(), so the caret escape always survives.
     const rows = buildFlagRows({});
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
-    const longBuffer = 'a'.repeat(60); // 60 > chevronBudget(42)
+    const longBuffer = 'a'.repeat(60); // 60 > chevronBudget(12)
     const state = makeState({
       rows,
       cursor: mcIdx,

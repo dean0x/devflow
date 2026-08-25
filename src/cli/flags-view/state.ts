@@ -53,6 +53,12 @@ export interface FlagRow {
   readonly label: string;
   readonly hint: string;
   /**
+   * Short phrase (≤ 30 chars) describing what the flag does.
+   * Shown as a dim trailing column in the TUI and appended to --status rows.
+   * D-BLURB: sourced from flag.blurb — single definition, consumed at render sites.
+   */
+  readonly blurb: string;
+  /**
    * The registry definition for this flag. Embedded so commitEdit and collectFlagRecord
    * can access flag metadata (kind, bounds, neutralValue) without a module-global
    * registry reach-back via findFlag. All rows are built from FLAG_REGISTRY, so this
@@ -216,6 +222,7 @@ export function buildFlagRows(record: FlagsRecord): FlagRow[] {
       id: flag.id,
       label: flag.label,
       hint: flag.hint,
+      blurb: flag.blurb,
       def: flag,
       kind: flag.kind,
       stops,

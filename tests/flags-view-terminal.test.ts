@@ -19,9 +19,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'stream';
 import { runFlagsTui } from '../src/cli/flags-view/terminal.js';
 import { MAX_KEYPRESSES } from '../src/cli/tui/terminal.js';
+import { runTui } from '../src/cli/tui/terminal.js';
 import { buildFlagRows } from '../src/cli/flags-view/state.js';
 import { FLAG_REGISTRY } from '../src/core/flags.js';
+import { reduce } from '../src/cli/flags-view/state.js';
+import { renderFrame } from '../src/cli/flags-view/render.js';
 import type { FlagsRecord } from '../src/core/flags.js';
+
+// ENTER_ALT / LEAVE_ALT sequences for inline-mode assertion
+const ENTER_ALT = '\x1b[?1049h';
+const LEAVE_ALT = '\x1b[?1049l';
+const ERASE_BELOW = '\x1b[0J';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -223,5 +231,171 @@ describe('flags-view-terminal — save result', () => {
     expect(result.action).toBe('save');
     const tuiRow = result.rows.find(r => r.id === 'tui');
     expect(tuiRow?.configuredValue).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline mode driver tests (D-INLINE)
+// ---------------------------------------------------------------------------
+
+describe('runTui — inline mode (D-INLINE)', () => {
+  function makeInlineSpec(stdin: PassThrough, stdout: PassThrough) {
+    const record = defaultRecord();
+    const rows = buildFlagRows(FLAG_REGISTRY, record);
+    const initialState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 10,
+      editing: null,
+    };
+    return {
+      initialState,
+      reduce,
+      renderFrame,
+      onResize: (s: typeof initialState, dims: { rows: number; cols: number }) => ({
+        ...s,
+        viewportHeight: Math.max(1, dims.rows - 2),
+      }),
+      signalAction: 'abort' as const,
+      continueIntent: 'none' as const,
+      screen: 'inline' as const,
+      io: { stdin, stdout },
+    };
+  }
+
+  it('inline mode never emits ENTER_ALT (\\x1b[?1049h)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // esc → cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(ENTER_ALT);
+  });
+
+  it('inline mode never emits LEAVE_ALT (\\x1b[?1049l)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b');
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(LEAVE_ALT);
+  });
+
+  it('inline mode repaint uses cursor-up (ESC[nA) after first frame', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+
+    // Let first frame render
+    await new Promise(r => setTimeout(r, 20));
+
+    // Send a navigation key to trigger a repaint
+    sendKey(stdin, 'j'); // down — noop at bottom but causes a repaint
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    // After the first key, at least one cursor-up must have been emitted
+    const all = written.join('');
+    const cursorUpPattern = /\x1b\[\d+A/;
+    expect(cursorUpPattern.test(all)).toBe(true);
+  });
+
+  it('inline mode exit emits ERASE_BELOW to clear widget', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const spec = makeInlineSpec(stdin, stdout);
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel → cleanup
+    await tui;
+
+    const all = written.join('');
+    expect(all).toContain(ERASE_BELOW);
+  });
+
+  it('alt mode still emits ENTER_ALT and LEAVE_ALT (alt mode unchanged)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const record = defaultRecord();
+    const rows = buildFlagRows(FLAG_REGISTRY, record);
+    const initialState = {
+      rows,
+      cursor: 0,
+      viewportOffset: 0,
+      viewportHeight: 10,
+      editing: null,
+    };
+    const spec = {
+      initialState,
+      reduce,
+      renderFrame,
+      onResize: (s: typeof initialState, dims: { rows: number; cols: number }) => ({
+        ...s,
+        viewportHeight: Math.max(1, dims.rows - 2),
+      }),
+      signalAction: 'abort' as const,
+      continueIntent: 'none' as const,
+      // screen: 'alt' is the default; not setting it
+      io: { stdin, stdout },
+    };
+
+    const tui = runTui(spec);
+    await new Promise(r => setTimeout(r, 20));
+
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).toContain(ENTER_ALT);
+    expect(all).toContain(LEAVE_ALT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runFlagsTui uses inline mode (D-INLINE integration)
+// ---------------------------------------------------------------------------
+
+describe('runFlagsTui — uses inline mode by default', () => {
+  it('runFlagsTui does not emit ENTER_ALT (inline mode active)', async () => {
+    const { stdin, stdout } = makeStreams();
+    const written: string[] = [];
+    stdout.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+    const record = defaultRecord();
+    const rowsIn = buildFlagRows(FLAG_REGISTRY, record);
+    const tui = runFlagsTui(rowsIn, { stdin, stdout });
+
+    await new Promise(r => setTimeout(r, 20));
+    sendKey(stdin, '\x1b'); // cancel
+    await tui;
+
+    const all = written.join('');
+    expect(all).not.toContain(ENTER_ALT);
+    expect(all).not.toContain(LEAVE_ALT);
   });
 });

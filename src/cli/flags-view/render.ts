@@ -21,7 +21,10 @@
  *   PREFIX  : 2  (cursor mark "❯ " or "  ")
  *   LABEL   : 27 (flag label, padded / truncated; scaled by cols/80 at other widths)
  *   DIRTY   : 2  ("● " when dirty, else "  ")
- *   VALUE   : 46 (formatted value or edit buffer; scaled by cols/80 at other widths)
+ *   VALUE   : 16 (formatted value or edit buffer; scaled by cols/80 at other widths)
+ *   BLURB   : 30 (dim per-flag short phrase; scaled by cols/80 at other widths)
+ *
+ * Column split: VALUE+BLURB = 46, preserving total width from the prior single VALUE column.
  *
  * Edit buffer rendering:
  *   Text before caret + inverse(charAtCaret|' ') + text after caret
@@ -38,6 +41,7 @@ import {
   red,
   inverse,
 } from '../../core/ansi.js';
+import { effectiveDisplay } from '../../core/flags.js';
 import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import type { FlagsViewState, FlagRow } from './state.js';
 import type { RenderDims } from '../tui/terminal.js';
@@ -49,7 +53,9 @@ export const FIXED_ROWS = 10;
 const MIN_VIEWPORT = 1;
 
 const COL_LABEL = 27;    // flag label
-const COL_VALUE = 46;    // value or edit buffer
+// D-BLURB: VALUE+BLURB = 46 preserves the prior total; split as 16+30 at 80-col.
+const COL_VALUE = 16;    // value or edit buffer
+const COL_BLURB = 30;    // per-flag short phrase (dim)
 
 // ─── computeViewportHeight ────────────────────────────────────────────────────
 
@@ -63,15 +69,19 @@ export function computeViewportHeight(termRows: number): number {
 /**
  * Format a row's configuredValue for display.
  *
- * Value vocabulary (one syntax, one semantic — applies ADR-016's amendment lesson):
- *   null → dim 'unset'; boolean → green 'enabled' / yellow 'disabled';
- *   non-boolean at devflow default → plain string;
- *   non-boolean deviating from devflow default → bold string.
+ * Value vocabulary (D-EFFDV — one-definition seam; never shows 'unset'):
+ *   null (enum neutral) → dim neutralValue text (e.g. dim('default'))
+ *   null (number)       → dim '<effective default> (default)' or dim('—')
+ *   null (string)       → dim('—')
+ *   boolean true        → green 'on'
+ *   boolean false       → yellow 'off'
+ *   non-boolean at devflow default → plain string
+ *   non-boolean deviating from devflow default → bold string
  *
  * Colour vocabulary (one colour, one semantic — applies ADR-016's amendment lesson):
  *   cyan   = focus indicator (chevron wrapper ‹ › on the cursor row only)
- *   yellow = dirty indicator (unconditional ●) and boolean 'disabled'
- *   green  = boolean 'enabled'
+ *   yellow = dirty indicator (unconditional ●) and boolean 'off'
+ *   green  = boolean 'on'
  *   bold   = non-boolean value deviating from devflow default
  *
  * disk-sourced values are routed through sanitizeCell to prevent TAB/LF
@@ -79,9 +89,17 @@ export function computeViewportHeight(termRows: number): number {
  */
 function formatValue(row: FlagRow): string {
   const v = row.configuredValue;
-  if (v === null) return dim('unset');
-  if (typeof v === 'boolean') return v ? green('enabled') : yellow('disabled');
-  // Non-boolean: sanitize; bold signals deviation (cyan is reserved for focus)
+  if (v === null) {
+    // Non-boolean neutral: show effective default, dimmed.
+    // D-EFFDV: delegate to effectiveDisplay — one definition, all sites.
+    const { text } = effectiveDisplay(row.def, null);
+    // Append ' (default)' for number flags so the value origin is clear.
+    // Enum neutral shows its meaningful name (e.g. 'default'); string null shows '—'.
+    const display = row.kind === 'number' ? text + ' (default)' : text;
+    return dim(display);
+  }
+  if (typeof v === 'boolean') return v ? green('on') : yellow('off');
+  // Non-boolean active: sanitize; bold signals deviation (cyan is reserved for focus)
   const str = sanitizeCell(String(v));
   if (!Object.is(v, row.devflowDefault)) return bold(str);
   return str;
@@ -142,6 +160,8 @@ function renderBuffer(buffer: string, caret: number, budget: number): string {
 /**
  * Render a single data row.
  * Column widths are passed in from renderFrame so the header and rows share one binding.
+ *
+ * D-BLURB: blurbW is passed alongside valueW; both are scaled by renderFrame.
  */
 function renderRow(
   row: FlagRow,
@@ -151,6 +171,7 @@ function renderRow(
   editCaret: number,
   labelW: number,
   valueW: number,
+  blurbW: number,
 ): string {
   const prefix = isCursor ? '❯ ' : '  ';
 
@@ -171,7 +192,7 @@ function renderRow(
   // The chevrons take 4 visible chars (‹ + space + space + ›); budget accordingly.
   //
   // Composition rule: colour AFTER measuring — each styled segment is self-contained
-  // so an inner RESET (e.g. from green('enabled')) does not kill the outer cyan.
+  // so an inner RESET (e.g. from green('on')) does not kill the outer cyan.
   //   cyan('‹ ') + <styled-or-plain content> + cyan(' ›')
   // rather than cyan(`‹ ${content} ›`), which terminates the outer cyan at the
   // inner RESET, leaving the closing chevron unstyled (applies ADR-016 amendment lesson).
@@ -186,13 +207,19 @@ function renderRow(
     // Focused control: truncateVisible is safe here — it fires on plain text only
     // when the value exceeds budget; the chevrons are in their own cyan segments.
     const fmtVal = formatValue(row);
-    valueCell = cyan('‹ ') + truncateVisible(fmtVal, chevronBudget) + cyan(' ›');
+    valueCell = padToVisible(cyan('‹ ') + truncateVisible(fmtVal, chevronBudget) + cyan(' ›'), valueW);
   } else {
     const fmtVal = formatValue(row);
-    valueCell = truncateVisible(fmtVal, valueW);
+    valueCell = padToVisible(truncateVisible(fmtVal, valueW), valueW);
   }
 
-  return `${prefix}${labelCell}${dirtyDot}${valueCell}`;
+  // D-BLURB: short phrase, dim, truncated to blurbW. row.blurb is sourced from
+  // flag.blurb at buildFlagRows — no registry reach-back needed here (ARCH-M4).
+  const blurbCell = blurbW > 0
+    ? ' ' + dim(truncateVisible(sanitizeCell(row.blurb), blurbW - 1))
+    : '';
+
+  return `${prefix}${labelCell}${dirtyDot}${valueCell}${blurbCell}`;
 }
 
 // ─── renderFrame ─────────────────────────────────────────────────────────────
@@ -212,9 +239,12 @@ export function renderFrame(
   const totalRows = rows.length;
 
   // ── Column widths (hoisted here so header and rows share one binding) ──────
+  // D-BLURB: blurbW is scaled alongside labelW/valueW; both VALUE+BLURB columns
+  // shrink proportionally so the total width stays at the prior COL_VALUE budget.
   const scale = Math.min(1, dims.cols / 80);
   const labelW = Math.max(8, Math.floor(COL_LABEL * scale));
   const valueW = Math.max(8, Math.floor(COL_VALUE * scale));
+  const blurbW = Math.max(0, Math.floor(COL_BLURB * scale));
 
   // ── Determine visible row range ───────────────────────────────────────────
   const lastVisible = Math.min(totalRows - 1, viewportOffset + viewportHeight - 1);
@@ -233,12 +263,14 @@ export function renderFrame(
     summaryLine += dim(` · `) + yellow(`${totalDirty} modified`);
   }
 
-  // ── Column header (uses same labelW/valueW as rows so offsets are identical) ──
+  // ── Column header (uses same labelW/valueW/blurbW as rows so offsets are identical) ──
+  // D-BLURB: HINT column header aligns with the blurb column in data rows.
   const colHeader =
     '  ' +
     padToVisible(gray('FLAG'), labelW) +
     '  ' +
-    gray('VALUE');
+    padToVisible(gray('VALUE'), valueW) +
+    (blurbW > 0 ? ' ' + gray('HINT') : '');
 
   // ── Scroll indicators ─────────────────────────────────────────────────────
   const upIndicator = rowsAbove > 0 ? dim(`  ↑ ${rowsAbove} more`) : '';
@@ -257,6 +289,7 @@ export function renderFrame(
       editing?.caret ?? 0,
       labelW,
       valueW,
+      blurbW,
     );
   });
 

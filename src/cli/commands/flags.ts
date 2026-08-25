@@ -31,6 +31,7 @@ import {
   convergeFlagsIntoSettings,
   parseFlagValueInput,
   formatFlagValue,
+  effectiveDisplay,
   neutralValueOf,
   describeFlagKind,
   expectedInputFor,
@@ -237,9 +238,10 @@ function formatStatusRows(record: FlagsRecord): string[] {
       : undefined;
     // sanitizeCell: defence in depth — a persisted LF/TAB must not inject extra
     // rows into the line-oriented table (applies SEC-M1).
+    // D-EFFDV: effectiveDisplay supplies the default label so 'unset' never appears.
     const rawDisplay = value !== undefined
       ? formatFlagValue(flag, value)
-      : `not adopted — default ${String(flag.defaultValue ?? 'unset')} applies on next devflow init`;
+      : `not adopted — default: ${effectiveDisplay(flag, neutralValueOf(flag)).text} applies on next devflow init`;
     const displayValue = sanitizeCell(rawDisplay);
     return `${flag.id.padEnd(28)} ${displayValue}`;
   });
@@ -259,9 +261,13 @@ async function handleList(): Promise<void> {
     const targetInfo = flag.target.type === 'env'
       ? `env ${flag.target.key}`
       : `setting ${flag.target.key}`;
-    const defaultLabel = flag.defaultValue !== undefined && flag.defaultValue !== null
-      ? String(flag.defaultValue)
-      : 'unset';
+    // D-EFFDV: number flags show the upstream default when present so the
+    // registry dump is meaningful even for flags with no devflow defaultValue.
+    const defaultLabel = flag.kind === 'number' && flag.upstreamDefault !== undefined
+      ? `upstream default: ${flag.upstreamDefault}`
+      : flag.defaultValue !== undefined && flag.defaultValue !== null
+        ? String(flag.defaultValue)
+        : 'none';
     const recLabel = flag.recommended ? color.green('recommended') : color.dim('optional');
     p.log.info(
       `${color.bold(flag.id.padEnd(28))} ${recLabel.padEnd(20)} ${color.dim(kindLabel.padEnd(36))} ${color.dim(targetInfo)}`,
@@ -341,13 +347,9 @@ async function handleSetBooleans(
 
   if (result.ok) {
     for (const flag of flagDefs) {
-      if (value) {
-        p.log.success(`${flag.id} enabled`);
-      } else {
-        // Route through formatFlagValue (applies ADR-016 — one vocabulary,
-        // shared with --status and TUI so the three surfaces cannot drift).
-        p.log.success(`${flag.id} ${formatFlagValue(flag, false)}`);
-      }
+      // D-EFFDV: formatFlagValue routes through effectiveDisplay — one vocabulary
+      // shared with --status and TUI so the three surfaces cannot drift.
+      p.log.success(`${flag.id} ${formatFlagValue(flag, value)}`);
     }
   }
 }
@@ -425,7 +427,10 @@ async function handleSet(
 
   if (result.ok) {
     for (const { id, flag, value } of assignments) {
-      p.log.success(`${id} = ${formatFlagValue(flag, value)}`);
+      // null means the user typed 'unset' explicitly — echo their word back.
+      // For active values, route through formatFlagValue (D-EFFDV vocabulary).
+      const displayText = value === null ? 'unset' : formatFlagValue(flag, value);
+      p.log.success(`${id} = ${displayText}`);
     }
   }
 }

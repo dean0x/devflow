@@ -788,7 +788,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
 
-      expect(successLines()).toContain('tui enabled');
+      expect(successLines()).toContain('tui on');
       expect(process.exitCode).toBeFalsy(); // undefined or 0 — never 1
     });
 
@@ -801,7 +801,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       await flagsCmd.parseAsync(['--disable', 'tui'], { from: 'user' });
 
-      expect(successLines()).toContain('tui disabled');
+      expect(successLines()).toContain('tui off');
     });
 
     it('--set emits a success line on a clean run', async () => {
@@ -832,7 +832,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
 
-      expect(successLines()).toContain('tui enabled');
+      expect(successLines()).toContain('tui on');
     });
   });
 

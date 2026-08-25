@@ -8,11 +8,18 @@
  *
  * Bounded: MAX_KEYPRESSES = 50_000 hard limit (reliability rule — every loop bounded).
  *
- * Frame output contract (avoids stale-frame ghosting on terminal shrink):
+ * Frame output contract — alt mode (avoids stale-frame ghosting on terminal shrink):
  *   - Each frame line ends with ERASE_EOL (clears to end of line).
  *   - Lines are joined with '\n' EXCEPT the last, which has no trailing '\n'.
  *   - ERASE_BELOW (ESC[0J) is appended after the last line to erase content below
  *     the frame on every redraw.
+ *
+ * Frame output contract — inline mode (D-INLINE):
+ *   - No ENTER_ALT/LEAVE_ALT; renders in place in the normal scroll buffer.
+ *   - First frame: write lines directly, track prevLineCount.
+ *   - Subsequent frames: cursor-up (prevLineCount-1) + \r, rewrite lines, ERASE_BELOW.
+ *   - Exit: cursor-up to frame top, ERASE_BELOW, SHOW_CURSOR — erases widget completely.
+ *   - Height is clamped to stdout.rows - INLINE_MARGIN to prevent terminal scroll.
  */
 
 import * as readline from 'readline';
@@ -23,6 +30,12 @@ import * as readline from 'readline';
 
 /** Hard upper bound on keypress events — resolves with signalAction on exhaustion. */
 export const MAX_KEYPRESSES = 50_000;
+
+/**
+ * Lines reserved below the inline widget so the shell prompt is never clobbered.
+ * D-INLINE: height clamped to stdout.rows - INLINE_MARGIN in inline mode.
+ */
+export const INLINE_MARGIN = 2;
 
 // ---------------------------------------------------------------------------
 // Terminal escape sequences
@@ -39,6 +52,11 @@ const HOME = `${ESC}[H`;
 const ERASE_EOL = `${ESC}[K`;
 /** Erase from cursor to end of screen. */
 const ERASE_BELOW = `${ESC}[0J`;
+/**
+ * Move cursor up N lines (D-INLINE: used by inline-mode repaints).
+ * Returns an empty string for n ≤ 0 so callers need no guard.
+ */
+const cursorUp = (n: number): string => (n > 0 ? `${ESC}[${n}A` : '');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,6 +135,14 @@ export interface RunTuiSpec<S, A extends string, C extends A> {
   continueIntent: C;
   /** Optional I/O override (defaults to process.stdin/stdout). Inject fakes in tests. */
   io?: Partial<TuiIO>;
+  /**
+   * Screen mode:
+   *   'alt'    — enter the alternate screen buffer (default; agents-view uses this).
+   *   'inline' — render in-place in the normal scroll buffer with cursor-up repaints;
+   *              no ENTER_ALT/LEAVE_ALT; erases widget on exit; height clamped to
+   *              stdout.rows - INLINE_MARGIN. D-INLINE: flags editor uses inline mode.
+   */
+  screen?: 'alt' | 'inline';
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +221,12 @@ function renderToStdout<S>(
 /**
  * Launch a generic interactive TUI.
  *
- * The TUI enters alt-screen, hides the cursor, enables raw mode, and begins
- * processing keypresses via the provided `spec.reduce` function.
+ * In 'alt' mode (default): enters the alternate screen buffer, hides the cursor,
+ * enables raw mode, and redraws by moving to HOME on each keypress.
+ *
+ * In 'inline' mode (D-INLINE): renders in-place in the normal scroll buffer.
+ * Repaints use cursor-up instead of ENTER_ALT/HOME. Height is clamped to
+ * stdout.rows - INLINE_MARGIN. Widget is erased completely on exit.
  *
  * Resolves when `reduce` returns an intent !== `spec.continueIntent`, when a
  * signal fires, or when MAX_KEYPRESSES is exhausted.
@@ -209,6 +239,7 @@ export async function runTui<S, A extends string, C extends A>(
   // D-SEAM: default to process streams; callers (tests) may inject fakes.
   const stdin: TuiIO['stdin'] = (spec.io?.stdin ?? process.stdin) as TuiIO['stdin'];
   const stdout: TuiIO['stdout'] = (spec.io?.stdout ?? process.stdout) as TuiIO['stdout'];
+  const isInline = spec.screen === 'inline';
 
   // REL-H1 driver bail: reject BEFORE any terminal mutation when stdin is not a
   // TTY and no spec.io.stdin was injected.
@@ -234,6 +265,50 @@ export async function runTui<S, A extends string, C extends A>(
     let state = spec.initialState;
     let cleaned = false;
     let keypressCount = 0;
+    // D-INLINE: tracks how many lines the last inline frame occupied.
+    // Used for cursor-up repaint and widget-erase on exit. Zero = no frame written yet.
+    let prevLineCount = 0;
+
+    // ── Inline-mode helpers ──────────────────────────────────────────────
+    function getInlineDims(): RenderDims {
+      const d = getDims(stdout);
+      return { rows: Math.max(1, d.rows - INLINE_MARGIN), cols: d.cols };
+    }
+
+    /**
+     * Render one inline frame in-place.
+     * First call: writes lines directly, sets prevLineCount.
+     * Subsequent calls: cursor-up (prevLineCount-1) + \r, rewrites, ERASE_BELOW.
+     * D-INLINE: ERASE_BELOW handles shrinking frames without a high-watermark.
+     */
+    function renderInline(s: S): void {
+      const dims = getInlineDims();
+      const lines = spec.renderFrame(s, dims).slice(0, dims.rows);
+      const lineCount = lines.length;
+
+      let out = '';
+      if (prevLineCount > 0) {
+        // Move back to start of previous frame
+        out += cursorUp(prevLineCount - 1) + '\r';
+      }
+      for (let i = 0; i < lineCount; i++) {
+        out += lines[i] + ERASE_EOL;
+        if (i < lineCount - 1) out += '\n';
+      }
+      // Erase stale lines below current frame (handles shrinking frames)
+      out += ERASE_BELOW;
+      stdout.write(out);
+      prevLineCount = lineCount;
+    }
+
+    /** Dispatch render to the appropriate mode. */
+    function doRender(s: S): void {
+      if (isInline) {
+        renderInline(s);
+      } else {
+        renderToStdout(s, stdout, spec.renderFrame);
+      }
+    }
 
     // ── Guarded startup — terminal setup, initial resize, and first render ─
     //
@@ -244,21 +319,21 @@ export async function runTui<S, A extends string, C extends A>(
     // appears later. removeListener on a not-yet-registered listener is a
     // no-op, making partial setup safe to tear down.
     try {
-      // D-SEC-S3: enter alt-screen and enable raw mode inside the guarded
-      // block so a setRawMode throw cannot leave the terminal stranded with
-      // hidden cursor and no cleanup path.
-      stdout.write(ENTER_ALT + HIDE_CURSOR);
+      // D-SEC-S3: enter screen and enable raw mode inside the guarded block
+      // so a setRawMode throw cannot leave the terminal stranded.
+      // D-INLINE: inline mode skips ENTER_ALT — renders in the scroll buffer.
+      stdout.write(isInline ? HIDE_CURSOR : ENTER_ALT + HIDE_CURSOR);
       if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
         stdin.setRawMode(true);
       }
       stdin.resume();
 
       // Apply initial resize (sets viewportHeight from actual terminal dims).
-      const initialDims = getDims(stdout);
+      const initialDims = isInline ? getInlineDims() : getDims(stdout);
       if (spec.onResize) {
         state = spec.onResize(state, initialDims);
       }
-      renderToStdout(state, stdout, spec.renderFrame);
+      doRender(state);
     } catch (err) {
       cleanup();
       reject(err instanceof Error ? err : new Error(String(err)));
@@ -284,7 +359,16 @@ export async function runTui<S, A extends string, C extends A>(
       // and the CLI hangs after the TUI resolves.
       stdin.pause();
 
-      stdout.write(LEAVE_ALT + SHOW_CURSOR);
+      if (isInline) {
+        // D-INLINE: erase widget and restore cursor.
+        // Move to start of frame, erase to bottom, show cursor.
+        let out = prevLineCount > 1 ? cursorUp(prevLineCount - 1) + '\r' : '\r';
+        if (prevLineCount > 0) out += ERASE_BELOW;
+        out += SHOW_CURSOR;
+        stdout.write(out);
+      } else {
+        stdout.write(LEAVE_ALT + SHOW_CURSOR);
+      }
     }
 
     function settle(intent: Exclude<A, C>, finalState: S): void {
@@ -309,11 +393,11 @@ export async function runTui<S, A extends string, C extends A>(
     // ── Resize handler ─────────────────────────────────────────────────────
     function onResize(): void {
       try {
-        const d = getDims(stdout);
+        const d = isInline ? getInlineDims() : getDims(stdout);
         if (spec.onResize) {
           state = spec.onResize(state, d);
         }
-        renderToStdout(state, stdout, spec.renderFrame);
+        doRender(state);
       } catch (err) {
         fail(err);
       }
@@ -339,7 +423,7 @@ export async function runTui<S, A extends string, C extends A>(
           settle(intent as Exclude<A, C>, state);
           return;
         }
-        renderToStdout(state, stdout, spec.renderFrame);
+        doRender(state);
       } catch (err) {
         fail(err);
       }

@@ -72,6 +72,10 @@ export async function runFlagsTui(
   // Exclude<FlagsIntent,'none'> = 'save' | 'cancel' | 'abort', which matches
   // FlagsTuiResult.action exactly — no casts needed, and adding a new FlagsIntent member
   // is a compile error here (exhaustiveness enforced at the type level).
+  //
+  // D-INLINE: flags editor uses inline mode — renders in-place in the scroll buffer
+  // without entering the alt screen. This is friendlier for devflow init's wizard
+  // context where the flags editor is embedded in a multi-step interactive flow.
   const result = await runTui<FlagsViewState, FlagsIntent, 'none'>({
     initialState,
     reduce,
@@ -81,6 +85,7 @@ export async function runFlagsTui(
     onResize: (state, dims) => resizeViewport(state, computeViewportHeight(dims.rows)),
     signalAction: 'abort',
     continueIntent: 'none',
+    screen: 'inline',
     io,
   });
 

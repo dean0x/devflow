@@ -47,6 +47,15 @@ interface FlagDefCommon {
   readonly description: string;
   /** One-line what + why hint shown in the UI (keep ≤ ~76 cols). */
   readonly hint: string;
+  /**
+   * Short phrase (target ≤ 30 chars, hard-capped by registry test) describing
+   * what the flag does. Shown as a dim trailing column in every TUI row and
+   * appended to each --status row. Registry test enforces the cap.
+   *
+   * D-BLURB: one-definition seam — lives here next to hint and description
+   * rather than separately derived at render sites.
+   */
+  readonly blurb: string;
   /** UI partitioning only: true = recommended section; false = optional section. */
   readonly recommended: boolean;
   readonly target: FlagTarget;
@@ -123,6 +132,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Fullscreen terminal UI',
     description: 'Flicker-free fullscreen rendering',
     hint: 'Enables fullscreen mode — flicker-free and cursor-stable',
+    blurb: 'fullscreen terminal UI',
     kind: 'boolean',
     target: { type: 'setting', key: 'tui' },
     onPayload: 'fullscreen',
@@ -134,6 +144,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Deferred tool loading',
     description: 'Load tool schemas on demand instead of all at startup',
     hint: 'Defers tool schema loading to first use — smaller initial context',
+    blurb: 'deferred tool schema loading',
     kind: 'boolean',
     target: { type: 'env', key: 'ENABLE_TOOL_SEARCH' },
     onPayload: 'true',
@@ -145,6 +156,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'LSP support',
     description: 'Enable Language Server Protocol integration',
     hint: 'Activates LSP tool so Claude can query your editor code intelligence',
+    blurb: 'editor code intelligence',
     kind: 'boolean',
     target: { type: 'env', key: 'ENABLE_LSP_TOOL' },
     onPayload: 'true',
@@ -156,6 +168,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Extended prompt cache',
     description: 'Extend prompt cache TTL from 5min to 1h',
     hint: 'Extends cache TTL from 5 min to 1 hr — cheaper long sessions',
+    blurb: '1-hour prompt cache TTL',
     kind: 'boolean',
     target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H' },
     onPayload: 'true',
@@ -167,6 +180,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Show turn duration',
     description: 'Display timing info after each turn',
     hint: 'Shows wall-clock time for each turn — useful for spotting slow paths',
+    blurb: 'wall-clock time per turn',
     kind: 'boolean',
     target: { type: 'setting', key: 'showTurnDuration' },
     onPayload: true,
@@ -178,6 +192,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Clear context on plan accept',
     description: 'Clear context window when accepting a plan',
     hint: 'Clears context on plan accept so implementation starts with full budget',
+    blurb: 'clear context on plan accept',
     kind: 'boolean',
     target: { type: 'setting', key: 'showClearContextOnPlanAccept' },
     onPayload: true,
@@ -189,6 +204,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable bundled skills',
     description: "Remove Claude Code's built-in skills and workflows (devflow provides its own)",
     hint: "Removes Claude Code's built-in skills — devflow installs its own set",
+    blurb: 'remove built-in CC skills',
     kind: 'boolean',
     target: { type: 'setting', key: 'disableBundledSkills' },
     onPayload: true,
@@ -200,6 +216,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Pin Sonnet to 4.6',
     description: 'Pin the default Sonnet model to claude-sonnet-4-6',
     hint: 'Pins Sonnet to 4.6 — stable, deterministic alias across model updates',
+    blurb: 'pin Sonnet to 4.6 model',
     kind: 'boolean',
     target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL' },
     onPayload: 'claude-sonnet-4-6',
@@ -214,6 +231,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Max concurrent subagents',
     description: 'Maximum number of subagents Claude Code will spawn concurrently',
     hint: 'Sets concurrent subagent cap; upstream default is 20 — devflow uses 40',
+    blurb: 'parallel subagent cap',
     kind: 'number',
     target: { type: 'env', key: 'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS' },
     recommended: true,
@@ -231,6 +249,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Brief output mode',
     description: 'Reduce verbosity of Claude Code output',
     hint: 'Reduces output verbosity — shorter responses, less explanation',
+    blurb: 'shorter, less verbose output',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_BRIEF' },
     onPayload: 'true',
@@ -242,6 +261,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Thinking summaries',
     description: 'Show thinking summaries during reasoning',
     hint: 'Surfaces condensed reasoning previews during extended thinking',
+    blurb: 'condensed reasoning previews',
     kind: 'boolean',
     target: { type: 'setting', key: 'showThinkingSummaries' },
     onPayload: true,
@@ -253,6 +273,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Subprocess env scrub',
     description: 'Strip cloud credentials from subprocesses',
     hint: 'Strips cloud credentials (AWS, GCP, Azure) from subprocess env',
+    blurb: 'strip cloud credentials',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' },
     onPayload: '1',
@@ -264,6 +285,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable non-essential traffic',
     description: 'Suppress usage metrics telemetry',
     hint: 'Suppresses usage telemetry sent back to Anthropic',
+    blurb: 'suppress usage telemetry',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' },
     onPayload: 'true',
@@ -275,6 +297,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Forked subagents',
     description: 'Better subagent perf on external builds',
     hint: 'Enables forked subagent model — faster parallel agents (experimental)',
+    blurb: 'faster parallel agents',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT' },
     onPayload: '1',
@@ -286,6 +309,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable adaptive thinking',
     description: 'Disable adaptive reasoning on Opus/Sonnet 4.6',
     hint: 'Disables adaptive thinking budget — fixes compute per turn',
+    blurb: 'fixed compute per turn',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING' },
     onPayload: 'true',
@@ -297,6 +321,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Always enable thinking',
     description: 'Enable extended thinking by default',
     hint: 'Forces extended thinking on every turn, including non-complex ones',
+    blurb: 'extended thinking always',
     kind: 'boolean',
     target: { type: 'setting', key: 'alwaysThinkingEnabled' },
     onPayload: true,
@@ -308,6 +333,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable git instructions',
     description: 'Remove git workflow instructions from system prompt',
     hint: 'Removes git workflow from system prompt — saves tokens in each turn',
+    blurb: 'remove git system prompt',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS' },
     onPayload: 'true',
@@ -321,6 +347,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable auto-compaction',
     description: 'Disable automatic context compaction',
     hint: 'Disables auto-compaction — retains full context at the cost of more tokens',
+    blurb: 'retain full context always',
     kind: 'boolean',
     target: { type: 'env', key: 'DISABLE_COMPACT' },
     onPayload: 'true',
@@ -334,6 +361,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable 1M context window',
     description: 'Disable the 1M-token context window experiment (v2.1.223+)',
     hint: 'Opts out of the 1M context experiment — uses standard context budget',
+    blurb: 'use standard context budget',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_1M_CONTEXT' },
     onPayload: 'true',
@@ -345,6 +373,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Disable auto-updater',
     description: 'Prevent automatic update checks',
     hint: 'Prevents automatic update checks — manage updates manually',
+    blurb: 'manual update management',
     kind: 'boolean',
     target: { type: 'env', key: 'DISABLE_AUTOUPDATER' },
     onPayload: 'true',
@@ -356,6 +385,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Agent Teams (experimental)',
     description: 'Enable Claude Code experimental Agent Teams',
     hint: 'Enables peer-agent teammate mode — experimental, may change any release',
+    blurb: 'peer-agent teammate mode',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' },
     onPayload: '1',
@@ -373,6 +403,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Enable todo/task tools',
     description: 'Restore Todo and TaskCreate tools removed by default in newer models',
     hint: 'Re-enables Todo/TaskCreate tools on Opus 4.8+ / Sonnet 5+ / Fable 5+',
+    blurb: 'restore Todo/Task tools',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
     onPayload: '1',
@@ -389,6 +420,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Max subagent spawn depth',
     description: 'Maximum depth of nested subagent spawning',
     hint: 'Caps nested spawn depth; upstream default is 3 — raise only when needed',
+    blurb: 'nested spawn depth limit',
     kind: 'number',
     target: { type: 'env', key: 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH' },
     recommended: false,
@@ -405,6 +437,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Workflow size guideline',
     description: 'Guide Claude on the expected size of workflow plans',
     hint: 'Hints preferred plan scale: small/medium/large/unrestricted',
+    blurb: 'plan scale hint',
     kind: 'enum',
     target: { type: 'setting', key: 'workflowSizeGuideline' },
     values: ['small', 'medium', 'large', 'unrestricted'],
@@ -416,6 +449,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Default model',
     description: 'Override the default model for Claude Code',
     hint: 'Sets ANTHROPIC_DEFAULT_MODEL — overrides session-level model selection',
+    blurb: 'override default model',
     kind: 'string',
     target: { type: 'env', key: 'ANTHROPIC_DEFAULT_MODEL' },
     recommended: false,
@@ -429,6 +463,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Goal check-in interval',
     description: 'Interval in minutes for Claude to check in on task goals',
     hint: 'Periodic goal check-ins every N min; 0 = off; upstream default is 30',
+    blurb: 'goal check-in interval',
     kind: 'number',
     target: { type: 'env', key: 'CLAUDE_CODE_GOAL_CHECKIN_MINUTES' },
     recommended: false,
@@ -444,6 +479,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'Spellcheck command',
     description: 'Custom spellcheck command for Claude Code',
     hint: 'Sets the external spell-check command (written as {command: ...})',
+    blurb: 'external spell-check command',
     kind: 'string',
     target: { type: 'setting', key: 'spellcheck' },
     recommended: false,
@@ -459,6 +495,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     label: 'View mode',
     description: 'Interface view mode (default / verbose / focus)',
     hint: "Controls view mode; 'default' removes the key (Claude Code native default)",
+    blurb: 'interface view mode',
     kind: 'enum',
     target: { type: 'setting', key: 'viewMode' },
     values: ['default', 'verbose', 'focus'],
@@ -686,21 +723,74 @@ export function expectedInputFor(flag: ClaudeCodeFlag): string {
 }
 
 /**
- * Format a flag value for display.
+ * Effective display result — plain text plus a flag indicating whether
+ * the text came from a default rather than an explicit value.
+ */
+export interface EffectiveDisplay {
+  /** Human-readable label (never 'unset'). */
+  readonly text: string;
+  /** True when the value is neutral/null and `text` comes from the default. */
+  readonly isDefault: boolean;
+}
+
+/**
+ * Returns the effective display for a flag value — the single source of truth
+ * for every render site (TUI cell, --status rows, --list default label,
+ * --enable/--disable confirmation text).
  *
- * Vocabulary (applies ADR-016 — one syntax, one semantic):
- *   boolean true  → 'enabled'
- *   boolean false → 'disabled'  (not 'unset' — false is a deliberate-off, not unset)
- *   null / neutral → 'unset'
- *   other active values → their string representation
+ * Never returns 'unset' — always shows what the flag effectively does:
+ *   boolean true           → { text: 'on',  isDefault: false }
+ *   boolean false/null     → { text: 'off', isDefault: true }
+ *   enum active value      → { text: value, isDefault: false }
+ *   enum neutral/null      → { text: neutralValue ?? '—', isDefault: true }
+ *   number active value    → { text: String(value), isDefault: false }
+ *   number null            → { text: String(defaultValue ?? upstreamDefault), isDefault: true }
+ *                             or { text: '—', isDefault: true } when no default exists
+ *   string active value    → { text: value, isDefault: false }
+ *   string null            → { text: '—', isDefault: true }
  *
- * Boolean branch must win before isNeutral so that false yields 'disabled',
- * not 'unset' (isNeutral treats false as neutral for booleans).
+ * D-EFFDV: one-definition seam consumed by formatFlagValue, render.ts formatValue,
+ * formatStatusRows (Site D), and handleList defaultLabel (Site C).
+ * All display sites must route through here — never re-derive independently.
+ */
+export function effectiveDisplay(flag: ClaudeCodeFlag, value: FlagsRecordValue): EffectiveDisplay {
+  // Boolean: true = 'on' (active), false/null = 'off' (neutral but meaningful)
+  if (flag.kind === 'boolean') {
+    const active = value === true;
+    return { text: active ? 'on' : 'off', isDefault: !active };
+  }
+
+  // Active non-null non-neutral value for enum/number/string
+  if (value !== null && !isNeutral(flag, value)) {
+    return { text: String(value), isDefault: false };
+  }
+
+  // Neutral or null: show what the flag effectively defaults to
+  switch (flag.kind) {
+    case 'enum': {
+      const neutral = flag.neutralValue ?? '—';
+      return { text: neutral, isDefault: true };
+    }
+    case 'number': {
+      const def = flag.defaultValue ?? flag.upstreamDefault;
+      return { text: def !== undefined ? String(def) : '—', isDefault: true };
+    }
+    case 'string':
+      return { text: '—', isDefault: true };
+  }
+}
+
+/**
+ * Format a flag value for display (CLI output, confirmation messages).
+ *
+ * Delegates to effectiveDisplay — see its JSDoc for the full vocabulary.
+ * D-EFFDV: one definition, all sites route through effectiveDisplay.
+ *
+ * NOTE: --set confirmation for an explicit 'unset' input should special-case
+ * null → literal 'unset' at the call site, since the user named it explicitly.
  */
 export function formatFlagValue(flag: ClaudeCodeFlag, value: FlagsRecordValue): string {
-  if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
-  if (value === null || isNeutral(flag, value)) return 'unset';
-  return String(value);
+  return effectiveDisplay(flag, value).text;
 }
 
 /**

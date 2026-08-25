@@ -9,6 +9,7 @@ import {
   coerceFlagValue,
   parseFlagValueInput,
   formatFlagValue,
+  effectiveDisplay,
   describeFlagKind,
   expectedInputFor,
   countActiveFlags,
@@ -30,6 +31,7 @@ import {
   type NumberFlagDef,
   type StringFlagDef,
 } from '../src/core/flags.js';
+import { resolveSeedFlags } from '../src/cli/commands/init-seed.js';
 
 // ─── Registry invariants ──────────────────────────────────────────────────────
 
@@ -210,32 +212,34 @@ describe('formatFlagValue — vocabulary table', () => {
   const numFlag  = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
   const strFlag  = FLAG_REGISTRY.find(f => f.id === 'spellcheck')!;
 
-  it('boolean true → enabled', () => {
-    expect(formatFlagValue(boolFlag, true)).toBe('enabled');
+  // D-EFFDV: formatFlagValue routes through effectiveDisplay — vocabulary updated
+  // from enabled/disabled/unset to on/off/<effective-default> (never 'unset').
+  it('boolean true → on', () => {
+    expect(formatFlagValue(boolFlag, true)).toBe('on');
   });
-  it('boolean false → disabled (not unset)', () => {
-    expect(formatFlagValue(boolFlag, false)).toBe('disabled');
+  it('boolean false → off (not unset; false is neutral but still renders as off)', () => {
+    expect(formatFlagValue(boolFlag, false)).toBe('off');
   });
-  it('boolean null → unset', () => {
-    expect(formatFlagValue(boolFlag, null)).toBe('unset');
+  it('boolean null → off (boolean null treated same as false)', () => {
+    expect(formatFlagValue(boolFlag, null)).toBe('off');
   });
-  it('enum neutral value → unset', () => {
-    expect(formatFlagValue(enumFlag, 'default')).toBe('unset');
+  it('enum neutral value → effective neutral text (default for view-mode)', () => {
+    expect(formatFlagValue(enumFlag, 'default')).toBe('default');
   });
   it('enum active value → string', () => {
     expect(formatFlagValue(enumFlag, 'verbose')).toBe('verbose');
   });
-  it('enum null → unset', () => {
-    expect(formatFlagValue(enumFlag, null)).toBe('unset');
+  it('enum null → neutralValue text (default for view-mode)', () => {
+    expect(formatFlagValue(enumFlag, null)).toBe('default');
   });
-  it('number null → unset', () => {
-    expect(formatFlagValue(numFlag, null)).toBe('unset');
+  it('number null → devflow defaultValue string (40 for max-concurrent-subagents)', () => {
+    expect(formatFlagValue(numFlag, null)).toBe('40');
   });
   it('number active value → string', () => {
     expect(formatFlagValue(numFlag, 40)).toBe('40');
   });
-  it('string null → unset', () => {
-    expect(formatFlagValue(strFlag, null)).toBe('unset');
+  it('string null → — (em-dash placeholder)', () => {
+    expect(formatFlagValue(strFlag, null)).toBe('—');
   });
   it('string active value → string', () => {
     expect(formatFlagValue(strFlag, 'aspell')).toBe('aspell');
@@ -1628,5 +1632,150 @@ describe('expectedInputFor', () => {
     for (const flag of FLAG_REGISTRY) {
       expect(expectedInputFor(flag), `${flag.id}: matches legacy output`).toBe(legacyExpected(flag));
     }
+  });
+});
+
+// ─── effectiveDisplay ─────────────────────────────────────────────────────────
+
+describe('effectiveDisplay — D-EFFDV one-definition seam', () => {
+  const boolFlag = FLAG_REGISTRY.find(f => f.id === 'tui')!;
+  const enumFlag = FLAG_REGISTRY.find(f => f.id === 'view-mode')!;        // neutralValue='default'
+  const numFlagD = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!; // defaultValue=40
+  const numFlagU = FLAG_REGISTRY.find(f => f.id === 'subagent-spawn-depth')!;     // upstreamDefault=3, no devflow default
+  const strFlag  = FLAG_REGISTRY.find(f => f.id === 'spellcheck')!;
+
+  it('boolean true → { text: "on", isDefault: false }', () => {
+    const d = effectiveDisplay(boolFlag, true);
+    expect(d.text).toBe('on');
+    expect(d.isDefault).toBe(false);
+  });
+
+  it('boolean false → { text: "off", isDefault: true } (false is neutral but meaningful)', () => {
+    const d = effectiveDisplay(boolFlag, false);
+    expect(d.text).toBe('off');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('boolean null → { text: "off", isDefault: true } (same as false)', () => {
+    const d = effectiveDisplay(boolFlag, null);
+    expect(d.text).toBe('off');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('enum active value → { text: value, isDefault: false }', () => {
+    const d = effectiveDisplay(enumFlag, 'verbose');
+    expect(d.text).toBe('verbose');
+    expect(d.isDefault).toBe(false);
+  });
+
+  it('enum null → { text: neutralValue, isDefault: true }', () => {
+    const d = effectiveDisplay(enumFlag, null);
+    expect(d.text).toBe('default');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('enum neutralValue → { text: neutralValue, isDefault: true }', () => {
+    const d = effectiveDisplay(enumFlag, 'default');
+    expect(d.text).toBe('default');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('number active value → { text: String(value), isDefault: false }', () => {
+    const d = effectiveDisplay(numFlagD, 20);
+    expect(d.text).toBe('20');
+    expect(d.isDefault).toBe(false);
+  });
+
+  it('number null with devflow defaultValue → { text: "40", isDefault: true }', () => {
+    const d = effectiveDisplay(numFlagD, null);
+    expect(d.text).toBe('40');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('number null with upstreamDefault only → { text: String(upstreamDefault), isDefault: true }', () => {
+    const d = effectiveDisplay(numFlagU, null);
+    expect(d.text).toBe('3');
+    expect(d.isDefault).toBe(true);
+  });
+
+  it('string active value → { text: value, isDefault: false }', () => {
+    const d = effectiveDisplay(strFlag, 'aspell list');
+    expect(d.text).toBe('aspell list');
+    expect(d.isDefault).toBe(false);
+  });
+
+  it('string null → { text: "—", isDefault: true }', () => {
+    const d = effectiveDisplay(strFlag, null);
+    expect(d.text).toBe('—');
+    expect(d.isDefault).toBe(true);
+  });
+});
+
+// ─── blurb hard-cap registry test ────────────────────────────────────────────
+
+describe('FLAG_REGISTRY — blurb hard-cap (D-BLURB)', () => {
+  it('every flag has blurb defined and blurb.length ≤ 30', () => {
+    for (const flag of FLAG_REGISTRY) {
+      expect(
+        typeof flag.blurb,
+        `${flag.id}: blurb must be a string`,
+      ).toBe('string');
+      expect(
+        flag.blurb.length,
+        `${flag.id}: blurb "${flag.blurb}" is ${flag.blurb.length} chars (max 30)`,
+      ).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it('every blurb is non-empty', () => {
+    for (const flag of FLAG_REGISTRY) {
+      expect(flag.blurb.length, `${flag.id}: blurb must not be empty`).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─── persistence round-trip ───────────────────────────────────────────────────
+
+describe('persistence round-trip: manifest write shape → resolveSeedFlags', () => {
+  it('explicitly set values survive the manifest → resolveSeedFlags round-trip unchanged', () => {
+    // Simulates what persistFlagConfig writes: manifest.features.flags = record.
+    // The saved record is then fed to resolveSeedFlags on re-init.
+    const persistedRecord: FlagsRecord = {
+      tui: false,                        // boolean, non-default (default=true)
+      'view-mode': 'verbose',            // enum, non-neutral
+      'max-concurrent-subagents': 20,    // number, non-default
+      spellcheck: 'aspell list',         // string active value
+    };
+
+    const seeded = resolveSeedFlags(persistedRecord);
+
+    // Explicitly set values must be preserved exactly
+    expect(seeded['tui']).toBe(false);
+    expect(seeded['view-mode']).toBe('verbose');
+    expect(seeded['max-concurrent-subagents']).toBe(20);
+    expect(seeded['spellcheck']).toBe('aspell list');
+  });
+
+  it('absent flags in manifest get registry defaults on resolveSeedFlags', () => {
+    // Only set one flag; all others should resolve to their registry defaults
+    const persistedRecord: FlagsRecord = { tui: false };
+    const seeded = resolveSeedFlags(persistedRecord);
+
+    // lsp.defaultValue = true → seeded as true
+    expect(seeded['lsp']).toBe(true);
+    // subagent-spawn-depth.defaultValue = undefined → null via defaultValueOf
+    expect(seeded['subagent-spawn-depth']).toBeNull();
+    // view-mode.defaultValue = 'default' → seeded as 'default'
+    expect(seeded['view-mode']).toBe('default');
+  });
+
+  it('null values in manifest are preserved (deliberately unset)', () => {
+    const persistedRecord: FlagsRecord = {
+      'subagent-spawn-depth': null,  // explicitly set to null (unset)
+    };
+    const seeded = resolveSeedFlags(persistedRecord);
+
+    // null in manifest means "deliberately unset" — must be preserved as null
+    expect(seeded['subagent-spawn-depth']).toBeNull();
   });
 });
