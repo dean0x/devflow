@@ -5,7 +5,7 @@
  * Pure functions, no I/O.
  */
 
-import { stripAnsi, truncate } from '../../hud/colors.js';
+import { stripAnsi, truncate } from '../../core/ansi.js';
 
 // ---------------------------------------------------------------------------
 // Cell padding and truncation

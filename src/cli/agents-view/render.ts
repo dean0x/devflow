@@ -31,7 +31,7 @@ import {
   cyan,
   gray,
   stripAnsi,
-} from '../../hud/colors.js';
+} from '../../core/ansi.js';
 import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import {
   isDirtyModel,

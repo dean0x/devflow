@@ -37,7 +37,7 @@ import {
   green,
   red,
   inverse,
-} from '../../hud/colors.js';
+} from '../../core/ansi.js';
 import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import type { FlagsViewState, FlagRow } from './state.js';
 import { FLAG_REGISTRY } from '../../core/flags.js';
