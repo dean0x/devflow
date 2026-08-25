@@ -14,6 +14,7 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Discriminant for the FlagDef union — determines which per-kind fields are present. */
 export type FlagKind = 'boolean' | 'enum' | 'number' | 'string';
 
 /** A concrete flag value (never null). */
@@ -97,19 +98,22 @@ export type ClaudeCodeFlag = BooleanFlagDef | EnumFlagDef | NumberFlagDef | Stri
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
-// Phase 0 probe findings (2026-08-23, Claude Code 2.1.241):
-//   keybindingFlavor:      CUT — domain unverifiable; 'emacs'/'readline'/'classic'
-//                          appear in binary but in unrelated contexts (Node.js module
-//                          names, VS Code terminal settings). Behavioral probes via
-//                          claude --version produced no validation output.
-//   workflowSizeGuideline: domain small|medium|large|unrestricted — verified from binary
-//                          strings at a 4-value cluster adjacent to each other and the
-//                          Workflows feature description.
-//   New env var names all confirmed present in the binary:
-//     CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH,
-//     CLAUDE_CODE_ENABLE_TODO_TOOLS, CLAUDE_CODE_GOAL_CHECKIN_MINUTES,
-//     ANTHROPIC_DEFAULT_MODEL.
+// Phase 0 probe findings: see docs/reference/claude-code-flags-probe.md
 
+/**
+ * Ordered registry of all Claude Code flags managed by devflow.
+ *
+ * IDs are the stable manifest keys (`features.flags` in the devflow manifest).
+ * Array order drives the `--list` table and TUI row order — intentional changes
+ * to order are display changes and should be made deliberately.
+ *
+ * Not every Claude Code env var belongs here. One notable exclusion:
+ *   `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` — deliberately
+ *   proxy-owned. It is paired with `ANTHROPIC_BASE_URL` in proxy.ts and its
+ *   lifecycle is coupled to relay enable/disable; strip is handled by
+ *   `stripProxyEnv` (src/cli/commands/proxy.ts). Adding it here would create a
+ *   second owner and double-strip it on uninstall. (mirrors agent-teams note)
+ */
 export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
 
   // ══ Recommended (default ON) ══════════════════════════════════════════════
@@ -362,6 +366,20 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     // The env var above is the only surface managed by FLAG_REGISTRY for this flag.
   },
 
+  {
+    // Upstream: restores Todo/TaskCreate tools removed by default in Opus 4.8+,
+    // Sonnet 5+, and Fable 5+. Set to '1' to re-enable.
+    id: 'enable-todo-tools',
+    label: 'Enable todo/task tools',
+    description: 'Restore Todo and TaskCreate tools removed by default in newer models',
+    hint: 'Re-enables Todo/TaskCreate tools on Opus 4.8+ / Sonnet 5+ / Fable 5+',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
+    onPayload: '1',
+    recommended: false,
+    defaultValue: false,
+  },
+
   // ── Valued flags (number/enum/string) ────────────────────────────────────
 
   {
@@ -403,19 +421,6 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     recommended: false,
     defaultValue: undefined,
     maxLength: 64,
-  },
-  {
-    // Upstream: restores Todo/TaskCreate tools removed by default in Opus 4.8+,
-    // Sonnet 5+, and Fable 5+. Set to '1' to re-enable.
-    id: 'enable-todo-tools',
-    label: 'Enable todo/task tools',
-    description: 'Restore Todo and TaskCreate tools removed by default in newer models',
-    hint: 'Re-enables Todo/TaskCreate tools on Opus 4.8+ / Sonnet 5+ / Fable 5+',
-    kind: 'boolean',
-    target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
-    onPayload: '1',
-    recommended: false,
-    defaultValue: false,
   },
   {
     // Upstream default: 30 min. 0 = disabled (still ACTIVE — written to env).

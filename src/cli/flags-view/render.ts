@@ -121,9 +121,7 @@ function renderBuffer(buffer: string, caret: number): string {
 
 /**
  * Render a single data row.
- *
- * Data row format (≤ 78 visible chars + PREFIX = ≤ 80):
- *   PREFIX(2) + LABEL(27) + DIRTY(3) + VALUE(46)
+ * Column widths at 80-col reference: see file-header table (total 77 visible chars).
  */
 function renderRow(
   row: FlagRow,
