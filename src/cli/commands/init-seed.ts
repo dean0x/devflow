@@ -20,6 +20,7 @@ import {
   readViewMode,
   type ClaudeCodeFlag,
   type FlagsRecord,
+  type ViewMode,
 } from '../../core/flags.js';
 import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
@@ -252,15 +253,21 @@ export function resolveInitSeed(
 
   // Encode the resolved view mode into flags['view-mode'] (PF-015: all flag state in FlagsRecord).
   // Priority: existing settings.json (non-default) → flags['view-mode'] from manifest → 'default'.
-  // readViewMode returns 'default' when absent or null, so 'default' is treated as no-opinion.
+  // resolveExistingViewMode returns undefined when absent or 'default' — treated as no-opinion.
   const existingViewMode = resolveExistingViewMode(settingsSnapshot);
   const manifestViewMode = readViewMode(flags); // already in flags via resolveSeedFlags spread
-  flags['view-mode'] =
-    existingViewMode ??
-    (manifestViewMode !== 'default' ? manifestViewMode : undefined) ??
-    'default';
+  let resolvedViewMode: ViewMode;
+  if (existingViewMode !== undefined) {
+    resolvedViewMode = existingViewMode;        // settings.json non-default wins
+  } else if (manifestViewMode !== 'default') {
+    resolvedViewMode = manifestViewMode;        // manifest non-default wins
+  } else {
+    resolvedViewMode = 'default';              // fall back to neutral
+  }
 
-  return { features, flags, workflowPlugins, languagePlugins };
+  // Return a fresh spread rather than mutating flags in place — keeps this function pure
+  // per the module docblock and avoids aliasing if the caller inspects seed.flags.
+  return { features, flags: { ...flags, 'view-mode': resolvedViewMode }, workflowPlugins, languagePlugins };
 }
 
 /**

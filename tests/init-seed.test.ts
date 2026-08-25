@@ -333,6 +333,29 @@ describe('resolveInitSeed', () => {
     expect(readViewMode(seed.flags)).toBe('default');
   });
 
+  it('does not mutate the manifest flags record (immutability regression — ARCH-S3)', () => {
+    // Regression guard: resolveInitSeed previously wrote flags['view-mode'] in place,
+    // which would corrupt manifest.features.flags if it was passed by reference.
+    const manifestFlags = { tui: true, 'view-mode': 'verbose' as const };
+    const manifest = makeManifest({ features: { ...makeManifest().features, flags: manifestFlags } });
+    const originalViewMode = manifest.features.flags?.['view-mode'];
+
+    resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+
+    // Manifest flags must be unchanged after the call.
+    expect(manifest.features.flags?.['view-mode']).toBe(originalViewMode);
+  });
+
+  it('returned flags are a fresh copy — mutating them does not affect the manifest', () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, flags: { 'view-mode': 'verbose' as const } } });
+    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+
+    (seed.flags as Record<string, unknown>)['view-mode'] = 'focus';
+
+    // Manifest flags must remain unaffected by the caller mutating the returned record.
+    expect(manifest.features.flags?.['view-mode']).toBe('verbose');
+  });
+
   it('re-init round-trip: re-resolving from the same manifest+config produces the same seed', () => {
     // Phase 2: FlagsRecord (was string[] + viewMode); view-mode in flags record
     const manifest = makeManifest({

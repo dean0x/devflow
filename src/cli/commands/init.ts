@@ -42,7 +42,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
-import { applyFlags, stripFlags, FLAG_REGISTRY, ViewMode, resolveExistingViewMode, resolveFinalViewMode, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
+import { applyFlags, stripFlags, FLAG_REGISTRY, resolveExistingViewMode, resolveFinalViewMode, countActiveFlags, readViewMode, getDefaultFlagsRecord, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
@@ -630,7 +630,7 @@ export const initCommand = new Command('init')
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
     let complianceFrameworks = seed.features.compliance.frameworks;
-    let enabledFlags: FlagsRecord = seed.flags;
+    let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when the user made an explicit interactive selection or --reset was passed.
     // Used by resolveFinalViewMode to decide whether the user-selected view-mode wins over
     // an externally-set /focus value in settings.json.
@@ -957,7 +957,10 @@ export const initCommand = new Command('init')
 
       if (flagsTuiResult.action === 'abort') {
         p.cancel('Installation cancelled.');
-        process.exit(0);
+        // avoids PF-014: process.exit(0) would report success to wrappers and can
+        // drop buffered terminal-restore escapes when stdout is a pipe before flushing.
+        process.exitCode = 130;
+        return;
       } else if (flagsTuiResult.action === 'save') {
         enabledFlags = collectFlagRecord(flagsTuiResult.rows);
         // Mark as explicit: user actively confirmed flags (including view-mode),
@@ -970,8 +973,10 @@ export const initCommand = new Command('init')
       {
         const activeCount = countActiveFlags(enabledFlags);
         const defaults = getDefaultFlagsRecord();
+        // Restrict to known IDs (applies PF-029): forward-compat unknown IDs have
+        // defaults[id] === undefined and would inflate the count if not excluded.
         const modifiedCount = Object.keys(enabledFlags).filter(
-          id => enabledFlags[id] !== defaults[id],
+          id => id in defaults && enabledFlags[id] !== defaults[id],
         ).length;
         p.log.info(`Flags: ${activeCount} configured, ${modifiedCount} modified from defaults`);
       }
@@ -1633,11 +1638,14 @@ export const initCommand = new Command('init')
       // - explicit=true (interactive TUI save or --reset): the TUI-selected view-mode wins
       // - explicit=false (recommended/non-TTY): preserve an externally-set /focus value;
       //   otherwise use the seeded value (which already reflects the prior manifest state)
-      enabledFlags['view-mode'] = resolveFinalViewMode(
-        resolveExistingViewMode(content),
-        readViewMode(enabledFlags),
-        viewModeExplicit,
-      );
+      enabledFlags = {
+        ...enabledFlags,
+        'view-mode': resolveFinalViewMode(
+          resolveExistingViewMode(content),
+          readViewMode(enabledFlags),
+          viewModeExplicit,
+        ),
+      };
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
 
