@@ -1,7 +1,7 @@
 ---
 feature: installer-shadowing
 name: Installer & Skill/Rule Shadowing
-description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, sweepDevflowNamespaces, resolveProjectDataCleanup) or install-artifact cleanup, extending the CLI skills/rules/flags management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, FlagsRecord, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy), or working on the flags TUI (FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, buildStops, cycleForward, cycleBackward) or the flags CLI (createFlagsCommand, lookupFlag, persistFlagConfig). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, enumerateDryRunExtras, sweepDevflowNamespaces, resolveProjectDataCleanup, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, getPackageRoot, isContainedIn, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, SweepResult, sweepOrphans, sweepFailures, SweepFailure, mdFileName, mdEntryName, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, FlagsRecord, FlagsRecordValue, getDefaultFlagsRecord, parseManifestFlags, migrateLegacyFlagsToRecord, sanitizeFlagsRecord, coerceFlagValue, parseFlagValueInput, neutralValueOf, isNeutral, countActiveFlags, readViewMode, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, AnyMigration, migrations.json, compliance-prompts, shouldRunComplianceStep, CompliancePromptIO, runComplianceStep, modePromptShown, createFlagsCommand, lookupFlag, persistFlagConfig, FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, buildStops, cycleForward, cycleBackward, sanitizeCell, padToVisible, truncateVisible."
+description: "Use when modifying the install pipeline (installViaFileCopy, installAllRules, composeScripts, InstallReport), adding or changing skill/rule shadow override logic, touching uninstall scope (enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, sweepDevflowNamespaces, resolveProjectDataCleanup) or install-artifact cleanup, extending the CLI skills/rules/flags management commands, working with asset directory accessors (rulesDir, skillsDir, commandsDir) and package-root resolution, modifying the init seeding layer (resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, --reset, FlagsRecord, knownPlugins, readConfigIfPresent, resolveExistingViewMode, getAllCommandNames, proxy), working on the flags TUI (FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, effectiveDisplay, blurb, inline mode, RunTuiSpec screen) or the flags CLI (createFlagsCommand, lookupFlag, persistFlagConfig, formatFlagValue), or working on the compliance wizard step (shouldRunComplianceStep, runComplianceStep, modePromptShown, CompliancePromptIO). Keywords: installViaFileCopy, installAllRules, composeScripts, InstallReport, RuleInstallOutcome, SkillShadowState, RuleShadowState, shadow, unshadow, validateSkillShadow, validateRuleShadow, seedRuleShadow, prefixSkillName, unprefixSkillName, devflow:, skills, rules, uninstall, EISDIR, enumerateUserDevFlowContent, removeDevFlowInstallArtifacts, resolveDevflowDirCleanup, installArtifactPaths, enumerateDryRunExtras, sweepDevflowNamespaces, resolveProjectDataCleanup, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, getPackageRoot, isContainedIn, rulesDir, skillsDir, agentsDir, commandsDir, scriptsDir, LEGACY_SKILL_NAMES, sweepOrphanedAssets, SweepResult, sweepOrphans, sweepFailures, SweepFailure, mdFileName, mdEntryName, orphan sweep, getAllSkillNames, getAllCommandNames, getAllAgentNames, DELETED_PLUGIN_NAMES, EXCLUDED, resolveInitSeed, resolveSeedFeatures, resolveSeedFlags, resolveSeedPlugins, resolveResetGatedInputs, applyCliToggles, FlagsRecord, FlagsRecordValue, getDefaultFlagsRecord, parseManifestFlags, migrateLegacyFlagsToRecord, sanitizeFlagsRecord, coerceFlagValue, parseFlagValueInput, neutralValueOf, isNeutral, countActiveFlags, readViewMode, knownPlugins, readConfigIfPresent, resolveExistingViewMode, resolveFinalViewMode, reset, init-seed, proxy, reapplyAgentMapping, revertExternalAgents, agent-models.json, proxy.json, proxy-routing.json, proxy.pid, applyDisableToSettings, buildRealPreflightDeps, canonicalise-agent-keys-v1, AnyMigration, migrations.json, compliance-prompts, shouldRunComplianceStep, CompliancePromptIO, runComplianceStep, modePromptShown, createFlagsCommand, lookupFlag, persistFlagConfig, FlagsViewState, FlagRow, buildFlagRows, collectFlagRecord, buildStops, cycleForward, cycleBackward, sanitizeCell, padToVisible, truncateVisible, effectiveDisplay, EffectiveDisplay, formatFlagValue, blurb, FlagDefCommon, INLINE_MARGIN, cursorUp, RunTuiSpec, screen, inline."
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/commands/flags.ts, src/cli/flags-view, src/cli/tui, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts, src/core/migrations.ts, src/cli/commands/compliance-prompts.ts]
 created: 2026-07-13
@@ -303,12 +303,19 @@ Key exports:
 - **`readSettingsSafe(settingsPath)`** — reads settings.json, returning `{ok: true, content}` or `{ok: false, reason}` — never throws.
 - **`persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)`** — writes the `FlagsRecord` to both `manifest.json` (`features.flags`) and `settings.json` (via `applyFlags`). Returns `true` on success, `false` on I/O failure. Boolean-only flags use `--enable`/`--disable`; non-boolean flags are redirected to `--set`.
 
+**Display vocabulary** (D-EFFDV — one definition, all surfaces route through `effectiveDisplay`):
+
+- **`--enable` / `--disable` confirmation**: both call `formatFlagValue(flag, value)` which delegates to `effectiveDisplay`. Vocabulary: `true` → 'on', `false` → 'off'. The former asymmetry ('enabled' for enable, `formatFlagValue` for disable) is gone.
+- **`--set` confirmation**: active values route through `formatFlagValue`; `null` echoes literal 'unset' at the call site (the user typed that word explicitly — do not replace it with the effective default).
+- **`formatStatusRows` (non-TTY status table)**: not-adopted rows use `effectiveDisplay(flag, neutralValueOf(flag)).text` — shows what the default does rather than printing 'unset'. Format: `not adopted — default: <effective text> applies on next devflow init`.
+- **`--list` defaultLabel**: number flags with `upstreamDefault` print `upstream default: N`; otherwise `flag.defaultValue` as a string or `'none'` (never 'unset').
+
 ### Flags TUI (`src/cli/flags-view/`, `src/cli/tui/`)
 
-An interactive terminal UI for editing flag state in one session. Launched by `devflow flags` bare on a TTY and by the Advanced init path.
+An interactive terminal UI for editing flag state in one session. Launched by `devflow flags` bare on a TTY and by the Advanced init path. Both launch paths use **inline mode** (see below) — the TUI renders in-place in the normal scroll buffer rather than entering the alt screen, which integrates cleanly into the init wizard's multi-step interactive flow.
 
 **`src/cli/flags-view/state.ts`** — pure state machine for the TUI. Key functions:
-- `buildFlagRows(registry, record)` — produces the row list from the live `FlagsRecord`; each `FlagRow` holds `id`, `tui` value (TUI-internal representation), and display metadata.
+- `buildFlagRows(registry, record)` — produces the row list from the live `FlagsRecord`; each `FlagRow` holds `id`, `tui` value (TUI-internal representation), `hint`, `blurb` (sourced from `flag.blurb`), and display metadata.
 - `collectFlagRecord(rows)` — inverse: reconstructs a `FlagsRecord` from the row list (via `tuiToRecord` per row).
 - `buildStops(flag)` — ordered cycle stops for a flag (for enum/boolean/number cycling).
 - `cycleForward` / `cycleBackward` — advance or retreat through a flag's stop list.
@@ -317,12 +324,38 @@ An interactive terminal UI for editing flag state in one session. Launched by `d
 - `recordToTui` / `tuiToRecord` — convert between `FlagsRecord` values and TUI-internal values (TUI uses `null` as the "devflow default" stop; `tuiToRecord` maps that back to `neutralValueOf`).
 - `adjustViewport` — scrolling helper (cursor, offset, height, rowCount).
 
+**`FlagRow.blurb`** — short phrase (≤30 chars) describing what the flag does. Sourced from `flag.blurb` at `buildFlagRows` — no registry reach-back at render time. Rendered as a dim trailing column in the TUI (D-BLURB).
+
+**`src/cli/flags-view/render.ts`** — frame renderer. Column layout at 80-col reference:
+
+| Column | Width | Notes |
+|--------|-------|-------|
+| PREFIX | 2 | cursor mark `❯ ` or `  ` |
+| LABEL | 27 | flag label |
+| DIRTY | 2 | `● ` when dirty |
+| VALUE | 16 | formatted value or edit buffer |
+| BLURB | 30 | dim short phrase (HINT in column header) |
+
+VALUE+BLURB = 46, preserving the prior total from the single VALUE column. All widths scale proportionally with terminal width (`Math.min(1, cols/80)`). Column header uses `gray('VALUE')` padded to `valueW` and `gray('HINT')` for the blurb column (omitted when `blurbW === 0`).
+
+`formatValue` vocabulary (D-EFFDV — delegates to `effectiveDisplay` for null/neutral values):
+- `null` (any kind) → `dim(effectiveDisplay(flag, null).text)`, with ` (default)` appended for number flags
+- `boolean true` → `green('on')`, `boolean false` → `yellow('off')`
+- Non-boolean active value → `bold(str)` when deviating from devflow default, else plain `str`
+
 **`src/cli/tui/cells.ts`** — shared cell-rendering helpers used by the flags TUI render layer:
 - `sanitizeCell(s)` — strips control characters from cell content (avoids terminal injection).
 - `padToVisible(s, width)` — pads a string to `width` visible characters (ANSI-aware).
 - `truncateVisible(s, maxWidth)` — truncates to `maxWidth` visible characters (ANSI-aware).
 
-**`src/cli/flags-view/index.ts`** and **`render.ts`** — entry-point and render logic; **`src/cli/flags-view/terminal.ts`** and **`src/cli/tui/terminal.ts`** — raw-mode terminal lifecycle (enter/exit raw mode, resize signals, cleanup on process exit).
+**`src/cli/flags-view/terminal.ts`** — flags TUI entry point. `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE) so both the bare `devflow flags` invocation and the init Advanced step render in the normal scroll buffer.
+
+**`src/cli/tui/terminal.ts`** — generic TUI driver. New additions:
+
+- **`RunTuiSpec.screen?: 'alt' | 'inline'`** — controls screen mode. Default is `'alt'` (prior behavior; agents-view uses this). `'inline'` renders in-place without entering the alt screen.
+- **Inline mode mechanics** (D-INLINE): first frame writes lines directly; subsequent frames use `cursorUp(prevLineCount - 1) + \r` then rewrite + `ERASE_BELOW`; on exit, cursor-up to frame top + `ERASE_BELOW` + `SHOW_CURSOR` erases the widget completely so the caller's clack flow continues uninterrupted.
+- **`INLINE_MARGIN = 2`** — lines reserved below the widget so the shell prompt is never clobbered. Height is clamped to `stdout.rows - INLINE_MARGIN` in inline mode.
+- **`cursorUp(n): string`** — returns `ESC[nA` for `n > 0`, empty string otherwise; callers need no guard.
 
 ## Integration Patterns
 
@@ -356,6 +389,7 @@ An interactive terminal UI for editing flag state in one session. Launched by `d
 - **Putting a name in both `enumerateUserDevFlowContent` and `installArtifactPaths`** — makes the confirmation prompt untruthful (item is presented as user content, then deleted regardless of user answer). A test enforces disjointness.
 - **Importing `EXCLUDED` as an oracle in tests** — destroys the test's independent literal check and turns invariant guards into tautologies. Pin an independent literal in the test alongside the production import.
 - **Dry-run preview using only pure helpers instead of the production enumeration path** — `runDryRunPhase` (full mode) must call `enumerateDryRunExtras`, which itself calls `installArtifactPaths`. A test that exercises only the pure helper (`installArtifactPaths` in isolation) does not catch divergence between the preview and the real removal loop. (avoids PF-018)
+- **Re-deriving the display vocabulary at a render site instead of calling `effectiveDisplay`** — four render sites (TUI `formatValue`, `--enable/--disable` confirmation, `--status` not-adopted message, `--list` defaultLabel) all route through `effectiveDisplay`. Adding a fifth site that hand-codes 'on'/'off' or shows 'unset' creates vocabulary drift. Always delegate to `effectiveDisplay` (D-EFFDV) or `formatFlagValue` (which does so internally).
 
 ## Gotchas
 
@@ -387,6 +421,12 @@ An interactive terminal UI for editing flag state in one session. Launched by `d
 
 - **Compliance wizard gate keys on `modePromptShown`, never the mode name.** `shouldRunComplianceStep` uses `modePromptShown` (was the Setup-mode `p.select` actually shown?) rather than checking `mode === 'recommended'`. Gating on the mode name would break the `--recommended` promptless contract: `--recommended` resolves `mode='recommended'` but never shows the prompt, so `modePromptShown` stays `false`. Same applies to the non-TTY fallback. (PF-029)
 
+- **`--set` confirmation echoes literal 'unset' for an explicit null input.** When the user types `--set flag=unset`, `parseFlagValueInput` maps that to `null`. The `handleSet` confirmation special-cases `null → 'unset'` at the call site so the user sees their own word reflected back. Active values route through `formatFlagValue` (D-EFFDV) as normal — this is the only site where 'unset' still appears in user-facing output.
+
+- **Blurb hard-cap is enforced by a registry test, not a TypeScript type.** `flag.blurb` is typed as `string` on `FlagDefCommon` (no length constraint in the type). The ≤30-char cap lives in `tests/flags.test.ts` as a registry-walk test — adding a blurb longer than 30 chars will fail CI but not the TypeScript compiler.
+
+- **Inline mode (`screen: 'inline'`) does not enter the alt screen.** On exit it cursor-ups to the frame top and `ERASE_BELOW` — the widget is erased and the clack flow continues in the normal scroll buffer. If you attach a flags TUI test expecting `ENTER_ALT` sequences, it will fail for `runFlagsTui` (which passes `screen: 'inline'`) but pass for agents-view tests (which use the default alt mode). Use `screen: 'alt'` explicitly when testing alt-screen behavior.
+
 ## Key Files
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<SweepResult>`; `SweepResult = { scanned, removed, failed }`; `mdFileName` / `mdEntryName` inverse pair; shared by both installer and uninstall; per-item failure isolation on both readdir and rm
@@ -401,10 +441,13 @@ An interactive terminal UI for editing flag state in one session. Launched by `d
 - `src/core/plugins.ts` — `prefixSkillName`, `unprefixSkillName`, `SKILL_NAMESPACE`, `DEVFLOW_PLUGINS` (21 plugins — no devflow-audit-claude), `buildFullSkillsMap`, `buildRulesMap`, `getAllSkillNames`, `getAllCommandNames`, `getAllAgentNames`, `partitionSelectablePlugins`, `EXCLUDED` (module-level export), `LEGACY_PLUGIN_NAMES`, `LEGACY_COMMAND_NAMES`, `LEGACY_RULE_NAMES`, `DELETED_PLUGIN_NAMES` (['devflow-audit-claude'])
 - `src/core/migrations.ts` — `MIGRATIONS: readonly AnyMigration[]` (one entry: `canonicalise-agent-keys-v1`, scope `'global'`); `AnyMigration = Migration<'global'> | Migration<'per-project'>` discriminated union; `canonicaliseAgentKeys` returns `{agents, didMutate, renamed, dropped, guardDropped}`; `parseAgentMappingEnvelope` shared with `readAgentMapping`; failure-as-warning means a failed write is permanently skipped (self-healed by `readAgentMapping`)
 - `src/cli/commands/proxy.ts` — `applyDisableToSettings`, `buildRealPreflightDeps`, `addProxyHooks`, `removeProxyHooks`, `applyProxyEnv`, `stripProxyEnv`
-- `src/core/flags.ts` — `FLAG_REGISTRY`, `FlagsRecord` (`Record<string, FlagsRecordValue>`), `FlagsRecordValue` (`FlagValue | null`); `getDefaultFlagsRecord`, `sanitizeFlagsRecord`, `migrateLegacyFlagsToRecord`, `coerceFlagValue`, `parseFlagValueInput`, `neutralValueOf`, `isNeutral`, `countActiveFlags`, `readViewMode`; `applyFlags(settingsJson, FlagsRecord)`, `stripFlags`, `resolveExistingViewMode`, `resolveFinalViewMode`
+- `src/core/flags.ts` — `FLAG_REGISTRY` (28 flags, each with `blurb: string` on `FlagDefCommon` — ≤30 chars, hard-capped by registry test); `FlagsRecord` (`Record<string, FlagsRecordValue>`), `FlagsRecordValue` (`FlagValue | null`); `effectiveDisplay(flag, value): EffectiveDisplay` (D-EFFDV one-definition seam — never returns 'unset': boolean→'on'/'off', enum null→neutralValue, number null→devflow/upstream default, string null→'—'); `formatFlagValue` delegates to `effectiveDisplay`; `getDefaultFlagsRecord`, `sanitizeFlagsRecord`, `migrateLegacyFlagsToRecord`, `coerceFlagValue`, `parseFlagValueInput`, `neutralValueOf`, `isNeutral`, `countActiveFlags`, `readViewMode`; `applyFlags(settingsJson, FlagsRecord)`, `stripFlags`, `resolveExistingViewMode`, `resolveFinalViewMode`
 - `src/core/feature-config.ts` — `readConfig`, `readConfigIfPresent`, `writeConfig`, `updateFeature`
-- `src/cli/commands/flags.ts` — `createFlagsCommand` (bare TTY→TUI, bare non-TTY→status table+exit 1); `lookupFlag(id)` (null for unknown); `readSettingsSafe(settingsPath)` (Result-returning); `persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)` (writes FlagsRecord to manifest + settings.json)
-- `src/cli/flags-view/state.ts` — `FlagsViewState`, `FlagRow`; `buildFlagRows(registry, record)`, `collectFlagRecord(rows)`; `buildStops`, `cycleForward`, `cycleBackward`; `recordToTui`/`tuiToRecord` value converters; `reduce(state, key) → {state, done, saved}`; `enterEdit`/`commitEdit`/`insertChar`/`reduceEditMode`; `adjustViewport`
+- `src/cli/commands/flags.ts` — `createFlagsCommand` (bare TTY→TUI inline mode, bare non-TTY→status table+exit 1); `lookupFlag(id)` (null for unknown); `readSettingsSafe(settingsPath)` (Result-returning); `persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)` (writes FlagsRecord to manifest + settings.json); `formatStatusRows` uses `effectiveDisplay` for not-adopted rows; `--set` confirmation special-cases null→literal 'unset'
+- `src/cli/flags-view/state.ts` — `FlagsViewState`, `FlagRow` (includes `blurb: string` sourced from `flag.blurb`); `buildFlagRows(registry, record)`, `collectFlagRecord(rows)`; `buildStops`, `cycleForward`, `cycleBackward`; `recordToTui`/`tuiToRecord` value converters; `reduce(state, key) → {state, done, saved}`; `enterEdit`/`commitEdit`/`insertChar`/`reduceEditMode`; `adjustViewport`
+- `src/cli/flags-view/render.ts` — column layout: PREFIX 2, LABEL 27, DIRTY 2, VALUE 16, BLURB 30; `formatValue` delegates to `effectiveDisplay` for null; boolean → green 'on' / yellow 'off'; HINT column header; blurb rendered dim and truncated to `blurbW`
+- `src/cli/flags-view/terminal.ts` — `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE); both bare-TTY and init-Advanced launch paths use inline mode
+- `src/cli/tui/terminal.ts` — `runTui<S,A,C>` generic driver; `RunTuiSpec.screen?: 'alt' | 'inline'` (default 'alt'; agents-view uses alt, flags uses inline); `INLINE_MARGIN = 2`; `cursorUp(n)` helper; inline mode: cursor-up repaints, ERASE_BELOW on exit, height clamped to stdout.rows - INLINE_MARGIN
 - `src/cli/tui/cells.ts` — `sanitizeCell(s)`, `padToVisible(s, width)`, `truncateVisible(s, maxWidth)` — ANSI-aware cell rendering helpers used by flags TUI render layer
 
 ## Related
