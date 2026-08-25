@@ -107,7 +107,10 @@ function parseManifestFlags(
 
   if (rawFlags !== null && typeof rawFlags === 'object') {
     // Case B: already a FlagsRecord. Spread to avoid mutating the parsed value.
-    const flagsRecord: FlagsRecord = { ...(rawFlags as Record<string, unknown>) } as FlagsRecord;
+    // Single cast: rawFlags is already confirmed to be a non-null, non-array object.
+    // sanitizeFlagsRecord (called by the outer readManifest) validates all values,
+    // dropping invalid ones — so the double assertion is unnecessary here (applies TS-M3).
+    const flagsRecord: FlagsRecord = { ...(rawFlags as FlagsRecord) };
     // Fold lingering viewMode into flags['view-mode'] when the record lacks a
     // non-default value (e.g. a manifest written by an older init that stored viewMode
     // as a separate deprecated field alongside a FlagsRecord with view-mode:null).

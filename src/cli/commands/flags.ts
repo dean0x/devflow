@@ -38,6 +38,7 @@ import {
 } from '../../core/flags.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { sanitizeCell } from '../tui/cells.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -236,9 +237,12 @@ export function createFlagsCommand(): Command {
           const value = Object.prototype.hasOwnProperty.call(record, flag.id)
             ? record[flag.id]
             : undefined;
-          const displayValue = value !== undefined
+          // sanitizeCell: defence in depth — a persisted LF/TAB must not reshape the
+          // status table even if a future flag kind bypasses coerceFlagValue (applies SEC-M1).
+          const rawDisplay = value !== undefined
             ? formatFlagValue(flag, value)
             : color.dim(`not adopted — default ${String(flag.defaultValue ?? 'unset')} applies on next devflow init`);
+          const displayValue = sanitizeCell(rawDisplay);
           p.log.info(`${flag.id.padEnd(28)} ${displayValue}`);
         }
         return;
@@ -512,7 +516,10 @@ export function createFlagsCommand(): Command {
           const value = Object.prototype.hasOwnProperty.call(record, flag.id)
             ? record[flag.id]
             : undefined;
-          const displayValue = value !== undefined ? formatFlagValue(flag, value) : 'not adopted';
+          // sanitizeCell: defence in depth — a persisted LF/TAB must not inject extra
+          // rows into the line-oriented table (applies SEC-M1).
+          const rawDisplay = value !== undefined ? formatFlagValue(flag, value) : 'not adopted';
+          const displayValue = sanitizeCell(rawDisplay);
           process.stdout.write(`${flag.id.padEnd(28)} ${displayValue}\n`);
         }
         process.stderr.write('Note: interactive TUI requires a TTY. Use --enable/--disable/--set/--unset for mutations.\n');

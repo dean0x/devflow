@@ -25,6 +25,7 @@
 import {
   FLAG_REGISTRY,
   coerceFlagValue,
+  parseFlagValueInput,
   type ClaudeCodeFlag,
   type FlagsRecord,
   type FlagsRecordValue,
@@ -281,33 +282,15 @@ function enterEdit(state: FlagsViewState): FlagsViewState {
 }
 
 /**
- * Strict number format check for TUI input.
- *
- * Rejects:
- *   - Leading whitespace ('  8' → error)
- *   - Trailing whitespace ('8 ' → error)
- *   - Leading zeros for multi-char numbers ('007', '-007' → error)
- *   - Empty string (handled separately by the caller)
- *
- * Returns an error message string on failure, null on success.
- */
-function checkNumberFormat(buf: string): string | null {
-  // Leading or trailing whitespace
-  if (buf !== buf.trim()) return 'No leading or trailing spaces allowed';
-  // Leading zero in multi-digit number (007, -007, 00, etc.)
-  if (/^[+-]?0\d/.test(buf)) return 'Leading zeros are not allowed (e.g. use 7, not 007)';
-  return null;
-}
-
-/**
  * Commit the current edit buffer for a text row.
  *
  * Contract:
  *   - Empty buffer + allowUnset → commit null (unset)
  *   - Empty buffer + !allowUnset → error "Value is required"
- *   - For number flags: strict format check THEN coerceFlagValue
- *   - For string flags: coerceFlagValue
- *   - coerceFlagValue returns null on invalid input → stay editing + error
+ *   - For number/string flags: delegate to parseFlagValueInput (applies PF-023 —
+ *     strict grammar enforced at the core sink, not per-caller). Error messages
+ *     distinguish format failures (padded/hex/leading-zeros) from bounds failures.
+ *   - parseFlagValueInput returns null on invalid input → stay editing + error
  */
 function commitEdit(state: FlagsViewState): FlagsViewState {
   const { editing, rows, cursor } = state;
@@ -336,17 +319,16 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
     }
   }
 
-  // Number flag: strict format check first
+  // Number flag: parseFlagValueInput enforces strict decimal grammar (avoids PF-023).
+  // Provide specific error messages to distinguish format from bounds failures.
   if (flagDef.kind === 'number') {
-    const fmtErr = checkNumberFormat(buf);
-    if (fmtErr !== null) {
-      return { ...state, editing: { ...editing, error: fmtErr } };
+    if (buf !== buf.trim()) {
+      return { ...state, editing: { ...editing, error: 'No leading or trailing spaces allowed' } };
     }
-    const n = Number(buf);
-    if (!Number.isFinite(n) || Number.isNaN(n)) {
-      return { ...state, editing: { ...editing, error: 'Must be a valid number' } };
+    if (/^[+-]?0\d/.test(buf)) {
+      return { ...state, editing: { ...editing, error: 'Leading zeros are not allowed (e.g. use 7, not 007)' } };
     }
-    const coerced = coerceFlagValue(flagDef, n);
+    const coerced = parseFlagValueInput(flagDef, buf);
     if (coerced === null) {
       const parts: string[] = [];
       if (flagDef.min !== undefined) parts.push(`min ${flagDef.min}`);
@@ -354,7 +336,7 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
       if (flagDef.integer) parts.push('must be an integer');
       return {
         ...state,
-        editing: { ...editing, error: `Invalid value (${parts.join(', ')})` },
+        editing: { ...editing, error: parts.length ? `Invalid value (${parts.join(', ')})` : 'Must be a valid number' },
       };
     }
     return {
@@ -364,11 +346,12 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
     };
   }
 
-  // String flag
+  // String flag: coerceFlagValue handles maxLength and control-char rejection.
+  // At this point flagDef.kind is 'string' (boolean and enum are guarded above,
+  // number returned in its own branch).
   const coerced = coerceFlagValue(flagDef, buf);
   if (coerced === null) {
-    const maxLen = (flagDef as typeof flagDef & { maxLength?: number }).maxLength;
-    const msg = maxLen !== undefined ? `Max ${maxLen} characters` : 'Invalid value';
+    const msg = flagDef.maxLength !== undefined ? `Max ${flagDef.maxLength} characters` : 'Invalid value';
     return { ...state, editing: { ...editing, error: msg } };
   }
   return {

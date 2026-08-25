@@ -534,9 +534,14 @@ export function coerceFlagValue(flag: ClaudeCodeFlag, raw: unknown): FlagsRecord
     }
     case 'string': {
       if (typeof raw !== 'string') return null;
+      // Empty string is UNSET, never an active value — caller should pass null for unset.
+      if (raw === '') return null;
       if (flag.maxLength !== undefined && raw.length > flag.maxLength) return null;
-      // Reject ASCII control chars except \t (horizontal tab is benign in commands)
-      if (/[\x00-\x08\x0b-\x1f\x7f]/.test(raw)) return null;
+      // Reject ASCII control chars except \t (horizontal tab is benign in commands).
+      // LF (\x0a) MUST be rejected: `spellcheck` is executed as a shell command, where
+      // a newline is a statement separator, and the --status table is line-oriented.
+      // The range \x0a-\x1f covers LF through US, with \x09 (TAB) as the sole omission.
+      if (/[\x00-\x08\x0a-\x1f\x7f]/.test(raw)) return null;
       return raw;
     }
   }
@@ -545,6 +550,13 @@ export function coerceFlagValue(flag: ClaudeCodeFlag, raw: unknown): FlagsRecord
 /**
  * Parse a CLI text input to a FlagsRecordValue.
  * 'unset' (literal) → null for any flag.
+ *
+ * Number branch uses strict decimal grammar (applies PF-023 — invariant at the sink
+ * every caller reaches, not per-caller): rejects empty, padded, hex, exponent,
+ * and leading-zero forms. Equivalent to the TUI's strict parsing so both entry
+ * points share one grammar.
+ *
+ * String branch: empty string → null (empty is UNSET, not an active value).
  */
 export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRecordValue {
   if (text === 'unset') return null;
@@ -557,10 +569,15 @@ export function parseFlagValueInput(flag: ClaudeCodeFlag, text: string): FlagsRe
     case 'enum':
       return coerceFlagValue(flag, text);
     case 'number': {
-      const n = Number(text);
-      return coerceFlagValue(flag, n);
+      // Strict decimal grammar: reject empty, padded, hex, exponent, and leading zeros.
+      // Number('') === 0, Number(' 3 ') === 3, Number('0x5') === 5, Number('1e1') === 10 —
+      // all would pass bare Number() but violate the strict grammar contract.
+      if (text === '' || text !== text.trim()) return null;
+      if (!/^[+-]?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) return null;
+      return coerceFlagValue(flag, Number(text));
     }
     case 'string':
+      // Empty string → null (empty is UNSET); coerceFlagValue handles the rest.
       return coerceFlagValue(flag, text);
   }
 }
@@ -608,7 +625,20 @@ export function readViewMode(record: FlagsRecord): ViewMode {
 
 /**
  * Sanitize a FlagsRecord by coercing each known flag's value through
- * coerceFlagValue. Invalid values become null. Unknown IDs pass through.
+ * coerceFlagValue.
+ *
+ * Known flag IDs (applies ADR-014 key-presence semantics):
+ *   - explicit null input → kept as null (deliberately unset)
+ *   - valid non-null input → kept as coerced value
+ *   - invalid non-null input → KEY DROPPED (absent = adopt default on next init,
+ *     which is safer than writing null = "deliberately unset" for a corrupt value)
+ *
+ * Unknown flag IDs (forward-compat):
+ *   - primitive values (boolean, number, string, null) → kept as-is
+ *   - non-primitive values (objects, arrays) → DROPPED to avoid laundering
+ *     untrusted shapes into FlagsRecordValue (applies PF-023)
+ *
+ * D39: `__proto__`, `constructor`, `prototype` are always skipped.
  */
 export function sanitizeFlagsRecord(record: FlagsRecord): FlagsRecord {
   const result: FlagsRecord = {};
@@ -618,9 +648,24 @@ export function sanitizeFlagsRecord(record: FlagsRecord): FlagsRecord {
     if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
     const flag = FLAG_REGISTRY_MAP.get(id);
     if (flag) {
-      result[id] = coerceFlagValue(flag, value);
+      if (value === null) {
+        // Explicit null = deliberately unset: preserve key-presence semantics.
+        result[id] = null;
+      } else {
+        const coerced = coerceFlagValue(flag, value);
+        if (coerced !== null) {
+          result[id] = coerced;
+        }
+        // else: invalid non-null value → DROP the key so the flag is re-adopted
+        // on next init from registry defaults (safer than writing null = "unset").
+      }
     } else {
-      result[id] = value; // unknown id: pass through unchanged
+      // Unknown id: forward-compat pass-through for primitive/null values only.
+      // Non-primitive values (objects, arrays) are dropped — laundering an
+      // arbitrary object into FlagsRecordValue violates the type contract.
+      if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+        result[id] = value;
+      }
     }
   }
   return result;
@@ -714,6 +759,20 @@ export function migrateLegacyFlagsToRecord(
 
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
+/**
+ * Return `v` as a `Record<string, unknown>` only when it is a plain object.
+ * Returns undefined for arrays, null, or non-objects.
+ *
+ * Used as a guard at every `settings.env` access point so that a malformed
+ * `"env": []` in settings.json cannot cause `Object.keys([]).length === 0`
+ * to delete the entire env key, losing user-set env vars (applies TS-M3).
+ */
+function asPlainObject(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+
 /** Compute the value to write to settings.json for an active flag. */
 function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
   switch (flag.kind) {
@@ -758,7 +817,8 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
     if (isNeutral(flag, safe)) {
       // Neutral → delete the target key
       if (flag.target.type === 'env') {
-        const env = settings.env as Record<string, unknown> | undefined;
+        // asPlainObject guard: "env": [] must not delete a user's env var (applies TS-M3)
+        const env = asPlainObject(settings.env);
         if (env) delete env[flag.target.key];
       } else {
         delete settings[flag.target.key];
@@ -766,11 +826,7 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
     } else {
       const payload = buildPayload(flag, safe as FlagValue);
       if (flag.target.type === 'env') {
-        if (
-          typeof settings.env !== 'object' ||
-          settings.env === null ||
-          Array.isArray(settings.env)
-        ) {
+        if (!asPlainObject(settings.env)) {
           settings.env = {};
         }
         (settings.env as Record<string, unknown>)[flag.target.key] = payload;
@@ -780,8 +836,8 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
     }
   }
 
-  // Clean up empty env object
-  const env = settings.env as Record<string, unknown> | undefined;
+  // Clean up empty env object; asPlainObject guard avoids matching "env": []
+  const env = asPlainObject(settings.env);
   if (env && Object.keys(env).length === 0) {
     delete settings.env;
   }
@@ -797,7 +853,8 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
  */
 export function stripFlags(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  const env = settings.env as Record<string, unknown> | undefined;
+  // asPlainObject guard: "env": [] must not have its keys iterated as an object (applies TS-M3)
+  const env = asPlainObject(settings.env);
 
   for (const flag of FLAG_REGISTRY) {
     if (flag.target.type === 'env') {

@@ -379,6 +379,20 @@ describe('coerceFlagValue — hostile-value sink cases', () => {
     expect(coerceFlagValue(strFlag(), 'aspell\x7fcheck')).toBeNull();
   });
 
+  it('LF in string → null (SEC-M1: LF is a shell statement separator)', () => {
+    // \x0a is LF — rejected so `spellcheck` cannot embed a second shell command
+    expect(coerceFlagValue(strFlag(), 'aspell\nlist')).toBeNull();
+    expect(coerceFlagValue(strFlag(), 'aspell\x0acheck')).toBeNull();
+  });
+
+  it('TAB in string → accepted (the sole documented exception)', () => {
+    expect(coerceFlagValue(strFlag(), 'aspell\tlist')).toBe('aspell\tlist');
+  });
+
+  it('empty string → null (empty is UNSET, never an active value)', () => {
+    expect(coerceFlagValue(strFlag(), '')).toBeNull();
+  });
+
   it('valid boolean → passes', () => {
     expect(coerceFlagValue(boolFlag(), true)).toBe(true);
     expect(coerceFlagValue(boolFlag(), false)).toBe(false);
@@ -624,6 +638,17 @@ describe('stripFlags — covers viewMode and spellcheck', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = JSON.parse(stripFlags(input));
     expect(result).toEqual({ hooks: {} });
+  });
+
+  it('"env": [] in settings does not delete user keys (TS-M3: asPlainObject guard)', () => {
+    // A malformed "env": [] (array, not object) must not match the empty-object
+    // cleanup guard (Object.keys([]).length === 0 is true) and delete the env key.
+    // stripFlags should leave an array env unchanged.
+    const input = JSON.stringify({ env: [], hooks: {} }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    // Array env is not a valid env block and must survive unchanged
+    expect(Array.isArray(result.env)).toBe(true);
+    expect(result.hooks).toEqual({});
   });
 
   it('strip-then-apply is idempotent (INV-1): roundtrip preserves only non-flag settings', () => {
@@ -955,6 +980,45 @@ describe('parseFlagValueInput', () => {
     const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
     expect(parseFlagValueInput(flag, 'notanumber')).toBeNull();
   });
+
+  it('empty string for number flag → null (empty is UNSET)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    // Number('') === 0 with bare Number(), but strict grammar rejects empty (TS-H1)
+    expect(parseFlagValueInput(flag, '')).toBeNull();
+  });
+
+  it('hex literal for number flag → null (strict decimal grammar)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    // Number('0x5') === 5 with bare Number(), but hex is rejected (TS-H1)
+    expect(parseFlagValueInput(flag, '0x5')).toBeNull();
+    expect(parseFlagValueInput(flag, '0x28')).toBeNull();
+  });
+
+  it('exponent notation for number flag → null (strict decimal grammar)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    // Number('1e1') === 10 with bare Number(), but exponent form is rejected (TS-H1)
+    expect(parseFlagValueInput(flag, '1e1')).toBeNull();
+    expect(parseFlagValueInput(flag, '2E2')).toBeNull();
+  });
+
+  it('padded number input → null (strict decimal grammar)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'max-concurrent-subagents')!;
+    // Number('  3  ') === 3 with bare Number(), but whitespace is rejected (TS-H1)
+    expect(parseFlagValueInput(flag, '  40  ')).toBeNull();
+    expect(parseFlagValueInput(flag, ' 40')).toBeNull();
+    expect(parseFlagValueInput(flag, '40 ')).toBeNull();
+  });
+
+  it('empty string for string flag → null (empty is UNSET, not active)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'default-model')!;
+    // --set default-model= with MODEL unset should not persist ANTHROPIC_DEFAULT_MODEL=''
+    expect(parseFlagValueInput(flag, '')).toBeNull();
+  });
+
+  it('valid string value → passes through', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'default-model')!;
+    expect(parseFlagValueInput(flag, 'claude-3-5-sonnet')).toBe('claude-3-5-sonnet');
+  });
 });
 
 // ─── countActiveFlags ─────────────────────────────────────────────────────────
@@ -1004,9 +1068,19 @@ describe('readViewMode', () => {
 // ─── sanitizeFlagsRecord ─────────────────────────────────────────────────────
 
 describe('sanitizeFlagsRecord', () => {
-  it('coerces invalid values to null', () => {
+  it('drops invalid non-null values — key absent (adopt default on next init, REL-S1 + ADR-014)', () => {
+    // Invalid value (above max) is DROPPED rather than becoming null="deliberately unset"
     const record: FlagsRecord = {
       'max-concurrent-subagents': 200 as unknown as number, // above max
+    };
+    const sanitized = sanitizeFlagsRecord(record);
+    // Key must be absent — not null — so the flag is re-adopted on next init
+    expect(Object.prototype.hasOwnProperty.call(sanitized, 'max-concurrent-subagents')).toBe(false);
+  });
+
+  it('preserves explicit null (deliberately unset — ADR-014 key-presence semantics)', () => {
+    const record: FlagsRecord = {
+      'max-concurrent-subagents': null, // explicit null = user deliberately unset this flag
     };
     const sanitized = sanitizeFlagsRecord(record);
     expect(sanitized['max-concurrent-subagents']).toBeNull();
@@ -1022,12 +1096,26 @@ describe('sanitizeFlagsRecord', () => {
     expect(sanitized['max-concurrent-subagents']).toBe(40);
   });
 
-  it('passes through unknown ids unchanged', () => {
+  it('passes through unknown ids with primitive values (forward-compat)', () => {
     const record: FlagsRecord = {
       'future-unknown-flag': true,
+      'future-unknown-string': 'some-value',
+      'future-unknown-null': null,
     };
     const sanitized = sanitizeFlagsRecord(record);
     expect(sanitized['future-unknown-flag']).toBe(true);
+    expect(sanitized['future-unknown-string']).toBe('some-value');
+    expect(sanitized['future-unknown-null']).toBeNull();
+  });
+
+  it('drops unknown ids with non-primitive values (TS-M3: no launder of objects into FlagsRecordValue)', () => {
+    const record = {
+      'future-unknown-object': { a: 1 } as unknown as boolean,
+      'future-unknown-array': [1, 2] as unknown as boolean,
+    } as FlagsRecord;
+    const sanitized = sanitizeFlagsRecord(record);
+    expect(Object.prototype.hasOwnProperty.call(sanitized, 'future-unknown-object')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(sanitized, 'future-unknown-array')).toBe(false);
   });
 });
 
