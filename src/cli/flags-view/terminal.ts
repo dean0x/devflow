@@ -55,20 +55,24 @@ export async function runFlagsTui(
     editing: null,
   };
 
-  const result = await runTui<FlagsViewState, FlagsIntent>({
+  // C='none' makes runTui return Promise<{ intent: Exclude<FlagsIntent,'none'>; state }>.
+  // Exclude<FlagsIntent,'none'> = 'save' | 'cancel' | 'abort', which matches
+  // FlagsTuiResult.action exactly — no casts needed, and adding a new FlagsIntent member
+  // is a compile error here (exhaustiveness enforced at the type level).
+  const result = await runTui<FlagsViewState, FlagsIntent, 'none'>({
     initialState,
     reduce,
     renderFrame,
     // resizeViewport re-clamps viewportOffset for the new height — setting the
     // height alone can strand the cursor outside the visible slice.
     onResize: (state, dims) => resizeViewport(state, computeViewportHeight(dims.rows)),
-    signalAction: 'abort' as FlagsIntent,
-    continueIntent: 'none' as FlagsIntent,
+    signalAction: 'abort',
+    continueIntent: 'none',
     io,
   });
 
   return {
-    action: result.intent as 'save' | 'cancel' | 'abort',
+    action: result.intent,
     rows: result.state.rows,
   };
 }

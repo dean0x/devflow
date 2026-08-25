@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'stream';
-import { runTui, type TuiIO } from '../src/cli/tui/terminal.js';
+import { runTui, normalizeKey, type TuiIO } from '../src/cli/tui/terminal.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,6 +74,123 @@ function expectTerminalRestored(h: Harness, pauseSpy: ReturnType<typeof vi.spyOn
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TS-M5: normalizeKey accepts undefined str (readline emits undefined for
+// non-printable escape sequences)
+// ---------------------------------------------------------------------------
+
+describe('normalizeKey — undefined str (TS-M5)', () => {
+  it('returns the key name when str is undefined and key has a name', () => {
+    // Node readline emits undefined as first arg for non-printable sequences
+    expect(normalizeKey(undefined, { name: 'up' })).toBe('up');
+    expect(normalizeKey(undefined, { name: 'return' })).toBe('enter');
+    expect(normalizeKey(undefined, { name: 'escape' })).toBe('escape');
+  });
+
+  it('returns empty string when both str and key.name are absent', () => {
+    expect(normalizeKey(undefined, null)).toBe('');
+  });
+
+  it('still handles ctrl-c with undefined str', () => {
+    expect(normalizeKey(undefined, { ctrl: true, name: 'c' })).toBe('ctrl-c');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC-S3: setRawMode(true) runs inside the guarded try block so a throw
+// (EIO on a detached TTY) routes through cleanup() before any listener is
+// registered.
+// ---------------------------------------------------------------------------
+
+describe('runTui — guarded startup (SEC-S3)', () => {
+  it('restores the terminal when setRawMode(true) throws before keypress listeners are registered', async () => {
+    const h = makeHarness();
+    let rawModeOffCalled = false;
+
+    // Override: true throws (EIO), false records itself via rawModeOffCalled
+    (h.stdin as unknown as { setRawMode: (m: boolean) => void }).setRawMode = (m: boolean) => {
+      if (m) throw new Error('EIO: input/output error');
+      rawModeOffCalled = true; // cleanup called setRawMode(false)
+    };
+
+    await expect(
+      runTui<{ n: number }, 'none' | 'done', 'none'>({
+        initialState: { n: 0 },
+        reduce: s => ({ state: s, intent: 'none' }),
+        renderFrame: () => ['frame'],
+        signalAction: 'done',
+        continueIntent: 'none',
+        io: h.io,
+      }),
+    ).rejects.toThrow('EIO: input/output error');
+
+    // Cleanup must restore the terminal even though setRawMode(true) threw
+    // before any keypress listener was registered.
+    expect(h.written()).toContain(SHOW_CURSOR);
+    expect(h.written()).toContain(LEAVE_ALT);
+    expect(rawModeOffCalled, 'cleanup called setRawMode(false) via its own try/catch').toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REL-M1: renderFrame output is clamped to dims.rows at the single write site
+// so every runTui consumer inherits the bound.
+// ---------------------------------------------------------------------------
+
+describe('runTui — frame line clamping (REL-M1)', () => {
+  it('emits at most dims.rows lines when renderFrame returns more', async () => {
+    const h = makeHarness();
+    // Use 3 rows so the excess is obvious (renderFrame returns 10)
+    (h.stdout as unknown as { rows: number }).rows = 3;
+
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      // Returns 10 distinctly-named lines — only the first 3 should appear in output
+      renderFrame: () => ['row0', 'row1', 'row2', 'row3', 'row4', 'row5', 'row6', 'row7', 'row8', 'row9'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io,
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    await tui;
+
+    const output = h.written();
+    // Lines within dims.rows (0–2) must appear; lines beyond must not
+    expect(output).toContain('row0');
+    expect(output).toContain('row1');
+    expect(output).toContain('row2');
+    expect(output).not.toContain('row3');
+    expect(output).not.toContain('row4');
+  });
+
+  it('preserves at least one line when dims.rows is 1 or less', async () => {
+    const h = makeHarness();
+    (h.stdout as unknown as { rows: number }).rows = 1;
+
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
+      initialState: { n: 0 },
+      reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
+      renderFrame: () => ['only-line', 'hidden-line'],
+      signalAction: 'done',
+      continueIntent: 'none',
+      io: h.io,
+    });
+
+    await new Promise<void>(r => setTimeout(r, 10));
+    h.stdin.push('x');
+    await tui;
+
+    const output = h.written();
+    expect(output).toContain('only-line');
+    expect(output).not.toContain('hidden-line');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('runTui — cleanup always runs', () => {
   it('restores the terminal when the INITIAL render throws', async () => {
     const h = makeHarness();
@@ -82,7 +199,7 @@ describe('runTui — cleanup always runs', () => {
 
     // The initial render happens after alt-screen + raw mode are already set.
     await expect(
-      runTui<{ n: number }, 'none' | 'done'>({
+      runTui<{ n: number }, 'none' | 'done', 'none'>({
         initialState: { n: 0 },
         reduce: s => ({ state: s, intent: 'none' }),
         renderFrame: () => { throw boom; },
@@ -100,7 +217,7 @@ describe('runTui — cleanup always runs', () => {
     const pauseSpy = vi.spyOn(h.stdin, 'pause');
 
     await expect(
-      runTui<{ n: number }, 'none' | 'done'>({
+      runTui<{ n: number }, 'none' | 'done', 'none'>({
         initialState: { n: 0 },
         reduce: s => ({ state: s, intent: 'none' }),
         renderFrame: () => ['frame'],
@@ -118,7 +235,7 @@ describe('runTui — cleanup always runs', () => {
     const h = makeHarness();
     const pauseSpy = vi.spyOn(h.stdin, 'pause');
 
-    const tui = runTui<{ n: number }, 'none' | 'done'>({
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
       initialState: { n: 0 },
       reduce: () => { throw new Error('reduce exploded'); },
       renderFrame: () => ['frame'],
@@ -139,7 +256,7 @@ describe('runTui — cleanup always runs', () => {
     const h = makeHarness();
     const pauseSpy = vi.spyOn(h.stdin, 'pause');
 
-    const promise = runTui<{ n: number }, 'none' | 'done'>({
+    const promise = runTui<{ n: number }, 'none' | 'done', 'none'>({
       initialState: { n: 0 },
       reduce: s => ({ state: s, intent: 'none' }),
       // eslint-disable-next-line @typescript-eslint/only-throw-error
@@ -158,7 +275,7 @@ describe('runTui — cleanup always runs', () => {
     const h = makeHarness();
     const pauseSpy = vi.spyOn(h.stdin, 'pause');
 
-    const tui = runTui<{ n: number }, 'none' | 'done'>({
+    const tui = runTui<{ n: number }, 'none' | 'done', 'none'>({
       initialState: { n: 0 },
       reduce: s => ({ state: { n: s.n + 1 }, intent: 'done' }),
       renderFrame: () => ['frame'],

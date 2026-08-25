@@ -81,9 +81,17 @@ export interface TuiIO {
  * Spec object for runTui. All pure functions; I/O only via `io`.
  *
  * @template S  TUI state type.
- * @template A  Intent type (e.g. 'none' | 'save' | 'cancel').
+ * @template A  Full intent union (e.g. `'none' | 'save' | 'cancel'`). Must extend string
+ *              so the `!==` comparison in the driver is always a string equality check.
+ * @template C  The "continue" intent — the member of A that means "keep running".
+ *              `extends A` enforces it is a valid member of the union.
+ *
+ * D-TS: the three-generic form makes `runTui`'s return type carry the invariant that
+ * the resolved intent is never `continueIntent`:
+ *   Promise<{ intent: Exclude<A, C>; state: S }>
+ * Adding a new member to A without updating the adapter's result type is a compile error.
  */
-export interface RunTuiSpec<S, A> {
+export interface RunTuiSpec<S, A extends string, C extends A> {
   /** Initial state before the first frame renders. */
   initialState: S;
   /** Pure keypress reducer — returns next state and intent. */
@@ -98,14 +106,16 @@ export interface RunTuiSpec<S, A> {
   onResize?: (state: S, dims: RenderDims) => S;
   /**
    * The intent to return when a signal (SIGINT/SIGTERM) or MAX_KEYPRESSES
-   * exhaustion forces exit. Typically 'cancel' or 'abort'.
+   * exhaustion forces exit. Typed as `Exclude<A, C>` — it can never be the
+   * continue intent, so the constraint is expressed in the type. Typically 'cancel' or 'abort'.
    */
-  signalAction: A;
+  signalAction: Exclude<A, C>;
   /**
    * The intent value that means "keep running — redraw and wait for the next key".
    * Any other value from reduce causes the TUI to resolve.
+   * Typed as `C` (the continue-intent parameter) so adapters need no casts.
    */
-  continueIntent: A;
+  continueIntent: C;
   /** Optional I/O override (defaults to process.stdin/stdout). Inject fakes in tests. */
   io?: Partial<TuiIO>;
 }
@@ -119,7 +129,7 @@ export interface RunTuiSpec<S, A> {
  *
  * Gains backspace/delete/home/end (were leaking raw bytes in agents-view).
  */
-export function normalizeKey(str: string, key: ReadlineKey | null | undefined): string {
+export function normalizeKey(str: string | undefined, key: ReadlineKey | null | undefined): string {
   if (key?.ctrl && key.name === 'c') return 'ctrl-c';
   const name = key?.name ?? '';
   switch (name) {
@@ -167,7 +177,9 @@ function renderToStdout<S>(
   renderFrame: (state: S, dims: RenderDims) => string[],
 ): void {
   const dims = getDims(stdout);
-  const lines = renderFrame(state, dims);
+  // D-REL-M1: clamp to terminal height so HOME-anchored redraws never desync
+  // on small panes. max(1, …) ensures at least one line is always written.
+  const lines = renderFrame(state, dims).slice(0, Math.max(1, dims.rows));
 
   let out = HOME;
   for (let i = 0; i < lines.length; i++) {
@@ -193,7 +205,9 @@ function renderToStdout<S>(
  *
  * @returns Promise resolving to `{ intent, state }` at exit.
  */
-export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A; state: S }> {
+export async function runTui<S, A extends string, C extends A>(
+  spec: RunTuiSpec<S, A, C>,
+): Promise<{ intent: Exclude<A, C>; state: S }> {
   // D-SEAM: default to process streams; callers (tests) may inject fakes.
   const stdin: TuiIO['stdin'] = (spec.io?.stdin ?? process.stdin) as TuiIO['stdin'];
   const stdout: TuiIO['stdout'] = (spec.io?.stdout ?? process.stdout) as TuiIO['stdout'];
@@ -201,30 +215,30 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
   // ── Enable readline keypress events ─────────────────────────────────────
   readline.emitKeypressEvents(stdin);
 
-  // ── Enter alt-screen, hide cursor ───────────────────────────────────────
-  stdout.write(ENTER_ALT + HIDE_CURSOR);
-
-  // ── Raw mode ─────────────────────────────────────────────────────────────
-  if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
-    stdin.setRawMode(true);
-  }
-  stdin.resume();
-
-  return new Promise<{ intent: A; state: S }>((resolve, reject) => {
+  return new Promise<{ intent: Exclude<A, C>; state: S }>((resolve, reject) => {
     let state = spec.initialState;
     let cleaned = false;
     let keypressCount = 0;
 
-    // Apply initial resize (sets viewportHeight from actual terminal dims).
+    // ── Guarded startup — terminal setup, initial resize, and first render ─
     //
-    // Guarded because the terminal is ALREADY in alt-screen + raw mode + hidden
-    // cursor by this point (set above, before the Promise). A throw from onResize
-    // or renderFrame here would reject with none of that undone, leaving the user's
-    // shell in raw mode — no echo, no line editing — until they run `stty sane`.
-    // cleanup/onKeypress/onSigint/onSigterm/onResize are function declarations and
-    // are therefore hoisted, so cleanup() is callable here. removeListener on a
-    // not-yet-registered listener is a no-op.
+    // All operations that modify terminal state run inside this try block so
+    // that any throw (including setRawMode EIO on a detached TTY) routes
+    // through cleanup(). cleanup() is a function declaration and is therefore
+    // hoisted, so it is callable here even though its textual definition
+    // appears later. removeListener on a not-yet-registered listener is a
+    // no-op, making partial setup safe to tear down.
     try {
+      // D-SEC-S3: enter alt-screen and enable raw mode inside the guarded
+      // block so a setRawMode throw cannot leave the terminal stranded with
+      // hidden cursor and no cleanup path.
+      stdout.write(ENTER_ALT + HIDE_CURSOR);
+      if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
+        stdin.setRawMode(true);
+      }
+      stdin.resume();
+
+      // Apply initial resize (sets viewportHeight from actual terminal dims).
       const initialDims = getDims(stdout);
       if (spec.onResize) {
         state = spec.onResize(state, initialDims);
@@ -258,7 +272,7 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
       stdout.write(LEAVE_ALT + SHOW_CURSOR);
     }
 
-    function settle(intent: A, finalState: S): void {
+    function settle(intent: Exclude<A, C>, finalState: S): void {
       cleanup();
       resolve({ intent, state: finalState });
     }
@@ -291,7 +305,7 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
     }
 
     // ── Keypress handler ───────────────────────────────────────────────────
-    function onKeypress(str: string, key: ReadlineKey): void {
+    function onKeypress(str: string | undefined, key: ReadlineKey | undefined): void {
       try {
         keypressCount++;
         if (keypressCount > MAX_KEYPRESSES) {
@@ -305,7 +319,9 @@ export async function runTui<S, A>(spec: RunTuiSpec<S, A>): Promise<{ intent: A;
         state = next;
 
         if (intent !== spec.continueIntent) {
-          settle(intent, state);
+          // D-TS: TS cannot narrow A to Exclude<A,C> from a !== check on a generic C.
+          // The invariant holds at runtime: any intent that is not continueIntent is Exclude<A,C>.
+          settle(intent as Exclude<A, C>, state);
           return;
         }
         renderToStdout(state, stdout, spec.renderFrame);

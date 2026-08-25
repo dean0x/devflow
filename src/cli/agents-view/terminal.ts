@@ -49,7 +49,11 @@ export async function runAgentsTui(
   initialState: AgentsViewState,
   io?: Partial<TuiIO>,
 ): Promise<TuiResult> {
-  const result = await runTui<AgentsViewState, Intent>({
+  // C='none' makes runTui return Promise<{ intent: Exclude<Intent,'none'>; state }>.
+  // Exclude<Intent,'none'> = 'save' | 'cancel', which matches TuiResult.action exactly —
+  // no casts needed, and adding a new Intent member is a compile error here (exhaustiveness
+  // enforced at the type level, replacing the deleted switch/never guard).
+  const result = await runTui<AgentsViewState, Intent, 'none'>({
     initialState,
     reduce,
     renderFrame,
@@ -57,13 +61,13 @@ export async function runAgentsTui(
       ...state,
       viewportHeight: computeViewportHeight(dims.rows),
     }),
-    signalAction: 'cancel' as Intent,
-    continueIntent: 'none' as Intent,
+    signalAction: 'cancel',
+    continueIntent: 'none',
     io,
   });
 
   return {
-    action: result.intent as 'save' | 'cancel',
+    action: result.intent,
     state: result.state,
   };
 }
