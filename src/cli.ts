@@ -68,8 +68,9 @@ program.action(() => {
   program.help();
 });
 
-// Parse arguments
-program.parse();
+// Parse arguments — parseAsync so async command handlers propagate rejection
+// rather than surfacing as an unhandled rejection with a bare stack trace.
+await program.parseAsync();
 
 // Show help if no arguments
 if (!process.argv.slice(2).length) {

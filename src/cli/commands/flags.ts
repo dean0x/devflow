@@ -573,7 +573,16 @@ async function handleBare(
 
     // ── Launch TUI ────────────────────────────────────────────────────
     const { runFlagsTui } = await import('../flags-view/index.js');
-    const result = await runFlagsTui(initialRows);
+    // Wrap: runTui rejects on initial-render failure or handler throw.
+    // On rejection: log and bail — no settings write (avoids PF-014 process.exit).
+    let result;
+    try {
+      result = await runFlagsTui(initialRows);
+    } catch (err) {
+      p.log.error(`Flags editor failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+      return;
+    }
 
     if (result.action === 'save') {
       // REL-M3: re-read settings.json AFTER the human-paced TUI session closes.

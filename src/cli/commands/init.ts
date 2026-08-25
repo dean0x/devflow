@@ -953,7 +953,17 @@ export const initCommand = new Command('init')
       p.log.info('Opening the flags editor — enter saves, esc keeps current settings.');
       const { runFlagsTui, buildFlagRows, collectFlagRecord } = await import('../flags-view/index.js');
       const flagRows = buildFlagRows(enabledFlags);
-      const flagsTuiResult = await runFlagsTui(flagRows);
+      // Wrap: runTui rejects on initial-render failure or handler throw. Init must
+      // not abort mid-run after assets are partially installed (PF-009 spirit).
+      // On rejection: log + continue with the seeded defaults already in enabledFlags.
+      let flagsTuiResult;
+      try {
+        flagsTuiResult = await runFlagsTui(flagRows);
+      } catch (err) {
+        p.log.error(`Flags editor failed: ${err instanceof Error ? err.message : String(err)}`);
+        p.log.info('Continuing with seeded flag defaults.');
+        flagsTuiResult = { action: 'cancel' as const, rows: flagRows };
+      }
 
       if (flagsTuiResult.action === 'abort') {
         p.cancel('Installation cancelled.');

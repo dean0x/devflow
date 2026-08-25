@@ -966,6 +966,64 @@ describe('flags CLI — createFlagsCommand factory', () => {
     });
   });
 
+  // ─── bare TUI rejection — runFlagsTui rejects → log.error + exitCode 1 ─────────
+  //
+  // REG-SF1 hardening: runTui can reject on initial-render failure or handler throw.
+  // handleBare must catch the rejection, emit p.log.error, set exitCode=1, and NOT
+  // write settings.json. Uses vi.doMock to make runFlagsTui reject (C3 precedent).
+
+  describe('bare TUI rejection — runFlagsTui rejects → log.error + exitCode 1', () => {
+    let origStdoutIsTTY: boolean | undefined;
+    let origStdinIsTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origStdoutIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      origStdinIsTTY = (process.stdin as { isTTY?: boolean }).isTTY;
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
+      vi.unmock('../src/cli/flags-view/index.js');
+      vi.resetModules();
+    });
+
+    it('runFlagsTui rejection → p.log.error, exitCode 1, settings.json not written', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeEmptyFlagsManifest(),
+        'utf-8',
+      );
+      // No settings.json written before — absence is evidence no write occurred.
+
+      vi.doMock('../src/cli/flags-view/index.js', () => ({
+        buildFlagRows: () => [],
+        collectFlagRecord: () => ({}),
+        runFlagsTui: async () => {
+          throw new Error('render failed: raw-mode unsupported');
+        },
+      }));
+      vi.resetModules();
+
+      const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
+      const freshCmd = createFlagsCommand();
+
+      vi.mocked(p.log.error).mockClear();
+      await freshCmd.parseAsync([], { from: 'user' });
+
+      expect(process.exitCode).toBe(1);
+      expect(vi.mocked(p.log.error)).toHaveBeenCalledWith(
+        expect.stringContaining('render failed: raw-mode unsupported'),
+      );
+      // settings.json must NOT have been created.
+      const settingsExists = await fs.access(path.join(tmpClaudeDir, 'settings.json'))
+        .then(() => true).catch(() => false);
+      expect(settingsExists, 'settings.json must not be written on TUI rejection').toBe(false);
+    });
+  });
+
   // ─── applyTuiResult seam — TUI→persist wiring (TEST-M5) ──────────────────────
   //
   // PF-017(c): an interactive surface has no automated test until a human runs it
