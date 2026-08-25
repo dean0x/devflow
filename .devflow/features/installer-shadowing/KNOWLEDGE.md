@@ -268,6 +268,8 @@ A dedicated pure-function module (`src/cli/commands/init-seed.ts`) computes the 
 
 **`--reset --plugin` rejection**: Combining factory reset with a partial install is rejected before reaching seed resolution.
 
+**Flags applied non-interactively (D40)**: After `applyCliToggles`, `init.ts` applies `enabledFlags` directly — no TUI is opened in either init path. Fresh install: all registry flags at their `defaultValue`. Re-init: spread manifest record, then adopt defaults only for absent flags (ADR-014). Outcome line: `Flags: ${activeCount} active — customize any time with 'devflow flags'`. `getDefaultFlagsRecord` is not imported by init.ts; `viewModeExplicit` is exclusively `!!options.reset` (not set by any interactive input since the TUI was removed).
+
 ### Compliance Prompt Module (`src/cli/commands/compliance-prompts.ts`)
 
 A dedicated CLI-layer module (ADR-013 — CLI-layer prompts; core stays UI-agnostic) that owns all compliance wizard UI. Key exports:
@@ -312,7 +314,7 @@ Key exports:
 
 ### Flags TUI (`src/cli/flags-view/`, `src/cli/tui/`)
 
-An interactive terminal UI for editing flag state in one session. Launched by `devflow flags` bare on a TTY and by the Advanced init path. Both launch paths use **inline mode** (see below) — the TUI renders in-place in the normal scroll buffer rather than entering the alt screen, which integrates cleanly into the init wizard's multi-step interactive flow.
+An interactive terminal UI for editing flag state in one session. Launched exclusively by `devflow flags` bare on a TTY (D40: init no longer opens the flags editor in any path). Uses **inline mode** (see below) — renders in-place in the normal scroll buffer rather than entering the alt screen.
 
 **`src/cli/flags-view/state.ts`** — pure state machine for the TUI. Key functions:
 - `buildFlagRows(registry, record)` — produces the row list from the live `FlagsRecord`; each `FlagRow` holds `id`, `tui` value (TUI-internal representation), `hint`, `blurb` (sourced from `flag.blurb`), and display metadata.
@@ -446,7 +448,7 @@ VALUE+BLURB = 46, preserving the prior total from the single VALUE column. All w
 - `src/cli/commands/flags.ts` — `createFlagsCommand` (bare TTY→TUI inline mode, bare non-TTY→status table+exit 1); `lookupFlag(id)` (null for unknown); `readSettingsSafe(settingsPath)` (Result-returning); `persistFlagConfig(claudeDir, devflowDir, settingsContent, newRecord)` (writes FlagsRecord to manifest + settings.json); `formatStatusRows` uses `effectiveDisplay` for not-adopted rows; `--set` confirmation special-cases null→literal 'unset'
 - `src/cli/flags-view/state.ts` — `FlagsViewState`, `FlagRow` (includes `blurb: string` sourced from `flag.blurb`); `buildFlagRows(registry, record)`, `collectFlagRecord(rows)`; `buildStops`, `cycleForward`, `cycleBackward`; `recordToTui`/`tuiToRecord` value converters; `reduce(state, key) → {state, done, saved}`; `enterEdit`/`commitEdit`/`insertChar`/`reduceEditMode`; `adjustViewport`
 - `src/cli/flags-view/render.ts` — column layout: PREFIX 2, LABEL 27, DIRTY 2, VALUE 16, BLURB 30; `formatValue` delegates to `effectiveDisplay` for null; boolean → green 'on' / yellow 'off'; HINT column header; blurb rendered dim and truncated to `blurbW`
-- `src/cli/flags-view/terminal.ts` — `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE); both bare-TTY and init-Advanced launch paths use inline mode
+- `src/cli/flags-view/terminal.ts` — `runFlagsTui` passes `screen: 'inline'` to `runTui` (D-INLINE); sole launch path is `devflow flags` bare on a TTY (D40: init does not open the flags editor)
 - `src/cli/tui/terminal.ts` — `runTui<S,A,C>` generic driver; `RunTuiSpec.screen?: 'alt' | 'inline'` (default 'alt'; agents-view uses alt, flags uses inline); `INLINE_MARGIN = 2`; `cursorUp(n)` helper; inline mode: cursor-up repaints, ERASE_BELOW on exit, height clamped to stdout.rows - INLINE_MARGIN
 - `src/cli/tui/cells.ts` — `sanitizeCell(s)`, `padToVisible(s, width)`, `truncateVisible(s, maxWidth)` — ANSI-aware cell rendering helpers used by flags TUI render layer
 
