@@ -587,7 +587,7 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 | Escalated | {n} |
 | Duplicates Collapsed | {n} |
 
-_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every other row above `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
+_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
 
 ## Verification
 | Command | Result |
