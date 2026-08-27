@@ -169,7 +169,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
-Triage every issue using the blast-radius disposition matrix. Assign exactly one verdict per issue.
+Triage every issue: collapse duplicates first, then apply the blast-radius disposition matrix to each group's primary. Assign exactly one verdict per issue.
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
@@ -186,7 +186,7 @@ Wait for Triage agent to complete before proceeding. Parse verdict ledger from T
 Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning columns.
 
 **Triage agent completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
-1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets. DUPLICATE is a valid bucket; a valid DUPLICATE entry must carry `duplicate_of` pointing to a non-DUPLICATE issue id. A missing `duplicate_of` or one that chains to another DUPLICATE is a **Triage agent failure** (retry-then-abort as below).
+1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets. DUPLICATE is a valid bucket; a valid DUPLICATE entry must name its `duplicate_of` primary (the `Duplicate Of` column of the ledger's DUPLICATE table) and that primary must be a non-DUPLICATE issue id. A missing `duplicate_of` or one that chains to another DUPLICATE is a **Triage agent failure** (retry-then-abort as below).
 2. If the Triage agent output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triage agent failure**:
    - Retry the Triage agent once with the same inputs.
    - If the retry also fails the completeness check: abort with a clear error message listing the missing issue IDs and failure reason — never proceed with dropped issues.
@@ -242,6 +242,8 @@ Collect from each Code agent:
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt.
+
+DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations`, or `## Blocked`. A duplicate of a FALSE_POSITIVE primary therefore leaves only the primary in the `False Positive` row and the `## False Positives` section; the same holds for every other outcome the duplicate inherits.
 
 Use the template from the Output Artifact section below.
 
@@ -585,7 +587,7 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 | Escalated | {n} |
 | Duplicates Collapsed | {n} |
 
-_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. All rows above `Duplicates Collapsed` count UNIQUE (non-DUPLICATE) issues only — this excludes collapsed duplicates from `Fixed`, `False Positive`, and `Deferred`, de-skewing the fp\_ratio convergence formula in code-review without any parser change.)_
+_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every other row above `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
 
 ## Verification
 | Command | Result |
