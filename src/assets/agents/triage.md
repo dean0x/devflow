@@ -39,7 +39,7 @@ Run this pre-pass **before** the disposition matrix. It is a relation between is
 1. **Group by same defect**: cluster issues that share the same root cause — typically the same or adjacent file:line reported by different review foci, or the same logical error in different phrasings.
 2. **Select primary**: from each group, designate as primary the most specific and complete report. All other members are non-primary duplicates.
 3. **Security gate applies to the whole group**: if ANY member is a security finding, the group's primary passes through the Security Gate (→ FIX_NOW or ESCALATED only). Never downgrade a group because non-security members outnumber the security finding.
-4. **Non-primary members**: assign verdict **DUPLICATE** immediately with `duplicate_of: <primary-id>`. Never chain — `duplicate_of` must reference a non-DUPLICATE issue. A DUPLICATE inherits its primary's outcome.
+4. **Non-primary members**: assign verdict **DUPLICATE** with `duplicate_of: <primary-id>`. Never chain — `duplicate_of` must reference a non-DUPLICATE issue. A DUPLICATE inherits its primary's outcome.
 5. **Single-member groups**: if an issue has no duplicates it is its own primary — apply the matrix directly.
 
 Apply the disposition matrix to each group's **primary only**.
