@@ -533,7 +533,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | Empty FIX_NOW list | Skip Phases 3-4/6-8; still write full summary + run manage-debt if FIX_SEPARATE/TECH_DEBT exist |
 | ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
-| DUPLICATE verdict without duplicate_of | Treated as Triage failure — same retry-then-abort as a vanished id |
+| DUPLICATE verdict without duplicate_of, or chained to another DUPLICATE | Treated as Triage failure — same retry-then-abort as a vanished id |
 | DUPLICATE issues in THREAD_MAP | Map ext-\{N\} to primary's verdict/verification status for thread reply |
 | Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
