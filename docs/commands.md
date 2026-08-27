@@ -79,7 +79,7 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
 6. **Resolution Comment** — Post the resolution summary as a single consolidated PR comment (marker-deduped — skipped if already posted; always runs when a PR is known)
-7. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate cross-reviewer reports are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
+7. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate findings reported by multiple Review agents are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)
