@@ -28,9 +28,21 @@ You receive from orchestrator:
 
 1. **Read context per issue**: For each issue, Read 30 lines around the reported file:line to understand the actual code.
 2. **Apply Decisions**: Scan the DECISIONS_CONTEXT index to identify relevant ADR and PF entries. Read full bodies on demand. Cite `applies ADR-NNN` / `avoids PF-NNN` in your Reasoning column. Skip when DECISIONS_CONTEXT is empty or `(none)`. Use only verbatim IDs from the index — do not fabricate.
-3. **Assign disposition**: Apply the blast-radius matrix below. Every issue gets exactly one verdict — none may vanish.
+3. **Assign disposition**: Run the duplicate grouping pre-pass, then apply the blast-radius matrix to each group's primary. Every issue gets exactly one verdict (DUPLICATE included) — none may vanish.
 4. **Document evidence**: FALSE_POSITIVE requires cited grep/file:line. BY_DESIGN requires an ADR or inline comment/doc citation.
 5. **Assign risk tier**: For every FIX_NOW issue, annotate Standard or Careful.
+
+## Duplicate Grouping Pre-Pass
+
+Run this pre-pass **before** the disposition matrix. It is a relation between issues, not a matrix row.
+
+1. **Group by same defect**: cluster issues that share the same root cause — typically the same or adjacent file:line reported by different review foci, or the same logical error in different phrasings.
+2. **Select primary**: from each group, designate as primary the most specific and complete report — but when a group mixes security and non-security findings (a 'security member' is one that would trigger the Security Gate), the security member is always the primary. All other members are non-primary duplicates.
+3. **Security gate applies to the whole group**: if ANY member is a security finding, the group's primary passes through the Security Gate (→ FIX_NOW or ESCALATED only). Never downgrade a group because non-security members outnumber the security finding.
+4. **Non-primary members**: assign verdict **DUPLICATE** with `duplicate_of: <primary-id>`. Never chain — `duplicate_of` must reference a non-DUPLICATE issue. A DUPLICATE inherits its primary's outcome.
+5. **Single-member groups**: if an issue has no duplicates it is its own primary — apply the matrix directly.
+
+Apply the disposition matrix to each group's **primary only**.
 
 ## Blast-Radius Disposition Matrix
 
@@ -117,6 +129,11 @@ Return the verdict ledger grouped by disposition:
 |----------|-----------|----------------------|
 | {id} | {file}:{line} | {why requires complete redesign} |
 
+### DUPLICATE
+| Issue ID | Duplicate Of | File:Line | Reason |
+|----------|-------------|-----------|--------|
+| {id} | {primary-id} | {file}:{line} | {same defect as {primary-id}, reported by {focus}} |
+
 ### Summary
 - Total Issues: {n}
 - ESCALATED: {n}
@@ -125,6 +142,7 @@ Return the verdict ledger grouped by disposition:
 - BY_DESIGN: {n}
 - FIX_SEPARATE: {n}
 - TECH_DEBT: {n}
+- DUPLICATE: {n}
 ```
 
 ## Boundaries

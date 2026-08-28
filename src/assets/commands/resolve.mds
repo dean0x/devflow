@@ -169,7 +169,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
-Triage every issue using the blast-radius disposition matrix. Assign exactly one verdict per issue.
+Triage every issue: collapse duplicates first, then apply the blast-radius disposition matrix to each group's primary. Assign exactly one verdict per issue.
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
@@ -181,11 +181,12 @@ Wait for Triage agent to complete before proceeding. Parse verdict ledger from T
 - **BY_DESIGN**: Intentional code (with ADR or code doc citation)
 - **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT
+- **DUPLICATE**: Collapsed duplicate issue — carries `duplicate_of: <primary-id>` referencing the non-DUPLICATE primary; inherits the primary's outcome
 
 Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning columns.
 
 **Triage agent completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
-1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets.
+1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets. DUPLICATE is a valid bucket; a valid DUPLICATE entry must name its `duplicate_of` primary (the `Duplicate Of` column of the ledger's DUPLICATE table) and that primary must be a non-DUPLICATE issue id. A missing `duplicate_of` or one that chains to another DUPLICATE is a **Triage agent failure** (retry-then-abort as below).
 2. If the Triage agent output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triage agent failure**:
    - Retry the Triage agent once with the same inputs.
    - If the retry also fails the completeness check: abort with a clear error message listing the missing issue IDs and failure reason — never proceed with dropped issues.
@@ -199,7 +200,7 @@ Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning c
 
 If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, run thread resolution + resolution comment (Phase 9b), run merge readiness (Phase 9c), display results (Phase 10).
 
-Otherwise, batch FIX_NOW issues for Code agent execution:
+Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are never dispatched** — they inherit the primary's outcome:
 - **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
 - **Distinct-file issues** → parallel Code agents
 - **Max 5 issues per batch** — chunk large sets
@@ -241,6 +242,8 @@ Collect from each Code agent:
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt.
+
+DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations`, or `## Blocked`. A duplicate of a FALSE_POSITIVE primary therefore leaves only the primary in the `False Positive` row and the `## False Positives` section; the same holds for every other outcome the duplicate inherits.
 
 Use the template from the Output Artifact section below.
 
@@ -334,7 +337,7 @@ Otherwise, for each worktree with fixes:
 
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
-If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent:
+If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent. **DUPLICATE issues never create their own debt tickets** — a duplicate of a deferred primary is covered by the primary's ticket:
 
 ```
 Agent(subagent_type="Git"):
@@ -359,6 +362,7 @@ Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty.
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-\{N\}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
+- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (avoids PF-024; caller-side mapping — git.md contracts unchanged)
 - Include `commit_sha` from Code agent results for FIXED verdicts
 - Unmatched threads: ESCALATED (human review)
 
@@ -438,6 +442,7 @@ The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary
 | Deferred | {n} |
 | Blocked | {n} |
 | Escalated | {n} |
+| Duplicates Collapsed | {n} |
 
 ### Verification
 Final gate: {PASS | FAILED after N attempts}
@@ -483,9 +488,9 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Git agent (fetch-review-threads) → THREAD_MAP
 │
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-│  └─ ALL issues → verdict ledger by disposition
+│  └─ ALL issues → verdict ledger by disposition (incl. DUPLICATE with duplicate_of)
 │
-├─ Phase 3: Batch FIX_NOW issues (skip if empty)
+├─ Phase 3: Batch FIX_NOW issues (skip if empty; DUPLICATE issues never dispatched)
 │  └─ same-file sequential, distinct-file parallel, max 5/batch
 │
 ├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
@@ -528,6 +533,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | Empty FIX_NOW list | Skip Phases 3-4/6-8; still write full summary + run manage-debt if FIX_SEPARATE/TECH_DEBT exist |
 | ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
+| DUPLICATE verdict without duplicate_of, or chained to another DUPLICATE | Treated as Triage failure — same retry-then-abort as a vanished id |
+| DUPLICATE issues in THREAD_MAP | Map ext-\{N\} to primary's verdict/verification status for thread reply |
 | Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
 | COMPLIANCE_SKILL_INSTALLED false | Phases 1b, 9b-step-1, and 9c are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
@@ -578,8 +585,9 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 | Deferred | {n} |
 | Blocked | {n} |
 | Escalated | {n} |
+| Duplicates Collapsed | {n} |
 
-_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser.)_
+_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
 
 ## Verification
 | Command | Result |
@@ -625,6 +633,11 @@ Final gate: PASS | FAILED after {n} attempts
 |-------|-----------|---------|
 | {description} | {file}:{line} | {why} |
 
+## Duplicates
+| Issue | Duplicate Of | File:Line |
+|-------|-------------|-----------|
+| {description} | {primary-id} | {file}:{line} |
+
 ## Third-Party Threads
 | Thread | File:Line | Verdict | Status |
 |--------|-----------|---------|--------|
@@ -633,4 +646,4 @@ Final gate: PASS | FAILED after {n} attempts
 
 _(Omit `## Third-Party Threads` if `COMPLIANCE_SKILL_INSTALLED` is false or no external threads were found.)_
 
-**Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `/code-review` convergence parser reads the `Deferred`, `Fixed`, and `False Positive` Statistics rows plus the `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable.
+**Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `Duplicates Collapsed` row is additive — the `/code-review` convergence parser reads only `Deferred`, `Fixed`, and `False Positive` rows plus `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable. All rows that the parser reads count UNIQUE (non-DUPLICATE) issues only, so collapsed duplicates do not inflate fp\_ratio.

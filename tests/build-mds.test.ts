@@ -1158,6 +1158,64 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// §16b DUPLICATE verdict guards — resolve.md
+//      Pins the DUPLICATE triage bucket, duplicate_of reference attribute,
+//      Duplicates Collapsed Statistics row, and ## Duplicates section.
+//      All counts in existing Statistics rows now apply to UNIQUE (non-DUPLICATE)
+//      issues only — this is the byte-stable contract verified here.
+// ---------------------------------------------------------------------------
+
+describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
+  let compiled: string;
+
+  beforeAll(async () => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+    compiled = await fs.readFile(path.join(ROOT, DIST_COMMANDS, 'resolve.md'), 'utf-8');
+    expect(compiled.length, 'resolve.md must be non-empty').toBeGreaterThan(0);
+  });
+
+  it('resolve.md contains DUPLICATE as a named verdict bucket', () => {
+    expect(
+      compiled,
+      'resolve.md must name DUPLICATE as a verdict bucket (avoids PF-024 spawn↔op seam)',
+    ).toContain('DUPLICATE');
+  });
+
+  it('resolve.md contains duplicate_of reference attribute for DUPLICATE entries', () => {
+    expect(
+      compiled,
+      'resolve.md must contain duplicate_of — the per-entry attribute Triage must supply for every DUPLICATE verdict',
+    ).toContain('duplicate_of');
+  });
+
+  it('resolve.md contains the Duplicates Collapsed Statistics row label (parser-contract additive extension)', () => {
+    // This row is additive — existing labels (Fixed, False Positive, Deferred) are unchanged.
+    // The convergence parser in code-review.md reads only those existing labels, so this
+    // new row does not break it while ensuring DUPLICATE counts surface in the artifact.
+    expect(
+      compiled,
+      'resolve.md must contain "| Duplicates Collapsed | " Statistics row label',
+    ).toContain('| Duplicates Collapsed | ');
+  });
+
+  it('resolve.md contains ## Duplicates section for per-entry traceability', () => {
+    expect(
+      compiled,
+      'resolve.md must contain ## Duplicates section (additive, safe per ADR-006)',
+    ).toContain('## Duplicates');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §17  Phase E traceability — implement.mds (2.5) + plan.mds (2.6) guards
 //      implement.md: ISSUE_NUMBER in Code-agent spawns, COMPLIANCE in Git spawn
 //      plan.md: ensure-traceable-issue replaces inline gh issue create

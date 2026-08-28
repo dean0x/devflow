@@ -73,13 +73,13 @@ Applies to `/code-review` and `/resolve`. On public repositories, Devflow posts 
 
 Processes all issues from `/code-review` reports through a validation/fix split:
 
-1. **Triage** — A single Triage agent (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED
+1. **Triage** — A single Triage agent (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED / DUPLICATE
 2. **Fix** — Parallel Code agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
 3. **Verify** — A Validate agent (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
 4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
 6. **Resolution Comment** — Post the resolution summary as a single consolidated PR comment (marker-deduped — skipped if already posted; always runs when a PR is known)
-7. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections
+7. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate findings reported by multiple Review agents are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)

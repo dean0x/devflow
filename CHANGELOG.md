@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`/resolve` DUPLICATE verdict**: `/resolve` now collapses duplicate cross-reviewer findings via a new `DUPLICATE` triage verdict — resolution-summary counts unique issues, with a `Duplicates Collapsed` statistics row and a `## Duplicates` section for traceability.
+
 ---
 
 ## [2.2.0] - 2026-08-25
