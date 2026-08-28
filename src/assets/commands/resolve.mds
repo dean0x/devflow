@@ -56,7 +56,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 **If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree.
+**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -138,7 +138,7 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 ### Phase 1b: Fetch External Review Threads (Compliance-gated)
 
 **Produces:** THREAD_MAP
-**Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
+**Requires:** BRANCH_INFO, COMPLIANCE_SKILL_INSTALLED
 
 Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
 
@@ -157,7 +157,7 @@ Parse `THREAD_MAP` from Git agent output. If Git agent returns `TRACEABILITY: DE
 ### Phase 2: Global Triage
 
 **Produces:** TRIAGE_RESULTS
-**Requires:** ISSUES, DIFF_FILES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_INFO
+**Requires:** ISSUES, DIFF_FILES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION
 
 Spawn a single global Triage agent for ALL issues:
 
@@ -208,7 +208,7 @@ Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are
 ### Phase 4: Fix (Code agent × N)
 
 **Produces:** CODE_AGENT_RESULTS
-**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_INFO
+**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 For each batch, spawn Code agent with `OPERATION: issue-fix` and `PUSH: false`:
 
@@ -237,7 +237,7 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, BRANCH_INFO
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -403,7 +403,7 @@ Update `## Third-Party Threads` section in resolution-summary.md with thread res
 ### Phase 9c: Merge Readiness (Compliance-gated, Report-only)
 
 **Produces:** MERGE_READINESS_REPORT
-**Requires:** PR_INFO, COMPLIANCE_SKILL_INSTALLED
+**Requires:** BRANCH_INFO, COMPLIANCE_SKILL_INSTALLED
 
 Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
 
@@ -422,7 +422,7 @@ If Git agent returns `TRACEABILITY: DEGRADED`: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
-**Requires:** TARGET_DIR
+**Requires:** BRANCH_INFO, TARGET_DIR
 
 The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7 and Phase 9). Display results to the user:
 
@@ -563,7 +563,7 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 ```markdown
 # Resolution Summary
 
-**Branch**: {branch} -> {base}
+**Branch**: {branch} -> {base_branch}
 **Date**: {timestamp}
 **Review**: {TARGET_DIR}
 **Command**: /resolve

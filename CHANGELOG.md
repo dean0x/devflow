@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **`/resolve` DUPLICATE verdict**: `/resolve` now collapses duplicate cross-reviewer findings via a new `DUPLICATE` triage verdict — resolution-summary counts unique issues, with a `Duplicates Collapsed` statistics row and a `## Duplicates` section for traceability.
 
+### Fixed
+- **`/resolve` base branch token**: resolution summaries now render the base branch name instead of a literal `{base}` token. Step 0b was not extracting `base_branch` while the summary template referenced it.
+
 ---
 
 ## [2.2.0] - 2026-08-25
