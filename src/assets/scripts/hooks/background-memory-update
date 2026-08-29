@@ -65,6 +65,7 @@ MEMORY_DIR="$DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
+STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write (applies ADR-023)
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
@@ -135,6 +136,11 @@ if ! acquire_lock; then
   trap - EXIT
   exit 0
 fi
+
+# Clean up any staged file left by a watchdog-killed prior run.
+# Without this, a stale staged file with a valid stamp would be mistakenly
+# mv-ed to the real path on the NEXT run's CAS check (applies ADR-023).
+rm -f "$STAGED_FILE" 2>/dev/null || true
 
 # --- Orphan-only auto-clean: if queue has no assistant/qa turn, truncate and exit ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
@@ -292,13 +298,20 @@ fi
 
 log "Built $TURN_COUNT turns from queue"
 
-# --- Read existing memory ---
+# --- Capture pre-run cksum baseline + read existing memory ---
+# Baseline captured BEFORE content read so the cksum reflects the exact bytes we
+# synthesised from. ABSENT sentinel when file missing — resolves toward false-conflict,
+# never false-success (a file created externally during the run triggers CONFLICT,
+# which is safer than accepting a write we did not produce). applies ADR-023.
+PRE_RUN_CKSUM="ABSENT"
+if [ -f "$MEMORY_FILE" ]; then
+  PRE_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null || echo "ABSENT")
+fi
+
 EXISTING_MEMORY=""
-PRE_UPDATE_MTIME=0
 MEMORY_READ_LIMIT=65536  # bytes — keep prompt under context limit
 if [ -f "$MEMORY_FILE" ]; then
   EXISTING_MEMORY=$(head -c "$MEMORY_READ_LIMIT" "$MEMORY_FILE")
-  PRE_UPDATE_MTIME=$(get_mtime "$MEMORY_FILE")
 fi
 
 # --- Gather git state + HEAD SHA for stamp ---
@@ -323,7 +336,7 @@ fi
 
 # --- Build prompt (passed via STDIN, not argv — turn content may hold secrets) ---
 # SECURITY: argv is visible to ps(1); all user/assistant content goes via stdin.
-PROMPT="You are a working memory updater. Your ONLY job is to update the file at ${MEMORY_FILE} using the Write tool. Do it immediately — do not ask questions or explain.
+PROMPT="You are a working memory updater. Your ONLY job is to write the staging file at ${STAGED_FILE} using the Write tool. Do it immediately — do not ask questions or explain.
 
 CRITICAL: Write EXACTLY this as line 1 of the file (verbatim substituting the values):
 <!-- memory-head: ${HEAD_SHA:-unknown} branch: ${BRANCH:-unknown} -->
@@ -338,7 +351,7 @@ Git state:
 ${GIT_STATE:-"(not a git repo or no git state)"}
 
 Instructions:
-- Write the file ${MEMORY_FILE} NOW using the Write tool
+- Write ${STAGED_FILE} NOW using the Write tool
 - Line 1 MUST be: <!-- memory-head: ${HEAD_SHA:-unknown} branch: ${BRANCH:-unknown} -->
 - Keep under 120 lines total
 - Required sections: ## Now, ## Progress, ## Decisions, ## Context, ## Session Log
@@ -426,32 +439,60 @@ elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   exit 0
 fi
 
-# --- Verify success: mtime changed AND first-line stamp present ---
+# --- CAS verification (applies ADR-023: staged compare-and-swap) ---
+# Only our own claude run can create STAGED_FILE between lock-acquire and here,
+# so verifying its content proves OUR write succeeded — as opposed to accepting
+# any mtime bump, which could come from a concurrent human edit of the real file.
 UPDATED="false"
-if [ -f "$MEMORY_FILE" ]; then
-  NEW_MTIME=$(get_mtime "$MEMORY_FILE")
-  if [ "$NEW_MTIME" -gt "$PRE_UPDATE_MTIME" ]; then
-    FIRST_LINE=$(head -1 "$MEMORY_FILE" 2>/dev/null || echo "")
-    case "$FIRST_LINE" in
-      "<!-- memory-head:"*)
-        UPDATED="true"
-        log "Update verified (mtime changed, stamp present)"
-        ;;
-      *)
-        log "WARN: mtime changed but stamp missing on line 1 — treating as failure"
-        ;;
-    esac
-  else
-    log "WARN: memory file not modified (Write tool may have failed)"
-  fi
+CONFLICT="false"
+
+if [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ]; then
+  STAGED_FIRST_LINE=$(head -1 "$STAGED_FILE" 2>/dev/null || echo "")
+  case "$STAGED_FIRST_LINE" in
+    "<!-- memory-head:"*)
+      # Staged file valid — re-check real file cksum before swapping.
+      # Residual TOCTOU: a human edit landing in the O(ms) window between this
+      # cksum re-check and the mv would be clobbered; this is accepted — the
+      # staged content was synthesised from the pre-run file, so the next run
+      # re-synthesises from the then-current content (no net information loss).
+      # applies ADR-023 (staged compare-and-swap)
+      POST_RUN_CKSUM="ABSENT"
+      if [ -f "$MEMORY_FILE" ]; then
+        POST_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null || echo "ABSENT")
+      fi
+      if [ "$PRE_RUN_CKSUM" = "$POST_RUN_CKSUM" ]; then
+        # Real file byte-identical since pre-run baseline — safe to swap
+        if mv "$STAGED_FILE" "$MEMORY_FILE" 2>/dev/null; then
+          UPDATED="true"
+          log "Update verified (staged file valid, real file unchanged — swap complete)"
+        else
+          log "WARN: atomic mv failed — staged file may remain; leaving .processing for retry"
+        fi
+      else
+        # Real file changed during run — keep user edit, discard staged content
+        CONFLICT="true"
+        rm -f "$STAGED_FILE" 2>/dev/null || true
+        log "CONFLICT: WORKING-MEMORY.md changed during run — keeping user edit, leaving .processing for retry"
+      fi
+      ;;
+    *)
+      log "WARN: staged file exists but stamp missing on line 1 — treating as failure"
+      rm -f "$STAGED_FILE" 2>/dev/null || true
+      ;;
+  esac
 else
-  log "WARN: memory file does not exist after claude -p run"
+  # Claude exited 0 but staged file is missing or empty — disobedient model or
+  # degraded extraction path that never invoked claude with parseable turns
+  log "WARN: staged file missing or empty after claude -p run"
 fi
 
 if [ "$UPDATED" = "true" ]; then
   rm -f "$PROCESSING_FILE" 2>/dev/null || true
   touch "$OK_FILE" 2>/dev/null || true
   log "SUCCESS: queue drained, .last-refresh-ok touched"
+elif [ "$CONFLICT" = "true" ]; then
+  # Keep .processing for retry via merge-on-next-spawn; do NOT touch .last-refresh-ok
+  : # intentional no-op — .processing already retained above
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
   log "FAIL: verification failed — leaving .processing for recovery"

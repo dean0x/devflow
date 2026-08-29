@@ -146,7 +146,7 @@ function buildNoJsonParsePath(tmpBase: string): string {
   // Tools sourced helpers and the worker actually call (from /usr/bin since /bin lacks them)
   const usrBinTools = [
     'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
-    'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname',
+    'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname', 'cksum',
   ];
   for (const t of usrBinTools) {
     const src = `/usr/bin/${t}`;
@@ -160,19 +160,22 @@ function buildNoJsonParsePath(tmpBase: string): string {
 }
 
 /**
- * Create a fake `claude` that writes a deterministic stamped WORKING-MEMORY.md.
- * When the capture hook spawns background-memory-update with this shim on PATH,
- * the fake claude completes instantly instead of hanging 120s.
+ * Create a fake `claude` that writes a deterministic stamped WORKING-MEMORY.md.new
+ * (the staged file). When the capture hook spawns background-memory-update with this
+ * shim on PATH, the fake claude completes instantly instead of hanging 120s.
+ * B1: shim writes to the staged path; the worker's CAS logic mv's it to the real path.
+ * applies ADR-023 (staged compare-and-swap)
  */
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
+  const stagedFile = `${memFile}.new`;
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-# Fake claude shim for tests
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
-echo "- test memory content written by fake claude" >> "${memFile}"
+# Fake claude shim for tests — writes to staged path, not real path (ADR-023)
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "- test memory content written by fake claude" >> "${stagedFile}"
 exit 0
 `
   );
@@ -864,10 +867,10 @@ describe('S13: D56c crash-recovery — leftover .processing merged with new queu
       `#!/bin/bash
 # Record stdin so the test can assert both turn-batches are present
 cat > "${stdinCapture}"
-# Write a valid stamped memory file so the worker treats this as success
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
-echo "- crash-recovery test" >> "${memFile}"
+# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
+echo "## Now" >> "${memFile}.new"
+echo "- crash-recovery test" >> "${memFile}.new"
 exit 0
 `
     );
@@ -924,9 +927,10 @@ exit 0
       `#!/bin/bash
 # Drain stdin (required so the worker's <<< doesn't stall)
 cat > /dev/null
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
-echo "- overflow cap test" >> "${memFile}"
+# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
+echo "## Now" >> "${memFile}.new"
+echo "- overflow cap test" >> "${memFile}.new"
 exit 0
 `
     );
@@ -1071,10 +1075,10 @@ describe('S15: stdin/argv safety — prompt content delivered via STDIN, not arg
 echo "$@" > "${argvLog}"
 # Record stdin (the full prompt)
 cat > "${stdinLog}"
-# Write a valid stamped memory file so the worker treats this as success
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
-echo "- stdin safety test" >> "${memFile}"
+# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
+echo "## Now" >> "${memFile}.new"
+echo "- stdin safety test" >> "${memFile}.new"
 exit 0
 `
     );
@@ -1374,8 +1378,9 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
       claudeBin,
       `#!/bin/bash
 cat > "${stdinCapture}"
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
+# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
+echo "## Now" >> "${memFile}.new"
 exit 0
 `
     );
@@ -1556,5 +1561,159 @@ describe('S20: DEVFLOW_BG_UPDATER self-guard (worker re-entrancy)', () => {
     expect(fs.existsSync(memFile)).toBe(false);
     // Guard fires before hook-log-init is sourced — no log file at all.
     expect(fs.existsSync(workerLogPath(projectDir, homeDir))).toBe(false);
+  });
+});
+
+// =============================================================================
+// S21 — Staged compare-and-swap verification (ADR-023, B1)
+//
+// Tests the CAS paths introduced in B1:
+//   - absent-pre-run success: mv staged → real when both pre/post are ABSENT
+//   - CONFLICT: real file changes during run → staged discarded, .processing kept
+//   - stale-staged cleanup: leftover .new from prior run deleted before claude
+//   - staged path in prompt: worker tells claude to write to .new, not real path
+//
+// PF-018 compliance: each test asserts on a log line that routes through the
+// new CAS branch specifically, not a path reachable by the old mtime logic.
+// applies ADR-023 (staged compare-and-swap)
+// =============================================================================
+describe('S21: staged compare-and-swap verification paths (ADR-023)', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    stagedFile = `${memFile}.new`;
+    seedQueue(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('CAS success (absent pre-run): staged mv-ed to real, .processing removed, .last-refresh-ok touched', () => {
+    // Real file absent before run — PRE_RUN_CKSUM=ABSENT; POST_RUN_CKSUM=ABSENT → swap succeeds
+    createFakeClaudeShim(shimDir, memFile);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // Staged consumed by mv; real file now exists with stamp
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(memFile)).toBe(true);
+    const firstLine = fs.readFileSync(memFile, 'utf-8').split('\n')[0];
+    expect(firstLine).toMatch(/^<!-- memory-head: .+ branch: .+ -->$/);
+
+    // Queue consumed; ok marker touched
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(true);
+
+    // Log confirms CAS swap path (PF-018 compliance: new branch exercised via log line)
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('staged file valid, real file unchanged — swap complete');
+  });
+
+  it('CONFLICT: real file changes during run — staged discarded, .processing retained, .last-refresh-ok not created', () => {
+    // Pre-create real file so baseline cksum is captured
+    fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
+
+    // Fake claude writes valid staged AND modifies real file (simulates human edit mid-run)
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "- updated by worker" >> "${stagedFile}"
+# Also modify the real file — changes its cksum, triggering CONFLICT
+echo "<!-- memory-head: human branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- human edit during worker run" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // CONFLICT: staged deleted, .processing retained (created by this run's claim step)
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    // .last-refresh-ok NOT created — user edit survived, worker does not claim success
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+
+    // Log confirms CONFLICT path (PF-018 compliance: new branch exercised via log line)
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('CONFLICT: WORKING-MEMORY.md changed during run');
+  });
+
+  it('stale-staged cleanup: leftover .new from prior run is removed before claude, preventing false-success', () => {
+    // Pre-create a stale staged file with valid stamp — simulates a watchdog-killed prior run.
+    // Without the rm -f cleanup, the CAS code would mistakenly mv this stale staged → false-success.
+    fs.writeFileSync(
+      stagedFile,
+      '<!-- memory-head: stale branch: main -->\n## Now\n- stale leftover from prior run\n'
+    );
+
+    // Fake claude: drains stdin but writes NOTHING to staged path
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > /dev/null
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // Stale staged cleaned before claude ran; no new staged written; no false-success
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(memFile)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+    // .processing retained — the FAIL path, not false-success
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+
+    // Log confirms FAIL path, not false-success (PF-018 compliance: new branch exercised via log line)
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('verification failed — leaving .processing for recovery');
+  });
+
+  it('staged path in prompt: worker instructs claude to write to .new staged path', () => {
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > "${stdinCapture}"
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    expect(fs.existsSync(stdinCapture)).toBe(true);
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+
+    // The prompt must mention the staged (.new) path — real path removed from write instruction
+    expect(capturedStdin).toContain('WORKING-MEMORY.md.new');
   });
 });

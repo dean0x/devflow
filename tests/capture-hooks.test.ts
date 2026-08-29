@@ -61,11 +61,13 @@ function runHookWithPath(
 
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
+  const stagedFile = `${memFile}.new`;
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
+# Writes to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
 exit 0
 `,
   );
