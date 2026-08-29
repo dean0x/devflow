@@ -93,6 +93,30 @@ function workerLogPath(projectDir: string, homeDir: string, hookName: string): s
   return path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
 }
 
+/**
+ * Poll a log file for a terminal needle line.
+ * Retries up to maxAttempts times, each attempt polling for pollMs milliseconds.
+ * All waits and retry counts explicitly bounded.
+ */
+async function pollForTerminalLine(
+  logFile: string,
+  needle: string,
+  pollMs: number,
+  maxAttempts: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const deadline = Date.now() + pollMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(logFile)) {
+        const content = fs.readFileSync(logFile, 'utf-8');
+        if (content.includes(needle)) return true;
+      }
+      await new Promise<void>((r) => setTimeout(r, 100));
+    }
+  }
+  return false;
+}
+
 // =============================================================================
 // capture-prompt
 // =============================================================================
@@ -497,15 +521,13 @@ describe('memory-worker', () => {
 
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
-    // Poll briefly for the detached worker's log (nohup-spawned, async)
+    // Poll for the detached worker's log to contain a terminal line.
+    // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
     const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !fs.existsSync(logFile)) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(fs.existsSync(logFile)).toBe(true);
+    const found = await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
+    expect(found).toBe(true);
     expect(fs.readFileSync(logFile, 'utf-8')).toContain('Starting (CWD=');
-  });
+  }, 15000);
 
   it('BG_UPDATER guard prevents spawn', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');

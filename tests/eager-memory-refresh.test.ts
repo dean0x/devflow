@@ -109,6 +109,30 @@ function workerLogPath(projectDir: string, homeDir: string): string {
 }
 
 /**
+ * Poll a log file for a terminal needle line.
+ * Retries up to maxAttempts times, each attempt polling for pollMs milliseconds.
+ * All waits and retry counts explicitly bounded.
+ */
+async function pollForTerminalLine(
+  logFile: string,
+  needle: string,
+  pollMs: number,
+  maxAttempts: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const deadline = Date.now() + pollMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(logFile)) {
+        const content = fs.readFileSync(logFile, 'utf-8');
+        if (content.includes(needle)) return true;
+      }
+      await new Promise<void>((r) => setTimeout(r, 100));
+    }
+  }
+  return false;
+}
+
+/**
  * Build a symlink-farm directory containing all required system tools EXCEPT jq and node,
  * suitable for constructing a PATH where _JSON_AVAILABLE=false in json-parse.
  *
@@ -779,7 +803,7 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after a memory-wo
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('no memory.* file in .devflow/dream/ after memory-worker spawns the updater (no marker created)', () => {
+  it('no memory.* file in .devflow/dream/ after memory-worker spawns the updater (no marker created)', async () => {
     runHookWithFakeClaude(
       MEMORY_WORKER_HOOK,
       { cwd: projectDir },
@@ -787,10 +811,15 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after a memory-wo
       shimDir
     );
 
+    // Wait for background-memory-update to start — prevents afterEach rmSync racing
+    // with an in-flight detached worker. Bounded: 4000ms × ≤3 attempts; 15000ms it-timeout.
+    const logFile = workerLogPath(projectDir, homeDir);
+    await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
+
     const dreamDir = path.join(projectDir, '.devflow', 'dream');
     const memMarkers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));
     expect(memMarkers).toHaveLength(0);
-  });
+  }, 15000);
 });
 
 // =============================================================================

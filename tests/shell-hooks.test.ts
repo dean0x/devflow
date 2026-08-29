@@ -39,6 +39,7 @@ const HOOK_SCRIPTS = [
   'capture-question',
   'memory-worker',
   'ensure-proxy',
+  'background-memory-update',
 ];
 
 describe('shell hook syntax checks', () => {
