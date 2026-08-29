@@ -20,6 +20,7 @@ const {
   formatPitfallBody,
   buildTldrLine,
   buildIndexContent,
+  segmentDetails,
 } = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
@@ -30,6 +31,10 @@ const {
     activePitfallRows: Record<string, unknown>[],
     opts: { decisionsFilePath: string; pitfallsFilePath: string }
   ) => string;
+  segmentDetails: (
+    detailsStr: string,
+    keys: readonly string[]
+  ) => Record<string, string>;
 };
 
 // ---------------------------------------------------------------------------
@@ -198,6 +203,202 @@ describe('formatPitfallBody', () => {
     };
     const result = formatPitfallBody(row);
     expect(result).toContain('- **Source**: self-learning:unknown\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// segmentDetails — direct unit tests (RED until A1 implemented)
+// ---------------------------------------------------------------------------
+// Tests the exported segmentDetails(detailsStr, keys) pure helper.
+// All assertions here will fail before the function is added to
+// decisions-format.cjs because segmentDetails will be `undefined`.
+
+describe('segmentDetails — direct unit tests', () => {
+  const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
+  const ADR_KEYS = ['context', 'decision', 'rationale'] as const;
+
+  it('extracts recognized key/value pairs from a clean details string', () => {
+    const result = segmentDetails(
+      'area: hooks; issue: foo; impact: bar; resolution: fix',
+      PF_KEYS,
+    );
+    expect(result).toEqual({ area: 'hooks', issue: 'foo', impact: 'bar', resolution: 'fix' });
+  });
+
+  it('continuation segments (no recognized key) appended to previous field with semicolon', () => {
+    // "src/core/" does not start with any recognized key → it extends the area value
+    const result = segmentDetails(
+      'area: src/hooks/; src/core/; issue: overwritten',
+      PF_KEYS,
+    );
+    expect(result).toEqual({ area: 'src/hooks/; src/core/', issue: 'overwritten' });
+  });
+
+  it('collapses \\n to space inside field values', () => {
+    const result = segmentDetails(
+      'area: hooks; issue: problem\nwith\nnewlines',
+      PF_KEYS,
+    );
+    expect(result).toEqual({ area: 'hooks', issue: 'problem with newlines' });
+  });
+
+  it('reissue: does NOT match issue: key (anchored check — reissue starts with r)', () => {
+    // The unanchored old regex /issue:\s*([^;]+)/i finds "issue:" inside "reissue:".
+    // The new segmenter checks the trimmed segment start; "reissue:" ≠ "issue:".
+    const result = segmentDetails(
+      'area: hooks; reissue: ADR-007; issue: actual problem; resolution: fix',
+      PF_KEYS,
+    );
+    expect(result.issue).toBe('actual problem');
+  });
+
+  it('works for ADR keys (context / decision / rationale)', () => {
+    const result = segmentDetails(
+      'context: TypeScript; decision: use Result; rationale: safety',
+      ADR_KEYS,
+    );
+    expect(result).toEqual({ context: 'TypeScript', decision: 'use Result', rationale: 'safety' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// segmentDetails — integration via formatDecisionBody (RED until A1)
+// ---------------------------------------------------------------------------
+// These tests drive formatDecisionBody through edge-cases that the OLD
+// unanchored regex cannot handle.  They are RED until A1 wires segmentDetails
+// into the formatter.
+
+describe('segmentDetails — internal semicolons in decision fields', () => {
+  it('Context field preserves embedded semicolons (not truncated at first ;)', () => {
+    // OLD regex: /context:\s*([^;]+)/i → stops at first ; → "TypeScript"
+    // NEW segmenter: "uses Result<T, E>" segment has no recognized key → continuation
+    const row = {
+      anchor_id: 'ADR-TEST',
+      pattern: 'Test decision',
+      id: 'obs_seg1',
+      date: '2026-01-01',
+      details: 'context: TypeScript; uses Result<T, E>; decision: always return Result; rationale: safety',
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Context**: TypeScript; uses Result<T, E>\n');
+  });
+
+  it('Decision field preserves embedded semicolons', () => {
+    // OLD regex: /decision:\s*([^;]+)/i → stops at first ; → "step 1"
+    const row = {
+      anchor_id: 'ADR-TEST',
+      pattern: 'Test decision',
+      id: 'obs_seg2',
+      date: '2026-01-01',
+      details: 'context: project; decision: step 1; also step 2; rationale: cleaner',
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Decision**: step 1; also step 2\n');
+  });
+
+  it('Consequences (rationale) field preserves embedded semicolons', () => {
+    // OLD regex: /rationale:\s*([^;]+)/i → stops at first ; → "benefit one"
+    const row = {
+      anchor_id: 'ADR-TEST',
+      pattern: 'Test decision',
+      id: 'obs_seg3',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: benefit one; benefit two; benefit three',
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Consequences**: benefit one; benefit two; benefit three\n');
+  });
+});
+
+describe('segmentDetails — internal semicolons in pitfall fields', () => {
+  it('Area field preserves embedded semicolons', () => {
+    // OLD regex: /area:\s*([^;]+)/i → "src/hooks/" only
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Test pitfall',
+      id: 'obs_seg4',
+      details: 'area: src/hooks/; src/core/; issue: overwritten on reinstall',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Area**: src/hooks/; src/core/\n');
+  });
+
+  it('Issue field preserves embedded semicolons', () => {
+    // OLD regex: /issue:\s*([^;]+)/i → "step 1" only
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Test pitfall',
+      id: 'obs_seg5',
+      details: 'area: hooks; issue: step 1; also step 2; impact: bad',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Issue**: step 1; also step 2\n');
+  });
+
+  it('Impact field preserves embedded semicolons', () => {
+    // OLD regex: /impact:\s*([^;]+)/i → "loses work" only
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Test pitfall',
+      id: 'obs_seg6',
+      details: 'area: hooks; issue: foo; impact: loses work; corrupts state; resolution: fix',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Impact**: loses work; corrupts state\n');
+  });
+
+  it('Resolution field preserves embedded semicolons', () => {
+    // OLD regex: /resolution:\s*([^;]+)/i → "step 1" only
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Test pitfall',
+      id: 'obs_seg7',
+      details: 'area: hooks; issue: foo; impact: bar; resolution: step 1; step 2',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Resolution**: step 1; step 2\n');
+  });
+
+  it('reissue: does NOT false-match issue: key (PF-014-shaped specimen)', () => {
+    // PF-014 bug: /issue:\s*([^;]+)/i is unanchored; it finds "issue:" inside
+    // "reissue:" at string offset 2 and captures the wrong value.
+    // Expected: issue = "process.exit skips finally" (from the actual issue: segment)
+    const row = {
+      anchor_id: 'PF-014',
+      pattern: 'Test pitfall',
+      id: 'obs_pf014',
+      details: 'area: Node.js; reissue: ADR-007 not applicable; issue: process.exit skips finally; resolution: throw instead',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Issue**: process.exit skips finally\n');
+    expect(result).toContain('- **Resolution**: throw instead\n');
+  });
+
+  it('first-match hijack: issue: embedded in area value does not capture wrong issue', () => {
+    // OLD code: /issue:\s*([^;]+)/i on whole string finds "issue:" inside
+    // "tracks issue: tickets" → captures "tickets" instead of "process exit".
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Hijack test',
+      id: 'obs_hijack',
+      details: 'area: tracks issue: tickets; issue: process exit skips finally; resolution: use throw',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Area**: tracks issue: tickets\n');
+    expect(result).toContain('- **Issue**: process exit skips finally\n');
+  });
+
+  it('newline in field value is collapsed to a space', () => {
+    // [^;]+ matches \n; the output line would contain an embedded newline
+    // unless the segmenter collapses \n → space.
+    const row = {
+      anchor_id: 'PF-TEST',
+      pattern: 'Newline test',
+      id: 'obs_newline',
+      details: 'area: hooks; issue: problem\nwith newline; resolution: fix',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Issue**: problem with newline\n');
   });
 });
 

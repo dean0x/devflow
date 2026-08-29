@@ -27,6 +27,11 @@
 //     decisions.md: "<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n"
 //     pitfalls.md:  "<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n"
 //
+// Field parsing: both formatters use segmentDetails() which splits on ';' and
+// anchors key detection to the START of each trimmed segment — so 'reissue:'
+// does NOT match 'issue:', and embedded semicolons inside a field value are
+// preserved (the segment is treated as a continuation of the prior field).
+//
 // Consumers of these strings:
 //   - session-start-context (line 57): reads TL;DR comment via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
@@ -34,6 +39,67 @@
 //   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered blocks
 
 'use strict';
+
+/**
+ * Segment-parse a details string into key→value pairs using anchored key
+ * detection.  Splits on ';' and checks whether each trimmed segment begins
+ * with one of the recognised keys (e.g. 'area:').  If a segment does NOT
+ * begin with a recognised key it is treated as a continuation of the
+ * previous field — this preserves embedded semicolons inside a field value.
+ *
+ * Key detection is anchored to the START of the trimmed segment so that
+ * 'reissue:' does NOT match 'issue:', 'precontext:' does NOT match
+ * 'context:', etc.  All matching is case-insensitive.
+ *
+ * Newlines inside values are collapsed to a single space so the formatted
+ * output lines remain single-line.
+ *
+ * D001 (details-parsing): This is the SINGLE parser for structured details
+ * strings — both formatDecisionBody and formatPitfallBody delegate here.
+ * applies PF-042 (delimiter-regex truncation).
+ *
+ * @param {string} detailsStr - raw details string from an observation row
+ * @param {readonly string[]} keys - recognised field names in priority order
+ * @returns {Record<string, string>} map of field name → extracted value
+ */
+function segmentDetails(detailsStr, keys) {
+  /** @type {Record<string, string>} */
+  const result = {};
+  if (!detailsStr) return result;
+
+  const segments = detailsStr.split(';');
+  let currentKey = null;
+
+  for (const seg of segments) {
+    const trimmed = seg.trim();
+    let matched = false;
+
+    for (const key of keys) {
+      const prefix = key + ':';
+      // Anchored: does the trimmed segment START with '<key>:'?
+      // Lower-casing both sides gives case-insensitive matching without regex.
+      if (trimmed.toLowerCase().startsWith(prefix)) {
+        currentKey = key;
+        result[key] = trimmed.slice(prefix.length).trim().replace(/\n/g, ' ');
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched && currentKey !== null) {
+      // Continuation of the previous field's value (embedded semicolons)
+      result[currentKey] = result[currentKey] + '; ' + trimmed.replace(/\n/g, ' ');
+    }
+  }
+
+  return result;
+}
+
+/** Recognised field keys for decision entries. */
+const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
+
+/** Recognised field keys for pitfall entries. */
+const PF_KEYS = /** @type {const} */ (['area', 'issue', 'impact', 'resolution']);
 
 /**
  * Return the initial header content for a new decisions or pitfalls file.
@@ -63,17 +129,15 @@ function formatDecisionBody(row) {
   const anchorId = row.anchor_id || '';
   const pattern = row.pattern || '';
 
-  const contextM = detailsStr.match(/context:\s*([^;]+)/i);
-  const decisionM = detailsStr.match(/decision:\s*([^;]+)/i);
-  const rationaleM = detailsStr.match(/rationale:\s*([^;]+)/i);
+  const fields = segmentDetails(detailsStr, ADR_KEYS);
 
   return (
     `\n## ${anchorId}: ${pattern}\n\n` +
     `- **Date**: ${artDate}\n` +
     `- **Status**: Accepted\n` +
-    `- **Context**: ${(contextM || [])[1] || detailsStr}\n` +
-    `- **Decision**: ${(decisionM || [])[1] || pattern}\n` +
-    `- **Consequences**: ${(rationaleM || [])[1] || ''}\n` +
+    `- **Context**: ${fields.context || detailsStr}\n` +
+    `- **Decision**: ${fields.decision || pattern}\n` +
+    `- **Consequences**: ${fields.rationale || ''}\n` +
     `- **Source**: self-learning:${obsId}\n`
   );
 }
@@ -92,17 +156,14 @@ function formatPitfallBody(row) {
   const anchorId = row.anchor_id || '';
   const pattern = row.pattern || '';
 
-  const areaM = detailsStr.match(/area:\s*([^;]+)/i);
-  const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
-  const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
-  const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
+  const fields = segmentDetails(detailsStr, PF_KEYS);
 
   return (
     `\n## ${anchorId}: ${pattern}\n\n` +
-    `- **Area**: ${(areaM || [])[1] || detailsStr}\n` +
-    `- **Issue**: ${(issueM || [])[1] || detailsStr}\n` +
-    `- **Impact**: ${(impactM || [])[1] || ''}\n` +
-    `- **Resolution**: ${(resM || [])[1] || ''}\n` +
+    `- **Area**: ${fields.area || detailsStr}\n` +
+    `- **Issue**: ${fields.issue || detailsStr}\n` +
+    `- **Impact**: ${fields.impact || ''}\n` +
+    `- **Resolution**: ${fields.resolution || ''}\n` +
     `- **Status**: Active\n` +
     `- **Source**: self-learning:${obsId}\n`
   );
@@ -293,6 +354,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
 
 module.exports = {
   initDecisionsContent,
+  segmentDetails,
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
