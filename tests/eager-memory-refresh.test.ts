@@ -1881,3 +1881,76 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     expect(capturedStdin).toMatch(/no stamp|current\)|no history|up.to.date/i);
   });
 });
+
+// =============================================================================
+// S24 — State-C blind spot: orphaned .processing counts toward queue depth (B4)
+//
+// Before B4, detect_refresh_failing only counted .pending-turns.jsonl lines.
+// A crashed worker's orphaned .processing (with empty .jsonl) was invisible to
+// State-C and didn't trigger the REFRESH FAILING banner.
+// After B4, .processing line count is added to _queue_depth.
+// =============================================================================
+describe('S24: State-C counts orphaned .processing toward queue depth (B4)', () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s24-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s24-home-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    initGitRepo(projectDir);
+    // Seed a minimal WORKING-MEMORY.md so session-start-memory injects something
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    fs.writeFileSync(memFile, `<!-- memory-head: ${headSha} branch: main -->\n## Now\n- test\n`);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('orphaned .processing (200s old, below cold-path 300s threshold) alone triggers State-C', () => {
+    // .processing is 200s old — too fresh for the D56c cold-path (300s gate) to recover it,
+    // so it stays as .processing and is NOT moved to .jsonl.
+    // BEFORE B4: detect_refresh_failing only counts .jsonl → _queue_depth=0 → State-C silent.
+    // AFTER  B4: detect_refresh_failing also counts .processing → _queue_depth>0 → State-C fires.
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      processingFile,
+      [
+        JSON.stringify({ role: 'user', content: 'orphaned turn', ts }),
+        JSON.stringify({ role: 'assistant', content: 'orphaned reply', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+    // 200s old: above State-C sensitivity window but below D56c 300s cold-path threshold
+    backdateMtime(processingFile, 200);
+
+    const { stdout } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    // State-C banner must appear even though .jsonl is absent (B4 fix)
+    expect(stdout).toContain('MEMORY REFRESH MAY BE FAILING');
+  });
+
+  it('.processing with fresh .last-refresh-ok does not trigger State-C — memory maintenance healthy', () => {
+    // .processing present (worker claimed queue) AND .last-refresh-ok is fresh (<600s)
+    // This represents a healthy memory pipeline: a worker finished recently and a new
+    // queue batch was just claimed. State-C should NOT fire.
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      processingFile,
+      JSON.stringify({ role: 'user', content: 'queued turn', ts }) + '\n'
+    );
+    // Touch .last-refresh-ok with a FRESH mtime (simulates successful recent refresh)
+    fs.writeFileSync(okFile, '');
+    // Leave okFile mtime at "now" (<600s old → ok_age <= 600 → State-C condition fails)
+
+    const { stdout } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    // Fresh .last-refresh-ok means memory is being maintained — no State-C panic
+    expect(stdout).not.toContain('MEMORY REFRESH MAY BE FAILING');
+  });
+});
