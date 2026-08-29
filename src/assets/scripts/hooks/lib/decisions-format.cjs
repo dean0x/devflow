@@ -125,7 +125,9 @@ function initDecisionsContent(kind) {
 function formatDecisionBody(row) {
   const detailsStr = row.details || '';
   const obsId = row.id || 'unknown';
-  const artDate = row.date || new Date().toISOString().slice(0, 10);
+  // D5: render purity — never clock-read inside a formatter.  Absent date
+  // renders as an empty string so the output is deterministic and idempotent.
+  const artDate = row.date || '';
   const anchorId = row.anchor_id || '';
   const pattern = row.pattern || '';
 

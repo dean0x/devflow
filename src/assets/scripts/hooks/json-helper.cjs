@@ -570,13 +570,15 @@ try {
         // that must stay in the log only. applies ADR-008.
         const aaDate = new Date().toISOString().slice(0, 10);
         const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
-        // Date set on decisions only (byte-compat asymmetry — formatDecisionBody
-        // emits "- **Date**: …"; pitfall rows have no date field)
-        const aaDecisionDate = assignType === 'decision' ? (aaObs.date || aaDate) : undefined;
+        // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
+        // date from the observation (content authority per ADR-022); fall back
+        // to today.  The old decision-only asymmetry is removed so that
+        // refresh-anchor can re-project pitfall rows correctly (D3 / A3 fix).
+        const aaEntryDate = aaObs.date || aaDate;
         const aaLedgerRow = toLedgerRow(aaObs, {
           anchorId: aaAnchorId,
           status: aaActiveStatus,
-          date: aaDecisionDate,
+          date: aaEntryDate,
         });
 
         // Append anchored row to ledger (atomic temp+rename).

@@ -121,6 +121,24 @@ describe('formatDecisionBody', () => {
     expect(result).toContain('- **Source**: self-learning:unknown\n');
   });
 
+  it('renders empty date string when row.date is absent (D5 — render purity, RED until A3)', () => {
+    // D5: formatDecisionBody must not clock-read new Date() as a fallback.
+    // The fallback `row.date || new Date()...` makes the output non-deterministic
+    // and breaks idempotent re-renders.  After the D5 fix: `row.date || ''`
+    // renders `- **Date**: \n` for dateless rows.
+    const row = {
+      anchor_id: 'ADR-DATE',
+      pattern: 'Dateless decision',
+      id: 'obs_nodate',
+      // date: intentionally absent — simulates a row that came through without a date
+      details: 'context: foo; decision: bar; rationale: baz',
+    };
+    const result = formatDecisionBody(row);
+    // Must render the empty date line (render-pure); must NOT embed today's date
+    expect(result).toContain('- **Date**: \n');
+    expect(result).not.toMatch(/- \*\*Date\*\*: \d{4}-\d{2}-\d{2}/);
+  });
+
   it('matches byte-compat strings produced by assign-anchor for a real example', () => {
     // This golden string matches what assign-anchor (via formatDecisionBody) would write for this obs.
     const row = {

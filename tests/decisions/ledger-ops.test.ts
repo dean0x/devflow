@@ -267,12 +267,16 @@ describe('assign-anchor CLI op', () => {
     expect(rows[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('does NOT set date on pitfalls (byte-compat asymmetry)', () => {
+  it('sets date on pitfall rows (all entry types stamped — no asymmetry, RED until A3)', () => {
+    // A3 fix: assign-anchor now passes date unconditionally for both decisions
+    // and pitfalls.  The old "byte-compat asymmetry" is removed: pitfall ledger
+    // rows must carry a date so refresh-anchor can re-project them correctly.
     writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_005', type: 'pitfall', status: 'ready' })]);
     runHelper('assign-anchor pitfall obs_pf_005', tmpDir);
     const rows = readLedger(tmpDir);
-    // pitfall rows should not have a date field set by assign-anchor
-    expect(rows[0].date).toBeUndefined();
+    // pitfall rows now get a date stamp (same as decisions — no asymmetry)
+    expect(typeof rows[0].date).toBe('string');
+    expect(rows[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('with existing anchors including Retired — assigns max+1, number not reused', () => {
