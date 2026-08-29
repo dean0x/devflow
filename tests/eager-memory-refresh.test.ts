@@ -24,6 +24,7 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hoo
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
 const MEMORY_WORKER_HOOK = path.join(HOOKS_DIR, 'memory-worker');
 const SESSION_START_MEMORY_HOOK = path.join(HOOKS_DIR, 'session-start-memory');
+const PRE_COMPACT_HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
 const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 
 // ---------------------------------------------------------------------------
@@ -1715,5 +1716,81 @@ exit 0
 
     // The prompt must mention the staged (.new) path — real path removed from write instruction
     expect(capturedStdin).toContain('WORKING-MEMORY.md.new');
+  });
+});
+
+// =============================================================================
+// S22 — Pre-compact bootstrap: stamp on line 1 + canonical 5 sections (B2)
+//
+// Tests the B2 fix to pre-compact-memory's bootstrap path:
+//   - bootstrap creates stamp on line 1 (40-hex SHA gated)
+//   - bootstrap creates canonical 5 sections (no ## Modified Files)
+//   - non-git directories skip bootstrap (no WORKING-MEMORY.md created)
+//   - existing WORKING-MEMORY.md is left untouched
+// =============================================================================
+describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s22-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s22-home-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('git repo + no existing WORKING-MEMORY.md: bootstrap creates file with 40-hex stamp on line 1', () => {
+    initGitRepo(projectDir);
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+
+    expect(fs.existsSync(memFile)).toBe(true);
+    const lines = fs.readFileSync(memFile, 'utf-8').split('\n');
+    // Line 1 must be a valid memory-head stamp with a 40-char hex SHA
+    expect(lines[0]).toMatch(/^<!-- memory-head: [0-9a-f]{40} branch: \S+ -->$/);
+  });
+
+  it('git repo + no existing WORKING-MEMORY.md: bootstrap includes all 5 canonical sections', () => {
+    initGitRepo(projectDir);
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+
+    const content = fs.readFileSync(memFile, 'utf-8');
+    expect(content).toContain('## Now');
+    expect(content).toContain('## Progress');
+    expect(content).toContain('## Decisions');
+    expect(content).toContain('## Context');
+    expect(content).toContain('## Session Log');
+    // The old ## Modified Files section must not appear
+    expect(content).not.toContain('## Modified Files');
+  });
+
+  it('non-git directory: bootstrap is skipped, no WORKING-MEMORY.md created', () => {
+    // Deliberately NOT calling initGitRepo — plain directory
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+
+    // Without a git HEAD SHA, the bootstrap guard fails — no file created
+    expect(fs.existsSync(memFile)).toBe(false);
+  });
+
+  it('existing WORKING-MEMORY.md is left untouched even in a git repo', () => {
+    initGitRepo(projectDir);
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const originalContent = '<!-- memory-head: existing branch: main -->\n## Now\n- existing content\n';
+    fs.writeFileSync(memFile, originalContent);
+
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+
+    // File must not be overwritten — pre-compact only bootstraps when absent
+    expect(fs.readFileSync(memFile, 'utf-8')).toBe(originalContent);
   });
 });
