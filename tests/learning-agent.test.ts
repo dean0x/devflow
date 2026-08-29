@@ -109,9 +109,11 @@ describe('learning agent', () => {
       expect(content).toContain('NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md');
     });
 
-    it('calls assign-anchor, retire-anchor, and rotate-observations via json-helper', () => {
+    it('calls assign-anchor, retire-anchor, refresh-anchor, and rotate-observations via json-helper', () => {
       expect(content).toMatch(/json-helper\.cjs" assign-anchor/);
       expect(content).toMatch(/json-helper\.cjs" retire-anchor/);
+      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files (D1/ADR-022)
+      expect(content).toMatch(/json-helper\.cjs" refresh-anchor/);
       expect(content).toMatch(/json-helper\.cjs" rotate-observations/);
     });
 

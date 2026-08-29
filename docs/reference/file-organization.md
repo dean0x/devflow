@@ -179,7 +179,7 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `capture-turn` | Stop | Appends the assistant turn to both queues; runs the decisions usage scanner; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
 | `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
-| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
+| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent): leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Learning agent with the resolved model (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus` default) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
@@ -198,9 +198,11 @@ Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agen
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|
-| `decisions.md` | ADR-NNN (sequential) | Learning agent via `assign-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
-| `pitfalls.md` | PF-NNN (sequential) | Learning agent via `assign-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
+| `decisions.md` | ADR-NNN (sequential) | Learning agent via `assign-anchor` or `refresh-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | Learning agent via `assign-anchor` or `refresh-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
 | `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
+
+The four ledger ops (`assign-anchor`, `retire-anchor`, `refresh-anchor`, `rotate-observations`) are the only callers that write entry content to the ledger — each projects `decisions-log.jsonl` rows through `toLedgerRow` then re-renders. The log is the content authority (ADR-022); the ledger is the anchor registry only.
 
 `decisions.md` and `pitfalls.md` each have a `<!-- TL;DR: ... -->` comment on line 1; SessionStart injects these TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file. `index.md` has no TL;DR line and is not injected at SessionStart — it is the write-time artifact consumed via plain Read by workflow commands at invocation time (applies ADR-007).
 

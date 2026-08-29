@@ -39,6 +39,7 @@ are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-he
 
 - `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
+- `refresh-anchor <anchor_id>` — strictly re-projects an anchored log row through the same projector as `assign-anchor` and re-renders; use after reinforcing an already-anchored observation (D1/ADR-022)
 - `rotate-observations` — archives `observing` log rows older than 30 days
 
 Each op self-locks internally. Call them plainly — never wrap them in a lock of your own,
@@ -119,6 +120,12 @@ rewrite the whole file:
   timestamps are UTC ISO (`date -u +%Y-%m-%dT%H:%M:%SZ`). Estimate `confidence` honestly —
   it is curation metadata only, NOT a gate; do not inflate it.
 
+  **`details` grammar**: use `Key: value` segments separated by `;`. A segment that begins
+  with a recognised key name followed by `:` (e.g. `context:`, `decision:`, `rationale:`,
+  `area:`, `issue:`, `impact:`, `resolution:`) starts a new field; semicolons inside a
+  value are preserved and do not split it. Keep prose out of key positions — do not start a
+  value with text that looks like a recognised key.
+
 - **Reinforce an existing row** — use the Edit tool to replace that row's single line:
   increment `observations`, union `evidence` (dedupe, cap 10), update `last_seen`, and
   refresh `pattern`/`details`/`confidence` only where the new evidence sharpens them.
@@ -134,12 +141,26 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall" "obs
 NEVER hand-edit `decisions.md` or `pitfalls.md`. NEVER invent an ADR-NNN/PF-NNN number
 yourself — `assign-anchor` is the only source of numbering.
 
+**After reinforcing an already-anchored observation**: once you have updated the log row
+(incrementing `observations`, refreshing `pattern`/`details`, updating `last_seen`), run:
+
+```bash
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id>
+```
+
+This re-projects the sharpened log row into the rendered files so the improvement reaches
+`decisions.md`/`pitfalls.md`/`index.md`. `refresh-anchor` calls do NOT count toward the
+≤5 curation-changes bound — they are projections, not new entries.
+
 ## Part 2 — Curation
 
 Periodic housekeeping of the ledger and rendered `.md` files. Bounds: **≤5 curation changes
 per run**. **7-day protection window** — never touch any entry whose `date` field in the
 ledger (`.devflow/learning/decisions-ledger.jsonl`) is within the past 7 days. The window key
-is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file.
+is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file. If the ledger
+row lacks a `date` field (pitfall rows promoted before date-stamping was added), use the
+observation log row's `last_seen` date for the window. If `last_seen` is also unavailable, the
+entry predates date-stamping and is outside the protection window (D5).
 
 Ground yourself first, all by direct reads:
 - Active entries and counts: `decisions.md` / `pitfalls.md` — what is rendered is what is active.
@@ -147,6 +168,13 @@ Ground yourself first, all by direct reads:
 - Stale code references: for entries whose `details`/`evidence` mention file paths, check
   those files still exist (Glob). An entry whose referenced files are gone is a preferred
   retirement candidate — a signal to prefer, not an automatic retirement.
+
+**PF-040 pointer-vs-citation gate**: before acting on a missing-path signal (a file cited in
+`details`/`evidence` no longer exists), determine whether the reference is a live POINTER (a
+file a reader should follow today) or a HISTORICAL CITATION (the file the entry recorded
+deleting, replacing, or retiring). A missing live pointer is drift — repair the reference. A
+missing historical citation is confirmation that the decision was implemented — leave the entry
+intact.
 
 **Rotate stale observations first** (before selecting curation candidates):
 
@@ -180,10 +208,12 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor <anchor_id> <s
 
 `retire-anchor` is atomic and idempotent. Call it once per entry.
 
-**Citation preservation**: if an entry being retired has inbound `applies ADR-NNN` citations
-in other entries, update those entries' `pattern`/`details` to reference the surviving entry
-instead — edit those ledger rows directly (one line at a time), then re-render via
-`node "$HOME/.devflow/scripts/hooks/lib/render-decisions.cjs" render "$(pwd)"`.
+**Citation preservation** (D1/ADR-022 — log is content authority): if an entry being retired
+has inbound `applies ADR-NNN` citations in other entries' `pattern`/`details`, update those
+other entries to reference the surviving entry — do this by editing their **log rows** in
+`decisions-log.jsonl` (one line at a time), then running
+`node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id>` for each
+updated row. Never edit the ledger directly for content changes; the log is the authority.
 
 **Cap enforcement**: stop after 5 changes regardless of remaining candidates.
 
