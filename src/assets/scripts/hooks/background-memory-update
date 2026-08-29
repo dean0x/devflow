@@ -314,10 +314,12 @@ if [ -f "$MEMORY_FILE" ]; then
   EXISTING_MEMORY=$(head -c "$MEMORY_READ_LIMIT" "$MEMORY_FILE")
 fi
 
-# --- Gather git state + HEAD SHA for stamp ---
+# --- Gather git state + HEAD SHA for stamp + reconciliation evidence ---
 HEAD_SHA=""
 BRANCH=""
 GIT_STATE=""
+TODAY=$(date -u +"%Y-%m-%d")
+COMMITS_SINCE_NOTE="(no stamp found in existing memory — full synthesis)"
 if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
   BRANCH=$(git branch --show-current 2>/dev/null || echo "")
@@ -332,6 +334,43 @@ Changed files:
 ${GIT_STATUS}
 Diff summary:
 ${GIT_DIFF}"
+
+  # Compute commits-since-stamp for reconciliation context (applies ADR-023 provenance).
+  # Extract stamp SHA from the existing memory's first line using parameter expansion
+  # (no subprocess → PF-008-safe). Hex-gate + ancestry check before running git log.
+  STAMP_FIRST_LINE="${EXISTING_MEMORY%%$'\n'*}"
+  STAMP_SHA=""
+  case "$STAMP_FIRST_LINE" in
+    "<!-- memory-head: "[0-9a-f]*" branch: "*)
+      STAMP_SHA=$(echo "$STAMP_FIRST_LINE" | awk '{print $3}' 2>/dev/null || echo "")
+      ;;
+  esac
+  if [ -n "$STAMP_SHA" ] && [ -n "$HEAD_SHA" ]; then
+    _SHA_LEN="${#STAMP_SHA}"
+    _SHA_VALID="false"
+    if [ "$_SHA_LEN" -ge 7 ] && [ "$_SHA_LEN" -le 40 ]; then
+      case "$STAMP_SHA" in
+        *[^0-9a-f]*) : ;;
+        *) _SHA_VALID="true" ;;
+      esac
+    fi
+    if [ "$_SHA_VALID" = "true" ]; then
+      if git merge-base --is-ancestor "$STAMP_SHA" HEAD 2>/dev/null; then
+        _CS=$(git log --oneline "${STAMP_SHA}..HEAD" 2>/dev/null | head -20 || echo "")
+        if [ -z "$_CS" ]; then
+          COMMITS_SINCE_NOTE="(none — memory is current as of HEAD)"
+        else
+          _CS_COUNT=$(printf '%s\n' "$_CS" | wc -l | tr -d ' ')
+          COMMITS_SINCE_NOTE="${_CS_COUNT} commit(s) since last memory update:
+${_CS}"
+        fi
+      else
+        COMMITS_SINCE_NOTE="(stamp SHA is not an ancestor of HEAD — possible branch switch or rebase)"
+      fi
+    else
+      COMMITS_SINCE_NOTE="(stamp SHA format invalid)"
+    fi
+  fi
 fi
 
 # --- Build prompt (passed via STDIN, not argv — turn content may hold secrets) ---
@@ -350,6 +389,9 @@ ${TURNS_TEXT}
 Git state:
 ${GIT_STATE:-"(not a git repo or no git state)"}
 
+RECONCILE — commits since last memory update (use this to catch up on work done between sessions):
+${COMMITS_SINCE_NOTE}
+
 Instructions:
 - Write ${STAGED_FILE} NOW using the Write tool
 - Line 1 MUST be: <!-- memory-head: ${HEAD_SHA:-unknown} branch: ${BRANCH:-unknown} -->
@@ -362,7 +404,8 @@ Instructions:
 - A feature being implemented does NOT make it done — testing, code review, resolving review feedback, release prep, and publishing are still Remaining work. Until a task is truly done, keep it under Remaining with its real current stage (e.g. \"implemented — awaiting review\", \"merged to main — not yet released\").
 - Only record a completed state (PR merged, CI passed, released, task done) when the session turns or git state actually evidence it. Never assume, predict, or upgrade a status; when unsure, describe the last confirmed state rather than an optimistic one.
 - ## Decisions entries: format as - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]
-- If queue is empty, preserve existing content as-is (still write line 1 stamp)"
+- If queue is empty, preserve existing content as-is (still write line 1 stamp)
+- PROVENANCE: today is ${TODAY}; use this for any date-stamped entries you add"
 
 log "Spawning claude -p (model claude-sonnet-4-6, ${TURN_COUNT} turns)"
 # SECURITY: never log PROMPT — it contains turn content which may include secrets

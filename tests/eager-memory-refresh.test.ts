@@ -1794,3 +1794,90 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     expect(fs.readFileSync(memFile, 'utf-8')).toBe(originalContent);
   });
 });
+
+// =============================================================================
+// S23 — Reconciliation-aware worker prompt (B3)
+//
+// Tests the B3 prompt additions: COMMITS_SINCE (hex-gated + ancestry), TODAY,
+// and the RECONCILE section in the prompt passed to claude via stdin.
+// =============================================================================
+describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B3)', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    stagedFile = `${memFile}.new`;
+    seedQueue(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('TODAY (YYYY-MM-DD) appears in the prompt sent to claude', () => {
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(capturedStdin).toContain(todayStr);
+  });
+
+  it('commits-since-stamp appear in prompt when stamp SHA is a valid ancestor of HEAD', () => {
+    // Capture C1 SHA (from initGitRepo), then create C2 on top
+    const c1Sha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+
+    // Pre-write WORKING-MEMORY.md stamped at C1
+    fs.writeFileSync(memFile, `<!-- memory-head: ${c1Sha} branch: main -->\n## Now\n- existing\n`);
+
+    // Create C2 commit
+    fs.writeFileSync(path.join(projectDir, 'file2.txt'), 'second commit content\n');
+    execSync('git add file2.txt', { cwd: projectDir });
+    execSync('git commit -qm "second commit for reconciliation test"', { cwd: projectDir });
+
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // The commits-since section must be present and mention the C2 commit message
+    expect(capturedStdin).toContain('second commit for reconciliation test');
+  });
+
+  it('no-stamp path: prompt includes reconciliation section indicating no stamp found', () => {
+    // No WORKING-MEMORY.md — no stamp to extract
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // A reconciliation section must exist, indicating the absence of a usable stamp
+    expect(capturedStdin).toMatch(/no stamp|current\)|no history|up.to.date/i);
+  });
+});
