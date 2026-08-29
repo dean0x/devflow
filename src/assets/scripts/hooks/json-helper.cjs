@@ -26,6 +26,7 @@
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   assign-anchor <type> <obs_id>         Claim next ADR/PF number, render both .md files
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
+//   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
 //   rotate-observations [<log>] [<arch>]  Archive observing rows older than 30 days
 
 'use strict';
@@ -667,6 +668,94 @@ try {
         renderAndWriteAll(raProjectRoot, raRows);
       } finally {
         releaseLock(raLockDir);
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // refresh-anchor <anchor_id>
+    // ADR-022: Re-project the log observation onto the committed ledger row and
+    // re-render both .md files.  Used after the Learning agent reinforces an
+    // existing obs (updates pattern/details in the log) to propagate those
+    // changes into the ledger without re-minting a new anchor number.
+    //
+    // Algorithm:
+    //   1. Read the log to find the obs whose anchor_id field equals <anchor_id>.
+    //      The log is the content authority (ADR-022); the latest version of the
+    //      obs is the one the Learning agent wrote most recently.
+    //   2. Read the ledger to find the existing row for <anchor_id> (to recover
+    //      decisions_status — the only ledger-owned field that may differ from
+    //      the log obs).
+    //   3. Re-project via toLedgerRow (D2: strict canonical projection — strips
+    //      all observation-lifecycle fields).
+    //   4. Replace the ledger row and re-render both .md files.
+    //
+    // Locking discipline: holds ONLY .decisions.lock.
+    // -------------------------------------------------------------------------
+    case 'refresh-anchor': {
+      const refreshAnchorId = args[0];
+
+      if (!refreshAnchorId) {
+        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor_id>\n');
+        process.exit(1);
+      }
+
+      const rfProjectRoot = process.cwd();
+      const rfLedgerPath = getDecisionsLedgerPath(rfProjectRoot);
+      const rfLogPath = getDecisionsLogPath(rfProjectRoot);
+      const rfLockDir = getDecisionsLockDir(rfProjectRoot);
+
+      // PF-013: ensure parent directory exists before acquiring lock
+      fs.mkdirSync(path.dirname(rfLockDir), { recursive: true });
+
+      if (!acquireMkdirLock(rfLockDir, 30000, 60000)) {
+        process.stderr.write(`refresh-anchor: timeout acquiring lock at ${rfLockDir}\n`);
+        process.exit(1);
+      }
+
+      try {
+        // (1) Locate the obs in the log by anchor_id (content authority)
+        const rfLogEntries = parseLedger(rfLogPath);
+        const rfObs = rfLogEntries.find(r => r.anchor_id === refreshAnchorId);
+        if (!rfObs) {
+          // throw instead of process.exit so the finally block releases the lock (PF-014)
+          throw new Error(
+            `refresh-anchor: no obs with anchor_id '${refreshAnchorId}' not found in log — ` +
+            `was assign-anchor called first?`
+          );
+        }
+
+        // (2) Locate the existing ledger row to recover decisions_status
+        const rfLedgerRows = parseLedger(rfLedgerPath);
+        const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === refreshAnchorId);
+        if (rfLedgerIdx === -1) {
+          // throw instead of process.exit so the finally block releases the lock (PF-014)
+          throw new Error(
+            `refresh-anchor: anchor_id '${refreshAnchorId}' not found in ledger — ` +
+            `cannot refresh a row that was never committed`
+          );
+        }
+
+        const rfExistingRow = rfLedgerRows[rfLedgerIdx];
+
+        // (3) Re-project via toLedgerRow (D2: strict canonical projection).
+        //     Preserve decisions_status and date from the ledger (ledger-owned
+        //     fields); take everything else from the log obs (content authority).
+        const rfReprojected = toLedgerRow(rfObs, {
+          anchorId: refreshAnchorId,
+          status: rfExistingRow.decisions_status,
+          date: rfObs.date || rfExistingRow.date,
+        });
+
+        // (4) Replace the ledger row and write back atomically
+        rfLedgerRows[rfLedgerIdx] = rfReprojected;
+        const rfLedgerContent = rfLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+        writeFileAtomic(rfLedgerPath, rfLedgerContent);
+
+        // Re-render both .md files (lock-free — we already hold .decisions.lock)
+        renderAndWriteAll(rfProjectRoot, rfLedgerRows);
+      } finally {
+        releaseLock(rfLockDir);
       }
       break;
     }

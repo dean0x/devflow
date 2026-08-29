@@ -678,6 +678,182 @@ describe('rotateObservations — internal function', () => {
 });
 
 // ---------------------------------------------------------------------------
+// refresh-anchor CLI op (ADR-022 — log-authority re-projection, A4)
+// All tests are RED until refresh-anchor is implemented in json-helper.cjs.
+// ---------------------------------------------------------------------------
+
+describe('refresh-anchor CLI op', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refresh-anchor-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('re-projects the log obs onto the ledger row (updates details from log)', () => {
+    // Seed ledger with old details; log obs has updated details (reinforcement)
+    const oldDetails = 'context: old; decision: old decision; rationale: old';
+    const newDetails = 'context: updated; decision: updated decision; rationale: updated rationale';
+    writeLog(tmpDir, [
+      makeObsRow({
+        id: 'obs_ra_001',
+        type: 'decision',
+        status: 'created',
+        anchor_id: 'ADR-001',
+        details: newDetails,
+      }),
+    ]);
+    writeLedger(tmpDir, [
+      makeLedgerRow({
+        id: 'obs_ra_001',
+        anchor_id: 'ADR-001',
+        decisions_status: 'Accepted',
+        details: oldDetails,
+      }),
+    ]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).toBe(0);
+
+    const rows = readLedger(tmpDir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].details).toBe(newDetails);
+    // Anchor id, status, type preserved
+    expect(rows[0].anchor_id).toBe('ADR-001');
+    expect(rows[0].decisions_status).toBe('Accepted');
+    expect(rows[0].type).toBe('decision');
+  });
+
+  it('strips observation-lifecycle fields (D2 strict re-projection via toLedgerRow)', () => {
+    // The ledger may carry legacy observation fields from old log-verbatim
+    // copies.  refresh-anchor must re-project via toLedgerRow which whitelists
+    // only canonical fields — everything else is stripped.
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_002', type: 'decision', status: 'created', anchor_id: 'ADR-002' }),
+    ]);
+    // Ledger row carries legacy fields that toLedgerRow must strip
+    writeLedger(tmpDir, [
+      makeLedgerRow({
+        id: 'obs_ra_002',
+        anchor_id: 'ADR-002',
+        decisions_status: 'Accepted',
+        confidence: 0.99,   // observation-lifecycle — must be stripped
+        observations: 5,    // observation-lifecycle — must be stripped
+        quality_ok: true,   // observation-lifecycle — must be stripped
+      }),
+    ]);
+    runHelper('refresh-anchor ADR-002', tmpDir);
+
+    const rows = readLedger(tmpDir);
+    const row = rows.find(r => r.anchor_id === 'ADR-002');
+    expect(row).toBeDefined();
+    // Canonical fields present
+    expect(row?.id).toBe('obs_ra_002');
+    expect(row?.type).toBe('decision');
+    expect(row?.anchor_id).toBe('ADR-002');
+    expect(row?.decisions_status).toBe('Accepted');
+    // Observation-lifecycle fields stripped by toLedgerRow
+    expect(row?.confidence).toBeUndefined();
+    expect(row?.observations).toBeUndefined();
+    expect(row?.quality_ok).toBeUndefined();
+  });
+
+  it('re-renders decisions.md after refresh', () => {
+    const newDetails = 'context: refreshed; decision: new approach; rationale: better';
+    writeLog(tmpDir, [
+      makeObsRow({
+        id: 'obs_ra_003',
+        type: 'decision',
+        status: 'created',
+        anchor_id: 'ADR-003',
+        pattern: 'Refreshed decision',
+        details: newDetails,
+        date: '2026-08-30',
+      }),
+    ]);
+    writeLedger(tmpDir, [
+      makeLedgerRow({
+        id: 'obs_ra_003',
+        anchor_id: 'ADR-003',
+        decisions_status: 'Accepted',
+        pattern: 'Refreshed decision',
+        details: 'context: stale; decision: old; rationale: outdated',
+        date: '2026-01-01',
+      }),
+    ]);
+    runHelper('refresh-anchor ADR-003', tmpDir);
+
+    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
+    expect(fs.existsSync(decisionsPath)).toBe(true);
+    const content = fs.readFileSync(decisionsPath, 'utf8');
+    expect(content).toContain('## ADR-003: Refreshed decision');
+    expect(content).toContain('refreshed');
+    // Old content should not appear
+    expect(content).not.toContain('stale');
+  });
+
+  it('exits non-zero when no obs with matching anchor_id in log', () => {
+    // Log has an obs but with a different anchor_id
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_missing', type: 'decision', status: 'created', anchor_id: 'ADR-099' }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-001');
+    expect(result.stderr).toContain('not found');
+  });
+
+  it('exits non-zero when anchor_id not found in ledger', () => {
+    // Log has the obs but ledger doesn't have that anchor
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_nol', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-999', decisions_status: 'Accepted' })]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-001');
+    expect(result.stderr).toContain('not found');
+  });
+
+  it('exits non-zero when called with no argument', () => {
+    const result = runHelper('refresh-anchor', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('usage');
+  });
+
+  it('completes without deadlock and leaves no lock dir behind', () => {
+    const newDetails = 'context: clean; decision: clean; rationale: clean';
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_lock', type: 'decision', status: 'created', anchor_id: 'ADR-001', details: newDetails }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', id: 'obs_ra_lock', decisions_status: 'Accepted' })]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+});
+
+describe('ADR-011 straggler: refresh-anchor on bare project directory', () => {
+  it('refresh-anchor on bare dir gives controlled error — not ENOENT crash — and creates .devflow/learning/', () => {
+    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refra-bare-'));
+    try {
+      const result = runHelper('refresh-anchor ADR-001', bareDir);
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).not.toMatch(/ENOENT/);
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'learning'))).toBe(true);
+      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
+    } finally {
+      fs.rmSync(bareDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rotate-observations CLI op
 // ---------------------------------------------------------------------------
 
@@ -1284,6 +1460,30 @@ describe('lock release on early-exit error paths', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
     const result = runHelper('retire-anchor ADR-999 Retired', tmpDir);
     expect(result.code).not.toBe(0);
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('refresh-anchor: missing log obs — lock dir released after controlled error (RED until A4)', () => {
+    // Ledger has ADR-001 but no obs with anchor_id=ADR-001 in the log
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
+    // No log seeded — obs lookup must fail gracefully
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('not found');
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('refresh-anchor: anchor_id not in ledger — lock dir released after controlled error (RED until A4)', () => {
+    // Log has the obs but the ledger is missing the anchor
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_lock', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-999', decisions_status: 'Accepted' })]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('not found');
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
