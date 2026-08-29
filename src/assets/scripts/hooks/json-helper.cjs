@@ -591,8 +591,12 @@ try {
         const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
         writeFileAtomic(aaLedgerPath, aaLedgerContent);
 
-        // Mark log row as created
-        aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created' });
+        // Mark log row as created and stamp anchor_id so guard (b) fires on
+        // any subsequent assign-anchor call for the same obs_id.  Without this
+        // write-back the guard is dead: aaObs.anchor_id would be undefined on
+        // a re-read and a second assign would silently mint a duplicate number.
+        // applies ADR-022 (log is content authority; anchor_id written back to arm guard).
+        aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created', anchor_id: aaAnchorId });
         writeJsonlAtomic(aaLogPath, aaLogEntries);
 
         // Register usage entry

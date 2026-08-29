@@ -741,6 +741,28 @@ describe('assign-anchor precondition assertions', () => {
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('PF-007');
   });
+
+  it('(b) live double-assign guard: second assign-anchor on same obs_id is rejected (RED until A2)', () => {
+    // Guard (b) is DEAD today because assign-anchor does not write anchor_id
+    // back to the log row.  A second assign-anchor call reads aaObs.anchor_id
+    // as undefined and passes the guard, silently minting ADR-002.
+    // After the fix (write anchor_id: aaAnchorId back to log row at ~:595),
+    // the second call finds aaObs.anchor_id set and rejects.
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_double_assign', type: 'decision' }),
+    ]);
+    // First assign-anchor: should succeed and mint ADR-001
+    const first = runHelper('assign-anchor decision obs_double_assign', tmpDir);
+    expect(first.code).toBe(0);
+    expect(first.stdout.trim()).toBe('ADR-001');
+
+    // Second assign-anchor on the SAME obs_id: guard must reject it.
+    // RED: currently exits 0 and mints ADR-002 (anchor_id not written back).
+    const second = runHelper('assign-anchor decision obs_double_assign', tmpDir);
+    expect(second.code).not.toBe(0);
+    expect(second.stderr).toContain('already anchored');
+    expect(second.stderr).toContain('obs_double_assign');
+  });
 });
 
 // ---------------------------------------------------------------------------
