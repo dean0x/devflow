@@ -720,7 +720,7 @@ try {
         if (!rfObs) {
           // throw instead of process.exit so the finally block releases the lock (PF-014)
           throw new Error(
-            `refresh-anchor: no obs with anchor_id '${refreshAnchorId}' not found in log — ` +
+            `refresh-anchor: obs with anchor_id '${refreshAnchorId}' not found in log — ` +
             `was assign-anchor called first?`
           );
         }

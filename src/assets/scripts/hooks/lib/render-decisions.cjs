@@ -263,10 +263,11 @@ function renderAndWriteAll(worktreePath, rows) {
     decisionsFilePath,
     pitfallsFilePath,
   });
-  writeAtomic(indexFilePath, indexContent + '\n');
+  const indexLine = indexContent + '\n';
+  writeAtomic(indexFilePath, indexLine);
 
   process.stderr.write(
-    `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisionsContent)}B) + pitfalls.md (${Buffer.byteLength(pitfallsContent)}B) + index.md (${Buffer.byteLength(indexContent + '\n')}B)\n`
+    `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisionsContent)}B) + pitfalls.md (${Buffer.byteLength(pitfallsContent)}B) + index.md (${Buffer.byteLength(indexLine)}B)\n`
   );
 }
 
@@ -277,14 +278,10 @@ function renderAndWriteAll(worktreePath, rows) {
 if (require.main === module) {
   const argv = process.argv.slice(2);
 
-  if (argv.length === 0) {
-    process.stderr.write(
-      'Usage:\n' +
-      '  render-decisions.cjs render <worktree>          Write both .md files\n' +
-      '  render-decisions.cjs --check <worktree>         Diff without writing; exit 1 on drift\n'
-    );
-    process.exit(1);
-  }
+  const USAGE =
+    'Usage:\n' +
+    '  render-decisions.cjs render <worktree>          Write both .md files\n' +
+    '  render-decisions.cjs --check <worktree>         Diff without writing; exit 1 on drift\n';
 
   // Parse: `render <worktree>` or `--check <worktree>`
   let mode; // 'render' | 'check'
@@ -297,11 +294,7 @@ if (require.main === module) {
     mode = 'check';
     worktreePath = path.resolve(argv[1]);
   } else {
-    process.stderr.write(
-      'Usage:\n' +
-      '  render-decisions.cjs render <worktree>          Write both .md files\n' +
-      '  render-decisions.cjs --check <worktree>         Diff without writing; exit 1 on drift\n'
-    );
+    process.stderr.write(USAGE);
     process.exit(1);
   }
 

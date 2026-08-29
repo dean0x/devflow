@@ -350,19 +350,11 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
   const blocks = [];
 
   if (adrEntries.length > 0) {
-    const lines = [`Decisions (${adrEntries.length}):`];
-    for (const entry of adrEntries) {
-      lines.push(formatIndexEntryLine(entry));
-    }
-    blocks.push(lines.join('\n'));
+    blocks.push([`Decisions (${adrEntries.length}):`, ...adrEntries.map(formatIndexEntryLine)].join('\n'));
   }
 
   if (pfEntries.length > 0) {
-    const lines = [`Pitfalls (${pfEntries.length}):`];
-    for (const entry of pfEntries) {
-      lines.push(formatIndexEntryLine(entry));
-    }
-    blocks.push(lines.join('\n'));
+    blocks.push([`Pitfalls (${pfEntries.length}):`, ...pfEntries.map(formatIndexEntryLine)].join('\n'));
   }
 
   // Footer: explain how to read full bodies
