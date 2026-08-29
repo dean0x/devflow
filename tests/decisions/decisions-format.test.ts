@@ -21,6 +21,7 @@ const {
   buildTldrLine,
   buildIndexContent,
   segmentDetails,
+  formatAmendmentsLine,
 } = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
@@ -35,6 +36,9 @@ const {
     detailsStr: string,
     keys: readonly string[]
   ) => Record<string, string>;
+  formatAmendmentsLine: (
+    amendments: string[]
+  ) => string;
 };
 
 // ---------------------------------------------------------------------------
@@ -417,6 +421,82 @@ describe('segmentDetails — internal semicolons in pitfall fields', () => {
     };
     const result = formatPitfallBody(row);
     expect(result).toContain('- **Issue**: problem with newline\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatAmendmentsLine — amendments rendering (RED until A5)
+// ---------------------------------------------------------------------------
+
+describe('formatAmendmentsLine', () => {
+  it('formats multiple amendments as semicolon-joined value on a single line', () => {
+    const result = formatAmendmentsLine([
+      '[2026-01-01] First amendment',
+      '[2026-02-01] Second amendment',
+    ]);
+    expect(result).toBe('- **Amendments**: [2026-01-01] First amendment; [2026-02-01] Second amendment\n');
+  });
+
+  it('single amendment has no trailing semicolon', () => {
+    const result = formatAmendmentsLine(['[2026-01-01] Only amendment']);
+    expect(result).toBe('- **Amendments**: [2026-01-01] Only amendment\n');
+  });
+
+  it('empty array returns empty string (no Amendments line rendered)', () => {
+    const result = formatAmendmentsLine([]);
+    expect(result).toBe('');
+  });
+});
+
+describe('formatAmendmentsLine — integration via formatDecisionBody / formatPitfallBody (RED until A5)', () => {
+  it('formatDecisionBody includes Amendments line when row.amendments is non-empty', () => {
+    const row = {
+      anchor_id: 'ADR-001',
+      pattern: 'Decision with amendments',
+      id: 'obs_amend_001',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+      amendments: ['[2026-02-01] Reinforced', '[2026-03-01] Confirmed'],
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Amendments**: [2026-02-01] Reinforced; [2026-03-01] Confirmed\n');
+  });
+
+  it('formatPitfallBody includes Amendments line when row.amendments is non-empty', () => {
+    const row = {
+      anchor_id: 'PF-001',
+      pattern: 'Pitfall with amendments',
+      id: 'obs_pf_amend_001',
+      details: 'area: hooks; issue: foo; impact: bar; resolution: fix',
+      amendments: ['[2026-02-01] Updated resolution'],
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Amendments**: [2026-02-01] Updated resolution\n');
+  });
+
+  it('formatDecisionBody omits Amendments line when row.amendments is absent', () => {
+    const row = {
+      anchor_id: 'ADR-002',
+      pattern: 'No amendments',
+      id: 'obs_002',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+    };
+    const result = formatDecisionBody(row);
+    expect(result).not.toContain('Amendments');
+  });
+
+  it('formatDecisionBody omits Amendments line when row.amendments is an empty array', () => {
+    const row = {
+      anchor_id: 'ADR-003',
+      pattern: 'Empty amendments',
+      id: 'obs_003',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+      amendments: [],
+    };
+    const result = formatDecisionBody(row);
+    expect(result).not.toContain('Amendments');
   });
 });
 

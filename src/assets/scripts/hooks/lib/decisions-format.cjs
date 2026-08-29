@@ -9,12 +9,13 @@
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
 //   Decision heading:  \n## {anchorId}: {title}\n
-//   Decision fields:   - **Date**: YYYY-MM-DD\n
+//   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — D5)
 //                      - **Status**: Accepted\n
 //                      - **Context**: ...\n
 //                      - **Decision**: ...\n
 //                      - **Consequences**: ...\n
 //                      - **Source**: self-learning:{obsId}\n
+//                      - **Amendments**: text1; text2\n   (omitted when absent or empty)
 //   Pitfall heading:   \n## {anchorId}: {title}\n
 //   Pitfall fields:    - **Area**: ...\n
 //                      - **Issue**: ...\n
@@ -22,6 +23,7 @@
 //                      - **Resolution**: ...\n
 //                      - **Status**: Active\n
 //                      - **Source**: self-learning:{obsId}\n
+//                      - **Amendments**: text1; text2\n   (omitted when absent or empty)
 //   TL;DR line:        <!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->
 //   File headers:
 //     decisions.md: "<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n"
@@ -31,6 +33,10 @@
 // anchors key detection to the START of each trimmed segment — so 'reissue:'
 // does NOT match 'issue:', and embedded semicolons inside a field value are
 // preserved (the segment is treated as a continuation of the prior field).
+//
+// Index extraction: extractEntryFromBlock uses line-anchored regexes
+// (/^- \*\*Status\*\*:/m, /^- \*\*Area\*\*:/m) to guard against amendment
+// text that accidentally contains those patterns as substrings.
 //
 // Consumers of these strings:
 //   - session-start-context (line 57): reads TL;DR comment via sed
@@ -95,6 +101,22 @@ function segmentDetails(detailsStr, keys) {
   return result;
 }
 
+/**
+ * Format the Amendments line for a decision or pitfall body.
+ * Returns an empty string when the amendments array is absent or empty so
+ * callers can concatenate unconditionally without leaving a blank line.
+ *
+ * Format: `- **Amendments**: text1; text2\n`
+ * A single amendment has no trailing semicolon.
+ *
+ * @param {string[] | undefined | null} amendments - array of amendment strings
+ * @returns {string} formatted line with trailing newline, or '' if empty
+ */
+function formatAmendmentsLine(amendments) {
+  if (!amendments || amendments.length === 0) return '';
+  return `- **Amendments**: ${amendments.join('; ')}\n`;
+}
+
 /** Recognised field keys for decision entries. */
 const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
 
@@ -140,7 +162,8 @@ function formatDecisionBody(row) {
     `- **Context**: ${fields.context || detailsStr}\n` +
     `- **Decision**: ${fields.decision || pattern}\n` +
     `- **Consequences**: ${fields.rationale || ''}\n` +
-    `- **Source**: self-learning:${obsId}\n`
+    `- **Source**: self-learning:${obsId}\n` +
+    formatAmendmentsLine(row.amendments)
   );
 }
 
@@ -167,7 +190,8 @@ function formatPitfallBody(row) {
     `- **Impact**: ${fields.impact || ''}\n` +
     `- **Resolution**: ${fields.resolution || ''}\n` +
     `- **Status**: Active\n` +
-    `- **Source**: self-learning:${obsId}\n`
+    `- **Source**: self-learning:${obsId}\n` +
+    formatAmendmentsLine(row.amendments)
   );
 }
 
@@ -295,9 +319,12 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
     if (!headingMatch) return null;
     const id = headingMatch[1];
     const rawTitle = headingMatch[2].trim();
-    const statusMatch = block.match(/- \*\*Status\*\*: (.+)/);
+    // Line-anchored regexes prevent amendment text that contains "- **Status**:"
+    // or "- **Area**:" as a substring from hijacking the extracted values.
+    // The /m (multiline) flag makes ^ match at the start of any line in the block.
+    const statusMatch = block.match(/^- \*\*Status\*\*: (.+)/m);
     const status = statusMatch ? statusMatch[1].trim() : null;
-    const areaMatch = block.match(/- \*\*Area\*\*: (.+)/);
+    const areaMatch = block.match(/^- \*\*Area\*\*: (.+)/m);
     const area = areaMatch ? areaMatch[1].trim() : null;
     return { id, title: rawTitle, status, area };
   }
@@ -357,6 +384,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
 module.exports = {
   initDecisionsContent,
   segmentDetails,
+  formatAmendmentsLine,
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
