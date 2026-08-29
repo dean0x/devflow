@@ -266,7 +266,7 @@ function renderAndWriteAll(worktreePath, rows) {
   writeAtomic(indexFilePath, indexContent + '\n');
 
   process.stderr.write(
-    `[render-decisions] wrote decisions.md (${decisionsContent.length}B) + pitfalls.md (${pitfallsContent.length}B) + index.md (${indexContent.length}B)\n`
+    `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisionsContent)}B) + pitfalls.md (${Buffer.byteLength(pitfallsContent)}B) + index.md (${Buffer.byteLength(indexContent + '\n')}B)\n`
   );
 }
 

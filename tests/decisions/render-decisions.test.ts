@@ -481,6 +481,62 @@ describe('CLI render subcommand', () => {
 });
 
 // ---------------------------------------------------------------------------
+// render summary: logged byte counts match actual file sizes
+// Defect: String.length reports character count (1 per code-unit), not bytes.
+// Multi-byte characters (em dash U+2014 in Area fields = 3 UTF-8 bytes each)
+// caused index.md to be logged as smaller than its on-disk size.
+// Fix: Buffer.byteLength(content) for each file including the trailing '\n'
+// added to indexContent before writing.
+// ---------------------------------------------------------------------------
+
+describe('render summary byte counts match actual file sizes', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-bytecount-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('logged byte counts equal actual file sizes (em dash U+2014 in Area field adds 2 extra bytes)', () => {
+    // formatIndexEntryLine appends "  —  <area>" when area is non-null.
+    // U+2014 em dash is 3 UTF-8 bytes but 1 JS character — String.length
+    // was used before this fix, making index.md appear 2 bytes smaller than it is.
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const row = makePitfallRow({
+      anchor_id: 'PF-001',
+      details: 'area: tests/hooks; issue: Y; impact: Z; resolution: W',
+    });
+    fs.writeFileSync(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf8'
+    );
+
+    // spawnSync gives us the real stderr even when the process exits 0
+    const { spawnSync } = require('child_process') as typeof import('child_process');
+    const sp = spawnSync('node', [RENDERER, 'render', tmpDir], { encoding: 'utf8' });
+    const stderrOutput: string = sp.stderr;
+
+    // Parse the three logged byte counts
+    const match = stderrOutput.match(
+      /wrote decisions\.md \((\d+)B\) \+ pitfalls\.md \((\d+)B\) \+ index\.md \((\d+)B\)/
+    );
+    expect(match).not.toBeNull();
+    if (!match) return;
+    const [, loggedDecisions, loggedPitfalls, loggedIndex] = match.map(Number);
+
+    // Each logged count must equal the actual on-disk file size
+    expect(loggedDecisions).toBe(fs.statSync(path.join(decisionsDir, 'decisions.md')).size);
+    expect(loggedPitfalls).toBe(fs.statSync(path.join(decisionsDir, 'pitfalls.md')).size);
+    expect(loggedIndex).toBe(fs.statSync(path.join(decisionsDir, 'index.md')).size);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CLI: --check subcommand exit codes
 // ---------------------------------------------------------------------------
 
