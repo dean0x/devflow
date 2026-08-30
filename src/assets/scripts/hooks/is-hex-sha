@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared SHA hex-validator — sourced by memory hooks.
+# Shared SHA hex-check helper — sourced by memory hooks.
 # Usage: source "$SCRIPT_DIR/is-hex-sha"  then  is_hex_sha <value> [min_len] [max_len]
 # Returns 0 (true) if value consists entirely of lowercase hex chars and has
 # length within [min_len, max_len].  Defaults: min_len=7, max_len=40.

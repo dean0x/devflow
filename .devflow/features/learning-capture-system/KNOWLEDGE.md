@@ -222,7 +222,7 @@ DIRECTIONS, PROVENANCE. A `TURNS_NOTE` disclosure is emitted when the 20-line tu
 
 ### Shared Sourced Helpers
 
-**`is-hex-sha`** (sourced, never executed directly): pure-shell hex validator, no forks
+**`is-hex-sha`** (sourced, never executed directly): pure-shell hex-check helper, no forks
 (PF-008-safe). `is_hex_sha <value> [min_len=7] [max_len=40]` returns 0 when `value` consists
 entirely of lowercase hex chars within `[min_len, max_len]`. Three callers with different bounds:
 - `background-memory-update` — default 7–40 (stamp SHA from `<!-- memory-head: ... -->`)
@@ -379,7 +379,7 @@ agents must not "fix" the naming mismatch.
 | `src/assets/scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
 | `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + queue_read_gates |
 | `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
-| `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA validator; sourced by three memory hooks with different min/max bounds |
+| `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA check helper; sourced by three memory hooks with different min/max bounds |
 | `src/assets/scripts/hooks/session-start-context` | Emits learning directive + TL;DR decisions header |
 | `src/assets/scripts/hooks/background-memory-update` | Detached worker: compute_commits_since_note, verify_and_swap, CAS, WORKING-MEMORY.md |
 | `src/assets/scripts/hooks/pre-compact-memory` | PreCompact: backup.json + noclobber-atomic WORKING-MEMORY.md bootstrap |

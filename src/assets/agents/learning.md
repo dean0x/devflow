@@ -133,7 +133,7 @@ rewrite the whole file:
   correction or ratification that should remain visible as history (rather than silently
   rewriting `details`), APPEND `{ "date": "YYYY-MM-DD", "note": "..." }` to the log row's
   `amendments` array (create the array if absent). The shape is exactly `{date, note}` — the
-  schema validator rejects bare strings. Amendments render at the end of the entry body in
+  schema guard rejects bare strings. Amendments render at the end of the entry body in
   `decisions.md`/`pitfalls.md`; they never appear in `index.md` lines. A follow-up
   `refresh-anchor <anchor_id>` is required to propagate the addition to the rendered files
   (ADR-022).
