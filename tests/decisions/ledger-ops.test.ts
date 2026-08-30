@@ -267,10 +267,9 @@ describe('assign-anchor CLI op', () => {
     expect(rows[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('sets date on pitfall rows (all entry types stamped — no asymmetry, RED until A3)', () => {
-    // A3 fix: assign-anchor now passes date unconditionally for both decisions
-    // and pitfalls.  The old "byte-compat asymmetry" is removed: pitfall ledger
-    // rows must carry a date so refresh-anchor can re-project them correctly.
+  it('sets date on pitfall rows — all entry types stamped, no decision/pitfall asymmetry', () => {
+    // assign-anchor passes date unconditionally for both decisions and pitfalls.
+    // Pitfall ledger rows carry a date so refresh-anchor can re-project them (ADR-022).
     writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_005', type: 'pitfall', status: 'ready' })]);
     runHelper('assign-anchor pitfall obs_pf_005', tmpDir);
     const rows = readLedger(tmpDir);
@@ -678,8 +677,7 @@ describe('rotateObservations — internal function', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor CLI op (ADR-022 — log-authority re-projection, A4)
-// All tests are RED until refresh-anchor is implemented in json-helper.cjs.
+// refresh-anchor CLI op (ADR-022 — log-authority re-projection)
 // ---------------------------------------------------------------------------
 
 describe('refresh-anchor CLI op', () => {
@@ -800,13 +798,13 @@ describe('refresh-anchor CLI op', () => {
     expect(content).not.toContain('stale');
   });
 
-  // ---- New behavioral tests (RED until refresh-anchor lookup-key fix) ----
+  // ---- Behavioral tests: lookup-key correctness ----
 
   it('resolves log row by ledger id when log obs has no anchor_id field (pre-existing-style row)', () => {
     // Pre-existing log rows were written before assign-anchor added anchor_id write-back.
     // They have no anchor_id field — only the id that matches the ledger row's id field.
-    // RED: current code searches log by anchor_id === 'ADR-005' → not found → exits non-zero.
-    // GREEN after fix: searches log by id === ledgerRow.id ('obs_pre_exist') → found → exits 0.
+    // The log obs is resolved by the LEDGER ROW's id, not by anchor_id — this covers
+    // pre-write-back rows that never had anchor_id stamped in the log (avoids PF-041).
     // Log is a superset of ledger (per PF-044). Ledger holds the prior base content;
     // log has the base plus the sharpened reinforcement appended to it.
     const basePart = 'context: initial; decision: basic; rationale: simple';
@@ -837,8 +835,7 @@ describe('refresh-anchor CLI op', () => {
 
   it('pitfall-anchor refresh re-renders pitfalls.md and index.md', () => {
     // Pitfall obs has no anchor_id field (pre-existing style) — resolves by ledger id.
-    // RED: current code searches log by anchor_id → not found → exits non-zero.
-    // GREEN after fix: finds by ledger row id → exits 0; both pitfalls.md and index.md re-rendered.
+    // id-based lookup covers both pre-existing and new-style rows uniformly (avoids PF-041).
     // Log is a superset of ledger (per PF-044). The ledger holds the base content;
     // log has base + the sharper reinforcement appended. Neither uses the word 'stale'
     // so the post-refresh pitfalls.md assertion (not.toContain('stale')) holds.
@@ -883,8 +880,8 @@ describe('refresh-anchor CLI op', () => {
   });
 
   it('date-pin: ledger row date wins over obs date', () => {
-    // RED: current code uses rfObs.date || rfExistingRow.date — obs date wins.
-    // GREEN after fix: date: rfExistingRow.date — ledger date is preserved verbatim.
+    // refresh-anchor takes date exclusively from the ledger row (rfExistingRow.date).
+    // The obs date is ignored — the promotion date is preserved regardless of obs updates.
     const ledgerDate = '2026-01-01';
     const obsDate = '2026-08-30';
     writeLog(tmpDir, [
@@ -912,8 +909,8 @@ describe('refresh-anchor CLI op', () => {
   });
 
   it('date-pin: dateless legacy ledger row stays dateless after refresh (D5: no backfill)', () => {
-    // RED: current code uses rfObs.date || rfExistingRow.date — obs date backfills.
-    // GREEN after fix: date: rfExistingRow.date — undefined propagates, no backfill.
+    // date: rfExistingRow.date — undefined propagates for dateless legacy rows; no backfill.
+    // The obs date is not used — a fabricated date would be worse than an unprotected entry (ADR-022).
     writeLog(tmpDir, [
       makeObsRow({
         id: 'obs_dateless',
@@ -997,8 +994,8 @@ describe('refresh-anchor CLI op', () => {
   });
 
   it('prints the anchor_id to stdout on success (mirrors assign-anchor contract)', () => {
-    // RED until refresh-anchor adds process.stdout.write(refreshAnchorId + '\n')
-    // after renderAndWriteAll — the same placement as assign-anchor's stdout echo.
+    // refresh-anchor echoes the anchor_id to stdout after renderAndWriteAll,
+    // mirroring assign-anchor's contract so callers can confirm which row was refreshed.
     writeLog(tmpDir, [
       makeObsRow({ id: 'obs_ra_stdout', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
     ]);
@@ -1580,12 +1577,9 @@ describe('assign-anchor precondition assertions', () => {
     expect(result.stderr).toContain('PF-007');
   });
 
-  it('(b) live double-assign guard: second assign-anchor on same obs_id is rejected (RED until A2)', () => {
-    // Guard (b) is DEAD today because assign-anchor does not write anchor_id
-    // back to the log row.  A second assign-anchor call reads aaObs.anchor_id
-    // as undefined and passes the guard, silently minting ADR-002.
-    // After the fix (write anchor_id: aaAnchorId back to log row at ~:595),
-    // the second call finds aaObs.anchor_id set and rejects.
+  it('(b) live double-assign guard: second assign-anchor on same obs_id is rejected', () => {
+    // assign-anchor writes anchor_id back to the log row after promotion.
+    // A second call on the same obs_id reads aaObs.anchor_id as set and is rejected by guard (b).
     writeLog(tmpDir, [
       makeObsRow({ id: 'obs_double_assign', type: 'decision' }),
     ]);
@@ -1595,7 +1589,6 @@ describe('assign-anchor precondition assertions', () => {
     expect(first.stdout.trim()).toBe('ADR-001');
 
     // Second assign-anchor on the SAME obs_id: guard must reject it.
-    // RED: currently exits 0 and mints ADR-002 (anchor_id not written back).
     const second = runHelper('assign-anchor decision obs_double_assign', tmpDir);
     expect(second.code).not.toBe(0);
     expect(second.stderr).toContain('already anchored');

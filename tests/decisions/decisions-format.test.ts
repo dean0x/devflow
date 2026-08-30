@@ -133,11 +133,10 @@ describe('formatDecisionBody', () => {
     expect(result).toContain('- **Source**: self-learning:unknown\n');
   });
 
-  it('renders empty date string when row.date is absent (D5 — render purity, RED until A3)', () => {
+  it('renders empty date string when row.date is absent — no clock-read fallback (D5: render purity)', () => {
     // D5: formatDecisionBody must not clock-read new Date() as a fallback.
-    // The fallback `row.date || new Date()...` makes the output non-deterministic
-    // and breaks idempotent re-renders.  After the D5 fix: `row.date || ''`
-    // renders `- **Date**: \n` for dateless rows.
+    // `row.date || ''` renders `- **Date**: \n` for dateless rows — deterministic
+    // and idempotent across re-renders.
     const row = {
       anchor_id: 'ADR-DATE',
       pattern: 'Dateless decision',
@@ -237,11 +236,9 @@ describe('formatPitfallBody', () => {
 });
 
 // ---------------------------------------------------------------------------
-// segmentDetails — direct unit tests (RED until A1 implemented)
+// segmentDetails — direct unit tests
 // ---------------------------------------------------------------------------
 // Tests the exported segmentDetails(detailsStr, keys) pure helper.
-// All assertions here will fail before the function is added to
-// decisions-format.cjs because segmentDetails will be `undefined`.
 
 describe('segmentDetails — direct unit tests', () => {
   const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
@@ -318,11 +315,10 @@ describe('segmentDetails — direct unit tests', () => {
 });
 
 // ---------------------------------------------------------------------------
-// segmentDetails — integration via formatDecisionBody (RED until A1)
+// segmentDetails — integration via formatDecisionBody
 // ---------------------------------------------------------------------------
-// These tests drive formatDecisionBody through edge-cases that the OLD
-// unanchored regex cannot handle.  They are RED until A1 wires segmentDetails
-// into the formatter.
+// These tests drive formatDecisionBody through edge-cases where the previous
+// unanchored regex would truncate values at the first semicolon.
 
 describe('segmentDetails — internal semicolons in decision fields', () => {
   it('Context field preserves embedded semicolons (not truncated at first ;)', () => {
@@ -459,7 +455,7 @@ describe('segmentDetails — internal semicolons in pitfall fields', () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatAmendmentsLine — amendments rendering (RED until A5)
+// formatAmendmentsLine — amendments rendering
 // ---------------------------------------------------------------------------
 
 describe('formatAmendmentsLine', () => {
@@ -482,7 +478,7 @@ describe('formatAmendmentsLine', () => {
   });
 });
 
-describe('formatAmendmentsLine — integration via formatDecisionBody / formatPitfallBody (RED until A5)', () => {
+describe('formatAmendmentsLine — integration via formatDecisionBody / formatPitfallBody', () => {
   it('formatDecisionBody includes Amendments line when row.amendments is non-empty', () => {
     const row = {
       anchor_id: 'ADR-001',

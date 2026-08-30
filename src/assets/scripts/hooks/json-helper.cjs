@@ -697,7 +697,9 @@ try {
     // -------------------------------------------------------------------------
     // refresh-anchor <anchor_id> [<anchor_id>...]
     // ADR-022: Re-project log observations onto committed ledger rows and
-    // re-render both .md files.  Variadic — accepts 1..N anchor ids and performs
+    // re-render all three files (decisions.md, pitfalls.md, index.md).  Each write
+    // is atomic; the sequence is not transactional — a crash between writes self-heals
+    // on the next ledger op.  Variadic — accepts 1..N anchor ids and performs
     // ONE lock acquisition, ONE ledger parse, ONE log parse, and ONE render
     // (PERF-1: collapses N agent turns into 1, N re-renders into 1).
     //

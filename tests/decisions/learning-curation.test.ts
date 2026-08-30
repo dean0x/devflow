@@ -189,9 +189,9 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toContain('7-day protection window');
     expect(agentContent).toContain("ledger row's");
     expect(agentContent).toContain('date` field');
-    // D5: pitfall rows promoted before date-stamping have no `date` field — contract must
-    // fall back to last_seen from the log row, not treat the entry as always-touchable.
-    expect(agentContent).toMatch(/lacks a `date`.*last_seen|last_seen.*date.*fallback/is);
+    // D5: pitfall rows promoted before date-stamping have no `date` field — fall back to
+    // last_seen from the log row, not treat the entry as always-touchable.
+    expect(agentContent).toContain('pitfall rows promoted before date-stamping was added');
   });
 
   it('rotation step is for archiving stale observing rows (AC-F9)', () => {

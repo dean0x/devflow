@@ -160,6 +160,22 @@ exit 0
   fs.chmodSync(bin, 0o755);
 }
 
+/**
+ * Fake claude that captures its stdin to a file and writes a valid staged memory file.
+ * Returns the path to the stdin capture file so callers can assert on prompt content.
+ * Use this in tests that need to inspect the prompt sent to the worker.
+ */
+function createPromptCapturingShim(shimDir: string, stagedFile: string): string {
+  const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+  const claudeBin = path.join(shimDir, 'claude');
+  fs.writeFileSync(
+    claudeBin,
+    `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`
+  );
+  fs.chmodSync(claudeBin, 0o755);
+  return stdinCapture;
+}
+
 /** Write feature config.json */
 function writeDreamConfig(projectDir: string, fields: Record<string, unknown>): void {
   const dir = path.join(projectDir, '.devflow');
@@ -1555,7 +1571,23 @@ describe('S20: DEVFLOW_BG_UPDATER self-guard (worker re-entrancy)', () => {
 // new CAS branch specifically, not a path reachable by the old mtime logic.
 // applies ADR-023 (staged compare-and-swap)
 // =============================================================================
-describe('S21: staged compare-and-swap verification paths (ADR-023)', () => {
+
+/**
+ * Shared fixture factory for S21, S23, and S25 — all three describe blocks
+ * need the same project/home/shim temp dirs, git repo, memory dir, and seeded queue.
+ * The callback receives the initialized context and assigns it to the outer let variables,
+ * keeping all test bodies unchanged (PF-018: no assertion weakening).
+ */
+function makeWorkerFixture(
+  prefix: string,
+  assign: (ctx: {
+    projectDir: string;
+    homeDir: string;
+    shimDir: string;
+    memFile: string;
+    stagedFile: string;
+  }) => void
+): void {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -1563,21 +1595,34 @@ describe('S21: staged compare-and-swap verification paths (ADR-023)', () => {
   let stagedFile: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-home-'));
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s21-shim-'));
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-home-`));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-shim-`));
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
     initGitRepo(projectDir);
     memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     stagedFile = `${memFile}.new`;
     seedQueue(projectDir);
+    assign({ projectDir, homeDir, shimDir, memFile, stagedFile });
   });
 
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+}
+
+describe('S21: staged compare-and-swap verification paths (ADR-023)', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  makeWorkerFixture('emr-s21', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
   });
 
   it('CAS success (absent pre-run): staged mv-ed to real, .processing removed, .last-refresh-ok touched', () => {
@@ -2025,7 +2070,8 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
   });
 
   // Item 3 — detached HEAD and unborn branch bootstrap gate
-  // RED until pre-compact-memory gates on BOTH non-empty branch AND 40-hex sha.
+  // pre-compact-memory requires BOTH a non-empty branch AND a 40-hex sha — detached HEAD
+  // and unborn branches are skipped to avoid embedding "branch: " (blank) in the stamp.
 
   it('detached HEAD: bootstrap is skipped — no WORKING-MEMORY.md created (Item 3)', () => {
     // Detached HEAD: git rev-parse HEAD returns a sha (non-empty) but
@@ -2083,29 +2129,12 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   let memFile: string;
   let stagedFile: string;
 
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-home-'));
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s23-shim-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
-    initGitRepo(projectDir);
-    memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    stagedFile = `${memFile}.new`;
-    seedQueue(projectDir);
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-    fs.rmSync(shimDir, { recursive: true, force: true });
+  makeWorkerFixture('emr-s23', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
   });
 
   it('TODAY (YYYY-MM-DD) appears in the prompt sent to claude', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
 
@@ -2128,10 +2157,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     execSync('git add file2.txt', { cwd: projectDir });
     execSync('git commit -qm "second commit for reconciliation test"', { cwd: projectDir });
 
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2150,10 +2176,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
   it('no-stamp path: prompt includes reconciliation section indicating no stamp found', () => {
     // No WORKING-MEMORY.md — no stamp to extract
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2200,10 +2223,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     const head = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
     fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- x\n`);
 
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2216,10 +2236,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   // Item 1 — literal headers in prompt
 
   it('prompt contains literal header RECONCILE BEFORE CARRYING FORWARD (Item 1a)', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2229,10 +2246,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   });
 
   it('prompt contains literal header STATUS DISCIPLINE, BOTH DIRECTIONS (Item 1b)', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2252,10 +2266,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     }
     fs.writeFileSync(qFile, rows.join('\n') + '\n');
 
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2269,10 +2280,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   it('TURNS_NOTE absent from prompt when turn window is NOT capped (TOTAL_LINES <= MAX_LINES) (Item 1c)', () => {
     // beforeEach calls seedQueue which writes 2 rows — well under MAX_LINES (20).
     // The TURNS_NOTE disclosure must NOT appear when no capping occurred.
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2284,14 +2292,11 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   });
 
   // Item 2 — containment preamble pins (SEC-2 / PF-023)
-  // RED until background-memory-update wraps untrusted blocks in named XML tags and
-  // adds a DATA-not-instructions sentence ahead of them.
+  // background-memory-update wraps untrusted blocks in named XML tags and prefixes them
+  // with a DATA-not-instructions sentence (avoids PF-023 prompt-injection surface).
 
   it('prompt contains the four named data tags wrapping untrusted blocks (Item 2a)', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2308,10 +2313,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   });
 
   it('prompt contains the DATA-not-instructions containment sentence (Item 2b)', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2322,14 +2324,11 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
   });
 
   // Item 3 — uncertainty default pin (REG-4 / PF-010)
-  // RED until background-memory-update appends the under-uncertainty default to the
-  // STATUS DISCIPLINE block.
+  // background-memory-update appends the under-uncertainty default to STATUS DISCIPLINE
+  // so the worker never optimistically reports state it cannot confirm (applies PF-010).
 
   it('prompt contains the uncertainty-default clause in STATUS DISCIPLINE (Item 3)', () => {
-    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
-    const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
-    fs.chmodSync(claudeBin, 0o755);
+    const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2432,22 +2431,8 @@ describe('S25: CAS heartbeat, fail-closed checksum, and orphan-gate retry-batch 
   let memFile: string;
   let stagedFile: string;
 
-  beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-home-'));
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-shim-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
-    initGitRepo(projectDir);
-    memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    stagedFile = `${memFile}.new`;
-    seedQueue(projectDir);
-  });
-
-  afterEach(() => {
-    fs.rmSync(projectDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-    fs.rmSync(shimDir, { recursive: true, force: true });
+  makeWorkerFixture('emr-s25', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
   });
 
   // REL-1: CONFLICT path heartbeats .processing mtime so the 300s cold path

@@ -294,7 +294,7 @@ describe('renderAndWriteAll — index.md integration', () => {
 })
 
 // ---------------------------------------------------------------------------
-// extractEntryFromBlock hijack-safety (RED until A5 line-anchors Status/Area)
+// extractEntryFromBlock hijack-safety (line-anchored Status/Area regexes)
 // ---------------------------------------------------------------------------
 // The old unanchored /- \*\*Status\*\*: (.+)/ and /- \*\*Area\*\*: (.+)/ regexes
 // could match substrings inside amendment text that happens to contain those
