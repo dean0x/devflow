@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reconciliation-aware worker prompt**: the memory worker prompt now includes bounded git evidence since the last stamp, explicit reconciliation and expiry guidance, and a strict DONE definition (per PF-010). Addresses unbounded carry-forward, conversation-coined labels promoted to durable state, and no-expiry instruction.
 - **State-C orphaned `.processing` visibility**: `session-start-memory`'s State C queue-depth count now includes lines from any orphaned `.pending-turns.processing` file, not just `.pending-turns.jsonl`. Previously an orphaned `.processing` was invisible to the State C detector, so a CONFLICT-requeued batch did not show in the refresh-failing banner.
 - **`/resolve` base branch token**: resolution summaries now render the base branch name instead of a literal `{base}` token. Step 0b was not extracting `base_branch` while the summary template referenced it.
-- **render summary byte counts**: `render-decisions.cjs` now reports file sizes via `Buffer.byteLength()` instead of `String.length`. The em dash separator in index Area fields (U+2014, 3 UTF-8 bytes, 1 JS character) caused the logged index.md size to be 2 bytes short per entry under the old code.
+- **render summary byte counts**: `render-decisions.cjs` now reports file sizes via `Buffer.byteLength()` instead of `String.length`. The em dash separator in index Area fields (U+2014, 3 UTF-8 bytes, 1 JS character) caused the logged index.md size to be 2 bytes per em dash in the rendered index under the old code.
 
 ---
 
