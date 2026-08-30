@@ -1658,6 +1658,13 @@ exit 0
     // Log confirms CONFLICT path (PF-018 compliance: new branch exercised via log line)
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
     expect(log).toContain('CONFLICT: WORKING-MEMORY.md changed during run');
+
+    // Item 5 — CONFLICT read-back: human-edit bytes must survive verbatim
+    // (The staged content is discarded; the real file must hold exactly what the
+    //  concurrent writer put there — not overwritten, not partially merged.)
+    const humanEditContent = fs.readFileSync(memFile, 'utf-8');
+    expect(humanEditContent).toContain('- human edit during worker run');
+    expect(humanEditContent).toContain('<!-- memory-head: human branch: main -->');
   });
 
   it('stale-staged cleanup: leftover .new from prior run is removed before claude, preventing false-success', () => {
@@ -1884,6 +1891,29 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     expect(lines[0]).toMatch(/^<!-- memory-head: [0-9a-f]{40} branch: \S+ -->$/);
   });
 
+  it('Item 5 exact-banner pin: bootstrap→session-start produces synced @ <exact 40-hex sha>', () => {
+    // The `toContain("synced @")` assertion in the State A test passes even if the banner
+    // reads "synced @ unknown" (which would indicate the bootstrap wrote no sha, or
+    // session-start-memory fell through to its no-stamp path).
+    // This test pins the EXACT sha so a regression to "synced @ unknown" fails loudly.
+    initGitRepo(projectDir);
+    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+    // Bootstrap via pre-compact
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+    expect(fs.existsSync(memFile)).toBe(true);
+
+    // Inject via session-start-memory
+    const { stdout } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    const parsed = JSON.parse(stdout.trim()) as { hookSpecificOutput?: { additionalContext?: string } };
+    const ctx = parsed?.hookSpecificOutput?.additionalContext ?? '';
+
+    // Must contain the exact 40-hex sha — not "synced @ unknown"
+    expect(ctx).toContain(`synced @ ${headSha}`);
+    expect(ctx).not.toContain('synced @ unknown');
+  });
+
   it('git repo + no existing WORKING-MEMORY.md: bootstrap includes all 5 canonical sections', () => {
     initGitRepo(projectDir);
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
@@ -1920,6 +1950,51 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
 
     // File must not be overwritten — pre-compact only bootstraps when absent
     expect(fs.readFileSync(memFile, 'utf-8')).toBe(originalContent);
+  });
+
+  // Item 3 — detached HEAD and unborn branch bootstrap gate
+  // RED until pre-compact-memory gates on BOTH non-empty branch AND 40-hex sha.
+
+  it('detached HEAD: bootstrap is skipped — no WORKING-MEMORY.md created (Item 3)', () => {
+    // Detached HEAD: git rev-parse HEAD returns a sha (non-empty) but
+    // git branch --show-current returns "" (empty) — gate must require non-empty branch.
+    // Without the branch gate, the stamp embeds "branch: " (empty) which recreates
+    // the "synced @ unknown" / blank-branch defect on the very first session.
+    initGitRepo(projectDir);
+    execSync('git checkout --detach', { cwd: projectDir });
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+
+    // Detached HEAD has no branch name — bootstrap must be skipped
+    expect(fs.existsSync(memFile)).toBe(false);
+  });
+
+  it('unborn branch (git init, no commits): bootstrap is skipped — no WORKING-MEMORY.md created (Item 3)', () => {
+    // Unborn branch: no commits yet, so git rev-parse HEAD fails → GIT_HEAD_SHA="".
+    // With no sha the stamp would be unstamped; the empty-sha gate already handles this.
+    // Adding the branch gate here ensures the guard is symmetric and documented.
+    // (Note: git branch --show-current on an unborn branch also returns "" — both
+    //  conditions are false, so bootstrap is skipped on either gate alone.)
+    const freshDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s22-unborn-'));
+    const freshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s22-unborn-home-'));
+    try {
+      fs.mkdirSync(path.join(freshDir, '.devflow', 'memory'), { recursive: true });
+      fs.mkdirSync(path.join(freshDir, '.devflow', 'dream'), { recursive: true });
+      execSync('git init -q', { cwd: freshDir });
+      execSync('git config user.email "test@test.com"', { cwd: freshDir });
+      execSync('git config user.name "Test"', { cwd: freshDir });
+      // Deliberately no commit — unborn branch, no HEAD
+      const memFile = path.join(freshDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+      runHook(PRE_COMPACT_HOOK, { cwd: freshDir }, freshHome);
+
+      // Unborn branch: no sha → bootstrap must be skipped
+      expect(fs.existsSync(memFile)).toBe(false);
+    } finally {
+      fs.rmSync(freshDir, { recursive: true, force: true });
+      fs.rmSync(freshHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -2007,6 +2082,77 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
     // A reconciliation section must exist, indicating the absence of a usable stamp
     expect(capturedStdin).toMatch(/no stamp|current\)|no history|up.to.date/i);
+  });
+
+  // Item 1 — literal headers in prompt
+  // RED until background-memory-update restructures the prompt with these exact headers.
+
+  it('prompt contains literal header RECONCILE BEFORE CARRYING FORWARD (Item 1a)', () => {
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(capturedStdin).toContain('RECONCILE BEFORE CARRYING FORWARD');
+  });
+
+  it('prompt contains literal header STATUS DISCIPLINE, BOTH DIRECTIONS (Item 1b)', () => {
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(capturedStdin).toContain('STATUS DISCIPLINE, BOTH DIRECTIONS');
+  });
+
+  it('TURNS_NOTE appears in prompt when turn window is capped (TOTAL_LINES > MAX_LINES) (Item 1c)', () => {
+    // MAX_LINES = MAX_TURNS * 2 = 10 * 2 = 20 — seed with 24 rows (12 pairs) to trigger cap.
+    const qFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    const ts = Math.floor(Date.now() / 1000);
+    const rows: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      rows.push(JSON.stringify({ role: 'user', content: `user turn ${i}`, ts: ts + i * 2 }));
+      rows.push(JSON.stringify({ role: 'assistant', content: `assistant turn ${i}`, ts: ts + i * 2 + 1 }));
+    }
+    fs.writeFileSync(qFile, rows.join('\n') + '\n');
+
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // TURNS_NOTE disclosure must appear in the prompt when the window is capped
+    expect(capturedStdin).toContain('showing newest');
+    expect(capturedStdin).toContain('prefer git evidence over conversational claims');
+  });
+
+  it('TURNS_NOTE absent from prompt when turn window is NOT capped (TOTAL_LINES <= MAX_LINES) (Item 1c)', () => {
+    // beforeEach calls seedQueue which writes 2 rows — well under MAX_LINES (20).
+    // The TURNS_NOTE disclosure must NOT appear when no capping occurred.
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // TURNS_NOTE must NOT appear — 2 rows < 20 MAX_LINES, no cap applied
+    expect(capturedStdin).not.toContain('showing newest');
+    expect(capturedStdin).not.toContain('prefer git evidence over conversational claims');
   });
 });
 

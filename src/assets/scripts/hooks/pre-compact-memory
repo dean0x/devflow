@@ -105,8 +105,17 @@ dbg "Wrote backup: $BACKUP_FILE"
 # Stamp on line 1 enables proper state-A/B/C header reconciliation in
 # session-start-memory. Non-git workspaces skip bootstrap — no HEAD SHA.
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
-if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_HEAD_SHA" ]; then
-  # Gate: 40-hex SHA required before embedding in stamp (defensive; git always
+if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_HEAD_SHA" ] && [ -n "$GIT_BRANCH" ]; then
+  # Gate: BOTH a 40-hex SHA AND a non-empty branch name are required before bootstrap.
+  # Detached HEAD: git branch --show-current returns "" → branch gate fails → skip.
+  # Without the branch gate, the stamp embeds "branch: " (empty string) which creates
+  # the same "synced @ unknown" / blank-branch defect that this branch was opened to fix.
+  # Unborn branch (git init, no commits): git rev-parse HEAD fails → GIT_HEAD_SHA="" →
+  # sha gate fails → skip. An unstamped bootstrap would recreate the "synced @ unknown"
+  # defect because the session-start-memory no-stamp path renders "synced @ unknown".
+  # Both gates are left in place so the guard is symmetric and each can be reasoned about
+  # independently.
+  # Inner gate: 40-hex SHA required before embedding in stamp (defensive; git always
   # returns 40-char lowercase hex or nothing, but guard prevents malformed stamps)
   _SHA_VALID="false"
   if [ "${#GIT_HEAD_SHA}" -eq 40 ]; then

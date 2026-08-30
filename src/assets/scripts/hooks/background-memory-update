@@ -207,9 +207,11 @@ fi
 # --- Build last-10 turns from queue ---
 MAX_TURNS=10
 MAX_LINES=$(( MAX_TURNS * 2 ))
+TURNS_NOTE=""
 if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
   ENTRIES=$(tail -"$MAX_LINES" "$PROCESSING_FILE")
   log "Capped to last $MAX_LINES entries (from $TOTAL_LINES)"
+  TURNS_NOTE="(showing newest ${MAX_LINES} of ${TOTAL_LINES} turns — prefer git evidence over conversational claims)"
 else
   ENTRIES=$(cat "$PROCESSING_FILE")
 fi
@@ -385,12 +387,18 @@ ${EXISTING_MEMORY:-"(no existing content)"}
 
 Recent session turns to synthesize:
 ${TURNS_TEXT}
+${TURNS_NOTE}
 
 Git state:
 ${GIT_STATE:-"(not a git repo or no git state)"}
 
-RECONCILE — commits since last memory update (use this to catch up on work done between sessions):
+RECONCILE BEFORE CARRYING FORWARD
+Commits since last memory update (use this to catch up on work done between sessions):
 ${COMMITS_SINCE_NOTE}
+Treat the existing memory content as claims, not facts. Re-verify each ## Now / ## Progress item against the commits-since evidence + git state + turns. If a claim is contradicted or superseded by newer evidence, rewrite it to the real current stage. If finished or irrelevant, move it to ## Session Log. ## Now / Remaining / Blockers must hold only currently-true items.
+
+STATUS DISCIPLINE, BOTH DIRECTIONS
+Never upgrade a status without evidence AND never restate a stale claim past contradicting evidence — newer evidence wins.
 
 Instructions:
 - Write ${STAGED_FILE} NOW using the Write tool
@@ -402,7 +410,6 @@ Instructions:
 - ## Progress tracks Done (fully completed — see the strict definition below), Remaining (next steps / in-progress work), Blockers (if any)
 - DEFINITION OF DONE — mark a task \"Done\" ONLY when its work has landed on the main/default branch AND been published/released to production. Writing code, committing, opening a PR, or passing CI is NOT done. Even a merged PR is NOT done until it is on main AND shipped to production.
 - A feature being implemented does NOT make it done — testing, code review, resolving review feedback, release prep, and publishing are still Remaining work. Until a task is truly done, keep it under Remaining with its real current stage (e.g. \"implemented — awaiting review\", \"merged to main — not yet released\").
-- Only record a completed state (PR merged, CI passed, released, task done) when the session turns or git state actually evidence it. Never assume, predict, or upgrade a status; when unsure, describe the last confirmed state rather than an optimistic one.
 - ## Decisions entries: format as - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]
 - If queue is empty, preserve existing content as-is (still write line 1 stamp)
 - PROVENANCE: today is ${TODAY}; use this for any date-stamped entries you add"
