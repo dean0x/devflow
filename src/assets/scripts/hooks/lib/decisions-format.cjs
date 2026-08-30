@@ -38,6 +38,12 @@
 // (/^- \*\*Status\*\*:/m, /^- \*\*Area\*\*:/m) to guard against amendment
 // text that accidentally contains those patterns as substrings.
 //
+// Amendments shape: the row's `amendments` array accepts BOTH the
+// { date, note } objects declared by LearningObservation/LedgerRow in
+// src/core/observations.ts (rendered as `[date] note`) and pre-rendered
+// strings.  formatAmendmentsLine normalises per entry — never a bare join,
+// which would emit `[object Object]` for the schema-declared shape.
+//
 // Consumers of these strings:
 //   - session-start-context (line 57): reads TL;DR comment via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
@@ -102,19 +108,53 @@ function segmentDetails(detailsStr, keys) {
 }
 
 /**
+ * Normalise one amendment entry to its rendered string form.
+ *
+ * TWO SHAPES are accepted because two authorities define this field:
+ *   - `{ date, note }` — the shape declared by LearningObservation /
+ *     LedgerRow in src/core/observations.ts, and the ONLY shape its
+ *     isLearningObservation type guard accepts. Renders as `[date] note`
+ *     (bare `note` when date is absent/blank).
+ *   - `string` — a pre-rendered `[date] note` line, the convenience form.
+ *
+ * A plain `join` over the object shape would emit `[object Object]`, so the
+ * normalisation is load-bearing rather than defensive. Unrecognised or
+ * note-less entries collapse to '' and are dropped by the caller — a
+ * formatter running under the .decisions.lock must never throw.
+ *
+ * Newlines are collapsed to spaces to preserve the single-line field contract.
+ *
+ * @param {unknown} entry
+ * @returns {string} rendered amendment, or '' when unrenderable
+ */
+function amendmentToString(entry) {
+  if (typeof entry === 'string') return entry.replace(/\n/g, ' ').trim();
+  if (entry && typeof entry === 'object') {
+    const note = typeof entry.note === 'string' ? entry.note.replace(/\n/g, ' ').trim() : '';
+    if (!note) return '';
+    const date = typeof entry.date === 'string' ? entry.date.replace(/\n/g, ' ').trim() : '';
+    return date ? `[${date}] ${note}` : note;
+  }
+  return '';
+}
+
+/**
  * Format the Amendments line for a decision or pitfall body.
- * Returns an empty string when the amendments array is absent or empty so
- * callers can concatenate unconditionally without leaving a blank line.
+ * Returns an empty string when the amendments array is absent, empty, or
+ * contains nothing renderable, so callers can concatenate unconditionally
+ * without leaving a blank line.
  *
  * Format: `- **Amendments**: text1; text2\n`
  * A single amendment has no trailing semicolon.
  *
- * @param {string[] | undefined | null} amendments - array of amendment strings
+ * @param {Array<string | { date?: string, note?: string }> | undefined | null} amendments
  * @returns {string} formatted line with trailing newline, or '' if empty
  */
 function formatAmendmentsLine(amendments) {
-  if (!amendments || amendments.length === 0) return '';
-  return `- **Amendments**: ${amendments.join('; ')}\n`;
+  if (!Array.isArray(amendments) || amendments.length === 0) return '';
+  const parts = amendments.map(amendmentToString).filter(Boolean);
+  if (parts.length === 0) return '';
+  return `- **Amendments**: ${parts.join('; ')}\n`;
 }
 
 /** Recognised field keys for decision entries. */

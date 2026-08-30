@@ -117,7 +117,7 @@ function readDecisionsMd(dir: string): string {
 //
 // The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
 // it claims the queue, reads the data files directly, and writes through the
-// three ledger ops. These describe pins hold the curation contract strings in
+// four ledger ops. These describe pins hold the curation contract strings in
 // place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 

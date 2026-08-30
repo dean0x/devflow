@@ -36,8 +36,10 @@ const {
     detailsStr: string,
     keys: readonly string[]
   ) => Record<string, string>;
+  // Accepts BOTH the { date, note } objects declared by LearningObservation /
+  // LedgerRow in src/core/observations.ts and pre-rendered strings.
   formatAmendmentsLine: (
-    amendments: string[]
+    amendments: unknown
   ) => string;
 };
 
@@ -281,6 +283,32 @@ describe('segmentDetails — direct unit tests', () => {
     );
     expect(result).toEqual({ context: 'TypeScript', decision: 'use Result', rationale: 'safety' });
   });
+
+  it('a decoy key with NO real key after it leaves the field UNSET (isolates the anchoring)', () => {
+    // The sibling 'reissue:' test above places the real `issue:` segment AFTER the
+    // decoy, so a substring match would be overwritten by the later real segment and
+    // the test would pass either way. Here there is no real `issue:` at all: the
+    // field must stay undefined, and the decoy must fold into `area` as a
+    // continuation. Swapping startsWith → includes makes THIS test RED.
+    const result = segmentDetails('area: hooks; reissue: ADR-007', PF_KEYS);
+    expect(result.issue).toBeUndefined();
+    expect(result.area).toBe('hooks; reissue: ADR-007');
+  });
+
+  it('a decoy key AFTER the real key does not overwrite the real value', () => {
+    // Ordering is the other half: with the decoy last, a substring match would
+    // clobber the already-extracted value instead of extending it.
+    const result = segmentDetails('issue: actual problem; reissue: ADR-007', PF_KEYS);
+    expect(result.issue).toBe('actual problem; reissue: ADR-007');
+  });
+
+  it('a leading segment with no recognised key and no preceding field is dropped', () => {
+    // currentKey is null until the first recognised key, so an orphan prefix has
+    // nowhere to attach. It must be dropped, never silently assigned to keys[0].
+    const result = segmentDetails('freeform prose with no key; area: hooks', PF_KEYS);
+    expect(result).toEqual({ area: 'hooks' });
+    expect(result.area).not.toContain('freeform prose');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -497,6 +525,110 @@ describe('formatAmendmentsLine — integration via formatDecisionBody / formatPi
     };
     const result = formatDecisionBody(row);
     expect(result).not.toContain('Amendments');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatAmendmentsLine — the { date, note } object shape
+//
+// src/core/observations.ts declares `amendments?: { date: string; note: string }[]`
+// on BOTH LearningObservation and LedgerRow, and its isLearningObservation
+// type guard REJECTS a plain string element (tests/decisions/observations-schema.test.ts).
+// toLedgerRow copies obs.amendments through verbatim, so the object shape is the
+// only shape that can legitimately reach the formatter — a bare join would render
+// `- **Amendments**: [object Object]`.
+// ---------------------------------------------------------------------------
+
+describe('formatAmendmentsLine — { date, note } object shape (the schema-declared shape)', () => {
+  it('renders a { date, note } entry as "[date] note" — never [object Object]', () => {
+    const result = formatAmendmentsLine([{ date: '2026-01-01', note: 'First amendment' }]);
+    expect(result).toBe('- **Amendments**: [2026-01-01] First amendment\n');
+    expect(result).not.toContain('[object Object]');
+  });
+
+  it('joins multiple object entries with "; " identically to the string form', () => {
+    const objects = formatAmendmentsLine([
+      { date: '2026-01-01', note: 'First amendment' },
+      { date: '2026-02-01', note: 'Second amendment' },
+    ]);
+    const strings = formatAmendmentsLine([
+      '[2026-01-01] First amendment',
+      '[2026-02-01] Second amendment',
+    ]);
+    expect(objects).toBe('- **Amendments**: [2026-01-01] First amendment; [2026-02-01] Second amendment\n');
+    expect(objects).toBe(strings);
+  });
+
+  it('accepts a mixed array of strings and objects', () => {
+    const result = formatAmendmentsLine([
+      'pre-rendered entry',
+      { date: '2026-02-01', note: 'object entry' },
+    ]);
+    expect(result).toBe('- **Amendments**: pre-rendered entry; [2026-02-01] object entry\n');
+  });
+
+  it('renders a note-only object bare (no empty bracket pair)', () => {
+    expect(formatAmendmentsLine([{ note: 'note without a date' }])).toBe(
+      '- **Amendments**: note without a date\n'
+    );
+  });
+
+  it('collapses newlines inside a note to preserve the single-line field contract', () => {
+    const result = formatAmendmentsLine([{ date: '2026-01-01', note: 'line one\nline two' }]);
+    expect(result).toBe('- **Amendments**: [2026-01-01] line one line two\n');
+    expect(result.split('\n').filter(Boolean)).toHaveLength(1);
+  });
+
+  it('drops unrenderable entries and emits NO line when nothing survives', () => {
+    // A formatter running under .decisions.lock must degrade, never throw.
+    expect(formatAmendmentsLine([{ date: '2026-01-01' }, null, 42])).toBe('');
+    expect(formatAmendmentsLine(['   '])).toBe('');
+  });
+
+  it('formatDecisionBody renders the object shape through to the entry body', () => {
+    const row = {
+      anchor_id: 'ADR-004',
+      pattern: 'Decision with object amendments',
+      id: 'obs_004',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+      amendments: [{ date: '2026-02-01', note: 'Reinforced' }],
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Amendments**: [2026-02-01] Reinforced\n');
+    expect(result).not.toContain('[object Object]');
+  });
+
+  it('formatPitfallBody renders the object shape through to the entry body', () => {
+    const row = {
+      anchor_id: 'PF-004',
+      pattern: 'Pitfall with object amendments',
+      id: 'obs_pf_004',
+      details: 'area: hooks; issue: foo; impact: bar; resolution: fix',
+      amendments: [{ date: '2026-02-01', note: 'Updated resolution' }],
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Amendments**: [2026-02-01] Updated resolution\n');
+    expect(result).not.toContain('[object Object]');
+  });
+
+  it('amendment text never leaks into the compact index line (applies ADR-007)', () => {
+    const row = {
+      anchor_id: 'ADR-005',
+      type: 'decision',
+      pattern: 'Indexed decision',
+      id: 'obs_005',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+      amendments: [{ date: '2026-02-01', note: 'amendment-marker-text' }],
+    };
+    const index = buildIndexContent([row], [], {
+      decisionsFilePath: '/d.md',
+      pitfallsFilePath: '/p.md',
+    });
+    expect(index).toContain('ADR-005  Indexed decision  [Accepted]');
+    expect(index).not.toContain('amendment-marker-text');
+    expect(index).not.toContain('Amendments');
   });
 });
 

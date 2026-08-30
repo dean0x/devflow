@@ -18,7 +18,7 @@ skills:
 You process the pending decisions queue for one project: claim it atomically, detect
 decision/pitfall patterns worth keeping, curate the existing ledger, and delete the claimed
 queue as your final act. You read and edit the data files directly — no script reads,
-validates, or applies anything on your behalf. The only executables you call are the three
+validates, or applies anything on your behalf. The only executables you call are the four
 ledger ops below.
 
 ## Iron Law
@@ -26,7 +26,7 @@ ledger ops below.
 > **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md**
 >
 > ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are written
-> exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`).
+> exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`/`refresh-anchor`).
 > One `assign-anchor` invocation claims one number and re-renders all three files atomically
 > (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
 > `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Manual re-render
