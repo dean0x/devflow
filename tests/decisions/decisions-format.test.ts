@@ -1026,3 +1026,116 @@ describe('Learning agent creation-bar contract', () => {
     expect(agentContent).toContain('NOT a pitfall');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Item 5 — acceptance-criteria pins
+// ---------------------------------------------------------------------------
+
+describe('segmentDetails — comma positive-control (commas never split fields)', () => {
+  // Commas are NOT separators in segmentDetails — only ';' is.
+  // These tests document the positive contract and prevent a regression where
+  // comma handling is accidentally introduced.
+
+  it('commas inside field values are preserved verbatim', () => {
+    const ADR_KEYS = ['context', 'decision', 'rationale'] as const;
+    const result = segmentDetails(
+      'context: TypeScript, Go, Rust; decision: use Result<T, E>; rationale: safety, clarity',
+      ADR_KEYS,
+    );
+    expect(result.context).toBe('TypeScript, Go, Rust');
+    expect(result.decision).toBe('use Result<T, E>');
+    expect(result.rationale).toBe('safety, clarity');
+  });
+
+  it('formatDecisionBody preserves commas in all ADR field values', () => {
+    const row = {
+      anchor_id: 'ADR-COMMA',
+      pattern: 'Comma positive-control decision',
+      id: 'obs_comma',
+      date: '2026-01-01',
+      details: 'context: Go, Rust, TypeScript; decision: use Result, not panics; rationale: safety, clarity',
+    };
+    const result = formatDecisionBody(row);
+    expect(result).toContain('- **Context**: Go, Rust, TypeScript\n');
+    expect(result).toContain('- **Decision**: use Result, not panics\n');
+    expect(result).toContain('- **Consequences**: safety, clarity\n');
+  });
+
+  it('formatPitfallBody preserves commas in pitfall field values', () => {
+    const row = {
+      anchor_id: 'PF-COMMA',
+      pattern: 'Comma positive-control pitfall',
+      id: 'obs_pf_comma',
+      details: 'area: hooks, scripts; issue: step 1, step 2; impact: foo; resolution: bar',
+    };
+    const result = formatPitfallBody(row);
+    expect(result).toContain('- **Area**: hooks, scripts\n');
+    expect(result).toContain('- **Issue**: step 1, step 2\n');
+  });
+});
+
+describe('formatDecisionBody / formatPitfallBody — amendments position pin', () => {
+  // Amendments must render LAST (after Source).  This test pins that ordering so
+  // reordering the concatenation in the formatters fails loudly rather than silently.
+
+  it('Amendments renders after Source in formatDecisionBody', () => {
+    const row = {
+      anchor_id: 'ADR-POS',
+      pattern: 'Position test decision',
+      id: 'obs_pos_adr',
+      date: '2026-01-01',
+      details: 'context: foo; decision: bar; rationale: baz',
+      amendments: [{ date: '2026-06-01', note: 'Reinforced' }],
+    };
+    const result = formatDecisionBody(row);
+    const sourceIdx = result.indexOf('- **Source**:');
+    const amendmentsIdx = result.indexOf('- **Amendments**:');
+    expect(sourceIdx).toBeGreaterThan(-1);
+    expect(amendmentsIdx).toBeGreaterThan(-1);
+    // Amendments must appear AFTER Source — reordering the concatenation fails here
+    expect(amendmentsIdx).toBeGreaterThan(sourceIdx);
+  });
+
+  it('Amendments renders after Source in formatPitfallBody', () => {
+    const row = {
+      anchor_id: 'PF-POS',
+      pattern: 'Position test pitfall',
+      id: 'obs_pos_pf',
+      details: 'area: hooks; issue: foo; impact: bar; resolution: fix',
+      amendments: [{ date: '2026-06-01', note: 'Updated resolution' }],
+    };
+    const result = formatPitfallBody(row);
+    const sourceIdx = result.indexOf('- **Source**:');
+    const amendmentsIdx = result.indexOf('- **Amendments**:');
+    expect(sourceIdx).toBeGreaterThan(-1);
+    expect(amendmentsIdx).toBeGreaterThan(-1);
+    expect(amendmentsIdx).toBeGreaterThan(sourceIdx);
+  });
+});
+
+describe("segmentDetails — rejoin-normalization of TL;DR (documented '; ' join behavior)", () => {
+  // segmentDetails splits on ';' — a tight TL;DR in a field value becomes two
+  // segments "TL" and "DR".  The continuation logic reassembles them with '; '
+  // (spaced) because that is the canonical rejoiner.  This is deliberate:
+  // the '; ' join is the contract for continuation segments throughout this module.
+  // Pin this behavior so it cannot silently change (e.g., to ',' or ';').
+
+  it('TL;DR in a decision field renders as "TL; DR" (tight → spaced, deliberate "; " rejoin)', () => {
+    const ADR_KEYS = ['context', 'decision', 'rationale'] as const;
+    const result = segmentDetails(
+      'decision: TL;DR of the approach; rationale: keeps things simple',
+      ADR_KEYS,
+    );
+    // '; ' join: TL + continuation " DR of the approach" → "TL; DR of the approach"
+    expect(result.decision).toBe('TL; DR of the approach');
+  });
+
+  it('TL;DR in a pitfall field renders as "TL; DR" (same normalization)', () => {
+    const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
+    const result = segmentDetails(
+      'area: hooks; issue: TL;DR of the problem; impact: bad',
+      PF_KEYS,
+    );
+    expect(result.issue).toBe('TL; DR of the problem');
+  });
+});

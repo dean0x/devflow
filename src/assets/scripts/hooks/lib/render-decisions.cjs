@@ -224,9 +224,9 @@ function writeAtomic(filePath, content) {
 
 /**
  * Render both decisions.md and pitfalls.md from the given ledger rows and write
- * them atomically. Does NOT acquire any lock — callers (assign-anchor, retire-anchor)
- * must already hold .decisions.lock. The standalone `render` CLI takes the lock
- * before calling this function.
+ * them atomically. Does NOT acquire any lock — callers (assign-anchor, retire-anchor,
+ * refresh-anchor) must already hold .decisions.lock. The standalone `render` CLI takes
+ * the lock before calling this function.
  *
  * Creates the decisionsDir if it does not exist.
  *
