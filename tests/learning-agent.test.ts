@@ -186,6 +186,9 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references .devflow/dream/', () => {
     const files = SHIPPED_DIRS.flatMap(dir => findFiles(dir, ['.md', '.mds']));
+    // avoids PF-018 (2): a scan-based test whose corpus went empty after a rename
+    // passes vacuously and silently stops guarding anything.
+    expect(files.length).toBeGreaterThan(0);
 
     const violations: string[] = [];
     for (const f of files) {
@@ -209,6 +212,8 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references subagent_type="Dream"', () => {
     const files = findFiles(path.join(ROOT, 'src', 'assets'), ['.md', '.mds']);
+    // avoids PF-018 (2): assert the scanned corpus is non-empty (see sibling test).
+    expect(files.length).toBeGreaterThan(0);
 
     const violations: string[] = [];
     for (const f of files) {

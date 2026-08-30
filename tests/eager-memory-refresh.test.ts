@@ -1717,6 +1717,134 @@ exit 0
     // The prompt must mention the staged (.new) path — real path removed from write instruction
     expect(capturedStdin).toContain('WORKING-MEMORY.md.new');
   });
+
+  it('prompt never names the REAL path as a write target — only the staged path (ADR-023)', () => {
+    // The positive half above is satisfied by a prompt that names BOTH paths, because
+    // STAGED_FILE is literally MEMORY_FILE + ".new". ADR-023's guarantee is that Claude
+    // can never touch the real path at all, so the write instruction must be pinned
+    // negatively too: no "Write <...>WORKING-MEMORY.md" that is not the .new path.
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > "${stdinCapture}"
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    runWorker(projectDir, homeDir, shimDir);
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+
+    // Path-agnostic: the worker resolves the project root through its real path, which
+    // differs from the test's tmpdir path under macOS /var → /private/var symlinks.
+    expect(capturedStdin).toMatch(/Write \S*WORKING-MEMORY\.md\.new NOW using the Write tool/);
+    // Negative lookahead: any Write instruction naming WORKING-MEMORY.md NOT followed
+    // by .new is a regression that re-exposes the real file to the model.
+    expect(capturedStdin).not.toMatch(/Write [^\n]*WORKING-MEMORY\.md(?!\.new)/);
+  });
+
+  it('ABSENT sentinel: real file created during the run resolves to CONFLICT, never false-success', () => {
+    // ADR-023 states the ABSENT sentinel "resolves toward false-conflict, never
+    // false-success". Every other CAS test is ABSENT→ABSENT; this is the ABSENT→present
+    // transition, i.e. a file that appeared from outside our run. Accepting the swap here
+    // would delete an unprocessed queue batch on a write we did not produce.
+    expect(fs.existsSync(memFile)).toBe(false);
+
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > /dev/null
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "- written by worker" >> "${stagedFile}"
+# A concurrent writer CREATES the real file mid-run (it was absent at baseline)
+echo "<!-- memory-head: human branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- created externally during worker run" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // The external content must survive untouched — the staged file is discarded
+    expect(fs.readFileSync(memFile, 'utf-8')).toContain('created externally during worker run');
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('CONFLICT: WORKING-MEMORY.md changed during run');
+  });
+
+  it('un-stamped staged file: FAIL path — staged discarded, real file untouched, .processing retained', () => {
+    // The stamp-prefix branch of the CAS case statement. A staged file that exists and is
+    // non-empty but whose line 1 is not the memory-head stamp is a disobedient model run,
+    // not a success: it must never be mv-ed over the real file.
+    fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
+
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > /dev/null
+echo "Sure! Here is your updated working memory:" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.readFileSync(memFile, 'utf-8')).toContain('- original');
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('staged file exists but stamp missing on line 1');
+    expect(log).toContain('verification failed — leaving .processing for recovery');
+  });
+
+  it('worker hex gate rejects a non-hex stamp SHA before any git rev-walk (injection guard)', () => {
+    // The COMMITS_SINCE reconciliation evidence interpolates the stamp SHA into a
+    // `git log <sha>..HEAD` range. The gate at background-memory-update:348-372 must
+    // reject anything that is not 7-40 lowercase hex. NOTE: session-start-memory has an
+    // analogous gate covered by S2 — this pins the WORKER's own copy, a different file.
+    const payload = 'deadbeefdeadbeefdeadbeefdeadbeefdeadb;x'; // 39 chars, non-hex ';' and 'x'
+    fs.writeFileSync(
+      memFile,
+      `<!-- memory-head: ${payload} branch: main -->\n## Now\n- prior state\n`
+    );
+
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > "${stdinCapture}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    runWorker(projectDir, homeDir, shimDir);
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+
+    // Rejected by the hex gate, not by the earlier stamp-prefix gate — asserting the
+    // absence of the no-stamp note proves the prefix matched and the hex gate is what fired.
+    expect(capturedStdin).toContain('(stamp SHA format invalid)');
+    expect(capturedStdin).not.toContain('(no stamp found in existing memory');
+    expect(capturedStdin).not.toContain('commit(s) since last memory update');
+  });
 });
 
 // =============================================================================
