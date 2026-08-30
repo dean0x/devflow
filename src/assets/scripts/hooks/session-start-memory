@@ -133,10 +133,11 @@ parse_and_validate_stamp() {
 
 # --- detect_refresh_failing: sets REFRESH_FAILING in caller's scope.
 # Condition: queue non-empty AND (.last-refresh-ok missing OR >600s old)
-# B4: count both .pending-turns.jsonl AND .pending-turns.processing toward
-# _queue_depth. Before this fix, an orphaned .processing (whose mtime is
-# between 0s and the D56c 300s cold-path gate) was invisible to State-C —
-# a crashed worker's batch would sit silently with no user-visible warning.
+# orphaned-processing depth fix: count both .pending-turns.jsonl AND
+# .pending-turns.processing toward _queue_depth. Before this fix, an orphaned
+# .processing (whose mtime is between 0s and the D56c 300s cold-path gate)
+# was invisible to State-C — a crashed worker's batch would sit silently with
+# no user-visible warning.
 detect_refresh_failing() {
   local _now="$1"
   local _memory_dir="$2"

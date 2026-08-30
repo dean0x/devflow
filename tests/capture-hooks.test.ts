@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -93,30 +94,6 @@ function writeFeatureConfig(projectDir: string, fields: Record<string, unknown>)
 function workerLogPath(projectDir: string, homeDir: string, hookName: string): string {
   const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
   return path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
-}
-
-/**
- * Poll a log file for a terminal needle line.
- * Retries up to maxAttempts times, each attempt polling for pollMs milliseconds.
- * All waits and retry counts explicitly bounded.
- */
-async function pollForTerminalLine(
-  logFile: string,
-  needle: string,
-  pollMs: number,
-  maxAttempts: number,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const deadline = Date.now() + pollMs;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(logFile)) {
-        const content = fs.readFileSync(logFile, 'utf-8');
-        if (content.includes(needle)) return true;
-      }
-      await new Promise<void>((r) => setTimeout(r, 100));
-    }
-  }
-  return false;
 }
 
 // =============================================================================

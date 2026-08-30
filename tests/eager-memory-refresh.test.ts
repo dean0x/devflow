@@ -19,6 +19,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
@@ -107,30 +108,6 @@ function backdateMtime(filePath: string, secondsAgo: number): void {
 function workerLogPath(projectDir: string, homeDir: string): string {
   const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
   return path.join(homeDir, '.devflow', 'logs', slug, '.background-memory-update.log');
-}
-
-/**
- * Poll a log file for a terminal needle line.
- * Retries up to maxAttempts times, each attempt polling for pollMs milliseconds.
- * All waits and retry counts explicitly bounded.
- */
-async function pollForTerminalLine(
-  logFile: string,
-  needle: string,
-  pollMs: number,
-  maxAttempts: number,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const deadline = Date.now() + pollMs;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(logFile)) {
-        const content = fs.readFileSync(logFile, 'utf-8');
-        if (content.includes(needle)) return true;
-      }
-      await new Promise<void>((r) => setTimeout(r, 100));
-    }
-  }
-  return false;
 }
 
 /**
@@ -1852,6 +1829,101 @@ exit 0
     expect(capturedStdin).not.toContain('(no stamp found in existing memory');
     expect(capturedStdin).not.toContain('commit(s) since last memory update');
   });
+
+  it('end-to-end CONFLICT then clean run: no turns lost across the conflict (ADR-023 composed guarantee)', () => {
+    // Run 1: CONFLICT — human edits WORKING-MEMORY.md while the worker is running.
+    // The fake claude writes a valid staged file AND mutates the real file (simulating
+    // a concurrent human edit). The CAS detects the cksum mismatch → CONFLICT path.
+    // .processing must be retained as the retry vehicle (ADR-023).
+
+    // Pre-create real file so the pre-run cksum baseline is captured
+    fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
+
+    // Write the queue with sentinel turns so we can confirm they survive
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      queueFile,
+      [
+        JSON.stringify({ role: 'user',      content: 'CONFLICT-RUN-USER-TURN',      ts }),
+        JSON.stringify({ role: 'assistant', content: 'CONFLICT-RUN-ASSISTANT-TURN', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    // Run 1 fake claude: writes staged file AND mutates the real file → CONFLICT
+    const claudeBin1 = path.join(shimDir, 'claude-run1');
+    fs.writeFileSync(
+      claudeBin1,
+      `#!/bin/bash
+echo "<!-- memory-head: worker-run1 branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "- worker output run1" >> "${stagedFile}"
+# Concurrent edit — changes the real file's cksum, triggering CONFLICT
+echo "<!-- memory-head: human-edit branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- human edited during run1" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin1, 0o755);
+    // Symlink as 'claude' for Run 1
+    const claudeBin = path.join(shimDir, 'claude');
+    if (fs.existsSync(claudeBin)) fs.unlinkSync(claudeBin);
+    fs.symlinkSync(claudeBin1, claudeBin);
+
+    const run1 = runWorker(projectDir, homeDir, shimDir);
+    expect(run1.exitCode).toBe(0);
+
+    // CONFLICT outcome: staged discarded, .processing retained (the retry vehicle)
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(processingFile)).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+
+    const log1 = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log1).toContain('CONFLICT: WORKING-MEMORY.md changed during run');
+
+    // Run 2: clean — no concurrent edit; the retained .processing batch (from Run 1)
+    // is merged with any new queue entries and fed to claude. The CAS succeeds.
+    // This proves no turns are lost across the CONFLICT (ADR-023's composed guarantee).
+
+    const stdinCapture2 = path.join(shimDir, 'stdin-captured-run2.txt');
+    const claudeBin2 = path.join(shimDir, 'claude-run2');
+    fs.writeFileSync(
+      claudeBin2,
+      `#!/bin/bash
+cat > "${stdinCapture2}"
+echo "<!-- memory-head: testsha2 branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "- clean run2 output" >> "${stagedFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin2, 0o755);
+    // Repoint 'claude' to Run 2 shim
+    fs.unlinkSync(claudeBin);
+    fs.symlinkSync(claudeBin2, claudeBin);
+
+    const run2 = runWorker(projectDir, homeDir, shimDir);
+    expect(run2.exitCode).toBe(0);
+
+    // Run 2 must invoke claude (stdin capture exists)
+    expect(fs.existsSync(stdinCapture2)).toBe(true);
+    const capturedStdin2 = fs.readFileSync(stdinCapture2, 'utf-8');
+
+    // Turns from the CONFLICT run must appear — they were retained in .processing
+    // and merged into the Run 2 input (no turns lost across the conflict)
+    expect(capturedStdin2).toContain('CONFLICT-RUN-USER-TURN');
+    expect(capturedStdin2).toContain('CONFLICT-RUN-ASSISTANT-TURN');
+
+    // CAS succeeded: staged consumed, real file updated, queue fully drained
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    expect(fs.existsSync(processingFile)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(true);
+
+    const log2 = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log2).toContain('staged file valid, real file unchanged — swap complete');
+  });
 });
 
 // =============================================================================
@@ -2065,8 +2137,15 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     expect(exitCode).toBe(0);
 
     const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
-    // The commits-since section must be present and mention the C2 commit message
+    // The commits-since block must show the exact count and the commit subject.
+    // avoids PF-018: the commit subject alone would pass even without the
+    // COMMITS_SINCE block (it also appears in GIT_STATE's git log -5 output).
+    // Pinning the count literal proves the block itself ran.
+    expect(capturedStdin).toContain('1 commit(s) since last memory update:');
     expect(capturedStdin).toContain('second commit for reconciliation test');
+    // Verify no-stamp and up-to-date paths were NOT taken — the stamp was valid.
+    expect(capturedStdin).not.toContain('(no stamp found in existing memory');
+    expect(capturedStdin).not.toContain('(none — memory is current as of HEAD)');
   });
 
   it('no-stamp path: prompt includes reconciliation section indicating no stamp found', () => {
@@ -2080,12 +2159,61 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
     expect(exitCode).toBe(0);
 
     const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
-    // A reconciliation section must exist, indicating the absence of a usable stamp
-    expect(capturedStdin).toMatch(/no stamp|current\)|no history|up.to.date/i);
+    // Exact literal — pinned to the no-stamp branch only (avoids PF-018: alternation regex
+    // would match the up-to-date branch too, passing even if the wrong branch fired).
+    expect(capturedStdin).toContain('(no stamp found in existing memory — full synthesis)');
+  });
+
+  it('stamp SHA not an ancestor of HEAD → branch-switch note in prompt', () => {
+    // Detect the default branch name — may be 'main' or 'master' depending on git config
+    const defaultBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectDir })
+      .toString().trim();
+
+    // Create a side branch and commit on it — its HEAD SHA is not an ancestor of defaultBranch
+    execSync('git checkout -qb side', { cwd: projectDir });
+    fs.writeFileSync(path.join(projectDir, 'side.txt'), 'x\n');
+    execSync('git add side.txt', { cwd: projectDir });
+    execSync('git commit -qm "side branch commit"', { cwd: projectDir });
+    const sideSha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+
+    // Return to the default branch — sideSha is now NOT an ancestor of HEAD there
+    execSync(`git checkout -q ${defaultBranch}`, { cwd: projectDir });
+
+    // Stamp WORKING-MEMORY.md with the side-branch SHA
+    fs.writeFileSync(memFile, `<!-- memory-head: ${sideSha} branch: side -->\n## Now\n- x\n`);
+
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: ${defaultBranch} -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // Exact literal for the not-an-ancestor branch
+    expect(capturedStdin).toContain('(stamp SHA is not an ancestor of HEAD — possible branch switch or rebase)');
+  });
+
+  it('HEAD == stamp → memory-is-current note in prompt', () => {
+    // Stamp WORKING-MEMORY.md at the current HEAD — zero commits ahead
+    const head = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- x\n`);
+
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    // Exact literal for the up-to-date branch
+    expect(capturedStdin).toContain('(none — memory is current as of HEAD)');
   });
 
   // Item 1 — literal headers in prompt
-  // RED until background-memory-update restructures the prompt with these exact headers.
 
   it('prompt contains literal header RECONCILE BEFORE CARRYING FORWARD (Item 1a)', () => {
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
