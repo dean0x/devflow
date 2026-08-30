@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`refresh-anchor` ledger op**: post-promotion reinforcement now reaches rendered output. When the Learning agent reinforces an already-anchored observation (sharpening its `pattern`/`details`), calling `refresh-anchor <anchor_id>` re-projects the updated log row through the same `toLedgerRow` projector as `assign-anchor` and re-renders all three `.md` files. Previously, post-promotion sharpening was written to the log but never projected forward, so the rendered entry silently froze at its first-promotion snapshot.
 
 ### Changed
+- **`decisions-ledger.jsonl` is now the anchor registry only (ADR-022)**: `decisions-log.jsonl` is the content authority; the ledger holds anchor numbers and `decisions_status` only. Entry content reaches the ledger exclusively through `assign-anchor` (first promotion) and `refresh-anchor` (post-promotion re-projection) via `toLedgerRow`. The Learning agent's previously sanctioned path of editing ledger rows directly is removed — content changes go to the log, then `refresh-anchor` re-projects. Tooling that reads or writes `decisions-ledger.jsonl` directly is affected.
 - **`/resolve` DUPLICATE verdict**: `/resolve` now collapses duplicate cross-reviewer findings via a new `DUPLICATE` triage verdict — resolution-summary counts unique issues, with a `Duplicates Collapsed` statistics row and a `## Duplicates` section for traceability.
 
 ### Fixed

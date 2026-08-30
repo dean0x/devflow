@@ -27,8 +27,9 @@ ledger ops below.
 >
 > ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are written
 > exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`/`refresh-anchor`).
-> One `assign-anchor` invocation claims one number and re-renders all three files atomically
-> (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
+> One `assign-anchor` invocation claims one number and re-renders all three files
+> (decisions.md, pitfalls.md, index.md — each write atomic; the sequence is not transactional:
+> a crash between writes self-heals on the next op). To deprecate, supersede, or retire an entry, call
 > `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Every ledger op
 > re-renders all three files internally; there is no separate render step for you to run.
 
@@ -175,6 +176,9 @@ is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file. I
 row lacks a `date` field (pitfall rows promoted before date-stamping was added), use the
 observation log row's `last_seen` date for the window. If `last_seen` is also unavailable, the
 entry predates date-stamping and is outside the protection window (no backfill: a fabricated date would be worse than an unprotected entry — ADR-022).
+Example: a pitfall row with no ledger `date` whose log row has `last_seen: "2026-08-27"` → window
+key 2026-08-27 (protected if within 7 days of today); no ledger `date` AND no log `last_seen`
+→ outside the window, eligible for curation.
 
 Ground yourself first, all by direct reads:
 - Active entries and counts: `decisions.md` / `pitfalls.md` — what is rendered is what is active.
@@ -236,8 +240,9 @@ Never edit the ledger directly for content changes; the log is the authority.
 
 1. Run `rotate-observations` if you have not already this run (Part 2 covers it — never run
    it twice).
-2. Delete the claim file as your FINAL act, strictly after every other write (bare `rm` is
-   blocked by devflow's recommended deny-list — PF-003):
+2. Delete the claim file as your FINAL act, strictly after every other write (`rm -f` is
+   denied by devflow's recommended deny-list; `unlink` and a flagless `rm` both pass — use
+   `unlink` (PF-003)):
    `unlink .devflow/learning/.pending-turns.processing`
    If deletion is denied, finish normally and note the leftover claim file in your summary —
    the next run's stale-merge recovery folds it in.

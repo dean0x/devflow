@@ -94,8 +94,11 @@ describe('learning agent', () => {
       expect(content).toMatch(/FINAL act.*unlink \.devflow\/learning\/\.pending-turns\.processing/s);
     });
 
-    it('does not use bare rm - (blocked by devflow deny-list, PF-003)', () => {
-      expect(content).not.toMatch(/\brm -/);
+    it('does not instruct rm -f for claim-file deletion — deny-list blocks flags, not the verb (PF-003)', () => {
+      // rm -f (flagged rm) is denied; unlink and a flagless rm both pass.
+      // The prose may explain PF-003 using "rm -f" as a counter-example,
+      // but the actual delete command must be unlink, not rm -f.
+      expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
 
     it('aborts without writes when inputs vanish mid-run', () => {

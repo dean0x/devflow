@@ -160,20 +160,22 @@ must use the same threshold or the live-vs-crashed decision diverges.
 - Heartbeat `touch` of `.processing` at the Part 1 → Part 2 boundary prevents a long run
   from being mistakenly re-claimed
 - **Final act**: `unlink .devflow/learning/.pending-turns.processing` (applies PF-003 —
-  bare `rm` is blocked by the deny-list; `unlink` is the required form)
+  `rm -f` is denied by the deny-list; `unlink` and a flagless `rm` both pass — use `unlink`)
 
 **Ledger ops** (called from agent's Bash tool) — there are exactly four:
 ```bash
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "decision" "obs_xxx"
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall"  "obs_xxx"
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall"  "obs_xxx"  # same op, both types
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor "ADR-NNN"  "Superseded"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor "ADR-NNN" [...]
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" rotate-observations
 ```
 
 Each op self-locks. Never wrap them in an external lock; never call more than one at a time.
-`assign-anchor` atomically writes `decisions.md`, `pitfalls.md`, and `index.md`. These files
-are **never hand-edited** — they are exclusively owned by the ledger ops (`assign-anchor`, `retire-anchor`, `refresh-anchor`), each of which renders internally.
+`assign-anchor` re-renders `decisions.md`, `pitfalls.md`, and `index.md` (each write atomic;
+the sequence is not transactional — a crash between writes self-heals on the next op). These
+files are **never hand-edited** — they are exclusively owned by the ledger ops (`assign-anchor`,
+`retire-anchor`, `refresh-anchor`), each of which renders internally.
 
 **`assign-anchor` details**: Beyond minting the next anchor number, `assign-anchor` now (a) writes
 `anchor_id` back into the log row (`status: 'created'`, `anchor_id: <id>`) — this arms guard (b)
@@ -378,8 +380,9 @@ agents must not "fix" the naming mismatch.
   (ADR-022). To update an anchored entry's content, edit the log row then call `refresh-anchor`.
   Direct ledger edits bypass the `toLedgerRow` projector and can reintroduce legacy fields.
 
-- **Using `rm` to delete `.pending-turns.processing`**: the recommended deny-list blocks bare
-  `rm` for agent instruction deletions (PF-003). Use `unlink` in the agent's final act.
+- **Using `rm -f` to delete `.pending-turns.processing`**: the recommended deny-list blocks
+  `rm -f` (the denial keys on the flags, not the verb — PF-003); `unlink` and a flagless `rm`
+  both pass. Use `unlink` in the agent's final act.
 
 - **Skipping the model allowlist in `session-start-context`**: `learning.json` is user-controlled;
   interpolating an unsanitized value into the `additionalContext` block creates injection risk.
