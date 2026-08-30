@@ -541,8 +541,8 @@ fi
 #
 # Sets OUTCOME to one of: updated | conflict | failed
 # Reads PRE_RUN_CKSUM, CKSUM_FAILED, STAGED_FILE, MEMORY_FILE from caller scope.
-# Each state is assigned exactly once at the point it is decided; single OUTCOME
-# variable replaces the prior two-boolean (UPDATED/CONFLICT) encoding. applies ADR-023
+# Each state is assigned exactly once at the point it is decided (single OUTCOME
+# variable, three states). applies ADR-023
 verify_and_swap() {
   [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ] || {
     log "WARN: staged file missing or empty after claude -p run"; OUTCOME="failed"; return; }

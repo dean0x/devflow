@@ -607,8 +607,8 @@ try {
         const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
         // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
         // date from the observation (content authority per ADR-022); fall back
-        // to today.  The old decision-only asymmetry is removed so that
-        // refresh-anchor can re-project pitfall rows correctly (pattern refreshes too — consumers match anchor headings, never titles, per ADR-022).
+        // to today. Both types carry a date so refresh-anchor can re-project
+        // them correctly (pattern refreshes too — consumers match anchor headings, never titles, per ADR-022).
         const aaEntryDate = aaObs.date || aaDate;
         const aaLedgerRow = toLedgerRow(aaObs, {
           anchorId: aaAnchorId,
@@ -709,9 +709,9 @@ try {
     // Algorithm:
     //   1. Read ledger and log ONCE (outside the per-anchor loop).
     //   2. For each anchor: locate ledger row, run precondition checks, run
-    //      REG-1 details divergence guard (pattern replacement is sanctioned
-    //      (ADR-022 — pattern replacement is sanctioned: consumers match anchor headings not titles; only details containment is enforced), re-project via
-    //      toLedgerRow (which carries PF-023 sink validation for pattern/raw_body/type).
+    //      REG-1 details divergence guard (ADR-022: consumers match anchor headings not
+    //      titles so pattern replacement is sanctioned; only details containment is enforced),
+    //      re-project via toLedgerRow (which carries PF-023 sink validation for pattern/raw_body/type).
     //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
     //   4. Write ledger once, render once, echo all ids to stdout (one per line).
     //
