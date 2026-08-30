@@ -292,6 +292,51 @@ function parseArgs(argList) {
   return { ...result, ...jsonArgs };
 }
 
+// ---------------------------------------------------------------------------
+// Lock helpers — shared by the three decisions ledger ops (assign-anchor,
+// retire-anchor, refresh-anchor). rotate-observations uses a DIFFERENT lock
+// (.observations.lock) and keeps its own scaffold (avoids over-generalising).
+// ---------------------------------------------------------------------------
+
+/** Acquire-timeout for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
+const LOCK_ACQUIRE_TIMEOUT_MS = 30000;
+/** Stale-break threshold for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
+const LOCK_STALE_MS = 60000;
+
+/**
+ * Run fn() under .decisions.lock.
+ *
+ * Never call process.exit() inside fn — throw instead (PF-014): the throw propagates
+ * through the try/finally so releaseLock always runs. process.exit is reserved for
+ * the acquire-failure path where no lock is held and no cleanup is needed.
+ *
+ * PF-013: parent directory of the lock dir is created before acquireMkdirLock is
+ * called so a fresh-project cold-path does not throw ENOENT inside the lock lib.
+ *
+ * @param {string} opName - operation name for error messages
+ * @param {string} projectRoot - project root (cwd)
+ * @param {() => unknown} fn - body to execute under the lock
+ */
+function withDecisionsLock(opName, projectRoot, fn) {
+  const lockDir = getDecisionsLockDir(projectRoot);
+  // PF-013: ensure parent directory exists before acquiring lock
+  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
+  if (!acquireMkdirLock(lockDir, LOCK_ACQUIRE_TIMEOUT_MS, LOCK_STALE_MS)) {
+    process.stderr.write(`${opName}: timeout acquiring lock at ${lockDir}\n`);
+    process.exit(1);
+  }
+  try { return fn(); } finally { releaseLock(lockDir); }
+}
+
+/**
+ * Serialize ledger rows to a JSONL string with trailing newline.
+ * Extracted to avoid repeating the same expression at four sites (COMP-4).
+ *
+ * @param {object[]} rows
+ * @returns {string}
+ */
+const serializeLedger = rows => rows.map(r => JSON.stringify(r)).join('\n') + '\n';
+
 if (require.main === module) {
 try {
   switch (op) {
@@ -512,17 +557,8 @@ try {
       const aaProjectRoot = process.cwd();
       const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
       const aaLogPath = getDecisionsLogPath(aaProjectRoot);
-      const aaLockDir = getDecisionsLockDir(aaProjectRoot);
 
-      // PF-013: ensure parent directory exists before acquiring lock
-      fs.mkdirSync(path.dirname(aaLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(aaLockDir, 30000, 60000)) {
-        process.stderr.write(`assign-anchor: timeout acquiring lock at ${aaLockDir}\n`);
-        process.exit(1);
-      }
-
-      try {
+      withDecisionsLock('assign-anchor', aaProjectRoot, () => {
         // Read existing ledger (absent = empty)
         const aaLedgerRows = parseLedger(aaLedgerPath);
 
@@ -533,7 +569,6 @@ try {
         let aaLogEntries = parseLedger(aaLogPath);
         const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
         if (aaObsIdx === -1) {
-          // throw instead of process.exit so the finally block releases the lock
           throw new Error(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}`);
         }
         const aaObs = aaLogEntries[aaObsIdx];
@@ -547,7 +582,6 @@ try {
         //     never fire in normal operation — it guards against double-assign
         //     bugs (e.g. assign called twice for the same obs_id in a crash loop).
         if (aaLedgerRows.some(r => r.anchor_id === aaAnchorId)) {
-          // throw instead of process.exit so the finally block releases the lock
           throw new Error(
             `assign-anchor: anchor_id '${aaAnchorId}' already present in ledger — ` +
             `possible double-assign; refusing to overwrite committed entry`
@@ -559,7 +593,6 @@ try {
         //     (the old anchor would remain in the ledger AND the new one would
         //     be added), corrupting the committed source of truth.
         if (aaObs.anchor_id) {
-          // throw instead of process.exit so the finally block releases the lock
           throw new Error(
             `assign-anchor: obs_id '${assignObsId}' is already anchored as '${aaObs.anchor_id}'; ` +
             `use retire-anchor to change its status instead`
@@ -592,8 +625,7 @@ try {
         // .md files. The render is kept as the FINAL write under the lock so
         // the window is as narrow as possible.
         const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
-        const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
-        writeFileAtomic(aaLedgerPath, aaLedgerContent);
+        writeFileAtomic(aaLedgerPath, serializeLedger(aaNewLedgerRows));
 
         // Mark log row as created and stamp anchor_id so guard (b) fires on
         // any subsequent assign-anchor call for the same obs_id.  Without this
@@ -612,9 +644,7 @@ try {
 
         // Print assigned anchor id to stdout
         process.stdout.write(aaAnchorId + '\n');
-      } finally {
-        releaseLock(aaLockDir);
-      }
+      });
       break;
     }
 
@@ -643,72 +673,63 @@ try {
 
       const raProjectRoot = process.cwd();
       const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
-      const raLockDir = getDecisionsLockDir(raProjectRoot);
 
-      // PF-013: ensure parent directory exists before acquiring lock
-      fs.mkdirSync(path.dirname(raLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(raLockDir, 30000, 60000)) {
-        process.stderr.write(`retire-anchor: timeout acquiring lock at ${raLockDir}\n`);
-        process.exit(1);
-      }
-
-      try {
+      withDecisionsLock('retire-anchor', raProjectRoot, () => {
         const raRows = parseLedger(raLedgerPath);
         const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
         if (raIdx === -1) {
-          // throw instead of process.exit so the finally block releases the lock
           throw new Error(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger`);
         }
 
         // Idempotent: if already set to same status, still write (no-op equivalent)
         raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
-        const raLedgerContent = raRows.map(r => JSON.stringify(r)).join('\n') + '\n';
-        writeFileAtomic(raLedgerPath, raLedgerContent);
+        writeFileAtomic(raLedgerPath, serializeLedger(raRows));
 
         // Re-render both .md (lock-free — we already hold .decisions.lock)
         renderAndWriteAll(raProjectRoot, raRows);
-      } finally {
-        releaseLock(raLockDir);
-      }
+
+        // Echo anchor_id to stdout matching the other three ops (CON-P1).
+        process.stdout.write(retireAnchorId + '\n');
+      });
       break;
     }
 
     // -------------------------------------------------------------------------
-    // refresh-anchor <anchor_id>
-    // ADR-022: Re-project the log observation onto the committed ledger row and
-    // re-render both .md files.  Used after the Learning agent reinforces an
-    // existing obs (updates pattern/details in the log) to propagate those
-    // changes into the ledger without re-minting a new anchor number.
+    // refresh-anchor <anchor_id> [<anchor_id>...]
+    // ADR-022: Re-project log observations onto committed ledger rows and
+    // re-render both .md files.  Variadic — accepts 1..N anchor ids and performs
+    // ONE lock acquisition, ONE ledger parse, ONE log parse, and ONE render
+    // (PERF-1: collapses N agent turns into 1, N re-renders into 1).
+    //
+    // All-or-nothing semantics: every anchor is validated before any write;
+    // a throw on any anchor leaves the ledger and .md files untouched.
     //
     // Algorithm:
-    //   1. Read the ledger to find the existing row for <anchor_id> (to recover
-    //      its `id` field — the stable key the Learning agent uses in the log).
-    //   2. Look up the log obs by the LEDGER ROW's id field (content authority,
-    //      ADR-022). id-based lookup covers pre-existing obs written before
-    //      assign-anchor added anchor_id write-back to the log.
-    //   3. Re-project via toLedgerRow (D2: strict canonical projection — strips
-    //      all observation-lifecycle fields).
-    //   4. Replace the ledger row and re-render both .md files.
+    //   1. Read ledger and log ONCE (outside the per-anchor loop).
+    //   2. For each anchor: locate ledger row, run precondition checks, run
+    //      REG-1 details divergence guard (pattern replacement is sanctioned
+    //      per D3 — only details containment is enforced), re-project via
+    //      toLedgerRow (which carries PF-023 sink validation for pattern/raw_body/type).
+    //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
+    //   4. Write ledger once, render once, echo all ids to stdout (one per line).
     //
     // Locking discipline: holds ONLY .decisions.lock.
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
-      const refreshAnchorId = args[0];
+      const refreshAnchorIds = args.filter(Boolean);
 
-      if (!refreshAnchorId) {
-        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor_id>\n');
+      if (refreshAnchorIds.length === 0) {
+        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor_id> [<anchor_id>...]\n');
         process.exit(1);
       }
 
       const rfProjectRoot = process.cwd();
       const rfLedgerPath = getDecisionsLedgerPath(rfProjectRoot);
       const rfLogPath = getDecisionsLogPath(rfProjectRoot);
-      const rfLockDir = getDecisionsLockDir(rfProjectRoot);
 
       // SEC-S3: refuse when no ledger exists at the resolved project root. A refresh
       // is only valid for a project with a committed ledger — invoked from the wrong
-      // cwd the mkdir below would otherwise silently materialise a stray
+      // cwd withDecisionsLock would otherwise silently materialise a stray
       // .devflow/learning/ tree before throwing 'not found in ledger'.
       if (!fs.existsSync(rfLedgerPath)) {
         throw new Error(
@@ -717,123 +738,113 @@ try {
         );
       }
 
-      // PF-013: ensure parent directory exists before acquiring lock
-      fs.mkdirSync(path.dirname(rfLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(rfLockDir, 30000, 60000)) {
-        process.stderr.write(`refresh-anchor: timeout acquiring lock at ${rfLockDir}\n`);
-        process.exit(1);
-      }
-
-      try {
-        // (1) Locate the existing ledger row by anchor_id (stable, canonical key).
-        //     Miss → throw before touching the log (PF-014: throw, not process.exit).
+      withDecisionsLock('refresh-anchor', rfProjectRoot, () => {
+        // (1) Read ledger and log ONCE — shared across all anchor ids (PERF-1).
         const rfLedgerRows = parseLedger(rfLedgerPath);
-        const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === refreshAnchorId);
-        if (rfLedgerIdx === -1) {
-          // throw instead of process.exit so the finally block releases the lock (PF-014)
-          throw new Error(
-            `refresh-anchor: anchor_id '${refreshAnchorId}' not found in ledger — ` +
-            `cannot refresh a row that was never committed`
-          );
-        }
-
-        const rfExistingRow = rfLedgerRows[rfLedgerIdx];
-
-        // Precondition assertions — checked under the lock (PF-014, assert-preconditions
-        // per reliability rule). Mirrors assign-anchor's (:190-208) pattern.
-        // (a) Ledger row must have an id — undefined===undefined would bind the wrong log row.
-        if (!rfExistingRow.id) {
-          throw new Error(
-            `refresh-anchor: ledger row '${refreshAnchorId}' has no id — ` +
-            `cannot resolve its log observation`
-          );
-        }
-        // (b) Ledger row must have decisions_status — toLedgerRow passes it through;
-        //     absent would cause JSON.stringify to drop the key from the projected row.
-        if (!rfExistingRow.decisions_status) {
-          throw new Error(
-            `refresh-anchor: ledger row '${refreshAnchorId}' has no decisions_status — ` +
-            `refusing to project a row that would drop it`
-          );
-        }
-
-        // (2) Locate the log obs by the LEDGER ROW's id field (content authority).
-        //     Matching on id (not anchor_id) is required for correctness across BOTH corpora:
-        //     rows promoted before anchor_id write-back have no anchor_id in the log at all,
-        //     and rows promoted after it are equally findable by id. Never switch this lookup
-        //     to anchor_id — pre-write-back entries would become unrefreshable (avoids PF-041).
-        //     Measured at the time of this change: 65/65 anchors in this repo resolve by id.
+        const rfExpectedRowCount = rfLedgerRows.length;
         const rfLogEntries = parseLedger(rfLogPath);
-        const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
-        if (!rfObs) {
-          // throw instead of process.exit so the finally block releases the lock (PF-014)
+
+        // (2) Validate and re-project each anchor — all-or-nothing: any throw
+        //     propagates out of withDecisionsLock's fn() before any write occurs.
+        for (const anchorId of refreshAnchorIds) {
+          // Locate the existing ledger row by anchor_id (stable, canonical key).
+          // Miss → throw (PF-014: throw, not process.exit, inside a lock scope).
+          const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === anchorId);
+          if (rfLedgerIdx === -1) {
+            throw new Error(
+              `refresh-anchor: anchor_id '${anchorId}' not found in ledger — ` +
+              `cannot refresh a row that was never committed`
+            );
+          }
+
+          const rfExistingRow = rfLedgerRows[rfLedgerIdx];
+
+          // Precondition assertions — checked under the lock (assert-preconditions
+          // per reliability rule). Mirrors assign-anchor's pattern.
+          // (a) Ledger row must have an id — undefined===undefined would bind the wrong log row.
+          if (!rfExistingRow.id) {
+            throw new Error(
+              `refresh-anchor: ledger row '${anchorId}' has no id — ` +
+              `cannot resolve its log observation`
+            );
+          }
+          // (b) Ledger row must have decisions_status — toLedgerRow passes it through;
+          //     absent would cause JSON.stringify to drop the key from the projected row.
+          if (!rfExistingRow.decisions_status) {
+            throw new Error(
+              `refresh-anchor: ledger row '${anchorId}' has no decisions_status — ` +
+              `refusing to project a row that would drop it`
+            );
+          }
+
+          // Locate the log obs by the LEDGER ROW's id field (content authority, ADR-022).
+          // Matching on id (not anchor_id) covers pre-existing obs written before
+          // assign-anchor added anchor_id write-back to the log (avoids PF-041).
+          const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
+          if (!rfObs) {
+            throw new Error(
+              `refresh-anchor: log obs with id '${rfExistingRow.id}' ` +
+              `(for anchor ${anchorId}) not found in log`
+            );
+          }
+
+          // (c) Type must match the committed anchor — re-projecting across types would move
+          //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
+          //     This check also satisfies toLedgerRow's expectType guard (PF-023 sink);
+          //     both fire with their respective messages — this one fires first.
+          if (rfObs.type !== rfExistingRow.type) {
+            throw new Error(
+              `refresh-anchor: log obs '${rfObs.id}' type '${rfObs.type}' does not match committed anchor ` +
+              `${anchorId} type '${rfExistingRow.type}' — refusing to re-project across entry types`
+            );
+          }
+
+          // REG-1 (avoids PF-044): divergence guard — refuse to silently overwrite
+          // ledger-only curation content. Applies to DETAILS only: pattern replacement
+          // is sanctioned per D3 (consumers match '## (ADR|PF)-NNN:' anchors, never
+          // titles, so a sharpened log pattern may update the rendered heading).
+          // raw_body is handled by isSafeRawBody inside toLedgerRow (PF-023 sink).
+          const rfNormWS = (/** @type {unknown} */ s) =>
+            typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
+          const rfLedgerDetails = rfNormWS(rfExistingRow.details);
+          const rfLogDetails = rfNormWS(rfObs.details);
+          if (rfLedgerDetails && !rfLogDetails.includes(rfLedgerDetails)) {
+            throw new Error(
+              `refresh-anchor: ledger row '${anchorId}' carries content absent from log obs ` +
+              `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
+              `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
+            );
+          }
+
+          // Re-project via toLedgerRow (strict canonical projection — ADR-022).
+          // Preserve decisions_status and date from the ledger (ledger-owned fields).
+          // expectType passed for PF-023 sink validation (redundant with the check above,
+          // but ensures the guard holds even if future callers bypass the outer check).
+          rfLedgerRows[rfLedgerIdx] = toLedgerRow(rfObs, {
+            anchorId,
+            status: rfExistingRow.decisions_status,
+            date: rfExistingRow.date,
+            expectType: rfExistingRow.type,
+          });
+        }
+
+        // (3) REL-6: assert row count unchanged — bounds parseLedger silent-drop
+        //     exposure. A whole-file rewrite that shrank the corpus is always a bug.
+        if (rfLedgerRows.length !== rfExpectedRowCount) {
           throw new Error(
-            `refresh-anchor: log obs with id '${rfExistingRow.id}' ` +
-            `(for anchor ${refreshAnchorId}) not found in log`
+            `refresh-anchor: ledger row count changed during re-projection ` +
+            `(${rfExpectedRowCount} → ${rfLedgerRows.length}) — refusing to write a lossy rewrite`
           );
         }
 
-        // (c) Type must match the committed anchor — re-projecting across types would move
-        //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
-        if (rfObs.type !== rfExistingRow.type) {
-          throw new Error(
-            `refresh-anchor: log obs '${rfObs.id}' type '${rfObs.type}' does not match committed anchor ` +
-            `${refreshAnchorId} type '${rfExistingRow.type}' — refusing to re-project across entry types`
-          );
-        }
-
-        // REG-1 (avoids PF-044): divergence guard — refuse to silently overwrite ledger-only
-        // curation content. The PREVIOUS agent contract instructed direct ledger edits that
-        // never reached the log; re-projecting would permanently destroy those amendments.
-        // If the ledger carries content the log does not (after whitespace normalisation),
-        // the log row must be reconciled (made a superset) before refresh is allowed.
-        const rfNormWS = (/** @type {unknown} */ s) =>
-          typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
-        const rfLedgerDetails = rfNormWS(rfExistingRow.details);
-        const rfLedgerPattern = rfNormWS(rfExistingRow.pattern);
-        const rfLogDetails = rfNormWS(rfObs.details);
-        const rfLogPattern = rfNormWS(rfObs.pattern);
-        if (rfLedgerDetails && !rfLogDetails.includes(rfLedgerDetails)) {
-          throw new Error(
-            `refresh-anchor: ledger row '${refreshAnchorId}' carries content absent from log obs ` +
-            `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
-            `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
-          );
-        }
-        if (rfLedgerPattern && !rfLogPattern.includes(rfLedgerPattern)) {
-          throw new Error(
-            `refresh-anchor: ledger row '${refreshAnchorId}' carries content absent from log obs ` +
-            `'${rfExistingRow.id}' (pattern: ledger ${rfLedgerPattern.length}B / log ${rfLogPattern.length}B). ` +
-            `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
-          );
-        }
-
-        // (3) Re-project via toLedgerRow (strict canonical projection — ADR-022).
-        //     Preserve decisions_status and date from the ledger (ledger-owned
-        //     fields); take everything else from the log obs (content authority).
-        //     date: rfExistingRow.date — ledger date is preserved verbatim; a dateless
-        //     legacy row stays dateless (D5: no backfill at write time).
-        const rfReprojected = toLedgerRow(rfObs, {
-          anchorId: refreshAnchorId,
-          status: rfExistingRow.decisions_status,
-          date: rfExistingRow.date,
-        });
-
-        // (4) Replace the ledger row and write back atomically
-        rfLedgerRows[rfLedgerIdx] = rfReprojected;
-        const rfLedgerContent = rfLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
-        writeFileAtomic(rfLedgerPath, rfLedgerContent);
-
-        // Re-render both .md files (lock-free — we already hold .decisions.lock)
+        // (4) Write once and render once (PERF-1 — N anchors, one I/O round-trip).
+        writeFileAtomic(rfLedgerPath, serializeLedger(rfLedgerRows));
         renderAndWriteAll(rfProjectRoot, rfLedgerRows);
 
-        // Echo anchor_id to stdout (mirrors assign-anchor's contract — callers
-        // use this to confirm which row was refreshed without parsing stderr).
-        process.stdout.write(refreshAnchorId + '\n');
-      } finally {
-        releaseLock(rfLockDir);
-      }
+        // Echo all refreshed ids to stdout — one per line, mirrors assign-anchor's
+        // contract; callers can confirm which rows were refreshed without parsing stderr.
+        process.stdout.write(refreshAnchorIds.join('\n') + '\n');
+      });
       break;
     }
 

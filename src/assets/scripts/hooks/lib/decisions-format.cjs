@@ -198,6 +198,27 @@ function formatAmendmentsLine(amendments) {
   return `- **Amendments**: ${parts.join('; ')}\n`;
 }
 
+/**
+ * Guard against raw_body payloads that could forge a second entry heading or
+ * claim a different anchor ID. Accepts only a string whose `^## (ADR|PF)-\d+:`
+ * headings number exactly one AND match `## ${anchorId}:`.
+ *
+ * A rejected raw_body is DROPPED from the row — the entry then renders through
+ * the sanitised formatDecisionBody/formatPitfallBody, the outcome ADR-022 D4 sanctions.
+ *
+ * Per PF-023: validate at the sink so all callers (assign-anchor, refresh-anchor,
+ * any future op) inherit the guard without repeating it.
+ *
+ * @param {unknown} body
+ * @param {string} anchorId - e.g. 'ADR-001' or 'PF-023'
+ * @returns {boolean}
+ */
+function isSafeRawBody(body, anchorId) {
+  if (typeof body !== 'string') return false;
+  const headings = body.match(/^## (?:ADR|PF)-\d+:/gm) || [];
+  return headings.length === 1 && headings[0] === `## ${anchorId}:`;
+}
+
 /** Recognised field keys for decision entries. */
 const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
 
@@ -290,23 +311,48 @@ function formatPitfallBody(row) {
  * add-path (assign-anchor) and the migration's preserve-verbatim path produce
  * byte-identical committed shapes. applies ADR-008.
  *
+ * Validation at the SINK (per PF-023 — validate at convergence so all callers inherit):
+ *   - expectType: if provided, obs.type must match or this function throws; prevents
+ *     re-projecting across entry types (PF-NNN into decisions.md or vice versa).
+ *   - pattern: JS LineTerminators collapsed to a single space — the heading is
+ *     single-line by construction; a newline in pattern would forge '- **Status**:'
+ *     lines or second '## ADR-NNN:' headings that line-anchored index regexes match first.
+ *   - raw_body: gated by isSafeRawBody — accepts only a body with exactly one heading
+ *     matching anchorId; a rejected body is dropped so the entry renders through the
+ *     sanitised formatDecisionBody/formatPitfallBody instead.
+ *
  * @param {object} obs - Full observation row from decisions-log.jsonl
- * @param {{ anchorId: string, status: string, date?: string }} opts
+ * @param {{ anchorId: string, status: string, date?: string, expectType?: string }} opts
  * @returns {object} Canonical ledger row
  */
-function toLedgerRow(obs, { anchorId, status, date }) {
+function toLedgerRow(obs, { anchorId, status, date, expectType }) {
+  // Type guard — per PF-023: validate at the sink so all callers (assign-anchor,
+  // refresh-anchor, any future op) inherit the check without repeating it.
+  if (expectType !== undefined && obs.type !== expectType) {
+    throw new Error(
+      `toLedgerRow: type mismatch for ${anchorId} — ledger has '${expectType}', log has '${obs.type}'`
+    );
+  }
   /** @type {Record<string, unknown>} */
   const row = {
     id: obs.id,
     type: obs.type,
-    pattern: obs.pattern,
-    details: obs.details,
+    // Heading is single-line by construction — collapse any LLM-injected line terminators
+    // so a newline in pattern cannot forge '- **Status**:' lines or second '## ADR-NNN:'
+    // headings inside the rendered body (those would be matched first by the line-anchored
+    // index regexes in extractEntryFromBlock). applies PF-023.
+    pattern: typeof obs.pattern === 'string' ? obs.pattern.replace(LINE_TERMINATORS, ' ').trim() : obs.pattern,
+    details: obs.details,  // segmentDetails already collapses line terminators at read time
     anchor_id: anchorId,
     decisions_status: status,
   };
   // Optional fields — include only when present in the observation or explicitly provided
   if (date !== undefined) row.date = date;
-  if (obs.raw_body !== undefined) row.raw_body = obs.raw_body;
+  // log-sourced raw_body mirrors ADR-022 D4 — a log row that lost raw_body un-freezes the
+  // entry to formatter-rendered output by design. Gate through isSafeRawBody (PF-023).
+  if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
+    row.raw_body = obs.raw_body;
+  }
   if (obs.amendments !== undefined) row.amendments = obs.amendments;
   return row;
 }
@@ -471,5 +517,6 @@ module.exports = {
   formatPitfallBody,
   buildTldrLine,
   toLedgerRow,
+  isSafeRawBody,
   buildIndexContent,
 };

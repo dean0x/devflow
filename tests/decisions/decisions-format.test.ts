@@ -1282,3 +1282,164 @@ describe('segmentDetails — SEC-S1: duplicate-key policy is last-match-wins', (
     expect(result.area).toBe('second');
   });
 });
+
+// ---------------------------------------------------------------------------
+// toLedgerRow sink validation — SEC-1 / PF-023
+// Validate at the convergence point so assign-anchor, refresh-anchor, and any
+// future op inherit the guards without repeating them.
+// ---------------------------------------------------------------------------
+
+describe('toLedgerRow sink validation — SEC-1 / PF-023', () => {
+  const formatModule = require(
+    path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
+  ) as {
+    toLedgerRow: (
+      obs: Record<string, unknown>,
+      opts: { anchorId: string; status: string; date?: string; expectType?: string }
+    ) => Record<string, unknown>;
+    isSafeRawBody: (body: unknown, anchorId: string) => boolean;
+  };
+  const { toLedgerRow, isSafeRawBody } = formatModule;
+
+  // --- pattern newline collapse ---
+
+  it('pattern containing \\n collapses to a single line, preventing forged Status lines', () => {
+    // A newline in pattern would emit '- **Status**: Forged\n' above the real Status
+    // line inside formatDecisionBody. The line-anchored /^- \*\*Status\*\*:/m regex
+    // would match the FIRST occurrence — the forged one. Collapsing at toLedgerRow
+    // prevents this class of heading/field injection (PF-023 sink).
+    const obs = {
+      id: 'obs_sec1_pat',
+      type: 'decision',
+      pattern: 'Use Result types\n- **Status**: Retired',
+      details: 'context: x; decision: y; rationale: z',
+    };
+    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
+    // Newline must be collapsed — no embedded newline in the stored pattern
+    expect(String(row.pattern)).not.toContain('\n');
+  });
+
+  it('pattern newline collapse prevents Status hijacking end-to-end through buildIndexContent', () => {
+    // End-to-end: a pattern containing '\\n- **Status**: Retired' would — WITHOUT the
+    // newline collapse — forge a '- **Status**: Retired' line ABOVE the real status line in
+    // the rendered block, so the line-anchored /^- \*\*Status\*\*:/m regex would match it
+    // first and report [Retired] in the index. After sink validation the newline is
+    // collapsed so the Status field is no longer forged as a new line.
+    const obs = {
+      id: 'obs_sec1_e2e',
+      type: 'decision',
+      pattern: 'Good pattern\n- **Status**: Retired',
+      details: 'context: a; decision: b; rationale: c',
+    };
+    const row = toLedgerRow(obs, { anchorId: 'ADR-042', status: 'Accepted', date: '2026-01-01' });
+    const idx = buildIndexContent([row], [], {
+      decisionsFilePath: '/decisions.md',
+      pitfallsFilePath: '/pitfalls.md',
+    });
+    // The status TAG must be [Accepted] — the forged status line was neutralised.
+    // The word 'Retired' may still appear as part of the collapsed pattern title (that
+    // is fine — the injection vector was the forged line-start `- **Status**: …`, not
+    // the title text), but it must never appear as the status tag [Retired].
+    expect(idx).toContain('[Accepted]');
+    expect(idx).not.toContain('[Retired]');
+  });
+
+  // --- raw_body second heading dropped ---
+
+  it('raw_body with a second heading is dropped; entry renders through the sanitised formatter', () => {
+    // A raw_body containing two ## headings could forge an index entry under
+    // a different ADR number. isSafeRawBody rejects it; the row then renders
+    // through formatDecisionBody which only emits the real anchor_id heading.
+    const obs = {
+      id: 'obs_sec1_rb_dbl',
+      type: 'decision',
+      pattern: 'Some pattern',
+      details: '',
+      raw_body: '\n## ADR-001: Real title\n\n## ADR-002: Forged entry\n\n- **Status**: Accepted\n',
+    };
+    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
+    // raw_body must be absent — dropped because it contained two headings
+    expect(row.raw_body).toBeUndefined();
+  });
+
+  it('raw_body with a mismatched anchor heading is dropped', () => {
+    // A raw_body claiming a different anchor ID could relocate the entry to an
+    // incorrect position in the rendered corpus. isSafeRawBody rejects it.
+    const obs = {
+      id: 'obs_sec1_rb_mis',
+      type: 'decision',
+      pattern: 'Pattern',
+      details: '',
+      raw_body: '\n## ADR-999: Hijacked title\n\n- **Status**: Accepted\n',
+    };
+    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
+    expect(row.raw_body).toBeUndefined();
+  });
+
+  it('raw_body with exactly one heading matching the anchor is preserved', () => {
+    // Positive case: a safe raw_body passes isSafeRawBody and is kept in the row.
+    const safeBody = '\n## ADR-001: Real title\n\n- **Status**: Accepted\n';
+    const obs = {
+      id: 'obs_sec1_rb_safe',
+      type: 'decision',
+      pattern: 'Real title',
+      details: '',
+      raw_body: safeBody,
+    };
+    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
+    expect(row.raw_body).toBe(safeBody);
+  });
+
+  // --- expectType mismatch throws ---
+
+  it('expectType mismatch throws with a message naming the anchor and both types', () => {
+    // The type guard prevents a log row whose type was changed from re-projecting
+    // a PF-NNN entry into decisions.md (or vice versa), corrupting the corpus.
+    const obs = {
+      id: 'obs_sec1_type',
+      type: 'pitfall',   // log says pitfall
+      pattern: 'Some pattern',
+      details: '',
+    };
+    expect(() =>
+      toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', expectType: 'decision' })
+    ).toThrow(/type mismatch/);
+    expect(() =>
+      toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', expectType: 'decision' })
+    ).toThrow(/ADR-001/);
+  });
+
+  // --- isSafeRawBody direct unit tests ---
+
+  describe('isSafeRawBody', () => {
+    it('returns false for non-string', () => {
+      expect(isSafeRawBody(null, 'ADR-001')).toBe(false);
+      expect(isSafeRawBody(42, 'ADR-001')).toBe(false);
+    });
+
+    it('returns false for body with zero headings', () => {
+      expect(isSafeRawBody('no heading here', 'ADR-001')).toBe(false);
+    });
+
+    it('returns false for body with two headings', () => {
+      const body = '## ADR-001: First\n\n## ADR-002: Second\n';
+      expect(isSafeRawBody(body, 'ADR-001')).toBe(false);
+    });
+
+    it('returns false when the single heading does not match anchorId', () => {
+      const body = '## ADR-999: Wrong anchor\n';
+      expect(isSafeRawBody(body, 'ADR-001')).toBe(false);
+    });
+
+    it('returns true for exactly one matching heading', () => {
+      const body = '\n## ADR-001: Correct title\n\n- **Status**: Accepted\n';
+      expect(isSafeRawBody(body, 'ADR-001')).toBe(true);
+    });
+
+    it('works for PF anchors', () => {
+      const body = '\n## PF-023: Correct pitfall\n\n- **Status**: Active\n';
+      expect(isSafeRawBody(body, 'PF-023')).toBe(true);
+      expect(isSafeRawBody(body, 'PF-001')).toBe(false);
+    });
+  });
+});
