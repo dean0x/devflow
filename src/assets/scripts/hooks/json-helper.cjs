@@ -514,6 +514,7 @@ try {
       const aaLogPath = getDecisionsLogPath(aaProjectRoot);
       const aaLockDir = getDecisionsLockDir(aaProjectRoot);
 
+      // PF-013: ensure parent directory exists before acquiring lock
       fs.mkdirSync(path.dirname(aaLockDir), { recursive: true });
 
       if (!acquireMkdirLock(aaLockDir, 30000, 60000)) {
@@ -644,6 +645,7 @@ try {
       const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
       const raLockDir = getDecisionsLockDir(raProjectRoot);
 
+      // PF-013: ensure parent directory exists before acquiring lock
       fs.mkdirSync(path.dirname(raLockDir), { recursive: true });
 
       if (!acquireMkdirLock(raLockDir, 30000, 60000)) {
@@ -704,6 +706,17 @@ try {
       const rfLogPath = getDecisionsLogPath(rfProjectRoot);
       const rfLockDir = getDecisionsLockDir(rfProjectRoot);
 
+      // SEC-S3: refuse when no ledger exists at the resolved project root. A refresh
+      // is only valid for a project with a committed ledger — invoked from the wrong
+      // cwd the mkdir below would otherwise silently materialise a stray
+      // .devflow/learning/ tree before throwing 'not found in ledger'.
+      if (!fs.existsSync(rfLedgerPath)) {
+        throw new Error(
+          `refresh-anchor: no decisions-ledger.jsonl found at '${rfLedgerPath}' — ` +
+          `cannot refresh an entry where no ledger exists`
+        );
+      }
+
       // PF-013: ensure parent directory exists before acquiring lock
       fs.mkdirSync(path.dirname(rfLockDir), { recursive: true });
 
@@ -727,11 +740,30 @@ try {
 
         const rfExistingRow = rfLedgerRows[rfLedgerIdx];
 
+        // Precondition assertions — checked under the lock (PF-014, assert-preconditions
+        // per reliability rule). Mirrors assign-anchor's (:190-208) pattern.
+        // (a) Ledger row must have an id — undefined===undefined would bind the wrong log row.
+        if (!rfExistingRow.id) {
+          throw new Error(
+            `refresh-anchor: ledger row '${refreshAnchorId}' has no id — ` +
+            `cannot resolve its log observation`
+          );
+        }
+        // (b) Ledger row must have decisions_status — toLedgerRow passes it through;
+        //     absent would cause JSON.stringify to drop the key from the projected row.
+        if (!rfExistingRow.decisions_status) {
+          throw new Error(
+            `refresh-anchor: ledger row '${refreshAnchorId}' has no decisions_status — ` +
+            `refusing to project a row that would drop it`
+          );
+        }
+
         // (2) Locate the log obs by the LEDGER ROW's id field (content authority).
-        //     Matching on id (not anchor_id) covers pre-existing obs that were written
-        //     before assign-anchor added anchor_id write-back — 0 of 65 anchored entries
-        //     in a typical repo carry anchor_id in the log, so the anchor_id lookup
-        //     strategy resolves 0 entries. id-based lookup resolves all of them.
+        //     Matching on id (not anchor_id) is required for correctness across BOTH corpora:
+        //     rows promoted before anchor_id write-back have no anchor_id in the log at all,
+        //     and rows promoted after it are equally findable by id. Never switch this lookup
+        //     to anchor_id — pre-write-back entries would become unrefreshable (avoids PF-041).
+        //     Measured at the time of this change: 65/65 anchors in this repo resolve by id.
         const rfLogEntries = parseLedger(rfLogPath);
         const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
         if (!rfObs) {
@@ -742,7 +774,42 @@ try {
           );
         }
 
-        // (3) Re-project via toLedgerRow (D2: strict canonical projection).
+        // (c) Type must match the committed anchor — re-projecting across types would move
+        //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
+        if (rfObs.type !== rfExistingRow.type) {
+          throw new Error(
+            `refresh-anchor: log obs '${rfObs.id}' type '${rfObs.type}' does not match committed anchor ` +
+            `${refreshAnchorId} type '${rfExistingRow.type}' — refusing to re-project across entry types`
+          );
+        }
+
+        // REG-1 (avoids PF-044): divergence guard — refuse to silently overwrite ledger-only
+        // curation content. The PREVIOUS agent contract instructed direct ledger edits that
+        // never reached the log; re-projecting would permanently destroy those amendments.
+        // If the ledger carries content the log does not (after whitespace normalisation),
+        // the log row must be reconciled (made a superset) before refresh is allowed.
+        const rfNormWS = (/** @type {unknown} */ s) =>
+          typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
+        const rfLedgerDetails = rfNormWS(rfExistingRow.details);
+        const rfLedgerPattern = rfNormWS(rfExistingRow.pattern);
+        const rfLogDetails = rfNormWS(rfObs.details);
+        const rfLogPattern = rfNormWS(rfObs.pattern);
+        if (rfLedgerDetails && !rfLogDetails.includes(rfLedgerDetails)) {
+          throw new Error(
+            `refresh-anchor: ledger row '${refreshAnchorId}' carries content absent from log obs ` +
+            `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
+            `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
+          );
+        }
+        if (rfLedgerPattern && !rfLogPattern.includes(rfLedgerPattern)) {
+          throw new Error(
+            `refresh-anchor: ledger row '${refreshAnchorId}' carries content absent from log obs ` +
+            `'${rfExistingRow.id}' (pattern: ledger ${rfLedgerPattern.length}B / log ${rfLogPattern.length}B). ` +
+            `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
+          );
+        }
+
+        // (3) Re-project via toLedgerRow (strict canonical projection — ADR-022).
         //     Preserve decisions_status and date from the ledger (ledger-owned
         //     fields); take everything else from the log obs (content authority).
         //     date: rfExistingRow.date — ledger date is preserved verbatim; a dateless
