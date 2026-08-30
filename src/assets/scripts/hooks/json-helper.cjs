@@ -680,12 +680,11 @@ try {
     // changes into the ledger without re-minting a new anchor number.
     //
     // Algorithm:
-    //   1. Read the log to find the obs whose anchor_id field equals <anchor_id>.
-    //      The log is the content authority (ADR-022); the latest version of the
-    //      obs is the one the Learning agent wrote most recently.
-    //   2. Read the ledger to find the existing row for <anchor_id> (to recover
-    //      decisions_status — the only ledger-owned field that may differ from
-    //      the log obs).
+    //   1. Read the ledger to find the existing row for <anchor_id> (to recover
+    //      its `id` field — the stable key the Learning agent uses in the log).
+    //   2. Look up the log obs by the LEDGER ROW's id field (content authority,
+    //      ADR-022). id-based lookup covers pre-existing obs written before
+    //      assign-anchor added anchor_id write-back to the log.
     //   3. Re-project via toLedgerRow (D2: strict canonical projection — strips
     //      all observation-lifecycle fields).
     //   4. Replace the ledger row and re-render both .md files.
@@ -761,6 +760,10 @@ try {
 
         // Re-render both .md files (lock-free — we already hold .decisions.lock)
         renderAndWriteAll(rfProjectRoot, rfLedgerRows);
+
+        // Echo anchor_id to stdout (mirrors assign-anchor's contract — callers
+        // use this to confirm which row was refreshed without parsing stderr).
+        process.stdout.write(refreshAnchorId + '\n');
       } finally {
         releaseLock(rfLockDir);
       }

@@ -981,6 +981,20 @@ describe('refresh-anchor CLI op', () => {
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
+
+  it('prints the anchor_id to stdout on success (mirrors assign-anchor contract)', () => {
+    // RED until refresh-anchor adds process.stdout.write(refreshAnchorId + '\n')
+    // after renderAndWriteAll — the same placement as assign-anchor's stdout echo.
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_ra_stdout', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', id: 'obs_ra_stdout', decisions_status: 'Accepted' })]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).toBe(0);
+    // refresh-anchor must echo the anchor_id to stdout so callers can confirm which
+    // row was refreshed — identical contract to assign-anchor
+    expect(result.stdout.trim()).toBe('ADR-001');
+  });
 });
 
 describe('ADR-011 straggler: refresh-anchor on bare project directory', () => {
