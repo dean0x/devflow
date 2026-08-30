@@ -131,6 +131,59 @@ function selectActiveRows(rows, kind) {
 }
 
 /**
+ * Build per-row body blocks from already-filtered + sorted active rows.
+ * Each block starts with a leading newline (matching the format contract).
+ *
+ * Per-row content:
+ *   - If row.raw_body is truthy → emit verbatim (migrated entries)
+ *   - Otherwise → formatDecisionBody / formatPitfallBody from details
+ *
+ * Extracted so renderAndWriteAll can compute blocks once and reuse them
+ * for both the body files and buildIndexContent, avoiding a second full
+ * render pass (PERF-2).
+ *
+ * @param {object[]} activeRows - already-filtered + sorted active rows
+ * @param {'decisions'|'pitfalls'} kind
+ * @returns {string[]} per-row rendered blocks
+ */
+function buildBodyBlocks(activeRows, kind) {
+  return activeRows.map(row => {
+    if (row.raw_body) {
+      // Migrated entry: emit verbatim. raw_body must start with \n## so
+      // it fits seamlessly after the header preamble.
+      return row.raw_body;
+    }
+    return kind === 'decisions'
+      ? formatDecisionBody(row)
+      : formatPitfallBody(row);
+  });
+}
+
+/**
+ * Assemble the full file content from pre-computed blocks and active rows.
+ * Internal helper — avoids re-computing blocks when the caller already has them.
+ *
+ * @param {object[]} activeRows - already-filtered + sorted active rows
+ * @param {string[]} blocks - pre-rendered per-row blocks (from buildBodyBlocks)
+ * @param {'decisions'|'pitfalls'} kind
+ * @returns {string} complete file content
+ */
+function buildFileFromBlocks(activeRows, blocks, kind) {
+  // Build TL;DR line (uses active + sorted rows so last-5 are stable)
+  const tldr = buildTldrLine(kind, activeRows);
+
+  // Build header: replace placeholder TL;DR in the init content with the real one.
+  // initDecisionsContent returns "<!-- TL;DR: 0 {kind}. Key: -->\n..." so we
+  // replace the TL;DR line at position 0.
+  const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
+  const headerWithPlaceholder = initDecisionsContent(initKind);
+  // Replace only the first line (the TL;DR comment)
+  const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
+
+  return header + blocks.join('');
+}
+
+/**
  * Build the full file content from already-filtered + sorted active rows.
  * Internal helper — callers that have already run selectActiveRows can pass
  * the result here directly to avoid re-filtering the ledger.
@@ -144,30 +197,7 @@ function selectActiveRows(rows, kind) {
  * @returns {string} complete file content
  */
 function renderBodyFromActive(activeRows, kind) {
-  // Build per-row blocks
-  const blocks = activeRows.map(row => {
-    if (row.raw_body) {
-      // Migrated entry: emit verbatim. raw_body must start with \n## so
-      // it fits seamlessly after the header preamble.
-      return row.raw_body;
-    }
-    return kind === 'decisions'
-      ? formatDecisionBody(row)
-      : formatPitfallBody(row);
-  });
-
-  // Build TL;DR line (uses active + sorted rows so last-5 are stable)
-  const tldr = buildTldrLine(kind, activeRows);
-
-  // Build header: replace placeholder TL;DR in the init content with the real one.
-  // initDecisionsContent returns "<!-- TL;DR: 0 {kind}. Key: -->\n..." so we
-  // replace the TL;DR line at position 0.
-  const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
-  const headerWithPlaceholder = initDecisionsContent(initKind);
-  // Replace only the first line (the TL;DR comment)
-  const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
-
-  return header + blocks.join('');
+  return buildFileFromBlocks(activeRows, buildBodyBlocks(activeRows, kind), kind);
 }
 
 /**
@@ -246,8 +276,13 @@ function renderAndWriteAll(worktreePath, rows) {
   const activeDecisionRows = selectActiveRows(rows, 'decisions');
   const activePitfallRows = selectActiveRows(rows, 'pitfalls');
 
-  const decisionsContent = renderBodyFromActive(activeDecisionRows, 'decisions');
-  const pitfallsContent = renderBodyFromActive(activePitfallRows, 'pitfalls');
+  // Build per-row blocks once — reused for body files and index so
+  // buildIndexContent does not re-render every entry a second time (PERF-2).
+  const decisionBlocks = buildBodyBlocks(activeDecisionRows, 'decisions');
+  const pitfallBlocks = buildBodyBlocks(activePitfallRows, 'pitfalls');
+
+  const decisionsContent = buildFileFromBlocks(activeDecisionRows, decisionBlocks, 'decisions');
+  const pitfallsContent = buildFileFromBlocks(activePitfallRows, pitfallBlocks, 'pitfalls');
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
@@ -258,10 +293,13 @@ function renderAndWriteAll(worktreePath, rows) {
   writeAtomic(pitfallsFilePath, pitfallsContent);
 
   // Build and write compact index (write-time artifact; consumed via plain Read)
-  // Reuses the pre-computed active rows — no additional selectActiveRows pass.
+  // Reuses the pre-computed active rows and pre-rendered blocks — no additional
+  // selectActiveRows or format pass.
   const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
     decisionsFilePath,
     pitfallsFilePath,
+    decisionBlocks,
+    pitfallBlocks,
   });
   const indexLine = indexContent + '\n';
   writeAtomic(indexFilePath, indexLine);

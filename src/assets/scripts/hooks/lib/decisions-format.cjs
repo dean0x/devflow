@@ -33,6 +33,15 @@
 // anchors key detection to the START of each trimmed segment — so 'reissue:'
 // does NOT match 'issue:', and embedded semicolons inside a field value are
 // preserved (the segment is treated as a continuation of the prior field).
+// Recovery pass: for any key the anchored pass left unset, an unanchored
+// regex ('(?:^|[.;\\s])key:\\s*([^;]+)') is tried against the full details
+// string — handles legacy corpus rows written before the ';'-delimited grammar
+// was documented, where fields are separated by '. ' rather than ';' (applies
+// PF-044). The recovery pass never overrides an anchored match.
+// LineTerminators (\r, \n, \u2028, \u2029) in field values are collapsed to a
+// single space at all five collapse sites (segmentDetails ×2, amendmentToString
+// ×3) — guards the single-line field contract against the full JS LineTerminator
+// set, not just \n.
 //
 // Index extraction: extractEntryFromBlock uses line-anchored regexes
 // (/^- \*\*Status\*\*:/m, /^- \*\*Area\*\*:/m) to guard against amendment
@@ -52,6 +61,9 @@
 
 'use strict';
 
+/** JS LineTerminator set — /m `^` matches after each of these and `.` excludes them. */
+const LINE_TERMINATORS = /[\r\n\u2028\u2029]/g;
+
 /**
  * Segment-parse a details string into key→value pairs using anchored key
  * detection.  Splits on ';' and checks whether each trimmed segment begins
@@ -63,15 +75,29 @@
  * 'reissue:' does NOT match 'issue:', 'precontext:' does NOT match
  * 'context:', etc.  All matching is case-insensitive.
  *
- * Newlines inside values are collapsed to a single space so the formatted
- * output lines remain single-line.
+ * JS LineTerminators (\r, \n,  ,  ) inside values are collapsed to a
+ * single space so the formatted output lines remain single-line (guards the
+ * full LineTerminator set, not only \n).
+ *
+ * DUPLICATE KEY POLICY: if the same key appears more than once in the
+ * details string the LAST occurrence wins — each new segment-start match
+ * overwrites the prior value. This is last-match-wins, not priority-ordered
+ * first-match-wins.
+ *
+ * RECOVERY PASS: after the anchored segment pass, any key still unset is
+ * searched for with an unanchored regex ('(?:^|[.;\\s])key:\\s*([^;]+)') so
+ * that legacy corpus rows written before the ';'-delimited grammar was
+ * documented (which embed field keys mid-segment after '. ') are still
+ * parsed correctly. The recovery pass never overrides a value the anchored
+ * pass already set. applies PF-044 (divergence/migration: legacy rows exist
+ * written under the old contract that embedded keys after '. ').
  *
  * D001 (details-parsing): This is the SINGLE parser for structured details
  * strings — both formatDecisionBody and formatPitfallBody delegate here.
  * applies PF-042 (delimiter-regex truncation).
  *
  * @param {string} detailsStr - raw details string from an observation row
- * @param {readonly string[]} keys - recognised field names in priority order
+ * @param {readonly string[]} keys - recognised field names
  * @returns {Record<string, string>} map of field name → extracted value
  */
 function segmentDetails(detailsStr, keys) {
@@ -84,15 +110,17 @@ function segmentDetails(detailsStr, keys) {
 
   for (const seg of segments) {
     const trimmed = seg.trim();
+    // Hoist toLowerCase — avoids one allocation per key per segment (PERF-3).
+    const lowered = trimmed.toLowerCase();
     let matched = false;
 
     for (const key of keys) {
       const prefix = key + ':';
       // Anchored: does the trimmed segment START with '<key>:'?
       // Lower-casing both sides gives case-insensitive matching without regex.
-      if (trimmed.toLowerCase().startsWith(prefix)) {
+      if (lowered.startsWith(prefix)) {
         currentKey = key;
-        result[key] = trimmed.slice(prefix.length).trim().replace(/\n/g, ' ');
+        result[key] = trimmed.slice(prefix.length).trim().replace(LINE_TERMINATORS, ' ');
         matched = true;
         break;
       }
@@ -100,8 +128,21 @@ function segmentDetails(detailsStr, keys) {
 
     if (!matched && currentKey !== null) {
       // Continuation of the previous field's value (embedded semicolons)
-      result[currentKey] = result[currentKey] + '; ' + trimmed.replace(/\n/g, ' ');
+      result[currentKey] = result[currentKey] + '; ' + trimmed.replace(LINE_TERMINATORS, ' ');
     }
+  }
+
+  // Recovery pass: a key the anchored pass never matched may still appear
+  // mid-segment in legacy corpus rows (written before the ';'-delimited
+  // grammar was documented) where fields are separated by '. ' rather than
+  // ';'. The unanchored regex requires the key to be preceded by a
+  // word-boundary character (^, '.', ';', or whitespace) so that 'reissue:'
+  // still does NOT match 'issue:', and it only fills keys the anchored pass
+  // left unset — never overrides an anchored match. applies PF-044.
+  for (const key of keys) {
+    if (result[key] !== undefined) continue;
+    const m = detailsStr.match(new RegExp('(?:^|[.;\\s])' + key + ':\\s*([^;]+)', 'i'));
+    if (m) result[key] = m[1].trim().replace(LINE_TERMINATORS, ' ');
   }
 
   return result;
@@ -128,11 +169,11 @@ function segmentDetails(detailsStr, keys) {
  * @returns {string} rendered amendment, or '' when unrenderable
  */
 function amendmentToString(entry) {
-  if (typeof entry === 'string') return entry.replace(/\n/g, ' ').trim();
+  if (typeof entry === 'string') return entry.replace(LINE_TERMINATORS, ' ').trim();
   if (entry && typeof entry === 'object') {
-    const note = typeof entry.note === 'string' ? entry.note.replace(/\n/g, ' ').trim() : '';
+    const note = typeof entry.note === 'string' ? entry.note.replace(LINE_TERMINATORS, ' ').trim() : '';
     if (!note) return '';
-    const date = typeof entry.date === 'string' ? entry.date.replace(/\n/g, ' ').trim() : '';
+    const date = typeof entry.date === 'string' ? entry.date.replace(LINE_TERMINATORS, ' ').trim() : '';
     return date ? `[${date}] ${note}` : note;
   }
   return '';
@@ -337,18 +378,25 @@ function formatIndexEntryLine(entry) {
  * Empty corpus (both arrays empty) → '(none)'.
  * No trailing newline (caller adds '\n' before writing).
  *
- * Strategy: for each row, obtain its rendered block (truthy raw_body || format*Body(row)),
- * then extract heading/Status/Area with the same regexes.
+ * Strategy: for each row, obtain its rendered block (pre-rendered block when
+ * provided, else truthy raw_body || format*Body(row)), then extract
+ * heading/Status/Area with the same regexes.
  * This preserves byte-compat for migrated rows that carry Area/Status only in raw_body.
  * Note: raw_body === "" is treated as absent (falsy); both predicates align with the
  * truthy check in renderDecisionsFile so index and body files never drift on this edge.
  *
  * @param {object[]} activeDecisionRows - Active decision rows (type='decision', sorted by anchor)
  * @param {object[]} activePitfallRows - Active pitfall rows (type='pitfall', sorted by anchor)
- * @param {{ decisionsFilePath: string, pitfallsFilePath: string }} opts - absolute file paths for footer
+ * @param {{ decisionsFilePath: string, pitfallsFilePath: string, decisionBlocks?: string[], pitfallBlocks?: string[] }} opts
+ *   decisionsFilePath / pitfallsFilePath — absolute file paths for footer.
+ *   decisionBlocks / pitfallBlocks — optional pre-rendered per-row blocks (one entry per
+ *   active row, same order as the row arrays). When provided, each block is used directly
+ *   instead of re-rendering the row, so callers that already built blocks for the body
+ *   files avoid a second full render pass (PERF-2). The fallback expression
+ *   (raw_body || format*Body(row)) is used when the arrays are absent.
  * @returns {string} compact index string, or '(none)'
  */
-function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFilePath, pitfallsFilePath }) {
+function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFilePath, pitfallsFilePath, decisionBlocks, pitfallBlocks }) {
   /**
    * Extract an index entry from a rendered block string.
    * @param {string} block
@@ -371,16 +419,18 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
 
   /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
   const adrEntries = [];
-  for (const row of activeDecisionRows) {
-    const block = row.raw_body ? row.raw_body : formatDecisionBody(row);
+  for (let i = 0; i < activeDecisionRows.length; i++) {
+    const row = activeDecisionRows[i];
+    const block = decisionBlocks ? decisionBlocks[i] : (row.raw_body ? row.raw_body : formatDecisionBody(row));
     const entry = extractEntryFromBlock(block);
     if (entry) adrEntries.push(entry);
   }
 
   /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
   const pfEntries = [];
-  for (const row of activePitfallRows) {
-    const block = row.raw_body ? row.raw_body : formatPitfallBody(row);
+  for (let i = 0; i < activePitfallRows.length; i++) {
+    const row = activePitfallRows[i];
+    const block = pitfallBlocks ? pitfallBlocks[i] : (row.raw_body ? row.raw_body : formatPitfallBody(row));
     const entry = extractEntryFromBlock(block);
     if (entry) pfEntries.push(entry);
   }

@@ -30,7 +30,12 @@ const {
   buildIndexContent: (
     activeDecisionRows: Record<string, unknown>[],
     activePitfallRows: Record<string, unknown>[],
-    opts: { decisionsFilePath: string; pitfallsFilePath: string }
+    opts: {
+      decisionsFilePath: string;
+      pitfallsFilePath: string;
+      decisionBlocks?: string[];
+      pitfallBlocks?: string[];
+    }
   ) => string;
   segmentDetails: (
     detailsStr: string,
@@ -1137,5 +1142,143 @@ describe("segmentDetails — rejoin-normalization of TL;DR (documented '; ' join
       PF_KEYS,
     );
     expect(result.issue).toBe('TL; DR of the problem');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REG-2: recovery pass for legacy corpus rows (fields embedded after ". ")
+// ---------------------------------------------------------------------------
+
+describe('segmentDetails — REG-2: recovery pass for legacy corpus rows', () => {
+  const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
+  const ADR_KEYS = ['context', 'decision', 'rationale'] as const;
+
+  it('PF-009-shaped: keys embedded mid-segment after ". " are recovered by recovery pass', () => {
+    // Legacy corpus rows (before the ';'-grammar was documented) use '. ' as
+    // the field separator — the anchored pass only captures 'area:' (at segment
+    // start), and the recovery pass fills 'issue:', 'impact:', 'resolution:'.
+    const details =
+      'area: rule install fan-out. issue: no per-item try/catch. impact: aborts install. resolution: wrap in try/catch';
+    const result = segmentDetails(details, PF_KEYS);
+    // anchored pass captures area (it is at segment start)
+    expect(result.area).toBeTruthy();
+    // recovery pass rescues the remaining fields
+    expect(result.issue).toBeTruthy();
+    expect(result.issue).toContain('no per-item try/catch');
+    expect(result.impact).toBeTruthy();
+    expect(result.impact).toContain('aborts install');
+    expect(result.resolution).toBeTruthy();
+    expect(result.resolution).toContain('wrap in try/catch');
+  });
+
+  it('ADR-004-shaped: decision and rationale embedded mid-segment are recovered', () => {
+    // ADR-004 uses '. ' separators; 'decision:' and 'rationale:' appear
+    // mid-segment after the context value — the recovery pass is required.
+    const details =
+      'context: ambient mode churned through two designs. decision: pivot to always-on orchestrator charter. rationale: graded orchestrator is simpler';
+    const result = segmentDetails(details, ADR_KEYS);
+    expect(result.context).toBeTruthy();
+    // recovery pass fills the remaining ADR keys
+    expect(result.decision).toBeTruthy();
+    expect(result.decision).toContain('pivot');
+    expect(result.rationale).toBeTruthy();
+    expect(result.rationale).toContain('simpler');
+  });
+
+  it('recovery pass does NOT override a value already set by the anchored pass', () => {
+    // 'area:' appears at the start of the first segment AND again mid-segment.
+    // The anchored pass sets it on the first occurrence; recovery must skip it.
+    const details = 'area: correct value. area: should not win via recovery';
+    const result = segmentDetails(details, PF_KEYS);
+    expect(result.area).toBeTruthy();
+    // The anchored match captured from the first segment — recovery skips.
+    expect(result.area).toContain('correct value');
+  });
+
+  it('well-formed ;-delimited input still parses correctly (no regression)', () => {
+    const details = 'area: hooks; issue: Promise.all; impact: install aborts; resolution: guard';
+    const result = segmentDetails(details, PF_KEYS);
+    expect(result.area).toBe('hooks');
+    expect(result.issue).toBe('Promise.all');
+    expect(result.impact).toBe('install aborts');
+    expect(result.resolution).toBe('guard');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TS-1: full JS LineTerminator set collapsed in field values (\r, \r\n, LS, PS)
+// ---------------------------------------------------------------------------
+
+describe('segmentDetails — TS-1: full LineTerminator set collapsed in field values', () => {
+  const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
+
+  it('\\r (bare CR) in a segment value is collapsed to a space', () => {
+    const result = segmentDetails('area: foo\rbar; issue: baz', PF_KEYS);
+    expect(result.area).toBe('foo bar');
+  });
+
+  it('\\r\\n (CRLF) in a segment value — each character is replaced, yielding two spaces', () => {
+    const result = segmentDetails('area: foo\r\nbar; issue: baz', PF_KEYS);
+    expect(result.area).toBe('foo  bar');
+  });
+
+  it('\\u2028 (LS) in a segment value is collapsed to a space', () => {
+    const result = segmentDetails('area: foo bar; issue: baz', PF_KEYS);
+    expect(result.area).toBe('foo bar');
+  });
+
+  it('\\r in amendmentToString string form is collapsed to a space', () => {
+    expect(formatAmendmentsLine(['foo\rbar'])).toBe('- **Amendments**: foo bar\n');
+  });
+
+  it('\\r\\n in amendmentToString string form — both chars replaced, two spaces', () => {
+    expect(formatAmendmentsLine(['foo\r\nbar'])).toBe('- **Amendments**: foo  bar\n');
+  });
+
+  it('\\u2028 in amendmentToString string form is collapsed to a space', () => {
+    expect(formatAmendmentsLine(['foo bar'])).toBe('- **Amendments**: foo bar\n');
+  });
+
+  it('\\r in amendmentToString { date, note } object note is collapsed to a space', () => {
+    expect(formatAmendmentsLine([{ note: 'foo\rbar', date: '2026-01-01' }])).toBe(
+      '- **Amendments**: [2026-01-01] foo bar\n',
+    );
+  });
+
+  it('CR-bearing area value cannot hijack the Status tag in buildIndexContent (TS-1 guard)', () => {
+    // Without LINE_TERMINATORS collapse, formatPitfallBody would emit:
+    //   "- **Area**: foo\r- **Status**: Faked\n"
+    // and the /^- \*\*Status\*\*:/m regex would wrongly extract "Faked" as
+    // the status field. With the fix the CR is collapsed to a space, so the
+    // actual "- **Status**: Active\n" line is the only Status line in the block.
+    const row = {
+      anchor_id: 'PF-001',
+      pattern: 'test pitfall',
+      id: 'obs1',
+      decisions_status: undefined,
+      details: 'area: foo\r- **Status**: Faked; issue: x; impact: y; resolution: z',
+    };
+    const result = buildIndexContent([], [row], {
+      decisionsFilePath: '/tmp/decisions.md',
+      pitfallsFilePath: '/tmp/pitfalls.md',
+    });
+    expect(result).toContain('[Active]');
+    expect(result).not.toContain('[Faked]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC-S1: duplicate-key policy — last-match-wins (docstring correction pin)
+// ---------------------------------------------------------------------------
+
+describe('segmentDetails — SEC-S1: duplicate-key policy is last-match-wins', () => {
+  const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
+
+  it('when the same key appears more than once the LAST segment-start occurrence wins', () => {
+    // The docstring previously said "priority order" (implying first-wins) but
+    // the implementation overwrites on each match — so last wins.  This test
+    // pins last-match-wins so a refactor cannot silently invert it.
+    const result = segmentDetails('area: first; area: second', PF_KEYS);
+    expect(result.area).toBe('second');
   });
 });
