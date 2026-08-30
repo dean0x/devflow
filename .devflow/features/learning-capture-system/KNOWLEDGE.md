@@ -167,13 +167,13 @@ must use the same threshold or the live-vs-crashed decision diverges.
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "decision" "obs_xxx"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall"  "obs_xxx"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor "ADR-NNN"  "Superseded"
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor "ADR-NNN"
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor "ADR-NNN" [...]
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" rotate-observations
 ```
 
 Each op self-locks. Never wrap them in an external lock; never call more than one at a time.
 `assign-anchor` atomically writes `decisions.md`, `pitfalls.md`, and `index.md`. These files
-are **never hand-edited** — they are exclusively owned by the ledger ops and `render-decisions.cjs`.
+are **never hand-edited** — they are exclusively owned by the ledger ops (`assign-anchor`, `retire-anchor`, `refresh-anchor`), each of which renders internally.
 
 **`assign-anchor` details**: Beyond minting the next anchor number, `assign-anchor` now (a) writes
 `anchor_id` back into the log row (`status: 'created'`, `anchor_id: <id>`) — this arms guard (b)
@@ -181,21 +181,29 @@ so a second call for the same obs_id throws rather than minting a duplicate numb
 `date` on BOTH decision and pitfall rows at promotion. Older pitfall rows promoted before this
 change may lack a `date` field — the D5 window fallback (see Gotchas) handles them.
 
-**`refresh-anchor <anchor_id>` — fourth op (ADR-022 content-update path)**:
-Re-projects an already-anchored log observation into the committed ledger row and re-renders
-all three output files. Use after reinforcing an anchored obs (updating `pattern`/`details`/
-`last_seen` in the log) to propagate the improvement to `decisions.md`/`pitfalls.md`/`index.md`.
+**`refresh-anchor <anchor_id> [<anchor_id>...]` — fourth op (ADR-022 content-update path)**:
+Variadic: re-projects one or more already-anchored log observations into the committed ledger
+rows and re-renders all three output files in a single lock/parse/render pass. Use after
+reinforcing anchored observations (updating `pattern`/`details`/`last_seen` in the log) to
+propagate improvements to `decisions.md`/`pitfalls.md`/`index.md`. BATCH: collect all anchor
+ids that need refreshing and make ONE call — N calls pay N renders; one variadic call pays one.
 
-Algorithm: (1) find the existing ledger row by `anchor_id`; (2) find the log obs by the
-LEDGER ROW's `id` field — id-based lookup covers pre-write-back corpora where the log row
-has no `anchor_id`; (3) re-project via `toLedgerRow`, preserving `decisions_status` and `date`
+Algorithm: (1) parse ledger + log once; (2) for each anchor id: find the existing ledger row by
+`anchor_id`; find the log obs by the LEDGER ROW's `id` field — id-based lookup covers
+pre-write-back corpora where the log row has no `anchor_id`; validate preconditions (missing id,
+missing `decisions_status`, type mismatch, details-divergence) — all-or-nothing, refuse on any
+failure; (3) re-project all rows via `toLedgerRow`, preserving `decisions_status` and `date`
 from the ledger (ledger-owned fields), taking content from the log (content authority); (4)
-replace the ledger row and re-render atomically inside `.decisions.lock`. Echoes anchor_id on
-stdout. **Never writes to the log.** Strips legacy-only fields (`evidence`, `confidence`,
-`count`, `status`, `artifact_path`) — incremental normalization at re-projection time.
+write the updated ledger and re-render atomically inside `.decisions.lock`. Echoes all refreshed
+anchor ids on stdout (newline-joined). **Never writes to the log.** `toLedgerRow` is a positive
+WHITELIST: the committed row is exactly `{id, type, pattern, details, anchor_id,
+decisions_status}` plus optional `date`, `raw_body`, `amendments`. Every other field (and
+anything added later) is dropped — a new ledger field must be added to `toLedgerRow` or it will
+never reach the ledger. The projector also collapses line terminators in `pattern`, enforces the
+committed row's `type` via `expectType`, and gates `raw_body` through `isSafeRawBody`.
 
-`refresh-anchor` calls do NOT count toward the ≤5 curation-changes bound in Part 2 — they
-are projections, not new entries (applies ADR-022).
+`refresh-anchor` calls do not consume curation slots, but at most 10 anchors may be refreshed
+per run, batched into a single variadic call — every loop bounded (applies ADR-022).
 
 **details grammar** (applies to observation log rows written by the agent):
 `details` is a `Key: value` string with segments separated by `;`. A segment that begins
@@ -216,7 +224,8 @@ in `details`/`evidence` no longer exists), determine whether the reference is a 
 file the entry recorded deleting or retiring — leave the entry intact). A missing historical
 citation confirms the decision was implemented; never retire an entry purely for that.
 
-**Directory bootstrapping**: Both `assign-anchor` and `retire-anchor` call
+**Directory bootstrapping**: Every `.decisions.lock` caller mkdirs its parent first (PF-013):
+`assign-anchor`, `retire-anchor`, and `refresh-anchor` all call
 `fs.mkdirSync(path.dirname(lockDir), { recursive: true })` before acquiring `.decisions.lock`.
 `path.dirname(lockDir)` resolves to `.devflow/learning/`, so this creates the correct
 directory tree on the first run of a fresh project — no pre-init needed.
@@ -244,6 +253,11 @@ Key functions:
   for the object shape — this normalisation is load-bearing.
 - **`formatAmendmentsLine(amendments)`**: renders `- **Amendments**: text1; text2\n` — last
   line in the entry body. Returns `''` when absent/empty; never appears in index lines.
+- **`amendments` producer**: the Learning agent appends `{ "date": "YYYY-MM-DD", "note": "..." }`
+  objects to the log row's `amendments` array when reinforcing an already-anchored observation
+  with a dated correction or ratification. A follow-up `refresh-anchor` propagates the addition
+  to rendered files. The shape is `{date, note}` — the schema validator rejects bare strings
+  (avoids PF-024).
 - **Date purity**: formatters read `row.date || ''` — no clock reads inside a formatter.
   Absent date renders as empty string for deterministic/idempotent output (D5).
 
@@ -357,8 +371,8 @@ agents must not "fix" the naming mismatch.
   for a single subprocess (AC-P1). Two forks double the overhead on every hook invocation.
 
 - **Editing `decisions.md`, `pitfalls.md`, or `index.md` directly in the Learning agent**:
-  these files are exclusively owned by `assign-anchor`/`retire-anchor`/`refresh-anchor`/
-  `render-decisions.cjs`. Hand-edits create rendering inconsistencies and get silently overwritten.
+  these files are exclusively owned by the ledger ops `assign-anchor`/`retire-anchor`/
+  `refresh-anchor` (each renders internally). Hand-edits get silently overwritten.
 
 - **Editing the ledger directly for content changes**: the log is the content authority
   (ADR-022). To update an anchored entry's content, edit the log row then call `refresh-anchor`.
@@ -379,8 +393,9 @@ agents must not "fix" the naming mismatch.
   `claude -p` session that fires `UserPromptSubmit`/`Stop` hooks. Without this guard, the
   worker's turns get double-captured into both queues.
 
-- **Counting `refresh-anchor` calls toward the ≤5 curation bound**: refresh-anchor is a
-  re-projection (not a new entry); it does not consume a curation slot.
+- **Running more than 10 `refresh-anchor` calls per run**: refresh calls do not consume
+  curation slots but are bounded separately — at most 10 anchors per run, batched into a single
+  variadic call. Stop when the cap is reached; the next run continues.
 
 ## Gotchas
 

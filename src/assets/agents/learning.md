@@ -29,8 +29,8 @@ ledger ops below.
 > exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`/`refresh-anchor`).
 > One `assign-anchor` invocation claims one number and re-renders all three files atomically
 > (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
-> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Manual re-render
-> via `render-decisions.cjs render "$(pwd)"` also refreshes index.md.
+> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Every ledger op
+> re-renders all three files internally; there is no separate render step for you to run.
 
 ## Environment
 
@@ -39,7 +39,7 @@ are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-he
 
 - `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
-- `refresh-anchor <anchor_id>` — strictly re-projects an anchored log row through the same projector as `assign-anchor` and re-renders; use after reinforcing an already-anchored observation (D1/ADR-022)
+- `refresh-anchor <anchor_id> [<anchor_id>...]` — variadic: re-projects one or more anchored log rows through the same projector as `assign-anchor` in a single lock/parse/render pass; use after reinforcing already-anchored observations (ADR-022)
 - `rotate-observations` — archives `observing` log rows older than 30 days
 
 Each op self-locks internally. Call them plainly — never wrap them in a lock of your own,
@@ -120,11 +120,22 @@ rewrite the whole file:
   timestamps are UTC ISO (`date -u +%Y-%m-%dT%H:%M:%SZ`). Estimate `confidence` honestly —
   it is curation metadata only, NOT a gate; do not inflate it.
 
-  **`details` grammar**: use `Key: value` segments separated by `;`. A segment that begins
-  with a recognised key name followed by `:` (e.g. `context:`, `decision:`, `rationale:`,
-  `area:`, `issue:`, `impact:`, `resolution:`) starts a new field; semicolons inside a
-  value are preserved and do not split it. Keep prose out of key positions — do not start a
-  value with text that looks like a recognised key.
+  **`details` grammar**: use `Key: value` segments separated by `;`. Recognised keys are per
+  type and disjoint — decisions: `context:`, `decision:`, `rationale:`; pitfalls: `area:`,
+  `issue:`, `impact:`, `resolution:`. A segment that begins with a key recognised FOR THAT TYPE
+  starts a new field; any other segment (including a key from the opposite type) is appended to
+  the previous field's value, so semicolons inside a value are preserved. Keep prose out of key
+  positions — do not start a value with text that looks like a recognised key for that type. The
+  parser has a recovery pass for legacy mid-segment keys.
+
+  **`amendments` field**: when reinforcing an already-anchored observation with a dated
+  correction or ratification that should remain visible as history (rather than silently
+  rewriting `details`), APPEND `{ "date": "YYYY-MM-DD", "note": "..." }` to the log row's
+  `amendments` array (create the array if absent). The shape is exactly `{date, note}` — the
+  schema validator rejects bare strings. Amendments render at the end of the entry body in
+  `decisions.md`/`pitfalls.md`; they never appear in `index.md` lines. A follow-up
+  `refresh-anchor <anchor_id>` is required to propagate the addition to the rendered files
+  (ADR-022).
 
 - **Reinforce an existing row** — use the Edit tool to replace that row's single line:
   increment `observations`, union `evidence` (dedupe, cap 10), update `last_seen`, and
@@ -141,16 +152,19 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall" "obs
 NEVER hand-edit `decisions.md` or `pitfalls.md`. NEVER invent an ADR-NNN/PF-NNN number
 yourself — `assign-anchor` is the only source of numbering.
 
-**After reinforcing an already-anchored observation**: once you have updated the log row
-(incrementing `observations`, refreshing `pattern`/`details`, updating `last_seen`), run:
+**After reinforcing already-anchored observations**: once you have updated all target log rows
+(incrementing `observations`, refreshing `pattern`/`details`, updating `last_seen`), collect
+all anchor ids and make ONE variadic call:
 
 ```bash
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id>
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id1> [<anchor_id2> ...]
 ```
 
-This re-projects the sharpened log row into the rendered files so the improvement reaches
-`decisions.md`/`pitfalls.md`/`index.md`. `refresh-anchor` calls do NOT count toward the
-≤5 curation-changes bound — they are projections, not new entries.
+This re-projects all sharpened log rows in a single lock/parse/render pass, propagating
+improvements to `decisions.md`/`pitfalls.md`/`index.md`. BATCH: do not call once per row — N
+calls pay N full-corpus renders; one variadic call pays one. Refresh calls do not consume
+curation slots; however, at most 10 anchors may be refreshed per run — stop if the cap is
+reached.
 
 ## Part 2 — Curation
 
@@ -160,7 +174,7 @@ ledger (`.devflow/learning/decisions-ledger.jsonl`) is within the past 7 days. T
 is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file. If the ledger
 row lacks a `date` field (pitfall rows promoted before date-stamping was added), use the
 observation log row's `last_seen` date for the window. If `last_seen` is also unavailable, the
-entry predates date-stamping and is outside the protection window (D5).
+entry predates date-stamping and is outside the protection window (no backfill: a fabricated date would be worse than an unprotected entry — ADR-022).
 
 Ground yourself first, all by direct reads:
 - Active entries and counts: `decisions.md` / `pitfalls.md` — what is rendered is what is active.
@@ -208,12 +222,13 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor <anchor_id> <s
 
 `retire-anchor` is atomic and idempotent. Call it once per entry.
 
-**Citation preservation** (D1/ADR-022 — log is content authority): if an entry being retired
+**Citation preservation** (ADR-022 — log is content authority): if an entry being retired
 has inbound `applies ADR-NNN` citations in other entries' `pattern`/`details`, update those
 other entries to reference the surviving entry — do this by editing their **log rows** in
-`decisions-log.jsonl` (one line at a time), then running
-`node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id>` for each
-updated row. Never edit the ledger directly for content changes; the log is the authority.
+`decisions-log.jsonl` (one line at a time), then collecting all updated anchor ids and calling
+ONCE: `node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id1> [<anchor_id2> ...]`
+Batch all ids into the single variadic call — one lock/parse/render pass for the whole set.
+Never edit the ledger directly for content changes; the log is the authority.
 
 **Cap enforcement**: stop after 5 changes regardless of remaining candidates.
 
