@@ -1,7 +1,7 @@
 ---
 feature: learning-capture-system
 name: Learning & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, render-decisions."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments."
 category: architecture
 directories:
   - src/assets/scripts/hooks
@@ -15,7 +15,7 @@ directories:
   - src/hud/components/learning-counts.ts
   - src/assets/commands/_partials
 created: 2026-07-15
-updated: 2026-07-22
+updated: 2026-08-30
 ---
 
 # Learning & Capture System
@@ -153,40 +153,143 @@ must use the same threshold or the live-vs-crashed decision diverges.
 
 **Processing**:
 - Part 1 (detection): reads claimed turns + `decisions-log.jsonl`; appends/reinforces
-  observations via Bash heredoc (one JSONL row at a time); promotes via `assign-anchor`
-- Part 2 (curation): calls `rotate-observations`; retires stale entries via `retire-anchor`
+  observations via Bash heredoc (one JSONL row at a time); promotes via `assign-anchor`;
+  calls `refresh-anchor` after reinforcing any already-anchored obs
+- Part 2 (curation): calls `rotate-observations`; retires stale entries via `retire-anchor`;
+  calls `refresh-anchor` after updating cross-reference log rows during citation cleanup
 - Heartbeat `touch` of `.processing` at the Part 1 → Part 2 boundary prevents a long run
   from being mistakenly re-claimed
 - **Final act**: `unlink .devflow/learning/.pending-turns.processing` (applies PF-003 —
   bare `rm` is blocked by the deny-list; `unlink` is the required form)
 
-**Ledger ops** (called from agent's Bash tool):
+**Ledger ops** (called from agent's Bash tool) — there are exactly four:
 ```bash
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "decision" "obs_xxx"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall"  "obs_xxx"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor "ADR-NNN"  "Superseded"
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor "ADR-NNN"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" rotate-observations
 ```
 
 Each op self-locks. Never wrap them in an external lock; never call more than one at a time.
 `assign-anchor` atomically writes `decisions.md`, `pitfalls.md`, and `index.md`. These files
-are **never hand-edited** — they are exclusively owned by `assign-anchor`/`retire-anchor`/
-`render-decisions.cjs`.
+are **never hand-edited** — they are exclusively owned by the ledger ops and `render-decisions.cjs`.
+
+**`assign-anchor` details**: Beyond minting the next anchor number, `assign-anchor` now (a) writes
+`anchor_id` back into the log row (`status: 'created'`, `anchor_id: <id>`) — this arms guard (b)
+so a second call for the same obs_id throws rather than minting a duplicate number; and (b) stamps
+`date` on BOTH decision and pitfall rows at promotion. Older pitfall rows promoted before this
+change may lack a `date` field — the D5 window fallback (see Gotchas) handles them.
+
+**`refresh-anchor <anchor_id>` — fourth op (ADR-022 content-update path)**:
+Re-projects an already-anchored log observation into the committed ledger row and re-renders
+all three output files. Use after reinforcing an anchored obs (updating `pattern`/`details`/
+`last_seen` in the log) to propagate the improvement to `decisions.md`/`pitfalls.md`/`index.md`.
+
+Algorithm: (1) find the existing ledger row by `anchor_id`; (2) find the log obs by the
+LEDGER ROW's `id` field — id-based lookup covers pre-write-back corpora where the log row
+has no `anchor_id`; (3) re-project via `toLedgerRow`, preserving `decisions_status` and `date`
+from the ledger (ledger-owned fields), taking content from the log (content authority); (4)
+replace the ledger row and re-render atomically inside `.decisions.lock`. Echoes anchor_id on
+stdout. **Never writes to the log.** Strips legacy-only fields (`evidence`, `confidence`,
+`count`, `status`, `artifact_path`) — incremental normalization at re-projection time.
+
+`refresh-anchor` calls do NOT count toward the ≤5 curation-changes bound in Part 2 — they
+are projections, not new entries (applies ADR-022).
+
+**details grammar** (applies to observation log rows written by the agent):
+`details` is a `Key: value` string with segments separated by `;`. A segment that begins
+with a recognised key name followed by `:` (anchored match — `reissue:` does NOT match
+`issue:`) starts a new field; semicolons inside a value are preserved as `'; '-rejoined
+continuations. Decision keys: `context`, `decision`, `rationale`. Pitfall keys: `area`,
+`issue`, `impact`, `resolution`. The parser in `decisions-format.cjs#segmentDetails` is
+the single authority for this grammar — never parse `details` strings by hand (avoids PF-042).
+
+**7-day protection window (D5) fallback**: the window key is the ledger row's `date` field.
+Pitfall rows promoted before date-stamping was added may lack `date`. Fallback chain:
+ledger `date` → observation log row's `last_seen` → assume pre-date-stamping (outside window).
+The agent must read the log row's `last_seen` explicitly before acting on old pitfall rows.
+
+**PF-040 pointer-vs-citation gate**: before acting on a missing-path signal (a file cited
+in `details`/`evidence` no longer exists), determine whether the reference is a live pointer
+(the file a reader should follow today — repair the reference) or a historical citation (the
+file the entry recorded deleting or retiring — leave the entry intact). A missing historical
+citation confirms the decision was implemented; never retire an entry purely for that.
 
 **Directory bootstrapping**: Both `assign-anchor` and `retire-anchor` call
 `fs.mkdirSync(path.dirname(lockDir), { recursive: true })` before acquiring `.decisions.lock`.
 `path.dirname(lockDir)` resolves to `.devflow/learning/`, so this creates the correct
-directory tree on the first run of a fresh project — no pre-init needed. The obsolete
-`.devflow/decisions/` directory is never created (applies ADR-011 — last runtime straggler
-of the decisions→learning rename removed on the `refactor/restructure-src` branch).
+directory tree on the first run of a fresh project — no pre-init needed.
 
 **Error paths inside the lock use `throw`, not `process.exit`**: Any early-exit condition
-that fires while holding `.decisions.lock` (obs_id not found, anchor_id not found) calls
-`throw new Error(...)` rather than `process.exit(1)`. Node's `process.exit()` skips `finally`
-blocks; throwing ensures the `finally` always runs `releaseLock(lockDir)`. An outer
-`catch (err)` in the `if (require.main === module)` block catches the throw, writes
-`json-helper error: <message>` to stderr, and exits 1. Net contract: controlled non-zero
-exit, `json-helper error: ` prefix on locked-path errors, lock always released.
+that fires while holding `.decisions.lock` calls `throw new Error(...)` rather than
+`process.exit(1)`. Node's `process.exit()` skips `finally` blocks; throwing ensures the
+`finally` always runs `releaseLock(lockDir)`. An outer `catch (err)` in
+`if (require.main === module)` catches the throw, writes `json-helper error: <message>`
+to stderr, and exits 1. Net contract: controlled non-zero exit, lock always released.
+
+### decisions-format.cjs
+
+Shared pure formatting helpers that are the single source of truth for byte-compatible
+output strings consumed by `assign-anchor`, `render-decisions.cjs`, and `session-start-context`.
+
+Key functions:
+- **`segmentDetails(detailsStr, keys)`**: anchored-key parser for `details` strings.
+  Splits on `;`, checks whether each trimmed segment starts with a recognised `key:` prefix
+  (case-insensitive, anchored at segment start). Non-matching segments are treated as
+  continuations of the previous field (preserves embedded semicolons). `TL;DR` → `TL; DR`
+  is a deliberate side-effect of this design. Applies PF-042.
+- **`amendmentToString(entry)`**: normalises `{date, note}` objects (rendered `[date] note`)
+  and pre-rendered strings to a single string. A bare `join` would emit `[object Object]`
+  for the object shape — this normalisation is load-bearing.
+- **`formatAmendmentsLine(amendments)`**: renders `- **Amendments**: text1; text2\n` — last
+  line in the entry body. Returns `''` when absent/empty; never appears in index lines.
+- **Date purity**: formatters read `row.date || ''` — no clock reads inside a formatter.
+  Absent date renders as empty string for deterministic/idempotent output (D5).
+
+### Memory Worker (background-memory-update)
+
+**Staged-write CAS (applies ADR-023)**: the model is instructed to write ONLY the staging
+file `WORKING-MEMORY.md.new` (never the real file). After the model exits:
+
+1. Worker re-checks the staging file for `<!-- memory-head:` on line 1.
+2. Re-checks real file cksum against the pre-run baseline (captured before content read;
+   `ABSENT` sentinel when the file was absent — resolves toward false-conflict, never false-success).
+3. If cksum matches → atomic `mv WORKING-MEMORY.md.new WORKING-MEMORY.md`; remove
+   `.processing`; touch `.last-refresh-ok`.
+4. If cksum differs → CONFLICT: discard staged file, keep `.processing` as the retry vehicle.
+   `.last-refresh-ok` is NOT touched on conflict.
+
+The stale-staged-file cleanup (`rm -f WORKING-MEMORY.md.new`) runs at the START of each
+worker run so a watchdog-killed prior run's leftover does not corrupt the next CAS check.
+
+**Prompt engineering**: the prompt carries three instruction blocks — RECONCILE BEFORE
+CARRYING FORWARD (re-verify each `## Now`/`## Progress` item against `COMMITS_SINCE` + git
+state + turns), STATUS DISCIPLINE BOTH DIRECTIONS (never upgrade without evidence AND never
+restate a stale claim), and PROVENANCE (today's date for any stamped entries). The
+`COMMITS_SINCE` computation is hex-gated + merge-base ancestry-checked before running
+`git log`; a `TURNS_NOTE` disclosure is emitted when the 20-line turns window caps.
+
+### pre-compact-memory Bootstrap Guard
+
+The hook bootstraps a minimal `WORKING-MEMORY.md` only when BOTH gates pass:
+- `GIT_HEAD_SHA` is a 40-hex SHA (guards against malformed stamps)
+- `GIT_BRANCH` is non-empty (guards against detached HEAD)
+
+Detached HEAD: `git branch --show-current` returns `""` → branch gate fails → no bootstrap.
+Unborn branch (no commits): `git rev-parse HEAD` fails → SHA is empty → SHA gate fails.
+An unstamped bootstrap would render as "synced @ unknown" at the next SessionStart.
+The bootstrapped file uses the canonical 5 sections and carries the stamp on line 1.
+
+### session-start-memory Refresh-Failing Detection (B4)
+
+`detect_refresh_failing()` counts unprocessed turns from BOTH:
+- `.pending-turns.jsonl` (primary queue)
+- `.pending-turns.processing` (an orphaned CONFLICT-retry batch)
+
+Before this fix, an orphaned `.processing` left by a CAS CONFLICT (mtime between 0s and the
+D56c 300s cold-path gate) was invisible to State-C — the warning would never fire even though
+content was stuck. The fix makes the two files additive for the depth count.
 
 ### decisions_load() and index.md Consumption
 
@@ -254,8 +357,12 @@ agents must not "fix" the naming mismatch.
   for a single subprocess (AC-P1). Two forks double the overhead on every hook invocation.
 
 - **Editing `decisions.md`, `pitfalls.md`, or `index.md` directly in the Learning agent**:
-  these files are exclusively owned by `assign-anchor`/`retire-anchor`/`render-decisions.cjs`.
-  Hand-edits create rendering inconsistencies and get silently overwritten.
+  these files are exclusively owned by `assign-anchor`/`retire-anchor`/`refresh-anchor`/
+  `render-decisions.cjs`. Hand-edits create rendering inconsistencies and get silently overwritten.
+
+- **Editing the ledger directly for content changes**: the log is the content authority
+  (ADR-022). To update an anchored entry's content, edit the log row then call `refresh-anchor`.
+  Direct ledger edits bypass the `toLedgerRow` projector and can reintroduce legacy fields.
 
 - **Using `rm` to delete `.pending-turns.processing`**: the recommended deny-list blocks bare
   `rm` for agent instruction deletions (PF-003). Use `unlink` in the agent's final act.
@@ -271,6 +378,9 @@ agents must not "fix" the naming mismatch.
 - **Omitting the `DEVFLOW_BG_UPDATER=1` guard**: the background memory worker spawns its own
   `claude -p` session that fires `UserPromptSubmit`/`Stop` hooks. Without this guard, the
   worker's turns get double-captured into both queues.
+
+- **Counting `refresh-anchor` calls toward the ≤5 curation bound**: refresh-anchor is a
+  re-projection (not a new entry); it does not consume a curation slot.
 
 ## Gotchas
 
@@ -295,18 +405,36 @@ agents must not "fix" the naming mismatch.
   feature config where there is no project-vs-global concept (`.devflow/config.json` is
   project-only).
 
+- **`process.exit()` skips `finally` blocks in Node.js `.cjs` helpers**: Any locked code path
+  that calls `process.exit(1)` directly will leak the lock directory. The established pattern
+  in `json-helper.cjs` is to `throw new Error(...)` inside the locked `try` block and let the
+  outer `catch (err)` in `if (require.main === module)` print `json-helper error: <message>`
+  and exit 1. Copy this pattern for any new locked operation; never call `process.exit()`
+  from inside a `try` that holds a lock directory.
+
+- **`refresh-anchor` looks up the log obs by the LEDGER ROW's `id`** (not by `anchor_id`):
+  pre-write-back corpora had no `anchor_id` stamped in the log row; matching on `id` covers all
+  anchored entries. A log with the `anchor_id` written by `assign-anchor` is also found this
+  way. Do not switch to anchor_id-based log lookup or pre-write-back repairs will fail.
+
+- **D5 pitfall-rows date fallback**: pitfall rows promoted before date-stamping may have `date`
+  absent in the ledger. The agent must read the observation log row's `last_seen` for the 7-day
+  gate before acting on such rows — never assume the ledger row has `date`.
+
+- **CAS CONFLICT leaves `.processing` as retry vehicle**: when `background-memory-update`
+  detects a CONFLICT (real file changed during model run), it keeps `.processing` and does NOT
+  touch `.last-refresh-ok`. The next worker spawn re-merges `.processing` with any new queue
+  and retries. State-C detection in `session-start-memory` counts `.processing` lines toward
+  the unprocessed depth, so users see the warning even when `.jsonl` is empty.
+
+- **Pre-compact bootstrap skips detached HEAD and unborn branches**: if either `GIT_BRANCH`
+  is empty or `GIT_HEAD_SHA` is not a 40-hex string, no bootstrap file is written. This
+  prevents a stampless file that would render as "synced @ unknown" at the next SessionStart.
+
 - **json_extract_cwd_field SOH delimiter**: `capture-turn` splits the combined `cwd+field`
   output using `$'\001'` (bash SOH literal). The jq side emits `""`. If you add a
   new hook that uses this helper, verify both branches (jq and node fallback) emit the same
   delimiter — the node fallback in `json-helper.cjs` uses `String.fromCharCode(1)`.
-
-- **`process.exit()` skips `finally` blocks in Node.js `.cjs` helpers**: Any locked code path
-  that calls `process.exit(1)` directly will leak the lock directory — Node's `process.exit()`
-  does not run `finally`. The established pattern in `json-helper.cjs` is to `throw new Error(...)`
-  inside the locked `try` block and let the outer `catch (err)` in `if (require.main === module)`
-  print `json-helper error: <message>` and exit 1. Copy this pattern for any new locked
-  operation added to `.cjs` helpers; never call `process.exit()` from inside a `try` that
-  holds a lock directory.
 
 ## Key Files
 
@@ -318,8 +446,14 @@ agents must not "fix" the naming mismatch.
 | `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + queue_read_gates |
 | `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
 | `src/assets/scripts/hooks/session-start-context` | Emits learning directive + TL;DR decisions header |
+| `src/assets/scripts/hooks/background-memory-update` | Detached worker: staged-write CAS, WORKING-MEMORY.md |
+| `src/assets/scripts/hooks/pre-compact-memory` | PreCompact: backup.json + gated WORKING-MEMORY.md bootstrap |
+| `src/assets/scripts/hooks/session-start-memory` | SessionStart: 3-state memory header + State-C refresh-failing |
 | `src/assets/scripts/hooks/json-parse` | JSON helpers including json_extract_cwd_field (SOH delimiter) |
 | `src/assets/agents/learning.md` | Learning agent spec (claim, detect, curate, unlink) |
+| `src/assets/scripts/hooks/json-helper.cjs` | Four ledger ops: assign-anchor, retire-anchor, refresh-anchor, rotate-observations |
+| `src/assets/scripts/hooks/lib/decisions-format.cjs` | segmentDetails, amendmentToString, formatAmendmentsLine, toLedgerRow, buildIndexContent |
+| `src/assets/scripts/hooks/lib/render-decisions.cjs` | Pure renderer — decisions.md, pitfalls.md, index.md from ledger rows |
 | `src/core/feature-config.ts` | `.devflow/config.json` read/write; `decisions`→`learning` coalesce |
 | `src/core/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) |
 | `src/core/project-paths.ts` | Path construction — single source of truth for all `.devflow/` paths |
@@ -331,11 +465,13 @@ agents must not "fix" the naming mismatch.
 
 ## Related
 
+- **ADR-022** — decisions-log.jsonl is the single content authority; the ledger is an anchor registry; ops project log→ledger→rendered .md; `refresh-anchor` is the projection-refresh path
+- **ADR-023** — staged compare-and-swap for the memory worker's write (`WORKING-MEMORY.md.new`)
+- **PF-040** — guard against acting on a missing path that is a historical citation rather than a live pointer
+- **PF-041** — guard reading a field its writer never persists fails open (e.g. `anchor_id` absent in pre-write-back log rows)
+- **PF-042** — delimiter-regex parsing of free prose truncates silently; `segmentDetails` anchored-key approach avoids this
 - **ADR-001** — config-only gates: feature toggles live in `.devflow/config.json`, not sentinel files; `decisions` legacy key coalesces to `learning` here
-- **ADR-002** — only `.devflow/features/` is git-tracked; all learning runtime files stay gitignored
-- **ADR-003** — document end-state only; the bash `opus` default is duplicated by design so the hook avoids a TS subprocess
 - **ADR-007** — `index.md` consumption is a plain Read; no subprocess, no `.cjs` script
-- **ADR-011** — decisions→learning rename; `assign-anchor`/`retire-anchor` no longer create `.devflow/decisions/` — they bootstrap `.devflow/learning/` via `fs.mkdirSync(path.dirname(lockDir), { recursive: true })` (last runtime straggler removed on `refactor/restructure-src`)
 - **PF-003** — agent instruction deletions use `unlink`, never bare `rm` (deny-list contract)
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system)
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
