@@ -138,6 +138,44 @@ function buildNoJsonParsePath(tmpBase: string): string {
 }
 
 /**
+ * Build a symlink-farm directory containing all tools the worker and its sourced helpers
+ * need, EXCEPT cksum. Setting PATH to only this directory makes `command -v cksum` fail
+ * deterministically on macOS and Linux, triggering the worker's startup assert.
+ *
+ * Uses an additive farm (not subtractive PATH filtering): Linux /bin carries cksum, so
+ * appending /bin to PATH always re-introduces it. Instead we symlink every needed tool
+ * from /usr/bin or /bin (whichever exists on the current platform) but never cksum.
+ */
+function buildNoCksumPath(tmpBase: string): string {
+  const farmDir = fs.mkdtempSync(path.join(tmpBase, 'emr-s25-nocksum-'));
+  // All tools the worker + sourced helpers call before (and after) the cksum assert.
+  // On Linux many /bin entries are symlinks into /usr/bin; we probe both so the farm
+  // works on macOS (/usr/bin-centric) and Linux (/bin or /usr/bin).
+  const tools = [
+    // /usr/bin tools on macOS; present in /usr/bin or /bin on Linux
+    'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
+    'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname',
+    // /bin tools on macOS; also /usr/bin or /bin on Linux
+    'bash', 'cat', 'chmod', 'cp', 'date', 'echo', 'kill', 'ls',
+    'mkdir', 'mv', 'rm', 'rmdir', 'sleep',
+    // 'cksum' deliberately absent — startup assert must fire
+  ];
+  for (const t of tools) {
+    const dst = path.join(farmDir, t);
+    if (fs.existsSync(dst)) continue;
+    for (const prefix of ['/usr/bin', '/bin']) {
+      const src = `${prefix}/${t}`;
+      if (fs.existsSync(src)) {
+        try { fs.symlinkSync(src, dst); } catch { /* skip already-exists */ }
+        break;
+      }
+    }
+  }
+  // No trailing /bin — the whole point is that cksum is not reachable
+  return farmDir;
+}
+
+/**
  * Create a fake `claude` that writes a deterministic stamped WORKING-MEMORY.md.new
  * (the staged file). When the capture hook spawns background-memory-update with this
  * shim on PATH, the fake claude completes instantly instead of hanging 120s.
@@ -2478,22 +2516,12 @@ exit 0
 
   // REL-3a: cksum absent from PATH — startup assert fires, worker exits without writing
   it('REL-3a: cksum absent from PATH — startup assert fires, no swap, queue not claimed', () => {
-    // Build a PATH symlink farm that includes all required tools EXCEPT cksum.
-    // This mirrors buildNoJsonParsePath but drops 'cksum' so command -v cksum fails.
-    const noCksumDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-nocksum-'));
+    // Build an additive symlink farm with all worker-required tools EXCEPT cksum.
+    // Additive farm (not subtractive /bin exclusion): Linux /bin carries cksum, so
+    // PATH=${farm}:/bin always re-introduces it on Linux. buildNoCksumPath never
+    // includes cksum regardless of platform — command -v cksum fails deterministically.
+    const noCksumDir = buildNoCksumPath(os.tmpdir());
     try {
-      const usrBinTools = [
-        'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
-        'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname',
-        // Deliberately omit 'cksum' — startup assert must fire
-      ];
-      for (const t of usrBinTools) {
-        const src = `/usr/bin/${t}`;
-        const dst = path.join(noCksumDir, t);
-        if (fs.existsSync(src) && !fs.existsSync(dst)) {
-          try { fs.symlinkSync(src, dst); } catch { /* skip already-exists */ }
-        }
-      }
       // Add a fake claude that would succeed if reached — proves the cksum check fires first
       const claudeBin = path.join(noCksumDir, 'claude');
       fs.writeFileSync(
@@ -2502,9 +2530,9 @@ exit 0
       );
       fs.chmodSync(claudeBin, 0o755);
 
-      // Override PATH entirely — no /usr/bin (which has cksum) on the path
+      // Override PATH to only the farm dir — no /bin, so cksum is unreachable
       const { exitCode } = runWorker(projectDir, homeDir, noCksumDir, {
-        PATH: `${noCksumDir}:/bin`,
+        PATH: noCksumDir,
       });
       expect(exitCode).toBe(0);
 
