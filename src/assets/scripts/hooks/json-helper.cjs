@@ -608,7 +608,7 @@ try {
         // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
         // date from the observation (content authority per ADR-022); fall back
         // to today.  The old decision-only asymmetry is removed so that
-        // refresh-anchor can re-project pitfall rows correctly (D3 / A3 fix).
+        // refresh-anchor can re-project pitfall rows correctly (pattern refreshes too — consumers match anchor headings, never titles, per ADR-022).
         const aaEntryDate = aaObs.date || aaDate;
         const aaLedgerRow = toLedgerRow(aaObs, {
           anchorId: aaAnchorId,
@@ -708,7 +708,7 @@ try {
     //   1. Read ledger and log ONCE (outside the per-anchor loop).
     //   2. For each anchor: locate ledger row, run precondition checks, run
     //      REG-1 details divergence guard (pattern replacement is sanctioned
-    //      per D3 — only details containment is enforced), re-project via
+    //      (ADR-022 — pattern replacement is sanctioned: consumers match anchor headings not titles; only details containment is enforced), re-project via
     //      toLedgerRow (which carries PF-023 sink validation for pattern/raw_body/type).
     //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
     //   4. Write ledger once, render once, echo all ids to stdout (one per line).
@@ -801,7 +801,7 @@ try {
 
           // REG-1 (avoids PF-044): divergence guard — refuse to silently overwrite
           // ledger-only curation content. Applies to DETAILS only: pattern replacement
-          // is sanctioned per D3 (consumers match '## (ADR|PF)-NNN:' anchors, never
+          // is sanctioned (ADR-022 — consumers match '## (ADR|PF)-NNN:' anchors, never
           // titles, so a sharpened log pattern may update the rendered heading).
           // raw_body is handled by isSafeRawBody inside toLedgerRow (PF-023 sink).
           const rfNormWS = (/** @type {unknown} */ s) =>

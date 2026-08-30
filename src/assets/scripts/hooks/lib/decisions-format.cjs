@@ -9,7 +9,7 @@
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
 //   Decision heading:  \n## {anchorId}: {title}\n
-//   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — D5)
+//   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — render purity, ADR-022: never clock-read in a formatter)
 //                      - **Status**: Accepted\n
 //                      - **Context**: ...\n
 //                      - **Decision**: ...\n
@@ -92,7 +92,7 @@ const LINE_TERMINATORS = /[\r\n\u2028\u2029]/g;
  * pass already set. applies PF-044 (divergence/migration: legacy rows exist
  * written under the old contract that embedded keys after '. ').
  *
- * D001 (details-parsing): This is the SINGLE parser for structured details
+ * D002 (details-parsing): This is the SINGLE parser for structured details
  * strings — both formatDecisionBody and formatPitfallBody delegate here.
  * applies PF-042 (delimiter-regex truncation).
  *
@@ -204,7 +204,7 @@ function formatAmendmentsLine(amendments) {
  * headings number exactly one AND match `## ${anchorId}:`.
  *
  * A rejected raw_body is DROPPED from the row — the entry then renders through
- * the sanitised formatDecisionBody/formatPitfallBody, the outcome ADR-022 D4 sanctions.
+ * the sanitised formatDecisionBody/formatPitfallBody — the sanctioned fallback when raw_body is absent or rejected (ADR-022).
  *
  * Per PF-023: validate at the sink so all callers (assign-anchor, refresh-anchor,
  * any future op) inherit the guard without repeating it.
@@ -249,7 +249,7 @@ function initDecisionsContent(kind) {
 function formatDecisionBody(row) {
   const detailsStr = row.details || '';
   const obsId = row.id || 'unknown';
-  // D5: render purity — never clock-read inside a formatter.  Absent date
+  // Render purity (ADR-022): never clock-read inside a formatter.  Absent date
   // renders as an empty string so the output is deterministic and idempotent.
   const artDate = row.date || '';
   const anchorId = row.anchor_id || '';
@@ -348,7 +348,7 @@ function toLedgerRow(obs, { anchorId, status, date, expectType }) {
   };
   // Optional fields — include only when present in the observation or explicitly provided
   if (date !== undefined) row.date = date;
-  // log-sourced raw_body mirrors ADR-022 D4 — a log row that lost raw_body un-freezes the
+  // log-sourced raw_body (ADR-022) — a log row that lost raw_body un-freezes the
   // entry to formatter-rendered output by design. Gate through isSafeRawBody (PF-023).
   if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
     row.raw_body = obs.raw_body;

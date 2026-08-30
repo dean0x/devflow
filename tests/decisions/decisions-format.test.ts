@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
+import { isLearningObservation } from '#core/observations.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -634,6 +635,30 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
     expect(index).toContain('ADR-005  Indexed decision  [Accepted]');
     expect(index).not.toContain('amendment-marker-text');
     expect(index).not.toContain('Amendments');
+  });
+
+  it('PF-043 cross-check: the canonical { date, note } fixture passes isLearningObservation AND formatAmendmentsLine renders it correctly', () => {
+    // PF-043 Resolution: derive fixtures from the runtime type guard and run at least
+    // one through the guard inside the consuming test so the two suites cannot drift.
+    // Previously this was only described in a comment; this test enforces it.
+    const amendments = [{ date: '2026-02-01', note: 'Reinforced' }];
+    const minimalObs = {
+      id: 'obs_pf043_check',
+      type: 'decision',
+      pattern: 'PF-043 cross-check fixture',
+      confidence: 0.9,
+      observations: 1,
+      first_seen: '2026-02-01T00:00:00Z',
+      last_seen: '2026-02-01T00:00:00Z',
+      status: 'created',
+      evidence: [],
+      details: 'context: PF-043; decision: derive fixtures from the type guard',
+      amendments,
+    };
+    // Guard accepts the object-shape amendments (the schema-declared shape)
+    expect(isLearningObservation(minimalObs)).toBe(true);
+    // Formatter renders the same fixture to the expected string
+    expect(formatAmendmentsLine(amendments)).toBe('- **Amendments**: [2026-02-01] Reinforced\n');
   });
 });
 

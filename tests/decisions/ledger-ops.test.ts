@@ -1229,6 +1229,37 @@ describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () 
     expect(decisionsMd).toContain('## ADR-001:');
     expect(decisionsMd).toContain('- **Status**: Accepted');
   });
+
+  it('D4 mirror: refresh preserves raw_body when the log row carries a safe one', () => {
+    // ADR-022 D4 mirror case: a log row that carries a safe raw_body propagates it
+    // into the refreshed ledger row. The ledger row started without raw_body.
+    const details = 'context: raw_body present; decision: preserve verbatim body; rationale: migration';
+    const safeRawBody = '\n## ADR-002: Preserve verbatim body\n\n- **Status**: Accepted\n- **Context**: preserved\n';
+    writeLog(tmpDir, [
+      makeObsRow({
+        id: 'obs_d4_002',
+        type: 'decision',
+        status: 'created',
+        anchor_id: 'ADR-002',
+        details,
+        raw_body: safeRawBody,
+      }),
+    ]);
+    writeLedger(tmpDir, [
+      makeLedgerRow({
+        id: 'obs_d4_002',
+        anchor_id: 'ADR-002',
+        decisions_status: 'Accepted',
+        details,
+        // ledger row did not previously have raw_body
+      }),
+    ]);
+    const result = runHelper('refresh-anchor ADR-002', tmpDir);
+    expect(result.code).toBe(0);
+    // Refreshed ledger row carries the safe raw_body from the log row
+    const rows = readLedger(tmpDir);
+    expect(rows[0].raw_body).toBe(safeRawBody);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2113,5 +2144,81 @@ describe('lock release on early-exit error paths', () => {
     expect(result.stderr).toContain('not found');
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-existing corpus fixture — REG-S1 (PF-044: fixtures derived from real corpus)
+//
+// Frozen copies of actual anchored rows from .devflow/learning/decisions-ledger.jsonl
+// at time of authoring. Used to pin that refresh-anchor succeeds against real-world
+// rows and that the rendered output has non-empty body fields.
+//
+// These fixtures are FROZEN IN-FILE per PF-035 and PF-044 — not live-file reads.
+// Derived from decisions-ledger.jsonl rows ADR-001 and PF-001.
+// ---------------------------------------------------------------------------
+
+describe('refresh-anchor — pre-existing corpus fixture (REG-S1, avoids PF-044)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-corpus-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // Frozen corpus fixtures — derived from live decisions-ledger.jsonl.
+  // ADR-001: decision (Accepted, dated) — has context/decision/rationale fields in details.
+  const CORPUS_ADR_001 = {
+    id: 'obs_cleanbrk1',
+    type: 'decision',
+    pattern: 'Ship feature-knowledge v2 as a clean break — delete the old-install cleanup machinery (migrations, runtime knowledge sweep, dream-knowledge auto-uninstall) and clean the only affected machine by hand; do not carry deprecated-pipeline defense code into the published version',
+    details: 'context: PR #247 simplifies feature-knowledge to a write-through model and removes knowledge from the Dream pipeline; the just-shipped commit e07b6b4 had added two run-once migrations (purge-feature-knowledge-pipeline) plus a runtime knowledge) marker-sweep case in dream-collect-tasks and a dream-knowledge stale-skill auto-uninstall, all to defend OLD installs against orphaned knowledge artifacts; decision: because v2 is an unreleased clean break and the only affected machine is the developers own, delete that entire old-install cleanup layer (revert the 2 migrations + their tests, drop the knowledge) runtime sweep, drop the dream-knowledge auto-uninstall) and perform the one-machine cleanup manually instead of shipping defense code; rationale: the deprecated-pipeline defense only matters for installs that upgrade across the break, which do not exist for an unreleased major; carrying it would be permanent dead code contradicting the minimalism the simplification was chartered to deliver; the cost is explicit and accepted — nothing auto-purges legacy knowledge artifacts on init, so the developer must manually trash eval-knowledge, lib/feature-knowledge.cjs, the dream-knowledge skill, and per-project .devflow/features knowledge markers',
+    anchor_id: 'ADR-001',
+    decisions_status: 'Accepted',
+    date: '2026-06-30',
+  };
+
+  // PF-001: pitfall (Active, no date) — has area/issue/impact/resolution fields in details.
+  const CORPUS_PF_001 = {
+    id: 'obs_planhandoff1',
+    type: 'pitfall',
+    pattern: "Claude Code plan-mode handoff schema is undocumented and mutable — as of ~v2.1.198 the injected prompt message.content carries ONLY the 31-char 'Implement the following plan:' prefix while the plan body moved to a separate top-level planContent field and the entry is tagged origin auto-continuation; match the handoff by prefix ONLY and never parse plan bodies out of transcripts or hook payloads",
+    details: "area: ambient plan-handoff detection (scripts/hooks/preamble + scripts/hooks/session-start-orchestrator); Claude Code plan-mode handoff contract; issue: Claude Code changed the handoff transcript/hook-payload schema at ~v2.1.198 — message.content now holds only the 31-char prefix 'Implement the following plan:', the plan body moved to a separate top-level planContent field, and the entry is tagged origin auto-continuation (typed prompts are origin human); the prefix literal itself is unchanged (stable back to v2.1.167), the change is undocumented (never appeared in release notes), and no setting/env/flag reverts it; impact: any tooling that parses the plan body out of transcripts or hook payloads breaks silently, and the origin auto-continuation tag is a plausible discriminator Claude Code could use to stop firing UserPromptSubmit for injected prompts (the open T-5 risk that would silently kill the preamble fast-path); resolution: match the handoff by the anchored 'Implement the following plan:' prefix ONLY and instruct the model (which always receives the full plan in context) — never parse plan bodies from payloads; keep the SessionStart charter as a fallback because SessionStart provably fires even when UserPromptSubmit may not; do not version-pin to chase the old schema (the prefix-only shape predates the oldest available sample). applies ADR-004",
+    anchor_id: 'PF-001',
+    decisions_status: 'Active',
+  };
+
+  it('refresh-anchor on a frozen ADR-001 corpus row succeeds and renders non-empty Consequences', () => {
+    // Derived from live ADR-001 ledger row — log carries identical details (superset check passes).
+    writeLog(tmpDir, [CORPUS_ADR_001]);
+    writeLedger(tmpDir, [CORPUS_ADR_001]);
+    const result = runHelper('refresh-anchor ADR-001', tmpDir);
+    expect(result.code).toBe(0);
+    const decisionsMd = fs.readFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8'
+    );
+    expect(decisionsMd).toContain('## ADR-001:');
+    // details has both 'context:' and 'decision:' fields — rendered body must be non-empty
+    expect(decisionsMd).toMatch(/- \*\*Context\*\*: .+/);
+    expect(decisionsMd).toMatch(/- \*\*Decision\*\*: .+/);
+  });
+
+  it('refresh-anchor on a frozen PF-001 corpus row succeeds and renders non-empty Impact and Resolution', () => {
+    // Derived from live PF-001 ledger row — log carries identical details (superset check passes).
+    writeLog(tmpDir, [CORPUS_PF_001]);
+    writeLedger(tmpDir, [CORPUS_PF_001]);
+    const result = runHelper('refresh-anchor PF-001', tmpDir);
+    expect(result.code).toBe(0);
+    const pitfallsMd = fs.readFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8'
+    );
+    expect(pitfallsMd).toContain('## PF-001:');
+    // details has 'impact:' and 'resolution:' fields — rendered body must be non-empty
+    expect(pitfallsMd).toMatch(/- \*\*Impact\*\*: .+/);
+    expect(pitfallsMd).toMatch(/- \*\*Resolution\*\*: .+/);
   });
 });
