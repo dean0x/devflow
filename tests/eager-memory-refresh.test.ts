@@ -2228,3 +2228,196 @@ describe('S24: State-C counts orphaned .processing toward queue depth (B4)', () 
     expect(stdout).not.toContain('MEMORY REFRESH MAY BE FAILING');
   });
 });
+
+// =============================================================================
+// S25 — CAS heartbeat (REL-1), fail-closed checksum (REL-3), orphan-gate retry guard (REG-3)
+//
+// REL-1: CONFLICT path must heartbeat .processing so session-start-memory's 300s cold
+//        path measures worker liveness, not queue-file turn age.
+// REL-3: cksum absent from PATH (startup assert) and cksum-fails-for-file (CKSUM_FAILED)
+//        must both refuse to swap — fail-closed, never false-success.
+// REG-3: orphan-only auto-clean must be gated on the absence of a retry .processing batch
+//        so a CONFLICT batch is not stranded while a user-only .jsonl is drained.
+// =============================================================================
+describe('S25: CAS heartbeat, fail-closed checksum, and orphan-gate retry-batch guard', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    stagedFile = `${memFile}.new`;
+    seedQueue(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  // REL-1: CONFLICT path heartbeats .processing mtime so the 300s cold path
+  // measures worker liveness, not the age of the original queue turns.
+  it('REL-1: CONFLICT path refreshes .processing mtime — not left at stale queue-file mtime', () => {
+    // Pre-create real file so baseline cksum is captured before the run
+    fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
+
+    // Backdate the queue file BEFORE the worker claims it as .processing.
+    // mv preserves the source mtime, so without a touch the retained .processing
+    // would be 400s old — past the session-start-memory D56c cold-path threshold (300s).
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    backdateMtime(queueFile, 400);
+    const queueFileMtimeMs = fs.statSync(queueFile).mtimeMs;
+
+    // Fake claude writes valid staged AND modifies real file — triggers CONFLICT
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+echo "<!-- memory-head: human branch: main -->" > "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // CONFLICT: .processing must still be present
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    expect(fs.existsSync(processingFile)).toBe(true);
+
+    // KEY: .processing mtime must be NEWER than the backdated queue-file mtime.
+    // A mv without touch would preserve the backdated mtime, so the cold-path
+    // recovery at 300s could reclaim a batch the worker still owns. The heartbeat
+    // touch (at claim time and again on CONFLICT) must refresh the mtime.
+    const processingMtimeMs = fs.statSync(processingFile).mtimeMs;
+    expect(processingMtimeMs).toBeGreaterThan(queueFileMtimeMs);
+  });
+
+  // REL-3a: cksum absent from PATH — startup assert fires, worker exits without writing
+  it('REL-3a: cksum absent from PATH — startup assert fires, no swap, queue not claimed', () => {
+    // Build a PATH symlink farm that includes all required tools EXCEPT cksum.
+    // This mirrors buildNoJsonParsePath but drops 'cksum' so command -v cksum fails.
+    const noCksumDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s25-nocksum-'));
+    try {
+      const usrBinTools = [
+        'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
+        'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname',
+        // Deliberately omit 'cksum' — startup assert must fire
+      ];
+      for (const t of usrBinTools) {
+        const src = `/usr/bin/${t}`;
+        const dst = path.join(noCksumDir, t);
+        if (fs.existsSync(src) && !fs.existsSync(dst)) {
+          try { fs.symlinkSync(src, dst); } catch { /* skip already-exists */ }
+        }
+      }
+      // Add a fake claude that would succeed if reached — proves the cksum check fires first
+      const claudeBin = path.join(noCksumDir, 'claude');
+      fs.writeFileSync(
+        claudeBin,
+        `#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`
+      );
+      fs.chmodSync(claudeBin, 0o755);
+
+      // Override PATH entirely — no /usr/bin (which has cksum) on the path
+      const { exitCode } = runWorker(projectDir, homeDir, noCksumDir, {
+        PATH: `${noCksumDir}:/bin`,
+      });
+      expect(exitCode).toBe(0);
+
+      // Worker must have bailed before claiming the queue (startup assert fires early)
+      const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+      expect(fs.existsSync(processingFile)).toBe(false);
+      // Real file must not be written
+      expect(fs.existsSync(memFile)).toBe(false);
+      // Log must contain SKIP with cksum reason
+      const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+      expect(log).toContain('cksum not on PATH');
+    } finally {
+      fs.rmSync(noCksumDir, { recursive: true, force: true });
+    }
+  });
+
+  // REL-3b: cksum in PATH but always exits 1 — CKSUM_FAILED triggers conflict, real file untouched
+  it('REL-3b: cksum in PATH but fails for file — conflict outcome, real file untouched (fail-closed)', () => {
+    // Pre-create real file so a PRE_RUN_CKSUM baseline capture is attempted
+    fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
+
+    // cksum shim that always exits 1: command -v cksum finds it (startup assert passes),
+    // but cksum "$MEMORY_FILE" fails → CKSUM_FAILED="true" → conflict outcome, never match
+    const cksumShim = path.join(shimDir, 'cksum');
+    fs.writeFileSync(cksumShim, `#!/bin/bash\nexit 1\n`);
+    fs.chmodSync(cksumShim, 0o755);
+
+    // Fake claude writes a valid staged file (would be swapped if CAS permitted)
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // Real file untouched — staged must NOT have been swapped in
+    expect(fs.readFileSync(memFile, 'utf-8')).toContain('- original');
+    // Staged file consumed or discarded (not left behind)
+    expect(fs.existsSync(stagedFile)).toBe(false);
+    // .processing retained (conflict or fail path), success marker absent
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    expect(fs.existsSync(processingFile)).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
+  });
+
+  // REG-3: orphan gate must not short-circuit when a CONFLICT .processing batch is waiting
+  it('REG-3: .processing present + user-only .jsonl — orphan gate bypassed, merge path runs', () => {
+    // Pre-create .processing with real turns (simulates a retained CONFLICT retry batch)
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      processingFile,
+      [
+        JSON.stringify({ role: 'user', content: 'conflicted user turn', ts }),
+        JSON.stringify({ role: 'assistant', content: 'conflicted assistant turn', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    // Overwrite the seeded .jsonl with user-only content.
+    // Without the fix, the orphan gate checks only .jsonl (user-only) → drains + exits,
+    // leaving the CONFLICT batch stranded in .processing.
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    fs.writeFileSync(
+      queueFile,
+      JSON.stringify({ role: 'user', content: 'new user-only turn', ts: ts + 2 }) + '\n'
+    );
+
+    // Fake claude that writes a valid staged file (reached only if merge path runs)
+    createFakeClaudeShim(shimDir, memFile);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    // Orphan gate must NOT have fired — worker did not drain+exit at the user-only check
+    expect(log).not.toContain('User-only queue (no assistant/qa turn) — truncating without LLM run');
+    // Merge path ran and LLM was invoked — merged .processing has assistant turns from conflict batch
+    expect(log).toContain('staged file valid, real file unchanged — swap complete');
+  });
+});

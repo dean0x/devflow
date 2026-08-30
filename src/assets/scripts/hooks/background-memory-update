@@ -88,6 +88,16 @@ if [ -z "$CLAUDE_BIN" ]; then
   exit 0
 fi
 
+# --- Assert cksum availability (required for CAS verification — avoids fail-open swap) ---
+# cksum must be on PATH at startup; a missing binary makes both CAS sentinels collapse
+# to the same "ABSENT" literal, compare equal, and swap unconditionally — reinstating
+# the exact clobber ADR-023 was designed to prevent. Fail loudly here rather than
+# silently degrading. applies ADR-023
+if ! command -v cksum >/dev/null 2>&1; then
+  log "SKIP: cksum not on PATH — CAS verification unavailable, refusing to write"
+  exit 0
+fi
+
 # --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
@@ -150,7 +160,7 @@ rm -f "$STAGED_FILE" 2>/dev/null || true
 # and the TURNS_TEXT extraction loop below must agree on that.
 # When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
 # and allow the run to proceed — conservative: better to attempt than to truncate blindly.
-if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
+if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
     _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
@@ -195,6 +205,11 @@ else
   log "SKIP: no queue file to process"
   exit 0
 fi
+
+# Heartbeat so session-start-memory's 300s cold path measures worker liveness, not turn age.
+# mv preserves the source mtime; touch stamps the claim time so the cold path cannot reclaim
+# a batch the worker actively owns — even if CONFLICT makes this a recurring retry vehicle.
+touch "$PROCESSING_FILE" 2>/dev/null || true
 
 TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
 log "Processing $TOTAL_LINES queued entries"
@@ -306,9 +321,15 @@ log "Built $TURN_COUNT turns from queue"
 # synthesised from. ABSENT sentinel when file missing — resolves toward false-conflict,
 # never false-success (a file created externally during the run triggers CONFLICT,
 # which is safer than accepting a write we did not produce). applies ADR-023.
+#
+# CKSUM_FAILED: if cksum invocation fails (EACCES, missing binary for this path, etc.)
+# on either side, the CAS must treat it as CONFLICT rather than a match — separating
+# the "cksum invocation failure" sentinel from "file absent" keeps the "resolves toward
+# false-conflict, never false-success" invariant true even when cksum errors.
+CKSUM_FAILED="false"
 PRE_RUN_CKSUM="ABSENT"
 if [ -f "$MEMORY_FILE" ]; then
-  PRE_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null || echo "ABSENT")
+  PRE_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null) || CKSUM_FAILED="true"
 fi
 
 EXISTING_MEMORY=""
@@ -492,56 +513,63 @@ fi
 # Only our own claude run can create STAGED_FILE between lock-acquire and here,
 # so verifying its content proves OUR write succeeded — as opposed to accepting
 # any mtime bump, which could come from a concurrent human edit of the real file.
-UPDATED="false"
-CONFLICT="false"
-
-if [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ]; then
-  STAGED_FIRST_LINE=$(head -1 "$STAGED_FILE" 2>/dev/null || echo "")
-  case "$STAGED_FIRST_LINE" in
-    "<!-- memory-head:"*)
-      # Staged file valid — re-check real file cksum before swapping.
-      # Residual TOCTOU: a human edit landing in the O(ms) window between this
-      # cksum re-check and the mv would be clobbered; this is accepted — the
-      # staged content was synthesised from the pre-run file, so the next run
-      # re-synthesises from the then-current content (no net information loss).
-      # applies ADR-023 (staged compare-and-swap)
-      POST_RUN_CKSUM="ABSENT"
-      if [ -f "$MEMORY_FILE" ]; then
-        POST_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null || echo "ABSENT")
-      fi
-      if [ "$PRE_RUN_CKSUM" = "$POST_RUN_CKSUM" ]; then
-        # Real file byte-identical since pre-run baseline — safe to swap
-        if mv "$STAGED_FILE" "$MEMORY_FILE" 2>/dev/null; then
-          UPDATED="true"
-          log "Update verified (staged file valid, real file unchanged — swap complete)"
-        else
-          log "WARN: atomic mv failed — staged file may remain; leaving .processing for retry"
-        fi
-      else
-        # Real file changed during run — keep user edit, discard staged content
-        CONFLICT="true"
-        rm -f "$STAGED_FILE" 2>/dev/null || true
-        log "CONFLICT: WORKING-MEMORY.md changed during run — keeping user edit, leaving .processing for retry"
-      fi
-      ;;
-    *)
-      log "WARN: staged file exists but stamp missing on line 1 — treating as failure"
-      rm -f "$STAGED_FILE" 2>/dev/null || true
-      ;;
+#
+# Sets OUTCOME to one of: updated | conflict | failed
+# Reads PRE_RUN_CKSUM, CKSUM_FAILED, STAGED_FILE, MEMORY_FILE from caller scope.
+# Each state is assigned exactly once at the point it is decided; single OUTCOME
+# variable replaces the prior two-boolean (UPDATED/CONFLICT) encoding. applies ADR-023
+verify_and_swap() {
+  [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ] || {
+    log "WARN: staged file missing or empty after claude -p run"; OUTCOME="failed"; return; }
+  case "$(head -1 "$STAGED_FILE" 2>/dev/null || echo "")" in
+    "<!-- memory-head:"*) : ;;
+    *) log "WARN: staged file exists but stamp missing on line 1 — treating as failure"
+       rm -f "$STAGED_FILE" 2>/dev/null || true; OUTCOME="failed"; return ;;
   esac
-else
-  # Claude exited 0 but staged file is missing or empty — disobedient model or
-  # degraded extraction path that never invoked claude with parseable turns
-  log "WARN: staged file missing or empty after claude -p run"
-fi
+  # Re-check real file cksum before swapping.
+  # Residual TOCTOU: a human edit landing in the O(ms) window between this
+  # cksum re-check and the mv would be clobbered; this is accepted — the
+  # staged content was synthesised from the pre-run file, so the next run
+  # re-synthesises from the then-current content (no net information loss).
+  # applies ADR-023 (staged compare-and-swap)
+  local _post="ABSENT" _post_cksum_failed="false"
+  if [ -f "$MEMORY_FILE" ]; then
+    _post=$(cksum "$MEMORY_FILE" 2>/dev/null) || _post_cksum_failed="true"
+  fi
+  # If either cksum invocation failed, treat as conflict (fail-closed — resolves toward
+  # false-conflict, never false-success; a cksum error must never silently degrade the
+  # CAS to "always overwrite", reinstating the clobber ADR-023 exists to prevent).
+  if [ "$CKSUM_FAILED" = "true" ] || [ "$_post_cksum_failed" = "true" ]; then
+    rm -f "$STAGED_FILE" 2>/dev/null || true
+    log "CONFLICT: cksum failed during CAS verification — leaving .processing for retry (fail-closed)"
+    OUTCOME="conflict"; return
+  fi
+  if [ "$PRE_RUN_CKSUM" != "$_post" ]; then
+    # Real file changed during run — keep user edit, discard staged content
+    rm -f "$STAGED_FILE" 2>/dev/null || true
+    log "CONFLICT: WORKING-MEMORY.md changed during run — keeping user edit, leaving .processing for retry"
+    OUTCOME="conflict"; return
+  fi
+  # Real file byte-identical since pre-run baseline — safe to swap
+  if mv "$STAGED_FILE" "$MEMORY_FILE" 2>/dev/null; then
+    log "Update verified (staged file valid, real file unchanged — swap complete)"; OUTCOME="updated"
+  else
+    log "WARN: atomic mv failed — staged file may remain; leaving .processing for retry"; OUTCOME="failed"
+  fi
+}
 
-if [ "$UPDATED" = "true" ]; then
+OUTCOME="failed"
+verify_and_swap
+
+if [ "$OUTCOME" = "updated" ]; then
   rm -f "$PROCESSING_FILE" 2>/dev/null || true
   touch "$OK_FILE" 2>/dev/null || true
   log "SUCCESS: queue drained, .last-refresh-ok touched"
-elif [ "$CONFLICT" = "true" ]; then
-  # Keep .processing for retry via merge-on-next-spawn; do NOT touch .last-refresh-ok
-  : # intentional no-op — .processing already retained above
+elif [ "$OUTCOME" = "conflict" ]; then
+  # Heartbeat: this batch is still owned by the retry cycle, not orphaned.
+  # Keeps session-start-memory's 300s cold path from reclaiming a live retry.
+  touch "$PROCESSING_FILE" 2>/dev/null || true
+  log "CONFLICT: queue retained in .processing, .last-refresh-ok untouched"
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
   log "FAIL: verification failed — leaving .processing for recovery"
