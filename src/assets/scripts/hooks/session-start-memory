@@ -68,6 +68,7 @@ fi
 # Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
 # so a concurrent session's fresh queue is never overwritten.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
+source "$SCRIPT_DIR/is-hex-sha" || { echo "session-start-memory: failed to source is-hex-sha" >&2; exit 1; }
 _SSM_PT_PROC="$MEMORY_DIR/.pending-turns.processing"
 _SSM_PT_JSONL="$MEMORY_DIR/.pending-turns.jsonl"
 if [ -f "$_SSM_PT_PROC" ]; then
@@ -112,26 +113,11 @@ parse_and_validate_stamp() {
       STAMP_BRANCH=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: [^ ]* branch: \([^ ]*\) -->/\1/p')
       ;;
   esac
-  # Hex-validation security gate — must stay before any git use of STAMP_SHA
-  if [ -n "$STAMP_SHA" ]; then
-    case "$STAMP_SHA" in
-      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
-        # Looks like a hex string; verify length ≤ 40 and only hex chars via sed
-        local _SHA_CLEAN
-        _SHA_CLEAN=$(echo "$STAMP_SHA" | sed 's/[^0-9a-f]//g')
-        local _SHA_LEN=${#STAMP_SHA}
-        if [ "$_SHA_CLEAN" != "$STAMP_SHA" ] || [ "$_SHA_LEN" -gt 40 ]; then
-          dbg "STAMP_SHA rejected (non-hex chars or >40): $STAMP_SHA"
-          STAMP_SHA=""
-          STAMP_BRANCH=""
-        fi
-        ;;
-      *)
-        dbg "STAMP_SHA rejected (bad prefix): $STAMP_SHA"
-        STAMP_SHA=""
-        STAMP_BRANCH=""
-        ;;
-    esac
+  # Hex-validation security gate — must stay before any git use of STAMP_SHA.
+  if [ -n "$STAMP_SHA" ] && ! is_hex_sha "$STAMP_SHA"; then
+    dbg "STAMP_SHA rejected (non-hex or out of range): $STAMP_SHA"
+    STAMP_SHA=""
+    STAMP_BRANCH=""
   fi
   dbg "STAMP_SHA=$STAMP_SHA STAMP_BRANCH=$STAMP_BRANCH"
   # Strip stamp line from injected body

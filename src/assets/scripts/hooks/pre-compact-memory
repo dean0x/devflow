@@ -23,6 +23,7 @@ source "$SCRIPT_DIR/hook-bootstrap" "pre-compact-memory"
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 source "$SCRIPT_DIR/json-parse" || { echo "pre-compact-memory: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/is-hex-sha" || { echo "pre-compact-memory: failed to source is-hex-sha" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -100,60 +101,38 @@ json_backup_construct \
 log "Wrote backup: $BACKUP_FILE"
 dbg "Wrote backup: $BACKUP_FILE"
 
-# Bootstrap minimal WORKING-MEMORY.md if none exists yet.
-# This ensures SessionStart has context to inject after compaction.
-# Stamp on line 1 enables proper state-A/B/C header reconciliation in
-# session-start-memory. Non-git workspaces skip bootstrap — no HEAD SHA.
+# Bootstrap minimal WORKING-MEMORY.md if absent; skip on detached HEAD, unborn branch,
+# or malformed SHA. is_hex_sha 40 40: exactly 40 lowercase hex chars required.
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
-if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_HEAD_SHA" ] && [ -n "$GIT_BRANCH" ]; then
-  # Gate: BOTH a 40-hex SHA AND a non-empty branch name are required before bootstrap.
-  # Detached HEAD: git branch --show-current returns "" → branch gate fails → skip.
-  # Without the branch gate, the stamp embeds "branch: " (empty string) which creates
-  # the same "synced @ unknown" / blank-branch defect that this branch was opened to fix.
-  # Unborn branch (git init, no commits): git rev-parse HEAD fails → GIT_HEAD_SHA="" →
-  # sha gate fails → skip. An unstamped bootstrap would recreate the "synced @ unknown"
-  # defect because the session-start-memory no-stamp path renders "synced @ unknown".
-  # Both gates are left in place so the guard is symmetric and each can be reasoned about
-  # independently.
-  # Inner gate: 40-hex SHA required before embedding in stamp (defensive; git always
-  # returns 40-char lowercase hex or nothing, but guard prevents malformed stamps)
-  _SHA_VALID="false"
-  if [ "${#GIT_HEAD_SHA}" -eq 40 ]; then
-    case "$GIT_HEAD_SHA" in
-      *[^0-9a-f]*) : ;;    # non-hex char present — invalid
-      *) _SHA_VALID="true" ;;
-    esac
-  fi
-  if [ "$_SHA_VALID" = "true" ]; then
-    {
-      echo "<!-- memory-head: $GIT_HEAD_SHA branch: $GIT_BRANCH -->"
-      echo ""
-      echo "## Now"
-      echo "- Session compacted before working memory was established"
-      echo ""
-      echo "## Progress"
-      echo "- (no history yet)"
-      echo ""
-      echo "## Decisions"
-      echo "- (none recorded)"
-      echo ""
-      echo "## Context"
-      echo "- Branch: $GIT_BRANCH"
-      echo "$GIT_LOG" | head -3 | while IFS= read -r line; do
-        [ -n "$line" ] && echo "- $line"
+if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_BRANCH" ] && is_hex_sha "$GIT_HEAD_SHA" 40 40; then
+  {
+    echo "<!-- memory-head: $GIT_HEAD_SHA branch: $GIT_BRANCH -->"
+    echo ""
+    echo "## Now"
+    echo "- Session compacted before working memory was established"
+    echo ""
+    echo "## Progress"
+    echo "- (no history yet)"
+    echo ""
+    echo "## Decisions"
+    echo "- (none recorded)"
+    echo ""
+    echo "## Context"
+    echo "- Branch: $GIT_BRANCH"
+    echo "$GIT_LOG" | head -3 | while IFS= read -r line; do
+      [ -n "$line" ] && echo "- $line"
+    done
+    if [ -n "$GIT_STATUS" ]; then
+      echo "- Modified files:"
+      echo "$GIT_STATUS" | head -10 | while IFS= read -r line; do
+        [ -n "$line" ] && echo "  - $(echo "$line" | awk '{print $2}')"
       done
-      if [ -n "$GIT_STATUS" ]; then
-        echo "- Modified files:"
-        echo "$GIT_STATUS" | head -10 | while IFS= read -r line; do
-          [ -n "$line" ] && echo "  - $(echo "$line" | awk '{print $2}')"
-        done
-      fi
-      echo ""
-      echo "## Session Log"
-      echo "- (no entries)"
-    } > "$MEMORY_FILE"
-    dbg "Bootstrapped minimal WORKING-MEMORY.md with stamp and canonical sections"
-  fi
+    fi
+    echo ""
+    echo "## Session Log"
+    echo "- (no entries)"
+  } > "$MEMORY_FILE"
+  dbg "Bootstrapped minimal WORKING-MEMORY.md with stamp and canonical sections"
 fi
 
 log "PreCompact complete"

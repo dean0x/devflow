@@ -29,6 +29,7 @@ const HOOK_SCRIPTS = [
   'git-marker',
   'json-parse',
   'get-mtime',
+  'is-hex-sha',
   'ensure-devflow-init',
   'ensure-root-gitignore',
   'resolve-project-root',
