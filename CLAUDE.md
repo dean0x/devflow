@@ -172,9 +172,9 @@ Per-project runtime files live under `.devflow/`:
 ```
 .devflow/
 ├── memory/
-│   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p sonnet 4.6)
+│   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p sonnet 4.6); line 1: <!-- memory-head: <sha> branch: <name> --> (stamp written by pre-compact-memory bootstrap)
 │   ├── WORKING-MEMORY.md.new         # Staged file written by the worker; renamed to WORKING-MEMORY.md on successful CAS (transient, ADR-023)
-│   ├── backup.json                   # Pre-compact git state snapshot (line 1: HEAD SHA stamp written by pre-compact-memory)
+│   ├── backup.json                   # Pre-compact git state snapshot (plain JSON — no stamp)
 │   ├── .pending-turns.jsonl          # Queue of captured user/assistant turns (JSONL, ephemeral)
 │   ├── .pending-turns.processing     # Atomic handoff during background processing (transient, D56c)
 │   ├── .working-memory-last-trigger  # Mtime = last worker spawn time (120s throttle key, transient)

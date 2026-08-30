@@ -32,8 +32,9 @@ export type DecisionsEntryStatus = (typeof DECISIONS_ENTRY_STATUSES)[number];
  *   anchor_id       — assigned once when an observation is promoted to an ADR/PF entry
  *                     (e.g. "ADR-016"). Never recomputed or reused. Lives in the
  *                     anchored ledger (decisions-ledger.jsonl); not set on raw log rows.
- *   date            — ISO date string (YYYY-MM-DD) for the decision entry. Decisions only;
- *                     pitfalls have no date field (byte-compat contract).
+ *   date            — ISO date string (YYYY-MM-DD) stamped at assign-anchor time. Both
+ *                     decisions and pitfalls carry this field; legacy pre-stamp rows may
+ *                     lack it (no backfill — protection-window fallback is read-time).
  *   decisions_status — Rendered status of the ADR/PF entry in decisions.md/pitfalls.md.
  *                     Distinct from `status` (observation lifecycle). Omitted = active.
  *   amendments      — Ordered list of amendment notes appended to an ADR entry.
@@ -60,7 +61,7 @@ export interface LearningObservation {
   // --- Ledger fields (Phase 2: decisions-ledger.jsonl schema extension) ---
   /** Stable anchor ID once promoted to ADR/PF (e.g. "ADR-016"). */
   anchor_id?: string;
-  /** Decision date (YYYY-MM-DD). Decisions only; pitfalls omit this field. */
+  /** Promotion date (YYYY-MM-DD). Both decisions and pitfalls carry this field (stamped at assign-anchor time); legacy pre-stamp rows may lack it. */
   date?: string;
   /** Rendered entry status — distinct from observation lifecycle `status`. */
   decisions_status?: DecisionsEntryStatus;
@@ -100,7 +101,7 @@ export interface LedgerRow {
   anchor_id: string;
   /** Rendered entry status in decisions.md / pitfalls.md. Typed to prevent illegal values. */
   decisions_status: DecisionsEntryStatus;
-  /** Decision date (YYYY-MM-DD). Decisions only; pitfalls omit this field. */
+  /** Promotion date (YYYY-MM-DD). Both decisions and pitfalls carry this field (stamped at assign-anchor time); legacy pre-stamp rows may lack it. */
   date?: string;
   /** Verbatim .md body for migrated entries — emitted as-is by the renderer. */
   raw_body?: string;

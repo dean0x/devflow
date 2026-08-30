@@ -35,7 +35,7 @@ devflow memory --status                # Check current state
 │   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p sonnet 4.6)
 │   │                                 # Line 1: <!-- memory-head: <sha> branch: <name> -->
 │   ├── WORKING-MEMORY.md.new         # Staged file: model writes here; CAS renames to WORKING-MEMORY.md on success (transient)
-│   ├── backup.json                   # Pre-compact git state snapshot (line 1: HEAD SHA stamp)
+│   ├── backup.json                   # Pre-compact git state snapshot (plain JSON — no stamp)
 │   ├── .pending-turns.jsonl          # Queue of captured user/assistant turns (JSONL, ephemeral)
 │   ├── .pending-turns.processing     # Atomic handoff during background processing (transient)
 │   │                                 # CONFLICT path leaves .processing for retry; FAIL path leaves for crash recovery
