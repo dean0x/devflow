@@ -714,18 +714,8 @@ try {
       }
 
       try {
-        // (1) Locate the obs in the log by anchor_id (content authority)
-        const rfLogEntries = parseLedger(rfLogPath);
-        const rfObs = rfLogEntries.find(r => r.anchor_id === refreshAnchorId);
-        if (!rfObs) {
-          // throw instead of process.exit so the finally block releases the lock (PF-014)
-          throw new Error(
-            `refresh-anchor: obs with anchor_id '${refreshAnchorId}' not found in log — ` +
-            `was assign-anchor called first?`
-          );
-        }
-
-        // (2) Locate the existing ledger row to recover decisions_status
+        // (1) Locate the existing ledger row by anchor_id (stable, canonical key).
+        //     Miss → throw before touching the log (PF-014: throw, not process.exit).
         const rfLedgerRows = parseLedger(rfLedgerPath);
         const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === refreshAnchorId);
         if (rfLedgerIdx === -1) {
@@ -738,13 +728,30 @@ try {
 
         const rfExistingRow = rfLedgerRows[rfLedgerIdx];
 
+        // (2) Locate the log obs by the LEDGER ROW's id field (content authority).
+        //     Matching on id (not anchor_id) covers pre-existing obs that were written
+        //     before assign-anchor added anchor_id write-back — 0 of 65 anchored entries
+        //     in a typical repo carry anchor_id in the log, so the anchor_id lookup
+        //     strategy resolves 0 entries. id-based lookup resolves all of them.
+        const rfLogEntries = parseLedger(rfLogPath);
+        const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
+        if (!rfObs) {
+          // throw instead of process.exit so the finally block releases the lock (PF-014)
+          throw new Error(
+            `refresh-anchor: log obs with id '${rfExistingRow.id}' ` +
+            `(for anchor ${refreshAnchorId}) not found in log`
+          );
+        }
+
         // (3) Re-project via toLedgerRow (D2: strict canonical projection).
         //     Preserve decisions_status and date from the ledger (ledger-owned
         //     fields); take everything else from the log obs (content authority).
+        //     date: rfExistingRow.date — ledger date is preserved verbatim; a dateless
+        //     legacy row stays dateless (D5: no backfill at write time).
         const rfReprojected = toLedgerRow(rfObs, {
           anchorId: refreshAnchorId,
           status: rfExistingRow.decisions_status,
-          date: rfObs.date || rfExistingRow.date,
+          date: rfExistingRow.date,
         });
 
         // (4) Replace the ledger row and write back atomically
