@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.0] - 2026-08-31
 
 ### Added
 - **`refresh-anchor` ledger op**: post-promotion reinforcement now reaches rendered output. When the Learning agent reinforces an already-anchored observation (sharpening its `pattern`/`details`), calling `refresh-anchor <anchor_id>` re-projects the updated log row through the same `toLedgerRow` projector as `assign-anchor` and re-renders all three `.md` files. Previously, post-promotion sharpening was written to the log but never projected forward, so the rendered entry silently froze at its first-promotion snapshot.
@@ -1215,6 +1215,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[2.3.0]: https://github.com/dean0x/devflow/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/dean0x/devflow/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/dean0x/devflow/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/dean0x/devflow/compare/v2.0.0...v2.0.1
