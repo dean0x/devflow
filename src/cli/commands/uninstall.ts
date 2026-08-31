@@ -1055,7 +1055,7 @@ export const uninstallCommand = new Command('uninstall')
     //
     // D-STRIP-1: only populate managedProxyPorts when proxy.json exists — evidence that
     // Devflow has managed the proxy on this machine. runCleanupPhase gates the
-    // applyDisableToSettings call on the port being present in the map, so when the file
+    // applyProxyTeardownToSettings call on the port being present in the map, so when the file
     // is absent (never managed), no env strip is attempted and a user's own gateway vars
     // are left untouched.
     const managedProxyPorts = new Map<string, number>();

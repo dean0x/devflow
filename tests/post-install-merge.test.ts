@@ -18,9 +18,16 @@
  *  - Empty template → changed:false
  */
 
-import { describe, it, expect } from 'vitest';
-import { mergeDevflowSettingsTemplate } from '../src/targets/claude-code/post-install.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mergeDevflowSettingsTemplate, installSettings } from '../src/targets/claude-code/post-install.js';
 import type { HookMatcher } from '../src/targets/claude-code/hooks.js';
+import * as os from 'node:os';
+import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Resolved repo root — installSettings needs it to locate the settings template.
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -283,5 +290,73 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     const hooks = (existing.hooks as Record<string, HookMatcher[]>)['SessionStart'] ?? [];
     expect(hooks[0]?.hooks[0]?.command).toBe(existingCmd); // user hook comes first
     expect(hooks[1]?.hooks[0]?.command).toBe(devflowCmd);  // devflow hook appended
+  });
+});
+
+// ─── installSettings — parse-failure and merge wiring ────────────────────────
+//
+// These tests exercise installSettings(claudeDir, rootDir, devflowDir, verbose)
+// against the real filesystem via real tmpdirs.  They complement the pure
+// mergeDevflowSettingsTemplate unit tests above by pinning the I/O wiring and
+// the parse-failure bail path (post-install.ts:926-935).
+
+describe('installSettings — parse-failure and wiring (issue #313)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'devflow-settings-test-'));
+  });
+
+  afterEach(async () => {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('(a) leaves settings.json byte-identical on invalid JSON and leaves no .tmp.* residue', async () => {
+    // Arrange — write a syntactically invalid JSON (trailing comma before closing brace)
+    const invalidJson = '{ "hooks": { "SessionStart": [] } , }';
+    const settingsPath = path.join(tmpDir, 'settings.json');
+    await fsp.writeFile(settingsPath, invalidJson, 'utf-8');
+    const bytesBefore = await fsp.readFile(settingsPath);
+
+    // Act — parse failure must bail without touching the file
+    await installSettings(tmpDir, REPO_ROOT, '/fake/devflow', false);
+
+    // Assert — file bytes are identical (no byte was changed)
+    const bytesAfter = await fsp.readFile(settingsPath);
+    expect(bytesAfter.equals(bytesBefore)).toBe(true);
+
+    // Assert — writeFileAtomicExclusive writes to a `.tmp.<pid>` sibling then renames;
+    // on the parse-failure path it must never be created.
+    const entries = await fsp.readdir(tmpDir);
+    const tmpFiles = entries.filter((e) => e.includes('.tmp.'));
+    expect(tmpFiles).toHaveLength(0);
+  });
+
+  it('(b) adds hooks while preserving env and permissions blocks byte-for-byte (wiring pin)', async () => {
+    // Arrange — valid settings with env + permissions but no hooks
+    const existingSettings: Record<string, unknown> = {
+      env: { ANTHROPIC_BASE_URL: 'https://my-gateway.example.com', MY_VAR: 'keep-me' },
+      permissions: { allow: ['Read(*)'], deny: ['Bash(rm -rf *)'] },
+    };
+    const settingsPath = path.join(tmpDir, 'settings.json');
+    await fsp.writeFile(settingsPath, JSON.stringify(existingSettings, null, 2) + '\n', 'utf-8');
+
+    // Act — installSettings should merge the template hooks in
+    await installSettings(tmpDir, REPO_ROOT, '/fake/devflow', false);
+
+    // Assert — hooks were added (template carries hooks for SessionStart, Stop, etc.)
+    const result = JSON.parse(await fsp.readFile(settingsPath, 'utf-8')) as Record<string, unknown>;
+    expect(result.hooks).toBeDefined();
+    const hooks = result.hooks as Record<string, unknown[]>;
+    const hookEventCount = Object.values(hooks).filter(
+      (arr) => Array.isArray(arr) && arr.length > 0,
+    ).length;
+    expect(hookEventCount).toBeGreaterThan(0);
+
+    // Assert — env block survived byte-for-byte
+    expect(result.env).toEqual(existingSettings.env);
+
+    // Assert — permissions block survived byte-for-byte
+    expect(result.permissions).toEqual(existingSettings.permissions);
   });
 });
