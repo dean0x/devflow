@@ -219,6 +219,59 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     expect(JSON.stringify(existing)).toBe(snapshotAfterFirst);
   });
 
+  // ── Shape guards (PF-023): `existing` is a hand-editable file ──────────────
+  //
+  // The merge mutates a user-authored object, so every branch validates shape at
+  // the sink. A settings.json that is valid JSON but structurally odd must neither
+  // throw (init would swallow it and skip hook installation entirely) nor lose the
+  // user's own entries.
+
+  it('leaves a non-object hooks value untouched instead of throwing', () => {
+    const existing: Record<string, unknown> = { hooks: 'not-an-object' };
+    const template = makeTemplate(['/devflow/scripts/hooks/run-hook memory-worker']);
+    expect(() => mergeDevflowSettingsTemplate(existing, template)).not.toThrow();
+    expect(existing.hooks).toBe('not-an-object');
+  });
+
+  it('leaves an array hooks value untouched instead of writing keys onto it', () => {
+    const existing: Record<string, unknown> = { hooks: [] };
+    const template: Record<string, unknown> = {
+      hooks: { SessionStart: [makeHookMatcher('/devflow/scripts/hooks/run-hook memory-worker')] },
+    };
+    const { changed } = mergeDevflowSettingsTemplate(existing, template);
+    // JSON.stringify would silently drop keys attached to an array — never touch it.
+    expect(Array.isArray(existing.hooks)).toBe(true);
+    expect((existing.hooks as unknown[]).length).toBe(0);
+    expect(changed).toBe(false);
+  });
+
+  it('leaves a non-array per-event value untouched instead of throwing', () => {
+    const existing: Record<string, unknown> = { hooks: { SessionStart: 'oops' } };
+    const template = makeTemplate(['/devflow/scripts/hooks/run-hook memory-worker']);
+    expect(() => mergeDevflowSettingsTemplate(existing, template)).not.toThrow();
+    expect((existing.hooks as Record<string, unknown>).SessionStart).toBe('oops');
+  });
+
+  it('tolerates malformed existing matcher entries when deduping', () => {
+    const cmd = '/devflow/scripts/hooks/run-hook memory-worker';
+    const existing: Record<string, unknown> = {
+      hooks: { SessionStart: ['a-string', { noHooksKey: true }, null] },
+    };
+    const template = makeTemplate([cmd]);
+    expect(() => mergeDevflowSettingsTemplate(existing, template)).not.toThrow();
+    const arr = (existing.hooks as Record<string, unknown[]>).SessionStart;
+    // Foreign entries survive; the devflow hook is appended after them.
+    expect(arr.length).toBe(4);
+    expect(arr[0]).toBe('a-string');
+  });
+
+  it('does not introduce an empty hooks key when the template adds no hooks', () => {
+    const existing: Record<string, unknown> = { model: 'claude-opus-4-5' };
+    const template: Record<string, unknown> = { statusLine: 's' };
+    mergeDevflowSettingsTemplate(existing, template);
+    expect('hooks' in existing).toBe(false);
+  });
+
   it('preserves existing hook order — devflow hooks appended, not prepended', () => {
     const existingCmd = '/user/custom-hook';
     const devflowCmd = '/devflow/scripts/hooks/run-hook memory-worker';

@@ -2639,10 +2639,9 @@ describe('ensure-proxy behavioral tests', () => {
         binPath: '/stale/relay.js', // non-existent stored path
       });
 
-      // Build a PATH that includes fakeBinDir (for `command -v subswitch`) plus
-      // the binaries the hook needs to run (bash, node, cat, etc.)
-      const hookPath = `/usr/bin:/bin${fakeBinDir ? ':' + fakeBinDir : ''}`;
-
+      // PATH must find the fake subswitch (for `command -v subswitch`) as well as
+      // every binary the hook itself needs (bash, node, cat, ...), so prepend the
+      // shadow dir to the inherited PATH rather than replacing it.
       const result = spawnSync('bash', [PROXY_HOOK], {
         input: JSON.stringify(SESSION_INPUT),
         env: {

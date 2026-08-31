@@ -7,7 +7,6 @@ import { getManagedSettingsPath } from './claude-paths.js';
 import { getGitignoreEntries, getDocsDir } from '../../core/project-paths.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import type { SecurityMode } from '../../core/manifest.js';
-import type { HookMatcher } from './hooks.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -792,6 +791,23 @@ export async function stripUserSecurityDenyList(
   return { removed };
 }
 
+/** True for a non-null, non-array object literal. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Every `command` string carried by a hook matcher, tolerating foreign shapes.
+ * Returns an empty array for anything that is not `{ hooks: [{ command: string }] }`.
+ */
+function hookCommandsOf(matcher: unknown): string[] {
+  if (!isPlainObject(matcher) || !Array.isArray(matcher.hooks)) return [];
+  return matcher.hooks
+    .filter(isPlainObject)
+    .map((h) => h.command)
+    .filter((c): c is string => typeof c === 'string');
+}
+
 /**
  * Merge Devflow's template hook entries and top-level fields into an existing
  * parsed settings object. Idempotent by exact command string — a hook that is
@@ -800,6 +816,11 @@ export async function stripUserSecurityDenyList(
  *
  * D-SETTINGS-1: merge strategy — never replace; only add devflow entries that are absent.
  * Returns { changed: true } when any field was added.
+ *
+ * `existing` comes from a hand-editable file, so every branch is shape-guarded:
+ * a `hooks` value (or per-event value) that is not the expected object/array shape
+ * is left untouched rather than overwritten or thrown on (applies PF-023 — validate
+ * at the sink that mutates).
  *
  * Exported for testing.
  */
@@ -810,20 +831,30 @@ export function mergeDevflowSettingsTemplate(
   let changed = false;
 
   // Merge hook entries — idempotent by exact command string
-  const tmplHooks = (template.hooks ?? {}) as Record<string, HookMatcher[]>;
-  const existingHooksObj = (existing.hooks as Record<string, HookMatcher[]> | undefined) ?? {};
-  existing.hooks = existingHooksObj;
-  for (const [event, matchers] of Object.entries(tmplHooks)) {
-    existingHooksObj[event] ??= [];
-    const eventArr = existingHooksObj[event];
-    for (const matcher of matchers) {
-      const cmd = matcher.hooks[0]?.command;
-      if (!cmd) continue;
-      const alreadyPresent = eventArr.some((m) => m.hooks.some((h) => h.command === cmd));
-      if (!alreadyPresent) {
+  const tmplHooks = isPlainObject(template.hooks) ? template.hooks : {};
+  const existingHooksRaw = existing.hooks;
+  if (existingHooksRaw === undefined || isPlainObject(existingHooksRaw)) {
+    const existingHooks: Record<string, unknown> = existingHooksRaw ?? {};
+    let hooksChanged = false;
+    for (const [event, matchers] of Object.entries(tmplHooks)) {
+      if (!Array.isArray(matchers)) continue;
+      for (const matcher of matchers) {
+        const cmd = hookCommandsOf(matcher)[0];
+        if (!cmd) continue;
+        const current = existingHooks[event];
+        if (current !== undefined && !Array.isArray(current)) break; // foreign shape — leave the event alone
+        const eventArr: unknown[] = current ?? [];
+        if (eventArr.some((m) => hookCommandsOf(m).includes(cmd))) continue;
         eventArr.push(matcher);
-        changed = true;
+        existingHooks[event] = eventArr;
+        hooksChanged = true;
       }
+    }
+    // Attach only when something was actually added — never introduce an empty
+    // `hooks` key into a settings.json that had none.
+    if (hooksChanged) {
+      existing.hooks = existingHooks;
+      changed = true;
     }
   }
 
@@ -851,6 +882,12 @@ export function mergeDevflowSettingsTemplate(
  *   Idempotent by exact command string — existing hooks are never duplicated or removed.
  *   Preserves every user key (env, permissions, apiKeyHelper, model, etc.) untouched.
  * - Parse failure: warn and skip; file left byte-identical (never clobber a broken file).
+ *
+ * The merge is additive only, so it runs without a confirmation prompt: init is called
+ * from inside an active spinner (a prompt would render on top of it), and declining
+ * could not protect the file anyway — init's own settings pass rewrites the hook set
+ * unconditionally right afterwards. A prompt whose answer changes nothing is worse
+ * than no prompt.
  *
  * The deny list is handled by init's dedicated security step
  * (applyUserSecurityDenyList / installManagedSettings) after installSettings completes.
@@ -908,26 +945,6 @@ export async function installSettings(
     if (!changed) {
       // Already fully configured — nothing to do
       return;
-    }
-
-    // Settings need Devflow hooks added.
-    // In TTY mode: ask before writing so the user knows what's happening.
-    // In non-TTY mode: merge silently (operation is non-destructive — D-SETTINGS-1).
-    if (process.stdin.isTTY) {
-      const confirmed = await p.confirm({
-        message: 'settings.json exists without some Devflow hooks. Add Working Memory hooks and HUD configuration?',
-        initialValue: true,
-      });
-
-      if (p.isCancel(confirmed)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-
-      if (!confirmed) {
-        p.log.info('Keeping existing settings unchanged');
-        return;
-      }
     }
 
     await writeFileAtomicExclusive(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
