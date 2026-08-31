@@ -25,7 +25,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
  * Expected exact-pinned version of the routing runtime.
  * Hoisted so the next bump is a one-line change.
  */
-const SUBSWITCH_VERSION = '0.2.0';
+const SUBSWITCH_VERSION = '0.3.0';
 
 // ---------------------------------------------------------------------------
 // Guard 3: dependency pin integrity
