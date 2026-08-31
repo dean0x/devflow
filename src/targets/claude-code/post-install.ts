@@ -811,9 +811,9 @@ export function mergeDevflowSettingsTemplate(
 
   // Merge hook entries — idempotent by exact command string
   const tmplHooks = (template.hooks ?? {}) as Record<string, HookMatcher[]>;
+  const existingHooksObj = (existing.hooks as Record<string, HookMatcher[]> | undefined) ?? {};
+  existing.hooks = existingHooksObj;
   for (const [event, matchers] of Object.entries(tmplHooks)) {
-    const existingHooksObj = (existing.hooks as Record<string, HookMatcher[]> | undefined) ?? {};
-    existing.hooks = existingHooksObj;
     existingHooksObj[event] ??= [];
     const eventArr = existingHooksObj[event];
     for (const matcher of matchers) {

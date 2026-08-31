@@ -194,7 +194,7 @@ if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
   log "prereq: binPath missing or not a file (${PROXY_BIN:-<empty>}) — attempting re-resolution"
   _RESOLVED_BIN=""
 
-  # Resolve node early for use in re-resolution (moved here from below)
+  # Resolve node for re-resolution strategies.
   _NODE_FOR_RESOLVE=$(command -v node 2>/dev/null || true)
 
   # Strategy a: locate devflow CLI → walk up to find node_modules/subswitch
