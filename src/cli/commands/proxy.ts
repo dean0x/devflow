@@ -187,9 +187,10 @@ function _stripProxyEnvFromObject(settings: Settings, managedPort: number): bool
   const env = s.env as Record<string, unknown> | undefined;
   if (!env) return false;
 
-  // Devflow is the only producer of this var — always remove it, regardless of whether
-  // the URL is still ours. Port-scoping protects a FOREIGN url value; there is no
-  // foreign value of this key to protect. (applies PF-015, ADR-003)
+  // D-STRIP-1: callers gate this function on devflow-managed evidence (proxy.json exists),
+  // so by the time we get here we know Devflow wrote this var. Always remove it
+  // unconditionally — there is no foreign value of this key to protect. Port-scoping
+  // protects ANTHROPIC_BASE_URL (see below), but not this var. (applies PF-015, ADR-003)
   const hadWindowVar = env[UNKNOWN_MODEL_WINDOW_ENV] !== undefined;
   delete env[UNKNOWN_MODEL_WINDOW_ENV];
 
@@ -453,6 +454,26 @@ export async function runProxyPreflight(
       PROBE_TIMEOUT_MS,
     );
     if (healthResult.ok && isOurRelayBody(healthResult.value)) {
+      // D-EFR-5: evaluate the foreign-env refusal BEFORE the adopted early-return.
+      // The old order (adopted-return first, foreign-check only when port is free)
+      // allowed enabling while a foreign ANTHROPIC_BASE_URL was set — any healthy
+      // relay on the port caused an early-return that silently skipped check ④.
+      // Now we read settings and refuse if a foreign URL is present, regardless of
+      // port state. swallowSettingsReadError semantics are preserved: when that flag
+      // is true, readSettingsJson() returns '{}' on I/O failure instead of throwing,
+      // so the catch here is only hit in the strict (runEnable) path.
+      let settingsJsonForForeignCheck: string;
+      try {
+        settingsJsonForForeignCheck = await deps.readSettingsJson();
+      } catch {
+        return Err('Could not read settings.json — check file permissions');
+      }
+      const envStateForAdopt = readProxyEnvState(settingsJsonForForeignCheck, port);
+      if (envStateForAdopt === 'foreign') {
+        return Err(
+          'An existing ANTHROPIC_BASE_URL in settings.json points to a different gateway — Devflow will not overwrite it',
+        );
+      }
       return Ok({ binPath, npxWarning, adopted: true });
     }
     // Port accepting but health timed out, failed, or not our relay

@@ -1755,3 +1755,98 @@ describe('Phase 4 / T7-extended: fully-enabled state includes UNKNOWN_MODEL_WIND
     expect(env[WINDOW_ENV]).toBe('1');
   });
 });
+
+// ─── FIX 3 (issue #313): runProxyPreflight — D-EFR-5 ordering ───────────────
+//
+// Foreign-env check (check ④) must evaluate BEFORE the adopted early-return
+// (check ③). Previously, a healthy relay on the port caused an early-return that
+// silently skipped the foreign-gateway refusal entirely.
+//
+// Regression tests:
+//   REG-EFR-1: foreign URL + healthy relay → Err (refusal), not adopted
+//   REG-EFR-2: no foreign URL + healthy relay → Ok(adopted:true) (normal adopt)
+//   REG-EFR-3: foreign URL + port free → Err (check ④ on the free-port path, unchanged)
+
+describe('runProxyPreflight — FIX 3 D-EFR-5 foreign-env check ordering (issue #313)', () => {
+  const port = DEFAULT_PORT;
+  const codexAuthPath = '/home/test/.codex/auth.json';
+  const configPath = '/home/test/.devflow/proxy-routing.json';
+  const logPath = '/home/test/.devflow/logs/proxy.log';
+
+  const ourHealthBody = '{"name":"subswitch","version":"0.2.0","providers":[{"id":"anthropic","configured":true,"modelCount":0}]}';
+
+  // REG-EFR-1: healthy relay + foreign URL → must be refused (not adopted silently)
+  it('REG-EFR-1: returns Err when relay is healthy but ANTHROPIC_BASE_URL is a foreign gateway', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),       // port up
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }), // our relay
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://litellm.mycompany.internal' }, // foreign URL
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    // Must be refused — not adopted silently
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('ANTHROPIC_BASE_URL');
+    }
+  });
+
+  // REG-EFR-2: healthy relay + no foreign URL → normal adopt
+  it('REG-EFR-2: returns Ok(adopted:true) when relay is healthy and no foreign URL', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson: vi.fn().mockResolvedValue('{}'), // no foreign URL
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.adopted).toBe(true);
+    }
+  });
+
+  // REG-EFR-3: port free + foreign URL → check ④ on the free-port path (already tested above,
+  // reconfirmed here to show both paths refuse a foreign URL)
+  it('REG-EFR-3: returns Err when port is free but ANTHROPIC_BASE_URL is a foreign gateway', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(false), // port free
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://litellm.mycompany.internal' },
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('ANTHROPIC_BASE_URL');
+    }
+  });
+
+  // REG-EFR-1b: healthy relay + our own relay URL on the port → adopted (not foreign)
+  it('REG-EFR-1b: adopted when relay is healthy and ANTHROPIC_BASE_URL is already our relay URL', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}` }, // our URL → not foreign
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.adopted).toBe(true);
+    }
+  });
+
+  // Verify that readSettingsJson is called in the adopt path (D-EFR-5 gate is wired)
+  it('calls readSettingsJson in the adopted path to evaluate foreign-env state', async () => {
+    const readSettingsJson = vi.fn().mockResolvedValue('{}');
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson,
+    });
+    await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(readSettingsJson).toHaveBeenCalledTimes(1);
+  });
+});
