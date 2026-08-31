@@ -268,6 +268,29 @@ export function proxyBaseUrl(port: number): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns true when ~/.devflow/proxy.json exists on disk — i.e. Devflow has
+ * previously managed the proxy on this machine.
+ *
+ * This is the evidence gate used by init and uninstall before stripping
+ * ANTHROPIC_BASE_URL / CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:
+ * we only strip those vars when we can prove Devflow wrote them.
+ *
+ * D-STRIP-1: gate proxy env stripping on devflow-managed evidence.
+ *   readProxyState() returns Ok(defaultState) on ENOENT — it cannot distinguish
+ *   "file absent" from "file present with DEFAULT_PROXY_PORT". Callers that need
+ *   to differentiate must use proxyJsonExists() rather than checking the result
+ *   of readProxyState().
+ */
+export async function proxyJsonExists(devflowDir: string): Promise<boolean> {
+  try {
+    await fs.access(join(devflowDir, 'proxy.json'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check whether the Devflow proxy is currently enabled.
  * Returns false when the proxy state file is missing, unreadable, or malformed.
  * This is the SOLE export that agent-models and cli commands use to check proxy state.

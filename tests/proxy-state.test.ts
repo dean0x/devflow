@@ -24,6 +24,7 @@ import {
   writeProxyState,
   buildRoutingConfigJson,
   buildProxyState,
+  proxyJsonExists,
   DEFAULT_PROXY_PORT,
   RUNTIME_VERSION_RE,
   DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS,
@@ -404,5 +405,60 @@ describe('RUNTIME_VERSION_RE — version string validation (AC-S4)', () => {
     ['1', true, 'single digit'],
   ])('RUNTIME_VERSION_RE.test("%s") === %s (%s)', (v, expected) => {
     expect(RUNTIME_VERSION_RE.test(v)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2 (issue #313): proxyJsonExists — D-STRIP-1 gate discriminator
+//
+// readProxyState() returns Ok(defaultState) on ENOENT — callers cannot use its
+// success to prove proxy.json exists. proxyJsonExists() is the correct gate for
+// stripping managed env vars: strip only when the file exists (proving devflow
+// previously wrote it).
+// ---------------------------------------------------------------------------
+
+describe('proxyJsonExists — FIX 2 (issue #313)', () => {
+  it('returns false when proxy.json does not exist', async () => {
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(false);
+  });
+
+  it('returns true when proxy.json exists (even with only a port)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'proxy.json'), JSON.stringify({ port: DEFAULT_PROXY_PORT }));
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns true for a full proxy.json written by writeProxyState', async () => {
+    const state = buildProxyState(DEFAULT_PROXY_PORT, '/path/relay.js', '/path/config.json', '0.2.0');
+    await writeProxyState(tmpDir, state);
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns true even when the file contains malformed JSON (file-exists ≠ valid JSON)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'proxy.json'), 'not-valid-json{{');
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns false when devflowDir itself does not exist', async () => {
+    const nonexistent = path.join(tmpDir, 'does-not-exist');
+    const result = await proxyJsonExists(nonexistent);
+    expect(result).toBe(false);
+  });
+
+  it('discriminates absent-file from Ok(defaultState) returned by readProxyState', async () => {
+    // readProxyState() returns Ok({enabled:false,port:DEFAULT_PROXY_PORT,...}) on ENOENT,
+    // which is indistinguishable from a file present with those exact values.
+    // proxyJsonExists() must correctly report false for the absent-file case.
+    const readResult = await readProxyState(tmpDir);
+    expect(readResult.ok).toBe(true); // readProxyState returns Ok even on ENOENT
+    if (readResult.ok) {
+      expect(readResult.value.port).toBe(DEFAULT_PROXY_PORT); // same as a real file with default port
+    }
+    // proxyJsonExists is the correct discriminator — file is absent
+    const exists = await proxyJsonExists(tmpDir);
+    expect(exists).toBe(false);
   });
 });

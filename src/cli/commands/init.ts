@@ -35,7 +35,7 @@ import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
 import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.js';
-import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
+import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT, proxyJsonExists } from '../../core/proxy-state.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
@@ -1635,14 +1635,18 @@ export const initCommand = new Command('init')
         content = JSON.stringify(parsedSettings, null, 2) + '\n';
       }
       // Proxy env: ANTHROPIC_BASE_URL strip-then-add, scoped to managed port.
-      // Read proxy.json to learn which port we own — only that URL is stripped.
-      // A user's own localhost gateway on any other port is preserved.
+      // D-STRIP-1: only strip when proxy.json exists — evidence that Devflow previously
+      // wrote ANTHROPIC_BASE_URL. Without this gate, a fresh init on a machine where
+      // DEFAULT_PROXY_PORT (4141) happens to be a user's own gateway (LiteLLM etc.)
+      // would silently delete both their URL and the window-enforcement var.
       // Invariant: proxy.json always reflects the final settled state after the
       // preflight block above — all paths that force proxyEnabled=false also write
       // proxy.json enabled:false (avoids PF-015), so managedPort == effectivePort.
-      const proxyStateForStrip = await readProxyState(devflowDir);
-      const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
-      content = stripProxyEnv(content, managedPort);
+      if (await proxyJsonExists(devflowDir)) {
+        const proxyStateForStrip = await readProxyState(devflowDir);
+        const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
+        content = stripProxyEnv(content, managedPort);
+      }
       if (proxyEnabled) content = applyProxyEnv(content, effectivePort);
 
       if (content !== original) {

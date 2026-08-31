@@ -16,7 +16,7 @@ import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
 import { applyDisableToSettings } from './proxy.js';
-import { readProxyState, DEFAULT_PROXY_PORT } from '../../core/proxy-state.js';
+import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
@@ -814,12 +814,14 @@ export async function runCleanupPhase(opts: {
       settingsContent = stripFlags(settingsContent); // also strips viewMode via view-mode registry entry
       settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
       // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
-      // REG-1: scope the URL strip to the port Devflow manages — use the pre-captured port
-      // (from opts.managedProxyPorts) because proxy.json is already deleted by
-      // removeDevFlowInstallArtifacts before this phase runs. A user's own localhost
-      // gateway on any other port is left in settings untouched.
-      {
-        const managedPort = opts.managedProxyPorts?.get(scope) ?? DEFAULT_PROXY_PORT;
+      // D-STRIP-1: only strip when we have devflow-managed evidence (proxy.json existed
+      // before artifact removal). managedProxyPorts is populated only when the file was
+      // present — if the scope has no entry, proxy was never managed and we leave
+      // ANTHROPIC_BASE_URL / CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT untouched.
+      // REG-1: the port-scoped URL strip protects any foreign localhost gateway on a
+      // different port — the managedPort value is from the pre-captured proxy.json port.
+      if (opts.managedProxyPorts?.has(scope)) {
+        const managedPort = opts.managedProxyPorts.get(scope)!;
         const parsedSettings = JSON.parse(settingsContent) as Settings;
         applyDisableToSettings(parsedSettings, managedPort);
         settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
@@ -1047,14 +1049,22 @@ export const uninstallCommand = new Command('uninstall')
     // Pre-capture managed proxy ports for each scope BEFORE artifact removal.
     // proxy.json is deleted by removeDevFlowInstallArtifacts (inside runFullPhaseForScope),
     // so reading it after the full phase would always yield DEFAULT_PROXY_PORT. (F6)
+    //
+    // D-STRIP-1: only populate managedProxyPorts when proxy.json exists — evidence that
+    // Devflow has managed the proxy on this machine. runCleanupPhase gates the
+    // applyDisableToSettings call on the port being present in the map, so when the file
+    // is absent (never managed), no env strip is attempted and a user's own gateway vars
+    // are left untouched.
     const managedProxyPorts = new Map<string, number>();
     if (!isSelectiveUninstall) {
       for (const scope of scopesToUninstall) {
         try {
           const paths = await getInstallationPaths(scope);
-          const proxyState = await readProxyState(paths.devflowDir);
-          if (proxyState.ok) managedProxyPorts.set(scope, proxyState.value.port);
-        } catch { /* non-fatal: if we can't read, we fall back to DEFAULT_PROXY_PORT */ }
+          if (await proxyJsonExists(paths.devflowDir)) {
+            const proxyState = await readProxyState(paths.devflowDir);
+            if (proxyState.ok) managedProxyPorts.set(scope, proxyState.value.port);
+          }
+        } catch { /* non-fatal */ }
       }
     }
 
