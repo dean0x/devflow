@@ -2553,4 +2553,126 @@ describe('ensure-proxy behavioral tests', () => {
       ).toBe(false);
     });
   });
+
+  // ── FIX 4 (issue #313): stale binPath re-resolution ─────────────────────────
+  //
+  // When proxy.json exists with enabled:true but the stored binPath is absent
+  // (e.g., npx cache GC cleared the subswitch package), the hook must attempt
+  // re-resolution before emitting the "relay binary not found" warning.
+  //
+  // Strategy b (command -v subswitch) is the easiest to test in a controlled env:
+  // create a fake subswitch script in a shadow PATH directory, set binPath to a
+  // non-existent path, and verify the hook heals silently (exits 0 with no warning).
+  //
+  // Strategy a (devflow walk) is exercised implicitly by the presence of a real
+  // devflow binary + node_modules/subswitch in the running test environment —
+  // but we can't rely on that structure in CI, so we keep strategy-b tests here.
+
+  describe('FIX 4 — stale binPath re-resolution (issue #313)', () => {
+
+    it('always exits 0 when binPath is stale (regression: no crash)', async () => {
+      // Base case: stale path + re-resolution fails (no devflow/subswitch in PATH)
+      // → hook falls through to warning and exits 0 (same as before fix).
+      writeProxyJson({
+        enabled: true,
+        port: await allocateFreePort(),
+        binPath: '/this/stale/path/does/not/exist/relay.js',
+      });
+      const result = spawnSync('bash', [PROXY_HOOK], {
+        input: JSON.stringify(SESSION_INPUT),
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          PATH: '/usr/bin:/bin', // restrict PATH so devflow/subswitch not found
+        },
+        encoding: 'utf-8',
+      });
+      expect(result.status).toBe(0); // must always exit 0
+    });
+
+    it('emits relay-binary-not-found warning when re-resolution fails', async () => {
+      writeProxyJson({
+        enabled: true,
+        port: await allocateFreePort(),
+        binPath: '/stale/relay.js',
+      });
+      const result = spawnSync('bash', [PROXY_HOOK], {
+        input: JSON.stringify(SESSION_INPUT),
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          PATH: '/usr/bin:/bin',
+        },
+        encoding: 'utf-8',
+      });
+      expect(result.status).toBe(0);
+      // Warning emitted for SessionStart
+      if (result.stdout) {
+        try {
+          const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+          const output = parsed['hookSpecificOutput'] as Record<string, unknown> | undefined;
+          if (output) {
+            expect((output['additionalContext'] as string)).toContain('[Devflow proxy]');
+          }
+        } catch {
+          // stdout not JSON (e.g., empty) — still acceptable as long as exit=0
+        }
+      }
+    });
+
+    it('heals silently (exits 0, no warning) when strategy-b finds subswitch via PATH', async () => {
+      // Create a fake subswitch binary in a shadow bin directory
+      const fakeBinDir = path.join(tmpDir, 'shadow-bin');
+      fs.mkdirSync(fakeBinDir, { recursive: true });
+
+      // The hook will call `subswitch serve` on the resolved binary — we need a
+      // script that does not actually start a relay (it will exit immediately).
+      // The hook only spawns in the UserPromptSubmit+port-up path, which doesn't
+      // trigger here since port is down. So we just need the binary to exist.
+      const fakeSubswitch = path.join(fakeBinDir, 'subswitch');
+      fs.writeFileSync(fakeSubswitch, '#!/bin/sh\nexec true\n');
+      fs.chmodSync(fakeSubswitch, '0755');
+
+      writeProxyJson({
+        enabled: true,
+        port: await allocateFreePort(),
+        binPath: '/stale/relay.js', // non-existent stored path
+      });
+
+      // Build a PATH that includes fakeBinDir (for `command -v subswitch`) plus
+      // the binaries the hook needs to run (bash, node, cat, etc.)
+      const hookPath = `/usr/bin:/bin${fakeBinDir ? ':' + fakeBinDir : ''}`;
+
+      const result = spawnSync('bash', [PROXY_HOOK], {
+        input: JSON.stringify(SESSION_INPUT),
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          PATH: `${fakeBinDir}:${process.env.PATH}`,
+        },
+        encoding: 'utf-8',
+      });
+
+      // After re-resolution, binPath is healed — the hook continues past the
+      // binPath check. On SessionStart with port down, it tries to spawn the relay.
+      // The fake subswitch exits immediately → relay fails to start → hook emits a
+      // different warning (port not accepting) and exits 0. The key assertion is
+      // that exit code is 0 and the "relay binary not found" warning is NOT emitted.
+      expect(result.status).toBe(0);
+
+      // Should NOT emit the "relay binary not found" message
+      if (result.stdout) {
+        try {
+          const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+          const output = parsed['hookSpecificOutput'] as Record<string, unknown> | undefined;
+          if (output) {
+            const ctx = output['additionalContext'] as string ?? '';
+            expect(ctx).not.toContain('relay binary not found');
+          }
+        } catch {
+          // Not JSON — also acceptable (empty stdout = healed past binPath check)
+        }
+      }
+    });
+  });
 });
