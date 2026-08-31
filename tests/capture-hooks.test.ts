@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -61,11 +62,13 @@ function runHookWithPath(
 
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
+  const stagedFile = `${memFile}.new`;
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
-echo "## Now" >> "${memFile}"
+# Writes to staged path (ADR-023); worker CAS-mv's it to the real path
+echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
+echo "## Now" >> "${stagedFile}"
 exit 0
 `,
   );
@@ -497,15 +500,13 @@ describe('memory-worker', () => {
 
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
-    // Poll briefly for the detached worker's log (nohup-spawned, async)
+    // Poll for the detached worker's log to contain a terminal line.
+    // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
     const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !fs.existsSync(logFile)) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(fs.existsSync(logFile)).toBe(true);
+    const found = await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
+    expect(found).toBe(true);
     expect(fs.readFileSync(logFile, 'utf-8')).toContain('Starting (CWD=');
-  });
+  }, 15000);
 
   it('BG_UPDATER guard prevents spawn', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');

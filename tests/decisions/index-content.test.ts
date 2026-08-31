@@ -292,3 +292,81 @@ describe('renderAndWriteAll — index.md integration', () => {
     expect(first).toBe(second)
   })
 })
+
+// ---------------------------------------------------------------------------
+// extractEntryFromBlock hijack-safety (line-anchored Status/Area regexes)
+// ---------------------------------------------------------------------------
+// The old unanchored /- \*\*Status\*\*: (.+)/ and /- \*\*Area\*\*: (.+)/ regexes
+// could match substrings inside amendment text that happens to contain those
+// patterns, yielding a wrong status or area in the index entry.
+// The fix: use /^- \*\*Status\*\*: (.+)/m and /^- \*\*Area\*\*: (.+)/m to anchor
+// the match to the START of a line.
+
+describe('extractEntryFromBlock hijack-safety (Status/Area regex)', () => {
+  const OPTS = {
+    decisionsFilePath: '/project/.devflow/learning/decisions.md',
+    pitfallsFilePath:  '/project/.devflow/learning/pitfalls.md',
+  }
+
+  it('amendment text containing "- **Status**:" before the real status line does not corrupt extracted status', () => {
+    // raw_body places the Amendments line BEFORE the Status line.
+    // The old unanchored regex matches "- **Status**: Deprecated" inside the
+    // amendment text and returns [Deprecated] (wrong).
+    // The anchored /^- \*\*Status\*\*:/m matches only at line start → [Accepted].
+    const rawBody = [
+      '',
+      '## ADR-091: Hijack test decision',
+      '',
+      '- **Amendments**: [2026-01-01] changed from - **Status**: Deprecated to Accepted',
+      '- **Date**: 2026-01-01',
+      '- **Status**: Accepted',
+      '- **Context**: foo',
+      '- **Decision**: bar',
+      '- **Consequences**: baz',
+      '- **Source**: self-learning:obs_hijack',
+      '',
+    ].join('\n')
+    const row = {
+      id: 'obs_hijack',
+      type: 'decision',
+      anchor_id: 'ADR-091',
+      pattern: 'Hijack test decision',
+      date: '2026-01-01',
+      decisions_status: 'Accepted',
+      raw_body: rawBody,
+    }
+    const result = buildIndexContent([row], [], OPTS)
+    // Must show [Accepted], not [Deprecated] or [unknown]
+    expect(result).toContain('[Accepted]')
+    expect(result).not.toContain('[Deprecated]')
+  })
+
+  it('amendment text containing "- **Area**:" before the real area line does not corrupt extracted area', () => {
+    // raw_body places the Amendments line BEFORE the Area line.
+    // The old unanchored regex picks up "- **Area**: old-area" from the amendment text.
+    // The anchored /^- \*\*Area\*\*:/m matches only at line start → "hooks".
+    const rawBody = [
+      '',
+      '## PF-091: Hijack test pitfall',
+      '',
+      '- **Amendments**: [2026-01-01] moved from - **Area**: old-area to hooks',
+      '- **Area**: hooks',
+      '- **Issue**: something',
+      '- **Status**: Active',
+      '- **Source**: self-learning:obs_pf_hijack',
+      '',
+    ].join('\n')
+    const row = {
+      id: 'obs_pf_hijack',
+      type: 'pitfall',
+      anchor_id: 'PF-091',
+      pattern: 'Hijack test pitfall',
+      decisions_status: 'Active',
+      raw_body: rawBody,
+    }
+    const result = buildIndexContent([], [row], OPTS)
+    // Must show "hooks" in the area suffix, not "old-area"
+    expect(result).toContain('hooks')
+    expect(result).not.toContain('old-area')
+  })
+})

@@ -94,8 +94,11 @@ describe('learning agent', () => {
       expect(content).toMatch(/FINAL act.*unlink \.devflow\/learning\/\.pending-turns\.processing/s);
     });
 
-    it('does not use bare rm - (blocked by devflow deny-list, PF-003)', () => {
-      expect(content).not.toMatch(/\brm -/);
+    it('does not instruct rm -f for claim-file deletion — deny-list blocks flags, not the verb (PF-003)', () => {
+      // rm -f (flagged rm) is denied; unlink and a flagless rm both pass.
+      // The prose may explain PF-003 using "rm -f" as a counter-example,
+      // but the actual delete command must be unlink, not rm -f.
+      expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
 
     it('aborts without writes when inputs vanish mid-run', () => {
@@ -109,9 +112,11 @@ describe('learning agent', () => {
       expect(content).toContain('NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md');
     });
 
-    it('calls assign-anchor, retire-anchor, and rotate-observations via json-helper', () => {
+    it('calls assign-anchor, retire-anchor, refresh-anchor, and rotate-observations via json-helper', () => {
       expect(content).toMatch(/json-helper\.cjs" assign-anchor/);
       expect(content).toMatch(/json-helper\.cjs" retire-anchor/);
+      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files (D1/ADR-022)
+      expect(content).toMatch(/json-helper\.cjs" refresh-anchor/);
       expect(content).toMatch(/json-helper\.cjs" rotate-observations/);
     });
 
@@ -184,6 +189,9 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references .devflow/dream/', () => {
     const files = SHIPPED_DIRS.flatMap(dir => findFiles(dir, ['.md', '.mds']));
+    // avoids PF-018 (2): a scan-based test whose corpus went empty after a rename
+    // passes vacuously and silently stops guarding anything.
+    expect(files.length).toBeGreaterThan(0);
 
     const violations: string[] = [];
     for (const f of files) {
@@ -207,6 +215,8 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references subagent_type="Dream"', () => {
     const files = findFiles(path.join(ROOT, 'src', 'assets'), ['.md', '.mds']);
+    // avoids PF-018 (2): assert the scanned corpus is non-empty (see sibling test).
+    expect(files.length).toBeGreaterThan(0);
 
     const violations: string[] = [];
     for (const f of files) {

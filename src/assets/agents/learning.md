@@ -18,7 +18,7 @@ skills:
 You process the pending decisions queue for one project: claim it atomically, detect
 decision/pitfall patterns worth keeping, curate the existing ledger, and delete the claimed
 queue as your final act. You read and edit the data files directly — no script reads,
-validates, or applies anything on your behalf. The only executables you call are the three
+validates, or applies anything on your behalf. The only executables you call are the four
 ledger ops below.
 
 ## Iron Law
@@ -26,11 +26,12 @@ ledger ops below.
 > **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md**
 >
 > ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are written
-> exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`).
-> One `assign-anchor` invocation claims one number and re-renders all three files atomically
-> (decisions.md, pitfalls.md, index.md). To deprecate, supersede, or retire an entry, call
-> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Manual re-render
-> via `render-decisions.cjs render "$(pwd)"` also refreshes index.md.
+> exclusively by `render-decisions.cjs` (invoked internally by `assign-anchor`/`retire-anchor`/`refresh-anchor`).
+> One `assign-anchor` invocation claims one number and re-renders all three files
+> (decisions.md, pitfalls.md, index.md — each write atomic; the sequence is not transactional:
+> a crash between writes self-heals on the next op). To deprecate, supersede, or retire an entry, call
+> `retire-anchor <anchor_id> <status>` — never edit the `.md` files directly. Every ledger op
+> re-renders all three files internally; there is no separate render step for you to run.
 
 ## Environment
 
@@ -39,6 +40,7 @@ are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-he
 
 - `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
+- `refresh-anchor <anchor_id> [<anchor_id>...]` — variadic: re-projects one or more anchored log rows through the same projector as `assign-anchor` in a single lock/parse/render pass; use after reinforcing already-anchored observations (ADR-022)
 - `rotate-observations` — archives `observing` log rows older than 30 days
 
 Each op self-locks internally. Call them plainly — never wrap them in a lock of your own,
@@ -119,6 +121,23 @@ rewrite the whole file:
   timestamps are UTC ISO (`date -u +%Y-%m-%dT%H:%M:%SZ`). Estimate `confidence` honestly —
   it is curation metadata only, NOT a gate; do not inflate it.
 
+  **`details` grammar**: use `Key: value` segments separated by `;`. Recognised keys are per
+  type and disjoint — decisions: `context:`, `decision:`, `rationale:`; pitfalls: `area:`,
+  `issue:`, `impact:`, `resolution:`. A segment that begins with a key recognised FOR THAT TYPE
+  starts a new field; any other segment (including a key from the opposite type) is appended to
+  the previous field's value, so semicolons inside a value are preserved. Keep prose out of key
+  positions — do not start a value with text that looks like a recognised key for that type. The
+  parser has a recovery pass for legacy mid-segment keys.
+
+  **`amendments` field**: when reinforcing an already-anchored observation with a dated
+  correction or ratification that should remain visible as history (rather than silently
+  rewriting `details`), APPEND `{ "date": "YYYY-MM-DD", "note": "..." }` to the log row's
+  `amendments` array (create the array if absent). The shape is exactly `{date, note}` — the
+  schema guard rejects bare strings. Amendments render at the end of the entry body in
+  `decisions.md`/`pitfalls.md`; they never appear in `index.md` lines. A follow-up
+  `refresh-anchor <anchor_id>` is required to propagate the addition to the rendered files
+  (ADR-022).
+
 - **Reinforce an existing row** — use the Edit tool to replace that row's single line:
   increment `observations`, union `evidence` (dedupe, cap 10), update `last_seen`, and
   refresh `pattern`/`details`/`confidence` only where the new evidence sharpens them.
@@ -134,12 +153,32 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall" "obs
 NEVER hand-edit `decisions.md` or `pitfalls.md`. NEVER invent an ADR-NNN/PF-NNN number
 yourself — `assign-anchor` is the only source of numbering.
 
+**After reinforcing already-anchored observations**: once you have updated all target log rows
+(incrementing `observations`, refreshing `pattern`/`details`, updating `last_seen`), collect
+all anchor ids and make ONE variadic call:
+
+```bash
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id1> [<anchor_id2> ...]
+```
+
+This re-projects all sharpened log rows in a single lock/parse/render pass, propagating
+improvements to `decisions.md`/`pitfalls.md`/`index.md`. BATCH: do not call once per row — N
+calls pay N full-corpus renders; one variadic call pays one. Refresh calls do not consume
+curation slots; however, at most 10 anchors may be refreshed per run — stop if the cap is
+reached.
+
 ## Part 2 — Curation
 
 Periodic housekeeping of the ledger and rendered `.md` files. Bounds: **≤5 curation changes
 per run**. **7-day protection window** — never touch any entry whose `date` field in the
 ledger (`.devflow/learning/decisions-ledger.jsonl`) is within the past 7 days. The window key
-is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file.
+is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file. If the ledger
+row lacks a `date` field (pitfall rows promoted before date-stamping was added), use the
+observation log row's `last_seen` date for the window. If `last_seen` is also unavailable, the
+entry predates date-stamping and is outside the protection window (no backfill: a fabricated date would be worse than an unprotected entry — ADR-022).
+Example: a pitfall row with no ledger `date` whose log row has `last_seen: "2026-08-27"` → window
+key 2026-08-27 (protected if within 7 days of today); no ledger `date` AND no log `last_seen`
+→ outside the window, eligible for curation.
 
 Ground yourself first, all by direct reads:
 - Active entries and counts: `decisions.md` / `pitfalls.md` — what is rendered is what is active.
@@ -147,6 +186,13 @@ Ground yourself first, all by direct reads:
 - Stale code references: for entries whose `details`/`evidence` mention file paths, check
   those files still exist (Glob). An entry whose referenced files are gone is a preferred
   retirement candidate — a signal to prefer, not an automatic retirement.
+
+**PF-040 pointer-vs-citation gate**: before acting on a missing-path signal (a file cited in
+`details`/`evidence` no longer exists), determine whether the reference is a live POINTER (a
+file a reader should follow today) or a HISTORICAL CITATION (the file the entry recorded
+deleting, replacing, or retiring). A missing live pointer is drift — repair the reference. A
+missing historical citation is confirmation that the decision was implemented — leave the entry
+intact.
 
 **Rotate stale observations first** (before selecting curation candidates):
 
@@ -180,10 +226,13 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor <anchor_id> <s
 
 `retire-anchor` is atomic and idempotent. Call it once per entry.
 
-**Citation preservation**: if an entry being retired has inbound `applies ADR-NNN` citations
-in other entries, update those entries' `pattern`/`details` to reference the surviving entry
-instead — edit those ledger rows directly (one line at a time), then re-render via
-`node "$HOME/.devflow/scripts/hooks/lib/render-decisions.cjs" render "$(pwd)"`.
+**Citation preservation** (ADR-022 — log is content authority): if an entry being retired
+has inbound `applies ADR-NNN` citations in other entries' `pattern`/`details`, update those
+other entries to reference the surviving entry — do this by editing their **log rows** in
+`decisions-log.jsonl` (one line at a time), then collecting all updated anchor ids and calling
+ONCE: `node "$HOME/.devflow/scripts/hooks/json-helper.cjs" refresh-anchor <anchor_id1> [<anchor_id2> ...]`
+Batch all ids into the single variadic call — one lock/parse/render pass for the whole set.
+Never edit the ledger directly for content changes; the log is the authority.
 
 **Cap enforcement**: stop after 5 changes regardless of remaining candidates.
 
@@ -191,8 +240,9 @@ instead — edit those ledger rows directly (one line at a time), then re-render
 
 1. Run `rotate-observations` if you have not already this run (Part 2 covers it — never run
    it twice).
-2. Delete the claim file as your FINAL act, strictly after every other write (bare `rm` is
-   blocked by devflow's recommended deny-list — PF-003):
+2. Delete the claim file as your FINAL act, strictly after every other write (`rm -f` is
+   denied by devflow's recommended deny-list; `unlink` and a flagless `rm` both pass — use
+   `unlink` (PF-003)):
    `unlink .devflow/learning/.pending-turns.processing`
    If deletion is denied, finish normally and note the leftover claim file in your summary —
    the next run's stale-merge recovery folds it in.

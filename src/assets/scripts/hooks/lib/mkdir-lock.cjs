@@ -48,7 +48,7 @@ function _idleSleep50() {
  * (default 60 s) is forcibly removed and the caller retries. This protects against
  * crashed holders but creates a narrow TOCTOU window: if a holder is actively
  * working and takes longer than 60 s, its lock can be stolen — leading to concurrent
- * ledger writes. Current callers (assign-anchor, retire-anchor, render CLI) perform
+ * ledger writes. Current callers (assign-anchor, retire-anchor, refresh-anchor, render CLI) perform
  * only synchronous file I/O + JSON parse and complete well under 60 s in practice,
  * so this window is not reachable under normal operation. For long-running callers
  * call refreshLock(lockDir) periodically to reset the mtime and push the deadline

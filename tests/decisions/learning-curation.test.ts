@@ -117,7 +117,7 @@ function readDecisionsMd(dir: string): string {
 //
 // The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
 // it claims the queue, reads the data files directly, and writes through the
-// three ledger ops. These describe pins hold the curation contract strings in
+// four ledger ops. These describe pins hold the curation contract strings in
 // place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
@@ -145,9 +145,11 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toContain('Inputs (read directly with your Read tool)');
   });
 
-  it('routes all ledger writes through assign-anchor/retire-anchor/rotate-observations', () => {
+  it('routes all ledger writes through assign-anchor/retire-anchor/refresh-anchor/rotate-observations', () => {
     expect(agentContent).toContain('assign-anchor');
     expect(agentContent).toContain('retire-anchor');
+    // refresh-anchor: post-promotion reinforcement op added by ADR-022 (log-is-content-authority)
+    expect(agentContent).toContain('refresh-anchor');
     expect(agentContent).toContain('rotate-observations');
   });
 
@@ -183,10 +185,13 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toContain('stop after 5 changes');
   });
 
-  it('7-day protection window is keyed off the ledger date field', () => {
+  it('7-day protection window is keyed off the ledger date field, with D5 fallback for dateless rows', () => {
     expect(agentContent).toContain('7-day protection window');
     expect(agentContent).toContain("ledger row's");
     expect(agentContent).toContain('date` field');
+    // D5: pitfall rows promoted before date-stamping have no `date` field — fall back to
+    // last_seen from the log row, not treat the entry as always-touchable.
+    expect(agentContent).toContain('pitfall rows promoted before date-stamping was added');
   });
 
   it('rotation step is for archiving stale observing rows (AC-F9)', () => {

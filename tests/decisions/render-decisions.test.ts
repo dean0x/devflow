@@ -29,6 +29,25 @@ const {
   anchorNumeric: (anchorId: string) => number;
 };
 
+const {
+  buildIndexContent,
+  formatDecisionBody,
+  formatPitfallBody,
+} = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')) as {
+  buildIndexContent: (
+    activeDecisionRows: Record<string, unknown>[],
+    activePitfallRows: Record<string, unknown>[],
+    opts: {
+      decisionsFilePath: string;
+      pitfallsFilePath: string;
+      decisionBlocks?: string[];
+      pitfallBlocks?: string[];
+    }
+  ) => string;
+  formatDecisionBody: (row: Record<string, unknown>) => string;
+  formatPitfallBody: (row: Record<string, unknown>) => string;
+};
+
 const RENDERER = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 // ---------------------------------------------------------------------------
@@ -481,6 +500,62 @@ describe('CLI render subcommand', () => {
 });
 
 // ---------------------------------------------------------------------------
+// render summary: logged byte counts match actual file sizes
+// Defect: String.length reports character count (1 per code-unit), not bytes.
+// Multi-byte characters (em dash U+2014 in Area fields = 3 UTF-8 bytes each)
+// caused index.md to be logged as smaller than its on-disk size.
+// Fix: Buffer.byteLength(content) for each file including the trailing '\n'
+// added to indexContent before writing.
+// ---------------------------------------------------------------------------
+
+describe('render summary byte counts match actual file sizes', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-bytecount-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('logged byte counts equal actual file sizes (em dash U+2014 in Area field adds 2 extra bytes)', () => {
+    // formatIndexEntryLine appends "  —  <area>" when area is non-null.
+    // U+2014 em dash is 3 UTF-8 bytes but 1 JS character — String.length
+    // was used before this fix, making index.md appear 2 bytes smaller than it is.
+    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const row = makePitfallRow({
+      anchor_id: 'PF-001',
+      details: 'area: tests/hooks; issue: Y; impact: Z; resolution: W',
+    });
+    fs.writeFileSync(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(row) + '\n',
+      'utf8'
+    );
+
+    // spawnSync gives us the real stderr even when the process exits 0
+    const { spawnSync } = require('child_process') as typeof import('child_process');
+    const sp = spawnSync('node', [RENDERER, 'render', tmpDir], { encoding: 'utf8' });
+    const stderrOutput: string = sp.stderr;
+
+    // Parse the three logged byte counts
+    const match = stderrOutput.match(
+      /wrote decisions\.md \((\d+)B\) \+ pitfalls\.md \((\d+)B\) \+ index\.md \((\d+)B\)/
+    );
+    expect(match).not.toBeNull();
+    if (!match) return;
+    const [, loggedDecisions, loggedPitfalls, loggedIndex] = match.map(Number);
+
+    // Each logged count must equal the actual on-disk file size
+    expect(loggedDecisions).toBe(fs.statSync(path.join(decisionsDir, 'decisions.md')).size);
+    expect(loggedPitfalls).toBe(fs.statSync(path.join(decisionsDir, 'pitfalls.md')).size);
+    expect(loggedIndex).toBe(fs.statSync(path.join(decisionsDir, 'index.md')).size);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CLI: --check subcommand exit codes
 // ---------------------------------------------------------------------------
 
@@ -679,5 +754,87 @@ describe('AC-P1 render performance (ratio/bounded-delta, not absolute ms)', () =
       // already guards O(N²) blowup. Consume the 2nd assertion slot.
       expect(true).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PERF-2: buildIndexContent byte-equality when using pre-rendered blocks
+// ---------------------------------------------------------------------------
+
+describe('buildIndexContent — PERF-2: pre-rendered blocks yield byte-identical output', () => {
+  // renderAndWriteAll pre-computes per-row blocks (via buildBodyBlocks) and passes
+  // them to buildIndexContent so the same render work is not repeated.  This test
+  // asserts that the index content produced with pre-rendered blocks is byte-identical
+  // to the index produced via the fallback path (no pre-rendered blocks), so the
+  // optimization is transparent to callers.
+
+  const DECISIONS_PATH = '/tmp/decisions.md';
+  const PITFALLS_PATH = '/tmp/pitfalls.md';
+
+  const decisionRow = makeDecisionRow({
+    anchor_id: 'ADR-001',
+    pattern: 'Use Result types everywhere',
+    details: 'context: TypeScript project; decision: return Result<T,E>; rationale: functional error handling',
+  });
+
+  const pitfallRow = makePitfallRow({
+    anchor_id: 'PF-002',
+    pattern: 'Editing installed scripts directly',
+    details: 'area: scripts/hooks/; issue: changes overwritten; impact: lost work; resolution: edit source + rebuild',
+  });
+
+  it('index built with pre-rendered decisionBlocks/pitfallBlocks matches index built without them', () => {
+    const decisionBlocks = [formatDecisionBody(decisionRow)];
+    const pitfallBlocks = [formatPitfallBody(pitfallRow)];
+
+    const withBlocks = buildIndexContent([decisionRow], [pitfallRow], {
+      decisionsFilePath: DECISIONS_PATH,
+      pitfallsFilePath: PITFALLS_PATH,
+      decisionBlocks,
+      pitfallBlocks,
+    });
+
+    const withoutBlocks = buildIndexContent([decisionRow], [pitfallRow], {
+      decisionsFilePath: DECISIONS_PATH,
+      pitfallsFilePath: PITFALLS_PATH,
+    });
+
+    // Must be byte-identical — pre-rendered blocks must not alter the output.
+    expect(withBlocks).toBe(withoutBlocks);
+  });
+
+  it('byte-equality holds for a multi-entry corpus (two decisions, two pitfalls)', () => {
+    const decisionRow2 = makeDecisionRow({
+      anchor_id: 'ADR-002',
+      pattern: 'Inject dependencies via constructor',
+      id: 'obs_test002',
+      details: 'context: coupling; decision: accept interfaces; rationale: testability',
+    });
+    const pitfallRow2 = makePitfallRow({
+      anchor_id: 'PF-003',
+      pattern: 'Hardcoded config paths',
+      id: 'obs_pf002',
+      details: 'area: config; issue: breaks on move; impact: silent failures; resolution: env vars',
+    });
+
+    const activeDecisionRows = [decisionRow, decisionRow2];
+    const activePitfallRows = [pitfallRow, pitfallRow2];
+
+    const decisionBlocks = activeDecisionRows.map((r) => formatDecisionBody(r));
+    const pitfallBlocks = activePitfallRows.map((r) => formatPitfallBody(r));
+
+    const withBlocks = buildIndexContent(activeDecisionRows, activePitfallRows, {
+      decisionsFilePath: DECISIONS_PATH,
+      pitfallsFilePath: PITFALLS_PATH,
+      decisionBlocks,
+      pitfallBlocks,
+    });
+
+    const withoutBlocks = buildIndexContent(activeDecisionRows, activePitfallRows, {
+      decisionsFilePath: DECISIONS_PATH,
+      pitfallsFilePath: PITFALLS_PATH,
+    });
+
+    expect(withBlocks).toBe(withoutBlocks);
   });
 });

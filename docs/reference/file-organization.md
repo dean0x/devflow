@@ -66,12 +66,12 @@ devflow/
 │           ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
 │           ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
 │           ├── memory-worker         # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
-│           ├── background-memory-update # Detached claude -p sonnet 4.6 worker: rewrites WORKING-MEMORY.md (spawned by memory-worker)
+│           ├── background-memory-update # Detached claude -p sonnet 4.6 worker: drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
 │           ├── learning-lock         # Shared helper: mkdir-based locking
 │           ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
 │           ├── session-start-context # SessionStart hook: injects decisions TL;DR + the Learning agent spawn directive when the queue is pending
 │           ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
-│           ├── pre-compact-memory    # PreCompact hook: saves git state backup
+│           ├── pre-compact-memory    # PreCompact hook: saves git state + WORKING-MEMORY.md snapshot; bootstraps WORKING-MEMORY.md with HEAD-SHA stamp when absent (requires non-empty branch + 40-hex sha)
 │           ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
 │           ├── git-marker            # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
 │           ├── get-mtime             # Shared helper: portable mtime (BSD/GNU stat)
@@ -179,14 +179,14 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `capture-turn` | Stop | Appends the assistant turn to both queues; runs the decisions usage scanner; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
 | `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
-| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
+| `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent or un-stamped): leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Learning agent with the resolved model (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus` default) |
-| `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
+| `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot; bootstraps a minimal WORKING-MEMORY.md (with `<!-- memory-head: <40-hex sha> branch: <name> -->` stamp on line 1 and 5 canonical sections) when absent — requires both a non-empty branch name and a 40-hex HEAD sha (detached HEAD and unborn branch skip bootstrap) |
 | `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the orchestrator charter as `additionalContext`; silent outside git repos |
 | `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`), slash skip, and orchestrator reminder; silent outside git repos |
 
-**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which rewrites `WORKING-MEMORY.md` directly via `claude -p`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Learning agent in the background, which claims the queue atomically, performs decision/pitfall detection and curation directly against the data files, deletes the claimed batch as its final act, and reports a 1–3 line summary.
+**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Learning agent in the background, which claims the queue atomically, performs decision/pitfall detection and curation directly against the data files, deletes the claimed batch as its final act, and reports a 1–3 line summary.
 
 `devflow memory --disable` disables Working Memory (hooks stay registered; queue writes for memory are skipped). Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow learning --clear`/`--reset` for the learning queue and learning state.
 
@@ -198,9 +198,11 @@ Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agen
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|
-| `decisions.md` | ADR-NNN (sequential) | Learning agent via `assign-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
-| `pitfalls.md` | PF-NNN (sequential) | Learning agent via `assign-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
+| `decisions.md` | ADR-NNN (sequential) | Learning agent via `assign-anchor` or `refresh-anchor` (renders via `render-decisions.cjs`) | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | Learning agent via `assign-anchor` or `refresh-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
 | `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
+
+Entry content reaches the ledger through exactly two ops: `assign-anchor` (first promotion) and `refresh-anchor` (post-promotion re-projection) — both project a `decisions-log.jsonl` row through `toLedgerRow`, then re-render all three files. `retire-anchor` flips `decisions_status` on the committed row in place and re-renders; it never re-projects content. `rotate-observations` touches only the log and its archive (under `.observations.lock`) and neither writes the ledger nor renders. The log is the content authority (ADR-022); the ledger is the anchor registry only.
 
 `decisions.md` and `pitfalls.md` each have a `<!-- TL;DR: ... -->` comment on line 1; SessionStart injects these TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file. `index.md` has no TL;DR line and is not injected at SessionStart — it is the write-time artifact consumed via plain Read by workflow commands at invocation time (applies ADR-007).
 
