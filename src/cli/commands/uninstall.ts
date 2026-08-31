@@ -15,7 +15,7 @@ import { removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeContextHook } from './context.js';
-import { applyDisableToSettings } from './proxy.js';
+import { applyProxyTeardownToSettings } from './proxy.js';
 import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
@@ -717,7 +717,10 @@ export async function runCleanupPhase(opts: {
   /** Pre-captured managed proxy ports per scope, read BEFORE artifact removal.
    * proxy.json is deleted by removeDevFlowInstallArtifacts (inside runFullPhaseForScope),
    * so reading it inside this phase would always yield the DEFAULT_PROXY_PORT fallback
-   * and leave a non-default ANTHROPIC_BASE_URL (e.g. port 4200) unstripped. (F6) */
+   * and leave a non-default ANTHROPIC_BASE_URL (e.g. port 4200) unstripped. (F6)
+   *
+   * A scope with no entry means proxy.json did not exist — the env vars are not
+   * Devflow's to remove and only the hooks come out (D-STRIP-1). */
   managedProxyPorts?: ReadonlyMap<string, number>;
 }): Promise<void> {
   const { scopesToUninstall, keepDocs, verbose, cwd, isTTY } = opts;
@@ -814,16 +817,16 @@ export async function runCleanupPhase(opts: {
       settingsContent = stripFlags(settingsContent); // also strips viewMode via view-mode registry entry
       settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
       // Remove proxy hooks and ANTHROPIC_BASE_URL env in a single parse-mutate-serialize pass.
-      // D-STRIP-1: only strip when we have devflow-managed evidence (proxy.json existed
-      // before artifact removal). managedProxyPorts is populated only when the file was
-      // present — if the scope has no entry, proxy was never managed and we leave
-      // ANTHROPIC_BASE_URL / CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT untouched.
+      // D-STRIP-1: an absent entry in managedProxyPorts means proxy.json did not exist
+      // before artifact removal — no evidence Devflow ever wrote the env vars, so
+      // applyProxyTeardownToSettings removes only our hooks and leaves the user's
+      // ANTHROPIC_BASE_URL / CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT alone.
+      // Hook removal is never gated: our hooks must not survive an uninstall.
       // REG-1: the port-scoped URL strip protects any foreign localhost gateway on a
       // different port — the managedPort value is from the pre-captured proxy.json port.
-      if (opts.managedProxyPorts?.has(scope)) {
-        const managedPort = opts.managedProxyPorts.get(scope)!;
+      {
         const parsedSettings = JSON.parse(settingsContent) as Settings;
-        applyDisableToSettings(parsedSettings, managedPort);
+        applyProxyTeardownToSettings(parsedSettings, opts.managedProxyPorts?.get(scope));
         settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
       }
 

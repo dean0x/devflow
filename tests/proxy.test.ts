@@ -22,6 +22,7 @@ import {
   removeProxyHooks,
   hasProxyHooks,
   applyDisableToSettings,
+  applyProxyTeardownToSettings,
   runProxyPreflight,
   runPostSpawnVerification,
   isOurRelayBody,
@@ -1848,5 +1849,103 @@ describe('runProxyPreflight — FIX 3 D-EFR-5 foreign-env check ordering (issue 
     });
     await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
     expect(readSettingsJson).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── FIX 2 (issue #313): applyProxyTeardownToSettings — D-STRIP-1 gate ────────
+//
+// Every proxy-off path (devflow proxy --disable, devflow uninstall) routes its
+// settings teardown through this one function so the two removals cannot drift:
+//   - hooks              → always removed (they are Devflow's own artifacts)
+//   - ANTHROPIC_BASE_URL + window var → removed only when the caller supplies a
+//     managedPort, which it may do only when proxy.json exists (the sole evidence
+//     that Devflow ever wrote them).
+//
+// Falsification: gating the whole call on the evidence (the shape this replaced)
+// leaves Devflow's hooks in settings.json after uninstall — REG-TEARDOWN-1 fails.
+
+describe('applyProxyTeardownToSettings — FIX 2 D-STRIP-1 (issue #313)', () => {
+  const DEVFLOW_DIR = '/home/test/.devflow';
+
+  /** Settings in the fully-enabled shape: proxy hooks + both env vars. */
+  function enabledSettings(port: number): Settings {
+    const s = {
+      env: {
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
+        [WINDOW_ENV]: '1',
+        MY_VAR: 'keep',
+      },
+    } as unknown as Settings;
+    addProxyHooks(s, DEVFLOW_DIR);
+    return s;
+  }
+
+  // REG-TEARDOWN-1: hooks go regardless of evidence — an uninstall that leaves them
+  // behind points every later session at a hook script that no longer exists.
+  it('REG-TEARDOWN-1: removes proxy hooks even with no managed port (unmanaged)', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+    expect(hasProxyHooks(settings)).toBe(true);
+
+    const changed = applyProxyTeardownToSettings(settings, undefined);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+  });
+
+  it('leaves both env vars untouched when no managed port is supplied', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    applyProxyTeardownToSettings(settings, undefined);
+
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    // Not ours to remove: without proxy.json there is no evidence Devflow wrote these.
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${DEFAULT_PORT}`);
+    expect(env[WINDOW_ENV]).toBe('1');
+    expect(env.MY_VAR).toBe('keep');
+  });
+
+  it('removes hooks AND both env vars when a managed port is supplied', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    const changed = applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+    const env = (settings as unknown as { env?: Record<string, string> }).env;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env?.[WINDOW_ENV]).toBeUndefined();
+    expect(env?.MY_VAR).toBe('keep');
+  });
+
+  it('keeps the both-operations invariant: env is stripped even when hooks are present', () => {
+    // The regression applyDisableToSettings guards against — hooks present must not
+    // short-circuit the env strip. Re-pinned through the teardown entry point.
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    const env = (settings as unknown as { env?: Record<string, string> }).env;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env?.[WINDOW_ENV]).toBeUndefined();
+  });
+
+  it('REG-1 preserved: a foreign gateway on another port survives a managed teardown', () => {
+    const settings = {
+      env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9999' },
+    } as unknown as Settings;
+    addProxyHooks(settings, DEVFLOW_DIR);
+
+    applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:9999');
+    expect(hasProxyHooks(settings)).toBe(false);
+  });
+
+  it('returns false when there is nothing to remove (unmanaged, no hooks)', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: 'https://gw.example.com' } } as unknown as Settings;
+    expect(applyProxyTeardownToSettings(settings, undefined)).toBe(false);
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://gw.example.com');
   });
 });
