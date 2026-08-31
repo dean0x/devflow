@@ -126,29 +126,49 @@ export async function writeProxyState(
 // ---------------------------------------------------------------------------
 
 /**
- * Accepted top-level keys for the subswitch 0.2.0 FileConfigSchema (z.strictObject).
+ * Accepted top-level keys for the subswitch 0.3.0 FileConfigSchema (z.strictObject).
  * Unknown top-level keys cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 Subswitch 0.2.0 routing config contract:
+ * @D-EFR-4 Subswitch 0.3.0 routing config contract:
  *   FileConfigSchema is a z.strictObject with exactly 5 accepted top-level keys:
  *   port, logLevel, anthropic, providers, limits. Unknown keys cause a hard startup
  *   error — the relay refuses to start. anthropic and limits are themselves
  *   strictObject + prefault({}), so they may be partially specified.
  *
- *   connectTimeoutMs default: subswitch 0.2.0 applies anthropic.connectTimeoutMs
- *   as upstream.setTimeout() at anthropic-passthrough.js:86 — a socket *inactivity*
- *   timeout, not a connect timeout. The 10s default kills any Anthropic request
- *   whose upstream takes >10s to emit the first response byte — routine for long
- *   opus requests (confirmed: 99 spurious 504s clustered at 10004-10098ms while
- *   successful requests ran 25s-99s). Default overridden to 120 000ms; a
- *   user-specified value always wins.
- *
- *   limits.connectTimeoutMs is a registered LEGACY KEY that causes a hard startup
- *   error. Strip it from the limits block when preserving existing config.
+ *   connectTimeoutMs: in 0.3.0 this is a genuine DNS+TCP connect budget, armed on
+ *   the socket and disarmed on 'connect' — neither the headers phase nor the stream
+ *   phase is bounded. The devflow override to 120 000ms dates from 0.2.0, where the
+ *   same key was applied as an upstream socket *inactivity* timeout whose 10s default
+ *   killed any Anthropic request taking >10s to emit its first byte (confirmed: 99
+ *   spurious 504s clustered at 10004-10098ms while successful requests ran 25s-99s).
+ *   The override is now only a wider connect budget; a user-specified value always wins.
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',
 ]);
+
+/**
+ * Sub-keys of a preserved `anthropic` / `limits` block that the pinned relay rejects
+ * outright — each is a registered LEGACY KEY, and a legacy key is a hard startup
+ * error naming its replacement, not a warning. They are stripped when carrying a
+ * user's existing config forward so an upgrade cannot leave the relay unable to boot.
+ *
+ * Every entry was valid under a version devflow previously pinned, which is what makes
+ * it reachable in a real user's file:
+ *   anthropic.streamIdleTimeoutMs — valid in 0.2.0, removed in 0.3.0 (relay no longer
+ *     bounds the stream-idle phase on a connected client).
+ *   limits.connectTimeoutMs       — moved to anthropic.connectTimeoutMs, which this
+ *     builder sets itself, so dropping it loses nothing.
+ *   limits.maxConcurrentRequests  — valid in 0.2.0, removed in 0.3.0 (admission gate
+ *     removed).
+ *
+ * Keys retired before 0.2.0 are deliberately absent: a config that worked against the
+ * version devflow shipped cannot contain them.
+ */
+const ROUTING_CONFIG_REJECTED_SUBKEYS: Readonly<Record<'anthropic' | 'limits', readonly string[]>> = {
+  anthropic: ['streamIdleTimeoutMs'],
+  limits: ['connectTimeoutMs', 'maxConcurrentRequests'],
+};
 
 /** Default anthropic.connectTimeoutMs injected when not specified by the user (ms). */
 export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000;
@@ -157,9 +177,9 @@ export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000;
  * Build the routing config JSON for ~/.devflow/proxy-routing.json.
  *
  * Authoritatively sets `port`. Preserves any existing valid `anthropic`,
- * `limits`, `logLevel`, and `providers` blocks from `existingContent`,
- * filtering out unknown top-level keys and the legacy `limits.connectTimeoutMs`
- * field (which causes a hard relay startup error in 0.2.0).
+ * `limits`, `logLevel`, and `providers` blocks from `existingContent`, filtering
+ * out unknown top-level keys and every sub-key in ROUTING_CONFIG_REJECTED_SUBKEYS
+ * (each one a hard relay startup error).
  *
  * Injects a default `anthropic.connectTimeoutMs` of 120 000ms when the user
  * has not set one — see @D-EFR-4 for the rationale.
@@ -204,6 +224,9 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
     !Array.isArray(preserved.anthropic)
       ? { ...(preserved.anthropic as Record<string, unknown>) }
       : {};
+  for (const key of ROUTING_CONFIG_REJECTED_SUBKEYS.anthropic) {
+    delete existingAnthropic[key];
+  }
   if (!Object.prototype.hasOwnProperty.call(existingAnthropic, 'connectTimeoutMs')) {
     existingAnthropic.connectTimeoutMs = DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS;
   }
@@ -214,8 +237,8 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
     config.providers = preserved.providers;
   }
 
-  // Preserve limits block if present; strip legacy limits.connectTimeoutMs that
-  // causes a hard startup error in 0.2.0 (use anthropic.connectTimeoutMs instead).
+  // Preserve limits block if present, minus the sub-keys the relay hard-errors on
+  // (see ROUTING_CONFIG_REJECTED_SUBKEYS).
   if (preserved.limits !== undefined) {
     if (
       typeof preserved.limits === 'object' &&
@@ -223,7 +246,9 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
       !Array.isArray(preserved.limits)
     ) {
       const limitsObj = { ...(preserved.limits as Record<string, unknown>) };
-      delete limitsObj['connectTimeoutMs'];
+      for (const key of ROUTING_CONFIG_REJECTED_SUBKEYS.limits) {
+        delete limitsObj[key];
+      }
       config.limits = limitsObj;
     } else {
       config.limits = preserved.limits;

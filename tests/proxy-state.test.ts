@@ -269,10 +269,13 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
   });
 
   it('preserves other anthropic fields alongside injected default', () => {
-    const existing = JSON.stringify({ port: 4141, anthropic: { streamIdleTimeoutMs: 60_000 } });
+    // maxUpstreamSockets is a live key in the pinned runtime's AnthropicSchema —
+    // a preservation fixture has to use a shape the relay actually accepts, or it
+    // pins behaviour that would break the relay at startup (avoids PF-043).
+    const existing = JSON.stringify({ port: 4141, anthropic: { maxUpstreamSockets: 64 } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.streamIdleTimeoutMs).toBe(60_000);
+    expect(anthropic.maxUpstreamSockets).toBe(64);
     expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
   });
 
@@ -294,6 +297,34 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const limits = obj.limits as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(limits, 'connectTimeoutMs')).toBe(false);
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  // Keys that were valid under the previously pinned 0.2.0 runtime and are registered
+  // legacy keys in 0.3.0 — a hard startup error, not a warning. Carrying a user's own
+  // proxy-routing.json forward across the upgrade must drop them, or the relay that the
+  // ensure-proxy hook spawns dies on boot every session with no route back.
+  it('strips anthropic.streamIdleTimeoutMs (removed in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      anthropic: { streamIdleTimeoutMs: 60_000, maxUpstreamSockets: 64 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'streamIdleTimeoutMs')).toBe(false);
+    // Neighbouring valid keys survive the strip.
+    expect(anthropic.maxUpstreamSockets).toBe(64);
+    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+  });
+
+  it('strips limits.maxConcurrentRequests (removed in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxConcurrentRequests: 8, maxConcurrent: 10 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxConcurrentRequests')).toBe(false);
     expect(limits.maxConcurrent).toBe(10);
   });
 
