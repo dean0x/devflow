@@ -346,6 +346,59 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
   });
 
+  it('strips limits.maxUpstreamSockets (moved to anthropic.maxUpstreamSockets in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxUpstreamSockets: 128, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxUpstreamSockets')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.streamIdleTimeoutMs (moved to providers.codex.streamIdleTimeoutMs in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { streamIdleTimeoutMs: 30_000, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'streamIdleTimeoutMs')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.requestTimeoutMs (moved to providers.codex.requestTimeoutMs in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { requestTimeoutMs: 60_000, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'requestTimeoutMs')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.maxSseEventBytes (moved to providers.codex.maxSseEventBytes in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxSseEventBytes: 65_536, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxSseEventBytes')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('omits limits key from output when all sub-keys are stripped (mirrors anthropic omit-when-empty)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxUpstreamSockets: 128, streamIdleTimeoutMs: 30_000 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(obj, 'limits')).toBe(false);
+  });
+
   it('preserves providers block from existing config', () => {
     const existing = JSON.stringify({ port: 4141, providers: { openai: { baseUrl: 'https://api.openai.com' } } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;

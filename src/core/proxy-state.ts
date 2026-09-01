@@ -134,7 +134,6 @@ export async function writeProxyState(
  *   port, logLevel, anthropic, providers, limits. Unknown keys cause a hard startup
  *   error — the relay refuses to start. anthropic and limits are themselves
  *   strictObject + prefault({}), so they may be partially specified.
- *
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',
@@ -157,13 +156,29 @@ const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
  *   limits.maxBodyBytes           — valid through 0.3.0, renamed to
  *     limits.maxBufferedBodyBytes in 0.4.0. The old spelling is a registered legacy
  *     key, so leaving it in place would stop the relay from booting.
+ *   limits.maxUpstreamSockets     — valid in 0.3.0, moved to anthropic.maxUpstreamSockets
+ *     in 0.4.0's providers.* restructure.
+ *   limits.streamIdleTimeoutMs    — valid in 0.3.0, moved to
+ *     providers.codex.streamIdleTimeoutMs in 0.4.0.
+ *   limits.requestTimeoutMs       — valid in 0.3.0, moved to
+ *     providers.codex.requestTimeoutMs in 0.4.0.
+ *   limits.maxSseEventBytes       — valid in 0.3.0, moved to
+ *     providers.codex.maxSseEventBytes in 0.4.0.
  *
- * Keys retired before 0.2.0 are deliberately absent: a config that worked against the
- * version devflow shipped cannot contain them.
+ * Keys retired before the 0.2.0 baseline are deliberately absent: only keys reachable
+ * in a config written by a previously pinned devflow version belong on this list.
  */
 const ROUTING_CONFIG_REJECTED_SUBKEYS: Readonly<Record<'anthropic' | 'limits', readonly string[]>> = {
   anthropic: ['streamIdleTimeoutMs'],
-  limits: ['connectTimeoutMs', 'maxConcurrentRequests', 'maxBodyBytes'],
+  limits: [
+    'connectTimeoutMs',
+    'maxConcurrentRequests',
+    'maxBodyBytes',
+    'maxUpstreamSockets',
+    'streamIdleTimeoutMs',
+    'requestTimeoutMs',
+    'maxSseEventBytes',
+  ],
 };
 
 /**
@@ -239,7 +254,9 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
       for (const key of ROUTING_CONFIG_REJECTED_SUBKEYS.limits) {
         delete limitsObj[key];
       }
-      config.limits = limitsObj;
+      if (Object.keys(limitsObj).length > 0) {
+        config.limits = limitsObj;
+      }
     } else {
       config.limits = preserved.limits;
     }
