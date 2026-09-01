@@ -18,6 +18,7 @@
  */
 
 import { clackNote, clackSelect, type PromptOutcome, type WizardPromptIO } from './prompt-io.js';
+import type { FlagsRecord } from '../../core/flags.js';
 
 // ── Gate predicate ─────────────────────────────────────────────────────────────
 
@@ -100,6 +101,40 @@ export interface AttributionStepCancelled {
 }
 
 export type AttributionStepOutcome = AttributionStepResolved | AttributionStepCancelled;
+
+// ── Seed / apply helpers ───────────────────────────────────────────────────────
+
+/**
+ * Derive the boolean seed for the attribution prompt from the current FlagsRecord.
+ *
+ * Returns true only when `suppress-attribution` is explicitly set to the boolean
+ * true — undefined, null, and false all map to false, giving `p.select` a real
+ * boolean rather than an unchecked cast (PF-018: non-vacuous path).
+ *
+ * Pure function — no side effects, fully testable without a TTY.
+ */
+export function attributionSeedFrom(flags: FlagsRecord): boolean {
+  return flags['suppress-attribution'] === true;
+}
+
+/**
+ * Apply the resolved wizard answer back onto the FlagsRecord.
+ *
+ * Returns a new record with `suppress-attribution` updated to outcome.suppress.
+ * Never mutates the input (immutability principle). The caller replaces its local
+ * enabledFlags binding with the return value.
+ *
+ * D27: this is the single merge site for the wizard answer; init.ts must not
+ * duplicate the spread inline.
+ *
+ * Pure function — no side effects, fully testable without a TTY.
+ */
+export function applyAttributionAnswer(
+  flags: FlagsRecord,
+  outcome: AttributionStepResolved,
+): FlagsRecord {
+  return { ...flags, 'suppress-attribution': outcome.suppress };
+}
 
 /**
  * Run the attribution wizard step.

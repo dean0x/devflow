@@ -60,6 +60,8 @@ import {
   shouldRunAttributionStep,
   runAttributionStep,
   buildClackAttributionPrompts,
+  applyAttributionAnswer,
+  attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
@@ -963,21 +965,26 @@ export const initCommand = new Command('init')
       // isTTY is guaranteed true here (the non-TTY guard above exit-1'd); passing it keeps
       // the promptless contract enforced at the predicate rather than by position (PF-029).
       if (shouldRunAttributionStep({
-        mode: 'advanced',
+        // D27-GATE: bind to the resolved mode so all four documented gate-table rows
+        // are reachable and the predicate — not lexical placement — enforces Advanced-only.
+        // Using useRecommended ? 'recommended' : 'advanced' makes the gate testable from
+        // both sides and prevents the Recommended path from accidentally running the step
+        // if this block is ever repositioned (applies PF-029).
+        mode: useRecommended ? 'recommended' : 'advanced',
         isTTY: process.stdin.isTTY,
       })) {
         const attributionStep = await runAttributionStep({
-          // resolveInitSeed always emits this key, but `=== true` keeps the seed a real
-          // boolean rather than an unchecked cast if that contract ever changes —
-          // an `undefined` reaching p.select's initialValue silently unseeds the prompt.
-          seed: enabledFlags['suppress-attribution'] === true,
+          // attributionSeedFrom keeps the seed a real boolean regardless of the stored
+          // FlagsRecord value type — undefined/null/false all map to false (PF-018).
+          seed: attributionSeedFrom(enabledFlags),
           prompts: buildClackAttributionPrompts(),
         });
         if (attributionStep.kind === 'cancelled') {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        enabledFlags = { ...enabledFlags, 'suppress-attribution': attributionStep.suppress };
+        // D27: applyAttributionAnswer is the single merge site for the wizard answer.
+        enabledFlags = applyAttributionAnswer(enabledFlags, attributionStep);
         // Advanced path emits an outcome line (mirrors compliance step pattern).
         for (const msg of attributionStep.messages) {
           if (msg.level === 'success') p.log.success(msg.text);
