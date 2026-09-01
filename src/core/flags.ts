@@ -12,6 +12,8 @@
  * sole API; init.ts works directly with FlagsRecord (no legacy string[] bridge).
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Discriminant for the FlagDef union — determines which per-kind fields are present. */
@@ -1018,29 +1020,21 @@ export function migrateLegacyFlagsToRecord(
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
 /**
- * Structural deep-equality limited to plain JSON values (objects, arrays, primitives).
- * Returns false for non-JSON types (functions, class instances, undefined).
+ * D-ATTR-GUARD: returns true when it is safe to delete a flag's target key from
+ * settings. For flags with a settingDeleteGuard the key is only deleted when the
+ * current on-disk value deep-equals the guarded shape exactly, preventing erasure
+ * of user-customized values (e.g. an organisation attribution block) on flag
+ * disable or uninstall. Flags without a guard are always safe to delete.
  *
- * D-ATTR-GUARD: used by the settingDeleteGuard check in applyFlags and stripFlags to
- * prevent erasing user-customized settings when a managed flag transitions to neutral.
+ * Uses `isDeepStrictEqual` from node:util — native, correct, and zero-maintenance.
+ *
+ * Single-source invariant (ADR-024 mechanism 3): the guard is symmetric across
+ * the disable path (applyFlags neutral branch) and the uninstall path (stripFlags),
+ * upheld by construction since both call sites collapse to this one predicate.
  */
-function deepEqualsPlain(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null) return a === b;
-  if (typeof a !== 'object' || typeof b !== 'object') return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a)) {
-    const aa = a as unknown[];
-    const ba = b as unknown[];
-    if (aa.length !== ba.length) return false;
-    return aa.every((v, i) => deepEqualsPlain(v, ba[i]));
-  }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const aKeys = Object.keys(ao);
-  const bKeys = Object.keys(bo);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every(k => Object.prototype.hasOwnProperty.call(bo, k) && deepEqualsPlain(ao[k], bo[k]));
+function canDeleteSettingKey(flag: ClaudeCodeFlag, settings: Record<string, unknown>): boolean {
+  const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
+  return guard === undefined || isDeepStrictEqual(settings[flag.target.key], guard);
 }
 
 /**
@@ -1112,12 +1106,7 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
         const env = asPlainObject(settings.env);
         if (env) delete env[flag.target.key];
       } else {
-        // D-ATTR-GUARD: for flags with settingDeleteGuard, only delete when the current
-        // value deep-equals the guarded shape. Prevents erasing user-customized values.
-        const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
-        if (guard === undefined || deepEqualsPlain(settings[flag.target.key], guard)) {
-          delete settings[flag.target.key];
-        }
+        if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
       }
     } else {
       const payload = buildPayload(flag, safe as FlagValue);
@@ -1162,12 +1151,7 @@ export function stripFlags(settingsJson: string): string {
     if (flag.target.type === 'env') {
       if (env) delete env[flag.target.key];
     } else {
-      // D-ATTR-GUARD: for flags with settingDeleteGuard, only delete when the current
-      // value deep-equals the guarded shape. Preserves user-customized values on uninstall.
-      const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
-      if (guard === undefined || deepEqualsPlain(settings[flag.target.key], guard)) {
-        delete settings[flag.target.key];
-      }
+      if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
     }
   }
 
@@ -1218,6 +1202,52 @@ export function resolveExistingViewMode(settingsJson: string): ViewMode | undefi
     }
   } catch { /* malformed settings.json — treat as no opinion */ }
   return undefined;
+}
+
+/**
+ * Returns true when `value` equals the managed shape declared by `flag.settingDeleteGuard`.
+ * Returns false when: the flag has no guard, is not a setting-target boolean, or the value
+ * does not deep-equal the guard.
+ *
+ * Value-level core for `settingHoldsManagedShape` — both share the single equality decision.
+ */
+export function settingValueHoldsManagedShape(flag: ClaudeCodeFlag, value: unknown): boolean {
+  if (flag.kind !== 'boolean' || flag.target.type !== 'setting') return false;
+  const guard = flag.settingDeleteGuard;
+  if (guard === undefined) return false;
+  return isDeepStrictEqual(value, guard);
+}
+
+/**
+ * D-ATTR-GUARD single-source predicate (consistency-01 / ADR-024).
+ *
+ * Returns true when the settings.json string contains a value at the flag's
+ * target key that equals the flag's managed shape (`settingDeleteGuard`).
+ *
+ * This is the ONE place that decides "on-disk value equals the managed shape".
+ * All consumers — `resolveExistingAttributionSuppression` (seeding priority),
+ * and the guarded-boolean adoption fold in `convergeFlagsIntoSettings` — delegate
+ * here rather than hand-rolling their own comparison.
+ *
+ * Returns false when:
+ *   - settingsJson is malformed
+ *   - root is not a plain object
+ *   - flagId is not in the registry
+ *   - the flag has no settingDeleteGuard
+ *   - the flag is not a setting-target boolean
+ *   - the on-disk value does not deep-equal the guard
+ */
+export function settingHoldsManagedShape(settingsJson: string, flagId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const flag = FLAG_REGISTRY_MAP.get(flagId);
+    if (!flag) return false;
+    const value = (parsed as Record<string, unknown>)[flag.target.key];
+    return settingValueHoldsManagedShape(flag, value);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1363,6 +1393,38 @@ export function convergeFlagsIntoSettings(
     const coerced = coerceFlagValue(flag, toCoerce);
     if (coerced !== null) {
       folded[flag.id] = coerced;
+    }
+  }
+
+  // ── Step 2b: adopt guarded boolean settings before the strip ─────────────
+  // D-ATTR-ADOPT (PF-050 / ADR-024): a delete guard is evidence about the VALUE,
+  // never about the record — a pre-existing on-disk key whose value matches the
+  // managed shape means devflow wrote it, so adopt it into the record now, before
+  // stripFlags can unconditionally remove it on the next line.
+  //
+  // Mirror of the view-mode fold (Step 1): adopt only when:
+  //   (a) the flag has a settingDeleteGuard (guarded boolean only)
+  //   (b) the record does NOT already claim the key — a claimed false or null still
+  //       deletes the managed block (the user intentionally disabled it)
+  //   (c) the pre-strip on-disk value holds the managed shape
+  //
+  // This fold runs before stripFlags so applyFlags rewrites the block from the
+  // now-claimed record and the block survives on BOTH the init and flags paths.
+  for (const flag of FLAG_REGISTRY) {
+    if (flag.kind !== 'boolean') continue;
+    if (flag.target.type !== 'setting') continue;
+    const boolFlag = flag as SettingBooleanFlagDef;
+    if (boolFlag.settingDeleteGuard === undefined) continue;
+
+    // Skip when the record already claims this flag (claimed false/null deletes the block)
+    const claimed =
+      claimedIn !== null &&
+      Object.prototype.hasOwnProperty.call(claimedIn, flag.id);
+    if (claimed) continue;
+
+    // Adopt only when the on-disk value matches the managed shape exactly
+    if (settingValueHoldsManagedShape(flag, parsed[flag.target.key])) {
+      folded[flag.id] = true;
     }
   }
 

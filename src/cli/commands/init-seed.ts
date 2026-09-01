@@ -16,6 +16,7 @@
 
 import {
   resolveExistingViewMode,
+  settingHoldsManagedShape,
   FLAG_REGISTRY,
   defaultValueOf,
   readViewMode,
@@ -226,30 +227,25 @@ export function resolveSeedPlugins(
 /**
  * Extract the attribution suppression state from a settings JSON string.
  *
- * Returns `true` when the exact devflow-managed attribution shape
- * `{"commit":"","pr":""}` is present, signaling that suppress-attribution was
- * active at the last install. Returns `undefined` when the block is absent or
- * holds a different (user-custom) value — callers fall through to the manifest
- * FlagsRecord entry or the registry default.
+ * Returns `true` when the exact devflow-managed attribution shape is present —
+ * delegating to `settingHoldsManagedShape('suppress-attribution')`, which is the
+ * single place that decides "on-disk value equals the managed shape" (consistency-01).
+ * Returns `undefined` when the block is absent, holds a custom value, or JSON is
+ * malformed — callers fall through to the manifest FlagsRecord entry or the registry
+ * default.
  *
- * Mirrors resolveExistingViewMode: returns undefined on malformed JSON, absent
- * key, or any non-devflow attribution value.
+ * Return type is `true | undefined` (typescript-06): settings.json can signal ON or
+ * nothing — never explicitly OFF. That asymmetry is load-bearing for seeding priority:
+ * `undefined` lets the manifest entry or the registry default win, while `true` is an
+ * unambiguous "this key was devflow-managed and active".
+ *
+ * Mirrors resolveExistingViewMode: returns undefined on malformed JSON, absent key,
+ * or any non-devflow attribution value.
  *
  * Pure function — no I/O, no side effects.
  */
-export function resolveExistingAttributionSuppression(settingsJson: string): boolean | undefined {
-  try {
-    const parsed: unknown = JSON.parse(settingsJson);
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    const attr = (parsed as Record<string, unknown>).attribution;
-    if (attr === null || typeof attr !== 'object' || Array.isArray(attr)) return undefined;
-    const a = attr as Record<string, unknown>;
-    // Only match the exact devflow-managed shape: {"commit":"","pr":""} with no extra keys.
-    if (a['commit'] === '' && a['pr'] === '' && Object.keys(a).length === 2) return true;
-    return undefined; // custom value — fall through to manifest / default
-  } catch {
-    return undefined;
-  }
+export function resolveExistingAttributionSuppression(settingsJson: string): true | undefined {
+  return settingHoldsManagedShape(settingsJson, 'suppress-attribution') ? true : undefined;
 }
 
 /**
@@ -303,7 +299,7 @@ export function resolveInitSeed(
   const existingAttr = resolveExistingAttributionSuppression(settingsSnapshot);
   const resolvedSuppressAttr: boolean = existingAttr !== undefined
     ? existingAttr                                        // settings.json exact shape wins
-    : ((flags['suppress-attribution'] as boolean) ?? false); // manifest or registry default
+    : flags['suppress-attribution'] === true;             // manifest or registry default
 
   // Return a fresh spread rather than mutating flags in place — keeps this function pure
   // per the module docblock and avoids aliasing if the caller inspects seed.flags.
