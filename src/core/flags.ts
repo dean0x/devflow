@@ -106,9 +106,29 @@ export interface SettingBooleanFlagDef extends BooleanFlagDefCommon {
 
 /**
  * A boolean on/off flag. `onPayload` is written when the flag is enabled.
- * Discriminated on `target.type` so the env-string invariant is enforced by tsc.
+ *
+ * What TypeScript enforces: object-literal assignability at registry declaration
+ * sites. An entry typed as `EnvBooleanFlagDef` must have `onPayload: string` at
+ * its declaration; one typed as `SettingBooleanFlagDef` may use an object.
+ *
+ * What TypeScript does NOT enforce for consumers: narrowing via a nested
+ * `target.type` check. After `if (f.target.type === 'env')`, `f` is still typed
+ * as `BooleanFlagDef` and `f.onPayload` remains `string | boolean |
+ * Record<string, unknown>`. Use `isEnvBooleanFlag(f)` to narrow to
+ * `EnvBooleanFlagDef` where the string type is needed directly.
  */
 export type BooleanFlagDef = EnvBooleanFlagDef | SettingBooleanFlagDef;
+
+/**
+ * Type predicate that narrows `ClaudeCodeFlag` to `EnvBooleanFlagDef`.
+ * Narrows `f.onPayload` to `string` so callers writing to the env string-map
+ * avoid an `unknown` hop without an unsafe cast.
+ *
+ * Use in `buildPayload` and `applyFlags` only where the string type is load-bearing.
+ */
+export function isEnvBooleanFlag(f: ClaudeCodeFlag): f is EnvBooleanFlagDef {
+  return f.kind === 'boolean' && f.target.type === 'env';
+}
 
 /** An enum flag. `neutralValue` is the value that means "no preference" (key is deleted). */
 export interface EnumFlagDef extends FlagDefCommon {
@@ -460,7 +480,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'suppress-attribution',
     label: 'Suppress AI attribution',
     description: 'Remove AI-attribution labels from git commits and pull requests',
-    hint: 'Writes {"commit":"","pr":""} to settings.json — suppresses Claude attribution in git history',
+    hint: 'Suppresses Claude attribution labels in git commits and pull requests',
     blurb: 'hide AI attribution labels',
     kind: 'boolean',
     target: { type: 'setting', key: 'attribution' },
@@ -1054,8 +1074,16 @@ function asPlainObject(v: unknown): Record<string, unknown> | undefined {
 /** Compute the value to write to settings.json for an active flag. */
 function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
   switch (flag.kind) {
-    case 'boolean':
-      return flag.onPayload;
+    case 'boolean': {
+      // D-PAYLOAD-CLONE: return a structural clone for object payloads so the
+      // FLAG_REGISTRY entry is never aliased into the caller's settings tree.
+      // Primitives (string, boolean) are values and require no clone.
+      // isEnvBooleanFlag narrows onPayload to string for env flags — no clone needed,
+      // and the string type avoids an `unknown` hop into the env string-map.
+      if (isEnvBooleanFlag(flag)) return flag.onPayload; // string — no clone needed
+      const p = flag.onPayload;
+      return typeof p === 'object' && p !== null ? structuredClone(p) : p;
+    }
     case 'enum':
       return value as string;
     case 'number':
