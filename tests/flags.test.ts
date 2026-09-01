@@ -19,6 +19,8 @@ import {
   applyFlags,
   stripFlags,
   convergeFlagsIntoSettings,
+  settingHoldsManagedShape,
+  isEnvBooleanFlag,
   // Kept verbatim
   VIEW_MODES,
   resolveExistingViewMode,
@@ -30,6 +32,7 @@ import {
   type EnumFlagDef,
   type NumberFlagDef,
   type StringFlagDef,
+  type EnvBooleanFlagDef,
 } from '../src/core/flags.js';
 import { resolveSeedFlags } from '../src/cli/commands/init-seed.js';
 
@@ -73,22 +76,60 @@ describe('FLAG_REGISTRY — structural invariants', () => {
     const boolFlags = FLAG_REGISTRY.filter((f): f is BooleanFlagDef => f.kind === 'boolean');
     expect(boolFlags.length).toBeGreaterThan(0);
     for (const flag of boolFlags) {
-      expect(
-        typeof flag.onPayload === 'string' || typeof flag.onPayload === 'boolean',
-        `${flag.id}: onPayload must be string or boolean`,
-      ).toBe(true);
+      // Env targets must use strings; setting targets may also use plain objects (D27/D-ATTR-GUARD).
+      const isValidPayload =
+        typeof flag.onPayload === 'string' ||
+        typeof flag.onPayload === 'boolean' ||
+        (flag.target.type === 'setting' &&
+          typeof flag.onPayload === 'object' &&
+          flag.onPayload !== null &&
+          !Array.isArray(flag.onPayload));
+      expect(isValidPayload, `${flag.id}: onPayload must be string, boolean, or plain object (setting targets only)`).toBe(true);
       expect(typeof flag.defaultValue, `${flag.id}: defaultValue must be boolean`).toBe('boolean');
     }
   });
 
+  /**
+   * Defense in depth. Since the BooleanFlagDef split into EnvBooleanFlagDef |
+   * SettingBooleanFlagDef this is ALSO compile-enforced: an env target with an
+   * object or boolean onPayload no longer typechecks. This test stays as the
+   * runtime backstop for a registry entry that reaches the array through a cast.
+   */
   it('env boolean flags have string onPayload (env vars are strings)', () => {
     const envBoolFlags = FLAG_REGISTRY
       .filter((f): f is BooleanFlagDef => f.kind === 'boolean' && f.target.type === 'env');
+    // Non-vacuity: the filter must actually match something or the loop proves nothing.
+    expect(envBoolFlags.length, 'no env boolean flags matched — assertion would be vacuous').toBeGreaterThan(0);
     for (const flag of envBoolFlags) {
       expect(
         typeof flag.onPayload,
         `${flag.id}: env boolean flag must have string onPayload`,
       ).toBe('string');
+      // buildPayload writes onPayload verbatim and never consults settingDeleteGuard
+      // for env targets, so a guard declared here would be a silent no-op.
+      expect(
+        flag.settingDeleteGuard,
+        `${flag.id}: env boolean flags must not declare settingDeleteGuard (it is never honoured)`,
+      ).toBeUndefined();
+    }
+  });
+
+  /**
+   * settingDeleteGuard is only meaningful for a payload that can differ from a
+   * user's own value. Pinning it to deep-equal onPayload keeps the guard and the
+   * written shape from drifting apart — a guard that no longer matches what
+   * applyFlags writes would strand the key in settings.json forever.
+   */
+  it('settingDeleteGuard, where present, deep-equals the flag onPayload', () => {
+    const guarded = FLAG_REGISTRY.filter(
+      (f): f is BooleanFlagDef => f.kind === 'boolean' && f.settingDeleteGuard !== undefined,
+    );
+    expect(guarded.length, 'no guarded flags matched — assertion would be vacuous').toBeGreaterThan(0);
+    for (const flag of guarded) {
+      expect(
+        flag.settingDeleteGuard,
+        `${flag.id}: settingDeleteGuard must match the shape applyFlags writes`,
+      ).toEqual(flag.onPayload);
     }
   });
 
@@ -198,6 +239,9 @@ describe('getDefaultFlagsRecord', () => {
 
     // New optional boolean flag
     expect(record['enable-todo-tools']).toBe(false);
+
+    // Attribution suppression flag (off by default — D27)
+    expect(record['suppress-attribution']).toBe(false);
 
     // view-mode: default is neutralValue, so entry is 'default'
     expect(record['view-mode']).toBe('default');
@@ -1711,6 +1755,27 @@ describe('effectiveDisplay — D-EFFDV one-definition seam', () => {
   });
 });
 
+// ─── hint column-budget registry test (consistency-03) ───────────────────────
+
+describe('FLAG_REGISTRY — hint column budget (≤ 76 chars)', () => {
+  it('every hint is non-empty and ≤ 76 chars', () => {
+    for (const flag of FLAG_REGISTRY) {
+      expect(
+        typeof flag.hint,
+        `${flag.id}: hint must be a string`,
+      ).toBe('string');
+      expect(
+        flag.hint.length,
+        `${flag.id}: hint "${flag.hint}" is ${flag.hint.length} chars (max 76)`,
+      ).toBeLessThanOrEqual(76);
+      expect(
+        flag.hint.length,
+        `${flag.id}: hint must not be empty`,
+      ).toBeGreaterThan(0);
+    }
+  });
+});
+
 // ─── blurb hard-cap registry test ────────────────────────────────────────────
 
 describe('FLAG_REGISTRY — blurb hard-cap (D-BLURB)', () => {
@@ -1777,5 +1842,281 @@ describe('persistence round-trip: manifest write shape → resolveSeedFlags', ()
 
     // null in manifest means "deliberately unset" — must be preserved as null
     expect(seeded['subagent-spawn-depth']).toBeNull();
+  });
+});
+
+// ─── suppress-attribution — shape guard (D27 / D-ATTR-GUARD) ─────────────────
+
+describe('suppress-attribution flag — shape guard (D27)', () => {
+  const DEVFLOW_ATTR = { commit: '', pr: '' };
+
+  it('applyFlags with true writes the attribution block', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}), { 'suppress-attribution': true }));
+    expect(result.attribution).toEqual(DEVFLOW_ATTR);
+  });
+
+  it('applyFlags with true OVERWRITES a custom attribution value (settingDeleteGuard only protects deletion)', () => {
+    // Documents AC2 and the wizard's "never deleted" wording: settingDeleteGuard only
+    // guards the DELETE path (flag false/null). Enabling the flag (true) always writes
+    // the devflow-managed shape regardless of what was on disk. This is intentional —
+    // the user opted in to attribution suppression, so the managed shape wins.
+    const custom = { commit: 'My Org', pr: 'My Org PR' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': true }));
+    expect(result.attribution).toEqual(DEVFLOW_ATTR);
+  });
+
+  it('applyFlags with false deletes the exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('applyFlags with null deletes the exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': null }));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('applyFlags with false does NOT delete custom attribution (shape guard)', () => {
+    const custom = { commit: 'My Org', pr: 'My Org' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toEqual(custom);
+  });
+
+  it('applyFlags with false does NOT delete string attribution (shape guard)', () => {
+    const input = JSON.stringify({ attribution: 'My Org' });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toBe('My Org');
+  });
+
+  it('stripFlags deletes exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('stripFlags does NOT delete custom attribution (shape guard)', () => {
+    const custom = { commit: 'My Org', pr: 'My Org' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toEqual(custom);
+  });
+
+  it('stripFlags does NOT delete string attribution', () => {
+    const input = JSON.stringify({ attribution: 'My Org' });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toBe('My Org');
+  });
+
+  it('suppress-attribution flag entry: id=suppress-attribution, setting target, key=attribution', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
+    expect(flag).toBeDefined();
+    expect(flag.kind).toBe('boolean');
+    expect(flag.target.type).toBe('setting');
+    expect(flag.target.key).toBe('attribution');
+    expect(flag.recommended).toBe(false);
+    expect(flag.defaultValue).toBe(false);
+    if (flag.kind === 'boolean') {
+      expect(flag.onPayload).toEqual(DEVFLOW_ATTR);
+      expect(flag.settingDeleteGuard).toEqual(DEVFLOW_ATTR);
+    }
+  });
+
+  // ── typescript-03: isEnvBooleanFlag predicate ─────────────────────────────
+
+  it('isEnvBooleanFlag is true for env boolean flags (e.g. tool-search)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'tool-search')!;
+    expect(isEnvBooleanFlag(flag)).toBe(true);
+    // After the predicate returns true, TypeScript narrows to EnvBooleanFlagDef.
+    // Runtime-verify that the narrowed type's onPayload is a string.
+    if (isEnvBooleanFlag(flag)) {
+      const _: string = (flag as EnvBooleanFlagDef).onPayload; // compile-time check
+      expect(typeof flag.onPayload).toBe('string');
+    }
+  });
+
+  it('isEnvBooleanFlag is false for setting boolean flags (e.g. suppress-attribution)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
+    expect(isEnvBooleanFlag(flag)).toBe(false);
+  });
+
+  // ── security-03: object payload clone (D-PAYLOAD-CLONE) ──────────────────
+  //
+  // applyFlags returns a JSON string, so the JSON.stringify → JSON.parse boundary
+  // already prevents a caller from mutating the returned value back into the
+  // FLAG_REGISTRY. The clone guards against future refactors that might expose
+  // the intermediate settings object or change buildPayload's return surface.
+  //
+  // We verify the invariant through the only available exported surface (applyFlags):
+  // after applying and round-trip-parsing the JSON, mutating the parsed result must
+  // leave FLAG_REGISTRY's onPayload unchanged.
+
+  it('mutating the parsed applyFlags result does not affect FLAG_REGISTRY onPayload (D-PAYLOAD-CLONE)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
+    const originalPayload = flag.kind === 'boolean' ? { ...(flag.onPayload as object) } : null;
+
+    // Apply the flag ON and parse the returned JSON.
+    const parsed = JSON.parse(
+      applyFlags(JSON.stringify({}), { 'suppress-attribution': true }),
+    ) as Record<string, unknown>;
+
+    // Mutate the parsed attribution object.
+    (parsed['attribution'] as Record<string, unknown>)['commit'] = 'MUTATED';
+    expect((parsed['attribution'] as Record<string, unknown>)['commit']).toBe('MUTATED');
+
+    // The FLAG_REGISTRY entry's onPayload must be unchanged.
+    if (flag.kind === 'boolean') {
+      expect(flag.onPayload).toEqual(originalPayload);
+      expect((flag.onPayload as Record<string, unknown>)['commit']).toBe('');
+    }
+  });
+
+  // ── testing-09: edge-case attribution values that must NOT be deleted ─────
+
+  it('applyFlags neutral pass: null attribution SURVIVES (guard does not match)', () => {
+    // null is not the managed shape — the guard must not fire.
+    const unmanaged = { attribution: null, model: 'opus' };
+    const input = JSON.stringify(unmanaged);
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false })) as Record<string, unknown>;
+    expect(result['attribution']).toBeNull();
+    expect(result['model']).toBe('opus');
+  });
+
+  it('stripFlags: null attribution SURVIVES (guard does not match)', () => {
+    const unmanaged = { attribution: null, model: 'opus' };
+    const result = JSON.parse(stripFlags(JSON.stringify(unmanaged))) as Record<string, unknown>;
+    expect(result['attribution']).toBeNull();
+    expect(result['model']).toBe('opus');
+  });
+
+  it('applyFlags neutral pass: array attribution SURVIVES (guard does not match)', () => {
+    const unmanaged = { attribution: [], model: 'opus' };
+    const input = JSON.stringify(unmanaged);
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false })) as Record<string, unknown>;
+    expect(result['attribution']).toEqual([]);
+    expect(result['model']).toBe('opus');
+  });
+
+  it('stripFlags: array attribution SURVIVES (guard does not match)', () => {
+    const unmanaged = { attribution: [], model: 'opus' };
+    const result = JSON.parse(stripFlags(JSON.stringify(unmanaged))) as Record<string, unknown>;
+    expect(result['attribution']).toEqual([]);
+    expect(result['model']).toBe('opus');
+  });
+
+  it('applyFlags neutral pass: attribution with extra key SURVIVES (guard does not match)', () => {
+    // {commit:'',pr:'',coAuthor:'x'} has an extra key — not the managed shape.
+    const unmanaged = { attribution: { commit: '', pr: '', coAuthor: 'x' }, model: 'opus' };
+    const input = JSON.stringify(unmanaged);
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false })) as Record<string, unknown>;
+    expect(result['attribution']).toEqual({ commit: '', pr: '', coAuthor: 'x' });
+    expect(result['model']).toBe('opus');
+  });
+
+  it('stripFlags: attribution with extra key SURVIVES (guard does not match)', () => {
+    const unmanaged = { attribution: { commit: '', pr: '', coAuthor: 'x' }, model: 'opus' };
+    const result = JSON.parse(stripFlags(JSON.stringify(unmanaged))) as Record<string, unknown>;
+    expect(result['attribution']).toEqual({ commit: '', pr: '', coAuthor: 'x' });
+    expect(result['model']).toBe('opus');
+  });
+
+});
+
+// ─── settingHoldsManagedShape — consistency-01 single-source predicate ────────
+
+describe('settingHoldsManagedShape', () => {
+  const MANAGED = { commit: '', pr: '' };
+  const makeSettings = (attr: unknown): string =>
+    JSON.stringify({ attribution: attr });
+
+  it('returns true for the exact managed shape', () => {
+    expect(settingHoldsManagedShape(makeSettings(MANAGED), 'suppress-attribution')).toBe(true);
+  });
+
+  it('returns false for a custom attribution object', () => {
+    expect(settingHoldsManagedShape(
+      makeSettings({ commit: 'Acme', pr: 'Acme' }), 'suppress-attribution'
+    )).toBe(false);
+  });
+
+  it('returns false for attribution with an extra key', () => {
+    expect(settingHoldsManagedShape(
+      makeSettings({ commit: '', pr: '', coAuthor: 'x' }), 'suppress-attribution'
+    )).toBe(false);
+  });
+
+  it('returns false for null attribution', () => {
+    expect(settingHoldsManagedShape(makeSettings(null), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for array attribution', () => {
+    expect(settingHoldsManagedShape(makeSettings([]), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false when the key is absent', () => {
+    expect(settingHoldsManagedShape(JSON.stringify({}), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for malformed JSON', () => {
+    expect(settingHoldsManagedShape('not json', 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for an unknown flag id', () => {
+    expect(settingHoldsManagedShape(makeSettings(MANAGED), 'no-such-flag')).toBe(false);
+  });
+});
+
+// ─── convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption ──────
+//
+// Regression tests for security-01 (PF-050 / ADR-024):
+// A pre-existing on-disk managed shape must be adopted into the record BEFORE
+// the strip sweep runs, so the block survives on both the init and flags paths.
+// RED state was confirmed by reasoning: the assertions are unsatisfiable
+// against the pre-fix code because Step 2 skips booleans unconditionally and
+// stripFlags deletes the block, meaning result.record['suppress-attribution']
+// would be undefined and the attribution key would be absent from the output.
+
+describe('convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption', () => {
+  const MANAGED = { commit: '', pr: '' };
+  const SIBLING_KEY = 'unrelatedSetting';
+  const SIBLING_VAL = 'preserved';
+
+  // Baseline: pre-D27 state — no suppress-attribution in record or ownedRecord,
+  // but the legacy attribution block is on disk plus an unrelated sibling key.
+  const makePreD27Settings = (): string =>
+    JSON.stringify({ attribution: MANAGED, [SIBLING_KEY]: SIBLING_VAL });
+
+  it('adopts the managed block: record gains suppress-attribution:true and block survives', () => {
+    const record: FlagsRecord = {};
+    const { settings, record: out } = convergeFlagsIntoSettings(
+      makePreD27Settings(), record, { viewModeExplicit: false, ownedRecord: null },
+    );
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed['attribution'], 'attribution block must survive').toEqual(MANAGED);
+    expect(out['suppress-attribution'], 'record must claim suppress-attribution:true').toBe(true);
+    expect(parsed[SIBLING_KEY], 'unmanaged sibling key must survive').toBe(SIBLING_VAL);
+  });
+
+  it('does NOT adopt a custom attribution (shape guard rejects it)', () => {
+    const custom = { commit: 'Acme', pr: 'Acme' };
+    const settings = JSON.stringify({ attribution: custom, [SIBLING_KEY]: SIBLING_VAL });
+    const record: FlagsRecord = {};
+    const { record: out } = convergeFlagsIntoSettings(
+      settings, record, { viewModeExplicit: false, ownedRecord: null },
+    );
+    // Custom shape must not trigger adoption
+    expect(out['suppress-attribution']).toBeUndefined();
+  });
+
+  it('does NOT adopt when the record already claims suppress-attribution:false', () => {
+    // A claimed false means the user deliberately disabled it — the managed block must be deleted.
+    const record: FlagsRecord = { 'suppress-attribution': false };
+    const { settings } = convergeFlagsIntoSettings(
+      makePreD27Settings(), record, { viewModeExplicit: false, ownedRecord: record },
+    );
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed['attribution'], 'claimed false still deletes the managed block').toBeUndefined();
   });
 });

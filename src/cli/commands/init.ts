@@ -56,6 +56,13 @@ import {
   runComplianceStep,
   buildClackCompliancePrompts,
 } from './compliance-prompts.js';
+import {
+  shouldRunAttributionStep,
+  runAttributionStep,
+  buildClackAttributionPrompts,
+  applyAttributionAnswer,
+  attributionSeedFrom,
+} from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
@@ -680,6 +687,10 @@ export const initCommand = new Command('init')
         // prints the Compliance line from complianceSummary via formatComplianceSummary.
       }
 
+      // No attribution step here: the suppress-attribution question is Advanced-only (D27).
+      // Recommended silently carries the seeded value in enabledFlags — fresh installs get
+      // the registry default (off), re-inits get prior state. See shouldRunAttributionStep.
+
       // Apply explicit CLI toggles on top of the seed.
       // Precedence: explicit CLI flag > wizard result > seed value (prior state > registry default).
       // proxy is included: --proxy/--no-proxy CLI flags override the seed in non-interactive mode.
@@ -946,6 +957,40 @@ export const initCommand = new Command('init')
       // No third case in practice: on this path the predicate only returns false for a
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
+
+      // Attribution feature (after compliance, before flags). This is the ONLY call site —
+      // the attribution question is Advanced-only (D27); the Recommended path never asks and
+      // silently carries the seeded value. The gate stays an explicit predicate call so the
+      // documented gate table in attribution-prompts.ts remains the single authority.
+      // isTTY is guaranteed true here (the non-TTY guard above exit-1'd); passing it keeps
+      // the promptless contract enforced at the predicate rather than by position (PF-029).
+      if (shouldRunAttributionStep({
+        // D27-GATE: bind to the resolved mode so all four documented gate-table rows
+        // are reachable and the predicate — not lexical placement — enforces Advanced-only.
+        // Using useRecommended ? 'recommended' : 'advanced' makes the gate testable from
+        // both sides and prevents the Recommended path from accidentally running the step
+        // if this block is ever repositioned (applies PF-029).
+        mode: useRecommended ? 'recommended' : 'advanced',
+        isTTY: process.stdin.isTTY,
+      })) {
+        const attributionStep = await runAttributionStep({
+          // attributionSeedFrom keeps the seed a real boolean regardless of the stored
+          // FlagsRecord value type — undefined/null/false all map to false (PF-018).
+          seed: attributionSeedFrom(enabledFlags),
+          prompts: buildClackAttributionPrompts(),
+        });
+        if (attributionStep.kind === 'cancelled') {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        // D27: applyAttributionAnswer is the single merge site for the wizard answer.
+        enabledFlags = applyAttributionAnswer(enabledFlags, attributionStep);
+        // Advanced path emits an outcome line (mirrors compliance step pattern).
+        for (const msg of attributionStep.messages) {
+          if (msg.level === 'success') p.log.success(msg.text);
+          else p.log.info(msg.text);
+        }
+      }
 
       /**
        * D40: init applies seeded flag defaults non-interactively. Flags are customized

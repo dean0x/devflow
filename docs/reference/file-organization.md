@@ -12,8 +12,9 @@ devflow/
 │   │   ├── commands/                 # init.ts, init-seed.ts, memory.ts, learning.ts, ambient.ts,
 │   │   │                             #   flags.ts, rules.ts, skills.ts, context.ts, hud.ts,
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
-│   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts, proxy.ts,
-│   │   │                             #   agents.ts, knowledge/
+│   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts,
+│   │   │                             #   compliance-prompts.ts, attribution-prompts.ts,
+│   │   │                             #   prompt-io.ts, proxy.ts, agents.ts, knowledge/
 │   │   ├── tui/                      # Generic TUI shell — runTui<S,A> driver, normalizeKey, cell helpers
 │   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)
 │   │   └── agents-view/              # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
@@ -21,7 +22,7 @@ devflow/
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
-│   │   ├── flags.ts                  # Claude Code flag registry (28 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (29 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)

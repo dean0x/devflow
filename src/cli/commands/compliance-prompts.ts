@@ -9,10 +9,18 @@
  * no prompt) and the non-TTY fallback preserve their promptless contracts.
  * Applies PF-014: runComplianceStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally cleanup safe.
+ *
+ * Shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) lives in
+ * prompt-io.ts — one definition, both wizard modules import from there (ADR-019).
  */
 
 import * as p from '@clack/prompts';
 import { COMPLIANCE_FRAMEWORKS, type ComplianceFeatureState } from '../../core/compliance.js';
+import { clackNote, clackSelect, type WizardPromptIO } from './prompt-io.js';
+
+// Re-export PromptOutcome so callers that import it from this module continue
+// to compile (e.g. tests/compliance-prompts.test.ts).
+export type { PromptOutcome } from './prompt-io.js';
 
 // ── Shared prompt content ──────────────────────────────────────────────────────
 
@@ -85,46 +93,32 @@ export function shouldRunComplianceStep(input: {
 
 // ── DI seam ────────────────────────────────────────────────────────────────────
 
-/** Discriminated union returned by every CompliancePromptIO method. */
-export type PromptOutcome<T> = { kind: 'value'; value: T } | { kind: 'cancel' };
-
 /**
  * Injectable prompt interface for runComplianceStep.
+ * Extends WizardPromptIO (from prompt-io.ts) with the compliance-specific
+ * multiselect prompt. The shared note + select seam is inherited.
  * Mirrors the ProxyPreflightDeps seam (src/cli/commands/proxy.ts:346).
  * Enables unit tests to drive all branches without a real TTY.
  */
-export interface CompliancePromptIO {
-  note: (message: string, title: string) => void;
-  select: (opts: {
-    message: string;
-    options: Array<{ value: boolean; label: string; hint: string }>;
-    initialValue: boolean;
-  }) => Promise<PromptOutcome<boolean>>;
+export interface CompliancePromptIO extends WizardPromptIO {
   multiselect: (opts: {
     message: string;
     options: Array<{ value: string; label: string; hint: string }>;
     initialValues: string[];
     required: boolean;
-  }) => Promise<PromptOutcome<string[]>>;
+  }) => Promise<import('./prompt-io.js').PromptOutcome<string[]>>;
 }
 
 /**
  * Build the real (clack) CompliancePromptIO adapter.
+ * Delegates the shared note + select to the shared adapters (prompt-io.ts).
  * Translates clack's cancel symbol into the PromptOutcome discriminated union.
  */
 export function buildClackCompliancePrompts(): CompliancePromptIO {
   return {
-    note: (message, title) => p.note(message, title),
+    note: clackNote,
 
-    select: async (opts) => {
-      const result = await p.select({
-        message: opts.message,
-        options: opts.options,
-        initialValue: opts.initialValue,
-      });
-      if (p.isCancel(result)) return { kind: 'cancel' };
-      return { kind: 'value', value: result as boolean };
-    },
+    select: (opts) => clackSelect(opts),
 
     multiselect: async (opts) => {
       const result = await p.multiselect({
@@ -134,7 +128,7 @@ export function buildClackCompliancePrompts(): CompliancePromptIO {
         required: opts.required,
       });
       if (p.isCancel(result)) return { kind: 'cancel' };
-      return { kind: 'value', value: result as string[] };
+      return { kind: 'value', value: result };
     },
   };
 }

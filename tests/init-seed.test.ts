@@ -4,6 +4,7 @@ import {
   resolveSeedFlags,
   resolveSeedPlugins,
   resolveInitSeed,
+  resolveExistingAttributionSuppression,
   applyCliToggles,
   resolveResetGatedInputs,
   FEATURE_DEFAULTS,
@@ -731,5 +732,101 @@ describe('compliance seeding', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
     const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
+  });
+});
+
+// ── resolveExistingAttributionSuppression ─────────────────────────────────────
+
+describe('resolveExistingAttributionSuppression (D27)', () => {
+  it('returns true when exact devflow attribution shape present', () => {
+    const settings = JSON.stringify({ attribution: { commit: '', pr: '' } });
+    expect(resolveExistingAttributionSuppression(settings)).toBe(true);
+  });
+
+  it('returns undefined when attribution key is absent', () => {
+    const settings = JSON.stringify({ other: 'value' });
+    expect(resolveExistingAttributionSuppression(settings)).toBeUndefined();
+  });
+
+  it('returns undefined for custom attribution object (shape guard)', () => {
+    const settings = JSON.stringify({ attribution: { commit: 'My Org', pr: 'My Org' } });
+    expect(resolveExistingAttributionSuppression(settings)).toBeUndefined();
+  });
+
+  it('returns undefined for string attribution (legacy/custom)', () => {
+    const settings = JSON.stringify({ attribution: 'Devflow' });
+    expect(resolveExistingAttributionSuppression(settings)).toBeUndefined();
+  });
+
+  it('returns undefined for attribution with extra keys (not exact shape)', () => {
+    const settings = JSON.stringify({ attribution: { commit: '', pr: '', extra: 'value' } });
+    expect(resolveExistingAttributionSuppression(settings)).toBeUndefined();
+  });
+
+  it('returns undefined for attribution with non-empty strings', () => {
+    const settings = JSON.stringify({ attribution: { commit: 'x', pr: '' } });
+    expect(resolveExistingAttributionSuppression(settings)).toBeUndefined();
+  });
+
+  it('returns undefined on malformed JSON', () => {
+    expect(resolveExistingAttributionSuppression('not json')).toBeUndefined();
+  });
+
+  it('returns undefined for empty settings string', () => {
+    expect(resolveExistingAttributionSuppression('')).toBeUndefined();
+  });
+});
+
+// ── resolveInitSeed — suppress-attribution seeding ───────────────────────────
+
+describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
+  it('fresh install (null manifest) → suppress-attribution defaults to false', () => {
+    const seed = resolveInitSeed(null, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(false);
+  });
+
+  it('settings.json with exact devflow attribution → seeds true (overrides manifest false)', () => {
+    const settings = JSON.stringify({ attribution: { commit: '', pr: '' } });
+    const manifest = makeManifest({ features: { ...makeManifest().features, flags: { 'suppress-attribution': false } } });
+    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(true);
+  });
+
+  it('manifest has suppress-attribution:true, no exact settings shape → seeds true', () => {
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, flags: { 'suppress-attribution': true } },
+    });
+    const seed = resolveInitSeed(manifest, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(true);
+  });
+
+  it('custom attribution in settings, manifest flag false → seeds false (shape guard)', () => {
+    const settings = JSON.stringify({ attribution: { commit: 'My Org', pr: 'My Org' } });
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, flags: { 'suppress-attribution': false } },
+    });
+    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(false);
+  });
+
+  it('--reset → suppress-attribution defaults to false even when settings has exact shape', () => {
+    const settings = JSON.stringify({ attribution: { commit: '', pr: '' } });
+    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+      true, makeManifest(), null, settings,
+    );
+    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(false);
+  });
+
+  it('manifest has suppress-attribution: null (ADR-014 deliberate unset) → resolves to false', () => {
+    // ADR-014: null = known + deliberately unset. For this boolean flag, null and false
+    // both delete the target settings key; the resolved seed must be exactly false.
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, flags: { 'suppress-attribution': null, tui: true } },
+    });
+    const seed = resolveInitSeed(manifest, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(false);
+    // Non-vacuity (PF-018): neighbouring flag from prior manifest survives unchanged.
+    expect(seed.flags['tui']).toBe(true);
   });
 });

@@ -7,13 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`suppress-attribution` flag** (optional boolean, default OFF): when enabled, writes `{"commit":"","pr":""}` to the `attribution` key in `settings.json`, suppressing Claude attribution trailers in git commits and PRs. Disabling (or uninstalling) removes the `attribution` key only when its current value exactly matches that managed shape — a custom attribution object is preserved, while enabling always replaces the existing value. Toggle via `devflow flags --enable/--disable suppress-attribution`.
+- **Attribution wizard step in Advanced init** (D27): the Advanced-mode `devflow init` wizard asks one attribution question after the compliance step. Recommended init never asks; it silently applies the seeded value (off by default on a fresh install). The non-interactive path is `devflow flags --enable/--disable suppress-attribution` — there is no `--attribution` init flag.
+
 ### Changed
+- **`templates/settings.json` no longer ships an `attribution` block**: fresh installs now emit Claude attribution in git commits and PRs by default (where every prior install suppressed it). Existing installs are unaffected — see Upgrade note below.
+- **`devflow:git` skill**: commit and PR templates no longer carry a hard-coded `Co-Authored-By: Claude` trailer or `Generated with Claude Code` footer. Attribution suppression is now an opt-in flag (`suppress-attribution`) rather than a hard-coded default.
 - **Routing runtime pinned to `subswitch@0.4.0`** (from `0.2.0`). Over-window Anthropic-bound request bodies are now streamed upstream instead of being rejected by the relay, so long prompts no longer fail at the proxy; only translated (Codex) routes still return `413 request_too_large`. `buildRoutingConfigJson` no longer injects `anthropic.connectTimeoutMs` — the relay's own default (10 s, connect-only) governs; user-set values are preserved as before. The injection was a 0.2.0-era workaround artifact that outlived its purpose once the key's semantics were narrowed to DNS+TCP connect only.
 
 ### Fixed
 - **`proxy-routing.json` upgrade safety**: `buildRoutingConfigJson` now strips all seven `limits.*` sub-keys that `subswitch@0.4.0` promotes to hard startup errors: `limits.maxBodyBytes` (renamed `limits.maxBufferedBodyBytes`), `limits.maxUpstreamSockets` (moved to `anthropic.maxUpstreamSockets`), `limits.streamIdleTimeoutMs` (moved to `providers.codex.streamIdleTimeoutMs`), `limits.requestTimeoutMs` (moved to `providers.codex.requestTimeoutMs`), and `limits.maxSseEventBytes` (moved to `providers.codex.maxSseEventBytes`), joining the existing strips for `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, and `limits.maxConcurrentRequests`. A hand-edited config carrying any of these keys would have killed the relay on every session start — spawned by the `ensure-proxy` hook, with no route back. The `limits` block is now omitted entirely when all its sub-keys are stripped (matching the `anthropic` block's existing omit-when-empty behaviour).
 
 **Upgrade**: no action required. If you hand-edited `~/.devflow/proxy-routing.json` to set any of the seven stripped `limits.*` keys, move their values to the 0.4.0 target paths (`limits.maxBufferedBodyBytes`, `anthropic.maxUpstreamSockets`, or the appropriate `providers.codex.*` key); the next `devflow proxy --enable` drops the stale keys for you.
+
+**Upgrade (attribution)**: existing installs that carry the devflow-managed `attribution` block — written by prior versions' `templates/settings.json` — keep their suppression. On the next `devflow init` or any `devflow flags` write, the managed block is detected and adopted into the manifest as `suppress-attribution: true` automatically, so no manual action is required. Installs with a custom `attribution` value are also unaffected — the shape guard prevents any modification.
 
 ---
 

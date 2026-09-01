@@ -12,6 +12,8 @@
  * sole API; init.ts works directly with FlagsRecord (no legacy string[] bridge).
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Discriminant for the FlagDef union — determines which per-kind fields are present. */
@@ -34,10 +36,14 @@ export type FlagsRecordValue = FlagValue | null;
  */
 export type FlagsRecord = Record<string, FlagsRecordValue>;
 
+/** A target inside the settings.json `env` block. Env values are always strings. */
+export type EnvFlagTarget = { readonly type: 'env'; readonly key: string };
+
+/** A top-level settings.json key. May hold any JSON value. */
+export type SettingFlagTarget = { readonly type: 'setting'; readonly key: string };
+
 /** Where the flag's value is written in settings.json. */
-export type FlagTarget =
-  | { readonly type: 'env'; readonly key: string }
-  | { readonly type: 'setting'; readonly key: string };
+export type FlagTarget = EnvFlagTarget | SettingFlagTarget;
 
 // ── Per-kind interfaces ────────────────────────────────────────────────────────
 
@@ -61,13 +67,67 @@ interface FlagDefCommon {
   readonly target: FlagTarget;
 }
 
-/** A boolean on/off flag. `onPayload` is written when the flag is enabled. */
-export interface BooleanFlagDef extends FlagDefCommon {
+interface BooleanFlagDefCommon extends FlagDefCommon {
   readonly kind: 'boolean';
-  /** The value written to the target when the flag is ON. Env targets must use strings. */
-  readonly onPayload: string | boolean;
   /** Default value; false = neutral for booleans (key is deleted when false). */
   readonly defaultValue: boolean;
+}
+
+/**
+ * A boolean flag targeting an env var. `onPayload` is constrained to `string`:
+ * the settings.json `env` block is a string map, and buildPayload writes
+ * `onPayload` through verbatim, so a non-string here would serialize an object
+ * or raw boolean into an env slot that Claude Code reads as a string.
+ *
+ * This constraint is COMPILE-ENFORCED — it used to be prose on `onPayload` plus a
+ * registry unit test, which let `target: {type:'env'}` + an object payload compile
+ * clean. Do not merge the two members back into one interface.
+ */
+export interface EnvBooleanFlagDef extends BooleanFlagDefCommon {
+  readonly target: EnvFlagTarget;
+  readonly onPayload: string;
+  /** Env keys are never shape-guarded — `never` makes that a compile error, not a silent no-op. */
+  readonly settingDeleteGuard?: never;
+}
+
+/** A boolean flag targeting a top-level settings.json key. */
+export interface SettingBooleanFlagDef extends BooleanFlagDefCommon {
+  readonly target: SettingFlagTarget;
+  /** Setting targets may use strings, booleans, or plain objects. */
+  readonly onPayload: string | boolean | Record<string, unknown>;
+  /**
+   * D-ATTR-GUARD: when set, deletion of the target setting key is shape-guarded —
+   * the key is only removed when its current value deep-equals this shape exactly.
+   * Prevents erasing user-customized values (e.g. attribution with a real org name)
+   * when the flag transitions to neutral.
+   */
+  readonly settingDeleteGuard?: Record<string, unknown>;
+}
+
+/**
+ * A boolean on/off flag. `onPayload` is written when the flag is enabled.
+ *
+ * What TypeScript enforces: object-literal assignability at registry declaration
+ * sites. An entry typed as `EnvBooleanFlagDef` must have `onPayload: string` at
+ * its declaration; one typed as `SettingBooleanFlagDef` may use an object.
+ *
+ * What TypeScript does NOT enforce for consumers: narrowing via a nested
+ * `target.type` check. After `if (f.target.type === 'env')`, `f` is still typed
+ * as `BooleanFlagDef` and `f.onPayload` remains `string | boolean |
+ * Record<string, unknown>`. Use `isEnvBooleanFlag(f)` to narrow to
+ * `EnvBooleanFlagDef` where the string type is needed directly.
+ */
+export type BooleanFlagDef = EnvBooleanFlagDef | SettingBooleanFlagDef;
+
+/**
+ * Type predicate that narrows `ClaudeCodeFlag` to `EnvBooleanFlagDef`.
+ * Narrows `f.onPayload` to `string` so callers writing to the env string-map
+ * avoid an `unknown` hop without an unsafe cast.
+ *
+ * Use in `buildPayload` and `applyFlags` only where the string type is load-bearing.
+ */
+export function isEnvBooleanFlag(f: ClaudeCodeFlag): f is EnvBooleanFlagDef {
+  return f.kind === 'boolean' && f.target.type === 'env';
 }
 
 /** An enum flag. `neutralValue` is the value that means "no preference" (key is deleted). */
@@ -407,6 +467,25 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
     onPayload: '1',
+    recommended: false,
+    defaultValue: false,
+  },
+
+  {
+    // D27: gates Claude Code's AI-attribution injection into git commits and PRs.
+    // When true, writes {"commit":"","pr":""} to settings.json which suppresses attribution.
+    // When false/null (neutral), removes the key ONLY when the current value is the exact
+    // devflow-managed shape (settingDeleteGuard). A custom attribution value (e.g. an org
+    // name) is never deleted — shape guard prevents erasure (D-ATTR-GUARD).
+    id: 'suppress-attribution',
+    label: 'Suppress AI attribution',
+    description: 'Remove AI-attribution labels from git commits and pull requests',
+    hint: 'Suppresses Claude attribution labels in git commits and pull requests',
+    blurb: 'hide AI attribution labels',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'attribution' },
+    onPayload: { commit: '', pr: '' },
+    settingDeleteGuard: { commit: '', pr: '' },
     recommended: false,
     defaultValue: false,
   },
@@ -961,6 +1040,74 @@ export function migrateLegacyFlagsToRecord(
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
 /**
+ * Returns true when `value` equals the managed shape declared by `flag.settingDeleteGuard`.
+ * Returns false when: the flag has no guard, is not a setting-target boolean, or the value
+ * does not deep-equal the guard.
+ *
+ * Single equality oracle for managed-shape comparisons — used by `canDeleteSettingKey`,
+ * `settingHoldsManagedShape`, and the Step 2b adoption fold in `convergeFlagsIntoSettings`.
+ * All three delegate here so there is exactly one `isDeepStrictEqual` call for guard matching.
+ */
+export function settingValueHoldsManagedShape(flag: ClaudeCodeFlag, value: unknown): boolean {
+  if (flag.kind !== 'boolean' || flag.target.type !== 'setting') return false;
+  const guard = flag.settingDeleteGuard;
+  if (guard === undefined) return false;
+  return isDeepStrictEqual(value, guard);
+}
+
+/**
+ * D-ATTR-GUARD single-source predicate (consistency-01 / ADR-024).
+ *
+ * Returns true when the settings.json string contains a value at the flag's
+ * target key that equals the flag's managed shape (`settingDeleteGuard`).
+ *
+ * This is the ONE place that decides "on-disk value equals the managed shape".
+ * All consumers — `resolveExistingAttributionSuppression` (seeding priority),
+ * and the guarded-boolean adoption fold in `convergeFlagsIntoSettings` — delegate
+ * here rather than hand-rolling their own comparison.
+ *
+ * Returns false when:
+ *   - settingsJson is malformed
+ *   - root is not a plain object
+ *   - flagId is not in the registry
+ *   - the flag has no settingDeleteGuard
+ *   - the flag is not a setting-target boolean
+ *   - the on-disk value does not deep-equal the guard
+ */
+export function settingHoldsManagedShape(settingsJson: string, flagId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const flag = FLAG_REGISTRY_MAP.get(flagId);
+    if (!flag) return false;
+    const value = (parsed as Record<string, unknown>)[flag.target.key];
+    return settingValueHoldsManagedShape(flag, value);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * D-ATTR-GUARD: returns true when it is safe to delete a flag's target key from
+ * settings. For flags with a settingDeleteGuard the key is only deleted when the
+ * current on-disk value deep-equals the managed shape, preventing erasure of
+ * user-customized values (e.g. an organisation attribution block) on flag
+ * disable or uninstall. Flags without a guard are always safe to delete.
+ *
+ * Delegates to `settingValueHoldsManagedShape` — the single equality oracle for
+ * managed-shape comparisons — so there is exactly one `isDeepStrictEqual` call
+ * across the entire apply/strip pipeline (ADR-024 mechanism 3).
+ *
+ * Single-source invariant: both the disable path (applyFlags neutral branch) and
+ * the uninstall path (stripFlags) collapse to this predicate.
+ */
+function canDeleteSettingKey(flag: ClaudeCodeFlag, settings: Record<string, unknown>): boolean {
+  if (flag.kind !== 'boolean') return true;
+  if (flag.settingDeleteGuard === undefined) return true;
+  return settingValueHoldsManagedShape(flag, settings[flag.target.key]);
+}
+
+/**
  * Return `v` as a `Record<string, unknown>` only when it is a plain object.
  * Returns undefined for arrays, null, or non-objects.
  *
@@ -977,8 +1124,16 @@ function asPlainObject(v: unknown): Record<string, unknown> | undefined {
 /** Compute the value to write to settings.json for an active flag. */
 function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
   switch (flag.kind) {
-    case 'boolean':
-      return flag.onPayload;
+    case 'boolean': {
+      // D-PAYLOAD-CLONE: return a structural clone for object payloads so the
+      // FLAG_REGISTRY entry is never aliased into the caller's settings tree.
+      // Primitives (string, boolean) are values and require no clone.
+      // isEnvBooleanFlag narrows onPayload to string for env flags — no clone needed,
+      // and the string type avoids an `unknown` hop into the env string-map.
+      if (isEnvBooleanFlag(flag)) return flag.onPayload; // string — no clone needed
+      const p = flag.onPayload;
+      return typeof p === 'object' && p !== null ? structuredClone(p) : p;
+    }
     case 'enum':
       return value as string;
     case 'number':
@@ -1029,7 +1184,7 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
         const env = asPlainObject(settings.env);
         if (env) delete env[flag.target.key];
       } else {
-        delete settings[flag.target.key];
+        if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
       }
     } else {
       const payload = buildPayload(flag, safe as FlagValue);
@@ -1074,7 +1229,7 @@ export function stripFlags(settingsJson: string): string {
     if (flag.target.type === 'env') {
       if (env) delete env[flag.target.key];
     } else {
-      delete settings[flag.target.key];
+      if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
     }
   }
 
@@ -1270,6 +1425,36 @@ export function convergeFlagsIntoSettings(
     const coerced = coerceFlagValue(flag, toCoerce);
     if (coerced !== null) {
       folded[flag.id] = coerced;
+    }
+  }
+
+  // ── Step 2b: adopt guarded boolean settings before the strip ─────────────
+  // D-ATTR-ADOPT (PF-050 / ADR-024): a delete guard is evidence about the VALUE,
+  // never about the record — a pre-existing on-disk key whose value matches the
+  // managed shape means devflow wrote it, so adopt it into the record now, before
+  // stripFlags can unconditionally remove it on the next line.
+  //
+  // Mirror of the view-mode fold (Step 1): adopt only when:
+  //   (a) the flag has a settingDeleteGuard (guarded boolean only)
+  //   (b) the record does NOT already claim the key — a claimed false or null still
+  //       deletes the managed block (the user intentionally disabled it)
+  //   (c) the pre-strip on-disk value holds the managed shape
+  //
+  // This fold runs before stripFlags so applyFlags rewrites the block from the
+  // now-claimed record and the block survives on BOTH the init and flags paths.
+  for (const flag of FLAG_REGISTRY) {
+    if (flag.kind !== 'boolean') continue;
+    if (flag.target.type !== 'setting') continue;
+
+    // Skip when the record already claims this flag (claimed false/null deletes the block)
+    const claimed =
+      claimedIn !== null &&
+      Object.prototype.hasOwnProperty.call(claimedIn, flag.id);
+    if (claimed) continue;
+
+    // Adopt only when the on-disk value matches the managed shape exactly
+    if (settingValueHoldsManagedShape(flag, parsed[flag.target.key])) {
+      folded[flag.id] = true;
     }
   }
 

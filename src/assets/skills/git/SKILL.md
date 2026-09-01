@@ -97,8 +97,6 @@ See `references/patterns.md` for extended recovery and stash workflows.
 <optional body explaining what and why>
 
 <optional footer with references>
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### Types
@@ -125,8 +123,6 @@ Implement token validation middleware with:
 - Expiration checking
 
 Closes #123
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -205,7 +201,7 @@ sleep 1  # Between each API call
 
 - Only lines in the PR diff can receive inline comments
 - Deduplicate before posting (same file + line = keep one)
-- Always include suggested fix and Claude Code attribution footer
+- Always include a suggested fix; every comment carries the `<!-- devflow:* -->` marker, and the visible devflow footer (*Posted by [devflow](https://github.com/dean0x/devflow)*) is appended only on summary comments (see src/assets/agents/git.md)
 
 ### Releases
 

@@ -177,8 +177,6 @@ Previous implementation assumed UTC, causing off-by-one errors
 for dates near midnight in non-UTC timezones.
 
 Fixes #456
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -193,8 +191,6 @@ BREAKING CHANGE: API responses now follow JSON:API specification.
 All clients must update to handle new response structure.
 
 Migration guide: docs/migration/v2-response-format.md
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -255,8 +251,6 @@ gh pr create \
 Implements JWT-based authentication...
 
 [Full description content]
-
-Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```
