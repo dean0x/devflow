@@ -10,7 +10,8 @@
  *  - readProxyState: malformed JSON → tolerant default, no throw (TEST-2)
  *  - writeProxyState → readProxyState round-trip (TEST-2)
  *  - Tolerant field parsing: wrong-typed fields self-heal to defaults (TEST-2)
- *  - buildRoutingConfigJson: exact {port} shape only — no codex key (AC-C4)
+ *  - buildRoutingConfigJson: port-only shape — no injected anthropic block (AC-C4)
+ *  - buildRoutingConfigJson: user-set anthropic.connectTimeoutMs is preserved
  *  - Pre-existing proxy.json with models loads cleanly; key absent after write (AC-C5)
  *  - RUNTIME_VERSION_RE: path-traversal and length-limit rejection (AC-S4)
  */
@@ -24,9 +25,9 @@ import {
   writeProxyState,
   buildRoutingConfigJson,
   buildProxyState,
+  proxyJsonExists,
   DEFAULT_PROXY_PORT,
   RUNTIME_VERSION_RE,
-  DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS,
 } from '../src/core/proxy-state.js';
 
 // ---------------------------------------------------------------------------
@@ -215,7 +216,7 @@ describe('readProxyState — wrong-typed fields self-heal to defaults', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildRoutingConfigJson — port + anthropic.connectTimeoutMs default (AC-C4 / D-EFR-4)
+// buildRoutingConfigJson — port-only shape; user-set anthropic keys preserved (AC-C4)
 // ---------------------------------------------------------------------------
 
 describe('buildRoutingConfigJson — base behavior', () => {
@@ -242,12 +243,9 @@ describe('buildRoutingConfigJson — base behavior', () => {
     expect(() => JSON.parse(json)).not.toThrow();
   });
 
-  it('injects default anthropic.connectTimeoutMs when no existing config supplied (D-EFR-4)', () => {
-    const json = buildRoutingConfigJson(4141);
-    const obj = JSON.parse(json) as Record<string, unknown>;
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic).toBeDefined();
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+  it('emits no anthropic block when no existing config is supplied (relay default governs)', () => {
+    const obj = JSON.parse(buildRoutingConfigJson(4141)) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 
   it('only emits allowed top-level keys (strictObject constraint D-EFR-4)', () => {
@@ -260,19 +258,22 @@ describe('buildRoutingConfigJson — base behavior', () => {
 });
 
 describe('buildRoutingConfigJson — existing config preservation', () => {
-  it('user-specified anthropic.connectTimeoutMs wins over default', () => {
+  it('user-specified anthropic.connectTimeoutMs is preserved (relay default not injected)', () => {
     const existing = JSON.stringify({ port: 4141, anthropic: { connectTimeoutMs: 30_000 } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
     expect(anthropic.connectTimeoutMs).toBe(30_000);
   });
 
-  it('preserves other anthropic fields alongside injected default', () => {
-    const existing = JSON.stringify({ port: 4141, anthropic: { streamIdleTimeoutMs: 60_000 } });
+  it('preserves other anthropic fields from existing config', () => {
+    // maxUpstreamSockets is a live key in the pinned runtime's AnthropicSchema —
+    // a preservation fixture has to use a shape the relay actually accepts, or it
+    // pins behaviour that would break the relay at startup (avoids PF-043).
+    const existing = JSON.stringify({ port: 4141, anthropic: { maxUpstreamSockets: 64 } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.streamIdleTimeoutMs).toBe(60_000);
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(anthropic.maxUpstreamSockets).toBe(64);
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'connectTimeoutMs')).toBe(false);
   });
 
   it('preserves logLevel from existing config', () => {
@@ -296,6 +297,108 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(limits.maxConcurrent).toBe(10);
   });
 
+  // Keys that were valid under a previously pinned runtime and are registered legacy
+  // keys in the current one — a hard startup error, not a warning. Carrying a user's own
+  // proxy-routing.json forward across the upgrade must drop them, or the relay that the
+  // ensure-proxy hook spawns dies on boot every session with no route back.
+  it('strips anthropic.streamIdleTimeoutMs (removed in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      anthropic: { streamIdleTimeoutMs: 60_000, maxUpstreamSockets: 64 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const anthropic = obj.anthropic as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'streamIdleTimeoutMs')).toBe(false);
+    // Neighbouring valid keys survive the strip; no default is injected.
+    expect(anthropic.maxUpstreamSockets).toBe(64);
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'connectTimeoutMs')).toBe(false);
+  });
+
+  it('strips limits.maxConcurrentRequests (removed in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxConcurrentRequests: 8, maxConcurrent: 10 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxConcurrentRequests')).toBe(false);
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('strips limits.maxBodyBytes (renamed maxBufferedBodyBytes in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxBodyBytes: 10_485_760, maxConcurrent: 10 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxBodyBytes')).toBe(false);
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('preserves the current limits.maxBufferedBodyBytes spelling', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.maxUpstreamSockets (moved to anthropic.maxUpstreamSockets in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxUpstreamSockets: 128, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxUpstreamSockets')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.streamIdleTimeoutMs (moved to providers.codex.streamIdleTimeoutMs in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { streamIdleTimeoutMs: 30_000, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'streamIdleTimeoutMs')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.requestTimeoutMs (moved to providers.codex.requestTimeoutMs in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { requestTimeoutMs: 60_000, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'requestTimeoutMs')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('strips limits.maxSseEventBytes (moved to providers.codex.maxSseEventBytes in 0.4.0)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxSseEventBytes: 65_536, maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxSseEventBytes')).toBe(false);
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
+  });
+
+  it('omits limits key from output when all sub-keys are stripped (mirrors anthropic omit-when-empty)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxUpstreamSockets: 128, streamIdleTimeoutMs: 30_000 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(obj, 'limits')).toBe(false);
+  });
+
   it('preserves providers block from existing config', () => {
     const existing = JSON.stringify({ port: 4141, providers: { openai: { baseUrl: 'https://api.openai.com' } } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
@@ -315,19 +418,17 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(obj.port).toBe(4141);
   });
 
-  it('malformed existing content falls back cleanly — no throw, port + anthropic default emitted', () => {
+  it('malformed existing content falls back cleanly — no throw, port-only config emitted', () => {
     expect(() => buildRoutingConfigJson(4141, '{ bad json !!!')).not.toThrow();
     const obj = JSON.parse(buildRoutingConfigJson(4141, '{ bad json !!!')) as Record<string, unknown>;
     expect(obj.port).toBe(4141);
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 
-  it('undefined existingContent falls back to clean defaults', () => {
+  it('undefined existingContent falls back to port-only config', () => {
     const obj = JSON.parse(buildRoutingConfigJson(4141, undefined)) as Record<string, unknown>;
     expect(obj.port).toBe(4141);
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 });
 
@@ -404,5 +505,60 @@ describe('RUNTIME_VERSION_RE — version string validation (AC-S4)', () => {
     ['1', true, 'single digit'],
   ])('RUNTIME_VERSION_RE.test("%s") === %s (%s)', (v, expected) => {
     expect(RUNTIME_VERSION_RE.test(v)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2 (issue #313): proxyJsonExists — D-STRIP-1 gate discriminator
+//
+// readProxyState() returns Ok(defaultState) on ENOENT — callers cannot use its
+// success to prove proxy.json exists. proxyJsonExists() is the correct gate for
+// stripping managed env vars: strip only when the file exists (proving devflow
+// previously wrote it).
+// ---------------------------------------------------------------------------
+
+describe('proxyJsonExists — FIX 2 (issue #313)', () => {
+  it('returns false when proxy.json does not exist', async () => {
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(false);
+  });
+
+  it('returns true when proxy.json exists (even with only a port)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'proxy.json'), JSON.stringify({ port: DEFAULT_PROXY_PORT }));
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns true for a full proxy.json written by writeProxyState', async () => {
+    const state = buildProxyState(DEFAULT_PROXY_PORT, '/path/relay.js', '/path/config.json', '0.2.0');
+    await writeProxyState(tmpDir, state);
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns true even when the file contains malformed JSON (file-exists ≠ valid JSON)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'proxy.json'), 'not-valid-json{{');
+    const result = await proxyJsonExists(tmpDir);
+    expect(result).toBe(true);
+  });
+
+  it('returns false when devflowDir itself does not exist', async () => {
+    const nonexistent = path.join(tmpDir, 'does-not-exist');
+    const result = await proxyJsonExists(nonexistent);
+    expect(result).toBe(false);
+  });
+
+  it('discriminates absent-file from Ok(defaultState) returned by readProxyState', async () => {
+    // readProxyState() returns Ok({enabled:false,port:DEFAULT_PROXY_PORT,...}) on ENOENT,
+    // which is indistinguishable from a file present with those exact values.
+    // proxyJsonExists() must correctly report false for the absent-file case.
+    const readResult = await readProxyState(tmpDir);
+    expect(readResult.ok).toBe(true); // readProxyState returns Ok even on ENOENT
+    if (readResult.ok) {
+      expect(readResult.value.port).toBe(DEFAULT_PROXY_PORT); // same as a real file with default port
+    }
+    // proxyJsonExists is the correct discriminator — file is absent
+    const exists = await proxyJsonExists(tmpDir);
+    expect(exists).toBe(false);
   });
 });

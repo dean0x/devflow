@@ -22,6 +22,7 @@ import {
   removeProxyHooks,
   hasProxyHooks,
   applyDisableToSettings,
+  applyProxyTeardownToSettings,
   runProxyPreflight,
   runPostSpawnVerification,
   isOurRelayBody,
@@ -1753,5 +1754,198 @@ describe('Phase 4 / T7-extended: fully-enabled state includes UNKNOWN_MODEL_WIND
     const env = result.env as Record<string, string>;
     expect(env.ANTHROPIC_BASE_URL).toBe(OUR_URL);
     expect(env[WINDOW_ENV]).toBe('1');
+  });
+});
+
+// ─── FIX 3 (issue #313): runProxyPreflight — D-EFR-5 ordering ───────────────
+//
+// Foreign-env check (check ④) must evaluate BEFORE the adopted early-return
+// (check ③). Previously, a healthy relay on the port caused an early-return that
+// silently skipped the foreign-gateway refusal entirely.
+//
+// Regression tests:
+//   REG-EFR-1: foreign URL + healthy relay → Err (refusal), not adopted
+//   REG-EFR-2: no foreign URL + healthy relay → Ok(adopted:true) (normal adopt)
+//   REG-EFR-3: foreign URL + port free → Err (check ④ on the free-port path, unchanged)
+
+describe('runProxyPreflight — FIX 3 D-EFR-5 foreign-env check ordering (issue #313)', () => {
+  const port = DEFAULT_PORT;
+  const codexAuthPath = '/home/test/.codex/auth.json';
+  const configPath = '/home/test/.devflow/proxy-routing.json';
+  const logPath = '/home/test/.devflow/logs/proxy.log';
+
+  const ourHealthBody = '{"name":"subswitch","version":"0.2.0","providers":[{"id":"anthropic","configured":true,"modelCount":0}]}';
+
+  // REG-EFR-1: healthy relay + foreign URL → must be refused (not adopted silently)
+  it('REG-EFR-1: returns Err when relay is healthy but ANTHROPIC_BASE_URL is a foreign gateway', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),       // port up
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }), // our relay
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://litellm.mycompany.internal' }, // foreign URL
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    // Must be refused — not adopted silently
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('ANTHROPIC_BASE_URL');
+    }
+  });
+
+  // REG-EFR-2: healthy relay + no foreign URL → normal adopt
+  it('REG-EFR-2: returns Ok(adopted:true) when relay is healthy and no foreign URL', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson: vi.fn().mockResolvedValue('{}'), // no foreign URL
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.adopted).toBe(true);
+    }
+  });
+
+  // REG-EFR-3: port free + foreign URL → check ④ on the free-port path (already tested above,
+  // reconfirmed here to show both paths refuse a foreign URL)
+  it('REG-EFR-3: returns Err when port is free but ANTHROPIC_BASE_URL is a foreign gateway', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(false), // port free
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://litellm.mycompany.internal' },
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('ANTHROPIC_BASE_URL');
+    }
+  });
+
+  // REG-EFR-1b: healthy relay + our own relay URL on the port → adopted (not foreign)
+  it('REG-EFR-1b: adopted when relay is healthy and ANTHROPIC_BASE_URL is already our relay URL', async () => {
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson: vi.fn().mockResolvedValue(JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}` }, // our URL → not foreign
+      })),
+    });
+    const result = await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.adopted).toBe(true);
+    }
+  });
+
+  // Verify that readSettingsJson is called in the adopt path (D-EFR-5 gate is wired)
+  it('calls readSettingsJson in the adopted path to evaluate foreign-env state', async () => {
+    const readSettingsJson = vi.fn().mockResolvedValue('{}');
+    const deps = makeDeps({
+      tcpConnectable: vi.fn().mockResolvedValue(true),
+      httpGet: vi.fn().mockResolvedValue({ ok: true, value: ourHealthBody }),
+      readSettingsJson,
+    });
+    await runProxyPreflight(port, codexAuthPath, configPath, logPath, deps);
+    expect(readSettingsJson).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── FIX 2 (issue #313): applyProxyTeardownToSettings — D-STRIP-1 gate ────────
+//
+// Every proxy-off path (devflow proxy --disable, devflow uninstall) routes its
+// settings teardown through this one function so the two removals cannot drift:
+//   - hooks              → always removed (they are Devflow's own artifacts)
+//   - ANTHROPIC_BASE_URL + window var → removed only when the caller supplies a
+//     managedPort, which it may do only when proxy.json exists (the sole evidence
+//     that Devflow ever wrote them).
+//
+// Falsification: gating the whole call on the evidence (the shape this replaced)
+// leaves Devflow's hooks in settings.json after uninstall — REG-TEARDOWN-1 fails.
+
+describe('applyProxyTeardownToSettings — FIX 2 D-STRIP-1 (issue #313)', () => {
+  const DEVFLOW_DIR = '/home/test/.devflow';
+
+  /** Settings in the fully-enabled shape: proxy hooks + both env vars. */
+  function enabledSettings(port: number): Settings {
+    const s = {
+      env: {
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
+        [WINDOW_ENV]: '1',
+        MY_VAR: 'keep',
+      },
+    } as unknown as Settings;
+    addProxyHooks(s, DEVFLOW_DIR);
+    return s;
+  }
+
+  // REG-TEARDOWN-1: hooks go regardless of evidence — an uninstall that leaves them
+  // behind points every later session at a hook script that no longer exists.
+  it('REG-TEARDOWN-1: removes proxy hooks even with no managed port (unmanaged)', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+    expect(hasProxyHooks(settings)).toBe(true);
+
+    const changed = applyProxyTeardownToSettings(settings, undefined);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+  });
+
+  it('leaves both env vars untouched when no managed port is supplied', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    applyProxyTeardownToSettings(settings, undefined);
+
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    // Not ours to remove: without proxy.json there is no evidence Devflow wrote these.
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${DEFAULT_PORT}`);
+    expect(env[WINDOW_ENV]).toBe('1');
+    expect(env.MY_VAR).toBe('keep');
+  });
+
+  it('removes hooks AND both env vars when a managed port is supplied', () => {
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    const changed = applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    expect(changed).toBe(true);
+    expect(hasProxyHooks(settings)).toBe(false);
+    const env = (settings as unknown as { env?: Record<string, string> }).env;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env?.[WINDOW_ENV]).toBeUndefined();
+    expect(env?.MY_VAR).toBe('keep');
+  });
+
+  it('keeps the both-operations invariant: env is stripped even when hooks are present', () => {
+    // The regression applyDisableToSettings guards against — hooks present must not
+    // short-circuit the env strip. Re-pinned through the teardown entry point.
+    const settings = enabledSettings(DEFAULT_PORT);
+
+    applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    const env = (settings as unknown as { env?: Record<string, string> }).env;
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env?.[WINDOW_ENV]).toBeUndefined();
+  });
+
+  it('REG-1 preserved: a foreign gateway on another port survives a managed teardown', () => {
+    const settings = {
+      env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9999' },
+    } as unknown as Settings;
+    addProxyHooks(settings, DEVFLOW_DIR);
+
+    applyProxyTeardownToSettings(settings, DEFAULT_PORT);
+
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:9999');
+    expect(hasProxyHooks(settings)).toBe(false);
+  });
+
+  it('returns false when there is nothing to remove (unmanaged, no hooks)', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: 'https://gw.example.com' } } as unknown as Settings;
+    expect(applyProxyTeardownToSettings(settings, undefined)).toBe(false);
+    const env = (settings as unknown as { env: Record<string, string> }).env;
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://gw.example.com');
   });
 });

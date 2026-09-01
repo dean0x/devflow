@@ -29,6 +29,7 @@ import {
   buildProxyState,
   buildRoutingConfigJson,
   proxyBaseUrl,
+  proxyJsonExists,
   resolveProxyBin,
   DEFAULT_PROXY_PORT,
 } from '../../core/proxy-state.js';
@@ -187,9 +188,11 @@ function _stripProxyEnvFromObject(settings: Settings, managedPort: number): bool
   const env = s.env as Record<string, unknown> | undefined;
   if (!env) return false;
 
-  // Devflow is the only producer of this var — always remove it, regardless of whether
-  // the URL is still ours. Port-scoping protects a FOREIGN url value; there is no
-  // foreign value of this key to protect. (applies PF-015, ADR-003)
+  // D-STRIP-1: every REMOVAL caller (init, uninstall, runDisable) first proves Devflow
+  // managed the proxy — `proxyJsonExists()` — and the enable caller is taking ownership
+  // of the key anyway, so reaching this line means the value is Devflow's to remove.
+  // Removal is therefore unconditional: unlike ANTHROPIC_BASE_URL (port-scoped below),
+  // this key has no foreign value to protect. (applies PF-015, ADR-003)
   const hadWindowVar = env[UNKNOWN_MODEL_WINDOW_ENV] !== undefined;
   delete env[UNKNOWN_MODEL_WINDOW_ENV];
 
@@ -336,6 +339,34 @@ export function applyDisableToSettings(settings: Settings, managedPort: number):
 }
 
 /**
+ * Settings teardown for every path that turns the proxy off: `devflow proxy --disable`
+ * and `devflow uninstall`.
+ *
+ * D-STRIP-1: the two removals answer to different evidence, so they are gated
+ * separately.
+ * - Hooks are Devflow's own artifacts — removed unconditionally. Leaving them behind
+ *   points later sessions at a hook script that no longer exists, and makes a re-run
+ *   of an interrupted uninstall unable to clean up.
+ * - The env vars (ANTHROPIC_BASE_URL, CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT)
+ *   are stripped only against `managedPort`, which the caller supplies from an existing
+ *   `proxy.json` — the one piece of evidence that Devflow ever wrote them. Pass
+ *   `undefined` when that file is absent: the values then belong to a gateway Devflow
+ *   never managed (a user's own LiteLLM on 4141, say) and must survive untouched.
+ *
+ * When `managedPort` is defined this delegates to `applyDisableToSettings`, so the
+ * both-operations invariant documented there still holds.
+ *
+ * Mutates settings in place. Returns true when any change was made.
+ */
+export function applyProxyTeardownToSettings(
+  settings: Settings,
+  managedPort: number | undefined,
+): boolean {
+  if (managedPort === undefined) return removeProxyHooks(settings);
+  return applyDisableToSettings(settings, managedPort);
+}
+
+/**
  * Check whether the ensure-proxy hook is registered on at least one event.
  * Returns true if present on either SessionStart or UserPromptSubmit.
  * Partial state (one event present, other missing) returns true —
@@ -411,6 +442,59 @@ export interface PreflightResult {
 }
 
 /**
+ * Preflight check ④ — settings.json readable and parseable, no foreign
+ * ANTHROPIC_BASE_URL, plus the non-fatal ANTHROPIC_API_KEY warning.
+ *
+ * Extracted so the adopted-relay path and the free-port path run the identical
+ * check (D-EFR-5): a healthy relay on the port must not buy an exemption from the
+ * foreign-gateway refusal. Keeping it in one function is what stops the two paths
+ * from drifting on which sub-checks they apply or which message they return.
+ *
+ * `swallowSettingsReadError` semantics are preserved by the caller-supplied dep:
+ * when that flag is set (init), readSettingsJson() resolves to '{}' on I/O failure
+ * instead of rejecting, so the read-failure branch is reachable only from runEnable.
+ */
+async function checkSettingsEnv(
+  deps: ProxyPreflightDeps,
+  port: number,
+): Promise<Result<undefined, string>> {
+  let settingsJson: string;
+  try {
+    settingsJson = await deps.readSettingsJson();
+  } catch {
+    return Err('Could not read settings.json — check file permissions');
+  }
+
+  let parsedSettings: Record<string, unknown>;
+  try {
+    parsedSettings = JSON.parse(settingsJson) as Record<string, unknown>;
+  } catch {
+    return Err('settings.json is malformed — fix it before enabling the proxy');
+  }
+
+  if (readProxyEnvState(settingsJson, port) === 'foreign') {
+    return Err(
+      'An existing ANTHROPIC_BASE_URL in settings.json points to a different gateway — Devflow will not overwrite it',
+    );
+  }
+
+  // API key warning (non-fatal)
+  const envBlock = parsedSettings.env;
+  if (
+    typeof envBlock === 'object' &&
+    envBlock !== null &&
+    !Array.isArray(envBlock) &&
+    typeof (envBlock as Record<string, unknown>).ANTHROPIC_API_KEY === 'string'
+  ) {
+    deps.onWarn?.(
+      'ANTHROPIC_API_KEY is set in settings.json — requests will use that key through the local relay',
+    );
+  }
+
+  return Ok(undefined);
+}
+
+/**
  * Run preflight checks before enabling the Devflow proxy.
  *
  * Checks (in order):
@@ -418,6 +502,8 @@ export interface PreflightResult {
  * ② ~/.codex/auth.json exists.
  * ③ Port probe: free → OK; accepting → health check → adopt or fail.
  * ④ settings.json parseable; ANTHROPIC_BASE_URL not pointing elsewhere; API key warn.
+ *    Runs on BOTH outcomes of ③ that can proceed — adopted relay and free port
+ *    (D-EFR-5) — via the shared `checkSettingsEnv` helper.
  *
  * Doctor is deliberately excluded from preflight: the relay's doctor subcommand
  * probes the relay port — a not-yet-started relay makes that probe fail (exit 1). A
@@ -453,6 +539,11 @@ export async function runProxyPreflight(
       PROBE_TIMEOUT_MS,
     );
     if (healthResult.ok && isOurRelayBody(healthResult.value)) {
+      // D-EFR-5: run check ④ BEFORE the adopted early-return. The old order
+      // (adopted-return first, settings check only when the port was free) let a
+      // healthy relay on the port silently skip the foreign-gateway refusal entirely.
+      const settingsCheck = await checkSettingsEnv(deps, port);
+      if (!settingsCheck.ok) return Err(settingsCheck.error);
       return Ok({ binPath, npxWarning, adopted: true });
     }
     // Port accepting but health timed out, failed, or not our relay
@@ -463,39 +554,8 @@ export async function runProxyPreflight(
   // Port refused — free to proceed
 
   // ④ Settings.json check
-  let settingsJson: string;
-  try {
-    settingsJson = await deps.readSettingsJson();
-  } catch {
-    return Err('Could not read settings.json — check file permissions');
-  }
-
-  let parsedSettings: Record<string, unknown>;
-  try {
-    parsedSettings = JSON.parse(settingsJson) as Record<string, unknown>;
-  } catch {
-    return Err('settings.json is malformed — fix it before enabling the proxy');
-  }
-
-  const envState = readProxyEnvState(settingsJson, port);
-  if (envState === 'foreign') {
-    return Err(
-      'An existing ANTHROPIC_BASE_URL in settings.json points to a different gateway — Devflow will not overwrite it',
-    );
-  }
-
-  // API key warning (non-fatal)
-  const envBlock = parsedSettings.env;
-  if (
-    typeof envBlock === 'object' &&
-    envBlock !== null &&
-    !Array.isArray(envBlock) &&
-    typeof (envBlock as Record<string, unknown>).ANTHROPIC_API_KEY === 'string'
-  ) {
-    deps.onWarn?.(
-      'ANTHROPIC_API_KEY is set in settings.json — requests will use that key through the local relay',
-    );
-  }
+  const settingsCheck = await checkSettingsEnv(deps, port);
+  if (!settingsCheck.ok) return Err(settingsCheck.error);
 
   return Ok({ binPath, npxWarning, adopted: false });
 }
@@ -1709,6 +1769,13 @@ async function runDisable(): Promise<void> {
   // applyDisableToSettings strips ANTHROPIC_BASE_URL only when the URL
   // port matches the port Devflow manages — callers must supply it. Reading
   // proxy.json here also consolidates state for Step 2 below.
+  //
+  // D-STRIP-1: readProxyState() cannot distinguish "file absent" from "file present
+  // with the default port", so the env strip is gated on the file's existence — the
+  // only evidence that Devflow ever wrote those vars. Must be read before Step 2
+  // creates the file. Hook removal is NOT gated: our hooks are ours to remove on
+  // every path.
+  const proxyManaged = await proxyJsonExists(devflowDir);
   const priorStateResult = await readProxyState(devflowDir);
   const priorState = priorStateResult.ok ? priorStateResult.value : null;
   const managedPort = priorState?.port ?? DEFAULT_PROXY_PORT;
@@ -1730,7 +1797,10 @@ async function runDisable(): Promise<void> {
     return;
   }
 
-  const changed = applyDisableToSettings(parsedSettings, managedPort);
+  const changed = applyProxyTeardownToSettings(
+    parsedSettings,
+    proxyManaged ? managedPort : undefined,
+  );
   if (changed) {
     // Guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
     try {

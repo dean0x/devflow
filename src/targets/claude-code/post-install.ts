@@ -791,10 +791,103 @@ export async function stripUserSecurityDenyList(
   return { removed };
 }
 
+/** True for a non-null, non-array object literal. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Every `command` string carried by a hook matcher, tolerating foreign shapes.
+ * Returns an empty array for anything that is not `{ hooks: [{ command: string }] }`.
+ */
+function hookCommandsOf(matcher: unknown): string[] {
+  if (!isPlainObject(matcher) || !Array.isArray(matcher.hooks)) return [];
+  return matcher.hooks
+    .filter(isPlainObject)
+    .map((h) => h.command)
+    .filter((c): c is string => typeof c === 'string');
+}
+
+/**
+ * Merge Devflow's template hook entries and top-level fields into an existing
+ * parsed settings object. Idempotent by exact command string — a hook that is
+ * already present is skipped. Sets `statusLine` and `attribution` only when the
+ * user has no existing value for them. Mutates `existing` in place.
+ *
+ * D-SETTINGS-1: merge strategy — never replace; only add devflow entries that are absent.
+ * Returns { changed: true } when any field was added.
+ *
+ * `existing` comes from a hand-editable file, so every branch is shape-guarded:
+ * a `hooks` value (or per-event value) that is not the expected object/array shape
+ * is left untouched rather than overwritten or thrown on (applies PF-023 — validate
+ * at the sink that mutates).
+ *
+ * Exported for testing.
+ */
+export function mergeDevflowSettingsTemplate(
+  existing: Record<string, unknown>,
+  template: Record<string, unknown>,
+): { changed: boolean } {
+  let changed = false;
+
+  // Merge hook entries — idempotent by exact command string
+  const tmplHooks = isPlainObject(template.hooks) ? template.hooks : {};
+  const existingHooksRaw = existing.hooks;
+  if (existingHooksRaw === undefined || isPlainObject(existingHooksRaw)) {
+    const existingHooks: Record<string, unknown> = existingHooksRaw ?? {};
+    let hooksChanged = false;
+    for (const [event, matchers] of Object.entries(tmplHooks)) {
+      if (!Array.isArray(matchers)) continue;
+      for (const matcher of matchers) {
+        const cmd = hookCommandsOf(matcher)[0];
+        if (!cmd) continue;
+        const current = existingHooks[event];
+        if (current !== undefined && !Array.isArray(current)) break; // foreign shape — leave the event alone
+        const eventArr: unknown[] = current ?? [];
+        if (eventArr.some((m) => hookCommandsOf(m).includes(cmd))) continue;
+        eventArr.push(matcher);
+        existingHooks[event] = eventArr;
+        hooksChanged = true;
+      }
+    }
+    // Attach only when something was actually added — never introduce an empty
+    // `hooks` key into a settings.json that had none.
+    if (hooksChanged) {
+      existing.hooks = existingHooks;
+      changed = true;
+    }
+  }
+
+  // Set statusLine only if the user has none
+  if (existing.statusLine === undefined && template.statusLine !== undefined) {
+    existing.statusLine = template.statusLine;
+    changed = true;
+  }
+
+  // Set attribution only if the user has none
+  if (existing.attribution === undefined && template.attribution !== undefined) {
+    existing.attribution = template.attribution;
+    changed = true;
+  }
+
+  return { changed };
+}
+
 /**
  * Install or update settings.json with Devflow configuration.
- * Prompts interactively in TTY mode when settings already exist.
- * In non-TTY mode, skips override (safe default).
+ *
+ * Strategy (D-SETTINGS-1: merge, never overwrite wholesale):
+ * - Fresh file: write the template directly.
+ * - Existing file: MERGE devflow hook entries and fields into the parsed object.
+ *   Idempotent by exact command string — existing hooks are never duplicated or removed.
+ *   Preserves every user key (env, permissions, apiKeyHelper, model, etc.) untouched.
+ * - Parse failure: warn and skip; file left byte-identical (never clobber a broken file).
+ *
+ * The merge is additive only, so it runs without a confirmation prompt: init is called
+ * from inside an active spinner (a prompt would render on top of it), and declining
+ * could not protect the file anyway — init's own settings pass rewrites the hook set
+ * unconditionally right afterwards. A prompt whose answer changes nothing is worse
+ * than no prompt.
  *
  * The deny list is handled by init's dedicated security step
  * (applyUserSecurityDenyList / installManagedSettings) after installSettings completes.
@@ -828,39 +921,35 @@ export async function installSettings(
       return;
     }
 
-    // Settings exist — check if they already have hooks
-    let hasHooks = false;
+    // Settings exist — parse and merge (never overwrite wholesale)
+    let existingParsed: Record<string, unknown>;
     try {
-      const existing = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-      hasHooks = !!existing.hooks;
-    } catch { /* parse error = treat as no hooks */ }
-
-    if (hasHooks) {
-      // Settings already configured with hooks — nothing to do
+      existingParsed = JSON.parse(await fs.readFile(settingsPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      // Parse failure — warn and skip; file left byte-identical (D-SETTINGS-1)
+      if (verbose) {
+        p.log.warn(
+          'settings.json could not be parsed — Devflow hooks not added. ' +
+          'Fix the JSON manually and re-run devflow init.',
+        );
+      }
       return;
     }
 
-    // Settings exist without hooks — prompt in TTY, warn in non-TTY
-    if (process.stdin.isTTY) {
-      const confirmed = await p.confirm({
-        message: 'settings.json exists without hooks (Working Memory needs hooks). Override?',
-        initialValue: true,
-      });
+    const templateParsed = JSON.parse(settingsContent) as Record<string, unknown>;
 
-      if (p.isCancel(confirmed)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
+    // Merge template into existing (mutates existingParsed in place).
+    // If nothing needs to be added the write is skipped entirely.
+    const { changed } = mergeDevflowSettingsTemplate(existingParsed, templateParsed);
 
-      if (confirmed) {
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-        p.log.success('Settings overridden');
-      } else {
-        p.log.info('Keeping existing settings');
-      }
-    } else {
-      p.log.warn('Settings exist without hooks. Working Memory requires hooks.');
-      p.log.info('Re-run interactively to configure, or manually add hooks to settings.json');
+    if (!changed) {
+      // Already fully configured — nothing to do
+      return;
+    }
+
+    await writeFileAtomicExclusive(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
+    if (verbose) {
+      p.log.success('Settings updated with Devflow hooks and HUD');
     }
   } catch (error: unknown) {
     if (verbose) {

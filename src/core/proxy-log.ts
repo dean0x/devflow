@@ -33,8 +33,10 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * (e.g. SUBSWITCH_CONFIG for the relay spawn and doctor spawn).
  *
  * applies ADR-003: the prior denylist rationale is gone — the routing runtime
- * reads exactly three env vars (ANTHROPIC_API_KEY, FORCE_COLOR, SUBSWITCH_CONFIG).
- * Verified by whole-dist grep of the 0.2.0 package. An allowlist is the correct
+ * reads exactly four env vars (ANTHROPIC_API_KEY, FORCE_COLOR, NO_COLOR,
+ * SUBSWITCH_CONFIG — NO_COLOR read in dist/tty.js with presence semantics; CI is
+ * read only by the `init` subcommand which devflow never invokes).
+ * Verified by whole-dist grep of the 0.4.0 package. An allowlist is the correct
  * shape: 61 inherited vars → 6.
  *
  * HOME is retained: the runtime's loadConfig resolves ~ paths via homedir().

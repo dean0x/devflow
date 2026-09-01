@@ -776,7 +776,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
 
     const result = await discoverExternalModels(cacheDir, logPath);
 
-    // subswitch models --json (0.2.0) is a static registry dump: no auth, no relay,
+    // subswitch models --json (0.4.0) is a static registry dump: no auth, no relay,
     // no config file required (verified: exit 0, configFileFound:false). The per-test
     // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
     // must be 'live'. Guarding these behind `if (result.known)` would let the test

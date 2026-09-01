@@ -181,12 +181,71 @@ PROXY_BIN=$(json_field_file "$PROXY_STATE_FILE" "binPath" "")
 PROXY_CONFIG=$(json_field_file "$PROXY_STATE_FILE" "configPath" "")
 dbg "PROXY_BIN=$PROXY_BIN PROXY_CONFIG=$PROXY_CONFIG"
 
-# Validate prerequisites before spawning
+# Validate prerequisites before spawning.
+# D-FIX4: when the persisted binPath is missing or stale (e.g. npx cache GC, upgrade),
+# attempt dependency-light re-resolution before warning. Two strategies:
+#   a) Walk up from `devflow` CLI to find devflow's node_modules/subswitch.
+#   b) `command -v subswitch` — globally installed CLI.
+# Re-resolution is best-effort: on failure the existing warning is emitted and the
+# hook exits 0 as before. The healed path is used for this session only; the next
+# successful `devflow proxy --enable` persists it to proxy.json. (avoids PF-001,
+# avoids PF-009: non-fatal on failure, always exits 0)
 if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
-  log "prereq fail: binPath missing or not a file: $PROXY_BIN"
-  CONTEXT="[Devflow proxy] Warning: relay binary not found. Run 'devflow proxy --enable' to restore external model routing."
-  json_session_output "$CONTEXT"
-  exit 0
+  log "prereq: binPath missing or not a file (${PROXY_BIN:-<empty>}) — attempting re-resolution"
+  _RESOLVED_BIN=""
+
+  # Resolve node for re-resolution strategies.
+  _NODE_FOR_RESOLVE=$(command -v node 2>/dev/null || true)
+
+  # Strategy a: locate devflow CLI → walk up to find node_modules/subswitch
+  if [ -n "$_NODE_FOR_RESOLVE" ]; then
+    _DF_CMD=$(command -v devflow 2>/dev/null || true)
+    if [ -n "$_DF_CMD" ]; then
+      _DF_REAL=$(realpath "$_DF_CMD" 2>/dev/null || readlink -f "$_DF_CMD" 2>/dev/null || echo "$_DF_CMD")
+      _WALK_DIR=$(dirname "$_DF_REAL")
+      _WALK_GUARD=0
+      while [ "$_WALK_GUARD" -lt 6 ] && [ -n "$_WALK_DIR" ] && [ "$_WALK_DIR" != "/" ]; do
+        _SW_PKG="$_WALK_DIR/node_modules/subswitch/package.json"
+        if [ -f "$_SW_PKG" ]; then
+          # Read bin field from package.json using node (already confirmed present).
+          # Env-var pass avoids shell-quoting issues with paths containing spaces.
+          _BIN_REL=$(SUBSWITCH_PKG_JSON="$_SW_PKG" \
+            "$_NODE_FOR_RESOLVE" -p \
+            "try{var p=JSON.parse(require('fs').readFileSync(process.env.SUBSWITCH_PKG_JSON,'utf-8'));var b=p.bin;typeof b==='string'?b:b&&b.subswitch?b.subswitch:''}catch(e){''}" \
+            2>/dev/null) || _BIN_REL=""
+          if [ -n "$_BIN_REL" ] && [ "$_BIN_REL" != "undefined" ]; then
+            _CAND="$(dirname "$_SW_PKG")/$_BIN_REL"
+            if [ -f "$_CAND" ]; then
+              _RESOLVED_BIN="$_CAND"
+              log "re-resolved binPath via devflow walk: $_RESOLVED_BIN"
+            fi
+          fi
+          break  # found subswitch dir — stop walking regardless of bin result
+        fi
+        _WALK_DIR=$(dirname "$_WALK_DIR")
+        _WALK_GUARD=$(( _WALK_GUARD + 1 ))
+      done
+    fi
+  fi
+
+  # Strategy b: subswitch globally installed as a CLI
+  if [ -z "$_RESOLVED_BIN" ]; then
+    _SW_GLOBAL=$(command -v subswitch 2>/dev/null || true)
+    if [ -n "$_SW_GLOBAL" ] && [ -f "$_SW_GLOBAL" ]; then
+      _RESOLVED_BIN="$_SW_GLOBAL"
+      log "re-resolved binPath via command -v subswitch: $_RESOLVED_BIN"
+    fi
+  fi
+
+  if [ -n "$_RESOLVED_BIN" ]; then
+    PROXY_BIN="$_RESOLVED_BIN"
+    log "binPath healed for this session: $PROXY_BIN"
+  else
+    log "re-resolution failed — binPath not found"
+    CONTEXT="[Devflow proxy] Warning: relay binary not found. Run 'devflow proxy --enable' to restore external model routing."
+    json_session_output "$CONTEXT"
+    exit 0
+  fi
 fi
 
 NODE_BIN=$(command -v node 2>/dev/null || true)
