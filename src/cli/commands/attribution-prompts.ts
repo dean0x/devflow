@@ -12,9 +12,12 @@
  *
  * D27: suppress-attribution flag — gates Claude Code's AI-attribution injection.
  * The question is ADVANCED-ONLY; Recommended never asks. See shouldRunAttributionStep.
+ *
+ * Shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) lives in
+ * prompt-io.ts — one definition, both wizard modules import from there (ADR-019).
  */
 
-import * as p from '@clack/prompts';
+import { clackNote, clackSelect, type PromptOutcome, type WizardPromptIO } from './prompt-io.js';
 
 // ── Gate predicate ─────────────────────────────────────────────────────────────
 
@@ -54,40 +57,25 @@ export function shouldRunAttributionStep(input: {
 
 // ── DI seam ────────────────────────────────────────────────────────────────────
 
-/** Discriminated union returned by every AttributionPromptIO method. */
-export type PromptOutcome<T> = { kind: 'value'; value: T } | { kind: 'cancel' };
+// Re-export so tests and init.ts continue to compile against these names.
+export type { PromptOutcome };
 
 /**
  * Injectable prompt interface for runAttributionStep.
- * Mirrors CompliancePromptIO (src/cli/commands/compliance-prompts.ts).
- * Enables unit tests to drive all branches without a real TTY.
+ * Alias of WizardPromptIO — attribution uses only note + boolean select.
+ * Kept as a named export for backward compatibility with tests and callers
+ * that import `AttributionPromptIO` by name.
  */
-export interface AttributionPromptIO {
-  note: (message: string, title: string) => void;
-  select: (opts: {
-    message: string;
-    options: Array<{ value: boolean; label: string; hint: string }>;
-    initialValue: boolean;
-  }) => Promise<PromptOutcome<boolean>>;
-}
+export type AttributionPromptIO = WizardPromptIO;
 
 /**
  * Build the real (clack) AttributionPromptIO adapter.
- * Translates clack's cancel symbol into the PromptOutcome discriminated union.
+ * Delegates to the shared clackNote / clackSelect adapters (prompt-io.ts).
  */
 export function buildClackAttributionPrompts(): AttributionPromptIO {
   return {
-    note: (message, title) => p.note(message, title),
-
-    select: async (opts) => {
-      const result = await p.select({
-        message: opts.message,
-        options: opts.options,
-        initialValue: opts.initialValue,
-      });
-      if (p.isCancel(result)) return { kind: 'cancel' };
-      return { kind: 'value', value: result as boolean };
-    },
+    note: clackNote,
+    select: (opts) => clackSelect(opts),
   };
 }
 
@@ -138,13 +126,20 @@ export async function runAttributionStep(opts: {
   const { seed, prompts } = opts;
 
   const currentStr = seed ? 'suppressed' : 'shown (default)';
+  // security-02: name the destructive branch (Yes) BEFORE the user consents.
+  // ADR-024 corollary (b): turning the flag ON replaces any existing attribution
+  // value, including a custom one — this is deliberate. Only the exact
+  // devflow-managed shape {"commit":"","pr":""} is removed on disable.
+  // security-04: surface the org AI-disclosure-policy dimension as a note (not a gate).
   prompts.note(
     `Current setting: ${currentStr}\n\n` +
-    'When enabled, writes {"commit":"","pr":""} to settings.json, which\n' +
-    'suppresses AI-attribution labels in git commits and pull requests.\n' +
-    'Toggle any time with: devflow flags --enable suppress-attribution\n\n' +
-    'Note: Only removes the devflow-managed attribution block on disable;\n' +
-    'custom attribution values you set manually are never deleted.',
+    'Choosing Yes REPLACES any existing \`attribution\` value in settings.json,\n' +
+    'including a custom one, with {"commit":"","pr":""}.\n' +
+    'Choosing No leaves a custom value untouched — only the exact\n' +
+    'devflow-managed block is ever removed on disable.\n' +
+    'Some organisations require machine-readable AI-authorship disclosure\n' +
+    '— check your policy before enabling.\n\n' +
+    'Toggle any time with: devflow flags --enable suppress-attribution',
     'AI Attribution',
   );
 
