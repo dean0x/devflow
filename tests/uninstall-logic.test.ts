@@ -1551,6 +1551,110 @@ describe('runCleanupPhase (A8)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// R5 / D27: attribution cleanup through the PRODUCTION uninstall path.
+//
+// PF-018: every other runCleanupPhase test passes `scopesToUninstall: []`, which
+// makes the settings.json loop a no-op — so stripFlags was never reached by any
+// behavioural test. These drive the real phase with a non-empty scope against a
+// sandboxed HOME so the shape guard is exercised where it actually runs, not just
+// as a pure applyFlags/stripFlags unit.
+//
+// Falsification: deleting `settingDeleteGuard` from the suppress-attribution
+// registry entry makes the "custom attribution survives" case fail here.
+// ---------------------------------------------------------------------------
+
+describe('R5: uninstall settings cleanup — attribution shape guard (D27, production path)', () => {
+  let tmpHome: string;
+  let tmpClaudeDir: string;
+  let tmpCwd: string;
+  let settingsPath: string;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-r5-home-'));
+    tmpClaudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(tmpClaudeDir, { recursive: true });
+    tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-r5-cwd-'));
+    settingsPath = path.join(tmpClaudeDir, 'settings.json');
+
+    // Sandbox every ambient path root runCleanupPhase can reach: getClaudeDirectory()
+    // honours CLAUDE_CODE_DIR, getDevFlowDirectory() honours DEVFLOW_DIR, and the
+    // shell-profile probe derives from HOME. Keeping the claude dir INSIDE tmpHome
+    // also avoids getClaudeDirectory's "outside home directory" console warning.
+    vi.stubEnv('HOME', tmpHome);
+    vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
+    vi.stubEnv('DEVFLOW_DIR', path.join(tmpHome, '.devflow'));
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(tmpHome, { recursive: true, force: true });
+    await fs.rm(tmpCwd, { recursive: true, force: true });
+  });
+
+  /** Drive the real cleanup phase over the sandboxed user scope. */
+  async function runCleanup(): Promise<void> {
+    await runCleanupPhase({
+      scopesToUninstall: ['user'],
+      keepDocs: true,   // skips the .devflow/ + security prompt branches
+      verbose: false,
+      cwd: tmpCwd,
+      isTTY: false,     // no confirm can fire
+    });
+  }
+
+  it('removes the devflow-managed attribution block', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      attribution: { commit: '', pr: '' },
+      model: 'opus',
+    }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after.attribution).toBeUndefined();
+    // Non-vacuity: runCleanupPhase swallows all errors in the settings loop, so a
+    // fixture that never got read would also show `attribution === undefined`.
+    // An untouched unmanaged key proves the file was actually parsed and rewritten.
+    expect(after.model, 'unmanaged keys must survive').toBe('opus');
+  });
+
+  it('preserves a user-customized attribution value (shape guard)', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      attribution: { commit: 'Acme Corp', pr: 'Acme' },
+      model: 'opus',
+    }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after.attribution).toEqual({ commit: 'Acme Corp', pr: 'Acme' });
+    expect(after.model).toBe('opus');
+  });
+
+  it('preserves an attribution object carrying extra keys (not the managed shape)', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      attribution: { commit: '', pr: '', coAuthor: 'nobody' },
+      model: 'opus',
+    }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after.attribution).toEqual({ commit: '', pr: '', coAuthor: 'nobody' });
+  });
+
+  it('leaves settings.json without an attribution key untouched', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({ model: 'opus' }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after).not.toHaveProperty('attribution');
+    expect(after.model).toBe('opus');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // F5: settings-hooks cleanup block removal static guard
 //
 // The block at ~:816-833 (settings.hooks check + delete settings.hooks) is

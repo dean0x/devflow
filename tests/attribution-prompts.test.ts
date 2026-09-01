@@ -15,59 +15,46 @@ import {
 
 // ── shouldRunAttributionStep ──────────────────────────────────────────────────
 
-describe('shouldRunAttributionStep — gate predicate (PF-029)', () => {
-  it('--recommended flag (no modePromptShown) → false (promptless contract preserved)', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'recommended',
-      modePromptShown: false,
-      isTTY: true,
-      hasCliOverride: false,
-    })).toBe(false);
+describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
+  // ── Advanced-only invariant (D27) ───────────────────────────────────────────
+  // The attribution question is reachable from the Advanced path ONLY. Unlike the
+  // compliance step, interactive Recommended never asks — it silently applies the
+  // seeded value. These tests are the authority for that divergence.
+
+  it('Advanced mode with TTY → true (the only path that asks)', () => {
+    expect(shouldRunAttributionStep({ mode: 'advanced', isTTY: true })).toBe(true);
   });
 
-  it('non-TTY → false regardless of mode (promptless contract preserved)', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'advanced',
-      modePromptShown: true,
-      isTTY: false,
-      hasCliOverride: false,
-    })).toBe(false);
+  it('interactive Recommended → false (Recommended NEVER asks, D27)', () => {
+    // Divergence from shouldRunComplianceStep, which returns true here. Interactive
+    // Recommended silently applies the seeded value (fresh install: off).
+    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: true })).toBe(false);
   });
 
-  it('hasCliOverride → false regardless of mode/TTY/modePromptShown', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'advanced',
-      modePromptShown: true,
-      isTTY: true,
-      hasCliOverride: true,
-    })).toBe(false);
+  it('--recommended flag (non-interactive Recommended) → false', () => {
+    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: true })).toBe(false);
   });
 
-  it('interactive Recommended + modePromptShown=true → true', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'recommended',
-      modePromptShown: true,
-      isTTY: true,
-      hasCliOverride: false,
-    })).toBe(true);
+  // ── Promptless contracts (PF-029) ───────────────────────────────────────────
+
+  it('non-TTY → false for Advanced (no prompt without a TTY)', () => {
+    expect(shouldRunAttributionStep({ mode: 'advanced', isTTY: false })).toBe(false);
   });
 
-  it('Advanced mode with TTY → true regardless of modePromptShown', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'advanced',
-      modePromptShown: false,
-      isTTY: true,
-      hasCliOverride: false,
-    })).toBe(true);
+  it('non-TTY → false for Recommended (promptless contract preserved)', () => {
+    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: false })).toBe(false);
   });
 
-  it('Advanced mode with TTY and modePromptShown=true → true', () => {
-    expect(shouldRunAttributionStep({
-      mode: 'advanced',
-      modePromptShown: true,
-      isTTY: true,
-      hasCliOverride: false,
-    })).toBe(true);
+  it('exhaustive gate matrix: only (advanced, TTY) is true', () => {
+    const matrix: Array<[('recommended' | 'advanced'), boolean, boolean]> = [
+      ['advanced', true, true],
+      ['advanced', false, false],
+      ['recommended', true, false],
+      ['recommended', false, false],
+    ];
+    for (const [mode, isTTY, expected] of matrix) {
+      expect(shouldRunAttributionStep({ mode, isTTY }), `mode=${mode} isTTY=${isTTY}`).toBe(expected);
+    }
   });
 });
 

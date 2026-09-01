@@ -471,3 +471,146 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(manifest2.features.flags).toEqual(manifest1.features.flags);
   }, SUBPROCESS_TIMEOUT_MS);
 });
+
+// ---------------------------------------------------------------------------
+// D27 / R3: suppress-attribution through the REAL init settings pass.
+//
+// PF-018: every other attribution test in the suite is a pure call to applyFlags,
+// stripFlags, or resolveExistingAttributionSuppression. None of them proves that
+// init writes the block, that the shape guard survives init's strip-then-apply
+// double pass (convergeFlagsIntoSettings runs stripFlags THEN applyFlags), that
+// the value survives the proxy JSON round-trip and the later security-deny-list
+// rewrite, or that the `content !== original` write guard actually fires.
+//
+// PF-015: each case asserts BOTH artifacts — manifest features.flags and
+// settings.json — so a divergence between the two cannot pass.
+// ---------------------------------------------------------------------------
+
+/** Build a current-format manifest with the given flags record. */
+function manifestWithFlags(flags: Record<string, unknown>) {
+  return {
+    version: '2.0.0',
+    plugins: ['devflow-implement'],
+    scope: 'user',
+    knownPlugins: ['devflow-implement'],
+    features: {
+      ambient: false, memory: false, hud: true, knowledge: false,
+      learning: false, rules: false, proxy: false,
+      flags,
+      security: 'user' as const,
+      compliance: { enabled: false, frameworks: [] },
+    },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+const DEVFLOW_ATTRIBUTION = { commit: '', pr: '' };
+
+describe('init e2e — suppress-attribution convergence (D27, production path)', () => {
+  /** Seed manifest + settings, run init, and assert the settings pass did not abort. */
+  async function seedAndInit(
+    flags: Record<string, unknown>,
+    settings: Record<string, unknown>,
+    extraArgs: string[] = [],
+  ) {
+    await fs.writeFile(
+      path.join(tmpHome, '.devflow', 'manifest.json'),
+      JSON.stringify(manifestWithFlags(flags), null, 2) + '\n',
+    );
+    await fs.writeFile(
+      path.join(tmpHome, '.claude', 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
+    );
+
+    const result = runInit(tmpHome, extraArgs);
+    expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    // PF-018 non-vacuity gate: init swallows settings-pass failures with a warning
+    // and still exits 0. Without this, every assertion below could pass unrun.
+    expect(
+      result.stdout + result.stderr,
+      'init warned it could not configure settings.json — the settings pass aborted, ' +
+      'so the assertions in this test would be vacuous',
+    ).not.toContain('Could not configure settings.json');
+
+    return {
+      settings: await readSettings(tmpHome),
+      flags: (await readManifest(tmpHome)).features.flags as Record<string, unknown>,
+    };
+  }
+
+  it.skipIf(!CLI_BUILT)('off→on: manifest flag true materialises the attribution block in settings.json', async () => {
+    const out = await seedAndInit(
+      { 'suppress-attribution': true },
+      { env: { CUSTOM_USER_VAR: 'preserved' } },   // no attribution key on disk
+    );
+
+    // On-side convergence: manifest says on, settings must carry the payload.
+    expect(out.flags['suppress-attribution']).toBe(true);
+    expect(out.settings.attribution).toEqual(DEVFLOW_ATTRIBUTION);
+    // Non-vacuity: the settings pass really ran over this file.
+    expect((out.settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.skipIf(!CLI_BUILT)('on→off via --reset: the devflow block is removed and the manifest agrees', async () => {
+    // --reset null-seeds the manifest and empties the settings snapshot, so the flag
+    // seeds to the registry default (false) even though the block is on disk. This is
+    // the only init path that turns attribution off — a plain re-init preserves it.
+    const out = await seedAndInit(
+      { 'suppress-attribution': true },
+      { attribution: { ...DEVFLOW_ATTRIBUTION }, env: { CUSTOM_USER_VAR: 'preserved' } },
+      ['--reset'],
+    );
+
+    // Off-side convergence: manifest says off, the key must be gone from settings.
+    expect(out.flags['suppress-attribution']).toBe(false);
+    expect(out.settings).not.toHaveProperty('attribution');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.skipIf(!CLI_BUILT)('a user-customised attribution survives init untouched (shape guard)', async () => {
+    // The highest-value case: convergeFlagsIntoSettings runs stripFlags THEN
+    // applyFlags, so the guard has to hold on BOTH passes within a single init.
+    // Falsification: dropping settingDeleteGuard from the registry entry makes the
+    // stripFlags pass erase this value and this test fails.
+    const custom = { commit: 'Acme Corp', pr: 'Acme' };
+    const out = await seedAndInit(
+      { 'suppress-attribution': false },
+      { attribution: { ...custom }, env: { CUSTOM_USER_VAR: 'preserved' } },
+    );
+
+    expect(out.settings.attribution).toEqual(custom);
+    // devflow does not claim a key it did not write.
+    expect(out.flags['suppress-attribution']).toBe(false);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.skipIf(!CLI_BUILT)('upgrade path: an existing devflow block seeds the flag ON and is preserved', async () => {
+    // Every install predating D27 has the block, written by the old template merge,
+    // with no manifest entry for the flag. Init must adopt it as ON rather than
+    // silently reverting the user's git attribution behaviour.
+    const out = await seedAndInit(
+      {},                                                   // flag absent → adopt-on-init
+      { attribution: { ...DEVFLOW_ATTRIBUTION }, env: { CUSTOM_USER_VAR: 'preserved' } },
+    );
+
+    expect(out.flags['suppress-attribution']).toBe(true);
+    expect(out.settings.attribution).toEqual(DEVFLOW_ATTRIBUTION);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.skipIf(!CLI_BUILT)('fresh install writes no attribution key and records the flag off', async () => {
+    await fs.writeFile(
+      path.join(tmpHome, '.claude', 'settings.json'),
+      JSON.stringify({ env: { CUSTOM_USER_VAR: 'preserved' } }, null, 2) + '\n',
+    );
+    const result = runInit(tmpHome);   // no manifest at all
+    expect(result.status, `init failed:\n${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain('Could not configure settings.json');
+
+    const settings = await readSettings(tmpHome);
+    const flags = (await readManifest(tmpHome)).features.flags as Record<string, unknown>;
+
+    // Default OFF: init must not put attribution into a fresh settings.json.
+    expect(settings).not.toHaveProperty('attribution');
+    expect(flags['suppress-attribution']).toBe(false);
+    expect((settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
+  }, SUBPROCESS_TIMEOUT_MS);
+});

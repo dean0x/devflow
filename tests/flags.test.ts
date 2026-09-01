@@ -86,14 +86,47 @@ describe('FLAG_REGISTRY — structural invariants', () => {
     }
   });
 
+  /**
+   * Defense in depth. Since the BooleanFlagDef split into EnvBooleanFlagDef |
+   * SettingBooleanFlagDef this is ALSO compile-enforced: an env target with an
+   * object or boolean onPayload no longer typechecks. This test stays as the
+   * runtime backstop for a registry entry that reaches the array through a cast.
+   */
   it('env boolean flags have string onPayload (env vars are strings)', () => {
     const envBoolFlags = FLAG_REGISTRY
       .filter((f): f is BooleanFlagDef => f.kind === 'boolean' && f.target.type === 'env');
+    // Non-vacuity: the filter must actually match something or the loop proves nothing.
+    expect(envBoolFlags.length, 'no env boolean flags matched — assertion would be vacuous').toBeGreaterThan(0);
     for (const flag of envBoolFlags) {
       expect(
         typeof flag.onPayload,
         `${flag.id}: env boolean flag must have string onPayload`,
       ).toBe('string');
+      // buildPayload writes onPayload verbatim and never consults settingDeleteGuard
+      // for env targets, so a guard declared here would be a silent no-op.
+      expect(
+        flag.settingDeleteGuard,
+        `${flag.id}: env boolean flags must not declare settingDeleteGuard (it is never honoured)`,
+      ).toBeUndefined();
+    }
+  });
+
+  /**
+   * settingDeleteGuard is only meaningful for a payload that can differ from a
+   * user's own value. Pinning it to deep-equal onPayload keeps the guard and the
+   * written shape from drifting apart — a guard that no longer matches what
+   * applyFlags writes would strand the key in settings.json forever.
+   */
+  it('settingDeleteGuard, where present, deep-equals the flag onPayload', () => {
+    const guarded = FLAG_REGISTRY.filter(
+      (f): f is BooleanFlagDef => f.kind === 'boolean' && f.settingDeleteGuard !== undefined,
+    );
+    expect(guarded.length, 'no guarded flags matched — assertion would be vacuous').toBeGreaterThan(0);
+    for (const flag of guarded) {
+      expect(
+        flag.settingDeleteGuard,
+        `${flag.id}: settingDeleteGuard must match the shape applyFlags writes`,
+      ).toEqual(flag.onPayload);
     }
   });
 

@@ -685,27 +685,9 @@ export const initCommand = new Command('init')
         // prints the Compliance line from complianceSummary via formatComplianceSummary.
       }
 
-      // B5: attribution wizard step — runs only when the Setup-mode prompt actually ran
-      // (modePromptShown=true), preserving the promptless contracts of --recommended and !isTTY.
-      // shouldRunAttributionStep gates on modePromptShown rather than the mode name (PF-029).
-      // No CLI override path exists for attribution on the Recommended path (D27).
-      if (shouldRunAttributionStep({
-        mode: 'recommended',
-        modePromptShown,
-        isTTY: process.stdin.isTTY,
-        hasCliOverride: false,
-      })) {
-        const attributionStep = await runAttributionStep({
-          seed: enabledFlags['suppress-attribution'] as boolean,
-          prompts: buildClackAttributionPrompts(),
-        });
-        if (attributionStep.kind === 'cancelled') {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-        enabledFlags = { ...enabledFlags, 'suppress-attribution': attributionStep.suppress };
-        // Step messages not emitted here — the Recommended summary note covers attribution state.
-      }
+      // No attribution step here: the suppress-attribution question is Advanced-only (D27).
+      // Recommended silently carries the seeded value in enabledFlags — fresh installs get
+      // the registry default (off), re-inits get prior state. See shouldRunAttributionStep.
 
       // Apply explicit CLI toggles on top of the seed.
       // Precedence: explicit CLI flag > wizard result > seed value (prior state > registry default).
@@ -974,19 +956,21 @@ export const initCommand = new Command('init')
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
 
-      // Attribution feature (after compliance, before flags — runs in both Advanced and re-init paths).
-      // Gated by the same shouldRunAttributionStep predicate as the Recommended path so the
-      // documented gate table is the single authority for both — the two paths cannot drift.
-      // Here isTTY is guaranteed true (the non-TTY guard above exit-1'd), so the predicate
-      // reduces to "no CLI override" — no CLI override exists for attribution (D27).
+      // Attribution feature (after compliance, before flags). This is the ONLY call site —
+      // the attribution question is Advanced-only (D27); the Recommended path never asks and
+      // silently carries the seeded value. The gate stays an explicit predicate call so the
+      // documented gate table in attribution-prompts.ts remains the single authority.
+      // isTTY is guaranteed true here (the non-TTY guard above exit-1'd); passing it keeps
+      // the promptless contract enforced at the predicate rather than by position (PF-029).
       if (shouldRunAttributionStep({
         mode: 'advanced',
-        modePromptShown,
         isTTY: process.stdin.isTTY,
-        hasCliOverride: false,
       })) {
         const attributionStep = await runAttributionStep({
-          seed: enabledFlags['suppress-attribution'] as boolean,
+          // resolveInitSeed always emits this key, but `=== true` keeps the seed a real
+          // boolean rather than an unchecked cast if that contract ever changes —
+          // an `undefined` reaching p.select's initialValue silently unseeds the prompt.
+          seed: enabledFlags['suppress-attribution'] === true,
           prompts: buildClackAttributionPrompts(),
         });
         if (attributionStep.kind === 'cancelled') {

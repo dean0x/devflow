@@ -34,10 +34,14 @@ export type FlagsRecordValue = FlagValue | null;
  */
 export type FlagsRecord = Record<string, FlagsRecordValue>;
 
+/** A target inside the settings.json `env` block. Env values are always strings. */
+export type EnvFlagTarget = { readonly type: 'env'; readonly key: string };
+
+/** A top-level settings.json key. May hold any JSON value. */
+export type SettingFlagTarget = { readonly type: 'setting'; readonly key: string };
+
 /** Where the flag's value is written in settings.json. */
-export type FlagTarget =
-  | { readonly type: 'env'; readonly key: string }
-  | { readonly type: 'setting'; readonly key: string };
+export type FlagTarget = EnvFlagTarget | SettingFlagTarget;
 
 // ── Per-kind interfaces ────────────────────────────────────────────────────────
 
@@ -61,26 +65,48 @@ interface FlagDefCommon {
   readonly target: FlagTarget;
 }
 
-/** A boolean on/off flag. `onPayload` is written when the flag is enabled. */
-export interface BooleanFlagDef extends FlagDefCommon {
+interface BooleanFlagDefCommon extends FlagDefCommon {
   readonly kind: 'boolean';
-  /**
-   * The value written to the target when the flag is ON.
-   * - Env targets must use strings.
-   * - Setting targets may use strings, booleans, or plain objects.
-   */
-  readonly onPayload: string | boolean | Record<string, unknown>;
   /** Default value; false = neutral for booleans (key is deleted when false). */
   readonly defaultValue: boolean;
+}
+
+/**
+ * A boolean flag targeting an env var. `onPayload` is constrained to `string`:
+ * the settings.json `env` block is a string map, and buildPayload writes
+ * `onPayload` through verbatim, so a non-string here would serialize an object
+ * or raw boolean into an env slot that Claude Code reads as a string.
+ *
+ * This constraint is COMPILE-ENFORCED — it used to be prose on `onPayload` plus a
+ * registry unit test, which let `target: {type:'env'}` + an object payload compile
+ * clean. Do not merge the two members back into one interface.
+ */
+export interface EnvBooleanFlagDef extends BooleanFlagDefCommon {
+  readonly target: EnvFlagTarget;
+  readonly onPayload: string;
+  /** Env keys are never shape-guarded — `never` makes that a compile error, not a silent no-op. */
+  readonly settingDeleteGuard?: never;
+}
+
+/** A boolean flag targeting a top-level settings.json key. */
+export interface SettingBooleanFlagDef extends BooleanFlagDefCommon {
+  readonly target: SettingFlagTarget;
+  /** Setting targets may use strings, booleans, or plain objects. */
+  readonly onPayload: string | boolean | Record<string, unknown>;
   /**
    * D-ATTR-GUARD: when set, deletion of the target setting key is shape-guarded —
    * the key is only removed when its current value deep-equals this shape exactly.
    * Prevents erasing user-customized values (e.g. attribution with a real org name)
    * when the flag transitions to neutral.
-   * Only honoured for setting-target boolean flags. Ignored for env targets.
    */
   readonly settingDeleteGuard?: Record<string, unknown>;
 }
+
+/**
+ * A boolean on/off flag. `onPayload` is written when the flag is enabled.
+ * Discriminated on `target.type` so the env-string invariant is enforced by tsc.
+ */
+export type BooleanFlagDef = EnvBooleanFlagDef | SettingBooleanFlagDef;
 
 /** An enum flag. `neutralValue` is the value that means "no preference" (key is deleted). */
 export interface EnumFlagDef extends FlagDefCommon {

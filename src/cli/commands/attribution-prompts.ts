@@ -4,13 +4,14 @@
  * CLI-layer module (ADR-013): prompt-rendering logic lives in src/cli/commands/,
  * core business logic stays in src/core/.
  *
- * Applies PF-029: every wizard gate keys on `modePromptShown`, never on the mode
- * name, so --recommended (flag, no prompt) and the non-TTY fallback preserve their
- * promptless contracts.
+ * Applies PF-029: the gate is an exported pure predicate with an explicit isTTY guard,
+ * so --recommended (flag, no prompt) and the non-TTY fallback keep their promptless
+ * contracts and the reachability rule is unit-testable without a terminal.
  * Applies PF-014: runAttributionStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally cleanup safe.
  *
  * D27: suppress-attribution flag — gates Claude Code's AI-attribution injection.
+ * The question is ADVANCED-ONLY; Recommended never asks. See shouldRunAttributionStep.
  */
 
 import * as p from '@clack/prompts';
@@ -20,32 +21,35 @@ import * as p from '@clack/prompts';
 /**
  * Determines whether the attribution wizard step should run for a given init invocation.
  *
- * Gate table (per PF-029: key on modePromptShown, never on the mode name):
+ * D27 — ADVANCED-ONLY. The attribution question is reachable from the Advanced path
+ * and nowhere else. This DIVERGES DELIBERATELY from shouldRunComplianceStep, which also
+ * runs on interactive Recommended: attribution rewrites the user's git history metadata,
+ * so Recommended stays a zero-question path and silently applies the seeded value
+ * (fresh install: off). Do not "restore symmetry" with the compliance gate.
  *
- *   --recommended flag / !isTTY fallback             → no (promptless contract preserved)
- *   Interactive mode-prompt → Recommended             → yes (modePromptShown=true)
- *   --advanced flag / re-init (banner path)           → yes (mode='advanced', isTTY=true)
- *   Interactive mode-prompt → Advanced                → yes (modePromptShown=true)
- *   Any path with a hasCliOverride for this step      → no (CLI override wins)
+ * Gate table:
+ *
+ *   --advanced flag / re-init (banner path) / prompt → Advanced   → yes
+ *   Interactive mode-prompt → Recommended                         → NO (D27 divergence)
+ *   --recommended flag                                            → no
+ *   !isTTY (any mode)                                             → no
+ *
+ * Gating on the mode name is sound here because 'advanced' is only ever resolved on an
+ * interactive path (the Advanced branch exit-1s on non-TTY), and the explicit isTTY guard
+ * keeps the promptless contracts of --recommended and the non-TTY fallback pinned
+ * regardless (PF-029).
+ *
+ * There is no CLI override for attribution — it is toggled post-install via
+ * `devflow flags --enable/--disable suppress-attribution`.
  *
  * Pure predicate — no side effects, fully testable without a TTY.
- * Mirrors shouldRunComplianceStep exactly (same gate table per PF-029).
  */
 export function shouldRunAttributionStep(input: {
   mode: 'recommended' | 'advanced';
-  modePromptShown: boolean;
   isTTY: boolean;
-  hasCliOverride: boolean;
 }): boolean {
-  if (input.hasCliOverride) return false;
   if (!input.isTTY) return false;
-  // Advanced path: non-TTY has already exit-1'd, so isTTY=true here → always run.
-  // Covers: --advanced flag, re-init banner path, interactive-prompt → advanced.
-  if (input.mode === 'advanced') return true;
-  // Recommended path: only run when the Setup-mode p.select actually ran
-  // (user made an active choice). --recommended flag and !isTTY fallback never set
-  // modePromptShown=true, preserving their promptless contracts.
-  return input.modePromptShown;
+  return input.mode === 'advanced';
 }
 
 // ── DI seam ────────────────────────────────────────────────────────────────────
