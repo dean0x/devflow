@@ -135,11 +135,6 @@ export async function writeProxyState(
  *   error — the relay refuses to start. anthropic and limits are themselves
  *   strictObject + prefault({}), so they may be partially specified.
  *
- *   connectTimeoutMs bounds only the DNS+TCP connect: it is armed on the socket and
- *   disarmed on 'connect', so neither the headers phase nor the stream phase is
- *   bounded by it. The relay's own 10s default is therefore the correct value, and a
- *   larger budget buys nothing — it only delays the failure when a host is
- *   unroutable. A user-specified value always wins.
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',
@@ -155,8 +150,8 @@ const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
  * it reachable in a real user's file:
  *   anthropic.streamIdleTimeoutMs — valid in 0.2.0, removed in 0.3.0 (relay no longer
  *     bounds the stream-idle phase on a connected client).
- *   limits.connectTimeoutMs       — moved to anthropic.connectTimeoutMs, which this
- *     builder sets itself, so dropping it loses nothing.
+ *   limits.connectTimeoutMs       — moved to anthropic.connectTimeoutMs in 0.3.0;
+ *     stripping it loses nothing (relay default governs).
  *   limits.maxConcurrentRequests  — valid in 0.2.0, removed in 0.3.0 (admission gate
  *     removed).
  *   limits.maxBodyBytes           — valid through 0.3.0, renamed to
@@ -172,28 +167,18 @@ const ROUTING_CONFIG_REJECTED_SUBKEYS: Readonly<Record<'anthropic' | 'limits', r
 };
 
 /**
- * Default anthropic.connectTimeoutMs injected when not specified by the user (ms).
- * Matches the relay's own default — connectTimeoutMs bounds only DNS+TCP connect,
- * so a wider budget would only delay failure against an unroutable host (D-EFR-4).
- */
-export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 10_000;
-
-/**
  * Build the routing config JSON for ~/.devflow/proxy-routing.json.
  *
  * Authoritatively sets `port`. Preserves any existing valid `anthropic`,
  * `limits`, `logLevel`, and `providers` blocks from `existingContent`, filtering
  * out unknown top-level keys and every sub-key in ROUTING_CONFIG_REJECTED_SUBKEYS
- * (each one a hard relay startup error).
+ * (each one a hard relay startup error). No `anthropic` block is injected when
+ * the user has not set one — the relay's own default governs (D-EFR-4).
  *
- * Injects a default `anthropic.connectTimeoutMs` of 10 000ms when the user
- * has not set one — see @D-EFR-4 for the rationale.
- *
- * If `existingContent` is missing or malformed, falls back to a clean config
- * with only `port` and `anthropic.connectTimeoutMs`.
+ * If `existingContent` is missing or malformed, falls back to a port-only config.
  *
  * applies ADR-013: pure core-layer function — no I/O.
- * @D-EFR-4: see note above for the strict top-key constraint and timeout rationale.
+ * @D-EFR-4: see note above for the strict top-key constraint.
  */
 export function buildRoutingConfigJson(port: number, existingContent?: string): string {
   // Parse existing config tolerantly; a malformed file falls back to clean defaults.
@@ -221,22 +206,21 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
     config.logLevel = preserved.logLevel;
   }
 
-  // Anthropic block: preserve user settings; inject connectTimeoutMs default when absent.
-  // @D-EFR-4: connectTimeoutMs is a DNS+TCP connect budget only — it never bounds a
-  // request that has already connected, however long that request runs.
-  const existingAnthropic =
+  // Anthropic block: preserve user settings; strip legacy rejected sub-keys.
+  // No default is injected — the relay's own default governs (D-EFR-4).
+  if (
     typeof preserved.anthropic === 'object' &&
     preserved.anthropic !== null &&
     !Array.isArray(preserved.anthropic)
-      ? { ...(preserved.anthropic as Record<string, unknown>) }
-      : {};
-  for (const key of ROUTING_CONFIG_REJECTED_SUBKEYS.anthropic) {
-    delete existingAnthropic[key];
+  ) {
+    const existingAnthropic = { ...(preserved.anthropic as Record<string, unknown>) };
+    for (const key of ROUTING_CONFIG_REJECTED_SUBKEYS.anthropic) {
+      delete existingAnthropic[key];
+    }
+    if (Object.keys(existingAnthropic).length > 0) {
+      config.anthropic = existingAnthropic;
+    }
   }
-  if (!Object.prototype.hasOwnProperty.call(existingAnthropic, 'connectTimeoutMs')) {
-    existingAnthropic.connectTimeoutMs = DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS;
-  }
-  config.anthropic = existingAnthropic;
 
   // Preserve providers block if present.
   if (preserved.providers !== undefined) {

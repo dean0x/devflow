@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Routing runtime pinned to `subswitch@0.4.0`** (from `0.2.0`). Over-window Anthropic-bound request bodies are now streamed upstream instead of being rejected by the relay, so long prompts no longer fail at the proxy; only translated (Codex) routes still return `413 request_too_large`. `anthropic.connectTimeoutMs` now bounds only the DNS+TCP connect, so the injected default drops from `120000` to `10000` — the relay's own default. A wider budget bounded nothing extra and only delayed failure against an unroutable host.
+- **Routing runtime pinned to `subswitch@0.4.0`** (from `0.2.0`). Over-window Anthropic-bound request bodies are now streamed upstream instead of being rejected by the relay, so long prompts no longer fail at the proxy; only translated (Codex) routes still return `413 request_too_large`. `buildRoutingConfigJson` no longer injects `anthropic.connectTimeoutMs` — the relay's own default (10 s, connect-only) governs; user-set values are preserved as before. The injection was a 0.2.0-era workaround artifact that outlived its purpose once the key's semantics were narrowed to DNS+TCP connect only.
 
 ### Fixed
 - **`proxy-routing.json` upgrade safety**: `buildRoutingConfigJson` now strips `limits.maxBodyBytes`, which `subswitch@0.4.0` renamed to `limits.maxBufferedBodyBytes`. The old spelling is a registered legacy key that makes the relay refuse to start, so a hand-edited config carrying it would have killed the relay on every session start — spawned by the `ensure-proxy` hook, with no route back. Joins the existing strips for `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, and `limits.maxConcurrentRequests`.

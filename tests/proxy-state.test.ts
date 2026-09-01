@@ -10,7 +10,8 @@
  *  - readProxyState: malformed JSON → tolerant default, no throw (TEST-2)
  *  - writeProxyState → readProxyState round-trip (TEST-2)
  *  - Tolerant field parsing: wrong-typed fields self-heal to defaults (TEST-2)
- *  - buildRoutingConfigJson: exact {port} shape only — no codex key (AC-C4)
+ *  - buildRoutingConfigJson: port-only shape — no injected anthropic block (AC-C4)
+ *  - buildRoutingConfigJson: user-set anthropic.connectTimeoutMs is preserved
  *  - Pre-existing proxy.json with models loads cleanly; key absent after write (AC-C5)
  *  - RUNTIME_VERSION_RE: path-traversal and length-limit rejection (AC-S4)
  */
@@ -27,7 +28,6 @@ import {
   proxyJsonExists,
   DEFAULT_PROXY_PORT,
   RUNTIME_VERSION_RE,
-  DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS,
 } from '../src/core/proxy-state.js';
 
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ describe('readProxyState — wrong-typed fields self-heal to defaults', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildRoutingConfigJson — port + anthropic.connectTimeoutMs default (AC-C4 / D-EFR-4)
+// buildRoutingConfigJson — port-only shape; user-set anthropic keys preserved (AC-C4)
 // ---------------------------------------------------------------------------
 
 describe('buildRoutingConfigJson — base behavior', () => {
@@ -243,20 +243,9 @@ describe('buildRoutingConfigJson — base behavior', () => {
     expect(() => JSON.parse(json)).not.toThrow();
   });
 
-  it('injects default anthropic.connectTimeoutMs when no existing config supplied (D-EFR-4)', () => {
-    const json = buildRoutingConfigJson(4141);
-    const obj = JSON.parse(json) as Record<string, unknown>;
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic).toBeDefined();
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
-  });
-
-  // Pinned by value, not just by symbol: connectTimeoutMs bounds only DNS+TCP connect,
-  // so the relay's own 10s default is the correct budget. A wider value silently
-  // delays failure against an unroutable host, and every other assertion in this file
-  // compares against the imported symbol — which would stay green if the value drifted.
-  it('injects the relay-default 10s connect budget, not a wider one (D-EFR-4)', () => {
-    expect(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS).toBe(10_000);
+  it('emits no anthropic block when no existing config is supplied (relay default governs)', () => {
+    const obj = JSON.parse(buildRoutingConfigJson(4141)) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 
   it('only emits allowed top-level keys (strictObject constraint D-EFR-4)', () => {
@@ -269,14 +258,14 @@ describe('buildRoutingConfigJson — base behavior', () => {
 });
 
 describe('buildRoutingConfigJson — existing config preservation', () => {
-  it('user-specified anthropic.connectTimeoutMs wins over default', () => {
+  it('user-specified anthropic.connectTimeoutMs is preserved (relay default not injected)', () => {
     const existing = JSON.stringify({ port: 4141, anthropic: { connectTimeoutMs: 30_000 } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
     expect(anthropic.connectTimeoutMs).toBe(30_000);
   });
 
-  it('preserves other anthropic fields alongside injected default', () => {
+  it('preserves other anthropic fields from existing config', () => {
     // maxUpstreamSockets is a live key in the pinned runtime's AnthropicSchema —
     // a preservation fixture has to use a shape the relay actually accepts, or it
     // pins behaviour that would break the relay at startup (avoids PF-043).
@@ -284,7 +273,7 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
     expect(anthropic.maxUpstreamSockets).toBe(64);
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'connectTimeoutMs')).toBe(false);
   });
 
   it('preserves logLevel from existing config', () => {
@@ -320,9 +309,9 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(anthropic, 'streamIdleTimeoutMs')).toBe(false);
-    // Neighbouring valid keys survive the strip.
+    // Neighbouring valid keys survive the strip; no default is injected.
     expect(anthropic.maxUpstreamSockets).toBe(64);
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(anthropic, 'connectTimeoutMs')).toBe(false);
   });
 
   it('strips limits.maxConcurrentRequests (removed in the pinned runtime)', () => {
@@ -376,19 +365,17 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(obj.port).toBe(4141);
   });
 
-  it('malformed existing content falls back cleanly — no throw, port + anthropic default emitted', () => {
+  it('malformed existing content falls back cleanly — no throw, port-only config emitted', () => {
     expect(() => buildRoutingConfigJson(4141, '{ bad json !!!')).not.toThrow();
     const obj = JSON.parse(buildRoutingConfigJson(4141, '{ bad json !!!')) as Record<string, unknown>;
     expect(obj.port).toBe(4141);
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 
-  it('undefined existingContent falls back to clean defaults', () => {
+  it('undefined existingContent falls back to port-only config', () => {
     const obj = JSON.parse(buildRoutingConfigJson(4141, undefined)) as Record<string, unknown>;
     expect(obj.port).toBe(4141);
-    const anthropic = obj.anthropic as Record<string, unknown>;
-    expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
+    expect(Object.prototype.hasOwnProperty.call(obj, 'anthropic')).toBe(false);
   });
 });
 
