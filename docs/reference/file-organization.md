@@ -21,7 +21,7 @@ devflow/
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
-│   │   ├── flags.ts                  # Claude Code flag registry (28 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (29 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)

@@ -205,7 +205,7 @@ npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separ
 
 `--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-All 28 flags by kind and devflow default:
+All 29 flags by kind and devflow default:
 
 | Flag ID | Kind | Target | Devflow Default |
 |---------|------|--------|-----------------|
@@ -231,6 +231,7 @@ All 28 flags by kind and devflow default:
 | `disable-autoupdater` | boolean | env `DISABLE_AUTOUPDATER` | `false` |
 | `agent-teams` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `false` |
 | `enable-todo-tools` | boolean | env `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `false` |
+| `suppress-attribution` | boolean | setting `attribution` | `false` |
 | `subagent-spawn-depth` | number | env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | unset (upstream: 3) |
 | `workflow-size-guideline` | enum | setting `workflowSizeGuideline` | unset (`small\|medium\|large\|unrestricted`) |
 | `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
