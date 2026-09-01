@@ -211,7 +211,7 @@ When `proxyEnabled` is true entering the install apply pass, `runProxyPreflight`
 
 **`revertExternalAgents` on the selective path**: runs **before** `removeSelectedPlugins` — strips GPT model lines from installed agent frontmatter while the files are still present. **Known limitation**: on the selective path it reverts EVERY installed agent, not only those being removed — surviving agents lose GPT frontmatter assignments until the next `devflow init`. On the full-uninstall path it also runs before `removeAllDevFlow`.
 
-**`removeAllDevFlow(claudeDir, devflowDir, verbose)`** removes `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, `devflowScriptsDir`, and skill dirs via two separate passes (avoids PF-012): **prefixed** (`devflow:name`) for every skill in `getAllSkillNames() ∪ LEGACY_SKILL_NAMES`; **bare** (name or `devflow-name`) for `LEGACY_SKILL_NAMES` only — `~/.claude/skills/` is shared, so a bare dir matching a live-registry skill name is by construction foreign to Devflow.
+**`removeAllDevFlow(claudeDir, devflowScriptsDir, verbose)`** removes `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, `devflowScriptsDir`, and skill dirs via two separate passes (avoids PF-012): **prefixed** (`devflow:name`) for every skill in `getAllSkillNames() ∪ LEGACY_SKILL_NAMES`; **bare** (name or `devflow-name`) for `LEGACY_SKILL_NAMES` only — `~/.claude/skills/` is shared, so a bare dir matching a live-registry skill name is by construction foreign to Devflow.
 
 After `removeAllDevFlow`, scope-specific logic handles the remainder of `devflowDir`. The scope decision lives in `resolveDevflowDirCleanup(opts)`, a **pure exported function** (mirrors `resolveSecurityRemovalDecision`) — no I/O, no side effects, fully testable.
 
