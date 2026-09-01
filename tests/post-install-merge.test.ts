@@ -21,6 +21,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mergeDevflowSettingsTemplate, installSettings } from '../src/targets/claude-code/post-install.js';
 import type { HookMatcher } from '../src/targets/claude-code/hooks.js';
+import { FLAG_REGISTRY } from '../src/core/flags.js';
+import type { SettingFlagTarget } from '../src/core/flags.js';
 import * as os from 'node:os';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -141,14 +143,36 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     expect(existing.statusLine).toBe('my-custom-status-line');
   });
 
-  it('does NOT inject attribution — attribution is managed by flags pipeline (D27)', () => {
-    // mergeDevflowSettingsTemplate never writes an attribution key regardless of
-    // what the template contains. Attribution is written/removed by applyFlags/
-    // stripFlags (suppress-attribution flag, D-ATTR-GUARD shape guard).
-    const existing: Record<string, unknown> = {};
-    const template = { statusLine: 's' }; // template has no attribution key (R2)
-    mergeDevflowSettingsTemplate(existing, template);
-    expect(existing.attribution).toBeUndefined();
+  /**
+   * Registry-driven single-ownership guard: no flag with target.type === 'setting'
+   * may have its target.key present as a top-level key in the settings merge template.
+   * ADR-024: one writer per settings.json key class. D27: attribution (and all
+   * other flag-owned keys) are written/removed exclusively by applyFlags/stripFlags.
+   * A template key managed by a flag creates a double-write on every fresh install.
+   */
+  it('no flag-owned settings key appears as a top-level template key (ADR-024, D27)', async () => {
+    const templatePath = path.join(REPO_ROOT, 'src/targets/claude-code/templates/settings.json');
+    const template = JSON.parse(await fsp.readFile(templatePath, 'utf-8')) as Record<string, unknown>;
+
+    // Non-vacuity: template must be a non-empty plain object
+    expect(Object.keys(template).length).toBeGreaterThan(0);
+
+    // Collect setting-target flags from the registry
+    const settingFlags = FLAG_REGISTRY.filter(
+      (f): f is typeof f & { target: SettingFlagTarget } => f.target.type === 'setting',
+    );
+
+    // Non-vacuity: at least one setting-target flag must exist in the registry
+    expect(settingFlags.length).toBeGreaterThan(0);
+
+    // Assert no flag-owned key appears in the template top-level
+    for (const flag of settingFlags) {
+      const key = flag.target.key;
+      expect(
+        key in template,
+        `"${key}" (flag: ${flag.id}) is flag-owned — must not appear in the settings merge template (ADR-024, D27)`,
+      ).toBe(false);
+    }
   });
 
   it('does NOT inject attribution even when template carries an attribution block', () => {
@@ -221,7 +245,7 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
   it('is idempotent — double merge produces same result as single merge', () => {
     const cmd = '/devflow/scripts/hooks/run-hook memory-worker';
     const existing: Record<string, unknown> = {};
-    const template = makeTemplate([cmd], 'devflow v2', 'Devflow');
+    const template = makeTemplate([cmd], 'devflow v2');
 
     mergeDevflowSettingsTemplate(existing, template);
     const snapshotAfterFirst = JSON.stringify(existing);

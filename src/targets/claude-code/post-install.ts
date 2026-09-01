@@ -865,10 +865,7 @@ export function mergeDevflowSettingsTemplate(
     changed = true;
   }
 
-  // Attribution is NOT injected here. It is managed exclusively by the flags
-  // pipeline (suppress-attribution flag, D27). Removing it from merge prevents a
-  // double-write: applyFlags writes it when the flag is on; stripFlags removes
-  // it when the flag is off (shape-guarded, D-ATTR-GUARD).
+  // attribution: owned exclusively by the flags pipeline (applyFlags/stripFlags, D27) — a second writer here would race it.
 
   return { changed };
 }
