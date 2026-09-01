@@ -97,8 +97,6 @@ See `references/patterns.md` for extended recovery and stash workflows.
 <optional body explaining what and why>
 
 <optional footer with references>
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### Types
@@ -125,8 +123,6 @@ Implement token validation middleware with:
 - Expiration checking
 
 Closes #123
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
