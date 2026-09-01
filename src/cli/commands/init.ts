@@ -689,7 +689,6 @@ export const initCommand = new Command('init')
       // (modePromptShown=true), preserving the promptless contracts of --recommended and !isTTY.
       // shouldRunAttributionStep gates on modePromptShown rather than the mode name (PF-029).
       // No CLI override path exists for attribution on the Recommended path (D27).
-      let wizardSuppressAttribution: boolean | undefined;
       if (shouldRunAttributionStep({
         mode: 'recommended',
         modePromptShown,
@@ -704,10 +703,8 @@ export const initCommand = new Command('init')
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        wizardSuppressAttribution = attributionStep.suppress;
-      }
-      if (wizardSuppressAttribution !== undefined) {
-        enabledFlags = { ...enabledFlags, 'suppress-attribution': wizardSuppressAttribution };
+        enabledFlags = { ...enabledFlags, 'suppress-attribution': attributionStep.suppress };
+        // Step messages not emitted here — the Recommended summary note covers attribution state.
       }
 
       // Apply explicit CLI toggles on top of the seed.
