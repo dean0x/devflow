@@ -1831,6 +1831,17 @@ describe('suppress-attribution flag — shape guard (D27)', () => {
     expect(result.attribution).toEqual(DEVFLOW_ATTR);
   });
 
+  it('applyFlags with true OVERWRITES a custom attribution value (settingDeleteGuard only protects deletion)', () => {
+    // Documents AC2 and the wizard's "never deleted" wording: settingDeleteGuard only
+    // guards the DELETE path (flag false/null). Enabling the flag (true) always writes
+    // the devflow-managed shape regardless of what was on disk. This is intentional —
+    // the user opted in to attribution suppression, so the managed shape wins.
+    const custom = { commit: 'My Org', pr: 'My Org PR' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': true }));
+    expect(result.attribution).toEqual(DEVFLOW_ATTR);
+  });
+
   it('applyFlags with false deletes the exact devflow attribution shape', () => {
     const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
     const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));

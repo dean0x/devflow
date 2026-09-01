@@ -31,8 +31,11 @@ describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
     expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: true })).toBe(false);
   });
 
-  it('--recommended flag (non-interactive Recommended) → false', () => {
-    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: true })).toBe(false);
+  it('--recommended flag (non-TTY, typical non-interactive case) → false', () => {
+    // The --recommended CLI flag is commonly run without a TTY (CI, scripts).
+    // The predicate has no modePromptShown or hasCliOverride param — isTTY:false
+    // is the distinct input that represents this scenario.
+    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: false })).toBe(false);
   });
 
   // ── Promptless contracts (PF-029) ───────────────────────────────────────────

@@ -151,13 +151,16 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     expect(existing.attribution).toBeUndefined();
   });
 
-  it('does NOT delete an existing attribution value (preserve user values)', () => {
+  it('does NOT inject attribution even when template carries an attribution block', () => {
     // Even when attribution appears in template (legacy or edge case), the
-    // merge function must not touch an existing attribution value.
-    const existing: Record<string, unknown> = { attribution: 'my-org' };
-    const template: Record<string, unknown> = { statusLine: 's' };
+    // merge function must not write it into a user settings object that lacks one.
+    // This falsifies re-introduced injection: if mergeDevflowSettingsTemplate were
+    // ever to merge the attribution key, this test would fail because the template
+    // carries the block and existing starts empty.
+    const existing: Record<string, unknown> = {};
+    const template: Record<string, unknown> = { statusLine: 's', attribution: { commit: '', pr: '' } };
     mergeDevflowSettingsTemplate(existing, template);
-    expect(existing.attribution).toBe('my-org');
+    expect(existing.attribution).toBeUndefined();
   });
 
   it('adds only the missing hooks when some are present and some are not', () => {
