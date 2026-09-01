@@ -817,4 +817,16 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
   });
+
+  it('manifest has suppress-attribution: null (ADR-014 deliberate unset) → resolves to false', () => {
+    // ADR-014: null = known + deliberately unset. For this boolean flag, null and false
+    // both delete the target settings key; the resolved seed must be exactly false.
+    const manifest = makeManifest({
+      features: { ...makeManifest().features, flags: { 'suppress-attribution': null, tui: true } },
+    });
+    const seed = resolveInitSeed(manifest, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    expect(seed.flags['suppress-attribution']).toBe(false);
+    // Non-vacuity (PF-018): neighbouring flag from prior manifest survives unchanged.
+    expect(seed.flags['tui']).toBe(true);
+  });
 });
