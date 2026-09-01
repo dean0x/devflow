@@ -1622,6 +1622,7 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     await fs.writeFile(settingsPath, JSON.stringify({
       attribution: { commit: 'Acme Corp', pr: 'Acme' },
       model: 'opus',
+      env: { ENABLE_TOOL_SEARCH: '1' },
     }, null, 2), 'utf-8');
 
     await runCleanup();
@@ -1629,28 +1630,43 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after.attribution).toEqual({ commit: 'Acme Corp', pr: 'Acme' });
     expect(after.model).toBe('opus');
+    // Non-vacuity anchor (PF-018): ENABLE_TOOL_SEARCH is a FLAG_REGISTRY env-target that
+    // stripFlags must remove. If the settings loop never ran, the key would survive and
+    // this assertion would fail, catching the vacuous-pass case.
+    expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
   });
 
   it('preserves an attribution object carrying extra keys (not the managed shape)', async () => {
     await fs.writeFile(settingsPath, JSON.stringify({
       attribution: { commit: '', pr: '', coAuthor: 'nobody' },
       model: 'opus',
+      env: { ENABLE_TOOL_SEARCH: '1' },
     }, null, 2), 'utf-8');
 
     await runCleanup();
 
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after.attribution).toEqual({ commit: '', pr: '', coAuthor: 'nobody' });
+    // Non-vacuity anchor (PF-018): the managed env flag must be stripped, proving
+    // the settings loop ran; an early-exit would leave ENABLE_TOOL_SEARCH intact.
+    expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
   });
 
   it('leaves settings.json without an attribution key untouched', async () => {
-    await fs.writeFile(settingsPath, JSON.stringify({ model: 'opus' }, null, 2), 'utf-8');
+    await fs.writeFile(settingsPath, JSON.stringify({
+      model: 'opus',
+      env: { ENABLE_TOOL_SEARCH: '1' },
+    }, null, 2), 'utf-8');
 
     await runCleanup();
 
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after).not.toHaveProperty('attribution');
     expect(after.model).toBe('opus');
+    // Non-vacuity anchor (PF-018): without this, asserting 'attribution' absent is
+    // unconditionally vacuous — the fixture never had it. The managed env flag was
+    // seeded and must be stripped; an early-exit would leave ENABLE_TOOL_SEARCH '1'.
+    expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
   });
 });
 

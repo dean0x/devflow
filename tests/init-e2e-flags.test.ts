@@ -565,6 +565,10 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     // Off-side convergence: manifest says off, the key must be gone from settings.
     expect(out.flags['suppress-attribution']).toBe(false);
     expect(out.settings).not.toHaveProperty('attribution');
+    // Non-vacuity anchor (PF-018): a deletion assertion passes silently when the file
+    // is never rewritten. The seeded CUSTOM_USER_VAR must survive the init pass,
+    // proving settings.json was actually rewritten around the deletion.
+    expect((out.settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it.skipIf(!CLI_BUILT)('a user-customised attribution survives init untouched (shape guard)', async () => {
