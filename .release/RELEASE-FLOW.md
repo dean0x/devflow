@@ -10,10 +10,14 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 
 ## Version Strategy
 
-- `semver-auto`: derive bump from conventional commits since last tag (`!`/BREAKING → major)
+- `semver-auto`: derive a PROPOSED bump from conventional commits since last tag
+  (`!`/BREAKING → major). ALWAYS confirm the resulting version with the user before
+  dispatch, even when derivation is unambiguous (user directive, 2026-09-02) — present
+  the version explicitly, not just folded into the release-plan summary.
   Also scan squash-commit BODIES for breaking-change sections (`## Breaking Changes`) —
-  PR templates document them there without the `!` marker; confirm major-vs-minor with
-  the user when found (2.1.0 shipped such changes as a minor by explicit user choice)
+  PR templates document them there without the `!` marker; a section stating "None" is
+  a negative declaration, not a breaking change (2.1.0 shipped real breaking changes as
+  a minor by explicit user choice; 2.4.0 resolved two "None" sections as minor)
 - Tag format: `vX.Y.Z` (annotated). Release title: `vX.Y.Z`. No `v` prefix in CI input.
 - Branching model: main-only, squash merges, no version PRs. CI bot commits directly to main
   (ruleset bypass). `.devflow/conventions.md` absent — heuristics above learned from history.
