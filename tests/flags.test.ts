@@ -19,6 +19,7 @@ import {
   applyFlags,
   stripFlags,
   convergeFlagsIntoSettings,
+  settingHoldsManagedShape,
   // Kept verbatim
   VIEW_MODES,
   resolveExistingViewMode,
@@ -1903,5 +1904,102 @@ describe('suppress-attribution flag — shape guard (D27)', () => {
   it('blurb cap: suppress-attribution blurb is ≤ 30 chars', () => {
     const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
     expect(flag.blurb.length).toBeLessThanOrEqual(30);
+  });
+});
+
+// ─── settingHoldsManagedShape — consistency-01 single-source predicate ────────
+
+describe('settingHoldsManagedShape', () => {
+  const MANAGED = { commit: '', pr: '' };
+  const makeSettings = (attr: unknown): string =>
+    JSON.stringify({ attribution: attr });
+
+  it('returns true for the exact managed shape', () => {
+    expect(settingHoldsManagedShape(makeSettings(MANAGED), 'suppress-attribution')).toBe(true);
+  });
+
+  it('returns false for a custom attribution object', () => {
+    expect(settingHoldsManagedShape(
+      makeSettings({ commit: 'Acme', pr: 'Acme' }), 'suppress-attribution'
+    )).toBe(false);
+  });
+
+  it('returns false for attribution with an extra key', () => {
+    expect(settingHoldsManagedShape(
+      makeSettings({ commit: '', pr: '', coAuthor: 'x' }), 'suppress-attribution'
+    )).toBe(false);
+  });
+
+  it('returns false for null attribution', () => {
+    expect(settingHoldsManagedShape(makeSettings(null), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for array attribution', () => {
+    expect(settingHoldsManagedShape(makeSettings([]), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false when the key is absent', () => {
+    expect(settingHoldsManagedShape(JSON.stringify({}), 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for malformed JSON', () => {
+    expect(settingHoldsManagedShape('not json', 'suppress-attribution')).toBe(false);
+  });
+
+  it('returns false for an unknown flag id', () => {
+    expect(settingHoldsManagedShape(makeSettings(MANAGED), 'no-such-flag')).toBe(false);
+  });
+});
+
+// ─── convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption ──────
+//
+// Regression tests for security-01 (PF-050 / ADR-024):
+// A pre-existing on-disk managed shape must be adopted into the record BEFORE
+// the strip sweep runs, so the block survives on both the init and flags paths.
+// RED state was confirmed by reasoning: the assertions are unsatisfiable
+// against the pre-fix code because Step 2 skips booleans unconditionally and
+// stripFlags deletes the block, meaning result.record['suppress-attribution']
+// would be undefined and the attribution key would be absent from the output.
+
+describe('convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption', () => {
+  const MANAGED = { commit: '', pr: '' };
+  const SIBLING_KEY = 'unrelatedSetting';
+  const SIBLING_VAL = 'preserved';
+
+  // Baseline: pre-D27 state — no suppress-attribution in record or ownedRecord,
+  // but the legacy attribution block is on disk plus an unrelated sibling key.
+  const makePreD27Settings = (): string =>
+    JSON.stringify({ attribution: MANAGED, [SIBLING_KEY]: SIBLING_VAL });
+
+  it('adopts the managed block: record gains suppress-attribution:true and block survives', () => {
+    const record: FlagsRecord = {};
+    const { settings, record: out } = convergeFlagsIntoSettings(
+      makePreD27Settings(), record, { viewModeExplicit: false, ownedRecord: null },
+    );
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed['attribution'], 'attribution block must survive').toEqual(MANAGED);
+    expect(out['suppress-attribution'], 'record must claim suppress-attribution:true').toBe(true);
+    expect(parsed[SIBLING_KEY], 'unmanaged sibling key must survive').toBe(SIBLING_VAL);
+  });
+
+  it('does NOT adopt a custom attribution (shape guard rejects it)', () => {
+    const custom = { commit: 'Acme', pr: 'Acme' };
+    const settings = JSON.stringify({ attribution: custom, [SIBLING_KEY]: SIBLING_VAL });
+    const record: FlagsRecord = {};
+    const { record: out } = convergeFlagsIntoSettings(
+      settings, record, { viewModeExplicit: false, ownedRecord: null },
+    );
+    // Custom shape must not trigger adoption
+    expect(out['suppress-attribution']).toBeUndefined();
+  });
+
+  it('does NOT adopt when the record already claims suppress-attribution:false', () => {
+    // A claimed false means the user deliberately disabled it — the managed block must be deleted.
+    const record: FlagsRecord = { 'suppress-attribution': false };
+    const { settings } = convergeFlagsIntoSettings(
+      makePreD27Settings(), record, { viewModeExplicit: false, ownedRecord: record },
+    );
+    const parsed = JSON.parse(settings) as Record<string, unknown>;
+    expect(parsed['attribution'], 'claimed false still deletes the managed block').toBeUndefined();
   });
 });
