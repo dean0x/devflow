@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.4.0] - 2026-09-01
 
 ### Added
 - **`suppress-attribution` flag** (optional boolean, default OFF): when enabled, writes `{"commit":"","pr":""}` to the `attribution` key in `settings.json`, suppressing Claude attribution trailers in git commits and PRs. Disabling (or uninstalling) removes the `attribution` key only when its current value exactly matches that managed shape — a custom attribution object is preserved, while enabling always replaces the existing value. Toggle via `devflow flags --enable/--disable suppress-attribution`.
@@ -1235,6 +1235,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[2.4.0]: https://github.com/dean0x/devflow/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/dean0x/devflow/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/dean0x/devflow/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/dean0x/devflow/compare/v2.0.1...v2.1.0
