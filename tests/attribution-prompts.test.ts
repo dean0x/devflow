@@ -2,16 +2,28 @@
  * Tests for attribution-prompts.ts (D27 / PF-029).
  *
  * Coverage:
- *  - shouldRunAttributionStep: gate predicate matrix (PF-029 invariants)
+ *  - shouldRunAttributionStep: exhaustive gate matrix (PF-029 invariants)
+ *  - structural reachability guard: init.ts call site must be in Advanced half with
+ *    a non-literal mode binding — test fails when the block is moved or the literal
+ *    is restored (applies PF-029, PF-018)
  *  - runAttributionStep: step runner with injected DI seam (PF-014 invariants)
+ *  - applyAttributionAnswer: immutable merge of wizard answer into FlagsRecord
+ *  - attributionSeedFrom: boolean seed derivation from FlagsRecord (PF-018)
  */
 
 import { describe, it, expect } from 'vitest';
+import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import {
   shouldRunAttributionStep,
   runAttributionStep,
+  applyAttributionAnswer,
+  attributionSeedFrom,
   type AttributionPromptIO,
+  type AttributionStepResolved,
 } from '../src/cli/commands/attribution-prompts.js';
+import type { FlagsRecord } from '../src/core/flags.js';
 
 // ── shouldRunAttributionStep ──────────────────────────────────────────────────
 
@@ -19,34 +31,7 @@ describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
   // ── Advanced-only invariant (D27) ───────────────────────────────────────────
   // The attribution question is reachable from the Advanced path ONLY. Unlike the
   // compliance step, interactive Recommended never asks — it silently applies the
-  // seeded value. These tests are the authority for that divergence.
-
-  it('Advanced mode with TTY → true (the only path that asks)', () => {
-    expect(shouldRunAttributionStep({ mode: 'advanced', isTTY: true })).toBe(true);
-  });
-
-  it('interactive Recommended → false (Recommended NEVER asks, D27)', () => {
-    // Divergence from shouldRunComplianceStep, which returns true here. Interactive
-    // Recommended silently applies the seeded value (fresh install: off).
-    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: true })).toBe(false);
-  });
-
-  it('--recommended flag (non-TTY, typical non-interactive case) → false', () => {
-    // The --recommended CLI flag is commonly run without a TTY (CI, scripts).
-    // The predicate has no modePromptShown or hasCliOverride param — isTTY:false
-    // is the distinct input that represents this scenario.
-    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: false })).toBe(false);
-  });
-
-  // ── Promptless contracts (PF-029) ───────────────────────────────────────────
-
-  it('non-TTY → false for Advanced (no prompt without a TTY)', () => {
-    expect(shouldRunAttributionStep({ mode: 'advanced', isTTY: false })).toBe(false);
-  });
-
-  it('non-TTY → false for Recommended (promptless contract preserved)', () => {
-    expect(shouldRunAttributionStep({ mode: 'recommended', isTTY: false })).toBe(false);
-  });
+  // seeded value. This exhaustive matrix is the authority for that divergence.
 
   it('exhaustive gate matrix: only (advanced, TTY) is true', () => {
     const matrix: Array<[('recommended' | 'advanced'), boolean, boolean]> = [
@@ -58,6 +43,91 @@ describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
     for (const [mode, isTTY, expected] of matrix) {
       expect(shouldRunAttributionStep({ mode, isTTY }), `mode=${mode} isTTY=${isTTY}`).toBe(expected);
     }
+  });
+});
+
+// ── Structural reachability guard ─────────────────────────────────────────────
+
+describe('init.ts structural guard — D27 call site must be in Advanced half, non-literal mode (PF-029 / PF-018)', () => {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const initTsPath = path.resolve(__dirname, '../src/cli/commands/init.ts');
+
+  // Robustly split init.ts at the Recommended / Advanced boundary.
+  // SPLIT_ANCHOR uniquely identifies the start of the Advanced interactive flow.
+  const SPLIT_ANCHOR = '// ── Advanced path: full interactive flow ──';
+  const REC_ANCHOR = 'if (useRecommended) {';
+
+  it('non-empty corpus: source and both halves must be non-empty (PF-018 non-vacuity)', () => {
+    const source = fs.readFileSync(initTsPath, 'utf8');
+    expect(source.length, 'init.ts is empty — file may have been deleted or renamed').toBeGreaterThan(0);
+
+    const splitIdx = source.indexOf(SPLIT_ANCHOR);
+    expect(splitIdx, `Split anchor "${SPLIT_ANCHOR}" not found in init.ts — the boundary label was renamed`).not.toBe(-1);
+
+    const recIdx = source.indexOf(REC_ANCHOR);
+    expect(recIdx, `Recommended anchor "${REC_ANCHOR}" not found in init.ts — the variable was renamed`).not.toBe(-1);
+
+    const recommendedHalf = source.slice(0, splitIdx);
+    const advancedHalf = source.slice(splitIdx);
+    expect(recommendedHalf.length, 'Recommended half is empty — split boundary is at position 0').toBeGreaterThan(0);
+    expect(advancedHalf.length, 'Advanced half is empty — split boundary is at end of file').toBeGreaterThan(0);
+  });
+
+  it('runAttributionStep( appears exactly once in Advanced half and zero times in Recommended half', () => {
+    const source = fs.readFileSync(initTsPath, 'utf8');
+    const splitIdx = source.indexOf(SPLIT_ANCHOR);
+    expect(splitIdx).not.toBe(-1);
+
+    const recommendedHalf = source.slice(0, splitIdx);
+    const advancedHalf = source.slice(splitIdx);
+
+    const countIn = (haystack: string, needle: string): number =>
+      haystack.split(needle).length - 1;
+
+    expect(
+      countIn(advancedHalf, 'runAttributionStep('),
+      'runAttributionStep( should appear exactly once in the Advanced half',
+    ).toBe(1);
+
+    expect(
+      countIn(recommendedHalf, 'runAttributionStep('),
+      'runAttributionStep( must not appear in the Recommended half — D27 Advanced-only',
+    ).toBe(0);
+  });
+
+  it('attribution call site does NOT pass a literal mode: "advanced" — must use the ternary (D27-GATE)', () => {
+    const source = fs.readFileSync(initTsPath, 'utf8');
+    const splitIdx = source.indexOf(SPLIT_ANCHOR);
+    expect(splitIdx).not.toBe(-1);
+
+    const advancedHalf = source.slice(splitIdx);
+
+    // Narrow to the shouldRunAttributionStep call block (not the broader Advanced half,
+    // which also contains the compliance call site that legitimately uses mode:'advanced').
+    const attrCallStart = advancedHalf.indexOf('shouldRunAttributionStep({');
+    expect(
+      attrCallStart,
+      'shouldRunAttributionStep({ not found in Advanced half',
+    ).not.toBe(-1);
+    const attrCallEnd = advancedHalf.indexOf('})', attrCallStart);
+    expect(attrCallEnd, '}}) closing not found after shouldRunAttributionStep({').not.toBe(-1);
+    const attrCallBlock = advancedHalf.slice(attrCallStart, attrCallEnd + 2);
+    expect(attrCallBlock.length, 'attribution call block is empty').toBeGreaterThan(0);
+
+    // After the fix, the attribution gate call must NOT contain the bare literal
+    // `mode: 'advanced'` — that pattern is what made the predicate always-true and
+    // three of the four gate rows unreachable (applies PF-029).
+    expect(
+      attrCallBlock.includes("mode: 'advanced'"),
+      "Found bare literal `mode: 'advanced'` at the attribution call site — must be the ternary `mode: useRecommended ? 'recommended' : 'advanced'`",
+    ).toBe(false);
+
+    // The ternary that binds to the resolved mode must be present in this block.
+    expect(
+      attrCallBlock.includes('mode: useRecommended'),
+      "Ternary `mode: useRecommended` not found in shouldRunAttributionStep block — attribution gate is not bound to the resolved init mode",
+    ).toBe(true);
   });
 });
 
@@ -153,5 +223,76 @@ describe('runAttributionStep — step runner (PF-014)', () => {
     };
     await runAttributionStep({ seed: false, prompts: io });
     expect(capturedInitialValue).toBe(false);
+  });
+});
+
+// ── applyAttributionAnswer ────────────────────────────────────────────────────
+
+describe('applyAttributionAnswer — immutable FlagsRecord merge (D27)', () => {
+  function makeResolved(suppress: boolean): AttributionStepResolved {
+    return {
+      kind: 'resolved',
+      suppress,
+      messages: [],
+    };
+  }
+
+  it('suppress:true → suppress-attribution written as true', () => {
+    const flags: FlagsRecord = {};
+    const result = applyAttributionAnswer(flags, makeResolved(true));
+    expect(result['suppress-attribution']).toBe(true);
+  });
+
+  it('suppress:false → suppress-attribution written as false', () => {
+    const flags: FlagsRecord = { 'suppress-attribution': true };
+    const result = applyAttributionAnswer(flags, makeResolved(false));
+    expect(result['suppress-attribution']).toBe(false);
+  });
+
+  it('neighbouring entries survive the spread (immutable merge)', () => {
+    const flags: FlagsRecord = {
+      'brief': true,
+      'thinking-summaries': false,
+      'suppress-attribution': false,
+    };
+    const result = applyAttributionAnswer(flags, makeResolved(true));
+    expect(result['suppress-attribution']).toBe(true);
+    expect(result['brief']).toBe(true);
+    expect(result['thinking-summaries']).toBe(false);
+  });
+
+  it('input object is not mutated', () => {
+    const flags: FlagsRecord = { 'suppress-attribution': false, 'brief': true };
+    const before = { ...flags };
+    applyAttributionAnswer(flags, makeResolved(true));
+    expect(flags).toEqual(before);
+  });
+});
+
+// ── attributionSeedFrom ───────────────────────────────────────────────────────
+
+describe('attributionSeedFrom — boolean seed from FlagsRecord (PF-018)', () => {
+  it('true stored → returns true (real boolean)', () => {
+    const result = attributionSeedFrom({ 'suppress-attribution': true });
+    expect(result).toBe(true);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('false stored → returns false (real boolean)', () => {
+    const result = attributionSeedFrom({ 'suppress-attribution': false });
+    expect(result).toBe(false);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('absent key → returns false (real boolean)', () => {
+    const result = attributionSeedFrom({});
+    expect(result).toBe(false);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('null stored → returns false (real boolean)', () => {
+    const result = attributionSeedFrom({ 'suppress-attribution': null });
+    expect(result).toBe(false);
+    expect(typeof result).toBe('boolean');
   });
 });
