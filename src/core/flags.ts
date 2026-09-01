@@ -1040,21 +1040,71 @@ export function migrateLegacyFlagsToRecord(
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
 /**
+ * Returns true when `value` equals the managed shape declared by `flag.settingDeleteGuard`.
+ * Returns false when: the flag has no guard, is not a setting-target boolean, or the value
+ * does not deep-equal the guard.
+ *
+ * Single equality oracle for managed-shape comparisons — used by `canDeleteSettingKey`,
+ * `settingHoldsManagedShape`, and the Step 2b adoption fold in `convergeFlagsIntoSettings`.
+ * All three delegate here so there is exactly one `isDeepStrictEqual` call for guard matching.
+ */
+export function settingValueHoldsManagedShape(flag: ClaudeCodeFlag, value: unknown): boolean {
+  if (flag.kind !== 'boolean' || flag.target.type !== 'setting') return false;
+  const guard = flag.settingDeleteGuard;
+  if (guard === undefined) return false;
+  return isDeepStrictEqual(value, guard);
+}
+
+/**
+ * D-ATTR-GUARD single-source predicate (consistency-01 / ADR-024).
+ *
+ * Returns true when the settings.json string contains a value at the flag's
+ * target key that equals the flag's managed shape (`settingDeleteGuard`).
+ *
+ * This is the ONE place that decides "on-disk value equals the managed shape".
+ * All consumers — `resolveExistingAttributionSuppression` (seeding priority),
+ * and the guarded-boolean adoption fold in `convergeFlagsIntoSettings` — delegate
+ * here rather than hand-rolling their own comparison.
+ *
+ * Returns false when:
+ *   - settingsJson is malformed
+ *   - root is not a plain object
+ *   - flagId is not in the registry
+ *   - the flag has no settingDeleteGuard
+ *   - the flag is not a setting-target boolean
+ *   - the on-disk value does not deep-equal the guard
+ */
+export function settingHoldsManagedShape(settingsJson: string, flagId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const flag = FLAG_REGISTRY_MAP.get(flagId);
+    if (!flag) return false;
+    const value = (parsed as Record<string, unknown>)[flag.target.key];
+    return settingValueHoldsManagedShape(flag, value);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * D-ATTR-GUARD: returns true when it is safe to delete a flag's target key from
  * settings. For flags with a settingDeleteGuard the key is only deleted when the
- * current on-disk value deep-equals the guarded shape exactly, preventing erasure
- * of user-customized values (e.g. an organisation attribution block) on flag
+ * current on-disk value deep-equals the managed shape, preventing erasure of
+ * user-customized values (e.g. an organisation attribution block) on flag
  * disable or uninstall. Flags without a guard are always safe to delete.
  *
- * Uses `isDeepStrictEqual` from node:util — native, correct, and zero-maintenance.
+ * Delegates to `settingValueHoldsManagedShape` — the single equality oracle for
+ * managed-shape comparisons — so there is exactly one `isDeepStrictEqual` call
+ * across the entire apply/strip pipeline (ADR-024 mechanism 3).
  *
- * Single-source invariant (ADR-024 mechanism 3): the guard is symmetric across
- * the disable path (applyFlags neutral branch) and the uninstall path (stripFlags),
- * upheld by construction since both call sites collapse to this one predicate.
+ * Single-source invariant: both the disable path (applyFlags neutral branch) and
+ * the uninstall path (stripFlags) collapse to this predicate.
  */
 function canDeleteSettingKey(flag: ClaudeCodeFlag, settings: Record<string, unknown>): boolean {
-  const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
-  return guard === undefined || isDeepStrictEqual(settings[flag.target.key], guard);
+  if (flag.kind !== 'boolean') return true;
+  if (flag.settingDeleteGuard === undefined) return true;
+  return settingValueHoldsManagedShape(flag, settings[flag.target.key]);
 }
 
 /**
@@ -1233,52 +1283,6 @@ export function resolveExistingViewMode(settingsJson: string): ViewMode | undefi
 }
 
 /**
- * Returns true when `value` equals the managed shape declared by `flag.settingDeleteGuard`.
- * Returns false when: the flag has no guard, is not a setting-target boolean, or the value
- * does not deep-equal the guard.
- *
- * Value-level core for `settingHoldsManagedShape` — both share the single equality decision.
- */
-export function settingValueHoldsManagedShape(flag: ClaudeCodeFlag, value: unknown): boolean {
-  if (flag.kind !== 'boolean' || flag.target.type !== 'setting') return false;
-  const guard = flag.settingDeleteGuard;
-  if (guard === undefined) return false;
-  return isDeepStrictEqual(value, guard);
-}
-
-/**
- * D-ATTR-GUARD single-source predicate (consistency-01 / ADR-024).
- *
- * Returns true when the settings.json string contains a value at the flag's
- * target key that equals the flag's managed shape (`settingDeleteGuard`).
- *
- * This is the ONE place that decides "on-disk value equals the managed shape".
- * All consumers — `resolveExistingAttributionSuppression` (seeding priority),
- * and the guarded-boolean adoption fold in `convergeFlagsIntoSettings` — delegate
- * here rather than hand-rolling their own comparison.
- *
- * Returns false when:
- *   - settingsJson is malformed
- *   - root is not a plain object
- *   - flagId is not in the registry
- *   - the flag has no settingDeleteGuard
- *   - the flag is not a setting-target boolean
- *   - the on-disk value does not deep-equal the guard
- */
-export function settingHoldsManagedShape(settingsJson: string, flagId: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(settingsJson);
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const flag = FLAG_REGISTRY_MAP.get(flagId);
-    if (!flag) return false;
-    const value = (parsed as Record<string, unknown>)[flag.target.key];
-    return settingValueHoldsManagedShape(flag, value);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Resolve the final view mode to write, combining an existing settings value,
  * an init-prompt-selected value, and whether the selection was explicit.
  *
@@ -1441,8 +1445,6 @@ export function convergeFlagsIntoSettings(
   for (const flag of FLAG_REGISTRY) {
     if (flag.kind !== 'boolean') continue;
     if (flag.target.type !== 'setting') continue;
-    const boolFlag = flag as SettingBooleanFlagDef;
-    if (boolFlag.settingDeleteGuard === undefined) continue;
 
     // Skip when the record already claims this flag (claimed false/null deletes the block)
     const claimed =
