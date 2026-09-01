@@ -126,22 +126,20 @@ export async function writeProxyState(
 // ---------------------------------------------------------------------------
 
 /**
- * Accepted top-level keys for the subswitch 0.3.0 FileConfigSchema (z.strictObject).
+ * Accepted top-level keys for the subswitch 0.4.0 FileConfigSchema (z.strictObject).
  * Unknown top-level keys cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 Subswitch 0.3.0 routing config contract:
+ * @D-EFR-4 Subswitch 0.4.0 routing config contract:
  *   FileConfigSchema is a z.strictObject with exactly 5 accepted top-level keys:
  *   port, logLevel, anthropic, providers, limits. Unknown keys cause a hard startup
  *   error — the relay refuses to start. anthropic and limits are themselves
  *   strictObject + prefault({}), so they may be partially specified.
  *
- *   connectTimeoutMs: in 0.3.0 this is a genuine DNS+TCP connect budget, armed on
- *   the socket and disarmed on 'connect' — neither the headers phase nor the stream
- *   phase is bounded. The devflow override to 120 000ms dates from 0.2.0, where the
- *   same key was applied as an upstream socket *inactivity* timeout whose 10s default
- *   killed any Anthropic request taking >10s to emit its first byte (confirmed: 99
- *   spurious 504s clustered at 10004-10098ms while successful requests ran 25s-99s).
- *   The override is now only a wider connect budget; a user-specified value always wins.
+ *   connectTimeoutMs bounds only the DNS+TCP connect: it is armed on the socket and
+ *   disarmed on 'connect', so neither the headers phase nor the stream phase is
+ *   bounded by it. The relay's own 10s default is therefore the correct value, and a
+ *   larger budget buys nothing — it only delays the failure when a host is
+ *   unroutable. A user-specified value always wins.
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',
@@ -161,17 +159,24 @@ const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
  *     builder sets itself, so dropping it loses nothing.
  *   limits.maxConcurrentRequests  — valid in 0.2.0, removed in 0.3.0 (admission gate
  *     removed).
+ *   limits.maxBodyBytes           — valid through 0.3.0, renamed to
+ *     limits.maxBufferedBodyBytes in 0.4.0. The old spelling is a registered legacy
+ *     key, so leaving it in place would stop the relay from booting.
  *
  * Keys retired before 0.2.0 are deliberately absent: a config that worked against the
  * version devflow shipped cannot contain them.
  */
 const ROUTING_CONFIG_REJECTED_SUBKEYS: Readonly<Record<'anthropic' | 'limits', readonly string[]>> = {
   anthropic: ['streamIdleTimeoutMs'],
-  limits: ['connectTimeoutMs', 'maxConcurrentRequests'],
+  limits: ['connectTimeoutMs', 'maxConcurrentRequests', 'maxBodyBytes'],
 };
 
-/** Default anthropic.connectTimeoutMs injected when not specified by the user (ms). */
-export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000;
+/**
+ * Default anthropic.connectTimeoutMs injected when not specified by the user (ms).
+ * Matches the relay's own default — connectTimeoutMs bounds only DNS+TCP connect,
+ * so a wider budget would only delay failure against an unroutable host (D-EFR-4).
+ */
+export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 10_000;
 
 /**
  * Build the routing config JSON for ~/.devflow/proxy-routing.json.
@@ -181,7 +186,7 @@ export const DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000;
  * out unknown top-level keys and every sub-key in ROUTING_CONFIG_REJECTED_SUBKEYS
  * (each one a hard relay startup error).
  *
- * Injects a default `anthropic.connectTimeoutMs` of 120 000ms when the user
+ * Injects a default `anthropic.connectTimeoutMs` of 10 000ms when the user
  * has not set one — see @D-EFR-4 for the rationale.
  *
  * If `existingContent` is missing or malformed, falls back to a clean config
@@ -217,7 +222,8 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
   }
 
   // Anthropic block: preserve user settings; inject connectTimeoutMs default when absent.
-  // @D-EFR-4: the 10s upstream inactivity timeout kills long opus requests.
+  // @D-EFR-4: connectTimeoutMs is a DNS+TCP connect budget only — it never bounds a
+  // request that has already connected, however long that request runs.
   const existingAnthropic =
     typeof preserved.anthropic === 'object' &&
     preserved.anthropic !== null &&

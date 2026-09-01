@@ -18,7 +18,7 @@ Two authority sources govern the proxy at different points in its lifecycle. `ma
 
 ## System Context
 
-The routing runtime is an internal package (`subswitch@0.3.0`, exact-pinned in `package.json`). Its name is a **hard branding constraint** — it must never appear in user-visible strings, error messages, CLI output, or agent context injections. User-facing vocabulary is always "external model routing" / "Devflow proxy". The one exception is internal code: health-check body comparisons (`body['name'] === 'subswitch'`), `SUBSWITCH_CONFIG` env var, and hook log lines are fine.
+The routing runtime is an internal package (`subswitch@0.4.0`, exact-pinned in `package.json`). Its name is a **hard branding constraint** — it must never appear in user-visible strings, error messages, CLI output, or agent context injections. User-facing vocabulary is always "external model routing" / "Devflow proxy". The one exception is internal code: health-check body comparisons (`body['name'] === 'subswitch'`), `SUBSWITCH_CONFIG` env var, and hook log lines are fine.
 
 ## Proxy Lifecycle
 
@@ -27,7 +27,7 @@ The routing runtime is an internal package (`subswitch@0.3.0`, exact-pinned in `
 | File | Role |
 |------|------|
 | `~/.devflow/proxy.json` | Runtime authority. Tolerant-parsed by `readProxyState()`. ENOENT → default disabled state (not an error). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
-| `~/.devflow/proxy-routing.json` | Routing config written by `buildRoutingConfigJson(port, existingContent?)`. Strict 5-key shape accepted by subswitch 0.3.0: `port`, `logLevel`, `anthropic`, `providers`, `limits`. Always injects `anthropic.connectTimeoutMs: 120000` when absent (D-EFR-4). Strips 0.2.0-era sub-keys that are hard startup errors in 0.3.0: `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, `limits.maxConcurrentRequests` (see `ROUTING_CONFIG_REJECTED_SUBKEYS`). Written before preflight runs on enable. |
+| `~/.devflow/proxy-routing.json` | Routing config written by `buildRoutingConfigJson(port, existingContent?)`. Strict 5-key shape accepted by subswitch 0.4.0: `port`, `logLevel`, `anthropic`, `providers`, `limits`. Always injects `anthropic.connectTimeoutMs: 10000` when absent (D-EFR-4). Strips legacy sub-keys that are hard startup errors in 0.4.0: `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, `limits.maxConcurrentRequests`, `limits.maxBodyBytes` (see `ROUTING_CONFIG_REJECTED_SUBKEYS`). Written before preflight runs on enable. |
 | `manifest.features.proxy` | Init/uninstall authority. Seeds from prior manifest on re-init (ADR-014). Never in `config.json` — manifest-group by design, same as `ambient`/`hud`/`rules`. |
 
 **`isProxyEnabled()` is the sole dormancy authority**: it reads only `proxy.json` (never manifest). This is load-bearing: on preflight failure, `init.ts` converges `proxy.json` to `enabled:false` alongside manifest, hooks, and env — all four artifacts must agree (avoids PF-015). Any path that forces `proxyEnabled=false` must write `proxy.json enabled:false` so that a subsequent `isProxyEnabled()` call in the same process returns false correctly.
@@ -206,18 +206,21 @@ The old "override confirm" prompt is gone. The merge is purely additive (Devflow
 
 `mergeDevflowSettingsTemplate` is exported for unit testing. Every shape check is at the mutation sink (not upstream) per PF-023.
 
-## subswitch 0.3.0 Routing Config Contract (D-EFR-4)
+## subswitch 0.4.0 Routing Config Contract (D-EFR-4)
 
-`buildRoutingConfigJson(port, existingContent?)` builds `proxy-routing.json` with a strict 5-key shape (`port`, `logLevel`, `anthropic`, `providers`, `limits`) accepted by subswitch 0.3.0's `z.strictObject` schema. Unknown top-level keys cause a hard relay startup error — never emit them.
+`buildRoutingConfigJson(port, existingContent?)` builds `proxy-routing.json` with a strict 5-key shape (`port`, `logLevel`, `anthropic`, `providers`, `limits`) accepted by subswitch 0.4.0's `z.strictObject` schema. Unknown top-level keys cause a hard relay startup error — never emit them.
 
-**`ROUTING_CONFIG_REJECTED_SUBKEYS`** strips sub-keys that were valid in prior pinned versions but are hard startup errors in 0.3.0:
+**`ROUTING_CONFIG_REJECTED_SUBKEYS`** strips sub-keys that were valid in prior pinned versions but are hard startup errors in 0.4.0:
 - `anthropic.streamIdleTimeoutMs` — valid in 0.2.0, removed in 0.3.0
 - `limits.connectTimeoutMs` — moved to `anthropic.connectTimeoutMs` in 0.3.0
 - `limits.maxConcurrentRequests` — valid in 0.2.0, removed in 0.3.0
+- `limits.maxBodyBytes` — valid through 0.3.0, renamed `limits.maxBufferedBodyBytes` in 0.4.0
 
-**`anthropic.connectTimeoutMs`** (injected at `DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 120_000`ms when absent): in 0.3.0 this is a genuine DNS+TCP connect budget — armed on the socket, disarmed on the `'connect'` event. It no longer bounds the stream/headers phase. A user-specified value always wins. The 120s override dates from 0.2.0, where the same key was an inactivity cap whose 10s default killed long opus requests.
+**`anthropic.connectTimeoutMs`** (injected at `DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS = 10_000`ms when absent): bounds only the DNS+TCP connect — armed on the socket, disarmed on the `'connect'` event. It never bounds the headers or stream phase, so it cannot cap a long-running request that has already connected. The value matches the relay's own default; a wider budget would only delay failure against an unroutable host. A user-specified value always wins.
 
-`buildRoutingConfigJson` preserves user customisations from the existing file (logLevel, providers, anthropic sub-keys except rejected ones, limits sub-keys except rejected ones) so an upgrade from 0.2.0 cannot leave the relay unable to boot.
+**Body handling in 0.4.0**: bodies over the buffering window are streamed to Anthropic rather than rejected (route labels `anthropic:streamed` / `anthropic:streamed:unsniffed`, log field `bodyMode`). Only translated (Codex) routes still return 413 `request_too_large`. The 0.2.0-era synthesized 503 `overloaded_error` no longer exists — devflow never depended on it.
+
+`buildRoutingConfigJson` preserves user customisations from the existing file (logLevel, providers, anthropic sub-keys except rejected ones, limits sub-keys except rejected ones) so an upgrade from an older pinned version cannot leave the relay unable to boot.
 
 ## Model Discovery (model-discovery.ts)
 

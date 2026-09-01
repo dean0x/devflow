@@ -251,6 +251,14 @@ describe('buildRoutingConfigJson — base behavior', () => {
     expect(anthropic.connectTimeoutMs).toBe(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS);
   });
 
+  // Pinned by value, not just by symbol: connectTimeoutMs bounds only DNS+TCP connect,
+  // so the relay's own 10s default is the correct budget. A wider value silently
+  // delays failure against an unroutable host, and every other assertion in this file
+  // compares against the imported symbol — which would stay green if the value drifted.
+  it('injects the relay-default 10s connect budget, not a wider one (D-EFR-4)', () => {
+    expect(DEFAULT_ANTHROPIC_CONNECT_TIMEOUT_MS).toBe(10_000);
+  });
+
   it('only emits allowed top-level keys (strictObject constraint D-EFR-4)', () => {
     const allowed = new Set(['port', 'logLevel', 'anthropic', 'providers', 'limits']);
     const obj = JSON.parse(buildRoutingConfigJson(4141)) as Record<string, unknown>;
@@ -300,8 +308,8 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(limits.maxConcurrent).toBe(10);
   });
 
-  // Keys that were valid under the previously pinned 0.2.0 runtime and are registered
-  // legacy keys in 0.3.0 — a hard startup error, not a warning. Carrying a user's own
+  // Keys that were valid under a previously pinned runtime and are registered legacy
+  // keys in the current one — a hard startup error, not a warning. Carrying a user's own
   // proxy-routing.json forward across the upgrade must drop them, or the relay that the
   // ensure-proxy hook spawns dies on boot every session with no route back.
   it('strips anthropic.streamIdleTimeoutMs (removed in the pinned runtime)', () => {
@@ -326,6 +334,27 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     const limits = obj.limits as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(limits, 'maxConcurrentRequests')).toBe(false);
     expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('strips limits.maxBodyBytes (renamed maxBufferedBodyBytes in the pinned runtime)', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxBodyBytes: 10_485_760, maxConcurrent: 10 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(limits, 'maxBodyBytes')).toBe(false);
+    expect(limits.maxConcurrent).toBe(10);
+  });
+
+  it('preserves the current limits.maxBufferedBodyBytes spelling', () => {
+    const existing = JSON.stringify({
+      port: 4141,
+      limits: { maxBufferedBodyBytes: 10_485_760 },
+    });
+    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
+    const limits = obj.limits as Record<string, unknown>;
+    expect(limits.maxBufferedBodyBytes).toBe(10_485_760);
   });
 
   it('preserves providers block from existing config', () => {
