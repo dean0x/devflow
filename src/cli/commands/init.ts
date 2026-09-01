@@ -56,6 +56,11 @@ import {
   runComplianceStep,
   buildClackCompliancePrompts,
 } from './compliance-prompts.js';
+import {
+  shouldRunAttributionStep,
+  runAttributionStep,
+  buildClackAttributionPrompts,
+} from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
@@ -680,6 +685,31 @@ export const initCommand = new Command('init')
         // prints the Compliance line from complianceSummary via formatComplianceSummary.
       }
 
+      // B5: attribution wizard step — runs only when the Setup-mode prompt actually ran
+      // (modePromptShown=true), preserving the promptless contracts of --recommended and !isTTY.
+      // shouldRunAttributionStep gates on modePromptShown rather than the mode name (PF-029).
+      // No CLI override path exists for attribution on the Recommended path (D27).
+      let wizardSuppressAttribution: boolean | undefined;
+      if (shouldRunAttributionStep({
+        mode: 'recommended',
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: false,
+      })) {
+        const attributionStep = await runAttributionStep({
+          seed: enabledFlags['suppress-attribution'] as boolean,
+          prompts: buildClackAttributionPrompts(),
+        });
+        if (attributionStep.kind === 'cancelled') {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        wizardSuppressAttribution = attributionStep.suppress;
+      }
+      if (wizardSuppressAttribution !== undefined) {
+        enabledFlags = { ...enabledFlags, 'suppress-attribution': wizardSuppressAttribution };
+      }
+
       // Apply explicit CLI toggles on top of the seed.
       // Precedence: explicit CLI flag > wizard result > seed value (prior state > registry default).
       // proxy is included: --proxy/--no-proxy CLI flags override the seed in non-interactive mode.
@@ -946,6 +976,33 @@ export const initCommand = new Command('init')
       // No third case in practice: on this path the predicate only returns false for a
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
+
+      // Attribution feature (after compliance, before flags — runs in both Advanced and re-init paths).
+      // Gated by the same shouldRunAttributionStep predicate as the Recommended path so the
+      // documented gate table is the single authority for both — the two paths cannot drift.
+      // Here isTTY is guaranteed true (the non-TTY guard above exit-1'd), so the predicate
+      // reduces to "no CLI override" — no CLI override exists for attribution (D27).
+      if (shouldRunAttributionStep({
+        mode: 'advanced',
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: false,
+      })) {
+        const attributionStep = await runAttributionStep({
+          seed: enabledFlags['suppress-attribution'] as boolean,
+          prompts: buildClackAttributionPrompts(),
+        });
+        if (attributionStep.kind === 'cancelled') {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        enabledFlags = { ...enabledFlags, 'suppress-attribution': attributionStep.suppress };
+        // Advanced path emits an outcome line (mirrors compliance step pattern).
+        for (const msg of attributionStep.messages) {
+          if (msg.level === 'success') p.log.success(msg.text);
+          else p.log.info(msg.text);
+        }
+      }
 
       /**
        * D40: init applies seeded flag defaults non-interactively. Flags are customized

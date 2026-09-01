@@ -11,8 +11,8 @@
  *  - Hooks absent → changed:true (added)
  *  - Preserves user-owned keys untouched (env, permissions, model, etc.)
  *  - statusLine set only when absent
- *  - attribution set only when absent
  *  - statusLine preserved when already set by the user
+ *  - attribution is NOT injected (managed by flags pipeline — D27)
  *  - Idempotent — double merge is the same as single merge
  *  - Template hook with no command string is skipped silently
  *  - Empty template → changed:false
@@ -35,14 +35,13 @@ function makeHookMatcher(command: string, timeout = 10): HookMatcher {
   return { hooks: [{ type: 'command', command, timeout }] };
 }
 
-function makeTemplate(commands: string[], statusLine = 'devflow: {branch}', attribution = 'Devflow'): Record<string, unknown> {
+function makeTemplate(commands: string[], statusLine = 'devflow: {branch}'): Record<string, unknown> {
   const matchers = commands.map((cmd) => makeHookMatcher(cmd));
   return {
     hooks: {
       'SessionStart': matchers,
     },
     statusLine,
-    attribution,
   };
 }
 
@@ -67,7 +66,6 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
         'SessionStart': [makeHookMatcher(cmd)],
       },
       statusLine: 'devflow: {branch}',
-      attribution: 'Devflow',
     };
     const template = makeTemplate([cmd]);
     const { changed } = mergeDevflowSettingsTemplate(existing, template);
@@ -143,16 +141,21 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     expect(existing.statusLine).toBe('my-custom-status-line');
   });
 
-  it('sets attribution from template when absent on existing', () => {
+  it('does NOT inject attribution — attribution is managed by flags pipeline (D27)', () => {
+    // mergeDevflowSettingsTemplate never writes an attribution key regardless of
+    // what the template contains. Attribution is written/removed by applyFlags/
+    // stripFlags (suppress-attribution flag, D-ATTR-GUARD shape guard).
     const existing: Record<string, unknown> = {};
-    const template = { statusLine: 's', attribution: 'Devflow' };
+    const template = { statusLine: 's' }; // template has no attribution key (R2)
     mergeDevflowSettingsTemplate(existing, template);
-    expect(existing.attribution).toBe('Devflow');
+    expect(existing.attribution).toBeUndefined();
   });
 
-  it('does NOT overwrite attribution when user already has one', () => {
+  it('does NOT delete an existing attribution value (preserve user values)', () => {
+    // Even when attribution appears in template (legacy or edge case), the
+    // merge function must not touch an existing attribution value.
     const existing: Record<string, unknown> = { attribution: 'my-org' };
-    const template = { statusLine: 's', attribution: 'Devflow' };
+    const template: Record<string, unknown> = { statusLine: 's' };
     mergeDevflowSettingsTemplate(existing, template);
     expect(existing.attribution).toBe('my-org');
   });

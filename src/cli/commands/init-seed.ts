@@ -224,11 +224,41 @@ export function resolveSeedPlugins(
 }
 
 /**
+ * Extract the attribution suppression state from a settings JSON string.
+ *
+ * Returns `true` when the exact devflow-managed attribution shape
+ * `{"commit":"","pr":""}` is present, signaling that suppress-attribution was
+ * active at the last install. Returns `undefined` when the block is absent or
+ * holds a different (user-custom) value — callers fall through to the manifest
+ * FlagsRecord entry or the registry default.
+ *
+ * Mirrors resolveExistingViewMode: returns undefined on malformed JSON, absent
+ * key, or any non-devflow attribution value.
+ *
+ * Pure function — no I/O, no side effects.
+ */
+export function resolveExistingAttributionSuppression(settingsJson: string): boolean | undefined {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const attr = (parsed as Record<string, unknown>).attribution;
+    if (attr === null || typeof attr !== 'object' || Array.isArray(attr)) return undefined;
+    const a = attr as Record<string, unknown>;
+    // Only match the exact devflow-managed shape: {"commit":"","pr":""} with no extra keys.
+    if (a['commit'] === '' && a['pr'] === '' && Object.keys(a).length === 2) return true;
+    return undefined; // custom value — fall through to manifest / default
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Compose the full init seed from manifest, project config, settings, and registry.
  *
  * view-mode priority: existing settings.json (non-default) → manifest → 'default'.
- * The resolved view mode is encoded into flags['view-mode'] so all flag state lives
- * in one FlagsRecord (applying PF-015: fold before strip — the fold happens here).
+ * suppress-attribution priority: settings.json exact devflow shape → manifest → false.
+ * All flag overrides are encoded into flags so all flag state lives in one FlagsRecord
+ * (applying PF-015: fold before strip — the fold happens here).
  *
  * This is the single composition point; callers (init.ts hoist block) call this
  * once and pass `seed` down to prompt wiring.
@@ -266,9 +296,27 @@ export function resolveInitSeed(
     resolvedViewMode = 'default';              // fall back to neutral
   }
 
+  // Encode resolved attribution suppression (D27) into flags['suppress-attribution'].
+  // Priority: settings.json exact devflow shape → manifest FlagsRecord entry → false.
+  // resolveExistingAttributionSuppression returns true only for the exact managed shape
+  // {"commit":"","pr":""}; custom values return undefined so the manifest entry wins.
+  const existingAttr = resolveExistingAttributionSuppression(settingsSnapshot);
+  const resolvedSuppressAttr: boolean = existingAttr !== undefined
+    ? existingAttr                                        // settings.json exact shape wins
+    : ((flags['suppress-attribution'] as boolean) ?? false); // manifest or registry default
+
   // Return a fresh spread rather than mutating flags in place — keeps this function pure
   // per the module docblock and avoids aliasing if the caller inspects seed.flags.
-  return { features, flags: { ...flags, 'view-mode': resolvedViewMode }, workflowPlugins, languagePlugins };
+  return {
+    features,
+    flags: {
+      ...flags,
+      'view-mode': resolvedViewMode,
+      'suppress-attribution': resolvedSuppressAttr,
+    },
+    workflowPlugins,
+    languagePlugins,
+  };
 }
 
 /**

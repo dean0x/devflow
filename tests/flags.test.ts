@@ -73,10 +73,15 @@ describe('FLAG_REGISTRY — structural invariants', () => {
     const boolFlags = FLAG_REGISTRY.filter((f): f is BooleanFlagDef => f.kind === 'boolean');
     expect(boolFlags.length).toBeGreaterThan(0);
     for (const flag of boolFlags) {
-      expect(
-        typeof flag.onPayload === 'string' || typeof flag.onPayload === 'boolean',
-        `${flag.id}: onPayload must be string or boolean`,
-      ).toBe(true);
+      // Env targets must use strings; setting targets may also use plain objects (D27/D-ATTR-GUARD).
+      const isValidPayload =
+        typeof flag.onPayload === 'string' ||
+        typeof flag.onPayload === 'boolean' ||
+        (flag.target.type === 'setting' &&
+          typeof flag.onPayload === 'object' &&
+          flag.onPayload !== null &&
+          !Array.isArray(flag.onPayload));
+      expect(isValidPayload, `${flag.id}: onPayload must be string, boolean, or plain object (setting targets only)`).toBe(true);
       expect(typeof flag.defaultValue, `${flag.id}: defaultValue must be boolean`).toBe('boolean');
     }
   });
@@ -198,6 +203,9 @@ describe('getDefaultFlagsRecord', () => {
 
     // New optional boolean flag
     expect(record['enable-todo-tools']).toBe(false);
+
+    // Attribution suppression flag (off by default — D27)
+    expect(record['suppress-attribution']).toBe(false);
 
     // view-mode: default is neutralValue, so entry is 'default'
     expect(record['view-mode']).toBe('default');
@@ -1777,5 +1785,79 @@ describe('persistence round-trip: manifest write shape → resolveSeedFlags', ()
 
     // null in manifest means "deliberately unset" — must be preserved as null
     expect(seeded['subagent-spawn-depth']).toBeNull();
+  });
+});
+
+// ─── suppress-attribution — shape guard (D27 / D-ATTR-GUARD) ─────────────────
+
+describe('suppress-attribution flag — shape guard (D27)', () => {
+  const DEVFLOW_ATTR = { commit: '', pr: '' };
+
+  it('applyFlags with true writes the attribution block', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}), { 'suppress-attribution': true }));
+    expect(result.attribution).toEqual(DEVFLOW_ATTR);
+  });
+
+  it('applyFlags with false deletes the exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('applyFlags with null deletes the exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': null }));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('applyFlags with false does NOT delete custom attribution (shape guard)', () => {
+    const custom = { commit: 'My Org', pr: 'My Org' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toEqual(custom);
+  });
+
+  it('applyFlags with false does NOT delete string attribution (shape guard)', () => {
+    const input = JSON.stringify({ attribution: 'My Org' });
+    const result = JSON.parse(applyFlags(input, { 'suppress-attribution': false }));
+    expect(result.attribution).toBe('My Org');
+  });
+
+  it('stripFlags deletes exact devflow attribution shape', () => {
+    const input = JSON.stringify({ attribution: DEVFLOW_ATTR });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('stripFlags does NOT delete custom attribution (shape guard)', () => {
+    const custom = { commit: 'My Org', pr: 'My Org' };
+    const input = JSON.stringify({ attribution: custom });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toEqual(custom);
+  });
+
+  it('stripFlags does NOT delete string attribution', () => {
+    const input = JSON.stringify({ attribution: 'My Org' });
+    const result = JSON.parse(stripFlags(input));
+    expect(result.attribution).toBe('My Org');
+  });
+
+  it('suppress-attribution flag entry: id=suppress-attribution, setting target, key=attribution', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
+    expect(flag).toBeDefined();
+    expect(flag.kind).toBe('boolean');
+    expect(flag.target.type).toBe('setting');
+    expect(flag.target.key).toBe('attribution');
+    expect(flag.recommended).toBe(false);
+    expect(flag.defaultValue).toBe(false);
+    if (flag.kind === 'boolean') {
+      expect(flag.onPayload).toEqual(DEVFLOW_ATTR);
+      expect(flag.settingDeleteGuard).toEqual(DEVFLOW_ATTR);
+    }
+  });
+
+  it('blurb cap: suppress-attribution blurb is ≤ 30 chars', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'suppress-attribution')!;
+    expect(flag.blurb.length).toBeLessThanOrEqual(30);
   });
 });

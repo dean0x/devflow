@@ -64,10 +64,22 @@ interface FlagDefCommon {
 /** A boolean on/off flag. `onPayload` is written when the flag is enabled. */
 export interface BooleanFlagDef extends FlagDefCommon {
   readonly kind: 'boolean';
-  /** The value written to the target when the flag is ON. Env targets must use strings. */
-  readonly onPayload: string | boolean;
+  /**
+   * The value written to the target when the flag is ON.
+   * - Env targets must use strings.
+   * - Setting targets may use strings, booleans, or plain objects.
+   */
+  readonly onPayload: string | boolean | Record<string, unknown>;
   /** Default value; false = neutral for booleans (key is deleted when false). */
   readonly defaultValue: boolean;
+  /**
+   * D-ATTR-GUARD: when set, deletion of the target setting key is shape-guarded —
+   * the key is only removed when its current value deep-equals this shape exactly.
+   * Prevents erasing user-customized values (e.g. attribution with a real org name)
+   * when the flag transitions to neutral.
+   * Only honoured for setting-target boolean flags. Ignored for env targets.
+   */
+  readonly settingDeleteGuard?: Record<string, unknown>;
 }
 
 /** An enum flag. `neutralValue` is the value that means "no preference" (key is deleted). */
@@ -407,6 +419,25 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_ENABLE_TODO_TOOLS' },
     onPayload: '1',
+    recommended: false,
+    defaultValue: false,
+  },
+
+  {
+    // D27: gates Claude Code's AI-attribution injection into git commits and PRs.
+    // When true, writes {"commit":"","pr":""} to settings.json which suppresses attribution.
+    // When false/null (neutral), removes the key ONLY when the current value is the exact
+    // devflow-managed shape (settingDeleteGuard). A custom attribution value (e.g. an org
+    // name) is never deleted — shape guard prevents erasure (D-ATTR-GUARD).
+    id: 'suppress-attribution',
+    label: 'Suppress AI attribution',
+    description: 'Remove AI-attribution labels from git commits and pull requests',
+    hint: 'Writes {"commit":"","pr":""} to settings.json — suppresses Claude attribution in git history',
+    blurb: 'hide AI attribution labels',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'attribution' },
+    onPayload: { commit: '', pr: '' },
+    settingDeleteGuard: { commit: '', pr: '' },
     recommended: false,
     defaultValue: false,
   },
@@ -961,6 +992,32 @@ export function migrateLegacyFlagsToRecord(
 // ─── Apply / Strip ────────────────────────────────────────────────────────────
 
 /**
+ * Structural deep-equality limited to plain JSON values (objects, arrays, primitives).
+ * Returns false for non-JSON types (functions, class instances, undefined).
+ *
+ * D-ATTR-GUARD: used by the settingDeleteGuard check in applyFlags and stripFlags to
+ * prevent erasing user-customized settings when a managed flag transitions to neutral.
+ */
+function deepEqualsPlain(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const aa = a as unknown[];
+    const ba = b as unknown[];
+    if (aa.length !== ba.length) return false;
+    return aa.every((v, i) => deepEqualsPlain(v, ba[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao);
+  const bKeys = Object.keys(bo);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(k => Object.prototype.hasOwnProperty.call(bo, k) && deepEqualsPlain(ao[k], bo[k]));
+}
+
+/**
  * Return `v` as a `Record<string, unknown>` only when it is a plain object.
  * Returns undefined for arrays, null, or non-objects.
  *
@@ -1029,7 +1086,12 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
         const env = asPlainObject(settings.env);
         if (env) delete env[flag.target.key];
       } else {
-        delete settings[flag.target.key];
+        // D-ATTR-GUARD: for flags with settingDeleteGuard, only delete when the current
+        // value deep-equals the guarded shape. Prevents erasing user-customized values.
+        const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
+        if (guard === undefined || deepEqualsPlain(settings[flag.target.key], guard)) {
+          delete settings[flag.target.key];
+        }
       }
     } else {
       const payload = buildPayload(flag, safe as FlagValue);
@@ -1074,7 +1136,12 @@ export function stripFlags(settingsJson: string): string {
     if (flag.target.type === 'env') {
       if (env) delete env[flag.target.key];
     } else {
-      delete settings[flag.target.key];
+      // D-ATTR-GUARD: for flags with settingDeleteGuard, only delete when the current
+      // value deep-equals the guarded shape. Preserves user-customized values on uninstall.
+      const guard = flag.kind === 'boolean' ? flag.settingDeleteGuard : undefined;
+      if (guard === undefined || deepEqualsPlain(settings[flag.target.key], guard)) {
+        delete settings[flag.target.key];
+      }
     }
   }
 

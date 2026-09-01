@@ -811,8 +811,9 @@ function hookCommandsOf(matcher: unknown): string[] {
 /**
  * Merge Devflow's template hook entries and top-level fields into an existing
  * parsed settings object. Idempotent by exact command string — a hook that is
- * already present is skipped. Sets `statusLine` and `attribution` only when the
- * user has no existing value for them. Mutates `existing` in place.
+ * already present is skipped. Sets `statusLine` only when the user has no existing
+ * value. Attribution is NOT injected here — managed by the flags pipeline (D27).
+ * Mutates `existing` in place.
  *
  * D-SETTINGS-1: merge strategy — never replace; only add devflow entries that are absent.
  * Returns { changed: true } when any field was added.
@@ -864,11 +865,10 @@ export function mergeDevflowSettingsTemplate(
     changed = true;
   }
 
-  // Set attribution only if the user has none
-  if (existing.attribution === undefined && template.attribution !== undefined) {
-    existing.attribution = template.attribution;
-    changed = true;
-  }
+  // Attribution is NOT injected here. It is managed exclusively by the flags
+  // pipeline (suppress-attribution flag, D27). Removing it from merge prevents a
+  // double-write: applyFlags writes it when the flag is on; stripFlags removes
+  // it when the flag is off (shape-guarded, D-ATTR-GUARD).
 
   return { changed };
 }
