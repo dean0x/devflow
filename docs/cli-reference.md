@@ -8,7 +8,7 @@ npx devflow-kit init
 
 The interactive wizard offers two modes:
 - **Recommended** (default) — Sensible defaults, quick setup
-- **Advanced** — Full interactive flow with all options
+- **Advanced** — Full interactive flow with all options, including one attribution question (Recommended never asks); the non-interactive path is `devflow flags --enable/--disable suppress-attribution` — there is no `--attribution` init flag
 
 Use `--recommended` or `--advanced` flags for non-interactive setup.
 
@@ -231,7 +231,7 @@ All 29 flags by kind and devflow default:
 | `disable-autoupdater` | boolean | env `DISABLE_AUTOUPDATER` | `false` |
 | `agent-teams` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `false` |
 | `enable-todo-tools` | boolean | env `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `false` |
-| `suppress-attribution` | boolean | setting `attribution` | `false` |
+| `suppress-attribution` | boolean | setting `attribution` | `false` ²|
 | `subagent-spawn-depth` | number | env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | unset (upstream: 3) |
 | `workflow-size-guideline` | enum | setting `workflowSizeGuideline` | unset (`small\|medium\|large\|unrestricted`) |
 | `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
@@ -240,6 +240,8 @@ All 29 flags by kind and devflow default:
 | `view-mode` | enum | setting `viewMode` | `default` (key omitted when default) |
 
 ¹ Boolean flags targeting an env var write the flag's configured string value when enabled (e.g., `claude-sonnet-4-6` for `pin-sonnet-4-6`), not `1` or `true`. The env var is deleted when the flag is disabled or unset.
+
+² `suppress-attribution` writes the object `{"commit":"","pr":""}` to the `attribution` key in `settings.json` when enabled — not `true`. Disabling or uninstalling removes the `attribution` key only when its current value exactly matches that shape; a custom attribution object is preserved. Enabling always replaces any existing `attribution` value, including a custom one.
 
 ## External Model Routing (Devflow Proxy)
 
