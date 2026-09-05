@@ -28,7 +28,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
-import { requireDistFiles, requireDistFile } from './helpers.js'
+import { requireDistFiles, requireDistFile, resolveAgentSource } from './helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents')
@@ -746,7 +746,9 @@ describe('GAP-4: roster model tiers match agent frontmatter (fail-loud when dist
         violations.push(`  Roster entry '${agentName}' has no matching agent file in src/assets/agents/`)
         continue
       }
-      const agentFile = path.join(AGENTS_DIR, `${agentSlug}.md`)
+      // Use resolveAgentSource (dist-preferred, src-fallback, ENOENT-tolerant on dist)
+      // rather than a literal AGENTS_DIR path — Phase 1 may rename agents (AC-0.7).
+      const agentFile = resolveAgentSource(agentSlug).path
       const frontmatterModel = readFrontmatterModel(agentFile)
       if (frontmatterModel !== rosterTier) {
         violations.push(
