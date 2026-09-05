@@ -26,7 +26,8 @@
     "version:bump": "npx tsx scripts/bump-version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:golden:update": "node scripts/update-golden.js"
   },
   "keywords": [
     "claude",
