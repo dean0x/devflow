@@ -276,12 +276,12 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 ## Test Guards
 
-Four test files provide static content guards that fail loudly when load-bearing literals are silently changed (avoids PF-018):
+The following test files provide static content guards that fail loudly when load-bearing literals are silently changed (avoids PF-018). Phase-0 added seven new files (`tests/seams/command-agent-input.test.ts`, `tests/goldens/git-agent-golden.test.ts`, `tests/goldens/github-status-lines.test.ts`, `tests/guards/agent-source-resolver.test.ts`, `tests/guards/retired-wording.test.ts`, `tests/guards/numeric-floor-manifest.test.ts`, `tests/guards/extended-references.test.ts`) alongside the four core guard files listed below:
 
 **`tests/git-agent.test.ts`** (source-file guards, no build required):
 - Guard 0: file non-vacuousness
-- Guard 1: required operation sections (`## Operation: {name}`) exist for all 15 operations
-- Guard 2: numeric bounds — 60000-char caps for post-review-summary, post-resolution-summary, post-wave-report; ≤50 threads bound for resolve-review-threads; ≤50 issues bound for backlink-shipped-issues; ≤2-page / 100-thread bound for fetch-review-threads; learn-conventions branch/tag/PR scan bounds
+- Guard 1: required operation sections (`## Operation: {name}`) exist for all 17 operations (15 original + `fetch-issue` and `fetch-issues-batch` added in Phase 0)
+- Guard 2: numeric bounds — 60000-char caps for post-review-summary, post-resolution-summary, post-wave-report, and manage-debt; ≤50 threads bound for resolve-review-threads; ≤50 issues bound for backlink-shipped-issues and fetch-issues-batch; ≤2-page / 100-thread bound for fetch-review-threads; learn-conventions branch/tag/PR scan bounds
 - Guard 3: D9 gate — pins the exact "ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty" sentence; also pins FALSE_POSITIVE and BY_DESIGN as reply-only
 - Guard 4: D4 rate-limit backpressure clauses (STOP trigger, THROTTLED report, `X-RateLimit-Remaining < 10` full-stop threshold, `< 50` backpressure threshold)
 - Guard 5: Dedup marker formats — `devflow:review-summary cycle:{N} ts:` pair, `devflow:resolution-summary ts:`
@@ -289,7 +289,7 @@ Four test files provide static content guards that fail loudly when load-bearing
 **`tests/registry-integrity.test.ts` — Guard 6** (build-gated):
 - **Forward check**: every `OPERATION: X` inside a Git-agent spawn block (`Agent(subagent_type="Git")`) in any compiled command must have a matching `## Operation: X` heading in git.md
 - **Reverse check**: every `## Operation: X` in git.md must be referenced by name in at least one compiled command, OR appear in `INTERNAL_OPS`
-- `INTERNAL_OPS` allowlist: `learn-conventions` (invoked internally by setup-task, not from commands directly) and `fetch-issues-batch` (no compiled command wired yet)
+- `INTERNAL_OPS` allowlist: `learn-conventions` only (invoked internally by setup-task, not from commands directly). `fetch-issues-batch` was removed from INTERNAL_OPS in Phase 0 — it is now wired live from `plan.mds` (AC-0.11, SG-11)
 - Fail-loud: asserts `dist/commands/` exists before checking — a guard that silently skips on a missing build artifact is not a guard
 
 **`tests/build-mds.test.ts §15`** (build-gated, Phase D traceability ops):

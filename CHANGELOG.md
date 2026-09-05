@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/debug #42` wrong Git-op spawn key** — before: `debug.mds` passed `ISSUE: {issue number}` to the `fetch-issue` Git operation, which declares `ISSUE_INPUT:`; the key mismatch meant no issue was ever fetched. After: `debug.mds` passes `ISSUE_INPUT: {issue reference}` — the key the op declares. (AC-0.1)
+
+- **`/plan` with issue references: issue body never fetched** — before: `/plan #42` parsed the issue reference but never retrieved it; the design was built without the issue content. After: `/plan #42` spawns the Git agent with `OPERATION: fetch-issue`; `/plan #12 #15 #18` uses `OPERATION: fetch-issues-batch` (≤50 issues, `TRUNCATED ({n} not processed)` beyond the cap). (AC-0.3)
+
+- **`gh issue` invocations in the command layer** — before: three sites in deployed commands (`dynamic-plan.mds`, `dynamic-build.mds`, `_wave.mds`) invoked or described `gh issue view` directly outside Git spawn fences, bypassing the Git agent. After: all `gh issue` invocations route through the Git agent; `gh pr view` at three sites (`code-review.md`, `bug-analysis.md`, `resolve.md`) remains as an explicit allowlisted PR-description exception. (AC-0.4)
+
+- **`resolve.mds` D9 thread-resolution rule contradicted `git.md` single authority** — before: `resolve.mds` stated that `resolveReviewThread` runs for `FIXED`, `FALSE_POSITIVE`, and `BY_DESIGN` verdicts, contradicting `git.md`'s D9 single authority which resolves threads only for `FIXED` with `commit_sha` non-empty. After: `resolve.mds` matches `git.md`'s D9 gate verbatim — thread resolution runs only for `FIXED` with `commit_sha` non-empty; `FALSE_POSITIVE` and `BY_DESIGN` are reply-only. (AC-0.5)
+
+- **`release.md` promised a `close milestone` step that does not exist** — before: `release.md` listed a post-release "close milestone" step; no such Git operation existed, so the step was silently a no-op and the command description was false. After: the `close milestone` reference is removed. (AC-0.14)
+
 ---
 
 ## [2.4.0] - 2026-09-01

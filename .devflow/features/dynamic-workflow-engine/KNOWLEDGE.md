@@ -68,7 +68,7 @@ Partials declare **no** `output-dir:` frontmatter key. Host files declare it as 
 
 ### Compiled output and test pinning
 
-`scripts/build-mds.ts` compiles all 13 host files (9 knowledge + 4 dynamic). The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
+`scripts/build-mds.ts` compiles all 13 host files (9 knowledge + 4 dynamic) — `ALL_HOSTS = 13`. **`DIST_FILES` = 14**: the 13 compiled outputs plus `release.md`, which is hand-authored and copied verbatim by the build; the divergence is permanent (SG-13). Compilation-scope guards use `ALL_HOSTS`; deployed-behaviour guards (gh-issue scope, compliance_gate, retired wording) use `DIST_FILES`. The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
 - `Simplify` and `Scrutinize` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
 - **C1 (single-pass review):** presence: `The review pass runs exactly ONCE`, `The pass runs exactly ONCE`, `Never author additional cycles or a delta re-review of fix commits` (invariant #7 unique), `Budget scales roster and verification votes, NEVER the number of passes` (review_pass prose unique); absence: `DELTA REVIEW`, `reviewBaseSha`, `preFixSha`, `maxCycles`, `cyclesRun`, `fixedInCycle`, `allCoverageGaps`, `for (let cycle` (skeleton guard), `review_loop`, `/review[- ]loop/i`
 - `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
@@ -275,7 +275,15 @@ In the SINGLE mode workflow's final Gate 1 (#2, `gate1-final` phase), retry atte
 - `src/assets/commands/dynamic-build.mds` — main build command source with inline SINGLE + WAVE workflow scripts
 - `dist/commands/dynamic-build.md` — compiled artifact pinned by test suite
 - `tests/build-mds.test.ts` — doctrine-literal pinning tests (sections 10, 12, 13)
-- `scripts/build-mds.ts` — unified MDS compiler (13 hosts → compiled .md files)
+- `scripts/build-mds.ts` — unified MDS compiler (13 compiled hosts `ALL_HOSTS`; `DIST_FILES` = 14 including hand-authored `release.md` — SG-13 permanent divergence)
+
+## Deliberate Exceptions (AC-0.4 gh-issue scope guard)
+
+Two categories of deliberate exceptions to the AC-0.4 guard (`tests/build-mds.test.ts §21`) that bars `gh issue` invocations or descriptive mentions from deployed commands outside Git spawn fences:
+
+**`gh pr view` at three prose sites** — `code-review.md` (source: `code-review.mds:76-78`), `bug-analysis.md` (source: `bug-analysis.mds:43-45`), and `resolve.md` (source: `resolve.mds:63`) each fetch a PR description via `gh pr view {pr_number}` in a bash prose block, not inside a Git spawn fence. This is an explicit allowlisted PR-hosting exception: `gh pr` is not `gh issue`, and fetching the PR body for display is unrelated to the issue-routing contract. Encoded in the guard's `GH_PR_VIEW_EXCEPTION_FILES` set.
+
+**`release.md:85` conventions read** — `release.md:85` instructs the release orchestrator to consult `.devflow/conventions.md` directly for version/tag naming conventions (a local file, not a GitHub API call). This is a local-file read that does not route through the Git agent; it is exempt from the AC-0.4 guard by definition (no `gh` CLI involved). Recorded here so future guard authors do not flag it as an oversight.
 
 ## Related
 
