@@ -2,38 +2,80 @@ import { describe, it, expect } from 'vitest';
 import {
   isClaudeAvailable,
   runClaudeAndWait,
-  getSessionSubagentPreloadedSkills,
+  getSubagentPreloadResult,
 } from './helpers.js';
+
+/**
+ * Maximum spawn attempts per agent type. One bounded retry is legitimate
+ * mitigation for LLM non-determinism: haiku may occasionally answer the
+ * parent prompt directly (exit 0) without calling the Agent tool, leaving
+ * no subagents/ directory. A second attempt almost always succeeds.
+ *
+ * Two attempts total (1 original + 1 retry). Never more.
+ */
+const MAX_SPAWN_ATTEMPTS = 2;
 
 /**
  * Spawn an agent by name and return the preloaded skills from all subagent
  * transcripts in the session that was actually spawned.
  *
- * D33 — uses session-scoped transcript scanning: runClaudeAndWait captures the
- * session_id from the JSON result, then getSessionSubagentPreloadedSkills reads
- * only that session's subagents/ directory. Concurrent agents running in the
- * same cwd (e.g., the devflow pipeline's own Code/Validate agents) cannot
- * contaminate the result.
+ * Session identity is deterministic: `runClaudeAndWait` generates a UUID before
+ * spawning and passes it via `--session-id`. The subagents/ directory is then
+ * read by exact path, eliminating the directory-diff race that caused sporadic
+ * null session IDs when background Claude processes (e.g., devflow memory worker)
+ * created new session directories concurrently.
+ *
+ * Outcome classification:
+ *  - 'no-session-dir': parent answered directly without spawning — retry once.
+ *  - 'no-transcripts': subagents/ dir exists but no agent-*.jsonl files — fail.
+ *  - 'ok': one or more transcripts found; return them for skill assertion.
  *
  * Returns string[][] — one skill list per transcript. The caller asserts that
  * at least one transcript contains the expected skills, avoiding a race where
  * Claude spawns auxiliary subagents whose transcript appears alongside the target.
  */
 async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): Promise<string[][]> {
-  const result = await runClaudeAndWait(
-    `Use the Agent tool with subagent_type="${agentType}" to ${prompt}. Only spawn the agent, do not do any other work.`,
-    { timeout: 60000, model: 'haiku', allowedTools: 'Agent' },
-  );
-  expect(
-    result.sessionId,
-    `No session_id in claude output for ${agentType} (exit=${result.exitCode}, ${result.durationMs}ms, cwd=${process.cwd()})`,
-  ).not.toBeNull();
-  const allPreloads = getSessionSubagentPreloadedSkills(result.sessionId!);
-  expect(
-    allPreloads.length,
-    `No subagent transcript found for ${agentType} (sessionId=${result.sessionId}, exit=${result.exitCode}, ${result.durationMs}ms, cwd=${process.cwd()})`,
-  ).toBeGreaterThan(0);
-  return allPreloads;
+  for (let attempt = 1; attempt <= MAX_SPAWN_ATTEMPTS; attempt++) {
+    const result = await runClaudeAndWait(
+      // Explicit imperative so haiku cannot answer the task itself.
+      `You MUST call the Agent tool exactly once with subagent_type="${agentType}" and the prompt below. ` +
+      `Do not answer the task yourself. After the agent returns, reply with the single word DONE.\n\n` +
+      `Prompt: ${prompt}`,
+      { timeout: 60000, model: 'haiku', allowedTools: 'Agent' },
+    );
+
+    const preloadResult = getSubagentPreloadResult(result.sessionId);
+
+    if (preloadResult.kind === 'no-session-dir') {
+      if (attempt < MAX_SPAWN_ATTEMPTS) {
+        // Parent answered directly without spawning — one bounded retry (PF-018: no silent vacuous pass).
+        console.warn(
+          `[attempt ${attempt}/${MAX_SPAWN_ATTEMPTS}] ${agentType}: parent spawned no subagent ` +
+          `(exit=${result.exitCode}, ${result.durationMs}ms). Retrying.\n` +
+          `Output tail: ${result.stdoutTail.slice(-400)}`,
+        );
+        continue;
+      }
+      expect.fail(
+        `${agentType}: parent spawned no subagent after ${MAX_SPAWN_ATTEMPTS} attempts. ` +
+        `exit=${result.exitCode}, duration=${result.durationMs}ms.\n` +
+        `Output tail (last ${result.stdoutTail.length}B):\n${result.stdoutTail}`,
+      );
+    }
+
+    if (preloadResult.kind === 'no-transcripts') {
+      expect.fail(
+        `${agentType}: subagents/ directory exists but contains zero agent-*.jsonl transcripts. ` +
+        `sessionId=${result.sessionId}, exit=${result.exitCode}, duration=${result.durationMs}ms.\n` +
+        `Output tail (last ${result.stdoutTail.length}B):\n${result.stdoutTail}`,
+      );
+    }
+
+    return preloadResult.transcripts;
+  }
+
+  // Unreachable: loop either returns or calls expect.fail().
+  throw new Error('unreachable: MAX_SPAWN_ATTEMPTS loop exited without returning');
 }
 
 /**

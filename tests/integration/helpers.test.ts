@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { selectTranscriptsBySession } from './helpers.js';
+import { selectTranscriptsBySession, buildSubagentsPath } from './helpers.js';
 import type { TranscriptRecord } from './helpers.js';
 
 describe('selectTranscriptsBySession', () => {
@@ -84,5 +84,32 @@ describe('selectTranscriptsBySession', () => {
   it('returns empty array for empty input', () => {
     const selected = selectTranscriptsBySession([], SPAWNED_SESSION);
     expect(selected).toHaveLength(0);
+  });
+});
+
+describe('buildSubagentsPath', () => {
+  it('encodes forward slashes in cwd as hyphens and prepends a leading hyphen', () => {
+    // PF-043: path encoding must match what Claude Code uses for the project directory.
+    // The encoding: replace every '/' with '-', then ensure a leading '-'.
+    const result = buildSubagentsPath(
+      '/home/user',
+      '/Users/dean/Sandbox/devflow',
+      'abc12345-1234-1234-1234-abcdef012345',
+    );
+    expect(result).toBe(
+      '/home/user/.claude/projects/-Users-dean-Sandbox-devflow/abc12345-1234-1234-1234-abcdef012345/subagents',
+    );
+  });
+
+  it('handles a single-segment cwd', () => {
+    const result = buildSubagentsPath('/home/user', '/project', 'uuid-1234');
+    expect(result).toBe('/home/user/.claude/projects/-project/uuid-1234/subagents');
+  });
+
+  it('uses the sessionId verbatim as the directory segment', () => {
+    const sessionId = 'f81d4fae-7dec-11d0-a765-00a0c91e6bf6';
+    const result = buildSubagentsPath('/Users/h', '/p', sessionId);
+    expect(result).toContain(sessionId);
+    expect(result).toContain('/subagents');
   });
 });
