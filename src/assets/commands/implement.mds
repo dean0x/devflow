@@ -70,7 +70,7 @@ Return the branch setup summary."
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
-- `ISSUE_NUMBER`: GitHub issue number (if provided or created by the issue-first gate in step 1c)
+- `ISSUE_NUMBER`: GitHub issue number (if provided or created by the Git agent's issue-first step in setup-task)
 - `ISSUE_CONTENT`: Full issue body including description (if provided)
 - `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 

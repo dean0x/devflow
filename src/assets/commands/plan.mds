@@ -29,7 +29,7 @@ The orchestrator only spawns agents and gates — all analytical work is done by
 - Other text → feature description
 - Empty → use conversation context
 
-For **multi-issue** mode: collect all `#N` tokens from `$ARGUMENTS` as `ISSUE_NUMBERS`.
+For **multi-issue** mode: collect all `#N` tokens from `$ARGUMENTS` as `ISSUE_REFS`.
 
 ## Clarification Gates
 
@@ -60,6 +60,28 @@ Explore the user's intent through focused Socratic questioning before spawning a
 - User input references an existing design document or detailed issue
 
 **Process:**
+
+**Step 0 — Fetch issue(s)** (issue mode only; skip for feature-description and empty modes):
+
+- **Single-ref** (one `#N` token in `$ARGUMENTS`):
+
+  ```
+  Agent(subagent_type="Git"):
+  "OPERATION: fetch-issue
+  ISSUE_INPUT: \{ref\}
+  Return issue title, body, labels, acceptance criteria, and dependencies."
+  ```
+
+- **Multi-ref** (multiple `#N` tokens):
+
+  ```
+  Agent(subagent_type="Git"):
+  "OPERATION: fetch-issues-batch
+  ISSUE_REFS: \{space-separated refs\}
+  Return issue titles, bodies, labels, acceptance criteria, and cross-issue relationships."
+  ```
+
+Capture from Git agent output: `ISSUE_CONTENT`, `ACCEPTANCE_CRITERIA`, `ISSUE_REF`, `ISSUE_ID`, `ISSUE_URL`. Use the fetched data to seed the discovery below; skip Gate 0 questions where the issue already provides sufficient scope (applies the **Skip discovery when** rule above).
 
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.

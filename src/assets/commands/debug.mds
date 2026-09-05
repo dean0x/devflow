@@ -14,14 +14,14 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 ```
 /debug "description of bug or issue"
 /debug "function returns undefined when called with empty array"
-/debug #42   (investigate bug from GitHub issue)
+/debug #42   (investigate bug from issue reference)
 ```
 
 ## Input
 
 `$ARGUMENTS` contains whatever follows `/debug`:
 - Bug description: "login fails after session timeout"
-- GitHub issue: "#42"
+- Issue reference: "#42"
 - Empty: use conversation context
 
 ## Phases
@@ -43,12 +43,12 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 **Produces:** HYPOTHESES, BUG_CONTEXT
 **Requires:** DECISIONS_CONTEXT
 
-If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
+If `$ARGUMENTS` starts with `#`, fetch the issue:
 
 ```
 Agent(subagent_type="Git"):
 "OPERATION: fetch-issue
-ISSUE: {issue number}
+ISSUE_INPUT: {issue reference}
 Return issue title, body, labels, and any linked error logs."
 ```
 

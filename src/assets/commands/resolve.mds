@@ -241,7 +241,7 @@ Collect from each Code agent:
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
-Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt.
+Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED (\{reason\})` if manage-debt degrades).
 
 DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations`, or `## Blocked`. A duplicate of a FALSE_POSITIVE primary therefore leaves only the primary in the `False Positive` row and the `## False Positives` section; the same holds for every other outcome the duplicate inherits.
 
@@ -349,7 +349,9 @@ Note: Deferred issues (FIX_SEPARATE and TECH_DEBT) from triage are in resolution
 under ## Fix Separately and ## Deferred to Tech Debt."
 ```
 
-After manage-debt completes, backfill `Tracked = #\{backlog_issue_number\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item.
+After manage-debt completes:
+- **Success**: backfill `Tracked = #\{backlog_issue_number\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item.
+- **DEGRADED**: if Git agent returns `TRACEABILITY: DEGRADED (\{reason\})`, warn and record in resolution-summary.md; `Tracked` stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` for each affected item.
 
 ### Phase 9b: Thread Resolution + Resolution Comment
 
@@ -375,7 +377,7 @@ THREAD_MAP: {thread_map_with_verdicts}
 VERIFICATION_STATUS: {PASS | FAILED | SKIPPED}
 PR_NUMBER: {pr_number}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-D9: resolve threads only when VERIFICATION_STATUS == PASS and verdict is FIXED/FALSE_POSITIVE/BY_DESIGN with cited evidence."
+D9: resolve threads ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty."
 ```
 
 If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.
@@ -496,7 +498,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
 │  └─ Returns Verification block per batch
 │
-├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)")
+├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
 │
 ├─ Phase 6: Simplify [Simplify agent]
 │
@@ -505,7 +507,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
 │  └─ Git agent (check-ci-status) → poll/fix loop
 │
-├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=#
+├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=# (or TRACEABILITY: DEGRADED on failure)
 │  SEQUENTIAL across worktrees
 │
 ├─ Phase 9b: Thread resolution + resolution comment
@@ -536,7 +538,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | DUPLICATE verdict without duplicate_of, or chained to another DUPLICATE | Treated as Triage failure — same retry-then-abort as a vanished id |
 | DUPLICATE issues in THREAD_MAP | Map ext-\{N\} to primary's verdict/verification status for thread reply |
 | Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
-| gh/GitHub absent | manage-debt fails gracefully; Tracked stays "(pending)" + noted — recorded, not dropped |
+| gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED (\{reason\})`); Tracked stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` — recorded, not dropped |
 | COMPLIANCE_SKILL_INSTALLED false | Phases 1b, 9b-step-1, and 9c are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
 | THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
