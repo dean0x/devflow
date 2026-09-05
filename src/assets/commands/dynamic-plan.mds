@@ -100,7 +100,7 @@ const OUTDIR = `.devflow/docs/design/${slug}/${ts}`;
 const tickets = await phase("read-tickets", () =>
   agent(`Read all tickets from: ${ticketSource}
 For each ticket, extract: title, summary, wave, dependsOn, scope (in/out), acceptance criteria, open questions, and any existing implementation hints.
-If the source is a directory, read all .md files. If the source is GitHub issues, use gh issue view for each.
+If the source is a directory, read all .md files. If the source is GitHub issues, use the Git agent's fetch-issue or fetch-issues-batch operation.
 Return: array of ticket objects with all fields.`, { agentType: "Git" })
 );
 

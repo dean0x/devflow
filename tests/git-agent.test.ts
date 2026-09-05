@@ -12,28 +12,31 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { promises as fs } from 'fs';
 import * as path from 'path';
+import { resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, type CorpusEntry } from './helpers.js';
 
-const GIT_AGENT_PATH = path.resolve(import.meta.dirname, '../src/assets/agents/git.md');
+// Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
+const GIT_AGENT_SOURCE = resolveAgentSource('git');
+const GIT_AGENT_PATH = GIT_AGENT_SOURCE.path;
 
 /**
- * Extract the content of a named operation section from git.md.
- * Returns text from "## Operation: {name}" to the next top-level "## " heading or EOF.
+ * Extract the content of a named operation section from a corpus.
+ * Thin wrapper around extractOpSectionFromCorpus — kept so callers stay readable.
+ * Use mode: 'sole' for single-authority lookups (seam test forward direction),
+ * mode: 'union' for sink-class guards (D11 forward/reverse).
  */
-function extractOpSection(content: string, opName: string): string {
-  const marker = `## Operation: ${opName}`;
-  const start = content.indexOf(marker);
-  if (start === -1) return '';
-  const nextSection = content.indexOf('\n## ', start + marker.length);
-  return nextSection === -1 ? content.slice(start) : content.slice(start, nextSection);
+function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' | 'sole'): string {
+  return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
 }
 
 describe('git agent — static content guards (PF-018)', () => {
+  // Single-file corpus for operations that have exactly one authority file
   let content: string;
+  let soleCorpus: CorpusEntry[];
 
-  beforeAll(async () => {
-    content = await fs.readFile(GIT_AGENT_PATH, 'utf-8');
+  beforeAll(() => {
+    content = GIT_AGENT_SOURCE.content;
+    soleCorpus = [{ path: GIT_AGENT_PATH, content }];
   });
 
   // ── Guard 0: Non-vacuousness ────────────────────────────────────────────────
@@ -65,6 +68,9 @@ describe('git agent — static content guards (PF-018)', () => {
     'check-ci-status',
     'manage-debt',
     'create-release',
+    // Wired live from plan.mds Gate 0 (single-issue and multi-issue fetch paths) — AC-0.11
+    'fetch-issue',
+    'fetch-issues-batch',
   ];
 
   for (const op of REQUIRED_OPS) {
@@ -79,7 +85,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 2: Load-bearing numeric bounds ────────────────────────────────────
 
   it('post-review-summary: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(content, 'post-review-summary');
+    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
     expect(
       sec,
       'post-review-summary: missing 60000-char cap — GitHub rejects > 65536 chars; 4xx silent-skip would hide the failure',
@@ -87,7 +93,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-resolution-summary: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(content, 'post-resolution-summary');
+    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
     expect(
       sec,
       'post-resolution-summary: missing 60000-char cap',
@@ -95,15 +101,26 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-wave-report: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(content, 'post-wave-report');
+    const sec = extractOpSection(soleCorpus, 'post-wave-report', 'sole');
     expect(
       sec,
       'post-wave-report: missing 60000-char cap',
     ).toContain('60000');
   });
 
+  it('manage-debt: 60000-char archive threshold is present (AC-0.12)', () => {
+    // Pin this literal before Phase 2 moves the manage-debt mechanics into a
+    // generated reference file. Floor must stay ≥ 60000 — reducing the threshold
+    // silently allows oversized archives that exceed GitHub's comment limit.
+    const sec = extractOpSection(soleCorpus, 'manage-debt', 'sole');
+    expect(
+      sec,
+      'manage-debt: missing 60000-char archive threshold — must be pinned before Phase 2 moves the mechanics',
+    ).toContain('60000');
+  });
+
   it('backlink-shipped-issues: ≤50 issues processing bound is present', () => {
-    const sec = extractOpSection(content, 'backlink-shipped-issues');
+    const sec = extractOpSection(soleCorpus, 'backlink-shipped-issues', 'sole');
     expect(
       sec,
       'backlink-shipped-issues: missing ≤50 issues bound — unbounded posting violates D4 rate contract',
@@ -111,7 +128,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolve-review-threads: ≤50 threads processing bound is present', () => {
-    const sec = extractOpSection(content, 'resolve-review-threads');
+    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
     expect(
       sec,
       'resolve-review-threads: missing ≤50 threads bound — unbounded mutation calls violate the GitHub rate contract',
@@ -119,7 +136,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('fetch-review-threads: ≤2-page / 100-thread GraphQL bound is present', () => {
-    const sec = extractOpSection(content, 'fetch-review-threads');
+    const sec = extractOpSection(soleCorpus, 'fetch-review-threads', 'sole');
     expect(
       sec,
       'fetch-review-threads: missing ≤2-page / 100-thread GraphQL bound — unbounded pagination can exhaust rate limits',
@@ -127,7 +144,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: branch scan bound (head -50) is present', () => {
-    const sec = extractOpSection(content, 'learn-conventions');
+    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
     expect(
       sec,
       'learn-conventions: missing branch scan bound "head -50"',
@@ -135,7 +152,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: tag scan bound (head -20) is present', () => {
-    const sec = extractOpSection(content, 'learn-conventions');
+    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
     expect(
       sec,
       'learn-conventions: missing tag scan bound "head -20"',
@@ -143,7 +160,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: merged-PR scan bound (--limit 30) is present', () => {
-    const sec = extractOpSection(content, 'learn-conventions');
+    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
     expect(
       sec,
       'learn-conventions: missing merged-PR scan bound "--limit 30"',
@@ -151,7 +168,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: rev-list --max-count=200 integration-branch bound is present', () => {
-    const sec = extractOpSection(content, 'learn-conventions');
+    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
     expect(
       sec,
       'learn-conventions: missing "--max-count=200" rev-list bound for integration-branch candidate scoring',
@@ -161,7 +178,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 3: D9 resolution gate ─────────────────────────────────────────────
 
   it('D9: resolveReviewThread requires VERIFICATION_STATUS == PASS AND verdict FIXED AND commit_sha non-empty', () => {
-    const sec = extractOpSection(content, 'resolve-review-threads');
+    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
     expect(
       sec,
       'D9 gate: must state "ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty" — this is the single authority for thread resolution',
@@ -169,7 +186,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D9: FALSE_POSITIVE verdict is reply-only (no resolveReviewThread)', () => {
-    const sec = extractOpSection(content, 'resolve-review-threads');
+    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
     expect(
       sec,
       'D9 gate: FALSE_POSITIVE must be reply-only — reviewers retain control over closing their own threads',
@@ -177,7 +194,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D9: BY_DESIGN verdict is reply-only (no resolveReviewThread)', () => {
-    const sec = extractOpSection(content, 'resolve-review-threads');
+    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
     expect(
       sec,
       'D9 gate: BY_DESIGN must be reply-only — reviewers retain control over closing their own threads',
@@ -217,7 +234,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 5: Dedup marker formats ───────────────────────────────────────────
 
   it('review-summary dedup marker uses cycle:{N} ts: pair form', () => {
-    const sec = extractOpSection(content, 'post-review-summary');
+    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
     expect(
       sec,
       'review-summary dedup: missing "devflow:review-summary cycle:{N} ts:" marker pair — changing either token breaks idempotency for existing comments',
@@ -225,7 +242,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolution-summary dedup marker uses ts: form', () => {
-    const sec = extractOpSection(content, 'post-resolution-summary');
+    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
     expect(
       sec,
       'resolution-summary dedup: missing "devflow:resolution-summary ts:" marker — changing this format breaks idempotency for existing comments',
@@ -270,7 +287,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: review-summary dedup marker appears ≥2× in post-review-summary (full mode + stub template)', () => {
-    const sec = extractOpSection(content, 'post-review-summary');
+    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
     const matches = sec.match(/devflow:review-summary cycle:/g);
     expect(
       matches,
@@ -280,7 +297,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: resolution-summary dedup marker appears ≥2× in post-resolution-summary (full mode + stub template)', () => {
-    const sec = extractOpSection(content, 'post-resolution-summary');
+    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
     const matches = sec.match(/devflow:resolution-summary ts:/g);
     expect(
       matches,
@@ -290,7 +307,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
-    const sec = extractOpSection(content, 'post-review-summary');
+    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
     expect(sec, 'D10: REVIEW_PUBLICATION not documented in post-review-summary').toContain('REVIEW_PUBLICATION');
     expect(sec, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
     expect(sec, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
@@ -314,7 +331,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
     const ghRepoViewOps: string[] = [];
     for (const op of opNames) {
-      const sec = extractOpSection(content, op);
+      const sec = extractOpSection(soleCorpus, op, 'sole');
       if (sec.includes('gh repo view')) ghRepoViewOps.push(op);
     }
     expect(
@@ -358,13 +375,17 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
     // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11 (PF-018)
+    // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
+    // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
+    // (Phase 2+); unioning ensures the floor never silently drops below 8 [DR-18, AC-0.8].
+    const sinkCorpus = gitAgentSinkCorpus();
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
 
     const postingOps: string[] = [];
     const postingOpsWithoutD11: string[] = [];
 
     for (const op of opNames) {
-      const sec = extractOpSection(content, op);
+      const sec = extractOpSection(sinkCorpus, op, 'union');
       if (sec.includes('--body-file') || sec.includes('-F body=@')) {
         postingOps.push(op);
         if (!sec.includes('Comment-sink scrub (D11)')) postingOpsWithoutD11.push(op);
@@ -382,7 +403,10 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: every op that references the Comment-sink scrub also has a posting call (reverse guard)', () => {
-    // Ensures the named reference is never orphaned — every D11 reference must pair with an actual posting
+    // Ensures the named reference is never orphaned — every D11 reference must pair with an actual posting.
+    // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
+    // Mode 'union' — same rationale as forward guard [DR-18].
+    const sinkCorpus = gitAgentSinkCorpus();
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
     expect(
       opNames.length,
@@ -391,7 +415,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
     const d11OpsWithoutPost: string[] = [];
     for (const op of opNames) {
-      const sec = extractOpSection(content, op);
+      const sec = extractOpSection(sinkCorpus, op, 'union');
       if (sec.includes('Comment-sink scrub (D11)')) {
         if (!sec.includes('--body-file') && !sec.includes('-F body=@') && !sec.includes('--notes-file')) {
           d11OpsWithoutPost.push(op);
@@ -408,9 +432,12 @@ describe('git agent — static content guards (PF-018)', () => {
     // The forward guard above only inspects ops that ALREADY use --body-file, so it is
     // blind to a bypass: `gh pr create --body "…"` posts an unscrubbed body and would
     // never be visited. This guard is the reverse check — it fails on any inline body
-    // form anywhere in git.md, which is exactly how a new sink escapes D11 (PF-023).
+    // form anywhere in the sink corpus, which is exactly how a new sink escapes D11 (PF-023).
+    // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist) [AC-0.8].
+    const sinkCorpus = gitAgentSinkCorpus();
+    const sinkContent = sinkCorpus.map(e => e.content).join('\n');
     const INLINE_BODY_RE = /gh (?:pr|issue) [a-z-]+[^`\n]*--body[ "]|-f body=/g;
-    const offenders = content.match(INLINE_BODY_RE) ?? [];
+    const offenders = sinkContent.match(INLINE_BODY_RE) ?? [];
     expect(
       offenders,
       `D11 bypass: inline body form(s) found — route the body through the scrubber and post with --body-file / -F body=@: ${offenders.join(' | ')}`,
@@ -424,7 +451,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {
-    const sec = extractOpSection(content, 'ensure-pr-ready');
+    const sec = extractOpSection(soleCorpus, 'ensure-pr-ready', 'sole');
     expect(sec.length, 'ensure-pr-ready section not found — guard is vacuous (PF-018)').toBeGreaterThan(0);
     expect(
       sec,

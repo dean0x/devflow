@@ -1403,6 +1403,59 @@ describe('ensure-root-gitignore behavioral', () => {
     // Original content preserved byte-for-byte
     expect(after).toBe(content);
   });
+
+  it('non-contiguous v3: conventions.md already present after two unrelated blocks — no duplicate appended, v3 marker stamped (P0-S24)', () => {
+    // Simulates this repo's real .gitignore layout where !.devflow/conventions.md
+    // sits at line 57, after two unrelated sections (launch materials + competitor
+    // codenames), rather than immediately after the devflow block.
+    // The script detects the sentinel via `grep -qF '!.devflow/conventions.md'`
+    // anywhere in the file (line 75 in ensure-root-gitignore) and must NOT append a
+    // duplicate — this exercises the grep-based detection rather than positional matching.
+    const gitignoreContent = [
+      'node_modules/',
+      '',
+      V2_BLOCK,
+      '',
+      '# Launch marketing materials',
+      '/launch/',
+      '',
+      '# Competitive analysis codenames',
+      '.competitive-codenames.json',
+      '',
+      '!.devflow/conventions.md',
+      '',
+    ].join('\n');
+
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), gitignoreContent);
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    // Seed v2 marker to simulate a prior v2 install that already ran once.
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'), '');
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const afterContent = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    const afterLines = afterContent.split('\n').map(l => l.trim());
+
+    // conventions.md must appear exactly once — never duplicated by the upgrade path.
+    expect(
+      afterLines.filter(l => l === '!.devflow/conventions.md'),
+      'conventions.md must appear exactly once (not duplicated by upgrade)',
+    ).toHaveLength(1);
+    // Unrelated blocks must be preserved intact.
+    expect(afterContent).toContain('/launch/');
+    expect(afterContent).toContain('.competitive-codenames.json');
+    // The v2 sentinel must still be present (v3 upgrade does not strip it).
+    expect(afterLines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    // v3 marker stamped; v2 marker removed.
+    expect(
+      fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3')),
+      'v3 marker must be stamped',
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2')),
+      'v2 marker must be removed after upgrade',
+    ).toBe(false);
+  });
 });
 
 // =============================================================================

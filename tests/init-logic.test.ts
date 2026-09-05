@@ -434,6 +434,35 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(result).not.toBeNull();
     expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
   });
+
+  it('non-contiguous v3: v3 sentinel present after two unrelated blocks → null (no-op) (P0-S24)', () => {
+    // Simulates this repo's real .gitignore layout where !.devflow/conventions.md
+    // sits at line 57, after two unrelated sections (launch materials + competitor
+    // codenames), rather than immediately after the devflow block.
+    // computeDevflowGitignore checks `trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V3)`
+    // (post-install.ts line 99) — positionally unaware — so the non-contiguous sentinel
+    // must trigger the null (no-op) path, not the v2→v3 upgrade path.
+    const content = [
+      'node_modules/',
+      '',
+      V2_BLOCK,
+      '',
+      '# Launch marketing materials',
+      '/launch/',
+      '',
+      '# Competitive analysis codenames',
+      '.competitive-codenames.json',
+      '',
+      V3_SENTINEL,
+      '',
+    ].join('\n');
+
+    // V3_SENTINEL is present (non-contiguously) → must return null (not an upgrade).
+    expect(
+      computeDevflowGitignore(content),
+      'non-contiguous v3 sentinel must produce null (no-op) — must not trigger v2→v3 upgrade',
+    ).toBeNull();
+  });
 });
 
 

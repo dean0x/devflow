@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames, getAllCommandNames } from '../src/core/plugins.js';
+import { resolveAgentSource } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
@@ -46,15 +47,16 @@ describe('Guard 1 (forward): every declared asset exists on disk', () => {
     }
   });
 
-  it('every agent in DEVFLOW_PLUGINS exists as src/assets/agents/{name}.md', async () => {
+  it('every agent in DEVFLOW_PLUGINS is resolvable (dist-preferred, src-fallback)', () => {
+    // Routed through resolveAgentSource so Phase 1 needs zero test edits when
+    // git.md becomes git.mds and is served from dist/agents/ instead (AC-0.7).
     const allAgents = getAllAgentNames();
 
     for (const agent of allAgents) {
-      const agentFile = path.join(ASSETS_DIR, 'agents', `${agent}.md`);
-      await expect(
-        fs.access(agentFile),
-        `Agent '${agent}' is declared in DEVFLOW_PLUGINS but src/assets/agents/${agent}.md does not exist`,
-      ).resolves.toBeUndefined();
+      expect(
+        () => resolveAgentSource(agent),
+        `Agent '${agent}' is declared in DEVFLOW_PLUGINS but could not be resolved from dist/agents/ or src/assets/agents/`,
+      ).not.toThrow();
     }
   });
 
@@ -390,7 +392,8 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 
 describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: declarations', () => {
   const distCommandsDir = path.join(ROOT, 'dist', 'commands');
-  const gitAgentPath = path.join(ROOT, 'src', 'assets', 'agents', 'git.md');
+  // Dist-preferred resolver — zero test edits needed in Phase 1 when git.md → git.mds (AC-0.7)
+  const gitAgentPath = resolveAgentSource('git').path;
 
   // Operations that are not directly invoked from compiled commands.
   // Each entry must have a comment explaining the exemption.
@@ -398,9 +401,9 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     // Invoked by setup-task step 1b when .devflow/conventions.md is absent — internal
     // to the Git agent; no compiled command calls it directly.
     'learn-conventions',
-    // Declared for multi-issue planning flows; not yet wired to any compiled command.
-    // A future command (e.g. a batch-plan flow) will call it directly when built.
-    'fetch-issues-batch',
+    // SG-11: fetch-issues-batch is now wired live from plan.mds Gate 0 (multi-issue path) —
+    // it is no longer internal-only. Removed from INTERNAL_OPS; added to REQUIRED_OPS in
+    // git-agent.test.ts (AC-0.11).
   ]);
 
   it('spawned OPERATION: values match git.md declarations (fail-loud when dist absent)', async () => {

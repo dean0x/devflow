@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. New entries are allowed; increase an existing floor value when the corresponding assertion is raised.",
+  "floors": [
+    {
+      "id": "dist-host-count",
+      "floor": 13,
+      "pattern": "toHaveLength(13)",
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Number of compiled MDS host commands in dist/commands/ (ALL_HOSTS)"
+    },
+    {
+      "id": "partial-count",
+      "floor": 11,
+      "pattern": "toHaveLength(11)",
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Number of _partials/*.mds partial files"
+    },
+    {
+      "id": "dist-files-count",
+      "floor": 14,
+      "pattern": "toBe(14)",
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "DIST_FILES count = ALL_HOSTS (13) + release.md (1); DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)"
+    },
+    {
+      "id": "slow-test-timeout-ms",
+      "floor": 60000,
+      "pattern": "60_000",
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Minimum timeout in ms for slow shell-exec tests that call npm run build:mds"
+    },
+    {
+      "id": "subagent-literal-count",
+      "floor": 50,
+      "pattern": "toBeGreaterThanOrEqual(50)",
+      "sourceFile": "tests/agent-name-guards.test.ts",
+      "description": "Minimum number of subagent_type literal sites across dist+scripts corpus (currently ~66+)"
+    },
+    {
+      "id": "charter-char-max",
+      "floor": 3072,
+      "pattern": "3072",
+      "sourceFile": "tests/agent-name-guards.test.ts",
+      "description": "MAX_CHARTER_CHARS = 75% of the 4096-char shell injection cap; orchestrator charter must stay at or below this"
+    },
+    {
+      "id": "plugin-count",
+      "floor": 8,
+      "pattern": "toBeGreaterThanOrEqual(8)",
+      "sourceFile": "tests/plugins.test.ts",
+      "description": "Minimum number of DEVFLOW_PLUGINS registry entries"
+    },
+    {
+      "id": "install-path-refs",
+      "floor": 2,
+      "pattern": "toBeGreaterThanOrEqual(2)",
+      "sourceFile": "tests/skill-references.test.ts",
+      "description": "Minimum install-path references in dist/commands/ files"
+    }
+  ]
+}

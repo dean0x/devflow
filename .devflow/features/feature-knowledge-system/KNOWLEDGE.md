@@ -106,7 +106,7 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 5. Writes `{basename}.md` to the declared `output-dir` (per-file clean; no dir wipe)
 6. Hard-fails on any compile error — no stale command ever ships
 
-13 hosts total: 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`).
+13 MDS-compiled hosts (`ALL_HOSTS`): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). `DIST_FILES` = 14 — the 13 compiled outputs plus `release.md`, which is hand-authored and not MDS-compiled (SG-13 permanent divergence; see `dynamic-workflow-engine` KB).
 Partials in `src/assets/commands/_partials/` have no `output-dir:` and are skipped automatically.
 
 ## Integration Patterns

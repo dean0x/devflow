@@ -1,12 +1,12 @@
 @define wave_loop():
 ### Wave execution loop (§8)
 
-There is NO scheduler, NO parser, NO graph code. A wave is the single-ticket engine run once per ready ticket, in an order that agents work out by reading the GitHub issues.
+There is NO scheduler, NO parser, NO graph code. A wave is the single-ticket engine run once per ready ticket, in an order that agents work out by reading the issues.
 
 **Step 1 — Read the wave**
 
 Spawn a `agentType: "Design"` agent (opus) to:
-- `gh issue view` each wave issue and read its full body (a Git agent may pre-fetch issue bodies to save budget)
+- Spawn a Git agent (`OPERATION: fetch-issues-batch`, `ISSUE_REFS: \{space-separated issue numbers\}`) to pre-fetch all wave issue bodies before reading them
 - Note each issue's stated `Depends on:` and `Wave:` fields
 - Apply the vacuous-truth rule and reason about which tickets are ready
 - Return the ready set and blocked set with rationale
