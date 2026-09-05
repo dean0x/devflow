@@ -22,10 +22,13 @@
 
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'child_process'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
+import { tmpdir } from 'os'
 import * as path from 'path'
 import { loadGolden, extractStatusLines } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
+const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
 
 // Phase-0 byte baselines — named constants so Phase-2's byte-budget.test.ts
 // can import them without re-deriving (C6).
@@ -129,26 +132,79 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     ).toMatch(/frozen at Phase 0|never regenerated through Phase 3/i)
   })
 
-  it('accepts github-status-lines with --unfreeze (subprocess guard)', () => {
-    // Only verifies exit 0; the written content is tested by the equality guard above.
-    const result = spawnSync(
-      'node',
-      ['scripts/update-golden.js', 'github-status-lines', '--unfreeze'],
-      {
-        cwd: ROOT,
-        encoding: 'utf-8',
-        timeout: 30_000,
-        env: { ...process.env },
-      },
-    )
+  it('accepts github-status-lines with --unfreeze, writing to --out-dir (never the live fixture)', () => {
+    // --out-dir is load-bearing, not convenience. Running this script without it
+    // rewrites tests/fixtures/golden/github-status-lines.txt on every `npm test`
+    // — including in CI — which silently re-freezes the fixture against whatever
+    // the source says today. A drifted source would fail the equality guard once
+    // and then pass forever after (§3: "a CI job that regenerates a golden is a
+    // golden that asserts nothing"; H2: a mismatch means the SOURCE is wrong).
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
+    try {
+      const result = spawnSync(
+        'node',
+        ['scripts/update-golden.js', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        {
+          cwd: ROOT,
+          encoding: 'utf-8',
+          timeout: 30_000,
+          env: { ...process.env },
+        },
+      )
 
-    if (result.error) throw result.error
+      if (result.error) throw result.error
 
+      expect(
+        result.status,
+        `Expected exit 0 with --unfreeze but got ${result.status}\n` +
+        `stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      ).toBe(0)
+
+      const written = readFileSync(path.join(tmpDir, 'github-status-lines.txt'), 'utf-8')
+
+      // The script carries its own copy of the extractStatusLines line ranges so
+      // it can run under plain node. Nothing keeps the two in sync by hand — this
+      // assertion does (PF-049): a range edited in one place and not the other
+      // fails here rather than silently producing a different fixture at the next
+      // sanctioned regeneration.
+      expect(
+        written,
+        'scripts/update-golden.js output diverged from tests/helpers.ts extractStatusLines() — ' +
+        'the duplicated line ranges are out of sync',
+      ).toBe(extractStatusLines())
+
+      // …and both still agree with the frozen fixture.
+      expect(written, 'regenerated content differs from the frozen fixture').toBe(
+        loadGolden('github-status-lines.txt'),
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves the live fixture untouched when --out-dir is given (no self-regeneration)', () => {
+    const before = loadGolden('github-status-lines.txt')
+    const beforeMtime = statSync(GOLDEN_PATH).mtimeMs
+
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
+    try {
+      const result = spawnSync(
+        'node',
+        ['scripts/update-golden.js', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
+      )
+      if (result.error) throw result.error
+      expect(result.status).toBe(0)
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+
+    expect(loadGolden('github-status-lines.txt'), 'frozen fixture content changed').toBe(before)
     expect(
-      result.status,
-      `Expected exit 0 with --unfreeze but got ${result.status}\n` +
-      `stdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0)
+      statSync(GOLDEN_PATH).mtimeMs,
+      'frozen fixture was rewritten — the update script must not touch tests/fixtures/golden/ ' +
+      'when --out-dir redirects the write',
+    ).toBe(beforeMtime)
   })
 
   it('exits non-zero with usage when no target is given (subprocess guard)', () => {

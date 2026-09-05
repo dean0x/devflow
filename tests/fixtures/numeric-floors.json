@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. New entries are allowed; increase an existing floor value when the corresponding assertion is raised.",
+  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. Each entry pins a floor value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so lowering one site out of several is caught. New entries are allowed; raise `floor`/`pattern` (and `occurrences`) deliberately when an assertion is raised.",
   "floors": [
     {
       "id": "dist-host-count",
       "floor": 13,
       "pattern": "toHaveLength(13)",
+      "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Number of compiled MDS host commands in dist/commands/ (ALL_HOSTS)"
     },
@@ -13,6 +14,7 @@
       "id": "partial-count",
       "floor": 11,
       "pattern": "toHaveLength(11)",
+      "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Number of _partials/*.mds partial files"
     },
@@ -20,6 +22,7 @@
       "id": "dist-files-count",
       "floor": 14,
       "pattern": "toBe(14)",
+      "occurrences": 3,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "DIST_FILES count = ALL_HOSTS (13) + release.md (1); DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)"
     },
@@ -27,6 +30,7 @@
       "id": "slow-test-timeout-ms",
       "floor": 60000,
       "pattern": "60_000",
+      "occurrences": 21,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Minimum timeout in ms for slow shell-exec tests that call npm run build:mds"
     },
@@ -34,6 +38,7 @@
       "id": "subagent-literal-count",
       "floor": 50,
       "pattern": "toBeGreaterThanOrEqual(50)",
+      "occurrences": 1,
       "sourceFile": "tests/agent-name-guards.test.ts",
       "description": "Minimum number of subagent_type literal sites across dist+scripts corpus (currently ~66+)"
     },
@@ -41,6 +46,7 @@
       "id": "charter-char-max",
       "floor": 3072,
       "pattern": "3072",
+      "occurrences": 1,
       "sourceFile": "tests/agent-name-guards.test.ts",
       "description": "MAX_CHARTER_CHARS = 75% of the 4096-char shell injection cap; orchestrator charter must stay at or below this"
     },
@@ -48,6 +54,7 @@
       "id": "plugin-count",
       "floor": 8,
       "pattern": "toBeGreaterThanOrEqual(8)",
+      "occurrences": 1,
       "sourceFile": "tests/plugins.test.ts",
       "description": "Minimum number of DEVFLOW_PLUGINS registry entries"
     },
@@ -55,8 +62,49 @@
       "id": "install-path-refs",
       "floor": 2,
       "pattern": "toBeGreaterThanOrEqual(2)",
+      "occurrences": 1,
       "sourceFile": "tests/skill-references.test.ts",
       "description": "Minimum install-path references in dist/commands/ files"
+    },
+    {
+      "id": "d11-posting-ops",
+      "floor": 8,
+      "pattern": "toBeGreaterThanOrEqual(8)",
+      "occurrences": 1,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from git.md alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
+    },
+    {
+      "id": "agent-roster-count",
+      "floor": 16,
+      "pattern": "toBe(16)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-source-resolver.test.ts",
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07)"
+    },
+    {
+      "id": "seam-op-section-map",
+      "floor": 15,
+      "pattern": "toBeGreaterThanOrEqual(15)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]"
+    },
+    {
+      "id": "seam-ops-with-callers",
+      "floor": 10,
+      "pattern": "toBeGreaterThanOrEqual(10)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud)."
+    },
+    {
+      "id": "issue-capture-contract-size",
+      "floor": 5,
+      "pattern": "toBe(5)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Values in issue_capture_contract() checked by the seam test's producer direction"
     }
   ]
 }

@@ -135,6 +135,54 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toMatch(/≤50/);
   });
 
+  // AC-0.3 named these three assertions as Guard 2's pinning test for
+  // fetch-issues-batch, but they were never written: the only occurrences of
+  // ≤50 / TRUNCATED / "## Issues Batch" under tests/ were inside the golden
+  // fixtures, which are data. The golden pins them transitively via whole-file
+  // byte equality; these give the bound its own named failure instead.
+
+  it('fetch-issues-batch: ≤50 issues processing bound is present (AC-0.3)', () => {
+    const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
+    expect(
+      sec,
+      'fetch-issues-batch: missing 50-issue bound — an unbounded batch fetch can exhaust the GraphQL rate budget',
+    ).toMatch(/at most 50|≤50|first 50/);
+  });
+
+  it('fetch-issues-batch: TRUNCATED ({n} not processed) overflow report is present (AC-0.3)', () => {
+    const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
+    expect(
+      sec,
+      'fetch-issues-batch: missing "TRUNCATED ({n} not processed)" — without it a truncated batch ' +
+      'is reported as complete and the caller plans against issues that were never fetched',
+    ).toContain('TRUNCATED ({n} not processed)');
+  });
+
+  it('fetch-issues-batch: "## Issues Batch ({n} issues)" output header is present (AC-0.3)', () => {
+    // Whole-file scope on purpose. extractOpSectionFromCorpus ends a section at
+    // the next `\n## `, and this header is itself a `## ` line inside the op's
+    // Output template — so the extractor cuts the section immediately before it
+    // and an op-scoped assertion can never see it.
+    expect(
+      content,
+      'git.md: missing "## Issues Batch ({n} issues)" output header — plan.mds Gate 0 ' +
+      'parses the batch response by this heading',
+    ).toContain('## Issues Batch ({n} issues)');
+  });
+
+  it('fetch-issues-batch: issues are fetched in a single GraphQL query, not N REST calls [DR-07]', () => {
+    const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
+    expect(
+      sec,
+      'fetch-issues-batch: missing the single-GraphQL-query mechanic — a per-issue loop reintroduces ' +
+      'the N-call rate exposure the A1 rewrite removed',
+    ).toContain('gh api graphql');
+    expect(
+      sec,
+      'fetch-issues-batch: the "single" GraphQL query wording is load-bearing [DR-07]',
+    ).toMatch(/\*\*single\*\* GraphQL query|single GraphQL query/);
+  });
+
   it('fetch-review-threads: ≤2-page / 100-thread GraphQL bound is present', () => {
     const sec = extractOpSection(soleCorpus, 'fetch-review-threads', 'sole');
     expect(

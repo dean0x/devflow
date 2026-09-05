@@ -33,8 +33,26 @@ interface FloorEntry {
   id: string;
   floor: number;
   pattern: string;
+  /**
+   * How many sites in `sourceFile` spell this floor. Checking mere presence is
+   * not enough when a pattern repeats: `toBe(14)` appears at 3 sites and
+   * `60_000` at 21, so lowering one of them leaves the pattern present and the
+   * decrease undetected. The guard requires at least this many matches.
+   */
+  occurrences: number;
   sourceFile: string;
   description: string;
+}
+
+/** Count non-overlapping occurrences of `needle` in `haystack`. */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let index = 0;
+  while ((index = haystack.indexOf(needle, index)) !== -1) {
+    count++;
+    index += needle.length;
+  }
+  return count;
 }
 
 interface FloorManifest {
@@ -72,6 +90,10 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
       expect(entry.id.length, `entry must have a non-empty id`).toBeGreaterThan(0);
       expect(entry.floor, `entry "${entry.id}" floor must be a positive integer`).toBeGreaterThan(0);
       expect(entry.pattern.length, `entry "${entry.id}" must have a non-empty pattern`).toBeGreaterThan(0);
+      expect(
+        entry.occurrences,
+        `entry "${entry.id}" must record how many sites spell the floor (occurrences ≥ 1)`,
+      ).toBeGreaterThanOrEqual(1);
       expect(entry.sourceFile.length, `entry "${entry.id}" must name a sourceFile`).toBeGreaterThan(0);
       expect(entry.description.length, `entry "${entry.id}" must have a description`).toBeGreaterThan(0);
     }
@@ -94,14 +116,16 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
         continue;
       }
 
-      if (!content.includes(entry.pattern)) {
+      const found = countOccurrences(content, entry.pattern);
+      if (found < entry.occurrences) {
         violations.push(
-          `[${entry.id}] pattern not found in ${entry.sourceFile}:\n` +
+          `[${entry.id}] pattern found ${found}× in ${entry.sourceFile}, expected ≥ ${entry.occurrences}:\n` +
           `  pattern : ${entry.pattern}\n` +
           `  floor   : ${entry.floor}\n` +
           `  desc    : ${entry.description}\n` +
-          `  → The assertion was likely lowered below the pinned floor (DR-27a).\n` +
-          `    If the floor was intentionally raised, update numeric-floors.json with the new floor and pattern.`,
+          `  → An assertion was likely lowered below the pinned floor (DR-27a).\n` +
+          `    If the floor was intentionally raised, or a pinned site deliberately removed,\n` +
+          `    update numeric-floors.json with the new floor, pattern and occurrences.`,
         );
       }
     }
@@ -112,45 +136,92 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: a floor pattern replaced with a decremented form would fail the guard (mechanic 2, H10)', () => {
+  it("every entry's pattern actually encodes its floor (a pattern that doesn't is unenforceable)", () => {
+    // Without this, {floor: 999, pattern: "toBe(14)"} passes forever: the guard
+    // only greps the pattern, so the recorded floor would be decorative. It is
+    // also the precondition for the decrement probe below.
     const manifest = loadManifest();
+    const violations: string[] = [];
 
-    // Pick the first entry as the known-bad probe.
-    const entry = manifest.floors[0];
-    expect(entry, 'manifest must have at least one entry for non-vacuity probe').toBeDefined();
+    for (const entry of manifest.floors) {
+      if (renderFloorToken(entry.pattern, entry.floor) === null) {
+        violations.push(
+          `[${entry.id}] pattern "${entry.pattern}" does not contain its floor ${entry.floor} ` +
+          `(plain "${entry.floor}" or grouped "${groupDigits(entry.floor)}")`,
+        );
+      }
+    }
 
-    const absPath = path.join(ROOT, entry.sourceFile);
-    const realContent = readFileSync(absPath, 'utf-8');
-
-    // Step 1: Real pattern must exist in the source file (guard would pass = GREEN).
     expect(
-      realContent.includes(entry.pattern),
-      `non-vacuity: real pattern "${entry.pattern}" must exist in ${entry.sourceFile}`,
-    ).toBe(true);
+      violations,
+      `Manifest entries whose pattern does not encode the floor:\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+  });
 
-    // Step 2: Build decremented pattern — replace the floor number with (floor - 1).
-    // Example: "toHaveLength(13)" → "toHaveLength(12)"
-    const decrementedPattern = entry.pattern.replace(
-      String(entry.floor),
-      String(entry.floor - 1),
-    );
+  it('non-vacuity: a decremented pattern would fail the guard for EVERY entry (mechanic 2, H10)', () => {
+    // Runs over every entry, not just floors[0]. Probing one entry left the rest
+    // unproven — and the probe silently no-opped on any pattern whose numeral is
+    // digit-grouped ("60_000" does not contain "60000", so the replace was an
+    // identity and the "pattern must be gone" assertion would fail for the wrong
+    // reason). renderFloorToken handles both spellings.
+    const manifest = loadManifest();
+    expect(manifest.floors.length, 'manifest must have at least one entry for the probe').toBeGreaterThan(0);
 
-    // Step 3: Simulate the guard on a synthetic content where the real pattern
-    // is replaced by the decremented pattern — mimicking a floor decrease.
-    const syntheticContent = realContent.replace(entry.pattern, decrementedPattern);
+    for (const entry of manifest.floors) {
+      const absPath = path.join(ROOT, entry.sourceFile);
+      const realContent = readFileSync(absPath, 'utf-8');
 
-    // The real pattern must NOT exist in the synthetic content (it was replaced).
-    expect(
-      syntheticContent.includes(entry.pattern),
-      `non-vacuity: after simulated decrement, real pattern "${entry.pattern}" must be gone`,
-    ).toBe(false);
+      // GREEN half: the real pattern is present at the recorded number of sites,
+      // so the guard passes today.
+      expect(
+        countOccurrences(realContent, entry.pattern),
+        `[${entry.id}] real pattern "${entry.pattern}" must appear ≥ ${entry.occurrences}× in ${entry.sourceFile}`,
+      ).toBeGreaterThanOrEqual(entry.occurrences);
 
-    // The guard would report a violation on syntheticContent.
-    // We prove this inline by checking that includes() returns false:
-    const guardWouldFail = !syntheticContent.includes(entry.pattern);
-    expect(
-      guardWouldFail,
-      `non-vacuity: guard must detect missing pattern after decrement — mechanic 2 (H10)`,
-    ).toBe(true);
+      // RED half: lowering a SINGLE site is enough to trip the guard. This is
+      // the case a presence-only check misses whenever occurrences > 1.
+      const token = renderFloorToken(entry.pattern, entry.floor)!;
+      const decrementedPattern = entry.pattern.replace(
+        token,
+        renderSameStyle(entry.floor - 1, token),
+      );
+      expect(
+        decrementedPattern,
+        `[${entry.id}] decremented pattern must differ from the real one`,
+      ).not.toBe(entry.pattern);
+
+      const syntheticContent = realContent.replace(entry.pattern, decrementedPattern);
+      expect(
+        countOccurrences(syntheticContent, entry.pattern),
+        `[${entry.id}] non-vacuity: lowering one of ${entry.occurrences} site(s) must drop the ` +
+        `match count below the pinned occurrences — otherwise a partial floor decrease is invisible`,
+      ).toBeLessThan(entry.occurrences);
+    }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Floor-token helpers
+//
+// A floor may be spelled plainly ("3072") or digit-grouped ("60_000") in the
+// assertion it pins. Both spellings must round-trip for the decrement probe.
+// ---------------------------------------------------------------------------
+
+/** Render a number with underscore digit grouping: 60000 → "60_000". */
+function groupDigits(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '_');
+}
+
+/** The exact substring of `pattern` that spells `floor`, or null if absent. */
+function renderFloorToken(pattern: string, floor: number): string | null {
+  const plain = String(floor);
+  if (pattern.includes(plain)) return plain;
+  const grouped = groupDigits(floor);
+  if (pattern.includes(grouped)) return grouped;
+  return null;
+}
+
+/** Render `n` in the same spelling style as `token` (grouped or plain). */
+function renderSameStyle(n: number, token: string): string {
+  return token.includes('_') ? groupDigits(n) : String(n);
+}

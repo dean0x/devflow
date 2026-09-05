@@ -281,7 +281,8 @@ The following test files provide static content guards that fail loudly when loa
 **`tests/git-agent.test.ts`** (source-file guards, no build required):
 - Guard 0: file non-vacuousness
 - Guard 1: required operation sections (`## Operation: {name}`) exist for all 17 operations (15 original + `fetch-issue` and `fetch-issues-batch` added in Phase 0)
-- Guard 2: numeric bounds — 60000-char caps for post-review-summary, post-resolution-summary, post-wave-report, and manage-debt; ≤50 threads bound for resolve-review-threads; ≤50 issues bound for backlink-shipped-issues and fetch-issues-batch; ≤2-page / 100-thread bound for fetch-review-threads; learn-conventions branch/tag/PR scan bounds
+- Guard 2: numeric bounds — 60000-char caps for post-review-summary, post-resolution-summary, post-wave-report, and manage-debt; ≤50 threads bound for resolve-review-threads; ≤50 issues bound for backlink-shipped-issues and fetch-issues-batch (the latter also pins `TRUNCATED ({n} not processed)`, the `## Issues Batch ({n} issues)` output header, and the single-GraphQL-query mechanic — AC-0.3); ≤2-page / 100-thread bound for fetch-review-threads; learn-conventions branch/tag/PR scan bounds
+- Section-scope caveat: `extractOpSectionFromCorpus` ends an op section at the next `\n## `, so a literal that lives inside an op's Output template *after* a `## ` heading (e.g. `## Issues Batch ({n} issues)`) is invisible to an op-scoped assertion and must be asserted against the whole file
 - Guard 3: D9 gate — pins the exact "ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty" sentence; also pins FALSE_POSITIVE and BY_DESIGN as reply-only
 - Guard 4: D4 rate-limit backpressure clauses (STOP trigger, THROTTLED report, `X-RateLimit-Remaining < 10` full-stop threshold, `< 50` backpressure threshold)
 - Guard 5: Dedup marker formats — `devflow:review-summary cycle:{N} ts:` pair, `devflow:resolution-summary ts:`

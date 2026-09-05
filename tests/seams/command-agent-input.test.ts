@@ -58,6 +58,95 @@ const EXCLUDED_KEYS = new Set([
   'WORKTREE_PATH', // cross-cutting optional; excluded by convention (PF-039 analogy)
 ])
 
+// Decision-ledger references restated inside a caller fence as a reminder to the
+// agent — never agent **Input:** fields. `D9:` at dist/commands/resolve.md
+// mirrors the D9 row of git.md's decision table (git.md:96); A1 aligned the
+// caller to that row verbatim.
+//
+// Kept as a literal set rather than a /^D\d+$/ class on purpose: a future `D12:`
+// that IS a field must fail loudly here instead of being silently swallowed by a
+// pattern. Same doctrine as EXCLUDED_KEYS and PRODUCES/REQUIRES (PF-039).
+const DECISION_ANNOTATION_KEYS = new Set(['D9'])
+
+// Phase-ordering DAG annotations, not spawn-block field contracts (PF-039, B10(13)).
+const DAG_ANNOTATION_KEYS = new Set(['PRODUCES', 'REQUIRES'])
+
+function isNonFieldKey(key: string): boolean {
+  return (
+    EXCLUDED_KEYS.has(key) ||
+    DAG_ANNOTATION_KEYS.has(key) ||
+    DECISION_ANNOTATION_KEYS.has(key)
+  )
+}
+
+// ── Fence-line anchors ───────────────────────────────────────────────────────
+//
+// Compiled command fences carry the agent prompt as a quoted prose block, and
+// some hosts indent it:
+//
+//     Agent(subagent_type="Git"):
+//     "OPERATION: fetch-issue
+//     ISSUE_INPUT: {issue reference}
+//     Return issue title, body, labels…"
+//
+// so both anchors must tolerate leading whitespace and the opening double quote.
+// Anchoring at a bare line start (/^OPERATION: /m) matched ZERO of the 18 Git
+// fences in dist/commands/ — keysPassedByOp stayed empty and Directions 1 and 2
+// iterated nothing while every assertion stayed green (PF-018). The
+// opMatchedFences invariant below is what makes that failure mode loud.
+const OPERATION_LINE_RE = /^[ \t]*"?OPERATION: (\S+)/m
+const PASSED_KEY_RE = /^[ \t]*"?([A-Z_][A-Z0-9_]*): /gm
+
+/**
+ * True for a language-tagged fence (```js …), i.e. a dynamic-workflow recipe
+ * rather than a prose spawn block.
+ *
+ * The corpus splits cleanly along this line: every `Agent(subagent_type="X")`
+ * spawn lives in an untagged prose fence, and every `agentType: "X"` call lives
+ * in a ```js recipe. A recipe is one fence holding many agent() calls of
+ * different types — dist/commands/dynamic-build.md has a single fence with 24
+ * calls across 9 agent types — so fence-level key attribution is meaningless
+ * there: harvesting every `KEY:` line would credit the Code agents' prompts to
+ * whichever OPERATION appeared first.
+ *
+ * Recorded scope limitation: the `setup-task` spawn inside that recipe is
+ * therefore not key-checked by this seam. Per-call parsing of recipe bodies is
+ * a separate guard, not a widened regex here.
+ */
+function isRecipeFence(fence: string): boolean {
+  const firstNewline = fence.indexOf('\n')
+  return fence.slice(3, firstNewline === -1 ? undefined : firstNewline).trim().length > 0
+}
+
+/**
+ * Harvest the operation name and passed keys from one spawn fence.
+ * Returns null when the fence declares no OPERATION.
+ *
+ * Shared by the live corpus scan and the known-bad RED proof so the proof
+ * exercises the same parser the guard uses — an inline re-implementation would
+ * keep passing after the real parser stopped matching (exactly the defect this
+ * function's anchors fix).
+ */
+function harvestFence(fence: string): { op: string; keys: Set<string> } | null {
+  const opMatch = fence.match(OPERATION_LINE_RE)
+  if (!opMatch) return null
+  const keys = new Set<string>()
+  for (const km of fence.matchAll(PASSED_KEY_RE)) keys.add(km[1])
+  return { op: opMatch[1], keys }
+}
+
+/** Keys in a fence that its op's **Input:** line does not declare. */
+function forwardViolationsFor(section: string, keys: Set<string>): string[] {
+  const bad: string[] = []
+  for (const key of keys) {
+    if (isNonFieldKey(key)) continue
+    // Exact-match: the key must appear as `KEY` in the **Input:** line.
+    // Never startsWith — 'ISSUE' must not satisfy 'ISSUE_INPUT' (AC-0.1).
+    if (!section.includes(`\`${key}\``)) bad.push(key)
+  }
+  return bad
+}
+
 // Values from issue_capture_contract() (Direction 3 — producer check).
 // In Phase 0 this runs against the plan-side capture list in the DIST_FILES corpus.
 // From Phase 2 onward this runs against the compiled _tracker.mds define.
@@ -114,6 +203,13 @@ let gitCorpus: CorpusEntry[]            // sole corpus (git.md only, for Directi
 let keysPassedByOp: Map<string, Set<string>>
 // All fences scanned, by agent type.
 let fencesScanned: Map<string, number>
+// Git fences whose text mentions OPERATION: anywhere (the population the parser
+// must cover) vs the ones harvestFence actually parsed. Divergence means the
+// anchors stopped matching the corpus — the vacuity failure mode (PF-018).
+let gitFencesMentioningOperation: number
+let gitFencesOpMatched: number
+// Language-tagged recipe fences skipped by the scan (see isRecipeFence).
+let recipeFencesSkipped: number
 
 beforeAll(() => {
   distFiles = requireDistFiles()
@@ -136,26 +232,28 @@ beforeAll(() => {
   // Scan all compiled commands for Git and Code fences.
   keysPassedByOp = new Map()
   fencesScanned = new Map([['Git', 0], ['Code', 0]])
+  gitFencesMentioningOperation = 0
+  gitFencesOpMatched = 0
+  recipeFencesSkipped = 0
 
   for (const entry of corpusEntries) {
     const fences = parseFences(entry.content)
     for (const fence of fences) {
+      if (isRecipeFence(fence)) {
+        if (isAgentBlock(fence, 'Git') || isAgentBlock(fence, 'Code')) recipeFencesSkipped++
+        continue
+      }
       if (isAgentBlock(fence, 'Git')) {
         fencesScanned.set('Git', fencesScanned.get('Git')! + 1)
+        if (fence.includes('OPERATION:')) gitFencesMentioningOperation++
 
-        const opMatch = fence.match(/^OPERATION: (\S+)/m)
-        if (!opMatch) continue
-        const op = opMatch[1]
+        const harvested = harvestFence(fence)
+        if (!harvested) continue
+        gitFencesOpMatched++
 
-        // Harvest passed keys: all UPPERCASE_KEY: lines in the fence.
-        const passedKeys = new Set<string>()
-        for (const km of fence.matchAll(/^([A-Z_][A-Z0-9_]*): /gm)) {
-          passedKeys.add(km[1])
-        }
-
-        const existing = keysPassedByOp.get(op) ?? new Set()
-        for (const k of passedKeys) existing.add(k)
-        keysPassedByOp.set(op, existing)
+        const existing = keysPassedByOp.get(harvested.op) ?? new Set<string>()
+        for (const k of harvested.keys) existing.add(k)
+        keysPassedByOp.set(harvested.op, existing)
       } else if (isAgentBlock(fence, 'Code')) {
         fencesScanned.set('Code', fencesScanned.get('Code')! + 1)
       }
@@ -178,6 +276,44 @@ describe('non-vacuity: per-agent-type fence counts', () => {
       fencesScanned.get('Code'),
       `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously (PF-018)`,
     ).toBeGreaterThan(0)
+  })
+
+  it('recipe fences are excluded and the exclusion arm is live', () => {
+    // Non-vacuity for the isRecipeFence arm: if it ever stops matching, the
+    // multi-agent ```js recipes would be swept into the prose scan and attribute
+    // unrelated keys to whichever OPERATION appeared first.
+    expect(
+      recipeFencesSkipped,
+      'no language-tagged agent recipe fence was skipped — isRecipeFence no longer matches the corpus',
+    ).toBeGreaterThan(0)
+  })
+
+  it('every prose Git fence that mentions OPERATION: is actually parsed (anchor coverage)', () => {
+    // The assertion that would have caught the original defect. Counting fences
+    // is not enough: a fence can be scanned, fail the OPERATION anchor, and be
+    // skipped while `fencesScanned > 0` stays green. This compares the parsed
+    // population against the population that must be parsed, so a regex that
+    // stops matching the corpus fails here instead of going quietly vacuous.
+    expect(
+      gitFencesMentioningOperation,
+      'no Git fence mentions OPERATION: — the corpus shape changed (PF-018)',
+    ).toBeGreaterThan(0)
+    expect(
+      gitFencesOpMatched,
+      `${gitFencesOpMatched}/${gitFencesMentioningOperation} Git fences with an OPERATION: line were parsed. ` +
+      'The OPERATION anchor no longer matches the compiled fence shape — the forward/reverse ' +
+      'directions would iterate an empty map and pass vacuously (PF-018).',
+    ).toBe(gitFencesMentioningOperation)
+  })
+
+  it('at least 10 operations have a live caller fence (key-map non-vacuity)', () => {
+    // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
+    // both of them assert nothing regardless of how many fences were counted.
+    expect(
+      keysPassedByOp.size,
+      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 10; ` +
+      'the forward and reverse directions iterate this map and would be near-vacuous',
+    ).toBeGreaterThanOrEqual(10)
   })
 
   it('op→section map covers at least 15 operations [DR-24]', () => {
@@ -212,18 +348,10 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
         continue
       }
 
-      for (const key of passedKeys) {
-        if (EXCLUDED_KEYS.has(key)) continue
-        // Produces / Requires are phase-ordering DAG annotations, not field contracts (PF-039).
-        if (key === 'PRODUCES' || key === 'REQUIRES') continue
-
-        // Exact-match: the key must appear as `KEY` in the **Input:** line.
-        // Never startsWith — 'ISSUE' must not satisfy 'ISSUE_INPUT' (AC-0.1).
-        if (!section.includes(`\`${key}\``)) {
-          violations.push(
-            `OPERATION: ${op} passes key '${key}' but it is not declared in **Input:** in git.md`,
-          )
-        }
+      for (const key of forwardViolationsFor(section, passedKeys)) {
+        violations.push(
+          `OPERATION: ${op} passes key '${key}' but it is not declared in **Input:** in git.md`,
+        )
       }
     }
 
@@ -233,40 +361,63 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     ).toHaveLength(0)
   })
 
-  // Known-bad inline sample — RED proof (mechanic 2, H10):
-  // An inline `OPERATION: fetch-issue\nISSUE: 42\n` fence proves the guard
-  // goes RED on a wrong key. A1 fixed debug.mds:51 (ISSUE: → ISSUE_INPUT:),
-  // so this fixture replays the pre-fix state without reverting any commit.
-  it('known-bad sample: inline fence with wrong key ISSUE produces exactly one violation', () => {
-    const KNOWN_BAD_FENCE =
-      '```\n' +
-      'Agent(subagent_type="Git"):\n' +
-      'OPERATION: fetch-issue\n' +
-      'ISSUE: 42\n' +
-      '```'
+  // Known-bad inline sample — RED proof (mechanic 2, H10).
+  //
+  // Verbatim pre-A1 text of src/assets/commands/debug.mds:49-53
+  // (`git show e726874:src/assets/commands/debug.mds`), including the opening
+  // double quote and the `{issue number}` placeholder. Runtime shape, not a
+  // stylised one (PF-043): a stripped-down `ISSUE: 42` fence with the anchor at
+  // a bare line start does not occur anywhere in the compiled corpus, so a proof
+  // built on it stays green even when the parser matches nothing real.
+  //
+  // Harvested through harvestFence/forwardViolationsFor — the same parser the
+  // live scan uses — so the proof tracks the guard rather than shadowing it.
+  const KNOWN_BAD_FENCE =
+    '```\n' +
+    'Agent(subagent_type="Git"):\n' +
+    '"OPERATION: fetch-issue\n' +
+    'ISSUE: {issue number}\n' +
+    'Return issue title, body, labels, and any linked error logs."\n' +
+    '```'
 
-    // Extract keys from the known-bad fence (same logic as main scan above)
-    const opMatch = KNOWN_BAD_FENCE.match(/^OPERATION: (\S+)/m)
-    expect(opMatch, 'known-bad fence must contain OPERATION:').not.toBeNull()
-    const op = opMatch![1]
+  it('known-bad sample: pre-A1 debug.mds fence is parsed by the live parser (PF-043 shape)', () => {
+    const harvested = harvestFence(KNOWN_BAD_FENCE)
+    expect(
+      harvested,
+      'the live parser must parse the pre-A1 debug.mds fence — if it returns null the ' +
+      'RED proof below is testing a shape the guard cannot see',
+    ).not.toBeNull()
+    expect(harvested!.op).toBe('fetch-issue')
+    expect(harvested!.keys, 'the wrong key ISSUE must be harvested').toContain('ISSUE')
+  })
 
-    const section = opSectionMap.get(op)
-    expect(section, `op '${op}' must be in the map for the RED proof to work`).toBeTruthy()
+  it('known-bad sample: pre-A1 debug.mds fence produces exactly one violation (ISSUE)', () => {
+    const harvested = harvestFence(KNOWN_BAD_FENCE)!
+    const section = opSectionMap.get(harvested.op)
+    expect(section, `op '${harvested.op}' must be in the map for the RED proof to work`).toBeTruthy()
 
-    const violations: string[] = []
-    for (const km of KNOWN_BAD_FENCE.matchAll(/^([A-Z_][A-Z0-9_]*): /gm)) {
-      const key = km[1]
-      if (EXCLUDED_KEYS.has(key) || key === 'PRODUCES' || key === 'REQUIRES') continue
-      if (!section!.includes(`\`${key}\``)) {
-        violations.push(key)
-      }
-    }
+    const violations = forwardViolationsFor(section!, harvested.keys)
 
     expect(
       violations,
       `Known-bad sample must produce exactly one violation (key 'ISSUE'), got: [${violations.join(', ')}]`,
     ).toHaveLength(1)
     expect(violations[0]).toBe('ISSUE')
+  })
+
+  it('post-A1 debug.mds fence produces no violation (GREEN counterpart)', () => {
+    // The same fence with the A1 fix applied. Pairing GREEN with RED proves the
+    // guard discriminates on the key, not on the fence shape.
+    const FIXED_FENCE = KNOWN_BAD_FENCE.replace(
+      'ISSUE: {issue number}',
+      'ISSUE_INPUT: {issue reference}',
+    )
+    const harvested = harvestFence(FIXED_FENCE)!
+    const section = opSectionMap.get(harvested.op)!
+    expect(
+      forwardViolationsFor(section, harvested.keys),
+      'the post-A1 fence must be clean — ISSUE_INPUT is declared in fetch-issue **Input:**',
+    ).toHaveLength(0)
   })
 })
 
@@ -285,7 +436,7 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 
       const { required } = parseInputIdentifiers(section)
       for (const key of required) {
-        if (EXCLUDED_KEYS.has(key)) continue
+        if (isNonFieldKey(key)) continue
         if (!passedKeys.has(key)) {
           violations.push(
             `OPERATION: ${op} declares required Input '${key}' but no caller fence passes it`,
@@ -313,7 +464,10 @@ describe('third direction: every issue_capture_contract() value has a producer',
     const missing: string[] = []
 
     for (const value of ISSUE_CAPTURE_CONTRACT) {
-      if (!allContent.includes(value)) {
+      // Word-boundary, not substring: a bare `includes` lets ISSUE_REFS satisfy
+      // ISSUE_REF, so a producer could disappear while a longer name kept the
+      // check green — the same prefix-collision class AC-0.1 guards against.
+      if (!new RegExp(`\\b${value}\\b`).test(allContent)) {
         missing.push(value)
       }
     }

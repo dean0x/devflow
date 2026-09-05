@@ -4,11 +4,19 @@
  *
  * Usage: npm run test:golden:update -- <target>
  *        npm run test:golden:update -- github-status-lines --unfreeze  (frozen through Phase 3)
+ *        npm run test:golden:update -- <target> --out-dir <dir>
  *
  * A target is required. Without one, exits non-zero and prints usage.
  * The target `github-status-lines` is frozen through Phase 3 and is refused
  * without an explicit --unfreeze argument (the frozen-target refusal test
  * asserts this behaviour — tests/goldens/github-status-lines.test.ts).
+ *
+ * `--out-dir <dir>` redirects the write away from tests/fixtures/golden/.
+ * The acceptance half of the refusal guard uses it to exercise the real write
+ * path against a temp directory: a test that ran this script against the live
+ * fixture would regenerate the frozen golden on every `npm test` (and in CI),
+ * which is the one thing §3 forbids — "a CI job that regenerates a golden is a
+ * golden that asserts nothing".
  *
  * DR-03 lifecycle rule:
  *   "frozen at Phase 0, never regenerated through Phase 3; green only with --unfreeze"
@@ -28,8 +36,24 @@ const FROZEN_LIFECYCLE_RULE =
   'Pass --unfreeze only when this constraint has been formally lifted by the phase plan.'
 
 const args = process.argv.slice(2)
-const targetArg = args.find(a => !a.startsWith('--'))
 const hasUnfreeze = args.includes('--unfreeze')
+
+// --out-dir consumes the following argument, so it must not be mistaken for the
+// target. Parse it out before picking the positional target.
+const outDirIndex = args.indexOf('--out-dir')
+const outDirArg = outDirIndex === -1 ? null : args[outDirIndex + 1]
+if (outDirIndex !== -1 && (!outDirArg || outDirArg.startsWith('--'))) {
+  console.error('Error: --out-dir requires a directory argument.')
+  process.exit(1)
+}
+const outDirValueIndex = outDirIndex === -1 ? -1 : outDirIndex + 1
+const positional = args.filter(
+  (a, i) => !a.startsWith('--') && i !== outDirValueIndex,
+)
+const targetArg = positional[0]
+
+// Resolved against ROOT so a relative --out-dir cannot depend on the caller's cwd.
+const destDir = outDirArg ? path.resolve(ROOT, outDirArg) : GOLDENS_DIR
 
 if (!targetArg) {
   console.error('Error: a named target is required.')
@@ -53,11 +77,11 @@ if (targetArg === 'github-status-lines' && !hasUnfreeze) {
   process.exit(1)
 }
 
-mkdirSync(GOLDENS_DIR, { recursive: true })
+mkdirSync(destDir, { recursive: true })
 
 if (targetArg === 'git-agent') {
   const src = path.join(ROOT, 'src', 'assets', 'agents', 'git.md')
-  const dst = path.join(GOLDENS_DIR, 'git-agent.md')
+  const dst = path.join(destDir, 'git-agent.md')
   // Prefer dist/agents/git.md when it exists (Phase 1+ dist-preferred path)
   let sourcePath = src
   try {
@@ -70,10 +94,14 @@ if (targetArg === 'git-agent') {
   }
   const content = readFileSync(sourcePath, 'utf-8')
   writeFileSync(dst, content, 'utf-8')
-  console.log(`Written: tests/fixtures/golden/git-agent.md (${content.length} chars)`)
+  console.log(`Written: ${dst} (${content.length} chars)`)
 } else if (targetArg === 'github-status-lines') {
-  // Inline extractStatusLines logic (avoids TypeScript import for Node.js direct execution).
-  // This must stay in sync with tests/helpers.ts extractStatusLines().
+  // Inline extractStatusLines logic (avoids a TypeScript import for direct
+  // Node.js execution). This duplicates tests/helpers.ts extractStatusLines();
+  // the two are pinned together by the byte-equality assertion in
+  // tests/goldens/github-status-lines.test.ts, which runs this script into a
+  // temp directory and compares its output to extractStatusLines(). Divergence
+  // goes RED there — the line ranges below are never hand-verified.
   const git = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
   const code = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8')
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
@@ -101,9 +129,9 @@ if (targetArg === 'git-agent') {
   ]
 
   const content = parts.join('\n') + '\n'
-  const dst = path.join(GOLDENS_DIR, 'github-status-lines.txt')
+  const dst = path.join(destDir, 'github-status-lines.txt')
   writeFileSync(dst, content, 'utf-8')
-  console.log(`Written: tests/fixtures/golden/github-status-lines.txt (${content.length} chars)`)
+  console.log(`Written: ${dst} (${content.length} chars)`)
 } else {
   console.error(`Unknown target: '${targetArg}'`)
   console.error('Available targets: git-agent, github-status-lines')

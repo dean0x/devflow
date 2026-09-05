@@ -371,19 +371,3 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
   return skills;
 }
 
-/**
- * Return all subagent transcripts from a specific session directory and parse
- * the preloaded skill names from each transcript's initial user message.
- *
- * Scoped to the exact sessionId returned by runClaudeAndWait, so concurrent
- * agents in the same cwd cannot contaminate the result (D33).
- *
- * Returns an empty array if no transcripts are found or the directory structure
- * has changed (graceful degradation).
- */
-export function getSessionSubagentPreloadedSkills(sessionId: string): string[][] {
-  const result = getSubagentPreloadResult(sessionId);
-  if (result.kind !== 'ok') return [];
-  return result.transcripts;
-}
-
