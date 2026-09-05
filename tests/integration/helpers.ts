@@ -1,5 +1,5 @@
 import { execSync, spawn, ChildProcess } from 'child_process';
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -376,10 +376,7 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
  * the preloaded skill names from each transcript's initial user message.
  *
  * Scoped to the exact sessionId returned by runClaudeAndWait, so concurrent
- * agents in the same cwd cannot contaminate the result (D33). The mtime bound
- * used by getAllSubagentPreloadedSkills is intentionally absent: session scoping
- * makes time-based bounding dead weight (ADR-003 — end-state, no belt-and-braces
- * residue without a reason).
+ * agents in the same cwd cannot contaminate the result (D33).
  *
  * Returns an empty array if no transcripts are found or the directory structure
  * has changed (graceful degradation).
@@ -390,86 +387,3 @@ export function getSessionSubagentPreloadedSkills(sessionId: string): string[][]
   return result.transcripts;
 }
 
-/** Max session directories to scan. Transcripts are in recent sessions only. */
-const SESSION_SCAN_LIMIT = 20;
-
-/**
- * Walk the project directory and collect subagent transcript paths written at or
- * after `since`. Only the most recent {@link SESSION_SCAN_LIMIT} session directories
- * are examined to keep this fast on machines with many sessions.
- */
-function findRecentSubagentTranscripts(
-  projectDir: string,
-  since: Date,
-): Array<{ path: string; mtime: Date }> {
-  const sessionEntries = readdirSync(projectDir)
-    .filter((d) => !d.endsWith('.jsonl'))
-    .map((d) => {
-      const full = resolve(projectDir, d);
-      try {
-        const s = statSync(full);
-        return s.isDirectory() ? { path: full, mtime: s.mtime } : null;
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is { path: string; mtime: Date } => e !== null)
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-    .slice(0, SESSION_SCAN_LIMIT);
-
-  const transcripts: Array<{ path: string; mtime: Date }> = [];
-  for (const session of sessionEntries) {
-    const subagentsDir = resolve(session.path, 'subagents');
-    try {
-      const files = readdirSync(subagentsDir).filter(
-        (f) => f.startsWith('agent-') && f.endsWith('.jsonl'),
-      );
-      for (const file of files) {
-        const filePath = resolve(subagentsDir, file);
-        const stat = statSync(filePath);
-        if (stat.mtime >= since) {
-          transcripts.push({ path: filePath, mtime: stat.mtime });
-        }
-      }
-    } catch {
-      // No subagents dir in this session — skip
-    }
-  }
-  return transcripts;
-}
-
-/**
- * Find all subagent transcripts written at or after `since` and return the
- * preloaded skill names from each transcript's initial user message.
- *
- * Returns one string[] per transcript. The caller can assert that at least one
- * transcript contains the expected skills — this avoids a race condition where
- * Claude spawns auxiliary subagents (e.g., Git) alongside the target agent,
- * and the auxiliary transcript has a later mtime.
- *
- * Returns an empty array if no transcripts are found or the directory structure
- * has changed (graceful degradation).
- *
- * @deprecated Use getSessionSubagentPreloadedSkills(sessionId) instead — it is
- *   hermetically scoped to the spawned session (D33). This function remains for
- *   reference; nothing in the test suite imports it after the D33 fix.
- */
-export function getAllSubagentPreloadedSkills(since: Date): string[][] {
-  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
-  const cwd = process.cwd();
-  // Claude Code encodes the project path by replacing / with -
-  const encodedPath = '-' + cwd.replace(/\//g, '-').replace(/^-/, '');
-  const projectDir = resolve(homeDir, '.claude', 'projects', encodedPath);
-
-  try {
-    const transcripts = findRecentSubagentTranscripts(projectDir, since);
-    if (transcripts.length === 0) return [];
-
-    // Most recent transcript first
-    transcripts.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-    return transcripts.map((t) => parsePreloadedSkills(t.path));
-  } catch {
-    // Project dir doesn't exist or structure changed — return empty gracefully
-    return [];
-  }
-}
