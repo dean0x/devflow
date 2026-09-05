@@ -309,35 +309,6 @@ export function runClaudeAndWait(
 // tags listing preloaded skills. If Claude Code changes this format, these helpers
 // return empty arrays (graceful degradation via catch).
 
-/** A parsed subagent transcript record with preloaded skill names. */
-export interface TranscriptRecord {
-  /** Absolute path to the agent-*.jsonl file. */
-  path: string;
-  /** The session ID extracted from the transcript's parent directory name. */
-  sessionId: string;
-  /** Skill names preloaded via <command-name> tags in the first user message. */
-  preloadedSkills: string[];
-}
-
-/**
- * Pure selector — returns only the records whose sessionId matches the target.
- *
- * Extracted as an injectable function so it can be unit-tested with synthetic
- * fixture data without touching the filesystem (per PF-043 shape requirement).
- *
- * D33 — session-scoped transcript filtering: the unfiltered scan over all
- * recent sessions was nondeterministic when concurrent agents ran in the same
- * cwd (observed in CI when the pipeline's Code/Validate agents contaminated
- * the Simplify preload assertion). Scoping to the spawned session ID fixes
- * the isolation defect.
- */
-export function selectTranscriptsBySession(
-  records: TranscriptRecord[],
-  sessionId: string,
-): TranscriptRecord[] {
-  return records.filter((r) => r.sessionId === sessionId);
-}
-
 /**
  * Read a subagent transcript and return the skill names declared in the first
  * user message via `<command-name>` tags. The `devflow:` namespace prefix is
