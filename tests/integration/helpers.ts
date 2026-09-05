@@ -172,14 +172,64 @@ export function hasRequiredSkills(result: StreamResult, required: string[]): boo
  * Run a prompt through claude CLI and wait for completion. No early-exit logic —
  * just spawns the process and resolves when it exits. Used for subagent tests
  * where we need the process to finish so transcripts are written to disk.
+ *
+ * D33 — session-scoped transcript filtering: captures the sessionId via a
+ * directory-diff snapshot rather than --output-format json. The diff approach
+ * works even when the process is killed by the timeout: the session directory
+ * is created at session start (before any work begins), so it is always present
+ * by the time the close/timeout handler runs. This avoids the brittle requirement
+ * that the process exit normally to produce JSON output.
+ *
+ * If exactly one new UUID session directory appears, it is ours. If multiple
+ * appear (concurrent background agents), the most-recently-modified one is
+ * returned as a best-effort heuristic; in sequential test runs this is correct.
  */
 export function runClaudeAndWait(
   prompt: string,
   options?: { timeout?: number; model?: string; allowedTools?: string },
-): Promise<{ durationMs: number; exitCode: number | null }> {
+): Promise<{ durationMs: number; exitCode: number | null; sessionId: string | null }> {
   const timeout = options?.timeout ?? 45000;
   const model = options?.model ?? 'haiku';
   const allowedTools = options?.allowedTools ?? 'Agent';
+
+  // Snapshot existing session directories before spawning (D33).
+  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const cwdPath = process.cwd();
+  const encodedPath = '-' + cwdPath.replace(/\//g, '-').replace(/^-/, '');
+  const projectDir = resolve(homeDir, '.claude', 'projects', encodedPath);
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  let existingDirs: Set<string>;
+  try {
+    existingDirs = new Set(readdirSync(projectDir).filter((d) => uuidRe.test(d)));
+  } catch {
+    existingDirs = new Set();
+  }
+
+  /**
+   * Find the session directory created by OUR spawn (D33). Called after close or
+   * timeout so the directory is guaranteed to exist if claude started successfully.
+   */
+  const findSessionId = (): string | null => {
+    try {
+      const newDirs = readdirSync(projectDir).filter((d) => uuidRe.test(d) && !existingDirs.has(d));
+      if (newDirs.length === 0) return null;
+      if (newDirs.length === 1) return newDirs[0] ?? null;
+      // Multiple new dirs — concurrent background sessions. Pick most recently
+      // modified (our spawn is most recent relative to pre-spawn snapshot).
+      const withMtime = newDirs.map((d) => {
+        try {
+          return { d, mtime: statSync(resolve(projectDir, d)).mtimeMs };
+        } catch {
+          return { d, mtime: 0 };
+        }
+      });
+      withMtime.sort((a, b) => b.mtime - a.mtime);
+      return withMtime[0]?.d ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   return new Promise((resolve) => {
     const startTime = Date.now();
@@ -193,17 +243,23 @@ export function runClaudeAndWait(
 
     const timer = setTimeout(() => {
       try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-      resolve({ durationMs: Date.now() - startTime, exitCode: null });
+      // Wait 3 s after SIGTERM: the spawned subagent runs independently and may
+      // still be writing its initialization transcript (skill preloads appear in
+      // the first JSONL lines). Resolving immediately races with that write and
+      // produces [[]] in getSessionSubagentPreloadedSkills (D33 timing fix).
+      setTimeout(() => {
+        resolve({ durationMs: Date.now() - startTime, exitCode: null, sessionId: findSessionId() });
+      }, 3000);
     }, timeout);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ durationMs: Date.now() - startTime, exitCode: code });
+      resolve({ durationMs: Date.now() - startTime, exitCode: code, sessionId: findSessionId() });
     });
 
     proc.on('error', () => {
       clearTimeout(timer);
-      resolve({ durationMs: Date.now() - startTime, exitCode: null });
+      resolve({ durationMs: Date.now() - startTime, exitCode: null, sessionId: findSessionId() });
     });
   });
 }
@@ -214,51 +270,33 @@ export function runClaudeAndWait(
 // tags listing preloaded skills. If Claude Code changes this format, these helpers
 // return empty arrays (graceful degradation via catch).
 
-/** Max session directories to scan. Transcripts are in recent sessions only. */
-const SESSION_SCAN_LIMIT = 20;
+/** A parsed subagent transcript record with preloaded skill names. */
+export interface TranscriptRecord {
+  /** Absolute path to the agent-*.jsonl file. */
+  path: string;
+  /** The session ID extracted from the transcript's parent directory name. */
+  sessionId: string;
+  /** Skill names preloaded via <command-name> tags in the first user message. */
+  preloadedSkills: string[];
+}
 
 /**
- * Walk the project directory and collect subagent transcript paths written at or
- * after `since`. Only the most recent {@link SESSION_SCAN_LIMIT} session directories
- * are examined to keep this fast on machines with many sessions.
+ * Pure selector — returns only the records whose sessionId matches the target.
+ *
+ * Extracted as an injectable function so it can be unit-tested with synthetic
+ * fixture data without touching the filesystem (per PF-043 shape requirement).
+ *
+ * D33 — session-scoped transcript filtering: the unfiltered scan over all
+ * recent sessions was nondeterministic when concurrent agents ran in the same
+ * cwd (observed in CI when the pipeline's Code/Validate agents contaminated
+ * the Simplify preload assertion). Scoping to the spawned session ID fixes
+ * the isolation defect.
  */
-function findRecentSubagentTranscripts(
-  projectDir: string,
-  since: Date,
-): Array<{ path: string; mtime: Date }> {
-  const sessionEntries = readdirSync(projectDir)
-    .map((d) => {
-      const full = resolve(projectDir, d);
-      try {
-        const s = statSync(full);
-        return s.isDirectory() ? { path: full, mtime: s.mtime } : null;
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is { path: string; mtime: Date } => e !== null)
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-    .slice(0, SESSION_SCAN_LIMIT);
-
-  const transcripts: Array<{ path: string; mtime: Date }> = [];
-  for (const session of sessionEntries) {
-    const subagentsDir = resolve(session.path, 'subagents');
-    try {
-      const files = readdirSync(subagentsDir).filter(
-        (f) => f.startsWith('agent-') && f.endsWith('.jsonl'),
-      );
-      for (const file of files) {
-        const filePath = resolve(subagentsDir, file);
-        const stat = statSync(filePath);
-        if (stat.mtime >= since) {
-          transcripts.push({ path: filePath, mtime: stat.mtime });
-        }
-      }
-    } catch {
-      // No subagents dir in this session — skip
-    }
-  }
-  return transcripts;
+export function selectTranscriptsBySession(
+  records: TranscriptRecord[],
+  sessionId: string,
+): TranscriptRecord[] {
+  return records.filter((r) => r.sessionId === sessionId);
 }
 
 /**
@@ -295,6 +333,85 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
 }
 
 /**
+ * Return all subagent transcripts from a specific session directory and parse
+ * the preloaded skill names from each transcript's initial user message.
+ *
+ * Scoped to the exact sessionId returned by runClaudeAndWait, so concurrent
+ * agents in the same cwd cannot contaminate the result (D33). The mtime bound
+ * used by getAllSubagentPreloadedSkills is intentionally absent: session scoping
+ * makes time-based bounding dead weight (ADR-003 — end-state, no belt-and-braces
+ * residue without a reason).
+ *
+ * Returns an empty array if no transcripts are found or the directory structure
+ * has changed (graceful degradation).
+ */
+export function getSessionSubagentPreloadedSkills(sessionId: string): string[][] {
+  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const cwd = process.cwd();
+  // Claude Code encodes the project path by replacing / with -
+  const encodedPath = '-' + cwd.replace(/\//g, '-').replace(/^-/, '');
+  const subagentsDir = resolve(homeDir, '.claude', 'projects', encodedPath, sessionId, 'subagents');
+
+  try {
+    const files = readdirSync(subagentsDir).filter(
+      (f) => f.startsWith('agent-') && f.endsWith('.jsonl'),
+    );
+    return files.map((file) => parsePreloadedSkills(resolve(subagentsDir, file)));
+  } catch {
+    // Session directory doesn't exist or structure changed — return empty gracefully
+    return [];
+  }
+}
+
+/** Max session directories to scan. Transcripts are in recent sessions only. */
+const SESSION_SCAN_LIMIT = 20;
+
+/**
+ * Walk the project directory and collect subagent transcript paths written at or
+ * after `since`. Only the most recent {@link SESSION_SCAN_LIMIT} session directories
+ * are examined to keep this fast on machines with many sessions.
+ */
+function findRecentSubagentTranscripts(
+  projectDir: string,
+  since: Date,
+): Array<{ path: string; mtime: Date }> {
+  const sessionEntries = readdirSync(projectDir)
+    .filter((d) => !d.endsWith('.jsonl'))
+    .map((d) => {
+      const full = resolve(projectDir, d);
+      try {
+        const s = statSync(full);
+        return s.isDirectory() ? { path: full, mtime: s.mtime } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is { path: string; mtime: Date } => e !== null)
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+    .slice(0, SESSION_SCAN_LIMIT);
+
+  const transcripts: Array<{ path: string; mtime: Date }> = [];
+  for (const session of sessionEntries) {
+    const subagentsDir = resolve(session.path, 'subagents');
+    try {
+      const files = readdirSync(subagentsDir).filter(
+        (f) => f.startsWith('agent-') && f.endsWith('.jsonl'),
+      );
+      for (const file of files) {
+        const filePath = resolve(subagentsDir, file);
+        const stat = statSync(filePath);
+        if (stat.mtime >= since) {
+          transcripts.push({ path: filePath, mtime: stat.mtime });
+        }
+      }
+    } catch {
+      // No subagents dir in this session — skip
+    }
+  }
+  return transcripts;
+}
+
+/**
  * Find all subagent transcripts written at or after `since` and return the
  * preloaded skill names from each transcript's initial user message.
  *
@@ -305,6 +422,10 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
  *
  * Returns an empty array if no transcripts are found or the directory structure
  * has changed (graceful degradation).
+ *
+ * @deprecated Use getSessionSubagentPreloadedSkills(sessionId) instead — it is
+ *   hermetically scoped to the spawned session (D33). This function remains for
+ *   reference; nothing in the test suite imports it after the D33 fix.
  */
 export function getAllSubagentPreloadedSkills(since: Date): string[][] {
   const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
