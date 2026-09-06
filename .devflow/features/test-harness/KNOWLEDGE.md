@@ -1,7 +1,7 @@
 ---
 feature: test-harness
 name: Test Harness (agent-source resolver, goldens, seam and guard tests, integration helpers)
-description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs ALL_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload."
+description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs ALL_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
 category: conventions
 directories: [tests/helpers.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration]
 created: 2026-09-06
@@ -14,7 +14,7 @@ updated: 2026-09-06
 
 The test harness (introduced in PR #327, issue #322 "Tracker Phase 0 — harness first") is the shared infrastructure that all future tracker-initiative tests build on. It lives in `tests/helpers.ts`, `tests/guards/`, `tests/goldens/`, `tests/seams/`, `tests/integration/`, and `tests/fixtures/`. It is designed around one principle: **a green test that exercises nothing is worse than no test**. Every major test in this harness has a non-vacuity probe that proves the detection logic is live.
 
-The harness has four cohesive pieces: (1) `helpers.ts` exports the shared API — agent-source resolver, corpus extractor, golden loader, and fence parsers; (2) guard tests pin source-file invariants and each includes a known-bad synthetic probe; (3) golden tests assert byte equality between agent source and a committed fixture; (4) integration tests spawn real `claude` CLI sessions to verify subagent skill preloading.
+The harness has four cohesive pieces: (1) `helpers.ts` exports the shared API — agent-source resolver, corpus extractor, golden loader, and fence parsers; (2) guard tests pin source-file invariants and each includes a known-bad synthetic probe; (3) golden tests assert byte equality between agent source and a committed fixture; (4) integration tests spawn real `claude` CLI sessions or full tarball installs to verify system-level properties.
 
 ## Code Organization Principles
 
@@ -72,6 +72,16 @@ Every guard in `tests/guards/` follows the same three-part structure:
 
 **3. Known-bad probe (mechanic 2 / H10).** Build a synthetic corpus entry or temp root that contains a real violation and confirm the collector flags it. This proves the detection logic is live without touching any committed source file. The probe must exercise the same collector the main guard uses — not an inline re-implementation.
 
+### De-vacuumed guard anti-pattern (AC-0.10 lesson)
+
+The AC-0.10 containment guard had a combined predicate (`<untrusted-issue-body> || <external-thread>`) with floor 3. On unmodified `main`, three pre-existing `<external-thread>` ops satisfied the floor — the guard passed without ever touching any `<untrusted-issue-body>` op. When `setup-task` containment was added via commit `75f13e7`, the combined predicate could not detect that the guard had always been vacuous for the issue-body half.
+
+The fix splits into two independent assertions with **named matching op sets**:
+- Issue-body: predicate `<untrusted-issue-body>` ONLY, floor 3, named set `{setup-task, fetch-issue, fetch-issues-batch}`. A named set prevents an unrelated op from satisfying the floor silently.
+- External-thread: predicate `<external-thread>` ONLY, floor 3, named set `{fetch-review-threads, post-resolution-summary, post-wave-report}`.
+
+Rule: when a guard predicate is a logical OR, you cannot tell which branch is carrying the floor. Split into independent assertions with named op sets. Never rely on a combined predicate to validate two distinct contracts.
+
 ### DIST_FILES vs ALL_HOSTS
 
 A permanent divergence (SG-13) between two related counts:
@@ -103,12 +113,23 @@ Goldens are committed fixtures that assert file content remains stable. "A golde
 `npm run test:golden:update -- git-agent` (via `scripts/update-golden.ts`, tsx).  
 `npm run test:golden:update -- github-status-lines --unfreeze` (frozen through Phase 3; refused without `--unfreeze`).
 
-CI never regenerates goldens. The `--out-dir <dir>` flag exists specifically so tests can exercise the update script against a temp directory without rewriting the frozen fixture — a test that runs the script against the live fixture regenerates it on every `npm test`.
+CI never regenerates goldens. The `--out-dir <dir>` flag exists specifically so tests can exercise the update script against a temp directory without rewriting the frozen fixture — a test that runs the script against the live fixture directory regenerates it on every `npm test`.
 
 **Sanctioned post-capture source fix procedure:**  
-Source fix commit → `npm run build` → re-anchor line references (for `extractStatusLines`) → fixture-only re-capture commit. This was done twice in this PR (`a5dd078`, `38db29e`).
+Source fix commit → `npm run build` → fixture-only re-capture commit (authorised `--unfreeze`). This procedure was used three times during Phase 0: twice in the initial PR and once in commit `3a95c92` (authorised unfreeze after containment changes to `git.md` altered content inside sampled operation sections).
 
-**`extractStatusLines()` is line-range sensitive.** It reads specific line ranges from `src/assets/agents/git.md`, `src/assets/agents/code.md`, `src/assets/commands/dynamic-build.mds`, and `src/assets/commands/resolve.mds`. Any edit that shifts those line numbers requires re-deriving the anchors by content and re-capturing the golden.
+**`extractStatusLines()` is CONTENT-ANCHORED, not line-offset based.** The function locates each excerpt in `src/assets/agents/git.md`, `src/assets/agents/code.md`, `src/assets/commands/dynamic-build.mds`, and `src/assets/commands/resolve.mds` using **unique text anchors** rather than hard-coded line numbers. This is the single most important fact for maintainers: the old implementation used 21 hard-coded ranges like `getLines(git, 238, 252)`, which meant ANY line insertion above a range silently shifted every anchor below it. A 26-line insertion to `git.md` (from commits `75f13e7`, `c7bff85`, `97f421a` combined) caused every sampled range to miss by 26 — zero content was correctly extracted.
+
+The three core helpers:
+- `gitOp(opName)` — extracts a named operation section from `git.md`. Uses `\n## Operation:` as the section boundary (deliberately NOT `\n## `) to avoid false splits at `## Issue #{n}:` headings inside output templates.
+- `between(src, startAnchor, endAnchor)` — extracts content between two text anchors (multi-line anchors are supported). Used for cross-cutting sections and Guard-5 marker lines that use leading-space-specific anchors to skip search-step lines with similar text.
+- `singleLine(src, anchor)` — extracts the single line containing an anchor.
+
+`extractStatusLines(gitContent?)` now accepts an optional `gitContent` parameter so callers can supply an alternative `git.md` body (e.g., a baseline snapshot for faithfulness proof testing).
+
+**Faithfulness proof obligation.** Any future rewrite of an extractor MUST reproduce the existing fixture byte-for-byte from the tree the fixture was captured at, BEFORE being run against a newer tree. The proof gate for the content-anchored rewrite: pass the `b6928e5` baseline snapshot of `git.md` as `gitContent` and assert the result equals the frozen `github-status-lines.txt` byte-for-byte. This gate makes the rewrite trustworthy. Editing the fixture to match a new extractor inverts the proof and destroys the contract.
+
+**Fixture freeze baselines** (in `tests/goldens/github-status-lines.test.ts`): `FIXTURE_BYTES = 17_914`, `FIXTURE_NEWLINES = 246`. These must move in the **same commit** as the fixture itself, or the tree is red at that boundary. Note the distinction: `git.md` size assertions were converted to `toBeGreaterThanOrEqual` floors (source legitimately grows); the fixture size pins stay exact `toBe` (the fixture is frozen). Both floor assertions appear in `numeric-floors.json`.
 
 ## Seam Test (command-agent-input.test.ts)
 
@@ -116,7 +137,9 @@ The seam test (`tests/seams/command-agent-input.test.ts`) pins the command→age
 
 1. **Forward** — every `KEY:` value passed in a Git fence is declared in that op's `**Input:**` line in `git.md` (sole corpus; git.md is the single authority).
 2. **Reverse** — every non-optional `**Input:**` identifier for an op that has at least one caller fence is passed by at least one caller.
-3. **Producer** — every value in `issue_capture_contract()` has a greppable producer in `DIST_FILES`.
+3. **Producer** — every value in `issue_capture_contract()` has a greppable producer in the **git agent source** (`gitCorpus` built in `beforeAll`). The consumer (`plan.md`) is excluded by construction.
+
+**Direction 3 de-vacuumed:** The old producer check searched `DIST_FILES` (compiled commands) — the only matching lines were `plan.md`'s own capture lines (the consumer). This found the consumer and called it the producer, concealing that `ISSUE_ID` and `ISSUE_URL` had no producer at all. The fix: point the search at `git.md` via `gitCorpus`, exclude the consumer by construction. Uses file-scoped slicing (not `extractOpSectionFromCorpus`) because `fetch-issue` and `fetch-issues-batch` output templates contain `## Issue #` headings that would truncate the section at `\n## ` — the same pattern as Guard 10. `issue-capture-contract-size` was corrected from 5 → 3 (a deliberate DECREASE: the old value counted two entries that had no producer).
 
 `parseInputIdentifiers(section)` scopes to the `**Input:**` line only. A key mentioned only in `**Process:**` is not declared and fails the forward check (MIS-8 failure mode). The old whole-section `includes()` check silently passed process-only keys.
 
@@ -143,21 +166,41 @@ The guard (`tests/guards/numeric-floor-manifest.test.ts`) verifies the pattern a
 
 To raise a floor: update both the assertion in the source file AND the `floor`, `pattern`, and `occurrences` fields in the manifest.
 
+**Current floor entries of note:**
+- `containment-ops-floor` was split (commit `c56c105`) into two entries: `containment-issue-body-floor` (predicate `<untrusted-issue-body>`, floor 3) and `containment-external-thread-floor` (predicate `<external-thread>`, floor 3). The old single entry could not distinguish which half was carrying the floor.
+- `issue-capture-contract-size` was corrected 5 → 3 (a deliberate DECREASE; the old value counted two entries that had no actual producer in `git.md`).
+- Two new entries for `git.md` size floors: `git-agent-line-floor` and `git-agent-char-floor` (both `toBeGreaterThanOrEqual` patterns, sourced from `tests/goldens/github-status-lines.test.ts`).
+
 Entries are **deliberately hand-registered** — automatic scanning would silently add floors for transient numbers and make the manifest untestable as a pinning device.
 
 ## Integration Test Hazards
 
-`tests/integration/subagent-skill-preload.test.ts` spawns real `claude` CLI sessions. Key constraints:
+### Subagent skill preload (tests/integration/subagent-skill-preload.test.ts)
+
+This file spawns real `claude` CLI sessions. Key constraints:
 
 - **Suite is skipped when `claude` is absent** — CI skips the suite.
 - **Prompts must stay read-only.** A spawned Git agent once made a real empty commit.
 - **Session identity is deterministic.** `runClaudeAndWait` generates a UUID before spawning and passes it via `--session-id <uuid>`. The subagents directory is then read at the known path rather than by directory-diff. Without `--session-id`, a concurrent devflow memory worker session can create a new UUID directory that the diff picks up instead.
 - **3-second post-SIGTERM wait.** The spawned subagent runs independently and may still be writing its initialization transcript (skill preloads appear in the first JSONL lines) when the parent exits. Resolving immediately races with that write.
 - **One bounded retry.** `MAX_SPAWN_ATTEMPTS = 2`. Haiku may occasionally answer the parent prompt directly without calling the Agent tool, leaving no `subagents/` directory. One retry almost always succeeds.
+- **Must be excluded from routine integration runs.** It spawns live `claude` against the developer's real `~/.claude` and has historically committed to this repo mid-run.
 
 The `subagents/` path follows Claude Code's layout:  
 `~/.claude/projects/-{encoded-cwd}/{sessionId}/subagents/agent-*.jsonl`  
 where the cwd encoding replaces every `/` with `-` and ensures a leading `-`.
+
+### Clause (ii) file-residue (tests/integration/clause-ii-file-residue.test.ts)
+
+Mechanises the file-residue half of the prefix-shippability clause (ii) acceptance criterion. What this file does that neither `pack-install.test.ts` nor `init-e2e-flags.test.ts` does: packs the real tarball, installs into a scratch `$HOME`, creates a throwaway git repo, runs `devflow init --recommended`, and asserts `git status --porcelain` has no `??` (untracked) entries.
+
+Non-vacuity assertion: `.gitignore` shows as modified (`M`) so the test cannot pass by doing nothing (init must have run and written the carve-out).
+
+This test found a real leak on first run (`?? .claudeignore`) which was fixed by commit `7074733` (gitignore v4 carve-out adds `.claudeignore`). The `.fails()` marker was removed after the fix.
+
+What remains manual: the "no new prompt" half, and the five-command walk-through (`/plan → /implement → /code-review → /resolve → /release`) require a live model and authenticated GitHub project.
+
+Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.integration.config.ts tests/integration/clause-ii-file-residue.test.ts`.
 
 ## Anti-Patterns
 
@@ -173,35 +216,44 @@ where the cwd encoding replaces every `/` with `-` and ensures a leading `-`.
 
 **Using a bare line-start anchor for OPERATION:.** The regex `/^OPERATION: /m` matches zero fences in the compiled corpus because fences are quoted and sometimes indented. Use `/^[ \t]*"?OPERATION: (\S+)/m`.
 
+**Combined OR predicate for two distinct containment contracts.** Using `<untrusted-issue-body> || <external-thread>` with a single floor cannot distinguish which branch carries the load. Split into two independent assertions with named matching op sets.
+
+**Searching the consumer (compiled commands) for a producer signal.** Direction 3 of the seam test must search `git.md` (the emitter), not `DIST_FILES` (which contains the consumer capture lines). Grepping the consumer and calling it the producer is vacuous and conceals missing producers.
+
+**Editing the golden fixture to match a new extractor before proving faithfulness.** Any extractor rewrite must reproduce the existing frozen fixture from the baseline tree FIRST (the faithfulness proof), THEN be run against the newer tree. Editing the fixture to match skips the proof entirely.
+
 ## Gotchas
 
-**`extractOpSectionFromCorpus` truncates at `\n## `.** Ops whose Output template contains `## ` headings (e.g., a multi-section output) have their section truncated at the next heading. File-scope assertions for those ops rather than using the corpus extractor on the full section.
+**`extractOpSectionFromCorpus` truncates at `\n## `.** Ops whose Output template contains `## ` headings (e.g., a multi-section output) have their section truncated at the next heading. File-scope assertions for those ops rather than using the corpus extractor on the full section. This is why Direction 3 of the seam test uses file-scoped slicing for `fetch-issue` and `fetch-issues-batch`.
 
-**`extractStatusLines()` is line-range bound.** It reads specific line numbers from four source files. A source edit that shifts those line numbers silently changes the extractor's output, making `github-status-lines.txt` stale. Re-derive anchors by content and re-capture after any source edit touching those ranges.
+**`extractStatusLines()` is content-anchored, not line-range based.** Adding or removing lines in `git.md` above a sampled section does NOT break the extractor — `gitOp()` finds the section by heading text, `between()` by surrounding text anchors, and `singleLine()` by a unique anchor. If a section heading or anchor text is renamed, the extractor throws explicitly rather than silently extracting wrong content. Re-capture the fixture after any `git.md` change that alters text inside a sampled operation's heading or anchor strings.
 
 **`github-status-lines.txt` is frozen through Phase 3.** The update script refuses the target without `--unfreeze`. A test that invokes the update script against the live fixture directory violates this freeze. Use `--out-dir <tmpdir>` to test the script safely.
 
-**Known load-sensitive tests.** These tests flake under full-suite load and should be re-run in isolation before blaming a branch: `hud-render` pair, `capture-hooks memory-worker`, `compliance-e2e S16b`, `eager-memory-refresh S18`, `spawnSync npx ETIMEDOUT` in `build-mds`.
+**Fixture byte/line counts must move in the same commit as the fixture.** `FIXTURE_BYTES` and `FIXTURE_NEWLINES` in `tests/goldens/github-status-lines.test.ts` are exact `toBe` pins. Moving them in a separate commit from the fixture leaves the tree red at that boundary commit.
+
+**Known load-sensitive tests.** These tests flake under full-suite load and should be re-run in isolation before blaming a branch: `hud-render` pair, `capture-hooks memory-worker`, `compliance-e2e S16b`, `eager-memory-refresh S18`, `spawnSync npx ETIMEDOUT` in `build-mds`, `redact-secrets`, `ledger-ops`, `shell-hooks` (json-helper describe), `decisions-usage-scan`. A full `npm test` may show 10–12 failures across 7 files that all pass 3/3 in isolation — these are load-induced subprocess-spawn flakes, not regressions.
 
 **PF-043 shape requirement.** Test fixtures must be built from real runtime shapes — copy actual agent files rather than hand-authoring content. A fixture built from an invented shape asserts nothing about production code. The resolver tests use `copyFileSync` to populate the temp root from real agent files.
 
 ## Key Files
 
-- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `gitAgentSinkCorpus`, `loadGolden`, `extractStatusLines`, `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
+- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `gitAgentSinkCorpus`, `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
 - `tests/guards/agent-source-resolver.test.ts` — resolver unit tests; dist-preferred and src-fallback proofs; `extractOpSectionFromCorpus` sole/union mode tests
 - `tests/guards/numeric-floor-manifest.test.ts` — floor pinning guard; occurrence-aware, decrement probe covers every entry
 - `tests/guards/literal-agent-paths.test.ts` — forbids `src/assets/agents/` literals in new test files; exception list with justifications; `requireDistFile`/`requireDistFiles` throw-contract tests
 - `tests/guards/retired-wording.test.ts` — Phase-0 allowlist of renamed/deleted literals; one shared grep guard (GAP-32); allowlist: `ISSUE_NUMBERS`, `ISSUE: {issue`, `close milestone`, `may pre-fetch`, `issue-first gate` (NOT `step 1c`)
 - `tests/guards/extended-references.test.ts` — SKILL.md Extended References table integrity; generated-path exception list seeded for Phase 2 (`references/tracker/`)
-- `tests/seams/command-agent-input.test.ts` — three-direction command→agent seam (PF-024); forward, reverse, producer; `parseInputIdentifiers` scoped to `**Input:**`
+- `tests/seams/command-agent-input.test.ts` — three-direction command→agent seam (PF-024); forward, reverse, producer (Direction 3 sources from git.md via gitCorpus, not DIST_FILES); `parseInputIdentifiers` scoped to `**Input:**`
 - `tests/goldens/git-agent-golden.test.ts` — byte-equality guard against `tests/fixtures/golden/git-agent.md`
-- `tests/goldens/github-status-lines.test.ts` — `extractStatusLines()` stability guard against `tests/fixtures/golden/github-status-lines.txt`
+- `tests/goldens/github-status-lines.test.ts` — `extractStatusLines()` stability guard; FIXTURE_BYTES=17_914, FIXTURE_NEWLINES=246; `git.md` size checks are `toBeGreaterThanOrEqual` floors
 - `tests/fixtures/golden/git-agent.md` — frozen byte-equal snapshot of `git.md`
 - `tests/fixtures/golden/github-status-lines.txt` — frozen output of `extractStatusLines()`; refused by update script without `--unfreeze`
-- `tests/fixtures/numeric-floors.json` — occurrence-aware floor manifest; hand-registered, never auto-generated
+- `tests/fixtures/numeric-floors.json` — occurrence-aware floor manifest; hand-registered; `containment-issue-body-floor` + `containment-external-thread-floor` (split from old `containment-ops-floor`); `issue-capture-contract-size` = 3; git.md line/char floors
 - `scripts/update-golden.ts` — golden update script (tsx); named target required; `--out-dir` for safe test exercising; `--unfreeze` for frozen targets
 - `tests/integration/helpers.ts` — `isClaudeAvailable`, `runClaudeAndWait`, `runClaudeStreaming`, `getSubagentPreloadResult`, `buildSubagentsPath`, `parseStreamEvent`
-- `tests/integration/subagent-skill-preload.test.ts` — real claude CLI spawn tests; `MAX_SPAWN_ATTEMPTS = 2`; skips when claude absent
+- `tests/integration/subagent-skill-preload.test.ts` — real claude CLI spawn tests; `MAX_SPAWN_ATTEMPTS = 2`; skips when claude absent; must be excluded from routine integration runs
+- `tests/integration/clause-ii-file-residue.test.ts` — prefix-shippability clause (ii) file-residue guard; packs real tarball, installs into scratch HOME, runs `devflow init --recommended`, asserts no `??` in `git status --porcelain`
 
 ## Recorded Exceptions
 
@@ -218,6 +270,7 @@ These are deliberate, documented divergences from the general rules:
 | `gh pr view` at `code-review.mds`, `bug-analysis.mds`, `resolve.mds:63` | Three occurrences allowlisted in `build-mds.test.ts` by filename | Legitimate traceability operations |
 | `references/tracker/` paths | Excepted from extended-references guard | Phase 2 generated-path; files created at build time, not in src/ |
 | `tests/integration/subagent-skill-preload.test.ts` | Spawns real `claude` with `--dangerously-skip-permissions` | Required for subagent spawn; prompts are read-only by test design |
+| Direction 3 producer search | Uses file-scoped slicing over `git.md`, not `extractOpSectionFromCorpus` | `fetch-issue`/`fetch-issues-batch` output templates contain `## Issue #` headings that truncate the section at `\n## ` |
 
 ## Related
 
