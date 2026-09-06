@@ -154,15 +154,29 @@ function forwardViolationsFor(section: string, keys: Set<string>): string[] {
 }
 
 // Values from issue_capture_contract() (Direction 3 — producer check).
-// In Phase 0 this runs against the plan-side capture list in the DIST_FILES corpus.
+//
+// Each entry names what git.md emits in its fetch-issue / fetch-issues-batch Output
+// template (the producer's vocabulary), NOT the variable name the plan command uses
+// (the consumer's vocabulary). Variable names like ISSUE_CONTENT, ACCEPTANCE_CRITERIA,
+// and ISSUE_REF never appear in git.md — they are plan.md's capture-side labels.
+// Searching DIST_FILES for them found only the consumer (plan.md's own capture line)
+// and called it the producer; that was the defect.
+//
+// ISSUE_ID and ISSUE_URL are excluded: neither name appears in git.md's Output templates
+// (no URL field is emitted; the issue id is embedded in the heading, not separately
+// labelled). Including them violated ADR-003 (no artifact without a reachable producer);
+// they were removed from the plan capture list in c7bff85.
+//
 // From Phase 2 onward this runs against the compiled _tracker.mds define.
-const ISSUE_CAPTURE_CONTRACT = [
-  'ISSUE_CONTENT',
-  'ACCEPTANCE_CRITERIA',
-  'ISSUE_REF',
-  'ISSUE_ID',
-  'ISSUE_URL',
-] as const
+const ISSUE_CAPTURE_CONTRACT: Array<{ label: string; producerPattern: string }> = [
+  // The issue body is wrapped in <untrusted-issue-body> in both fetch-issue and
+  // fetch-issues-batch Output templates (Principle 8 containment, commit 75f13e7).
+  { label: 'ISSUE_CONTENT', producerPattern: '<untrusted-issue-body>' },
+  // "### Acceptance Criteria" heading in fetch-issue; "**Acceptance Criteria**:" in batch.
+  { label: 'ACCEPTANCE_CRITERIA', producerPattern: 'Acceptance Criteria' },
+  // "## Issue #{number}:" heading in fetch-issue; "### Issue #{number1}:" in batch.
+  { label: 'ISSUE_REF', producerPattern: '## Issue #' },
+]
 
 // ── Build state shared across all directions (beforeAll) ─────────────────────
 
@@ -504,32 +518,63 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 
 // ── Direction 3: producer check ──────────────────────────────────────────────
 //
-// Every value in issue_capture_contract() has a greppable producer in the
-// DIST_FILES corpus (plan-side capture list in Phase 0).
-// From Phase 2 onward this runs against the compiled _tracker.mds define.
+// Every entry in issue_capture_contract() has a greppable producer in git.md's
+// fetch-issue / fetch-issues-batch Output templates.
+//
+// The corpus is git.md (via gitCorpus built in beforeAll), NOT DIST_FILES.
+// Searching DIST_FILES found only plan.md's own capture line — the consumer —
+// and mistook it for the producer. That vacuity hid the fact that ISSUE_ID and
+// ISSUE_URL had no producer at all (removed from plan capture list in c7bff85).
+//
+// The consumer (plan.md) is excluded by construction: we search only the two
+// fetching-op full sections from git.md, never the compiled command files.
+//
+// FILE-SCOPED SLICING (not extractOpSectionFromCorpus): the Output templates in
+// fetch-issue and fetch-issues-batch contain "## Issue #" headings that would
+// truncate the extracted section at the first \n## , cutting off the
+// <untrusted-issue-body> content. Per-op full-file slicing avoids truncation
+// (same pattern as AC-0.3 / Guard 10 in git-agent.test.ts).
 
-describe('third direction: every issue_capture_contract() value has a producer', () => {
-  it('every contract value appears in at least one compiled command (plan-side capture, Phase 0)', () => {
-    const allContent = corpusEntries.map(e => e.content).join('\n')
+describe('third direction: every issue_capture_contract() value has a producer in git.md', () => {
+  it('every contract entry has a greppable producer in fetch-issue / fetch-issues-batch Output (git.md sole corpus)', () => {
+    // File-scoped slicing: slice the full git.md content between ## Operation: anchors so
+    // that ## headings inside Output templates do not prematurely end the section.
+    const gitContent = gitCorpus[0]?.content ?? ''
+    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
+
+    function fileSlice(op: string): string {
+      const start = gitContent.indexOf(`## Operation: ${op}`)
+      if (start === -1) return ''
+      const next = gitContent.indexOf('\n## Operation: ', start + 1)
+      return next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
+    }
+
+    // Concatenate the two issue-fetching op slices — both may emit a given field.
+    const fetchIssueSec = fileSlice('fetch-issue')
+    const fetchBatchSec = fileSlice('fetch-issues-batch')
+    expect(
+      fetchIssueSec.length + fetchBatchSec.length,
+      'fetch-issue and fetch-issues-batch sections must be non-empty (corpus non-vacuity)',
+    ).toBeGreaterThan(0)
+    const producerContent = fetchIssueSec + '\n' + fetchBatchSec
+
     const missing: string[] = []
-
-    for (const value of ISSUE_CAPTURE_CONTRACT) {
-      // Word-boundary, not substring: a bare `includes` lets ISSUE_REFS satisfy
-      // ISSUE_REF, so a producer could disappear while a longer name kept the
-      // check green — the same prefix-collision class AC-0.1 guards against.
-      if (!new RegExp(`\\b${value}\\b`).test(allContent)) {
-        missing.push(value)
+    for (const { label, producerPattern } of ISSUE_CAPTURE_CONTRACT) {
+      if (!producerContent.includes(producerPattern)) {
+        missing.push(
+          `${label}: pattern "${producerPattern}" not found in git.md fetch-issue or fetch-issues-batch Output`,
+        )
       }
     }
 
     expect(
       missing,
-      `issue_capture_contract values missing from DIST_FILES corpus (plan-side capture list):\n` +
+      `issue_capture_contract values missing from git.md producer sections (fetch-issue / fetch-issues-batch):\n` +
       missing.join('\n'),
     ).toHaveLength(0)
   })
 
-  it('issue_capture_contract has 5 values (non-vacuous floor)', () => {
-    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(5)
+  it('issue_capture_contract has 3 values (non-vacuous floor)', () => {
+    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(3)
   })
 })
