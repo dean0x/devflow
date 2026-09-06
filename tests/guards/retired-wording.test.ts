@@ -90,7 +90,7 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
         if (entry.name === 'node_modules' || entry.name === '.git') continue;
         addDir(path.join(dir, entry.name), `${relPrefix}/${entry.name}`, exts);
       } else if (exts.some(ext => ext === '' ? !entry.name.includes('.') : entry.name.endsWith(ext))) {
-        // M13: ext === '' matches extensionless files (hook scripts in src/assets/scripts/hooks/)
+        // ext === '' matches extensionless files (hook scripts in src/assets/scripts/hooks/)
         const absPath = path.join(dir, entry.name);
         try {
           corpus.push({ relPath: `${relPrefix}/${entry.name}`, content: readFileSync(absPath, 'utf-8') });
@@ -101,7 +101,7 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
     }
   }
 
-  // M13: '' in exts picks up extensionless hook scripts in src/assets/scripts/hooks/ so
+  // '' in exts picks up extensionless hook scripts in src/assets/scripts/hooks/ so
   // retired-wording checks are not silently skipped for that corpus (e.g. capture-prompt, ensure-proxy).
   addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh', '']);
   addDir(path.join(ROOT, 'dist', 'commands'), 'dist/commands', ['.md']);

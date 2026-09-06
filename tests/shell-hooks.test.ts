@@ -1198,6 +1198,18 @@ describe('ensure-devflow-init behavioral', () => {
     // No .devflow/ directory should have been created in the test working directory
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
+
+  it('fast-path gates on .root-gitignore-configured-v3 marker with no -v2 reference (P0-S13)', () => {
+    // P0-S13 verify clause: fix A1 repaired -v2 → -v3 in the fast-path instead of deleting
+    // the branch. Deleting would let the fast-path fire on repos that have the four directories
+    // but no gitignore carve-out, skipping ensure-root-gitignore. Keeping -v3 is correct.
+    // RED: git show e726874:src/assets/scripts/hooks/ensure-devflow-init references
+    //   .root-gitignore-configured-v2 (no -v3), so both assertions below would fail on that
+    //   content — confirming -v3 is a genuine post-Phase-0 invariant, not a pre-existing truth.
+    const hookContent = fs.readFileSync(ENSURE_DEVFLOW, 'utf-8');
+    expect(hookContent, 'fast-path must reference .root-gitignore-configured-v3').toContain('.root-gitignore-configured-v3');
+    expect(hookContent, 'fast-path must not reference -v2 marker').not.toContain('-v2');
+  });
 });
 
 describe('ensure-root-gitignore behavioral', () => {

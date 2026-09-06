@@ -18,7 +18,7 @@
  *     legacy src paths present before Phase-0 renaming (historical documentation only).
  *   tests/goldens/git-agent-golden.test.ts — excluded: its it() test description string
  *     mentions the literal as a human-readable label, not as a file-reading path. The test
- *     uses resolveAgentSource() for all content access (MIS-5a compliant).
+ *     uses resolveAgentSource() for all content access.
  *
  * Comment lines (// and * prefixed) are skipped by the collector: literal mentions in
  * comments are documentation and are not path-resolution code.
@@ -62,7 +62,7 @@ interface CorpusEntry {
 /**
  * Scan a corpus of file content for `src/assets/agents/` string literals.
  * Returns a list of violation descriptions. Used by both the live scan and the
- * non-vacuity probe — same function, not an inline re-implementation (M12b).
+ * non-vacuity probe — same function, not an inline re-implementation.
  */
 function collectLiteralAgentPathViolations(corpus: CorpusEntry[]): string[] {
   const LITERAL = 'src/assets/agents/';

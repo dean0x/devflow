@@ -1,18 +1,16 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Phase-0 byte baselines (named constants, post-M3 corpus updated after
- * D4 degradation additions to fetch-issue + fetch-issues-batch — MIS-2/MIS-4 fix):
+ * Phase-0 char baselines (JS `.length`, not bytes) — named constants, corpus updated after
+ * D4 degradation additions to fetch-issue + fetch-issues-batch:
  *
  *   git.md              61,018 ch / 963 L
  *   skills/git/SKILL.md  9,204 ch / 283 L
  *   skills/worktree-support/SKILL.md  2,942 ch / 92 L
  *   Total (all three)   73,164 ch / 1,338 L
  *
- * Pre-Phase-0 baseline at main@e726874 (wc -c / wc -l):
- *   PRE_PHASE0_GIT_MD_CHARS = 59,376 B / PRE_PHASE0_GIT_MD_LINES = 938 L
- * §C.4's plan-time git.md estimate of 58,904 was short by 472
- * (PRE_PHASE0_GIT_MD_CHARS − 58,904 = 59,376 − 58,904 = 472); Phase-2
+ * Pre-Phase-0 baseline at main@e726874:
+ *   PRE_PHASE0_GIT_MD_BYTES = 59,376 (wc -c) / PRE_PHASE0_GIT_MD_CHARS = 58,903 (.length) / PRE_PHASE0_GIT_MD_LINES = 938 L
  * constants derive from the verified post-Phase-0 numbers above — drift D19.
  *
  * The fixture is frozen at Phase 0 and is never regenerated through Phase 3
@@ -34,14 +32,14 @@ import { loadGolden, extractStatusLines, resolveAgentSource } from '../helpers.j
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
 
-// Pre-Phase-0 baseline at main@e726874 — informational, wc-c / wc-l units.
-// Arithmetic check: PRE_PHASE0_GIT_MD_CHARS − 58_904 (§C.4 estimate) = 472
-export const PRE_PHASE0_GIT_MD_CHARS = 59_376
+// Pre-Phase-0 baseline at main@e726874 — informational, measured units.
+export const PRE_PHASE0_GIT_MD_BYTES = 59_376  // wc -c bytes
+export const PRE_PHASE0_GIT_MD_CHARS = 58_903  // JS .length (UTF-16 code units)
 export const PRE_PHASE0_GIT_MD_LINES = 938
 
-// Phase-0 byte baselines — named constants so Phase-2's byte-budget.test.ts
-// can import them without re-deriving (C6). Updated after MIS-2/MIS-4 fix
-// (D4 degradation clauses added to fetch-issue + fetch-issues-batch).
+// Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
+// byte-budget.test.ts can import them without re-deriving (C6). Updated after
+// D4 degradation clauses added to fetch-issue + fetch-issues-batch.
 export const GIT_MD_CHARS = 61_018
 export const GIT_MD_LINES = 963
 export const SKILL_GIT_CHARS = 9_204
@@ -51,7 +49,7 @@ export const SKILL_WORKTREE_LINES = 92
 export const TOTAL_CHARS = 73_164
 export const TOTAL_LINES = 1_338
 
-// Fixture invariants
+// Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 17_379
 export const FIXTURE_NEWLINES = 233
 
@@ -107,13 +105,13 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Live-file baselines for git.md and skills (post-M3, updated after MIS-2/MIS-4 fix)
+// Live-file baselines for git.md and skills (Phase-0, updated after D4 degradation additions)
 //
 // Assert the source file's dimensions match the named constants. A mismatch
 // means a file changed — update the constants and re-capture the golden.
 // ---------------------------------------------------------------------------
 
-describe('git.md live-file baselines (post-M3)', () => {
+describe('git.md live-file baselines (Phase-0)', () => {
   // Use resolveAgentSource (dist-preferred, src-fallback) — no literal src/assets/agents/ path
   // so Phase 1's git.md → git.mds migration needs zero edits here (AC-0.7/P0-S17).
   const gitAgent = resolveAgentSource('git')
@@ -122,19 +120,19 @@ describe('git.md live-file baselines (post-M3)', () => {
     const lines = gitAgent.content.split('\n').length - 1
     expect(
       lines,
-      `git.md line count changed from post-M3 baseline (${GIT_MD_LINES}) — update GIT_MD_LINES and re-capture the golden`,
+      `git.md line count changed from Phase-0 baseline (${GIT_MD_LINES}) — update GIT_MD_LINES and re-capture the golden`,
     ).toBe(GIT_MD_LINES)
   })
 
   it(`git.md has ${GIT_MD_CHARS} chars`, () => {
     expect(
       gitAgent.content.length,
-      `git.md char count changed from post-M3 baseline (${GIT_MD_CHARS}) — update GIT_MD_CHARS and re-capture the golden`,
+      `git.md char count changed from Phase-0 baseline (${GIT_MD_CHARS}) — update GIT_MD_CHARS and re-capture the golden`,
     ).toBe(GIT_MD_CHARS)
   })
 })
 
-describe('skill live-file baselines (post-M3)', () => {
+describe('skill live-file baselines (Phase-0)', () => {
   it(`skills/git/SKILL.md has ${SKILL_GIT_LINES} lines`, () => {
     const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
     const lines = content.split('\n').length - 1

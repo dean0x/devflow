@@ -138,7 +138,7 @@ function harvestFence(fence: string): { op: string; keys: Set<string> } | null {
 /** Keys in a fence that its op's **Input:** line does not declare. */
 function forwardViolationsFor(section: string, keys: Set<string>): string[] {
   const bad: string[] = []
-  // Scope to **Input:** line only via parseInputIdentifiers (MIS-8).
+  // Scope to **Input:** line only via parseInputIdentifiers (P0-S10).
   // The old `section.includes(`\`KEY\``)` checked the WHOLE section, so a key
   // mentioned in **Process:** but not declared in **Input:** would silently pass.
   const { required, optional } = parseInputIdentifiers(section)
@@ -442,7 +442,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     ).toHaveLength(0)
   })
 
-  it('process-only key: a key mentioned only in **Process:** but not in **Input:** is a violation (MIS-8 new failure mode)', () => {
+  it('process-only key: a key mentioned only in **Process:** but not in **Input:** is a violation', () => {
     // The OLD predicate (section.includes(`\`KEY\``)) checked the WHOLE section, so a key
     // appearing in **Process:** (e.g. "`PROCESS_ONLY_KEY`") would pass — no violation reported.
     // The NEW predicate (parseInputIdentifiers) scopes to **Input:** only, so the same key
@@ -458,7 +458,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     const redViolations = forwardViolationsFor(syntheticSection, new Set(['PROCESS_ONLY_KEY']))
     expect(
       redViolations,
-      'a key present only in **Process:** must be caught by the forward check (MIS-8 RED proof)',
+      'a key present only in **Process:** must be caught by the forward check (RED proof)',
     ).toHaveLength(1)
     expect(redViolations[0]).toBe('PROCESS_ONLY_KEY')
 

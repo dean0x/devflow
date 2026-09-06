@@ -432,7 +432,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     }
 
     expect(caught).toBeDefined();
-    // M13 note: literal 'src/assets/agents' path is pinned to the installer's error message
+    // The literal 'src/assets/agents' path is pinned to the installer's error message
     // rather than going through resolveAgentSource. Repoint through resolveAgentSource in P1
     // when agent resolution is decoupled from the installer's path constants.
     expect(caught!.message).toContain('src/assets/agents');

@@ -559,7 +559,8 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('every REQUIRED_OP with remote I/O carries **Degradation (D4):** (AC-0.6b)', () => {
-    // "Does remote I/O" derived from op text — not a hand list (PF-049).
+    // "Does remote I/O": the op set is derived from REQUIRED_OPS, but the 12 remote-I/O
+    // indicators below are an explicit list (not derived from op text).
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
     const remoteOps: string[] = [];
@@ -592,7 +593,7 @@ describe('git agent — static content guards (PF-018)', () => {
       remoteOps.push(op);
       if (!hasD4Evidence) missingD4.push(op);
     }
-    // Non-vacuity: fetch-issue and fetch-issues-batch must be detected as remote-I/O (MIS-2).
+    // Non-vacuity: fetch-issue and fetch-issues-batch must be detected as remote-I/O.
     expect(
       remoteOps,
       'non-vacuity: fetch-issue must be detected as remote-I/O (backtick-quoted `gh` in its D4 line)',
@@ -638,6 +639,10 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   // ── Guard 10: Containment guard (AC-0.10) ──────────────────────────────────
+  // AC-0.10 mechanisation record (P0-S11): "every op Output block rendering a remote-sourced field"
+  // is pinned as a floor of >= 3 ops carrying <untrusted-issue-body> or <external-thread>
+  // (one containment class per Principle 8); <external-thread> pre-exists on main. The negative
+  // arm checks that summary/reply ops do not interpolate remote body placeholders directly.
 
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (file-scoped)', () => {
     // FILE-SCOPED: extractOpSectionFromCorpus ends a section at the next \n## , which truncates
@@ -681,7 +686,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // The extractOpSection wrapper in this file discards matchCount — this test calls
     // extractOpSectionFromCorpus directly to assert the matchCount contract [DR-18].
     // Exact expectation: count how many sink-corpus files contain the anchor independently,
-    // then assert matchCount equals that count (unfalsifiable >= 1 replaced per MIS-6a).
+    // then assert matchCount equals that count (exact count, not an unfalsifiable >= 1).
     const sinkCorpus = gitAgentSinkCorpus();
     const expectedMatchCount = sinkCorpus.filter(
       e => e.content.includes('## Operation: post-review-summary'),

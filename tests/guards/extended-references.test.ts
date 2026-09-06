@@ -74,7 +74,7 @@ function getExtRefSection(content: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Named collector — used by both the main guard and the non-vacuity probe (M12b).
+// Named collector — used by both the main guard and the non-vacuity probe.
 // Extracts missing-reference violations from a single skill's Extended References section.
 // Calling this from both sites proves the probe exercises the real guard logic (pattern:
 // collectGhIssueProseViolations in tests/build-mds.test.ts ~:1549 / ~:1571 / ~:1602).
@@ -146,7 +146,7 @@ describe('Extended References file-existence guard (P0-S22)', () => {
       const refPaths = extractExtRefPaths(section);
       rowsScanned += refPaths.filter(p => !isGeneratedException(p)).length;
 
-      // Use the named collector so the probe exercises the same logic (M12b).
+      // Use the named collector so the probe exercises the same logic.
       violations.push(...collectMissingReferences(skillName, skillPath, section));
     }
 
@@ -162,8 +162,8 @@ describe('Extended References file-existence guard (P0-S22)', () => {
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: a row pointing at a nonexistent reference fails the guard (mechanic 2, M12b)', () => {
-    // M12b: prior probe re-implemented the violation loop inline — this called the same
+  it('non-vacuity: a row pointing at a nonexistent reference fails the guard (mechanic 2)', () => {
+    // Prior probe re-implemented the violation loop inline — this calls the same
     // named collector as the main guard so the proof tracks the guard rather than shadowing it.
     const knownBadSection =
       `## Extended References\n\n| Reference | Contents |\n|-----------|----------|\n` +
