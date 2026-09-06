@@ -623,6 +623,15 @@ Learn project conventions from git history and write `.devflow/conventions.md` o
 - {section}: replaced verbatim match with generic default
 ```
 
+**Commit (non-blocking):** After writing `.devflow/conventions.md`, commit it to the current branch so the tracked carve-out is not left untracked in `git status`. Run every command with `git -C "{WORKTREE_PATH or .}"` (never `cd`). Mirror the Knowledge agent commit protocol:
+1. **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, or `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), skip committing and report `CONVENTIONS_COMMIT: skipped (no branch)`. Never commit on a detached HEAD.
+2. **Detect changes.** `git -C "{worktree}" status --porcelain -- .devflow/conventions.md` — if empty, report `CONVENTIONS_COMMIT: skipped (no changes)` and stop.
+3. **Stage only the path:** `git -C "{worktree}" add -- .devflow/conventions.md`
+4. **Commit only that path:** `git -C "{worktree}" commit --only -- .devflow/conventions.md -m "docs(devflow): record project conventions"`
+5. **Stop there.** Do NOT push. Do NOT force. Do NOT amend.
+
+If any git step errors (commit hook rejects, index locked, no remote), report `CONVENTIONS_COMMIT: failed (<one-line reason>)` and finish normally — never abort the caller's workflow, and never retry in a loop.
+
 ---
 
 ## Operation: fetch-review-threads
