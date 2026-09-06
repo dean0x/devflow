@@ -1,15 +1,19 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Phase-0 byte baselines (named constants, derived from the post-M3 corpus):
+ * Phase-0 byte baselines (named constants, post-M3 corpus updated after
+ * D4 degradation additions to fetch-issue + fetch-issues-batch — MIS-2/MIS-4 fix):
  *
- *   git.md              60,440 ch / 959 L
- *   skills/git/SKILL.md  9,236 ch / 283 L
- *   skills/worktree-support/SKILL.md  2,950 ch / 92 L
- *   Total (all three)   72,626 ch / 1,334 L
+ *   git.md              61,018 ch / 963 L
+ *   skills/git/SKILL.md  9,204 ch / 283 L
+ *   skills/worktree-support/SKILL.md  2,942 ch / 92 L
+ *   Total (all three)   73,164 ch / 1,338 L
  *
- * (§C.4's 71,090 / 58,904 are wrong by 472 ch; Phase-2 constants derive
- *  from the verified numbers above — drift D19.)
+ * Pre-Phase-0 baseline at main@e726874 (wc -c / wc -l):
+ *   PRE_PHASE0_GIT_MD_CHARS = 59,376 B / PRE_PHASE0_GIT_MD_LINES = 938 L
+ * §C.4's plan-time git.md estimate of 58,904 was short by 472
+ * (PRE_PHASE0_GIT_MD_CHARS − 58,904 = 59,376 − 58,904 = 472); Phase-2
+ * constants derive from the verified post-Phase-0 numbers above — drift D19.
  *
  * The fixture is frozen at Phase 0 and is never regenerated through Phase 3
  * (AC-0.9 / AC-1.11 / AC-2.1 / AC-3.1). A mismatch means the source is
@@ -30,20 +34,26 @@ import { loadGolden, extractStatusLines } from '../helpers.js'
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
 
+// Pre-Phase-0 baseline at main@e726874 — informational, wc-c / wc-l units.
+// Arithmetic check: PRE_PHASE0_GIT_MD_CHARS − 58_904 (§C.4 estimate) = 472
+export const PRE_PHASE0_GIT_MD_CHARS = 59_376
+export const PRE_PHASE0_GIT_MD_LINES = 938
+
 // Phase-0 byte baselines — named constants so Phase-2's byte-budget.test.ts
-// can import them without re-deriving (C6).
-export const GIT_MD_CHARS = 60_440
-export const GIT_MD_LINES = 959
-export const SKILL_GIT_CHARS = 9_236
+// can import them without re-deriving (C6). Updated after MIS-2/MIS-4 fix
+// (D4 degradation clauses added to fetch-issue + fetch-issues-batch).
+export const GIT_MD_CHARS = 61_018
+export const GIT_MD_LINES = 963
+export const SKILL_GIT_CHARS = 9_204
 export const SKILL_GIT_LINES = 283
-export const SKILL_WORKTREE_CHARS = 2_950
+export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92
-export const TOTAL_CHARS = 72_626
-export const TOTAL_LINES = 1_334
+export const TOTAL_CHARS = 73_164
+export const TOTAL_LINES = 1_338
 
 // Fixture invariants
-export const FIXTURE_BYTES = 16_749
-export const FIXTURE_NEWLINES = 225
+export const FIXTURE_BYTES = 17_379
+export const FIXTURE_NEWLINES = 233
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {
@@ -97,10 +107,10 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Live-file baselines for git.md (post-M3)
+// Live-file baselines for git.md and skills (post-M3, updated after MIS-2/MIS-4 fix)
 //
 // Assert the source file's dimensions match the named constants. A mismatch
-// means git.md changed — update the constants and re-capture the golden.
+// means a file changed — update the constants and re-capture the golden.
 // ---------------------------------------------------------------------------
 
 describe('git.md live-file baselines (post-M3)', () => {
@@ -119,6 +129,42 @@ describe('git.md live-file baselines (post-M3)', () => {
       content.length,
       `git.md char count changed from post-M3 baseline (${GIT_MD_CHARS}) — update GIT_MD_CHARS and re-capture the golden`,
     ).toBe(GIT_MD_CHARS)
+  })
+})
+
+describe('skill live-file baselines (post-M3)', () => {
+  it(`skills/git/SKILL.md has ${SKILL_GIT_LINES} lines`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
+    const lines = content.split('\n').length - 1
+    expect(
+      lines,
+      `skills/git/SKILL.md line count changed from baseline (${SKILL_GIT_LINES}) — update SKILL_GIT_LINES`,
+    ).toBe(SKILL_GIT_LINES)
+  })
+
+  it(`skills/git/SKILL.md has ${SKILL_GIT_CHARS} chars`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
+    expect(
+      content.length,
+      `skills/git/SKILL.md char count changed from baseline (${SKILL_GIT_CHARS}) — update SKILL_GIT_CHARS`,
+    ).toBe(SKILL_GIT_CHARS)
+  })
+
+  it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_LINES} lines`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
+    const lines = content.split('\n').length - 1
+    expect(
+      lines,
+      `skills/worktree-support/SKILL.md line count changed from baseline (${SKILL_WORKTREE_LINES}) — update SKILL_WORKTREE_LINES`,
+    ).toBe(SKILL_WORKTREE_LINES)
+  })
+
+  it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_CHARS} chars`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
+    expect(
+      content.length,
+      `skills/worktree-support/SKILL.md char count changed from baseline (${SKILL_WORKTREE_CHARS}) — update SKILL_WORKTREE_CHARS`,
+    ).toBe(SKILL_WORKTREE_CHARS)
   })
 })
 

@@ -108,19 +108,19 @@
     },
     {
       "id": "git-md-lines",
-      "floor": 959,
-      "pattern": "GIT_MD_LINES = 959",
+      "floor": 963,
+      "pattern": "GIT_MD_LINES = 963",
       "occurrences": 1,
       "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md line count post-M3 baseline — a decrease means containment lines were lost"
+      "description": "git.md line count post-M3 baseline — a decrease means containment lines were lost (updated from 959 after MIS-2/MIS-4 D4 degradation additions)"
     },
     {
       "id": "git-md-chars",
-      "floor": 60440,
-      "pattern": "GIT_MD_CHARS = 60_440",
+      "floor": 61018,
+      "pattern": "GIT_MD_CHARS = 61_018",
       "occurrences": 1,
       "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md character count post-M3 baseline — a decrease means content was removed"
+      "description": "git.md character count post-M3 baseline — a decrease means content was removed (updated from 60440 after MIS-2/MIS-4 D4 degradation additions)"
     },
     {
       "id": "manage-debt-archive-cap",

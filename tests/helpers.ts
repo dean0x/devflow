@@ -263,10 +263,12 @@ export function loadGolden(name: string): string {
  *
  * Line ranges (1-indexed, inclusive) from P0-S15:
  * - src/assets/agents/git.md cross-cutting: 23-28, 33, 36, 54-57
- * - src/assets/agents/git.md op ranges: 140-149, 174-191, 238-252, 270-288,
- *   314-335, 377-382, 407-416, 437-447, 475-481, 503-514, 578-590, 621-640,
- *   690-700, 750-753, 781-783, 830-838, 873-877, 913-916
- * - src/assets/agents/git.md Guard-5 lines: 362, 738, 917
+ * - src/assets/agents/git.md op ranges: 140-149, 174-191, 238-252, 268-290
+ *   (fetch-issue: D4 at 268 + output 272-290), 314-339
+ *   (fetch-issues-batch: D4 at 314 + output 318-339), 381-386, 411-420,
+ *   441-451, 479-485, 507-518, 582-594, 625-644, 694-704, 754-757, 785-787,
+ *   834-842, 877-881, 917-920
+ * - src/assets/agents/git.md Guard-5 lines: 366, 742, 921
  * - src/assets/agents/code.md: 93, 95, 99
  * - src/assets/commands/dynamic-build.mds: 522, 524
  * - src/assets/commands/resolve.mds: 244, 354, 501, 510, 541, 619
@@ -294,25 +296,25 @@ export function extractStatusLines(): string {
     getLines(git, 140, 149),
     getLines(git, 174, 191),
     getLines(git, 238, 252),
-    getLines(git, 270, 288),
-    getLines(git, 314, 335),
-    getLines(git, 377, 382),
-    getLines(git, 407, 416),
-    getLines(git, 437, 447),
-    getLines(git, 475, 481),
-    getLines(git, 503, 514),
-    getLines(git, 578, 590),
-    getLines(git, 621, 640),
-    getLines(git, 690, 700),
-    getLines(git, 750, 753),
-    getLines(git, 781, 783),
-    getLines(git, 830, 838),
-    getLines(git, 873, 877),
-    getLines(git, 913, 916),
+    getLines(git, 268, 290),   // fetch-issue: D4 (268) extended through output (272-290)
+    getLines(git, 314, 339),   // fetch-issues-batch: D4 (314) extended through output (318-339)
+    getLines(git, 381, 386),
+    getLines(git, 411, 420),
+    getLines(git, 441, 451),
+    getLines(git, 479, 485),
+    getLines(git, 507, 518),
+    getLines(git, 582, 594),
+    getLines(git, 625, 644),
+    getLines(git, 694, 704),
+    getLines(git, 754, 757),
+    getLines(git, 785, 787),
+    getLines(git, 834, 842),
+    getLines(git, 877, 881),
+    getLines(git, 917, 920),
     // git.md Guard-5 marker lines
-    getLine(git, 362),
-    getLine(git, 738),
-    getLine(git, 917),
+    getLine(git, 366),
+    getLine(git, 742),
+    getLine(git, 921),
     // code.md
     getLine(code, 93),
     getLine(code, 95),
