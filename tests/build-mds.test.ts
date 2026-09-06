@@ -1475,7 +1475,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
 //
 // No `gh issue` invocation or descriptive mention in any DIST_FILE entry
 // outside a Git spawn fence. Scans all 14 DIST_FILES (§14.5 deployed-behaviour
-// rule). Two recorded exceptions encoded as an explicit allowlist (never a
+// rule). Three recorded exceptions encoded as an explicit allowlist (never a
 // loosened regex):
 //
 //   1. `gh pr view` at code-review.mds:76-78 (dist: code-review.md:71)
