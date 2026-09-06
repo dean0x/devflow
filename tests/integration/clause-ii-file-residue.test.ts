@@ -239,22 +239,10 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 6: clause-(ii) file-residue assertion ────────────────────────────
 
-  // FINDING: `devflow init --recommended` creates `.claudeignore` in the target repo.
-  // Observed `git status --porcelain` output (2026-09-06, devflow on feat/322-tracker-phase-0):
-  //   M .gitignore
-  //   ?? .claudeignore
-  //
-  // `.claudeignore` is written by `installClaudeignore()` (src/targets/claude-code/post-install.ts)
-  // when `claudeignoreEnabled = true`, which is the case whenever the CWD is inside a git repo
-  // (claudeignoreEnabled = !!earlyGitRoot, set before the --recommended path runs; the
-  // interactive claudeignore prompt in the advanced path is never reached). This is a genuine
-  // clause-(ii) violation: the file is untracked, not a reviewed committed-file change.
-  //
-  // Marked `.fails()` to document the real behaviour without papering over the finding.
-  // Once the residue is fixed upstream (e.g., by gitignoring .claudeignore, pre-excluding it
-  // in the committed .gitignore the test seeds, or adding a --no-claudeignore flag), remove
-  // the `.fails()` wrapper and this comment.
-  it.skipIf(!CLI_BUILT).fails('git status shows no untracked (??) entries after devflow init [clause-ii file-residue]', () => {
+  // FIX: `.claudeignore` is now listed in the devflow-managed gitignore block (v4), so it
+  // is ignored by git and does not appear as an untracked entry. The clause-(ii) violation
+  // is resolved: `git status --porcelain` now shows only ` M .gitignore` (the block update).
+  it.skipIf(!CLI_BUILT)('git status shows no untracked (??) entries after devflow init [clause-ii file-residue]', () => {
     const statusResult = runSync('git status --porcelain', { cwd: TARGET_REPO });
     expect(statusResult.exitCode, `git status failed: ${statusResult.stderr}`).toBe(0);
 
