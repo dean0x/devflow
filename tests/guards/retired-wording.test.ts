@@ -89,7 +89,8 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === '.git') continue;
         addDir(path.join(dir, entry.name), `${relPrefix}/${entry.name}`, exts);
-      } else if (exts.some(ext => entry.name.endsWith(ext))) {
+      } else if (exts.some(ext => ext === '' ? !entry.name.includes('.') : entry.name.endsWith(ext))) {
+        // M13: ext === '' matches extensionless files (hook scripts in src/assets/scripts/hooks/)
         const absPath = path.join(dir, entry.name);
         try {
           corpus.push({ relPath: `${relPrefix}/${entry.name}`, content: readFileSync(absPath, 'utf-8') });
@@ -100,7 +101,9 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
     }
   }
 
-  addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh']);
+  // M13: '' in exts picks up extensionless hook scripts in src/assets/scripts/hooks/ so
+  // retired-wording checks are not silently skipped for that corpus (e.g. capture-prompt, ensure-proxy).
+  addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh', '']);
   addDir(path.join(ROOT, 'dist', 'commands'), 'dist/commands', ['.md']);
 
   return corpus;
@@ -148,17 +151,25 @@ describe('retired-wording guard — per-phase allowlist (P0-S22, GAP-32)', () =>
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: a seeded retired literal in a synthetic corpus entry fails the guard (mechanic 2, H10)', () => {
-    // Use the first retired literal as the known-bad sample.
+  it('non-vacuity: a seeded retired literal in a synthetic corpus entry fails the guard (mechanic 2, M12a)', () => {
+    // M12a: prior probe called syntheticContent.includes(literal) — trivially true and vacuous.
+    // Fix: run the same violation-collection loop used in the main guard on a synthetic corpus,
+    // then assert violations.length > 0.  This proves the guard logic actually fires (PF-018).
     const retired = RETIRED_LITERALS[0];
-
-    const syntheticContent = `# Synthetic test file\n\nThis file contains the retired literal: ${retired.literal}\n`;
-
-    // The guard would flag this entry — prove it.
-    const wouldFlag = syntheticContent.includes(retired.literal);
+    const syntheticCorpus = [
+      { relPath: 'synthetic/test.md', content: `# Synthetic\nContains: ${retired.literal}\n` },
+    ];
+    const syntheticViolations: string[] = [];
+    for (const { relPath, content } of syntheticCorpus) {
+      for (const entry of RETIRED_LITERALS) {
+        if (content.includes(entry.literal)) {
+          syntheticViolations.push(`${relPath}: contains retired literal "${entry.literal}"`);
+        }
+      }
+    }
     expect(
-      wouldFlag,
-      `non-vacuity: synthetic corpus entry with "${retired.literal}" must be flagged by the guard`,
-    ).toBe(true);
+      syntheticViolations.length,
+      `non-vacuity: the guard logic must flag a corpus entry seeded with "${retired.literal}"`,
+    ).toBeGreaterThan(0);
   });
 });

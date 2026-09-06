@@ -151,27 +151,30 @@ describe('Extended References file-existence guard (P0-S22)', () => {
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: a row pointing at a nonexistent reference fails the guard (mechanic 2, H10)', () => {
-    // Inline known-bad SKILL.md content with a reference that does not exist.
-    const knownBadSection = `## Extended References\n\n| Reference | Contents |\n|-----------|----------|\n| \`references/nonexistent-file-that-will-never-exist.md\` | Missing |\n`;
+  it('non-vacuity: a row pointing at a nonexistent reference fails the guard (mechanic 2, M12b)', () => {
+    // M12b: prior probe asserted existsSync(syntheticPath) === false — this only checks that
+    // the path doesn't exist, not that the guard logic would flag it.  Fix: run the same
+    // violation-collection path as the main guard on a synthetic corpus and assert violations > 0.
+    const knownBadSection =
+      `## Extended References\n\n| Reference | Contents |\n|-----------|----------|\n` +
+      `| \`references/nonexistent-file-that-will-never-exist.md\` | Missing |\n`;
+
+    const syntheticSkillName = '_synthetic_nonexistent_test_skill_';
+    const syntheticSkillDir = path.join(SKILLS_DIR, syntheticSkillName);
+
+    // Mirror the guard loop over the synthetic SKILL.md content.
     const refPaths = extractExtRefPaths(knownBadSection);
-
-    // Assert we extracted at least one reference from the known-bad section.
-    expect(refPaths.length, 'parser must extract the reference path from the known-bad section').toBeGreaterThan(0);
-
-    // Assert none of the extracted paths resolve under a real skill dir (because they are synthetic).
-    const knownBadPath = refPaths[0];
-    expect(knownBadPath, 'expected references/ path from known-bad content').toContain('references/');
-
-    // Check that the full path would fail existence — using a temp synthetic skill dir.
-    const syntheticSkillDir = path.join(SKILLS_DIR, '_synthetic_nonexistent_test_skill_');
-    const syntheticAbsPath = path.join(syntheticSkillDir, knownBadPath);
+    const syntheticViolations: string[] = [];
+    for (const refPath of refPaths) {
+      if (isGeneratedException(refPath)) continue;
+      const absPath = path.join(syntheticSkillDir, refPath);
+      if (!existsSync(absPath)) {
+        syntheticViolations.push(`skills/${syntheticSkillName}/SKILL.md → ${refPath} (file not found)`);
+      }
+    }
     expect(
-      existsSync(syntheticAbsPath),
-      `non-vacuity: synthetic path ${syntheticAbsPath} must not exist`,
-    ).toBe(false);
-    // → If this test reached here without throwing, the parser correctly extracted a
-    //   path that does not exist on disk. The live guard loop above would report it as
-    //   a violation. This inline assertion proves non-vacuity (H10, mechanic 2).
+      syntheticViolations.length,
+      'non-vacuity: the guard logic must flag a missing reference in a synthetic corpus entry (H10, mechanic 2)',
+    ).toBeGreaterThan(0);
   });
 });

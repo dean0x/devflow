@@ -309,6 +309,10 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('at least 10 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
+    // M9: the spec-level AC says git.md declares 16 ops (REQUIRED_OPS), but the
+    // corpus scan finds 13 live caller fences (17 ops minus ops with no callers yet, e.g.
+    // fetch-issues-batch). Floor is 10, not 16 — intentionally conservative pending Phase 1
+    // wiring. Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
     expect(
       keysPassedByOp.size,
       `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 10; ` +

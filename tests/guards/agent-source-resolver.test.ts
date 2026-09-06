@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
-import * as os from 'os'
+import { mkdirSync, writeFileSync, rmSync } from 'fs'
 import * as path from 'path'
 import {
+  ROOT,
   resolveAgentSource,
   resolveAllAgents,
   extractOpSectionFromCorpus,
@@ -62,17 +62,33 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (16 agents, AC-0.7)', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveAgentSource: dist-preferred, src-fallback', () => {
-  let tmpDir: string
-  let fakeDistAgentsDir: string
+  // Synthetic dist fixture: creates ROOT/dist/agents/git.md with a sentinel so
+  // the dist-preferred path is exercised. Cleaned up in afterAll.
+  // No literal 'src/assets/agents/' path here (AC-0.7).
   const SENTINEL = '# DIST SENTINEL\n'
+  const distAgentsDir = path.join(ROOT, 'dist', 'agents')
+  const sentinelFile = path.join(distAgentsDir, 'git.md')
 
-  // These tests use a real agent name but point at a temp tree for isolation.
-  // No literal src/assets/agents/ path appears here (AC-0.7).
+  beforeAll(() => {
+    mkdirSync(distAgentsDir, { recursive: true })
+    writeFileSync(sentinelFile, SENTINEL, 'utf8')
+  })
 
-  it('src-fallback is used when dist/agents/ is absent', () => {
-    // dist/agents/ does not exist in Phase 0 — all agents resolve from src.
+  afterAll(() => {
+    rmSync(sentinelFile, { force: true })
+  })
+
+  it('dist is preferred over src when dist/agents/<name>.md exists', () => {
+    // The sentinel written in beforeAll makes dist/agents/git.md resolvable.
     const source = resolveAgentSource('git')
-    expect(source.origin, 'git agent should resolve from src in Phase 0').toBe('src')
+    expect(source.origin, 'git agent must resolve from dist when dist/agents/git.md is present').toBe('dist')
+    expect(source.content, 'dist agent content must match the sentinel').toContain('DIST SENTINEL')
+  })
+
+  it('src-fallback is used when the agent has no dist/agents/ file', () => {
+    // 'code' has no sentinel — resolves from src while git resolves from dist.
+    const source = resolveAgentSource('code')
+    expect(source.origin, 'code agent (no dist sentinel) must resolve from src').toBe('src')
     expect(source.content.length).toBeGreaterThan(0)
   })
 

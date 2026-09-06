@@ -292,6 +292,9 @@ describe('escape-regression guard: no dist command contains literal backslash-br
   });
 
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
+    // ALL_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
+    // output only.  release.md is hand-authored and not produced by the MDS compiler —
+    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
     let scanned = 0;
     for (const basename of ALL_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
@@ -731,6 +734,9 @@ describe('compiled knowledge commands — no stale call-site references', () => 
   });
 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
+    // ALL_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
+    // applies to MDS compiler outputs only.  release.md is hand-authored — it never
+    // contains MDS call sites (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
     for (const basename of ALL_HOSTS) {
@@ -1004,9 +1010,14 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // Title corrected (P0-S22): the body asserts COMPLIANCE: {enabled (not COMPLIANCE: ${).
     // dist/commands/dynamic-build.md:210 legitimately contains COMPLIANCE: ${COMPLIANCE}
     // (a JS template literal in a code block) — that is intentional, not an MDS escape bug.
+    // M8: DIST_FILES (not ALL_HOSTS) — release.md is a hand-authored dist file that must
+    // pass the same COMPLIANCE_ENABLED/devflow-compliance/comment-pr cleanliness checks.
+    // ALL_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = ALL_HOSTS + release.md (14 total).
+    // DIST_FILES entries already include the '.md' extension (e.g. 'implement.md').
+    // Use `basename` directly as the filename — do NOT append '.md' again.
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of DIST_FILES) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1016,24 +1027,24 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       scanned++;
       expect(
         content,
-        `${basename}.md must not contain COMPLIANCE_ENABLED`,
+        `${basename} must not contain COMPLIANCE_ENABLED`,
       ).not.toContain('COMPLIANCE_ENABLED');
       expect(
         content,
-        `${basename}.md must not contain devflow-compliance`,
+        `${basename} must not contain devflow-compliance`,
       ).not.toContain('devflow-compliance');
       // COMPLIANCE: {enabled is sanctioned only in implement.md (Git setup-task spawn, AC-32).
       // All other files must not contain it.
-      if (basename !== 'implement') {
+      if (basename !== 'implement.md') {
         expect(
           content,
-          `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
+          `${basename} must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
         ).not.toContain('COMPLIANCE: {enabled');
       }
       // comment-pr was retired; post-review-summary replaces it.
       expect(
         content,
-        `${basename}.md must not contain comment-pr (retired operation)`,
+        `${basename} must not contain comment-pr (retired operation)`,
       ).not.toContain('comment-pr');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -1044,9 +1055,11 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
+    // M8: DIST_FILES (not ALL_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
+    // DIST_FILES entries include the '.md' extension — use basename directly (no extra .md).
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of DIST_FILES) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1072,7 +1085,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
 
       expect(
         violations,
-        `${basename}.md: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+        `${basename}: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
       ).toHaveLength(0);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -1531,6 +1544,20 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
       `dist/commands/ has ${distFiles.length} .md files — expected 14`,
     ).toBe(14);
 
+    // Named collector — used by both the main guard loop and the non-vacuity probe (M12c).
+    // Extracts `gh issue` occurrences in prose (non-fence) content.
+    function collectGhIssueProseViolations(filename: string, content: string): string[] {
+      const fencePattern = /```[^\n]*\n[\s\S]*?```/g;
+      const stripped = content.replace(fencePattern, (match) => '\n'.repeat(match.split('\n').length - 1));
+      const results: string[] = [];
+      const re = /\bgh issue\b/g;
+      let m;
+      while ((m = re.exec(stripped)) !== null) {
+        results.push(`${filename}: prose contains 'gh issue' at char ${m.index}`);
+      }
+      return results;
+    }
+
     const violations: string[] = [];
 
     for (const filename of DIST_FILES) {
@@ -1540,12 +1567,8 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
       const fencePattern = /```[^\n]*\n[\s\S]*?```/g;
       const stripped = content.replace(fencePattern, (m) => '\n'.repeat(m.split('\n').length - 1));
 
-      // Check for `gh issue` in prose — always a violation.
-      const ghIssueRe = /\bgh issue\b/g;
-      let m;
-      while ((m = ghIssueRe.exec(stripped)) !== null) {
-        violations.push(`${filename}: prose contains 'gh issue' at char ${m.index}`);
-      }
+      // Check for `gh issue` in prose — always a violation (uses shared collector, M12c).
+      violations.push(...collectGhIssueProseViolations(filename, content));
 
       // Check for `gh` calls in spawn fences — only Git fences are allowed.
       const fenceMatch = /```[^\n]*\n([\s\S]*?)```/g;
@@ -1564,6 +1587,7 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
 
       // Check for `gh pr view` outside fences — allowed only for the exception set.
       const ghPrRe = /\bgh pr view\b/g;
+      let m;
       while ((m = ghPrRe.exec(stripped)) !== null) {
         if (!GH_PR_VIEW_EXCEPTION_FILES.has(filename)) {
           violations.push(`${filename}: prose contains 'gh pr view' — add to exception list if intentional`);
@@ -1571,19 +1595,14 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
       }
     }
 
-    // Non-vacuity (mechanic 2): a bare `gh issue view` in prose would fail this guard.
-    // Inline known-bad sample to prove non-vacuity without reverting A1 (H10):
+    // Non-vacuity (mechanic 2, M12c): calls the shared collectGhIssueProseViolations helper
+    // to prove the guard isn't vacuous — a bare `gh issue view` in prose must be flagged.
+    // This is NOT an inline re-implementation; it calls the same function as the main loop.
     const knownBadProse = 'OPERATION: fetch-issue\ngh issue view 42\n';
-    const knownBadStripped = knownBadProse.replace(/```[^\n]*\n[\s\S]*?```/g, '');
-    const knownBadViolations: string[] = [];
-    const knownBadRe = /\bgh issue\b/g;
-    let knownBadM;
-    while ((knownBadM = knownBadRe.exec(knownBadStripped)) !== null) {
-      knownBadViolations.push(`known-bad: prose contains 'gh issue' at char ${knownBadM.index}`);
-    }
+    const knownBadViolations = collectGhIssueProseViolations('known-bad.md', knownBadProse);
     expect(
       knownBadViolations.length,
-      'non-vacuity: the guard must flag a bare gh issue line in prose — mechanic 2 (H10)',
+      'non-vacuity: collectGhIssueProseViolations must flag a bare gh issue line in prose (H10)',
     ).toBeGreaterThan(0);
 
     expect(

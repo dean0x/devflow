@@ -224,9 +224,10 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
     ).toHaveLength(0);
   });
 
-  it('compiled dist/commands/ matches declared commands (skipped when dist absent)', async () => {
+  it('compiled dist/commands/ matches declared commands (fails when dist absent — run `npm run build`)', async () => {
     const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
-    if (!distExists) return; // not a failure — dist may not be built yet
+    // M4: dist must be built before this test suite runs — a missing dist is a test failure, not a skip.
+    expect(distExists, 'dist/commands/ must exist — run `npm run build` before running the test suite').toBe(true);
 
     const distFiles = await fs.readdir(distCommandsDir);
     const compiledNames = distFiles.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''));
@@ -458,8 +459,10 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
           /agentType:\s*"Git"/.test(block);
         if (!isGitBlock) continue;
 
-        // Parse OPERATION: lines (at start of line within the fence).
-        for (const opMatch of block.matchAll(/^OPERATION: (\S+)/gm)) {
+        // Parse OPERATION: lines within the fence.
+        // Compiled MDS fences emit OPERATION: inside a JSON string literal, so lines start
+        // with optional whitespace and an optional double-quote before OPERATION: (Guard 6 fix).
+        for (const opMatch of block.matchAll(/^[ \t]*"?OPERATION: (\S+)/gm)) {
           const opName = opMatch[1];
           calledOpsInGitBlocks.add(opName);
           if (!declaredOps.has(opName)) {
