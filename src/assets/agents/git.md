@@ -265,6 +265,8 @@ Fetch comprehensive issue details for implementation planning.
 2. Fetch full issue data (title, body, labels, assignees, milestone, comments)
 3. Extract acceptance criteria and dependencies from body
 
+**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable, or rate-limited at fetch time → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without issue content. Caller receives only the DEGRADED line; `/plan` proceeds from the task description alone.
+
 **Output:**
 ```markdown
 ## Issue #{number}:
@@ -274,7 +276,7 @@ Fetch comprehensive issue details for implementation planning.
 **State**: {open/closed} | **Labels**: {labels} | **Priority**: {P0-P3 or Unspecified}
 
 ### Description
-{body}
+{body summary}
 
 ### Acceptance Criteria
 {extracted or "Not specified"}
@@ -309,6 +311,8 @@ Fetch multiple GitHub issues for multi-issue planning flows.
 3. Extract acceptance criteria and dependencies from each body
 4. Identify cross-issue relationships (shared labels, mutual references, dependency chains)
 
+**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable, or rate-limited at fetch time → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without issue content. Caller receives only the DEGRADED line; `/plan` proceeds from the task description alone.
+
 **Output:**
 ```markdown
 ## Issues Batch ({n} issues)
@@ -319,7 +323,7 @@ Fetch multiple GitHub issues for multi-issue planning flows.
 
 **Labels**: {labels} | **Priority**: {priority}
 
-{body}
+{body summary}
 
 **Acceptance Criteria**: {extracted}
 **Dependencies**: {extracted}
