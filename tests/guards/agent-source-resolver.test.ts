@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdirSync, writeFileSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, copyFileSync, existsSync } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 import {
   ROOT,
@@ -55,39 +56,65 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (16 agents, AC-0.7)', () => {
       ).toBeGreaterThan(0)
     }
   })
+
+  it('resolved agents report origin=src when no dist/agents/ file is present (Phase 1 safe)', () => {
+    // Conditional: when dist/agents/<name>.md does not exist, origin must be 'src'.
+    // When it does exist (Phase 1+), origin will be 'dist' — also correct.
+    const resolved = resolveAllAgents()
+    for (const [name, source] of resolved) {
+      if (!existsSync(path.join(ROOT, 'dist', 'agents', `${name}.md`))) {
+        expect(
+          source.origin,
+          `Agent '${name}' must resolve from src when dist/agents/${name}.md is absent`,
+        ).toBe('src')
+      }
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
-// Guard: dist-preferred resolver behaviour (synthetic dist tree)
+// Guard: dist-preferred resolver behaviour (hermetic temp root)
 // ---------------------------------------------------------------------------
 
 describe('resolveAgentSource: dist-preferred, src-fallback', () => {
-  // Synthetic dist fixture: creates ROOT/dist/agents/git.md with a sentinel so
-  // the dist-preferred path is exercised. Cleaned up in afterAll.
-  // No literal 'src/assets/agents/' path here (AC-0.7).
+  // Hermetic: writes only into a mkdtempSync root — never into the real dist/.
+  // PF-043: copies the real agent files rather than hand-authoring fixture content.
   const SENTINEL = '# DIST SENTINEL\n'
-  const distAgentsDir = path.join(ROOT, 'dist', 'agents')
-  const sentinelFile = path.join(distAgentsDir, 'git.md')
+  let tmpRoot: string
 
   beforeAll(() => {
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-resolver-'))
+
+    // Populate src/assets/agents/ with copies of all real agent files (PF-043).
+    const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
+    mkdirSync(srcAgentsDir, { recursive: true })
+    for (const name of getAllAgentNames()) {
+      copyFileSync(
+        path.join(ROOT, 'src', 'assets', 'agents', `${name}.md`),
+        path.join(srcAgentsDir, `${name}.md`),
+      )
+    }
+
+    // Populate dist/agents/ with only a git.md sentinel — exercises dist-preferred path.
+    // 'code' deliberately has no dist copy so the src-fallback path is exercised too.
+    const distAgentsDir = path.join(tmpRoot, 'dist', 'agents')
     mkdirSync(distAgentsDir, { recursive: true })
-    writeFileSync(sentinelFile, SENTINEL, 'utf8')
+    writeFileSync(path.join(distAgentsDir, 'git.md'), SENTINEL, 'utf8')
   })
 
   afterAll(() => {
-    rmSync(sentinelFile, { force: true })
+    rmSync(tmpRoot, { recursive: true, force: true })
   })
 
   it('dist is preferred over src when dist/agents/<name>.md exists', () => {
-    // The sentinel written in beforeAll makes dist/agents/git.md resolvable.
-    const source = resolveAgentSource('git')
+    const source = resolveAgentSource('git', tmpRoot)
     expect(source.origin, 'git agent must resolve from dist when dist/agents/git.md is present').toBe('dist')
     expect(source.content, 'dist agent content must match the sentinel').toContain('DIST SENTINEL')
   })
 
   it('src-fallback is used when the agent has no dist/agents/ file', () => {
-    // 'code' has no sentinel — resolves from src while git resolves from dist.
-    const source = resolveAgentSource('code')
+    // 'code' has no sentinel in dist — resolves from src while git resolves from dist.
+    const source = resolveAgentSource('code', tmpRoot)
     expect(source.origin, 'code agent (no dist sentinel) must resolve from src').toBe('src')
     expect(source.content.length).toBeGreaterThan(0)
   })
@@ -95,9 +122,18 @@ describe('resolveAgentSource: dist-preferred, src-fallback', () => {
   it('throws with a build hint when neither dist nor src resolves the agent', () => {
     // Non-vacuous: prove the throw path with a name that cannot exist.
     expect(
-      () => resolveAgentSource('_nonexistent_agent_for_test_'),
+      () => resolveAgentSource('_nonexistent_agent_for_test_', tmpRoot),
       'resolver must throw with a build hint for an unresolvable agent name',
     ).toThrow(/Run `npm run build`/)
+  })
+
+  it('resolveAllAgents(tmpRoot) covers all 16 registry names', () => {
+    const resolved = resolveAllAgents(tmpRoot)
+    const declared = getAllAgentNames()
+    expect([...resolved.keys()]).toEqual(expect.arrayContaining(declared))
+    // Use declared.length (not literal 16) so this site does not duplicate the
+    // numeric-floor-manifest pin in the real-tree suite (DR-27a, occurrences: 1).
+    expect(resolved.size, 'resolveAllAgents(tmpRoot) must resolve all registry agents').toBe(declared.length)
   })
 })
 

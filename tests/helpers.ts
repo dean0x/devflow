@@ -66,13 +66,17 @@ export interface CorpusEntry {
 /**
  * Resolve the source for a named agent: dist/agents first, src/assets/agents
  * fallback. Throws with a build hint when neither exists.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to keep fixtures hermetic; all real callers
+ *   use the default so no call sites change.
  */
-export function resolveAgentSource(name: string): AgentSource {
-  const distPath = path.join(ROOT, 'dist', 'agents', `${name}.md`)
+export function resolveAgentSource(name: string, root: string = ROOT): AgentSource {
+  const distPath = path.join(root, 'dist', 'agents', `${name}.md`)
   if (existsSync(distPath)) {
     return { path: distPath, content: readFileSync(distPath, 'utf-8'), origin: 'dist' }
   }
-  const srcPath = path.join(ROOT, 'src', 'assets', 'agents', `${name}.md`)
+  const srcPath = path.join(root, 'src', 'assets', 'agents', `${name}.md`)
   try {
     return { path: srcPath, content: readFileSync(srcPath, 'utf-8'), origin: 'src' }
   } catch {
@@ -87,11 +91,14 @@ export function resolveAgentSource(name: string): AgentSource {
  * Resolve all agents declared in DEVFLOW_PLUGINS.
  * Returns a Map keyed by agent name. Every consumer must assert:
  *   expect([...resolveAllAgents().keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to keep fixtures hermetic.
  */
-export function resolveAllAgents(): Map<string, AgentSource> {
+export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> {
   const result = new Map<string, AgentSource>()
   for (const name of getAllAgentNames()) {
-    result.set(name, resolveAgentSource(name))
+    result.set(name, resolveAgentSource(name, root))
   }
   return result
 }
