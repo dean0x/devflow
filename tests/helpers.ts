@@ -261,81 +261,127 @@ export function loadGolden(name: string): string {
 
 // ── github-status-lines extractor ────────────────────────────────────────────
 //
-// Pure function over the source corpus; derives the github-status-lines.txt
-// fixture from the exact line ranges documented in P0-S15. Must remain in
-// sync with tests/fixtures/golden/github-status-lines.txt (AC-0.9).
+// Content-anchored extraction: each excerpt is located by a unique text anchor
+// rather than a hard-coded line number. Adding or removing lines above a sampled
+// section does not break the extractor. Must remain in sync with
+// tests/fixtures/golden/github-status-lines.txt (AC-0.9).
 
 /**
  * Extract the status-line corpus that matches tests/fixtures/golden/github-status-lines.txt.
  *
- * Line ranges (1-indexed, inclusive) from P0-S15:
- * - src/assets/agents/git.md cross-cutting: 23-28, 33, 36, 54-57
- * - src/assets/agents/git.md op ranges: 140-149, 174-191, 238-252, 268-290
- *   (fetch-issue: D4 at 268 + output 272-290), 314-339
- *   (fetch-issues-batch: D4 at 314 + output 318-339), 381-386, 411-420,
- *   441-451, 479-485, 507-518, 582-594, 625-644, 694-704, 754-757, 785-787,
- *   834-842, 877-881, 917-920
- * - src/assets/agents/git.md Guard-5 lines: 366, 742, 921
- * - src/assets/agents/code.md: 93, 95, 99
- * - src/assets/commands/dynamic-build.mds: 522, 524
- * - src/assets/commands/resolve.mds: 244, 354, 501, 510, 541, 619
+ * Anchors (not line numbers) drive extraction so the function survives line insertions
+ * in git.md without fixture drift. The optional `gitContent` parameter allows callers
+ * to supply an alternative git.md body (e.g. a baseline snapshot for proof testing).
  */
-export function extractStatusLines(): string {
-  const git = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
+export function extractStatusLines(gitContent?: string): string {
+  const git = gitContent ?? readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
   const code = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8')
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
-  function getLines(content: string, from: number, to: number): string {
-    return content.split('\n').slice(from - 1, to).join('\n')
+  /**
+   * Extract the named operation section from git.md.
+   * Uses \n## Operation: as the boundary so output blocks that contain ## headings
+   * (e.g. fetch-issue's "## Issue #{number}:" in its template) are not truncated.
+   */
+  function gitOp(opName: string): string {
+    const heading = `## Operation: ${opName}`
+    const start = git.indexOf(heading)
+    if (start === -1) throw new Error(`git.md: operation section not found: "${opName}"`)
+    const next = git.indexOf('\n## Operation:', start + heading.length)
+    return git.slice(start, next === -1 ? git.length : next)
   }
-  function getLine(content: string, n: number): string {
-    return content.split('\n')[n - 1]
+
+  /**
+   * Extract from the start of startAnchor's line through the end of endAnchor's line
+   * (inclusive, no trailing newline). Both anchors may span multiple lines.
+   */
+  function between(src: string, startAnchor: string, endAnchor: string): string {
+    const si = src.indexOf(startAnchor)
+    if (si === -1) throw new Error(`between: start anchor not found: "${startAnchor.slice(0, 80)}"`)
+    const lineStart = src.lastIndexOf('\n', si) + 1
+    const ei = src.indexOf(endAnchor, si + startAnchor.length)
+    if (ei === -1) throw new Error(`between: end anchor not found: "${endAnchor.slice(0, 80)}"`)
+    const lineEnd = src.indexOf('\n', ei + endAnchor.length - 1)
+    return src.slice(lineStart, lineEnd === -1 ? src.length : lineEnd)
+  }
+
+  /** Extract the single line containing anchor (no trailing newline). */
+  function singleLine(src: string, anchor: string): string {
+    const i = src.indexOf(anchor)
+    if (i === -1) throw new Error(`singleLine: anchor not found: "${anchor.slice(0, 80)}"`)
+    const ls = src.lastIndexOf('\n', i) + 1
+    const le = src.indexOf('\n', i)
+    return src.slice(ls, le === -1 ? src.length : le)
   }
 
   const parts: string[] = [
-    // git.md cross-cutting
-    getLines(git, 23, 28),
-    getLine(git, 33),
-    getLine(git, 36),
-    getLines(git, 54, 57),
-    // git.md op ranges
-    getLines(git, 140, 149),
-    getLines(git, 174, 191),
-    getLines(git, 238, 252),
-    getLines(git, 268, 290),   // fetch-issue: D4 (268) extended through output (272-290)
-    getLines(git, 314, 339),   // fetch-issues-batch: D4 (314) extended through output (318-339)
-    getLines(git, 381, 386),
-    getLines(git, 411, 420),
-    getLines(git, 441, 451),
-    getLines(git, 479, 485),
-    getLines(git, 507, 518),
-    getLines(git, 582, 594),
-    getLines(git, 625, 644),
-    getLines(git, 694, 704),
-    getLines(git, 754, 757),
-    getLines(git, 785, 787),
-    getLines(git, 834, 842),
-    getLines(git, 877, 881),
-    getLines(git, 917, 920),
-    // git.md Guard-5 marker lines
-    getLine(git, 366),
-    getLine(git, 742),
-    getLine(git, 921),
-    // code.md
-    getLine(code, 93),
-    getLine(code, 95),
-    getLine(code, 99),
-    // dynamic-build.mds
-    getLine(dynamicBuild, 522),
-    getLine(dynamicBuild, 524),
-    // resolve.mds
-    getLine(resolveMds, 244),
-    getLine(resolveMds, 354),
-    getLine(resolveMds, 501),
-    getLine(resolveMds, 510),
-    getLine(resolveMds, 541),
-    getLine(resolveMds, 619),
+    // git.md cross-cutting: D4 degradation contract (baseline lines 23-28)
+    between(git, '**Degradation contract (D4):**', 'raise the inter-operation delay from 1s to 3s for the remainder of the batch.'),
+    // blank separator line within the D10 section (baseline line 33)
+    '',
+    // D10 step 2 (baseline line 36)
+    singleLine(git, '2. Resolve `REVIEW_PUBLICATION` input:'),
+    // D11 Comment-sink scrub rules (baseline lines 54-57)
+    between(git, '- Non-zero scrubber exit OR script missing → **DO NOT POST**', '- **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**'),
+    // ensure-pr-ready output template (baseline lines 140-149)
+    between(gitOp('ensure-pr-ready'), '- Committed: {yes/no} ({message} if yes)', '{Any `TRACEABILITY: DEGRADED ({reason})` lines from steps 4b/4c — these never change the READY/BLOCKED verdict}'),
+    // validate-branch output block (baseline lines 174-191)
+    between(gitOp('validate-branch'), '## Pre-Flight: Validation', '{BLOCKED reason if applicable}'),
+    // setup-task output block (baseline lines 238-252)
+    between(gitOp('setup-task'), '## Task Setup: {branch-name}', '- **Acceptance Criteria**: {criteria}'),
+    // fetch-issue D4 + output block (baseline lines 268-290)
+    // Must use gitOp() to avoid ## truncation on "## Issue #{number}:" in the output template
+    between(gitOp('fetch-issue'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '{type}/{number}-{slug}'),
+    // fetch-issues-batch D4 + output block (baseline lines 314-339)
+    // Must use gitOp() to avoid ## truncation on "## Issues Batch" in the output template
+    between(gitOp('fetch-issues-batch'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '- **Conflicts**: {conflicting requirements if any}'),
+    // post-review-summary STUB output template (baseline lines 381-386)
+    between(gitOp('post-review-summary'), '     {counts-by-severity table verbatim from local artifact', 'Cap body at 60000 characters'),
+    // manage-debt process + D4 (baseline lines 411-420)
+    between(gitOp('manage-debt'), '3. Extract items to add:', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
+    // check-ci-status input + process (baseline lines 441-451): leading and trailing blank lines
+    '\n' + between(gitOp('check-ci-status'), '**Input:** `PR_NUMBER`', '6. List failing/pending checks with names') + '\n',
+    // create-release process steps (baseline lines 479-485)
+    between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
+    // gather-release-evidence input + process (baseline lines 507-518)
+    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', '**Output:**'),
+    // learn-conventions version-names + degradation + output opener (baseline lines 582-594): leading blank
+    '\n' + between(gitOp('learn-conventions'), '   ## Version Names', '**Output:**\n```markdown'),
+    // fetch-review-threads process + output header (baseline lines 625-644)
+    between(gitOp('fetch-review-threads'), '3. Apply devflow-authored exclusion predicate', '### External Thread Records'),
+    // resolve-review-threads reply loop (baseline lines 694-704): trailing blank
+    between(gitOp('resolve-review-threads'), 'unexplained unresolved threads.', '4. Wait 1s between operations') + '\n',
+    // post-resolution-summary STUB output template (baseline lines 754-757): trailing blank
+    between(gitOp('post-resolution-summary'), '     Full summary withheld (public repository).', '     {counts-by-severity table verbatim from local artifact') + '\n',
+    // check-merge-readiness PR + CI fetch steps (baseline lines 785-787)
+    between(gitOp('check-merge-readiness'), '2. Fetch PR review decision:', '3. Fetch CI status (same logic as `check-ci-status`)'),
+    // backlink-shipped-issues per-issue steps (baseline lines 834-842)
+    between(gitOp('backlink-shipped-issues'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
+    // ensure-traceable-issue plan-artifact + create steps (baseline lines 877-881)
+    between(gitOp('ensure-traceable-issue'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
+    // post-wave-report dedup check + compose steps (baseline lines 917-920)
+    between(gitOp('post-wave-report'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
+    // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
+    // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
+    // that also reference these markers within the same operation section.
+    singleLine(gitOp('post-review-summary'), '     <!-- devflow:review-summary'),
+    singleLine(gitOp('post-resolution-summary'), '     <!-- devflow:resolution-summary'),
+    singleLine(gitOp('post-wave-report'), '   <!-- devflow:wave-report'),
+    // code.md: PR-body guidance table and D11 scrub directive (lines 93, 95, 99)
+    singleLine(code, '| Related Issues (ISSUE_NUMBER provided) |'),
+    singleLine(code, 'When `ISSUE_NUMBER` is provided, always include'),
+    singleLine(code, '**D11 scrub (PR body is a GitHub-visible sink):**'),
+    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524)
+    singleLine(dynamicBuild, 'The Git agent deduplicates via marker'),
+    singleLine(dynamicBuild, 'In WAVE mode, if no tracking-issue number'),
+    // resolve.mds: Tracked field rules and phase diagram (lines 244, 354, 501, 510, 541, 619)
+    singleLine(resolveMds, 'Set `Tracked` for FIX_SEPARATE and TECH_DEBT items'),
+    singleLine(resolveMds, '- **DEGRADED**: if Git agent returns `TRACEABILITY: DEGRADED'),
+    singleLine(resolveMds, '├─ Phase 5: Write resolution-summary.md (compaction safety'),
+    singleLine(resolveMds, '├─ Phase 9: Git agent (manage-debt)'),
+    singleLine(resolveMds, '| gh/GitHub absent | manage-debt degrades'),
+    singleLine(resolveMds, '| Issue | File:Line | Reason | Tracked |'),
   ]
 
   return parts.join('\n') + '\n'

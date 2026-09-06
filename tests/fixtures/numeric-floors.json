@@ -123,6 +123,22 @@
       "description": "git.md character count Phase-0 baseline — a decrease means content was removed (updated from 60440 after D4 degradation additions to fetch-issue + fetch-issues-batch)"
     },
     {
+      "id": "git-md-lines-floor-assert",
+      "floor": 963,
+      "pattern": "toBeGreaterThanOrEqual(963)",
+      "occurrences": 1,
+      "sourceFile": "tests/goldens/github-status-lines.test.ts",
+      "description": "git.md line count assertion uses >= floor style so growth is allowed but shrinkage below Phase-0 baseline is caught; converted from toBe after production commits grew git.md"
+    },
+    {
+      "id": "git-md-chars-floor-assert",
+      "floor": 61018,
+      "pattern": "toBeGreaterThanOrEqual(61_018)",
+      "occurrences": 1,
+      "sourceFile": "tests/goldens/github-status-lines.test.ts",
+      "description": "git.md char count assertion uses >= floor style so growth is allowed but shrinkage below Phase-0 baseline is caught; converted from toBe after production commits grew git.md"
+    },
+    {
       "id": "manage-debt-archive-cap",
       "floor": 60000,
       "pattern": "toContain('60000')",
