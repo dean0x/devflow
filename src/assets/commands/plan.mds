@@ -81,7 +81,7 @@ Explore the user's intent through focused Socratic questioning before spawning a
   Return issue titles, bodies, labels, acceptance criteria, and cross-issue relationships."
   ```
 
-Capture from Git agent output: `ISSUE_CONTENT`, `ACCEPTANCE_CRITERIA`, `ISSUE_REF`, `ISSUE_ID`, `ISSUE_URL`. Use the fetched data to seed the discovery below; skip Gate 0 questions where the issue already provides sufficient scope (applies the **Skip discovery when** rule above).
+Capture from Git agent output: `ISSUE_CONTENT`, `ACCEPTANCE_CRITERIA`, `ISSUE_REF`. Use the fetched data to seed the discovery below; skip Gate 0 questions where the issue already provides sufficient scope (applies the **Skip discovery when** rule above).
 
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
@@ -92,7 +92,7 @@ For multi-issue: present unified scope across all issues after individual discov
 
 If the user says "skip" or "just proceed" — skip remaining questions, present inferred understanding (core problem, users, outcome, assumptions, recommended approach) in one message for confirmation, then proceed. Gate 0 is satisfied by the confirmation, not by the discovery questions.
 
-**MANDATORY**: Do not spawn any agents until Gate 0 is confirmed.
+**MANDATORY**: Do not spawn any agents until Gate 0 is confirmed — the Step 0 issue fetch (if applicable) is the sole exception; it precedes and informs Gate 0 and must complete before Gate 0 begins.
 
 #### Phase 2: Orient + Load Decisions
 
