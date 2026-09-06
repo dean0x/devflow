@@ -1149,8 +1149,9 @@ describe('ensure-devflow-init behavioral', () => {
     expect(lines).toContain('!.devflow/features/');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(lines).toContain('!.devflow/conventions.md'); // v3 addition
+    expect(lines).toContain('.claudeignore'); // v4 addition
     expect(lines).not.toContain('.devflow/'); // no bare wholesale line
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(true);
     // No nested .devflow/.gitignore is written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
@@ -1199,16 +1200,15 @@ describe('ensure-devflow-init behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 
-  it('fast-path gates on .root-gitignore-configured-v3 marker with no -v2 reference (P0-S13)', () => {
-    // P0-S13 verify clause: fix A1 repaired -v2 → -v3 in the fast-path instead of deleting
-    // the branch. Deleting would let the fast-path fire on repos that have the four directories
-    // but no gitignore carve-out, skipping ensure-root-gitignore. Keeping -v3 is correct.
+  it('fast-path gates on .root-gitignore-configured-v4 marker with no -v3 reference (P0-S13)', () => {
+    // P0-S13 verify clause: the fast-path marker is bumped with each block format change.
+    // After the v4 bump, ensure-devflow-init must reference -v4 only — not the legacy -v3.
     // RED: git show e726874:src/assets/scripts/hooks/ensure-devflow-init references
     //   .root-gitignore-configured-v2 (no -v3), so both assertions below would fail on that
-    //   content — confirming -v3 is a genuine post-Phase-0 invariant, not a pre-existing truth.
+    //   content — confirming -v4 is a genuine post-fix invariant, not a pre-existing truth.
     const hookContent = fs.readFileSync(ENSURE_DEVFLOW, 'utf-8');
-    expect(hookContent, 'fast-path must reference .root-gitignore-configured-v3').toContain('.root-gitignore-configured-v3');
-    expect(hookContent, 'fast-path must not reference -v2 marker').not.toContain('-v2');
+    expect(hookContent, 'fast-path must reference .root-gitignore-configured-v4').toContain('.root-gitignore-configured-v4');
+    expect(hookContent, 'fast-path must not reference -v3 marker').not.toContain('-v3');
   });
 });
 
@@ -1228,7 +1228,7 @@ describe('ensure-root-gitignore behavioral', () => {
   const ignoreLines = (file: string): string[] =>
     fs.readFileSync(file, 'utf-8').split('\n').map(l => l.trim());
 
-  it('creates the root .gitignore (and .devflow/) when absent, writes the v3 marker', () => {
+  it('creates the root .gitignore (and .devflow/) when absent, writes the v4 marker', () => {
     // Standalone case (as session-start-context calls it): no .devflow/ exists yet.
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -1237,9 +1237,10 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(ignoreLines(gitignore)).toContain('.devflow/*');
     expect(ignoreLines(gitignore)).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(ignoreLines(gitignore)).toContain('!.devflow/conventions.md'); // v3 addition
+    expect(ignoreLines(gitignore)).toContain('.claudeignore'); // v4 addition
     expect(ignoreLines(gitignore)).not.toContain('.devflow/'); // carve-out, not wholesale
     // The helper must create .devflow/ to host the marker even when called standalone
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(true);
     // No nested .devflow/.gitignore written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
@@ -1284,10 +1285,10 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(contentAfterFirst);
   });
 
-  it('v3 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
-    // Simulate a merge-conflict resolution that drops the devflow block while leaving the v3 marker.
+  it('v4 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
+    // Simulate a merge-conflict resolution that drops the devflow block while leaving the v4 marker.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'), '');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'), '');
     // .gitignore exists but the devflow block was dropped — only unrelated content remains.
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n');
 
@@ -1295,11 +1296,12 @@ describe('ensure-root-gitignore behavioral', () => {
 
     const lines = ignoreLines(path.join(tmpDir, '.gitignore'));
     expect(lines).toContain('!.devflow/conventions.md');
+    expect(lines).toContain('.claudeignore');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(lines).toContain('node_modules/');
   });
 
-  it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v3', () => {
+  it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v4', () => {
     // Simulate an existing v1 install: legacy comment + bare wholesale entry + v1 marker.
     fs.writeFileSync(
       path.join(tmpDir, '.gitignore'),
@@ -1317,10 +1319,11 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(content).not.toContain('remove to share via git');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(lines).toContain('!.devflow/conventions.md'); // v3 addition
+    expect(lines).toContain('.claudeignore'); // v4 addition
     expect(content).toContain('node_modules/');
-    // Marker is bumped: v1 dropped, v3 written.
+    // Marker is bumped: v1 dropped, v4 written.
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(true);
   });
 
   // The v2 carve-out block exactly as shipped before the conventions.md line was added.
@@ -1345,41 +1348,43 @@ describe('ensure-root-gitignore behavioral', () => {
     fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'), '');
   };
 
-  it('upgrades a v2 install: appends only the conventions.md line and bumps v2 → v3', () => {
+  it('upgrades a v2 install: appends the conventions.md and .claudeignore lines and bumps v2 → v4', () => {
     seedV2Install(`node_modules/\n\n${V2_BLOCK}\n`);
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = path.join(tmpDir, '.gitignore');
     const lines = ignoreLines(gitignore);
-    // The missing line is added exactly once — the whole block is NOT re-appended.
+    // Both missing lines are added exactly once — the whole block is NOT re-appended.
     expect(lines.filter(l => l === '!.devflow/conventions.md')).toHaveLength(1);
+    expect(lines.filter(l => l === '.claudeignore')).toHaveLength(1);
     expect(lines.filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
     expect(lines.filter(l => l === '.devflow/*')).toHaveLength(1);
     expect(fs.readFileSync(gitignore, 'utf-8')).toContain('node_modules/');
-    // Marker is bumped: v2 dropped, v3 written.
+    // Marker is bumped: v2 dropped, v4 written.
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(true);
   });
 
-  it('v2 → v3 upgrade does not fuse onto a .gitignore with no trailing newline', () => {
-    // A file whose last byte is not \n would otherwise turn the appended line into
+  it('v2 → v4 upgrade does not fuse onto a .gitignore with no trailing newline', () => {
+    // A file whose last byte is not \n would otherwise turn the appended lines into
     // `!.devflow/features/*/KNOWLEDGE.md!.devflow/conventions.md`, corrupting both patterns.
     seedV2Install(`node_modules/\n\n${V2_BLOCK}`); // note: no trailing newline
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const lines = ignoreLines(path.join(tmpDir, '.gitignore'));
     expect(lines).toContain('!.devflow/conventions.md');
+    expect(lines).toContain('.claudeignore');
     expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(lines.some(l => l.includes('KNOWLEDGE.md!'))).toBe(false);
   });
 
-  it('re-running after a v2 → v3 upgrade is a no-op (idempotent)', () => {
+  it('re-running after a v2 → v4 upgrade is a no-op (idempotent)', () => {
     seedV2Install(`${V2_BLOCK}\n`);
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
     const afterFirst = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
 
     // Drop the marker so the fast-path cannot mask a non-idempotent content branch.
-    fs.rmSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'));
+    fs.rmSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'));
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(afterFirst);
@@ -1397,8 +1402,8 @@ describe('ensure-root-gitignore behavioral', () => {
 
   it('branch-order: /.devflow/ wins over v2 sentinel when both present — no carve-out appended', () => {
     // A .gitignore with BOTH /.devflow/ (user-authored) AND the v2 sentinel.
-    // Shell (after fix) checks /.devflow/ BEFORE v2 sentinel — same as TS twin.
-    // The v2→v3 upgrade must be suppressed; /.devflow/ must survive untouched.
+    // Shell (after fix) checks /.devflow/ BEFORE v2/v3 sentinels — same as TS twin.
+    // The v2→v4 upgrade must be suppressed; /.devflow/ must survive untouched.
     const v2Block = [
       '!.devflow/features/*/KNOWLEDGE.md',
       '.devflow/*',
@@ -1410,19 +1415,17 @@ describe('ensure-root-gitignore behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const after = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
-    // /.devflow/ respected — conventions.md line must NOT be appended
+    // /.devflow/ respected — neither conventions.md nor .claudeignore must be appended
     expect(after).not.toContain('!.devflow/conventions.md');
+    expect(after).not.toContain('.claudeignore');
     // Original content preserved byte-for-byte
     expect(after).toBe(content);
   });
 
-  it('non-contiguous v3: conventions.md already present after two unrelated blocks — no duplicate appended, v3 marker stamped (P0-S24)', () => {
-    // Simulates this repo's real .gitignore layout where !.devflow/conventions.md
-    // sits at line 57, after two unrelated sections (launch materials + competitor
-    // codenames), rather than immediately after the devflow block.
-    // The script detects the sentinel via `grep -qF '!.devflow/conventions.md'`
-    // anywhere in the file (line 75 in ensure-root-gitignore) and must NOT append a
-    // duplicate — this exercises the grep-based detection rather than positional matching.
+  it('non-contiguous v3: conventions.md present non-contiguously → v3→v4 upgrade: .claudeignore appended, v4 marker stamped (P0-S24)', () => {
+    // Simulates a .gitignore where !.devflow/conventions.md sits after unrelated sections
+    // (non-contiguous). The script detects the v3 sentinel via `grep -qF '!.devflow/conventions.md'`
+    // anywhere in the file and must NOT duplicate it — it must only append .claudeignore (v3→v4).
     const gitignoreContent = [
       'node_modules/',
       '',
@@ -1453,15 +1456,20 @@ describe('ensure-root-gitignore behavioral', () => {
       afterLines.filter(l => l === '!.devflow/conventions.md'),
       'conventions.md must appear exactly once (not duplicated by upgrade)',
     ).toHaveLength(1);
+    // .claudeignore must be appended exactly once (v3→v4 upgrade).
+    expect(
+      afterLines.filter(l => l === '.claudeignore'),
+      '.claudeignore must appear exactly once (v3→v4 upgrade)',
+    ).toHaveLength(1);
     // Unrelated blocks must be preserved intact.
     expect(afterContent).toContain('/launch/');
     expect(afterContent).toContain('.competitive-codenames.json');
-    // The v2 sentinel must still be present (v3 upgrade does not strip it).
+    // The v2 sentinel must still be present (upgrade does not strip it).
     expect(afterLines).toContain('!.devflow/features/*/KNOWLEDGE.md');
-    // v3 marker stamped; v2 marker removed.
+    // v4 marker stamped; v2 marker removed.
     expect(
-      fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3')),
-      'v3 marker must be stamped',
+      fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4')),
+      'v4 marker must be stamped',
     ).toBe(true);
     expect(
       fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2')),
@@ -1535,10 +1543,27 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
   // Table-driven branch coverage: each state-machine branch, both implementations
   // -------------------------------------------------------------------------
 
+  // The v3 block (with conventions.md but without .claudeignore) used to seed v3-install state.
+  const V3_BLOCK_SEED = [
+    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+    '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/',
+    '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming',
+    '# authority). To stop sharing, re-add `.devflow/features/` or `.devflow/conventions.md`',
+    '# to your own .gitignore.',
+    '.devflow/*',
+    '!.devflow/features/',
+    '.devflow/features/*',
+    '!.devflow/features/index.md',
+    '!.devflow/features/*/',
+    '.devflow/features/*/*',
+    '!.devflow/features/*/KNOWLEDGE.md',
+    '!.devflow/conventions.md',
+  ].join('\n');
+
   const PARITY_CASES: Array<{
     label: string;
     input: string | null;
-    sentinelPresent: boolean; // '!.devflow/conventions.md' expected in result
+    sentinelPresent: boolean; // '.claudeignore' (v4 sentinel) expected in result
     blockPresent: boolean;    // DEVFLOW_GITIGNORE_BLOCK expected verbatim in result
   }> = [
     {
@@ -1560,10 +1585,18 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: true,
     },
     {
-      label: 'v2-format block present (conventions.md line appended, block not re-added)',
+      label: 'v2-format block present (conventions.md and .claudeignore lines appended, block not re-added)',
       input: `${V2_BLOCK_SEED}\n`,
       sentinelPresent: true,
-      blockPresent: false, // only the missing line is appended, not the whole v3 block
+      blockPresent: false, // only the missing lines are appended, not the whole v4 block
+    },
+    {
+      label: 'v3-format block present (.claudeignore line appended, completing the v4 block)',
+      input: `${V3_BLOCK_SEED}\n`,
+      sentinelPresent: true,
+      // V3_BLOCK_SEED + '\n' + '.claudeignore' = DEVFLOW_GITIGNORE_BLOCK verbatim,
+      // so the full block IS present in the result even though only one line was appended.
+      blockPresent: true,
     },
     {
       label: 'user-authored /.devflow/ entry (no carve-out forced)',
@@ -1578,8 +1611,8 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       const shellResult = runShell(input);
       const tsResult = applyTs(input);
 
-      const hasSentinelShell = shellResult.split('\n').map(l => l.trim()).includes('!.devflow/conventions.md');
-      const hasSentinelTs = tsResult.split('\n').map(l => l.trim()).includes('!.devflow/conventions.md');
+      const hasSentinelShell = shellResult.split('\n').map(l => l.trim()).includes('.claudeignore');
+      const hasSentinelTs = tsResult.split('\n').map(l => l.trim()).includes('.claudeignore');
       const hasBlockShell = shellResult.includes(DEVFLOW_GITIGNORE_BLOCK);
       const hasBlockTs = tsResult.includes(DEVFLOW_GITIGNORE_BLOCK);
 
@@ -1716,7 +1749,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     const gitignore = path.join(tmpDir, '.gitignore');
     expect(fs.existsSync(gitignore)).toBe(true);
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/features/*/KNOWLEDGE.md');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(true);
   });
 });
 

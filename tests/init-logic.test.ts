@@ -317,7 +317,7 @@ describe('ensureDevflowGitignore', () => {
   });
 });
 
-describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
+describe('ensureDevflowGitignore — v4 carve-out (.claudeignore)', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -330,23 +330,25 @@ describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
 
   const read = (): Promise<string> => fs.readFile(path.join(tmpDir, '.gitignore'), 'utf-8');
   const lines = (content: string): string[] => content.split('\n').map(l => l.trim());
+  const markerV4 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4');
   const markerV3 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v3');
   const markerV2 = (): string => path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2');
 
-  it('writes the v3 marker after installing the carve-out', async () => {
+  it('writes the v4 marker after installing the carve-out', async () => {
     await ensureDevflowGitignore(tmpDir, false);
 
-    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+    await expect(fs.access(markerV4())).resolves.toBeUndefined();
   });
 
-  it('includes the conventions.md re-include line in the installed block', async () => {
+  it('includes the .claudeignore line in the installed block', async () => {
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
     expect(lines(content)).toContain('!.devflow/conventions.md');
+    expect(lines(content)).toContain('.claudeignore');
   });
 
-  it('upgrades a v2-marked install once (appends conventions.md line, writes v3 marker)', async () => {
+  it('upgrades a v2-marked install once (appends conventions.md and .claudeignore lines, writes v4 marker)', async () => {
     // Simulate a v2 install: .gitignore with the v2 sentinel, v2 marker present.
     const v2Block = [
       '# Devflow runtime data — local by default (memory, learning, docs, locks).',
@@ -365,16 +367,46 @@ describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
-    // The conventions.md line must be appended.
+    // Both missing lines must be appended.
     expect(lines(content)).toContain('!.devflow/conventions.md');
+    expect(lines(content)).toContain('.claudeignore');
     // The v2 block content must still be present (no duplication).
     expect(lines(content).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
-    // v3 marker must exist; v2 marker must be removed.
-    await expect(fs.access(markerV3())).resolves.toBeUndefined();
+    // v4 marker must exist; v2 marker must be removed.
+    await expect(fs.access(markerV4())).resolves.toBeUndefined();
     await expect(fs.access(markerV2())).rejects.toThrow();
   });
 
-  it('is a no-op (byte-identical) when v3 marker already exists', async () => {
+  it('upgrades a v3-marked install once (appends .claudeignore line, writes v4 marker)', async () => {
+    // Simulate a v3 install: .gitignore with v3 sentinel, v3 marker present.
+    const v3Block = [
+      '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+      '.devflow/*',
+      '!.devflow/features/',
+      '.devflow/features/*',
+      '!.devflow/features/index.md',
+      '!.devflow/features/*/',
+      '.devflow/features/*/*',
+      '!.devflow/features/*/KNOWLEDGE.md',
+      '!.devflow/conventions.md',
+    ].join('\n') + '\n';
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), v3Block);
+    await fs.mkdir(path.join(tmpDir, '.devflow'), { recursive: true });
+    await fs.writeFile(markerV3(), '', 'utf-8');
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    // The .claudeignore line must be appended.
+    expect(lines(content)).toContain('.claudeignore');
+    // The conventions.md line must still be present (not duplicated).
+    expect(lines(content).filter(l => l === '!.devflow/conventions.md')).toHaveLength(1);
+    // v4 marker must exist; v3 marker must be removed.
+    await expect(fs.access(markerV4())).resolves.toBeUndefined();
+    await expect(fs.access(markerV3())).rejects.toThrow();
+  });
+
+  it('is a no-op (byte-identical) when v4 marker already exists', async () => {
     // First run installs the carve-out and writes the marker.
     await ensureDevflowGitignore(tmpDir, false);
     const contentAfterFirstRun = await read();
@@ -390,6 +422,7 @@ describe('ensureDevflowGitignore — v3 carve-out (conventions.md)', () => {
 describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   const V2_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
   const V3_SENTINEL = '!.devflow/conventions.md';
+  const V4_SENTINEL = '.claudeignore';
   const V2_BLOCK = [
     '# Devflow runtime data — local by default (memory, learning, docs, locks).',
     '.devflow/*',
@@ -400,6 +433,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     '.devflow/features/*/*',
     V2_SENTINEL,
   ].join('\n');
+  const V3_BLOCK = `${V2_BLOCK}\n${V3_SENTINEL}`;
 
   // Issue 1 (branch-order): /.devflow/ wins over v2 sentinel when both present
   it('branch-order: /.devflow/ wins over v2 sentinel when both present → null (no-op)', () => {
@@ -409,39 +443,51 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(computeDevflowGitignore(content)).toBeNull();
   });
 
-  // Issue 2 (byte-identity): v2→v3 upgrade preserves trailing newlines
-  it('byte-identity: v2→v3 upgrade appends after existing trailing newline (no trimEnd)', () => {
+  // byte-identity: v2→v4 upgrade appends both missing lines
+  it('byte-identity: v2→v4 upgrade appends after existing trailing newline (no trimEnd)', () => {
     // A file ending with a single newline — upgrade must preserve that newline,
     // not collapse it. Shell uses `tail -c 1` guard (same behavior).
     const input = `${V2_BLOCK}\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
   });
 
-  it('byte-identity: v2→v3 upgrade preserves extra trailing newlines', () => {
+  it('byte-identity: v2→v4 upgrade preserves extra trailing newlines', () => {
     // A file ending with two newlines — both preserved (trimEnd would collapse to one).
     const input = `${V2_BLOCK}\n\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
   });
 
-  it('byte-identity: v2→v3 upgrade adds newline separator when file lacks trailing newline', () => {
+  it('byte-identity: v2→v4 upgrade adds newline separator when file lacks trailing newline', () => {
     // A file with no trailing newline — upgrade must add one before the sentinel.
     const input = V2_BLOCK; // no trailing newline
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
   });
 
-  it('non-contiguous v3: v3 sentinel present after two unrelated blocks → null (no-op) (P0-S24)', () => {
-    // Simulates this repo's real .gitignore layout where !.devflow/conventions.md
-    // sits at line 57, after two unrelated sections (launch materials + competitor
-    // codenames), rather than immediately after the devflow block.
-    // computeDevflowGitignore checks `trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V3)`
-    // (post-install.ts line 99) — positionally unaware — so the non-contiguous sentinel
-    // must trigger the null (no-op) path, not the v2→v3 upgrade path.
+  // byte-identity: v3→v4 upgrade appends only .claudeignore
+  it('byte-identity: v3→v4 upgrade appends .claudeignore after existing trailing newline', () => {
+    const input = `${V3_BLOCK}\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V3_BLOCK}\n${V4_SENTINEL}\n`);
+  });
+
+  it('byte-identity: v3→v4 upgrade adds newline separator when file lacks trailing newline', () => {
+    const input = V3_BLOCK; // no trailing newline
+    const result = computeDevflowGitignore(input);
+    expect(result).not.toBeNull();
+    expect(result).toBe(`${V3_BLOCK}\n${V4_SENTINEL}\n`);
+  });
+
+  it('non-contiguous v4: .claudeignore present after unrelated blocks → null (no-op) (P0-S24)', () => {
+    // Simulates a .gitignore where .claudeignore (v4 sentinel) sits non-contiguously.
+    // computeDevflowGitignore checks `trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V4)`
+    // positionally unaware — so the non-contiguous sentinel must trigger null (no-op).
     const content = [
       'node_modules/',
       '',
@@ -454,14 +500,32 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
       '.competitive-codenames.json',
       '',
       V3_SENTINEL,
+      V4_SENTINEL,
       '',
     ].join('\n');
 
-    // V3_SENTINEL is present (non-contiguously) → must return null (not an upgrade).
+    // V4_SENTINEL is present (non-contiguously) → must return null (not an upgrade).
     expect(
       computeDevflowGitignore(content),
-      'non-contiguous v3 sentinel must produce null (no-op) — must not trigger v2→v3 upgrade',
+      'non-contiguous v4 sentinel must produce null (no-op) — must not trigger upgrade',
     ).toBeNull();
+  });
+
+  it('non-contiguous v3 only: conventions.md present non-contiguously (no .claudeignore) → v3→v4 upgrade', () => {
+    // V3_SENTINEL present but V4_SENTINEL absent → trigger v3→v4 upgrade: append .claudeignore.
+    const content = [
+      'node_modules/',
+      '',
+      V2_BLOCK,
+      '',
+      V3_SENTINEL,
+      '',
+    ].join('\n');
+
+    const result = computeDevflowGitignore(content);
+    expect(result).not.toBeNull();
+    expect(result!.split('\n').map(l => l.trim())).toContain(V4_SENTINEL);
+    expect(result!.split('\n').filter(l => l.trim() === V3_SENTINEL)).toHaveLength(1);
   });
 });
 
