@@ -256,13 +256,13 @@ export function loadGolden(name: string): string {
  *
  * Line ranges (1-indexed, inclusive) from P0-S15:
  * - src/assets/agents/git.md cross-cutting: 23-28, 33, 36, 54-57
- * - src/assets/agents/git.md op ranges: 140-149, 174-191, 238-252, 270-283,
- *   302-318, 369-374, 399-408, 429-439, 467-473, 495-506, 570-582, 613-632,
- *   682-692, 742-745, 773-775, 822-830, 865-869, 905-908
- * - src/assets/agents/git.md Guard-5 lines: 354, 730, 909
+ * - src/assets/agents/git.md op ranges: 140-149, 174-191, 238-252, 270-288,
+ *   314-335, 377-382, 407-416, 437-447, 475-481, 503-514, 578-590, 621-640,
+ *   690-700, 750-753, 781-783, 830-838, 873-877, 913-916
+ * - src/assets/agents/git.md Guard-5 lines: 362, 738, 917
  * - src/assets/agents/code.md: 93, 95, 99
  * - src/assets/commands/dynamic-build.mds: 522, 524
- * - src/assets/commands/resolve.mds: 244, 352, 499, 508, 539, 619
+ * - src/assets/commands/resolve.mds: 244, 354, 501, 510, 541, 619
  */
 export function extractStatusLines(): string {
   const git = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
@@ -287,25 +287,25 @@ export function extractStatusLines(): string {
     getLines(git, 140, 149),
     getLines(git, 174, 191),
     getLines(git, 238, 252),
-    getLines(git, 270, 283),
-    getLines(git, 302, 318),
-    getLines(git, 369, 374),
-    getLines(git, 399, 408),
-    getLines(git, 429, 439),
-    getLines(git, 467, 473),
-    getLines(git, 495, 506),
-    getLines(git, 570, 582),
-    getLines(git, 613, 632),
-    getLines(git, 682, 692),
-    getLines(git, 742, 745),
-    getLines(git, 773, 775),
-    getLines(git, 822, 830),
-    getLines(git, 865, 869),
-    getLines(git, 905, 908),
+    getLines(git, 270, 288),
+    getLines(git, 314, 335),
+    getLines(git, 377, 382),
+    getLines(git, 407, 416),
+    getLines(git, 437, 447),
+    getLines(git, 475, 481),
+    getLines(git, 503, 514),
+    getLines(git, 578, 590),
+    getLines(git, 621, 640),
+    getLines(git, 690, 700),
+    getLines(git, 750, 753),
+    getLines(git, 781, 783),
+    getLines(git, 830, 838),
+    getLines(git, 873, 877),
+    getLines(git, 913, 916),
     // git.md Guard-5 marker lines
-    getLine(git, 354),
-    getLine(git, 730),
-    getLine(git, 909),
+    getLine(git, 362),
+    getLine(git, 738),
+    getLine(git, 917),
     // code.md
     getLine(code, 93),
     getLine(code, 95),
@@ -315,10 +315,10 @@ export function extractStatusLines(): string {
     getLine(dynamicBuild, 524),
     // resolve.mds
     getLine(resolveMds, 244),
-    getLine(resolveMds, 352),
-    getLine(resolveMds, 499),
-    getLine(resolveMds, 508),
-    getLine(resolveMds, 539),
+    getLine(resolveMds, 354),
+    getLine(resolveMds, 501),
+    getLine(resolveMds, 510),
+    getLine(resolveMds, 541),
     getLine(resolveMds, 619),
   ]
 

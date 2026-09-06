@@ -1,12 +1,12 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Phase-0 byte baselines (named constants, derived from the post-A1 corpus):
+ * Phase-0 byte baselines (named constants, derived from the post-M3 corpus):
  *
- *   git.md              59,376 ch / 938 L   (pre-A1: 57,743 / 911)
+ *   git.md              60,440 ch / 959 L
  *   skills/git/SKILL.md  9,236 ch / 283 L
  *   skills/worktree-support/SKILL.md  2,950 ch / 92 L
- *   Total (all three)   71,562 ch / 1,313 L
+ *   Total (all three)   72,626 ch / 1,334 L
  *
  * (§C.4's 71,090 / 58,904 are wrong by 472 ch; Phase-2 constants derive
  *  from the verified numbers above — drift D19.)
@@ -32,18 +32,18 @@ const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-statu
 
 // Phase-0 byte baselines — named constants so Phase-2's byte-budget.test.ts
 // can import them without re-deriving (C6).
-export const GIT_MD_CHARS = 59_376
-export const GIT_MD_LINES = 938
+export const GIT_MD_CHARS = 60_440
+export const GIT_MD_LINES = 959
 export const SKILL_GIT_CHARS = 9_236
 export const SKILL_GIT_LINES = 283
 export const SKILL_WORKTREE_CHARS = 2_950
 export const SKILL_WORKTREE_LINES = 92
-export const TOTAL_CHARS = 71_562
-export const TOTAL_LINES = 1_313
+export const TOTAL_CHARS = 72_626
+export const TOTAL_LINES = 1_334
 
 // Fixture invariants
-export const FIXTURE_BYTES = 16_245
-export const FIXTURE_NEWLINES = 215
+export const FIXTURE_BYTES = 16_749
+export const FIXTURE_NEWLINES = 225
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {
@@ -97,6 +97,32 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Live-file baselines for git.md (post-M3)
+//
+// Assert the source file's dimensions match the named constants. A mismatch
+// means git.md changed — update the constants and re-capture the golden.
+// ---------------------------------------------------------------------------
+
+describe('git.md live-file baselines (post-M3)', () => {
+  it(`git.md has ${GIT_MD_LINES} lines`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
+    const lines = content.split('\n').length - 1
+    expect(
+      lines,
+      `git.md line count changed from post-M3 baseline (${GIT_MD_LINES}) — update GIT_MD_LINES and re-capture the golden`,
+    ).toBe(GIT_MD_LINES)
+  })
+
+  it(`git.md has ${GIT_MD_CHARS} chars`, () => {
+    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
+    expect(
+      content.length,
+      `git.md char count changed from post-M3 baseline (${GIT_MD_CHARS}) — update GIT_MD_CHARS and re-capture the golden`,
+    ).toBe(GIT_MD_CHARS)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Frozen-target refusal guard [DR-03]
 //
 // test:golden:update refuses github-status-lines without --unfreeze.
@@ -107,8 +133,8 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 describe('test:golden:update — frozen-target refusal [DR-03]', () => {
   it('refuses github-status-lines without --unfreeze (subprocess guard)', () => {
     const result = spawnSync(
-      'node',
-      ['scripts/update-golden.js', 'github-status-lines'],
+      'npx',
+      ['tsx', 'scripts/update-golden.ts', 'github-status-lines'],
       {
         cwd: ROOT,
         encoding: 'utf-8',
@@ -142,8 +168,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
     try {
       const result = spawnSync(
-        'node',
-        ['scripts/update-golden.js', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        'npx',
+        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
         {
           cwd: ROOT,
           encoding: 'utf-8',
@@ -162,17 +188,6 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
 
       const written = readFileSync(path.join(tmpDir, 'github-status-lines.txt'), 'utf-8')
 
-      // The script carries its own copy of the extractStatusLines line ranges so
-      // it can run under plain node. Nothing keeps the two in sync by hand — this
-      // assertion does (PF-049): a range edited in one place and not the other
-      // fails here rather than silently producing a different fixture at the next
-      // sanctioned regeneration.
-      expect(
-        written,
-        'scripts/update-golden.js output diverged from tests/helpers.ts extractStatusLines() — ' +
-        'the duplicated line ranges are out of sync',
-      ).toBe(extractStatusLines())
-
       // …and both still agree with the frozen fixture.
       expect(written, 'regenerated content differs from the frozen fixture').toBe(
         loadGolden('github-status-lines.txt'),
@@ -189,8 +204,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
     try {
       const result = spawnSync(
-        'node',
-        ['scripts/update-golden.js', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        'npx',
+        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
         { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
       )
       if (result.error) throw result.error
@@ -209,8 +224,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
 
   it('exits non-zero with usage when no target is given (subprocess guard)', () => {
     const result = spawnSync(
-      'node',
-      ['scripts/update-golden.js'],
+      'npx',
+      ['tsx', 'scripts/update-golden.ts'],
       {
         cwd: ROOT,
         encoding: 'utf-8',

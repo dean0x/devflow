@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * update-golden.js — Golden fixture update script (DR-03).
+ * update-golden.ts — Golden fixture update script (DR-03).
  *
  * Usage: npm run test:golden:update -- <target>
  *        npm run test:golden:update -- github-status-lines --unfreeze  (frozen through Phase 3)
@@ -25,6 +25,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import { extractStatusLines } from '../tests/helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -48,7 +49,7 @@ if (outDirIndex !== -1 && (!outDirArg || outDirArg.startsWith('--'))) {
 }
 const outDirValueIndex = outDirIndex === -1 ? -1 : outDirIndex + 1
 const positional = args.filter(
-  (a, i) => !a.startsWith('--') && i !== outDirValueIndex,
+  (a: string, i: number) => !a.startsWith('--') && i !== outDirValueIndex,
 )
 const targetArg = positional[0]
 
@@ -96,39 +97,7 @@ if (targetArg === 'git-agent') {
   writeFileSync(dst, content, 'utf-8')
   console.log(`Written: ${dst} (${content.length} chars)`)
 } else if (targetArg === 'github-status-lines') {
-  // Inline extractStatusLines logic (avoids a TypeScript import for direct
-  // Node.js execution). This duplicates tests/helpers.ts extractStatusLines();
-  // the two are pinned together by the byte-equality assertion in
-  // tests/goldens/github-status-lines.test.ts, which runs this script into a
-  // temp directory and compares its output to extractStatusLines(). Divergence
-  // goes RED there — the line ranges below are never hand-verified.
-  const git = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
-  const code = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8')
-  const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
-  const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
-
-  function getLines(content, from, to) {
-    return content.split('\n').slice(from - 1, to).join('\n')
-  }
-  function getLine(content, n) {
-    return content.split('\n')[n - 1]
-  }
-
-  const parts = [
-    getLines(git, 23, 28), getLine(git, 33), getLine(git, 36), getLines(git, 54, 57),
-    getLines(git, 140, 149), getLines(git, 174, 191), getLines(git, 238, 252), getLines(git, 270, 283),
-    getLines(git, 302, 318), getLines(git, 369, 374), getLines(git, 399, 408), getLines(git, 429, 439),
-    getLines(git, 467, 473), getLines(git, 495, 506), getLines(git, 570, 582), getLines(git, 613, 632),
-    getLines(git, 682, 692), getLines(git, 742, 745), getLines(git, 773, 775), getLines(git, 822, 830),
-    getLines(git, 865, 869), getLines(git, 905, 908),
-    getLine(git, 354), getLine(git, 730), getLine(git, 909),
-    getLine(code, 93), getLine(code, 95), getLine(code, 99),
-    getLine(dynamicBuild, 522), getLine(dynamicBuild, 524),
-    getLine(resolveMds, 244), getLine(resolveMds, 352), getLine(resolveMds, 499),
-    getLine(resolveMds, 508), getLine(resolveMds, 539), getLine(resolveMds, 619),
-  ]
-
-  const content = parts.join('\n') + '\n'
+  const content = extractStatusLines()
   const dst = path.join(destDir, 'github-status-lines.txt')
   writeFileSync(dst, content, 'utf-8')
   console.log(`Written: ${dst} (${content.length} chars)`)

@@ -27,7 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:golden:update": "node scripts/update-golden.js"
+    "test:golden:update": "npx tsx scripts/update-golden.ts"
   },
   "keywords": [
     "claude",
