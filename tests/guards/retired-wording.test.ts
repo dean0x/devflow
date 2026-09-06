@@ -110,6 +110,28 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
 }
 
 // ---------------------------------------------------------------------------
+// Named collector — used by both the main guard and the non-vacuity probe (M12a).
+// Calling this from both sites proves the probe exercises the real guard logic (pattern:
+// collectGhIssueProseViolations in tests/build-mds.test.ts ~:1549 / ~:1571 / ~:1602).
+// ---------------------------------------------------------------------------
+
+function collectRetiredLiteralViolations(
+  corpus: Array<{ relPath: string; content: string }>,
+): string[] {
+  const violations: string[] = [];
+  for (const { relPath, content } of corpus) {
+    for (const entry of RETIRED_LITERALS) {
+      if (content.includes(entry.literal)) {
+        violations.push(
+          `${relPath}: contains retired literal "${entry.literal}" (phase ${entry.phase}; removed from ${entry.removedFrom})`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+// ---------------------------------------------------------------------------
 // Guard
 // ---------------------------------------------------------------------------
 
@@ -135,15 +157,8 @@ describe('retired-wording guard — per-phase allowlist (P0-S22, GAP-32)', () =>
       `corpus is empty — check SKILLS_DIR and dist/commands/; guard is vacuous (PF-018)`,
     ).toBeGreaterThan(0);
 
-    const violations: string[] = [];
-
-    for (const { relPath, content } of corpus) {
-      for (const entry of RETIRED_LITERALS) {
-        if (content.includes(entry.literal)) {
-          violations.push(`${relPath}: contains retired literal "${entry.literal}" (phase ${entry.phase}; removed from ${entry.removedFrom})`);
-        }
-      }
-    }
+    // Use the named collector so the probe exercises the same logic (M12a).
+    const violations = collectRetiredLiteralViolations(corpus);
 
     expect(
       violations,
@@ -152,21 +167,14 @@ describe('retired-wording guard — per-phase allowlist (P0-S22, GAP-32)', () =>
   });
 
   it('non-vacuity: a seeded retired literal in a synthetic corpus entry fails the guard (mechanic 2, M12a)', () => {
-    // M12a: prior probe called syntheticContent.includes(literal) — trivially true and vacuous.
-    // Fix: run the same violation-collection loop used in the main guard on a synthetic corpus,
-    // then assert violations.length > 0.  This proves the guard logic actually fires (PF-018).
+    // M12a: prior probe re-implemented the violation loop inline — this calls the same
+    // named collector as the main guard so the proof tracks the guard rather than shadowing it.
     const retired = RETIRED_LITERALS[0];
     const syntheticCorpus = [
       { relPath: 'synthetic/test.md', content: `# Synthetic\nContains: ${retired.literal}\n` },
     ];
-    const syntheticViolations: string[] = [];
-    for (const { relPath, content } of syntheticCorpus) {
-      for (const entry of RETIRED_LITERALS) {
-        if (content.includes(entry.literal)) {
-          syntheticViolations.push(`${relPath}: contains retired literal "${entry.literal}"`);
-        }
-      }
-    }
+    // Call the same collectRetiredLiteralViolations function used by the main guard.
+    const syntheticViolations = collectRetiredLiteralViolations(syntheticCorpus);
     expect(
       syntheticViolations.length,
       `non-vacuity: the guard logic must flag a corpus entry seeded with "${retired.literal}"`,

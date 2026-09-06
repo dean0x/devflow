@@ -74,6 +74,26 @@ function getExtRefSection(content: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Named collector — used by both the main guard and the non-vacuity probe (M12b).
+// Extracts missing-reference violations from a single skill's Extended References section.
+// Calling this from both sites proves the probe exercises the real guard logic (pattern:
+// collectGhIssueProseViolations in tests/build-mds.test.ts ~:1549 / ~:1571 / ~:1602).
+// ---------------------------------------------------------------------------
+
+function collectMissingReferences(skillName: string, skillDir: string, section: string): string[] {
+  const violations: string[] = [];
+  const refPaths = extractExtRefPaths(section);
+  for (const refPath of refPaths) {
+    if (isGeneratedException(refPath)) continue;
+    const absPath = path.join(skillDir, refPath);
+    if (!existsSync(absPath)) {
+      violations.push(`skills/${skillName}/SKILL.md → ${refPath} (file not found at ${absPath})`);
+    }
+  }
+  return violations;
+}
+
+// ---------------------------------------------------------------------------
 // Guard
 // ---------------------------------------------------------------------------
 
@@ -124,19 +144,10 @@ describe('Extended References file-existence guard (P0-S22)', () => {
       if (section === null) continue;
 
       const refPaths = extractExtRefPaths(section);
-      for (const refPath of refPaths) {
-        rowsScanned++;
+      rowsScanned += refPaths.filter(p => !isGeneratedException(p)).length;
 
-        if (isGeneratedException(refPath)) {
-          // Generated path — excepted from existence check; will appear in Phase 2.
-          continue;
-        }
-
-        const absPath = path.join(skillPath, refPath);
-        if (!existsSync(absPath)) {
-          violations.push(`skills/${skillName}/SKILL.md → ${refPath} (file not found at ${absPath})`);
-        }
-      }
+      // Use the named collector so the probe exercises the same logic (M12b).
+      violations.push(...collectMissingReferences(skillName, skillPath, section));
     }
 
     // rowsScanned > 0: non-vacuity — asserts the guard actually found and checked rows.
@@ -152,9 +163,8 @@ describe('Extended References file-existence guard (P0-S22)', () => {
   });
 
   it('non-vacuity: a row pointing at a nonexistent reference fails the guard (mechanic 2, M12b)', () => {
-    // M12b: prior probe asserted existsSync(syntheticPath) === false — this only checks that
-    // the path doesn't exist, not that the guard logic would flag it.  Fix: run the same
-    // violation-collection path as the main guard on a synthetic corpus and assert violations > 0.
+    // M12b: prior probe re-implemented the violation loop inline — this called the same
+    // named collector as the main guard so the proof tracks the guard rather than shadowing it.
     const knownBadSection =
       `## Extended References\n\n| Reference | Contents |\n|-----------|----------|\n` +
       `| \`references/nonexistent-file-that-will-never-exist.md\` | Missing |\n`;
@@ -162,16 +172,8 @@ describe('Extended References file-existence guard (P0-S22)', () => {
     const syntheticSkillName = '_synthetic_nonexistent_test_skill_';
     const syntheticSkillDir = path.join(SKILLS_DIR, syntheticSkillName);
 
-    // Mirror the guard loop over the synthetic SKILL.md content.
-    const refPaths = extractExtRefPaths(knownBadSection);
-    const syntheticViolations: string[] = [];
-    for (const refPath of refPaths) {
-      if (isGeneratedException(refPath)) continue;
-      const absPath = path.join(syntheticSkillDir, refPath);
-      if (!existsSync(absPath)) {
-        syntheticViolations.push(`skills/${syntheticSkillName}/SKILL.md → ${refPath} (file not found)`);
-      }
-    }
+    // Call the same collectMissingReferences function used by the main guard.
+    const syntheticViolations = collectMissingReferences(syntheticSkillName, syntheticSkillDir, knownBadSection);
     expect(
       syntheticViolations.length,
       'non-vacuity: the guard logic must flag a missing reference in a synthetic corpus entry (H10, mechanic 2)',

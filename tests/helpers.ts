@@ -11,10 +11,14 @@ const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
  * Ensure dist/commands/ exists and return its .md files.
  * Throws — does NOT return — when absent. A guard that silently skips
  * on a missing build artifact is not a guard.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to verify throw behaviour without touching the real dist.
  */
-export function requireDistFiles(): string[] {
+export function requireDistFiles(root: string = ROOT): string[] {
+  const dir = path.join(root, 'dist', 'commands')
   try {
-    return readdirSync(DIST_COMMANDS_DIR).filter(f => f.endsWith('.md'))
+    return readdirSync(dir).filter(f => f.endsWith('.md'))
   } catch {
     throw new Error(
       'dist/commands/ is absent — run `npm run build` first\n' +
@@ -26,9 +30,12 @@ export function requireDistFiles(): string[] {
 /**
  * Read a dist command file. Throws if absent (referencing the build step).
  * A missing dist file is a build error, not a skip condition.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to verify throw behaviour without touching the real dist.
  */
-export function requireDistFile(name: string): string {
-  const filePath = path.join(DIST_COMMANDS_DIR, name)
+export function requireDistFile(name: string, root: string = ROOT): string {
+  const filePath = path.join(root, 'dist', 'commands', name)
   try {
     return readFileSync(filePath, 'utf-8')
   } catch {

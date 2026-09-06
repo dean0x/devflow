@@ -138,11 +138,17 @@ function harvestFence(fence: string): { op: string; keys: Set<string> } | null {
 /** Keys in a fence that its op's **Input:** line does not declare. */
 function forwardViolationsFor(section: string, keys: Set<string>): string[] {
   const bad: string[] = []
+  // Scope to **Input:** line only via parseInputIdentifiers (MIS-8).
+  // The old `section.includes(`\`KEY\``)` checked the WHOLE section, so a key
+  // mentioned in **Process:** but not declared in **Input:** would silently pass.
+  const { required, optional } = parseInputIdentifiers(section)
+  const declared = new Set([...required, ...optional])
   for (const key of keys) {
     if (isNonFieldKey(key)) continue
-    // Exact-match: the key must appear as `KEY` in the **Input:** line.
-    // Never startsWith — 'ISSUE' must not satisfy 'ISSUE_INPUT' (AC-0.1).
-    if (!section.includes(`\`${key}\``)) bad.push(key)
+    // Membership against the parsed **Input:** identifiers only — never whole-section scan.
+    // Exact match: 'ISSUE' is not satisfied by 'ISSUE_INPUT' (parseInputIdentifiers uses
+    // backtick-delimited identifier extraction, same AC-0.1 guard as before).
+    if (!declared.has(key)) bad.push(key)
   }
   return bad
 }
@@ -174,15 +180,27 @@ function parseInputIdentifiers(section: string): { required: string[]; optional:
   const inputLineMatch = section.match(/^\*\*Input:\*\*(.*?)$/m)
   if (!inputLineMatch) return { required, optional }
 
-  const line = inputLineMatch[1]
-  // Extract all backtick-delimited identifiers on this line.
-  // Format: `IDENTIFIER` possibly followed by (optional) and/or a description.
-  const identPattern = /`([A-Z_][A-Z0-9_]*)`(?:\s*\(optional\))?/g
+  // Build the full input text: content on the **Input:** line itself, plus any
+  // following bullet lines (multi-line format used by setup-task and similar ops).
+  // Bullet lines look like `- \`KEY\` (optional): description` immediately after **Input:**
+  // and continue until the first non-bullet, non-blank line (next **Heading:** etc.).
+  let inputText = inputLineMatch[1]
+  const afterInputLine = section.slice(
+    (inputLineMatch.index ?? 0) + inputLineMatch[0].length,
+  )
+  // Collect consecutive lines that start with optional whitespace + dash (list items).
+  const bulletBlockMatch = afterInputLine.match(/^((?:\n[ \t]*-[ \t][^\n]*)*)/)
+  if (bulletBlockMatch?.[1]) {
+    inputText += bulletBlockMatch[1]
+  }
+
+  // Extract all backtick-delimited UPPERCASE identifiers from the combined text.
+  const identPattern = /`([A-Z_][A-Z0-9_]*)`/g
   let m
-  while ((m = identPattern.exec(line)) !== null) {
+  while ((m = identPattern.exec(inputText)) !== null) {
     const name = m[1]
-    // Check if (optional) appears after the closing backtick of this identifier.
-    const afterBt = line.slice(m.index + m[0].indexOf(m[1]) + m[1].length + 1)
+    // Determine optional: check if (optional) appears immediately after the closing backtick.
+    const afterBt = inputText.slice(m.index + m[0].length)
     const isOptional = /^\s*\(optional\)/.test(afterBt)
     if (isOptional) {
       optional.push(name)
@@ -309,9 +327,9 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('at least 10 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: the spec-level AC says git.md declares 16 ops (REQUIRED_OPS), but the
+    // M9: the spec-level AC says git.md declares 17 ops (REQUIRED_OPS), but the
     // corpus scan finds 13 live caller fences (17 ops minus ops with no callers yet, e.g.
-    // fetch-issues-batch). Floor is 10, not 16 — intentionally conservative pending Phase 1
+    // fetch-issues-batch). Floor is 10, not 17 — intentionally conservative pending Phase 1
     // wiring. Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
     expect(
       keysPassedByOp.size,
@@ -421,6 +439,34 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     expect(
       forwardViolationsFor(section, harvested.keys),
       'the post-A1 fence must be clean — ISSUE_INPUT is declared in fetch-issue **Input:**',
+    ).toHaveLength(0)
+  })
+
+  it('process-only key: a key mentioned only in **Process:** but not in **Input:** is a violation (MIS-8 new failure mode)', () => {
+    // The OLD predicate (section.includes(`\`KEY\``)) checked the WHOLE section, so a key
+    // appearing in **Process:** (e.g. "`PROCESS_ONLY_KEY`") would pass — no violation reported.
+    // The NEW predicate (parseInputIdentifiers) scopes to **Input:** only, so the same key
+    // is flagged as undeclared — correct behaviour.
+    //
+    // RED: pass a key that appears in **Process:** but is absent from **Input:**
+    const syntheticSection =
+      '## Operation: test-op\n' +
+      '**Input:** `DECLARED_KEY` - The real input\n' +
+      '**Process:**\n' +
+      '1. Process using `PROCESS_ONLY_KEY` here\n'
+
+    const redViolations = forwardViolationsFor(syntheticSection, new Set(['PROCESS_ONLY_KEY']))
+    expect(
+      redViolations,
+      'a key present only in **Process:** must be caught by the forward check (MIS-8 RED proof)',
+    ).toHaveLength(1)
+    expect(redViolations[0]).toBe('PROCESS_ONLY_KEY')
+
+    // GREEN: pass a key that is actually declared in **Input:**
+    const greenViolations = forwardViolationsFor(syntheticSection, new Set(['DECLARED_KEY']))
+    expect(
+      greenViolations,
+      'a key declared in **Input:** must not be flagged (GREEN)',
     ).toHaveLength(0)
   })
 })

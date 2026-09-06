@@ -964,7 +964,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     ).toBe(0);
   });
 
-  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
+  it('code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
     for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');

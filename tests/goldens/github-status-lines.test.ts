@@ -29,7 +29,7 @@ import { spawnSync } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
-import { loadGolden, extractStatusLines } from '../helpers.js'
+import { loadGolden, extractStatusLines, resolveAgentSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
@@ -114,9 +114,12 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 // ---------------------------------------------------------------------------
 
 describe('git.md live-file baselines (post-M3)', () => {
+  // Use resolveAgentSource (dist-preferred, src-fallback) — no literal src/assets/agents/ path
+  // so Phase 1's git.md → git.mds migration needs zero edits here (AC-0.7/P0-S17).
+  const gitAgent = resolveAgentSource('git')
+
   it(`git.md has ${GIT_MD_LINES} lines`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
-    const lines = content.split('\n').length - 1
+    const lines = gitAgent.content.split('\n').length - 1
     expect(
       lines,
       `git.md line count changed from post-M3 baseline (${GIT_MD_LINES}) — update GIT_MD_LINES and re-capture the golden`,
@@ -124,9 +127,8 @@ describe('git.md live-file baselines (post-M3)', () => {
   })
 
   it(`git.md has ${GIT_MD_CHARS} chars`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
     expect(
-      content.length,
+      gitAgent.content.length,
       `git.md char count changed from post-M3 baseline (${GIT_MD_CHARS}) — update GIT_MD_CHARS and re-capture the golden`,
     ).toBe(GIT_MD_CHARS)
   })
