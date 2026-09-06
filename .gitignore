@@ -56,3 +56,4 @@ install.log
 .competitive-codenames.json
 !.devflow/conventions.md
 release-notes.md
+.claudeignore
