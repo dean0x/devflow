@@ -53,6 +53,10 @@
 - **Title**: {title}
 - **Description**: {description}
 - **Acceptance Criteria**: {criteria}
+**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable, or rate-limited at fetch time → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without issue content. Caller receives only the DEGRADED line; `/plan` proceeds from the task description alone.
+
+**Output:**
+```markdown
 ## Issue #{number}:
 <untrusted-issue-body>
 {title}
@@ -60,7 +64,7 @@
 **State**: {open/closed} | **Labels**: {labels} | **Priority**: {P0-P3 or Unspecified}
 
 ### Description
-{body}
+{body summary}
 
 ### Acceptance Criteria
 {extracted or "Not specified"}
@@ -72,6 +76,10 @@
 
 ### Suggested Branch
 {type}/{number}-{slug}
+**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable, or rate-limited at fetch time → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without issue content. Caller receives only the DEGRADED line; `/plan` proceeds from the task description alone.
+
+**Output:**
+```markdown
 ## Issues Batch ({n} issues)
 
 ### Issue #{number1}:
@@ -80,7 +88,7 @@
 
 **Labels**: {labels} | **Priority**: {priority}
 
-{body}
+{body summary}
 
 **Acceptance Criteria**: {extracted}
 **Dependencies**: {extracted}
