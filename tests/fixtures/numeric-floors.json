@@ -100,11 +100,11 @@
     },
     {
       "id": "issue-capture-contract-size",
-      "floor": 5,
-      "pattern": "toBe(5)",
+      "floor": 3,
+      "pattern": "toBe(3)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Values in issue_capture_contract() checked by the seam test's producer direction"
+      "description": "Entries in issue_capture_contract() checked by the seam test's producer direction — corrected from 5 to 3 after removing ISSUE_ID and ISSUE_URL (c7bff85: no emitted producer in git.md for either name)"
     },
     {
       "id": "git-md-lines",
@@ -139,12 +139,20 @@
       "description": "D10 dedup-marker guard: two >= 2 floors in git-agent.test.ts (post-review-summary and post-resolution-summary dedup markers); lowering either site is caught"
     },
     {
-      "id": "containment-ops-floor",
+      "id": "containment-issue-body-floor",
       "floor": 3,
       "pattern": "toBeGreaterThanOrEqual(3)",
-      "occurrences": 1,
+      "occurrences": 2,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "AC-0.10 containment guard: ops wrapping remote-sourced text in <untrusted-issue-body> or <external-thread> — fetch-issue, fetch-issues-batch, and fetch-review-threads (three ops, per Principle 8)"
+      "description": "AC-0.10 containment guard (issue-body): ops wrapping remote issue content in <untrusted-issue-body> — setup-task, fetch-issue, fetch-issues-batch (three ops added in commit 75f13e7). Split from the prior combined predicate to make this assertion non-vacuous on main."
+    },
+    {
+      "id": "containment-external-thread-floor",
+      "floor": 3,
+      "pattern": "toBeGreaterThanOrEqual(3)",
+      "occurrences": 2,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "AC-0.10 containment guard (external-thread): ops carrying <external-thread> for review thread bodies — fetch-review-threads, post-resolution-summary, post-wave-report (pre-existing on main, Principle 8 stabilisation)."
     }
   ]
 }

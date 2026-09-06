@@ -640,29 +640,66 @@ describe('git agent — static content guards (PF-018)', () => {
 
   // ── Guard 10: Containment guard (AC-0.10) ──────────────────────────────────
   // AC-0.10 mechanisation record (P0-S11): "every op Output block rendering a remote-sourced field"
-  // is pinned as a floor of >= 3 ops carrying <untrusted-issue-body> or <external-thread>
-  // (one containment class per Principle 8); <external-thread> pre-exists on main. The negative
-  // arm checks that summary/reply ops do not interpolate remote body placeholders directly.
+  // is split into two independent assertions — one per containment class (Principle 8):
+  //
+  //   (a) <untrusted-issue-body>: setup-task, fetch-issue, fetch-issues-batch wrap issue bodies.
+  //       Non-vacuity proof: on main, <untrusted-issue-body> appears ZERO times → floor 3 fails.
+  //       The prior combined predicate (<untrusted-issue-body> OR <external-thread>) scored 3 on
+  //       main from the pre-existing <external-thread> ops, making the issue-body detection vacuous.
+  //
+  //   (b) <external-thread>: fetch-review-threads, post-resolution-summary, post-wave-report.
+  //       Pre-existing on main (stabilisation assertion, named-set ensures no silent op drift).
+  //
+  // FILE-SCOPED: extractOpSectionFromCorpus ends a section at the next \n## , which truncates
+  // ops whose Output template contains ## headings (e.g. fetch-issues-batch). Per-op slicing over
+  // the full file avoids truncation (AC-0.3 uses the same approach at tests/git-agent.test.ts:~161).
 
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (file-scoped)', () => {
-    // FILE-SCOPED: extractOpSectionFromCorpus ends a section at the next \n## , which truncates
-    // ops whose Output template contains ## headings (e.g. fetch-issues-batch). This guard uses
-    // per-op slicing over the full file content to avoid truncation (AC-0.3's guard uses the same
-    // approach at tests/git-agent.test.ts:~161-171).
-    // Principle 8 (git.md ~:943) declares <untrusted-issue-body> (issue bodies) and <external-thread>
-    // (review thread bodies) as the same containment class. Count ops using either tag.
-    // fetch-issue and fetch-issues-batch use <untrusted-issue-body>; fetch-review-threads uses
-    // <external-thread>; total >= 3 (AC-0.10).
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
-    const opsWithContainment = opNames.filter(op => {
+
+    // ── (a) Issue-body containment ────────────────────────────────────────────
+    // Predicate: <untrusted-issue-body> ONLY.
+    // Named set: ensures an unrelated op cannot satisfy the floor by accident.
+    // Non-vacuity: on main's git.md, 0 ops have <untrusted-issue-body> → the floor-3 assertion below FAILS.
+    const EXPECTED_ISSUE_BODY_OPS = ['setup-task', 'fetch-issue', 'fetch-issues-batch'];
+    const opsWithUntrustedIssueBody = opNames.filter(op => {
       const opStart = content.indexOf(`## Operation: ${op}`);
       const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
       const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
-      return slice.includes('<untrusted-issue-body>') || slice.includes('<external-thread>');
+      return slice.includes('<untrusted-issue-body>');
     });
+    for (const expectedOp of EXPECTED_ISSUE_BODY_OPS) {
+      expect(
+        opsWithUntrustedIssueBody,
+        `containment (issue-body): expected '${expectedOp}' to wrap issue content in <untrusted-issue-body>`,
+      ).toContain(expectedOp);
+    }
     expect(
-      opsWithContainment.length,
-      `containment: expected >= 3 ops with <untrusted-issue-body> or <external-thread>; found [${opsWithContainment.join(', ')}]`,
+      opsWithUntrustedIssueBody.length,
+      `containment (issue-body): expected >= 3 ops with <untrusted-issue-body>; found [${opsWithUntrustedIssueBody.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(3);
+
+    // ── (b) External-thread containment ──────────────────────────────────────
+    // Predicate: <external-thread> ONLY.
+    // Named set: stabilises the set; any silent removal of an expected op is loud.
+    // These three ops pre-existed on main; the assertion existed there too — its non-vacuity
+    // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
+    const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
+    const opsWithExternalThread = opNames.filter(op => {
+      const opStart = content.indexOf(`## Operation: ${op}`);
+      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
+      const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
+      return slice.includes('<external-thread>');
+    });
+    for (const expectedOp of EXPECTED_EXTERNAL_THREAD_OPS) {
+      expect(
+        opsWithExternalThread,
+        `containment (external-thread): expected '${expectedOp}' to carry <external-thread> in its section`,
+      ).toContain(expectedOp);
+    }
+    expect(
+      opsWithExternalThread.length,
+      `containment (external-thread): expected >= 3 ops with <external-thread>; found [${opsWithExternalThread.join(', ')}]`,
     ).toBeGreaterThanOrEqual(3);
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
