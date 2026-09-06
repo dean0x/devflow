@@ -50,8 +50,8 @@ export const TOTAL_CHARS = 73_164
 export const TOTAL_LINES = 1_338
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 17_379
-export const FIXTURE_NEWLINES = 233
+export const FIXTURE_BYTES = 17_914
+export const FIXTURE_NEWLINES = 246
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {
