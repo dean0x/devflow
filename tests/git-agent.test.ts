@@ -558,20 +558,18 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('(pending — TRACEABILITY: DEGRADED');
   });
 
-  it('every REQUIRED_OP with posting/mutation remote I/O carries **Degradation (D4):** (AC-0.6b)', () => {
-    // "Does posting/mutation remote I/O" derived from op text — not a hand list (PF-049).
-    // D4 scope: ops that POST content or execute mutations (body-file, push, release, GraphQL mutation).
-    // Read-only ops (gh pr view, gh issue view, gh run list, gh pr checks, gh api GET-only) are
-    // outside D4 scope in git.md v5fc76aa — those ops are lower-risk and git.md does not carry D4
-    // on them. The src/assets/ corpus is frozen; this guard pins the ops that DO carry D4.
+  it('every REQUIRED_OP with remote I/O carries **Degradation (D4):** (AC-0.6b)', () => {
+    // "Does remote I/O" derived from op text — not a hand list (PF-049).
+    // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
+    // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
     const remoteOps: string[] = [];
     const missingD4: string[] = [];
     for (const op of REQUIRED_OPS) {
       const sec = extractOpSection(soleCorpus, op, 'sole');
-      // Posting/mutation indicators: body-file posting, git push, or explicit
-      // gh <subcommand> that writes/modifies state (comment, merge, release, review).
-      // GraphQL is excluded: fetch-issues-batch uses GraphQL for reads (no D4 needed).
-      const doesPostingIO =
+      // Remote I/O indicators: body-file posting, git push, explicit gh subcommands
+      // that write state, plus read-only API calls (gh api, gh issue view/list, GraphQL,
+      // and backtick-quoted `gh` which appears in D4 lines of fetch-issue/fetch-issues-batch).
+      const doesRemoteIO =
         sec.includes('--body-file') ||
         sec.includes('-F body=@') ||
         sec.includes('git push') ||
@@ -579,8 +577,13 @@ describe('git agent — static content guards (PF-018)', () => {
         sec.includes('gh pr comment') ||
         sec.includes('gh issue comment') ||
         sec.includes('gh release create') ||
-        sec.includes('gh pr review');
-      if (!doesPostingIO) continue;
+        sec.includes('gh pr review') ||
+        sec.includes('gh api') ||
+        sec.includes('gh issue view') ||
+        sec.includes('gh issue list') ||
+        /graphql/i.test(sec) ||
+        sec.includes('`gh`');
+      if (!doesRemoteIO) continue;
       // D4 evidence: either the formal `**Degradation (D4):**` label or an inline
       // TRACEABILITY: DEGRADED site (ops that carry the degradation concept but use
       // the inline form rather than a separate labelled clause — e.g. setup-task,
@@ -589,6 +592,15 @@ describe('git agent — static content guards (PF-018)', () => {
       remoteOps.push(op);
       if (!hasD4Evidence) missingD4.push(op);
     }
+    // Non-vacuity: fetch-issue and fetch-issues-batch must be detected as remote-I/O (MIS-2).
+    expect(
+      remoteOps,
+      'non-vacuity: fetch-issue must be detected as remote-I/O (backtick-quoted `gh` in its D4 line)',
+    ).toContain('fetch-issue');
+    expect(
+      remoteOps,
+      'non-vacuity: fetch-issues-batch must be detected as remote-I/O (gh api graphql in Process)',
+    ).toContain('fetch-issues-batch');
     expect(
       remoteOps.length,
       'no REQUIRED_OPS detected as remote-I/O — guard is vacuous (PF-018)',
@@ -632,21 +644,21 @@ describe('git agent — static content guards (PF-018)', () => {
     // ops whose Output template contains ## headings (e.g. fetch-issues-batch). This guard uses
     // per-op slicing over the full file content to avoid truncation (AC-0.3's guard uses the same
     // approach at tests/git-agent.test.ts:~161-171).
-    // fetch-issue and fetch-issues-batch use <untrusted-issue-body>.
-    // fetch-review-threads uses <external-thread> for review bodies — a different tag.
-    // The AC's >= 3 floor is unreachable with <untrusted-issue-body> alone because
-    // fetch-review-threads uses <external-thread>; assert the true corpus count (>= 2).
+    // Principle 8 (git.md ~:943) declares <untrusted-issue-body> (issue bodies) and <external-thread>
+    // (review thread bodies) as the same containment class. Count ops using either tag.
+    // fetch-issue and fetch-issues-batch use <untrusted-issue-body>; fetch-review-threads uses
+    // <external-thread>; total >= 3 (AC-0.10).
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
-    const opsWithUntrusted = opNames.filter(op => {
+    const opsWithContainment = opNames.filter(op => {
       const opStart = content.indexOf(`## Operation: ${op}`);
       const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
       const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
-      return slice.includes('<untrusted-issue-body>');
+      return slice.includes('<untrusted-issue-body>') || slice.includes('<external-thread>');
     });
     expect(
-      opsWithUntrusted.length,
-      `containment: expected >= 2 ops with <untrusted-issue-body>; found [${opsWithUntrusted.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(2);
+      opsWithContainment.length,
+      `containment: expected >= 3 ops with <untrusted-issue-body> or <external-thread>; found [${opsWithContainment.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(3);
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
@@ -668,14 +680,23 @@ describe('git agent — static content guards (PF-018)', () => {
   it('D11: extractOpSectionFromCorpus matchCount is surfaced for union calls (non-vacuous, AC-0.8)', () => {
     // The extractOpSection wrapper in this file discards matchCount — this test calls
     // extractOpSectionFromCorpus directly to assert the matchCount contract [DR-18].
+    // Exact expectation: count how many sink-corpus files contain the anchor independently,
+    // then assert matchCount equals that count (unfalsifiable >= 1 replaced per MIS-6a).
     const sinkCorpus = gitAgentSinkCorpus();
+    const expectedMatchCount = sinkCorpus.filter(
+      e => e.content.includes('## Operation: post-review-summary'),
+    ).length;
+    expect(
+      expectedMatchCount,
+      'expected matchCount must be > 0 — otherwise the union guard would be vacuous (PF-018)',
+    ).toBeGreaterThan(0);
     const { content: sec, matchCount } = extractOpSectionFromCorpus(
       sinkCorpus, 'post-review-summary', { mode: 'union' },
     );
     expect(
       matchCount,
-      'union matchCount for post-review-summary must be >= 1 — a count of 0 means the forward guard is vacuous',
-    ).toBeGreaterThanOrEqual(1);
+      `union matchCount for post-review-summary must be exactly ${expectedMatchCount} — computed independently from the corpus`,
+    ).toBe(expectedMatchCount);
     expect(sec.length, 'union result content must be non-empty').toBeGreaterThan(0);
   });
 

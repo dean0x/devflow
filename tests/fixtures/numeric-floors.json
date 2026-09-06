@@ -134,9 +134,17 @@
       "id": "d10-dedup-marker-floor",
       "floor": 2,
       "pattern": "toBeGreaterThanOrEqual(2)",
-      "occurrences": 3,
+      "occurrences": 2,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D10 dedup-marker guard: three >= 2 floors in git-agent.test.ts (post-review-summary, post-resolution-summary, and containment ops count); lowering any site is caught"
+      "description": "D10 dedup-marker guard: two >= 2 floors in git-agent.test.ts (post-review-summary and post-resolution-summary dedup markers); lowering either site is caught"
+    },
+    {
+      "id": "containment-ops-floor",
+      "floor": 3,
+      "pattern": "toBeGreaterThanOrEqual(3)",
+      "occurrences": 1,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "AC-0.10 containment guard: ops wrapping remote-sourced text in <untrusted-issue-body> or <external-thread> — fetch-issue, fetch-issues-batch, and fetch-review-threads (three ops, per Principle 8)"
     }
   ]
 }
