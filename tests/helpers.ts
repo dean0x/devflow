@@ -178,19 +178,39 @@ export function extractOpSectionFromCorpus(
  * Recursively walk `dir`, returning the absolute paths of all files for which
  * `accept` returns true, sorted deterministically.
  *
- * ENOENT on the top-level `dir` returns [] (directory simply absent).
- * Other errors (e.g. EACCES) propagate — they indicate a genuine problem.
+ * ENOENT or ENOTDIR on any node returns [] for that node (directory absent or
+ * not a directory). Other errors (e.g. EACCES) propagate — they indicate a
+ * genuine problem.
+ *
+ * Descent stops silently once the recursion reaches `maxDepth` levels below
+ * the initial `dir` (default 8). No error is thrown when the cap is hit.
  *
  * @param dir - Absolute path of the directory to walk.
  * @param accept - Predicate applied to each file's absolute path.
+ * @param maxDepth - Maximum recursion depth (default 8). Descent beyond this
+ *   depth is silently skipped.
  */
-export function walkFiles(dir: string, accept: (file: string) => boolean): string[] {
-  if (!existsSync(dir)) return []
+export function walkFiles(
+  dir: string,
+  accept: (file: string) => boolean,
+  maxDepth = 8,
+  _depth = 0,
+): string[] {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    throw err
+  }
   const result: string[] = []
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of entries) {
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      result.push(...walkFiles(absPath, accept))
+      if (_depth < maxDepth) {
+        result.push(...walkFiles(absPath, accept, maxDepth, _depth + 1))
+      }
     } else if (accept(absPath)) {
       result.push(absPath)
     }

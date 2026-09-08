@@ -90,8 +90,8 @@ function isNonFieldKey(key: string): boolean {
 //     Return issue title, body, labels…"
 //
 // so both anchors must tolerate leading whitespace and the opening double quote.
-// Anchoring at a bare line start (/^OPERATION: /m) matched ZERO of the 18 Git
-// fences in dist/commands/ — keysPassedByOp stayed empty and Directions 1 and 2
+// Anchoring at a bare line start (/^OPERATION: /m) matched ZERO of the 15 Git
+// spawn fences in dist/commands/ — keysPassedByOp stayed empty and Directions 1 and 2
 // iterated nothing while every assertion stayed green (PF-018). The
 // opMatchedFences invariant below is what makes that failure mode loud.
 const OPERATION_LINE_RE = /^[ \t]*"?OPERATION: (\S+)/m

@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as path from 'path';
 import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { requireDistFiles, requireDistFile, resolveAllAgents } from './helpers.js';
+import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -750,10 +750,7 @@ describe('Completeness: review.md Focus Areas vs code-review plugin', () => {
       'apply-feature-knowledge',  // consumption meta-skill, not a review focus
     ]);
 
-    const reviewContent = readFileSync(
-      path.join(ROOT, 'src', 'assets', 'agents', 'review.md'),
-      'utf-8',
-    );
+    const reviewContent = resolveAgentSource('review').content;
 
     for (const skill of codeReviewPlugin!.skills) {
       if (NON_FOCUS_SKILLS.has(skill)) continue;
@@ -796,7 +793,7 @@ function parseCodeReviewFocusTable(content: string): Map<string, string> {
 }
 
 describe('Cross-component runtime alignment', () => {
-  const reviewContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'review.md'), 'utf-8');
+  const reviewContent = resolveAgentSource('review').content;
   const reviewFocusAreas = parseReviewFocusAreas(reviewContent);
 
   it('review.md Focus Areas table has entries', () => {
@@ -913,7 +910,7 @@ describe('Cross-component runtime alignment', () => {
   });
 
   it('code.md domain skill paths cover all language/ecosystem skills', () => {
-    const codeContent = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8');
+    const codeContent = resolveAgentSource('code').content;
 
     // Language skills that should be loadable as domain skills via Skill tool invocations
     const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
@@ -943,7 +940,7 @@ describe('Cross-component runtime alignment', () => {
 // ---------------------------------------------------------------------------
 
 describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
-  it('every src/assets/agents/*.md has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
+  it('every agent resolved by resolveAllAgents has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
     // Enumerated via resolveAllAgents() for completeness — avoids GAP-07 anti-pattern.
     // avoids PF-002
     const agents = resolveAllAgents();

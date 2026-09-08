@@ -20,6 +20,7 @@ import {
   resolveAllAgents,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  walkFiles,
   type CorpusEntry,
 } from '../helpers.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
@@ -313,6 +314,38 @@ describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)',
       expect(corpus[0].path, 'sole entry must end with git.md').toMatch(/git\.md$/)
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Guard: walkFiles — ENOENT and maxDepth behaviours
+// ---------------------------------------------------------------------------
+
+describe('walkFiles: ENOENT and maxDepth behaviours', () => {
+  it('returns [] for a non-existent directory', () => {
+    const missing = path.join(os.tmpdir(), 'devflow-walkfiles-nonexistent-' + Date.now())
+    expect(walkFiles(missing, () => true)).toEqual([])
+  })
+
+  it('does not descend into directories nested deeper than maxDepth', () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-walkfiles-depth-'))
+    try {
+      // Build a chain: tmpRoot/a/b/c/deep.md — depth 3 from tmpRoot.
+      const deepDir = path.join(tmpRoot, 'a', 'b', 'c')
+      mkdirSync(deepDir, { recursive: true })
+      writeFileSync(path.join(deepDir, 'deep.md'), '# deep', 'utf8')
+
+      // maxDepth=2 stops before entering 'c' (depths 0→a, 1→b, 2 stops before c).
+      const files = walkFiles(tmpRoot, f => f.endsWith('.md'), 2)
+      expect(files, 'file nested at depth 3 must not be returned when maxDepth=2').toHaveLength(0)
+
+      // maxDepth=3 (default minus some) should reach 'c'.
+      const filesDeep = walkFiles(tmpRoot, f => f.endsWith('.md'), 3)
+      expect(filesDeep, 'file nested at depth 3 must be returned when maxDepth=3').toHaveLength(1)
+      expect(filesDeep[0]).toMatch(/deep\.md$/)
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true })
     }
   })
 })
