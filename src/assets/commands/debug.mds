@@ -52,6 +52,8 @@ ISSUE_INPUT: {issue reference}
 Return issue title, body, labels, and any linked error logs."
 ```
 
+If the Git agent returns only a TRACEABILITY: DEGRADED line and no issue content, report that line verbatim to the user and use AskUserQuestion to request the bug description before generating any hypotheses — do not fabricate a description from the issue number alone.
+
 Analyze the bug description (from arguments or issue) and identify 3-5 plausible hypotheses. Each hypothesis must be:
 - **Specific**: Points to a concrete mechanism (not "something is wrong")
 - **Testable**: Can be confirmed or disproved by reading code/logs

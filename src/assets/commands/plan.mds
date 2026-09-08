@@ -83,6 +83,8 @@ Explore the user's intent through focused Socratic questioning before spawning a
 
 Capture from Git agent output: `ISSUE_CONTENT`, `ACCEPTANCE_CRITERIA`, `ISSUE_REF`. Use the fetched data to seed the discovery below; skip Gate 0 questions where the issue already provides sufficient scope (applies the **Skip discovery when** rule above).
 
+If the Git agent returns only a `TRACEABILITY: DEGRADED (\{reason\})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the bare issue reference (the `#N` token) as the sole context. Never treat the `TRACEABILITY: DEGRADED` status line as issue content — no title, body, or acceptance criteria may be inferred from it.
+
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
