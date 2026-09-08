@@ -109,10 +109,11 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('manage-debt: 60000-char archive threshold is present (AC-0.12)', () => {
-    // Pin this literal before Phase 2 moves the manage-debt mechanics into a
-    // generated reference file. Floor must stay ≥ 60000 — reducing the threshold
-    // silently allows oversized archives that exceed GitHub's comment limit.
-    const sec = extractOpSection(soleCorpus, 'manage-debt', 'sole');
+    // Union corpus: the pin follows the text when Phase 2 moves manage-debt
+    // mechanics into compiled reference files under dist/skills/git/references/.
+    // Floor must stay ≥ 60000 — reducing the threshold silently allows oversized
+    // archives that exceed GitHub's comment limit.
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'manage-debt', 'union');
     expect(
       sec,
       'manage-debt: missing 60000-char archive threshold — must be pinned before Phase 2 moves the mechanics',

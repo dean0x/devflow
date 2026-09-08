@@ -28,10 +28,9 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
-import { requireDistFiles, requireDistFile, resolveAgentSource } from './helpers.js'
+import { requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
-const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents')
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
 const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
 const DOCS_DIR = path.join(ROOT, 'docs')
@@ -509,19 +508,18 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
    * That entry exits when the agent is renamed in phase 4.
    */
   it('every agent frontmatter name: matches its slug or the exception map', () => {
-    const agentFiles = readdirSync(AGENTS_DIR).filter(f => f.endsWith('.md'))
-    expect(agentFiles.length, 'No agent files found in src/assets/agents/').toBeGreaterThan(0)
+    const agents = resolveAllAgents()
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
 
     const violations: string[] = []
-    for (const file of agentFiles) {
-      const slug = path.basename(file, '.md')
-      const frontmatterName = readFrontmatterName(path.join(AGENTS_DIR, file))
+    for (const [slug, source] of agents) {
+      const frontmatterName = readFrontmatterName(source.path)
       const expected = Object.hasOwn(SLUG_TO_NAME_EXCEPTIONS, slug)
         ? SLUG_TO_NAME_EXCEPTIONS[slug]
         : capitalizeFirst(slug)
       if (frontmatterName !== expected) {
         violations.push(
-          `  ${file}: name: '${frontmatterName}' ≠ expected '${expected}'` +
+          `  ${path.relative(ROOT, source.path)}: name: '${frontmatterName}' ≠ expected '${expected}'` +
           (slug.includes('-')
             ? ` (add to SLUG_TO_NAME_EXCEPTIONS if PascalCase was intended)`
             : ' (fix frontmatter name: or add to SLUG_TO_NAME_EXCEPTIONS)'),
@@ -626,13 +624,12 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
      */
     const BUILTINS_EXACT = new Set(['Explore'])
 
-    // Truth set: the real frontmatter name: values, not a derived transform.
+    // Truth set: the real frontmatter name: values via the resolver, not a derived transform.
+    const agents = resolveAllAgents()
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
     const formBNames = new Set(
-      readdirSync(AGENTS_DIR)
-        .filter(f => f.endsWith('.md'))
-        .map(f => readFrontmatterName(path.join(AGENTS_DIR, f))),
+      [...agents.values()].map(source => readFrontmatterName(source.path)),
     )
-    expect(formBNames.size, 'No agent frontmatter names parsed').toBeGreaterThan(0)
 
     // Matches subagent_type="X", subagent_type: "X", and the shell-escaped
     // subagent_type=\"X\" form used inside hook heredoc strings.

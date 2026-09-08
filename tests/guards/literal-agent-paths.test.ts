@@ -10,8 +10,6 @@
  *     path (inside resolveAgentSource). extractStatusLines() reads through the resolver and
  *     contains no literal src/assets/agents/ path for content resolution. It is outside the
  *     scan scope below.
- *   tests/installer-new.test.ts — out of scope: it is not a new Phase-0 file and pins
- *     an installer error message, not an agent-path literal used for content resolution.
  *   tests/guards/literal-agent-paths.test.ts — self-excluded: this file defines the
  *     LITERAL constant, the error message strings, and the non-vacuity probe corpus entry,
  *     all of which necessarily contain the literal string.

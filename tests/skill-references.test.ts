@@ -12,8 +12,8 @@ import { describe, it, expect } from 'vitest';
 // test function synchronous (simpler assertions, no `await` boilerplate).
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as path from 'path';
-import { getAllSkillNames, getAllCommandNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { requireDistFiles, requireDistFile } from './helpers.js';
+import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { requireDistFiles, requireDistFile, resolveAllAgents } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -228,35 +228,31 @@ function filterNonSkillRefs(names: string[], extraAllowed?: ReadonlySet<string>)
 describe('Format 2: Agent frontmatter skills', () => {
   it('every skill in shared agent frontmatter exists in canonical set', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    const agentFiles = readdirSync(path.join(ROOT, 'src', 'assets', 'agents')).filter(f => f.endsWith('.md'));
+    const agents = resolveAllAgents();
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    for (const file of agentFiles) {
-      const filePath = path.join(ROOT, 'src', 'assets', 'agents', file);
-      const content = readFileSync(filePath, 'utf-8');
-      const skillNames = parseFrontmatterSkills(content);
+    for (const [name, source] of agents) {
+      const skillNames = parseFrontmatterSkills(source.content);
 
       for (const skill of skillNames) {
         expect(
           canonicalSkills.has(skill),
-          `src/assets/agents/${file}: frontmatter skill '${skill}' is not in canonical getAllSkillNames()`,
+          `${path.relative(ROOT, source.path)}: frontmatter skill '${skill}' is not in canonical getAllSkillNames()`,
         ).toBe(true);
       }
     }
   });
 
   it('every shared agent declares at least one skill in frontmatter', () => {
-    const agentFiles = readdirSync(path.join(ROOT, 'src', 'assets', 'agents')).filter(f => f.endsWith('.md'));
+    const agents = resolveAllAgents();
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    expect(agentFiles.length, 'agent corpus must be non-empty — a rename emptying the directory would pass vacuously').toBeGreaterThan(0);
-
-    for (const file of agentFiles) {
-      const filePath = path.join(ROOT, 'src', 'assets', 'agents', file);
-      const content = readFileSync(filePath, 'utf-8');
-      const skillNames = parseFrontmatterSkills(content);
+    for (const [name, source] of agents) {
+      const skillNames = parseFrontmatterSkills(source.content);
 
       expect(
         skillNames.length,
-        `src/assets/agents/${file}: parseFrontmatterSkills returned empty — missing or malformed skills: block in frontmatter`,
+        `${path.relative(ROOT, source.path)}: parseFrontmatterSkills returned empty — missing or malformed skills: block in frontmatter`,
       ).toBeGreaterThan(0);
     }
   });
@@ -272,8 +268,8 @@ describe('Format 3: Install path references', () => {
     // code.md references ~/.claude/skills/devflow:compliance/SKILL.md for the conditional
     // compliance gate. Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
     const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
-    const agentsDir = path.join(ROOT, 'src', 'assets', 'agents');
-    const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+    const agents = resolveAllAgents();
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
     // review.md reads focus skill files directly via the Read tool using the install path
     // (~/.claude/skills/devflow:{FOCUS}/SKILL.md) — the {FOCUS} placeholder is not matched
@@ -281,14 +277,13 @@ describe('Format 3: Install path references', () => {
     // code.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
     // not install-path references. Frontmatter-listed skills are pre-activated and must never
     // be re-invoked via the Skill tool (enforced by the structural test below).
-    for (const file of agentFiles) {
-      const content = readFileSync(path.join(agentsDir, file), 'utf-8');
-      const refs = extractInstallPaths(content);
+    for (const [name, source] of agents) {
+      const refs = extractInstallPaths(source.content);
 
       for (const ref of refs) {
         expect(
           canonicalSkills.has(ref),
-          `src/assets/agents/${file}: install path 'devflow:${ref}' is not canonical`,
+          `${path.relative(ROOT, source.path)}: install path 'devflow:${ref}' is not canonical`,
         ).toBe(true);
       }
     }
@@ -949,18 +944,16 @@ describe('Cross-component runtime alignment', () => {
 
 describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
   it('every src/assets/agents/*.md has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
-    // All agents now live in src/assets/agents/ — plugin-specific agent copies were removed in the restructure.
+    // Enumerated via resolveAllAgents() for completeness — avoids GAP-07 anti-pattern.
     // avoids PF-002
-    const agentsDir = path.join(ROOT, 'src', 'assets', 'agents');
-    const agentPaths = readdirSync(agentsDir)
-      .filter(f => f.endsWith('.md'))
-      .map(f => path.join(agentsDir, f));
+    const agents = resolveAllAgents();
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
     const skillCallPattern = /Skill\(skill="devflow:([\w-]+)"\)/g;
 
-    for (const filePath of agentPaths) {
-      const label = path.relative(ROOT, filePath);
-      const content = readFileSync(filePath, 'utf-8');
+    for (const [name, source] of agents) {
+      const label = path.relative(ROOT, source.path);
+      const content = source.content;
       const frontmatterSkills = new Set(parseFrontmatterSkills(content));
 
       // Strip frontmatter block before scanning for Skill() calls, so that the
