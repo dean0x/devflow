@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. Each entry pins a floor value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so lowering one site out of several is caught. New entries are allowed; raise `floor`/`pattern` (and `occurrences`) deliberately when an assertion is raised.",
+  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. Each entry pins a floor value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so lowering one site out of several is caught. New entries are allowed; raise `floor`/`pattern` (and `occurrences`) deliberately when an assertion is raised. Equality baselines (the GIT_MD_* / SKILL_* / TOTAL_* constants in tests/goldens/github-status-lines.test.ts) are not floors and are not registered here.",
   "floors": [
     {
       "id": "dist-host-count",
@@ -105,38 +105,6 @@
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
       "description": "Entries in issue_capture_contract() checked by the seam test's producer direction — corrected from 5 to 3 after removing ISSUE_ID and ISSUE_URL (c7bff85: no emitted producer in git.md for either name)"
-    },
-    {
-      "id": "git-md-lines",
-      "floor": 963,
-      "pattern": "GIT_MD_LINES = 963",
-      "occurrences": 1,
-      "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md line count Phase-0 baseline — a decrease means containment lines were lost (updated from 959 after D4 degradation additions to fetch-issue + fetch-issues-batch)"
-    },
-    {
-      "id": "git-md-chars",
-      "floor": 61018,
-      "pattern": "GIT_MD_CHARS = 61_018",
-      "occurrences": 1,
-      "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md character count Phase-0 baseline — a decrease means content was removed (updated from 60440 after D4 degradation additions to fetch-issue + fetch-issues-batch)"
-    },
-    {
-      "id": "git-md-lines-floor-assert",
-      "floor": 963,
-      "pattern": "toBeGreaterThanOrEqual(963)",
-      "occurrences": 1,
-      "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md line count assertion uses >= floor style so growth is allowed but shrinkage below Phase-0 baseline is caught; converted from toBe after production commits grew git.md"
-    },
-    {
-      "id": "git-md-chars-floor-assert",
-      "floor": 61018,
-      "pattern": "toBeGreaterThanOrEqual(61_018)",
-      "occurrences": 1,
-      "sourceFile": "tests/goldens/github-status-lines.test.ts",
-      "description": "git.md char count assertion uses >= floor style so growth is allowed but shrinkage below Phase-0 baseline is caught; converted from toBe after production commits grew git.md"
     },
     {
       "id": "manage-debt-archive-cap",

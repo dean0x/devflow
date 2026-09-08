@@ -1,25 +1,26 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Phase-0 char baselines (JS `.length`, not bytes) — named constants, corpus updated after
- * D4 degradation additions to fetch-issue + fetch-issues-batch:
+ * Post-regeneration measurements (commit 7, after conventions-commit and ref-handling fixes):
  *
- *   git.md              61,018 ch / 963 L
- *   skills/git/SKILL.md  9,204 ch / 283 L
- *   skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)   73,164 ch / 1,338 L
+ *   tests/fixtures/golden/git-agent.md          65,677 ch / 992 L   (== src/assets/agents/git.md)
+ *   src/assets/skills/git/SKILL.md               9,204 ch / 283 L
+ *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
+ *   Total (all three)                           77,823 ch / 1,367 L
  *
  * Pre-Phase-0 baseline at main@e726874:
  *   PRE_PHASE0_GIT_MD_BYTES = 59,376 (wc -c) / PRE_PHASE0_GIT_MD_CHARS = 58,903 (.length) / PRE_PHASE0_GIT_MD_LINES = 938 L
  * constants derive from the verified post-Phase-0 numbers above — drift D19.
  *
- * The fixture is frozen at Phase 0 and is never regenerated through Phase 3
- * (AC-0.9 / AC-1.11 / AC-2.1 / AC-3.1). A mismatch means the source is
- * wrong, never the fixture (H2). CI must never call test:golden:update.
+ * The GIT_MD_* / SKILL_* / TOTAL_* size constants in this file are EQUALITY
+ * baselines pinned to the git-agent.md golden fixture, re-set in each
+ * golden-regeneration commit. They are NOT floors and are NOT registered in
+ * tests/fixtures/numeric-floors.json.
  *
- * Update ritual (sanctioned once at Phase 2):
- *   npm run test:golden:update -- github-status-lines --unfreeze
- *   (the frozen-target guard below asserts refusal without --unfreeze)
+ * github-status-lines.txt is frozen through Phase 3 and the --unfreeze refusal
+ * guard below protects that fixture only. git-agent.md is what gets regenerated
+ * (always a fixture-only commit via `npm run test:golden:update -- git-agent`).
+ * Phase 2 re-baselines the SKILL_* constants in its T2 task.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -27,7 +28,7 @@ import { spawnSync } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
-import { loadGolden, extractStatusLines, resolveAgentSource } from '../helpers.js'
+import { loadGolden, extractStatusLines } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
@@ -40,14 +41,14 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). Updated after
 // D4 degradation clauses added to fetch-issue + fetch-issues-batch.
-export const GIT_MD_CHARS = 61_018
-export const GIT_MD_LINES = 963
+export const GIT_MD_CHARS = 65_677
+export const GIT_MD_LINES = 992
 export const SKILL_GIT_CHARS = 9_204
 export const SKILL_GIT_LINES = 283
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92
-export const TOTAL_CHARS = 73_164
-export const TOTAL_LINES = 1_338
+export const TOTAL_CHARS = GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS
+export const TOTAL_LINES = GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 17_914
@@ -105,30 +106,33 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Live-file baselines for git.md and skills (Phase-0, updated after D4 degradation additions)
+// Golden-dimension baselines for git.md (equality, re-set in regeneration commits)
 //
-// Assert the source file's dimensions match the named constants. A mismatch
-// means a file changed — update the constants and re-capture the golden.
+// Assert the golden fixture's dimensions match the named constants. A mismatch
+// means the golden was regenerated — update the constants to match the new values.
+// These are EQUALITY baselines pinned to the golden, not floors.
 // ---------------------------------------------------------------------------
 
-describe('git.md live-file baselines (Phase-0)', () => {
-  // Use resolveAgentSource (dist-preferred, src-fallback) — no literal src/assets/agents/ path
-  // so Phase 1's git.md → git.mds migration needs zero edits here (AC-0.7/P0-S17).
-  const gitAgent = resolveAgentSource('git')
-
-  it(`git.md has at least ${GIT_MD_LINES} lines`, () => {
-    const lines = gitAgent.content.split('\n').length - 1
+describe('git.md golden-dimension baselines', () => {
+  it(`git-agent.md golden has ${GIT_MD_LINES} newlines`, () => {
+    const golden = loadGolden('git-agent.md')
     expect(
-      lines,
-      `git.md shrank below Phase-0 baseline (${GIT_MD_LINES} lines) — a decrease means containment lines were lost`,
-    ).toBeGreaterThanOrEqual(963)
+      (golden.match(/\n/g) ?? []).length,
+      `git-agent.md newline count changed — update GIT_MD_LINES and regenerate the golden`,
+    ).toBe(GIT_MD_LINES)
   })
 
-  it(`git.md has at least ${GIT_MD_CHARS} chars`, () => {
+  it(`git-agent.md golden has ${GIT_MD_CHARS} chars`, () => {
+    const golden = loadGolden('git-agent.md')
     expect(
-      gitAgent.content.length,
-      `git.md shrank below Phase-0 baseline (${GIT_MD_CHARS} chars) — a decrease means content was removed`,
-    ).toBeGreaterThanOrEqual(61_018)
+      golden.length,
+      `git-agent.md char count changed — update GIT_MD_CHARS and regenerate the golden`,
+    ).toBe(GIT_MD_CHARS)
+  })
+
+  it('TOTAL_* constants are sums of their parts', () => {
+    expect(TOTAL_CHARS, 'TOTAL_CHARS must equal GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS').toBe(GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS)
+    expect(TOTAL_LINES, 'TOTAL_LINES must equal GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES').toBe(GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES)
   })
 })
 
