@@ -5,7 +5,7 @@ description: "Use when modifying the install pipeline (installViaFileCopy, insta
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/targets/claude-code/post-install.ts, src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/cli/commands/uninstall.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/cli/commands/flags.ts, src/cli/commands/attribution-prompts.ts, src/cli/commands/compliance-prompts.ts, src/cli/commands/prompt-io.ts, src/cli/flags-view, src/cli/tui, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/manifest.ts, src/core/flags.ts, src/core/feature-config.ts, src/core/orphan-sweep.ts, src/core/migrations.ts, src/assets/scripts/hooks/ensure-root-gitignore]
 created: 2026-07-13
-updated: 2026-09-06
+updated: 2026-09-09
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -409,22 +409,25 @@ VALUE+BLURB = 46, preserving the prior total from the single VALUE column. All w
 
 ### Devflow-managed `.gitignore` carve-out (`D-GITIGNORE-V4`)
 
-`src/targets/claude-code/post-install.ts` exports `DEVFLOW_GITIGNORE_BLOCK` (the exact lines to append) and `computeDevflowGitignore(existingContent)` (returns the new content or `null` when no change is needed). The shell hook `src/assets/scripts/hooks/ensure-root-gitignore` must produce byte-identical output — cross-parity tests in `tests/shell-hooks.test.ts` enforce this.
+`src/targets/claude-code/post-install.ts` exports `DEVFLOW_GITIGNORE_BLOCK` and `DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE` (the exact lines to append in each case) and `computeDevflowGitignore(existingContent)` (returns the new content or `null` when no change is needed). The shell hook `src/assets/scripts/hooks/ensure-root-gitignore` must produce byte-identical output — 15-row cross-parity tests in `tests/shell-hooks.test.ts` assert this, each row verifying `changed`/`devflowSentinelPresent`/`claudeignoreLinePresent` booleans plus TS and shell idempotency (avoids PF-059).
 
-**Version history:**
-- v2: base block (`.devflow/` ignore with feature-knowledge carve-out)
-- v3: adds `!.devflow/conventions.md`
-- v4 (D-GITIGNORE-V4, commit `7074733`): adds `.claudeignore` as the final line
+**Note**: D-GITIGNORE-V4 refers to the v4 gitignore carve-out block. It is unrelated to the tracker design's cancelled "carve-out v4" concept (GAP-35) — same version label, different feature.
 
-**Upgrade paths implemented in `computeDevflowGitignore`:**
-- v4 sentinel present → no-op
-- v3 sentinel present, no v4 → append `.claudeignore` only
-- v2 sentinel present, no v3 → append `!.devflow/conventions.md` + `.claudeignore`
-- Legacy bare or absent → append full block
+**Block-presence detection uses only the v3 sentinel.** Block presence is detected ONLY by the `!.devflow/conventions.md` line (the v3 sentinel constant in `post-install.ts`). `.claudeignore` is **never** a sentinel: it appears as a final line in the block but is not used to detect block presence (avoids PF-059). `hasClaudeignoreEntry` is `true` when some whole line, trimmed, equals `.claudeignore` or `!.claudeignore` — it is independent of block detection and gates only whether the `.claudeignore` line is appended.
 
-The `ensure-devflow-init` hook's fast-path checks for `~/.devflow/.root-gitignore-configured-v4` — this marker must be updated in the same commit as the stamper. On `main` prior to v4, the fast path checked for the v3 marker while the stamper wrote v4 and deleted v3, so the fast path could never hit and every hook invocation fell through to the slow path.
+**Upgrade paths in `computeDevflowGitignore`:**
+- `/.devflow/` present (already uses the `/.devflow/` form that overrides the v3 block) → no-op
+- v3 sentinel present → `null` when `hasClaudeignoreEntry`, else append `.claudeignore` only (via `appendLines`)
+- v2 sentinel present (no v3) → append `!.devflow/conventions.md` (+ `.claudeignore` unless `hasClaudeignoreEntry`) (via `appendLines`)
+- Legacy bare `.devflow/` or no block → append the full block via `appendBlock`; uses `DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE` when `hasClaudeignoreEntry`, else `DEVFLOW_GITIGNORE_BLOCK`
 
-**Why `.claudeignore` was added:** `installClaudeignore()` writes `.claudeignore` unconditionally when the CWD is a git repo, leaving it as an untracked `??` entry in `git status` — a violation of prefix-shippability clause (ii). The v4 carve-out ignores it. This is safe for existing users: gitignore has no effect on already-tracked files, so anyone who committed their `.claudeignore` is unaffected.
+**Two append forms:**
+- `appendLines(body, block)` — continues an existing block with no blank-line separator (used for rules 2 and 3: adding lines to an existing v2/v3 block)
+- `appendBlock(body, block)` — starts a new block: empty file → `block + '\n'`; else body + newline-if-missing + blank line + block + newline (used for rule 4: fresh install)
+
+**Fast path:** marker file `.devflow/.root-gitignore-configured-v4` (project-local inside the project's `.devflow/` directory, NOT `~/.devflow/`) AND v3 sentinel present AND `hasClaudeignoreEntry`. The shell twin mirrors both append forms with `[ -s ]` and `tail -c 1` guards, anchored whole-line EREs replacing `grep -qF`, `_ERG_BLOCK`/`_ERG_BLOCK_NO_CI` via `printf -v`, and the `claudeignore` check computed BEFORE the legacy grep-filter-and-move.
+
+**Why `.claudeignore` was added:** `installClaudeignore()` writes `.claudeignore` unconditionally when the CWD is a git repo, leaving it as an untracked `??` entry in `git status` — a violation of prefix-shippability clause (ii). The v4 block ignores it. This is safe for existing users: gitignore has no effect on already-tracked files.
 
 ## Anti-Patterns
 
@@ -447,6 +450,7 @@ The `ensure-devflow-init` hook's fast-path checks for `~/.devflow/.root-gitignor
 - **Duplicating the managed-shape comparison instead of delegating to `settingHoldsManagedShape`** — `settingValueHoldsManagedShape` (flag + value) and `settingHoldsManagedShape` (settingsJson + flagId) are the single equality oracle; `resolveExistingAttributionSuppression` and the Step 2b adoption fold in `convergeFlagsIntoSettings` both delegate here. Do not hand-roll `isDeepStrictEqual` against the guard at a call site.
 - **Defining `PromptOutcome` or `WizardPromptIO` locally in a wizard module** — these types are defined once in `prompt-io.ts`. A new wizard step should import from there, not re-define equivalent types.
 - **Updating `DEVFLOW_GITIGNORE_BLOCK` in only one of the two implementations** — the TS `computeDevflowGitignore` in `post-install.ts` and the shell `ensure-root-gitignore` hook must produce byte-identical output. Cross-parity tests in `tests/shell-hooks.test.ts` enforce this. Both must be updated in the same commit, along with the fast-path marker version bump in `ensure-devflow-init`.
+- **Using `.claudeignore` as a sentinel to detect the v4 block** — `.claudeignore` is never a sentinel; it is a line that may or may not be in the block depending on `hasClaudeignoreEntry`. Block detection uses only `!.devflow/conventions.md` (the v3 sentinel). Asserting block presence via `.claudeignore` produces false negatives on repos that already had a `.claudeignore` entry before the block was written (avoids PF-059).
 
 ## Gotchas
 
@@ -474,7 +478,7 @@ The `ensure-devflow-init` hook's fast-path checks for `~/.devflow/.root-gitignor
 
 - **`proxy` seeds from the manifest group, not the config group.** Unlike `memory`/`learning`/`knowledge` (config.json wins per ADR-001), `proxy` follows the same seeding path as `ambient`/`hud`/`rules` — manifest is authoritative, then registry default (`false`). Do not gate `proxy` on `readConfigIfPresent`.
 
-- **PF-018: dry-run preview must exercise the production enumeration path.** The original test (9j) tested `installArtifactPaths` in isolation. When the dry-run loop was refactored to use `enumerateDryRunExtras`, a real divergence (bare legacy skill dirs and `agent-models.json` were shown in the preview but not in the production removal path) was missed. The fix: `runDryRunPhase` (full mode) calls `enumerateDryRunExtras`, which derives from `installArtifactPaths` and the same skill-candidate sets that `removeAllDevFlow` uses. The updated test exercises `runDryRunPhase` directly, not only the pure helper.
+- **PF-018: dry-run preview must exercise the production output path.** The original test (9j) tested `installArtifactPaths` in isolation. When the dry-run loop was refactored to use `enumerateDryRunExtras`, a real divergence (bare legacy skill dirs and `agent-models.json` were shown in the preview but not in the production removal path) was missed. The fix: `runDryRunPhase` (full mode) calls `enumerateDryRunExtras`, which derives from `installArtifactPaths` and the same skill-candidate sets that `removeAllDevFlow` uses. The updated test exercises `runDryRunPhase` directly, not only the pure helper.
 
 - **Compliance wizard gate keys on `modePromptShown`, never the mode name.** `shouldRunComplianceStep` uses `modePromptShown` (was the Setup-mode `p.select` actually shown?) rather than checking `mode === 'recommended'`. Gating on the mode name would break the `--recommended` promptless contract: `--recommended` resolves `mode='recommended'` but never shows the prompt, so `modePromptShown` stays `false`. Same applies to the non-TTY fallback. (PF-029)
 
@@ -494,15 +498,17 @@ The `ensure-devflow-init` hook's fast-path checks for `~/.devflow/.root-gitignor
 
 - **Step 2b adoption fold runs before `stripFlags` (applies PF-050 / ADR-024).** In `convergeFlagsIntoSettings`, guarded boolean flags (those with `settingDeleteGuard`) whose pre-strip on-disk value matches the managed shape are adopted into the `FlagsRecord` before `stripFlags` runs. Without this fold, a template-written attribution block would be stripped unconditionally on the first init, even when the user never explicitly set the flag. The fold only claims unclaimed flags — a record that already has `suppress-attribution: false` or `null` still deletes the block.
 
-- **`DEVFLOW_GITIGNORE_BLOCK` fast-path marker must match the stamper version.** The `ensure-devflow-init` hook fast-exits when `.devflow/.root-gitignore-configured-v{N}` exists. This marker must be bumped in the same commit that updates both implementations. On the transition from v3→v4, the fast path checked for the v3 marker while the stamper wrote v4 and deleted v3, causing every hook invocation to fall through to the slow path unnecessarily. Future maintainers: when adding a v5 block, update the sentinel in `post-install.ts`, the shell hook `ensure-root-gitignore`, and `ensure-devflow-init` — all three in one commit.
+- **Fast-path marker for the gitignore carve-out is project-local, not global.** The marker `.devflow/.root-gitignore-configured-v4` lives inside the project's own `.devflow/` directory, not under `~/.devflow/`. Using the global path would mark every project as configured after the first init, preventing the block from being written to other projects. When bumping to v5, update the marker name in `post-install.ts`, `ensure-root-gitignore`, and `ensure-devflow-init` — all three in the same commit.
+
+- **Parity test count is 15 rows.** `tests/shell-hooks.test.ts` has 15 `PARITY_CASES` rows, each asserting that the shell hook and the TS implementation produce byte-identical output, with independent idempotency checks for both. Adding a new upgrade path requires a new parity row — the count is not pinned by the manifest but is verifiable by inspection (avoids PF-059).
 
 ## Key Files
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<SweepResult>`; `SweepResult = { scanned, removed, failed }`; `mdFileName` / `mdEntryName` inverse pair; shared by both installer and uninstall; per-item failure isolation on both readdir and rm
 - `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport` (+ `sweptOrphans`, `sweepFailures`), `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills, commands, agents via `sweepOrphanedAssets`
-- `src/targets/claude-code/post-install.ts` — `DEVFLOW_GITIGNORE_BLOCK` (D-GITIGNORE-V4; v4 adds `.claudeignore`), `computeDevflowGitignore(existingContent)` (idempotent; upgrade paths v3→v4, v2→v4), `DEVFLOW_GITIGNORE_SENTINEL_V4`/`_V3`/`_V2`; must stay byte-identical with `ensure-root-gitignore`
-- `src/assets/scripts/hooks/ensure-root-gitignore` — shell implementation of the same gitignore block logic; cross-parity tested against `post-install.ts` in `tests/shell-hooks.test.ts`
-- `src/assets/scripts/hooks/ensure-devflow-init` — fast-path checks for `.root-gitignore-configured-v4` (must match the stamper version)
+- `src/targets/claude-code/post-install.ts` — `DEVFLOW_GITIGNORE_BLOCK` (full block including `.claudeignore`), `DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE` (block minus the `.claudeignore` line; used when the project already has that entry), `computeDevflowGitignore(existingContent)` (idempotent; upgrade paths v3→v4, v2→v4, legacy→v4); sentinels V2/V3 are module-private constants (not exported); no DEVFLOW_GITIGNORE_SENTINEL_V4 export; must stay byte-identical with `ensure-root-gitignore`
+- `src/assets/scripts/hooks/ensure-root-gitignore` — shell implementation of the same gitignore block logic; cross-parity tested (15 PARITY_CASES) against `post-install.ts` in `tests/shell-hooks.test.ts`; fast-path marker is project-local `.devflow/.root-gitignore-configured-v4`
+- `src/assets/scripts/hooks/ensure-devflow-init` — fast-path checks for `.root-gitignore-configured-v4` (project-local marker; must match the stamper version in both `post-install.ts` and `ensure-root-gitignore`)
 - `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`; `isContainedIn(parent, candidate)` pure containment predicate (guards path-traversal in reapplyAgentMapping)
 - `src/targets/claude-code/legacy.ts` — `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
@@ -541,6 +547,7 @@ The `ensure-devflow-init` hook's fast-path checks for `~/.devflow/.root-gitignor
 - PF-018: Dry-run regression test must exercise the production output path — the original helper-only test missed a real preview/deletion divergence; `runDryRunPhase` (full mode) calls `enumerateDryRunExtras` which shares `installArtifactPaths` with the removal loop
 - PF-029: Wizard gate predicates must be fully wired, seeded, tested — applies to both `shouldRunComplianceStep` and `shouldRunAttributionStep`; the attribution gate diverges deliberately (Advanced-only, no modePromptShown) and the divergence is documented in `attribution-prompts.ts` (D27)
 - PF-050: Registry adoption of on-disk key — governs the D-ATTR-ADOPT fold: the day a settings key that already ships on disk becomes registry-managed, it must be adopted before the strip pass; `settingDeleteGuard` presence is the signal; `convergeFlagsIntoSettings` Step 2b is the mechanism
+- PF-059: Content-anchored fixtures; equality baselines not floors — parity tables in `tests/shell-hooks.test.ts` assert bytes, not structure; `.claudeignore` is never a sentinel because PF-059 requires the detection anchor to be unambiguous and owned by the block itself
 - PF-043: Test fixtures must match runtime shapes — governs the `tests/init-e2e-flags.test.ts` subprocess e2e tests over the real init settings pass, ensuring test fixtures stay in sync with the actual settings.json schema written by `applyFlags`
 - Feature knowledge: `external-model-routing` — deep proxy mechanics (lifecycle, preflight protocol, ensure-proxy hook, per-agent model mapping, dormancy invariant, agent frontmatter rewriting, TUI); `installer-shadowing` covers only proxy's footprint in the install/uninstall pipeline and init seeding
 - Feature knowledge: `feature-knowledge-system` — the Knowledge agent writes to `.devflow/features/` which is tracked in git; related to the `.gitignore` carve-out maintained by the installer (v4 block)
