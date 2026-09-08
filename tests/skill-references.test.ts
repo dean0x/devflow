@@ -231,7 +231,7 @@ describe('Format 2: Agent frontmatter skills', () => {
     const agents = resolveAllAgents();
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    for (const [name, source] of agents) {
+    for (const [, source] of agents) {
       const skillNames = parseFrontmatterSkills(source.content);
 
       for (const skill of skillNames) {
@@ -247,7 +247,7 @@ describe('Format 2: Agent frontmatter skills', () => {
     const agents = resolveAllAgents();
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    for (const [name, source] of agents) {
+    for (const [, source] of agents) {
       const skillNames = parseFrontmatterSkills(source.content);
 
       expect(
@@ -277,7 +277,7 @@ describe('Format 3: Install path references', () => {
     // code.md invokes domain skills (typescript, go, etc.) via the Skill tool — those are
     // not install-path references. Frontmatter-listed skills are pre-activated and must never
     // be re-invoked via the Skill tool (enforced by the structural test below).
-    for (const [name, source] of agents) {
+    for (const [, source] of agents) {
       const refs = extractInstallPaths(source.content);
 
       for (const ref of refs) {
@@ -951,7 +951,7 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
 
     const skillCallPattern = /Skill\(skill="devflow:([\w-]+)"\)/g;
 
-    for (const [name, source] of agents) {
+    for (const [, source] of agents) {
       const label = path.relative(ROOT, source.path);
       const content = source.content;
       const frontmatterSkills = new Set(parseFrontmatterSkills(content));
