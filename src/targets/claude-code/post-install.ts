@@ -1144,10 +1144,12 @@ const GITIGNORE_MARKER_V2 = '.root-gitignore-configured-v2';
  *
  * Manages ONLY `.devflow/` — never `.claude/` — because user-scope installs must
  * not gitignore `.claude/`. This is the init-time counterpart to the always-on
- * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both write the identical
- * DEVFLOW_GITIGNORE_BLOCK, so the two paths are byte-compatible and mutually
- * idempotent. Called unconditionally (independent of install scope and every
- * feature toggle) whenever a git root is known.
+ * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both resolve the same
+ * shape for a given .gitignore — DEVFLOW_GITIGNORE_BLOCK, or
+ * DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE when the project owns that entry — and
+ * emit identical bytes, so the two paths are byte-compatible and mutually idempotent.
+ * Called unconditionally (independent of install scope and every feature toggle)
+ * whenever a git root is known.
  *
  * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v4`)
  * for fast-path detection — the same pattern as the shell twin. The marker is a claim,
