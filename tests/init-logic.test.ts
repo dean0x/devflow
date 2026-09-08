@@ -28,6 +28,8 @@ import {
   loadTemplateDenyEntries,
   ensureDevflowGitignore,
   computeDevflowGitignore,
+  DEVFLOW_GITIGNORE_BLOCK,
+  DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
@@ -422,18 +424,25 @@ describe('ensureDevflowGitignore — v4 carve-out (.claudeignore)', () => {
 describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   const V2_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
   const V3_SENTINEL = '!.devflow/conventions.md';
-  const V4_SENTINEL = '.claudeignore';
-  const V2_BLOCK = [
-    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
-    '.devflow/*',
-    '!.devflow/features/',
-    '.devflow/features/*',
-    '!.devflow/features/index.md',
-    '!.devflow/features/*/',
-    '.devflow/features/*/*',
-    V2_SENTINEL,
-  ].join('\n');
-  const V3_BLOCK = `${V2_BLOCK}\n${V3_SENTINEL}`;
+  /**
+   * The block's final line. NOT a sentinel — users author `.claudeignore` (and
+   * `!.claudeignore`) themselves, so its presence proves nothing about the block.
+   */
+  const CLAUDEIGNORE_LINE = '.claudeignore';
+
+  // Seeds are sliced off the exported block rather than retyped, so a block edit
+  // can never leave these fixtures silently describing a shape that no longer ships
+  // (applies PF-043).
+  const BLOCK_LINES = DEVFLOW_GITIGNORE_BLOCK.split('\n');
+  const V3_BLOCK = BLOCK_LINES.slice(0, -1).join('\n');
+  const V2_BLOCK = BLOCK_LINES.slice(0, -2).join('\n');
+
+  it('the exported block constants are the same lines minus .claudeignore', () => {
+    expect(BLOCK_LINES[BLOCK_LINES.length - 1]).toBe(CLAUDEIGNORE_LINE);
+    expect(BLOCK_LINES[BLOCK_LINES.length - 2]).toBe(V3_SENTINEL);
+    expect(BLOCK_LINES[BLOCK_LINES.length - 3]).toBe(V2_SENTINEL);
+    expect(DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE).toBe(V3_BLOCK);
+  });
 
   // Issue 1 (branch-order): /.devflow/ wins over v2 sentinel when both present
   it('branch-order: /.devflow/ wins over v2 sentinel when both present → null (no-op)', () => {
@@ -450,7 +459,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = `${V2_BLOCK}\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
   it('byte-identity: v2→v4 upgrade preserves extra trailing newlines', () => {
@@ -458,7 +467,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = `${V2_BLOCK}\n\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
   it('byte-identity: v2→v4 upgrade adds newline separator when file lacks trailing newline', () => {
@@ -466,7 +475,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = V2_BLOCK; // no trailing newline
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${V4_SENTINEL}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
   // byte-identity: v3→v4 upgrade appends only .claudeignore
@@ -474,20 +483,20 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = `${V3_BLOCK}\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V3_BLOCK}\n${V4_SENTINEL}\n`);
+    expect(result).toBe(`${V3_BLOCK}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
   it('byte-identity: v3→v4 upgrade adds newline separator when file lacks trailing newline', () => {
     const input = V3_BLOCK; // no trailing newline
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V3_BLOCK}\n${V4_SENTINEL}\n`);
+    expect(result).toBe(`${V3_BLOCK}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
-  it('non-contiguous v4: .claudeignore present after unrelated blocks → null (no-op) (P0-S24)', () => {
-    // Simulates a .gitignore where .claudeignore (v4 sentinel) sits non-contiguously.
-    // computeDevflowGitignore checks `trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V4)`
-    // positionally unaware — so the non-contiguous sentinel must trigger null (no-op).
+  it('converged: v3 sentinel and a .claudeignore line both present → null (no-op) (P0-S24)', () => {
+    // Simulates a .gitignore where the two block-completing lines sit non-contiguously.
+    // Sentinel matching is positionally unaware — the block sentinel plus a
+    // .claudeignore entry anywhere in the file means there is nothing left to add.
     const content = [
       'node_modules/',
       '',
@@ -500,19 +509,18 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
       '.competitive-codenames.json',
       '',
       V3_SENTINEL,
-      V4_SENTINEL,
+      CLAUDEIGNORE_LINE,
       '',
     ].join('\n');
 
-    // V4_SENTINEL is present (non-contiguously) → must return null (not an upgrade).
     expect(
       computeDevflowGitignore(content),
-      'non-contiguous v4 sentinel must produce null (no-op) — must not trigger upgrade',
+      'block sentinel + .claudeignore entry must produce null (no-op) — must not re-append',
     ).toBeNull();
   });
 
-  it('non-contiguous v3 only: conventions.md present non-contiguously (no .claudeignore) → v3→v4 upgrade', () => {
-    // V3_SENTINEL present but V4_SENTINEL absent → trigger v3→v4 upgrade: append .claudeignore.
+  it('non-contiguous v3 only: conventions.md present non-contiguously (no .claudeignore) → appends .claudeignore', () => {
+    // V3_SENTINEL present but no .claudeignore entry → append the missing line.
     const content = [
       'node_modules/',
       '',
@@ -524,8 +532,81 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
 
     const result = computeDevflowGitignore(content);
     expect(result).not.toBeNull();
-    expect(result!.split('\n').map(l => l.trim())).toContain(V4_SENTINEL);
+    expect(result!.split('\n').map(l => l.trim())).toContain(CLAUDEIGNORE_LINE);
     expect(result!.split('\n').filter(l => l.trim() === V3_SENTINEL)).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // .claudeignore is a block LINE, never a sentinel (avoids PF-059). A project
+  // that already ignores (or un-ignores) .claudeignore must still receive the
+  // carve-out, and must never have its own entry contradicted.
+  // ---------------------------------------------------------------------------
+
+  /** The exact bytes both twins must produce when starting a new block after `body`. */
+  const appendBlock = (body: string, block: string): string =>
+    body.length === 0
+      ? `${block}\n`
+      : `${body}${body.endsWith('\n') ? '' : '\n'}\n${block}\n`;
+
+  /** Every non-null result must be a fixed point: re-running converges (applies PF-015). */
+  const expectIdempotent = (result: string | null): void => {
+    if (result === null) return;
+    expect(
+      computeDevflowGitignore(result),
+      'feeding the output back must be a no-op',
+    ).toBeNull();
+  };
+
+  it('(a) user .claudeignore entry still receives the carve-out, minus the .claudeignore line', () => {
+    const input = 'node_modules/\n.claudeignore\n';
+    const result = computeDevflowGitignore(input);
+
+    expect(result).toBe(appendBlock(input, DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE));
+    expectIdempotent(result);
+  });
+
+  it('(b) user !.claudeignore un-ignore is never reversed by an appended .claudeignore line', () => {
+    const input = 'node_modules/\n!.claudeignore\n';
+    const result = computeDevflowGitignore(input);
+
+    expect(result).toBe(appendBlock(input, DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE));
+    // gitignore is last-match-wins: appending `.claudeignore` after the user's
+    // `!.claudeignore` would silently reverse their intent.
+    expect(result!.split('\n').map(l => l.trim())).not.toContain(CLAUDEIGNORE_LINE);
+    expectIdempotent(result);
+  });
+
+  it('(c) v2 block plus a user .claudeignore entry gets only the missing conventions.md line', () => {
+    const input = `${V2_BLOCK}\n${CLAUDEIGNORE_LINE}\n`;
+    const result = computeDevflowGitignore(input);
+
+    expect(result).toBe(`${input}${V3_SENTINEL}\n`);
+    expectIdempotent(result);
+  });
+
+  it('(d) v3 block with a user .claudeignore entry placed before it → null (no-op)', () => {
+    const content = `${CLAUDEIGNORE_LINE}\n\nnode_modules/\n\n${V3_BLOCK}\n`;
+    expect(computeDevflowGitignore(content)).toBeNull();
+  });
+
+  it('(e) v3 block plus a user !.claudeignore un-ignore → null (no-op)', () => {
+    const content = `${V3_BLOCK}\n!${CLAUDEIGNORE_LINE}\n`;
+    expect(computeDevflowGitignore(content)).toBeNull();
+  });
+
+  it('(f) newline edge cases: empty, no trailing newline, multiple trailing newlines', () => {
+    const empty = computeDevflowGitignore('');
+    expect(empty).toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expectIdempotent(empty);
+
+    const noTrailing = computeDevflowGitignore('node_modules/');
+    expect(noTrailing).toBe(`node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expectIdempotent(noTrailing);
+
+    // Existing trailing newlines are preserved verbatim — no trimEnd, no blank-line dedupe.
+    const twoTrailing = computeDevflowGitignore('node_modules/\n\n');
+    expect(twoTrailing).toBe(`node_modules/\n\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expectIdempotent(twoTrailing);
   });
 });
 

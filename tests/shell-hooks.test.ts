@@ -6,7 +6,11 @@ import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
-import { DEVFLOW_GITIGNORE_BLOCK, computeDevflowGitignore } from '../src/targets/claude-code/post-install.js';
+import {
+  DEVFLOW_GITIGNORE_BLOCK,
+  DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
+  computeDevflowGitignore,
+} from '../src/targets/claude-code/post-install.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -1543,57 +1547,96 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
   // Table-driven branch coverage: each state-machine branch, both implementations
   // -------------------------------------------------------------------------
 
-  // The v3 block (with conventions.md but without .claudeignore) used to seed v3-install state.
-  const V3_BLOCK_SEED = [
-    '# Devflow runtime data — local by default (memory, learning, docs, locks).',
-    '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/',
-    '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming',
-    '# authority). To stop sharing, re-add `.devflow/features/` or `.devflow/conventions.md`',
-    '# to your own .gitignore.',
-    '.devflow/*',
-    '!.devflow/features/',
-    '.devflow/features/*',
-    '!.devflow/features/index.md',
-    '!.devflow/features/*/',
-    '.devflow/features/*/*',
-    '!.devflow/features/*/KNOWLEDGE.md',
-    '!.devflow/conventions.md',
-  ].join('\n');
+  // The v3 block — the shipped block minus its final `.claudeignore` line. Sliced off
+  // the exported constant rather than retyped so a block edit cannot leave this seed
+  // silently describing a shape that no longer ships (applies PF-043).
+  const V3_BLOCK_SEED = DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE;
+
+  /** The block's devflow-unique presence sentinel. */
+  const V3_SENTINEL = '!.devflow/conventions.md';
+  /** A block LINE users also author themselves — never a sentinel (applies PF-059). */
+  const CLAUDEIGNORE_LINE = '.claudeignore';
+
+  /** Start a new block after unrelated content: one blank separator line. */
+  const appendBlock = (body: string, block: string): string =>
+    body.length === 0
+      ? `${block}\n`
+      : `${body}${body.endsWith('\n') ? '' : '\n'}\n${block}\n`;
+
+  /** Continue an existing devflow block with the lines it lacks: no blank separator. */
+  const appendLines = (body: string, block: string): string =>
+    `${body}${body.endsWith('\n') ? '' : '\n'}${block}\n`;
+
+  const wholeLines = (content: string): string[] => content.split('\n').map(l => l.trim());
 
   const PARITY_CASES: Array<{
     label: string;
     input: string | null;
-    sentinelPresent: boolean; // '.claudeignore' (v4 sentinel) expected in result
-    blockPresent: boolean;    // DEVFLOW_GITIGNORE_BLOCK expected verbatim in result
+    /** Exact bytes BOTH twins must leave in .gitignore. */
+    expected: string;
+    /** Result differs from the input (a no-op row expects the input back verbatim). */
+    changed: boolean;
+    /** The devflow-unique block sentinel is present in the result. */
+    devflowSentinelPresent: boolean;
+    /** A bare `.claudeignore` line is present in the result. */
+    claudeignoreLinePresent: boolean;
+    /** DEVFLOW_GITIGNORE_BLOCK appears verbatim in the result. */
+    blockPresent: boolean;
   }> = [
     {
       label: 'no .gitignore',
       input: null,
-      sentinelPresent: true,
+      expected: `${DEVFLOW_GITIGNORE_BLOCK}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
       blockPresent: true,
     },
     {
       label: 'unrelated content only',
       input: 'node_modules/\ndist/\n',
-      sentinelPresent: true,
+      expected: appendBlock('node_modules/\ndist/\n', DEVFLOW_GITIGNORE_BLOCK),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
       blockPresent: true,
     },
     {
       label: 'legacy bare .devflow/ entry',
       input: 'node_modules/\n.devflow/\n',
-      sentinelPresent: true,
+      expected: appendBlock('node_modules/\n', DEVFLOW_GITIGNORE_BLOCK),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: true,
+    },
+    {
+      // The legacy filter emits nothing here, so the shell twin must not treat the
+      // filtering grep's exit status as failure.
+      label: 'legacy bare .devflow/ entry as the whole file',
+      input: '.devflow/\n',
+      expected: `${DEVFLOW_GITIGNORE_BLOCK}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
       blockPresent: true,
     },
     {
       label: 'v2-format block present (conventions.md and .claudeignore lines appended, block not re-added)',
       input: `${V2_BLOCK_SEED}\n`,
-      sentinelPresent: true,
-      blockPresent: false, // only the missing lines are appended, not the whole v4 block
+      expected: appendLines(`${V2_BLOCK_SEED}\n`, `${V3_SENTINEL}\n${CLAUDEIGNORE_LINE}`),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: false, // only the missing lines are appended, not the whole block
     },
     {
-      label: 'v3-format block present (.claudeignore line appended, completing the v4 block)',
+      label: 'v3-format block present (.claudeignore line appended, completing the block)',
       input: `${V3_BLOCK_SEED}\n`,
-      sentinelPresent: true,
+      expected: appendLines(`${V3_BLOCK_SEED}\n`, CLAUDEIGNORE_LINE),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
       // V3_BLOCK_SEED + '\n' + '.claudeignore' = DEVFLOW_GITIGNORE_BLOCK verbatim,
       // so the full block IS present in the result even though only one line was appended.
       blockPresent: true,
@@ -1601,28 +1644,120 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     {
       label: 'user-authored /.devflow/ entry (no carve-out forced)',
       input: '/.devflow/\n',
-      sentinelPresent: false, // user-authored entry respected; no block installed
+      expected: '/.devflow/\n',
+      changed: false,
+      devflowSentinelPresent: false, // user-authored entry respected; no block installed
+      claudeignoreLinePresent: false,
       blockPresent: false,
+    },
+    // -------------------------------------------------------------------------
+    // .claudeignore is a block LINE, never a presence sentinel (avoids PF-059).
+    // -------------------------------------------------------------------------
+    {
+      label: '(a) user .claudeignore entry — block still installed, minus its .claudeignore line',
+      input: 'node_modules/\n.claudeignore\n',
+      expected: appendBlock('node_modules/\n.claudeignore\n', DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true, // the user's own line, not one we appended
+      blockPresent: false,
+    },
+    {
+      label: '(b) user !.claudeignore un-ignore — never reversed by an appended .claudeignore',
+      input: 'node_modules/\n!.claudeignore\n',
+      expected: appendBlock('node_modules/\n!.claudeignore\n', DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: false, // last-match-wins: appending it would reverse the user
+      blockPresent: false,
+    },
+    {
+      label: '(c) v2 block + user .claudeignore entry — only the conventions.md line appended',
+      input: `${V2_BLOCK_SEED}\n${CLAUDEIGNORE_LINE}\n`,
+      expected: appendLines(`${V2_BLOCK_SEED}\n${CLAUDEIGNORE_LINE}\n`, V3_SENTINEL),
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(d) v3 block + user .claudeignore placed before it — no-op',
+      input: `${CLAUDEIGNORE_LINE}\n\nnode_modules/\n\n${V3_BLOCK_SEED}\n`,
+      expected: `${CLAUDEIGNORE_LINE}\n\nnode_modules/\n\n${V3_BLOCK_SEED}\n`,
+      changed: false,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: false, // the .claudeignore line is not adjacent to the block
+    },
+    {
+      label: '(e) v3 block + user !.claudeignore un-ignore — no-op',
+      input: `${V3_BLOCK_SEED}\n!${CLAUDEIGNORE_LINE}\n`,
+      expected: `${V3_BLOCK_SEED}\n!${CLAUDEIGNORE_LINE}\n`,
+      changed: false,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: false,
+      blockPresent: false,
+    },
+    // -------------------------------------------------------------------------
+    // Newline edge cases: the six rows above all happen to end in exactly one
+    // newline, which is what let a trimEnd/no-trimEnd divergence hide.
+    // -------------------------------------------------------------------------
+    {
+      label: '(f1) existing but empty .gitignore',
+      input: '',
+      expected: `${DEVFLOW_GITIGNORE_BLOCK}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: true,
+    },
+    {
+      label: '(f2) no trailing newline',
+      input: 'node_modules/',
+      expected: `node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: true,
+    },
+    {
+      label: '(f3) multiple trailing newlines preserved verbatim',
+      input: 'node_modules/\n\n',
+      expected: `node_modules/\n\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      blockPresent: true,
     },
   ];
 
-  for (const { label, input, sentinelPresent, blockPresent } of PARITY_CASES) {
-    it(`branch: ${label} — shell and TS agree on outcome`, () => {
+  for (const row of PARITY_CASES) {
+    const { label, input, expected, changed, devflowSentinelPresent, claudeignoreLinePresent, blockPresent } = row;
+
+    it(`branch: ${label} — shell and TS agree byte-for-byte`, () => {
       const shellResult = runShell(input);
       const tsResult = applyTs(input);
+      const baseline = input ?? '';
 
-      const hasSentinelShell = shellResult.split('\n').map(l => l.trim()).includes('.claudeignore');
-      const hasSentinelTs = tsResult.split('\n').map(l => l.trim()).includes('.claudeignore');
-      const hasBlockShell = shellResult.includes(DEVFLOW_GITIGNORE_BLOCK);
-      const hasBlockTs = tsResult.includes(DEVFLOW_GITIGNORE_BLOCK);
+      // Byte equality is the contract; the booleans below only name WHY it holds.
+      // Asserting only has-line booleans would hide whitespace divergence (PF-059).
+      expect(shellResult, 'shell and TS must produce identical bytes').toBe(tsResult);
+      expect(shellResult, 'both twins must produce the expected bytes').toBe(expected);
 
-      // Both implementations must agree with each other.
-      expect(hasSentinelShell).toBe(hasSentinelTs);
-      expect(hasBlockShell).toBe(hasBlockTs);
+      for (const [who, result] of [['shell', shellResult], ['ts', tsResult]] as const) {
+        expect(result !== baseline, `${who}: changed`).toBe(changed);
+        expect(wholeLines(result).includes(V3_SENTINEL), `${who}: devflowSentinelPresent`)
+          .toBe(devflowSentinelPresent);
+        expect(wholeLines(result).includes(CLAUDEIGNORE_LINE), `${who}: claudeignoreLinePresent`)
+          .toBe(claudeignoreLinePresent);
+        expect(result.includes(DEVFLOW_GITIGNORE_BLOCK), `${who}: blockPresent`).toBe(blockPresent);
+      }
 
-      // And both must meet the expected outcome for this branch.
-      expect(hasSentinelShell).toBe(sentinelPresent);
-      expect(hasBlockShell).toBe(blockPresent);
+      // Convergence: every branch must be a fixed point on re-run (applies PF-015).
+      expect(computeDevflowGitignore(tsResult), 'TS: re-running over its own output must be a no-op')
+        .toBeNull();
+      expect(runShell(shellResult), 'shell: re-running over its own output must be a byte no-op')
+        .toBe(shellResult);
     });
   }
 });
