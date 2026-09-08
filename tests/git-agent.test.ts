@@ -29,6 +29,143 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
   return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
 }
 
+/**
+ * Collect conventions-commit placement violations from a corpus.
+ *
+ * Pins (PF-030, PF-058):
+ *   (a) setup-task step 4b commits `.devflow/conventions.md` after branch creation — sole mode;
+ *       git.md is the single authority. The section is truncated at `## Task Setup:` (inside the
+ *       output code fence), but all three pinned literals sit in the process steps before the fence.
+ *   (b) learn-conventions contains NO `commit --only` — the commit has moved to setup-task step 4b
+ *       (ADR-003: end state only; the old **Commit (non-blocking):** block must not reappear).
+ *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
+ *   (d) fetch-issue strips #-prefixed refs in step 1 before the numeric/text branch.
+ *
+ * All four ops use sole-mode extraction (git.md is the single contract authority for each).
+ * Missing op = violation, never a silent pass (PF-018).
+ */
+function collectConventionsCommitPlacementViolations(corpus: CorpusEntry[]): string[] {
+  const violations: string[] = [];
+
+  if (corpus.length === 0) {
+    violations.push('corpus is empty — cannot verify any operation');
+    return violations;
+  }
+
+  // Helper: extract a sole-mode section; a missing op is a violation, not an unhandled throw.
+  function getSection(opName: string): string | null {
+    try {
+      return extractOpSectionFromCorpus(corpus, opName, { mode: 'sole' }).content;
+    } catch {
+      violations.push(`operation '${opName}' not found in corpus — cannot verify placement`);
+      return null;
+    }
+  }
+
+  // ── (a) setup-task ─────────────────────────────────────────────────────────
+  // sole mode: git.md is the single authority for setup-task.
+  const setupTask = getSection('setup-task');
+  if (setupTask !== null) {
+    if (!setupTask.includes('commit --only -- .devflow/conventions.md')) {
+      violations.push(
+        'setup-task: missing "commit --only -- .devflow/conventions.md" — ' +
+        'conventions commit must happen in setup-task step 4b, not inside learn-conventions (PF-030)',
+      );
+    }
+    if (!setupTask.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
+      violations.push(
+        'setup-task: missing "CONVENTIONS_COMMIT: skipped (no branch)" — ' +
+        'step 4b must guard against a detached/base HEAD before committing',
+      );
+    }
+    // 4b. step must appear AFTER the git checkout -b line.
+    // Scoped to this extracted section: ensure-pr-ready has its own unrelated 4b. at git.md:~113,
+    // but that section is never included when extracting setup-task (sole mode).
+    const lines = setupTask.split('\n');
+    const checkoutIdx = lines.findIndex(l => l.includes('git checkout -b "$DEVFLOW_BRANCH"'));
+    const step4bIdx = lines.findIndex(l => /^\s*4b\./.test(l));
+    if (step4bIdx === -1) {
+      violations.push(
+        'setup-task: "4b." step is absent — conventions commit step must be present in setup-task, ' +
+        'immediately after the git checkout -b step (PF-030)',
+      );
+    } else if (checkoutIdx === -1) {
+      violations.push(
+        'setup-task: "git checkout -b \\"$DEVFLOW_BRANCH\\"" line not found — ' +
+        'cannot verify that 4b. appears after branch creation',
+      );
+    } else if (step4bIdx <= checkoutIdx) {
+      violations.push(
+        'setup-task: "4b." step appears at or before the git checkout -b line — ' +
+        'conventions commit must happen AFTER branch creation so it lands on the feature branch',
+      );
+    }
+  }
+
+  // ── (b) learn-conventions ──────────────────────────────────────────────────
+  // File-scoped slicing (not extractOpSectionFromCorpus): the output block's
+  // ## Conventions Learned heading causes extractOpSectionFromCorpus to truncate
+  // before the post-output **Commit boundary:** area, which is where a misplaced
+  // commit --only would live. Slicing from ## Operation: learn-conventions to
+  // the next ## Operation: covers the full section including the post-output area.
+  {
+    const marker = '## Operation: learn-conventions';
+    const matchingSections: string[] = [];
+    for (const entry of corpus) {
+      const start = entry.content.indexOf(marker);
+      if (start === -1) continue;
+      const nextOp = entry.content.indexOf('\n## Operation:', start + marker.length);
+      matchingSections.push(nextOp === -1 ? entry.content.slice(start) : entry.content.slice(start, nextOp));
+    }
+    if (matchingSections.length === 0) {
+      violations.push("operation 'learn-conventions' not found in corpus — cannot verify placement");
+    } else {
+      const learnConventions = matchingSections.join('\n');
+      if (learnConventions.includes('commit --only')) {
+        violations.push(
+          'learn-conventions: contains "commit --only" — the conventions commit must not be inside ' +
+          'learn-conventions; it belongs in setup-task step 4b so it lands on the feature branch (PF-030)',
+        );
+      }
+    }
+  }
+
+  // ── (c) fetch-issues-batch ─────────────────────────────────────────────────
+  // sole mode: git.md is the single authority.
+  // Both pins sit in the process steps before the ## Issues Batch output heading.
+  const fetchBatch = getSection('fetch-issues-batch');
+  if (fetchBatch !== null) {
+    if (!fetchBatch.includes('NOT_FOUND ({refs})')) {
+      violations.push(
+        'fetch-issues-batch: missing "NOT_FOUND ({refs})" — null GraphQL aliases must be reported, ' +
+        'never silently dropped; the batch must never abort on a single missing ref (PF-058)',
+      );
+    }
+    if (!fetchBatch.includes('Strip a leading `#`')) {
+      violations.push(
+        'fetch-issues-batch: missing "Strip a leading `#`" — #-prefixed references must be normalised ' +
+        'before parsing so #42 takes the numeric path, not the search path',
+      );
+    }
+  }
+
+  // ── (d) fetch-issue ────────────────────────────────────────────────────────
+  // sole mode: git.md is the single authority.
+  // Section is truncated at ## Issue #{number}: inside the output code fence,
+  // but step 1 (the strip step) is before the output block.
+  const fetchIssue = getSection('fetch-issue');
+  if (fetchIssue !== null) {
+    if (!fetchIssue.includes('Strip a leading `#`')) {
+      violations.push(
+        'fetch-issue: missing "Strip a leading `#`" in step 1 — #-prefixed references must be ' +
+        'normalised before the numeric/text branch so #42 fetches directly, not as a search term',
+      );
+    }
+  }
+
+  return violations;
+}
+
 describe('git agent — static content guards (PF-018)', () => {
   // Single-file corpus for operations that have exactly one authority file
   let content: string;
@@ -755,5 +892,78 @@ describe('git agent — static content guards (PF-018)', () => {
     // Verify the detection logic: posting present, D11 absent — the forward guard would flag this.
     expect(sec.includes('--body-file') || sec.includes('-F body=@'), 'posting must be detected').toBe(true);
     expect(sec.includes('Comment-sink scrub (D11)'), 'D11 reference must be absent in the known-bad').toBe(false);
+  });
+
+  // ── Guard 12: Conventions-commit placement and batch NOT_FOUND rule (PF-030, PF-058) ──
+  //
+  // Pins the contracts introduced in commit ae62d0a:
+  //   (a) setup-task step 4b commits .devflow/conventions.md on the feature branch,
+  //       immediately after git checkout -b — so the commit never lands on BASE_BRANCH.
+  //   (b) learn-conventions is a commit boundary only — no commit --only inside it.
+  //   (c) fetch-issues-batch drops (not aborts on) null GraphQL aliases → NOT_FOUND ({refs}).
+  //   (d) fetch-issue and fetch-issues-batch both strip a leading # from their ref inputs.
+  //
+  // Named collector + known-bad probe (H10, PF-043): proves detection is live.
+
+  it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
+    const violations = collectConventionsCommitPlacementViolations(gitAgentSinkCorpus());
+    expect(
+      violations,
+      `conventions-commit placement: live guard found violations:\n${violations.map(v => `  • ${v}`).join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('conventions-commit placement: known-bad synthetic corpus triggers violations (H10, PF-043)', () => {
+    // PF-043: synthetic corpus built from real git.md content (copy + targeted mutation),
+    // never hand-authored. PF-018: calls the same named collector as the live guard.
+    //
+    // Mutation 1: remove setup-task's 4b step block.
+    //   Search from the setup-task marker so ensure-pr-ready's unrelated 4b. (git.md:~113)
+    //   is not mistakenly targeted.
+    // Mutation 2: replace learn-conventions' **Commit boundary:** one-liner with an old-style
+    //   **Commit (non-blocking):** block containing commit --only, reproducing the pre-ae62d0a shape.
+    const realContent = resolveAgentSource('git').content;
+
+    // Mutation 1: delete the 4b block from setup-task.
+    const setupTaskMarker = '## Operation: setup-task';
+    const setupTaskStart = realContent.indexOf(setupTaskMarker);
+    if (setupTaskStart === -1) throw new Error('probe: ## Operation: setup-task not found in git.md');
+    const step4bStart = realContent.indexOf('\n4b. ', setupTaskStart);
+    const step5Start = realContent.indexOf('\n5. Return setup summary', step4bStart);
+    if (step4bStart === -1 || step5Start === -1) {
+      throw new Error('probe: could not locate 4b./5. boundaries in setup-task for mutation');
+    }
+    let mutated = realContent.slice(0, step4bStart) + realContent.slice(step5Start);
+
+    // Mutation 2: replace the **Commit boundary:** one-liner with an old-style block.
+    const commitBoundaryAnchor = '\n**Commit boundary:**';
+    const cbIdx = mutated.indexOf(commitBoundaryAnchor);
+    if (cbIdx === -1) throw new Error('probe: "**Commit boundary:**" not found after mutation 1');
+    const cbLineEnd = mutated.indexOf('\n', cbIdx + 1);
+    const oldStyleBlock =
+      '\n**Commit (non-blocking):** Run only if learn-conventions returned `**Status**: WRITTEN`.\n' +
+      '```bash\n' +
+      'git commit --only -- .devflow/conventions.md -m "docs(devflow): record project conventions"\n' +
+      '```\n';
+    mutated =
+      mutated.slice(0, cbIdx) +
+      oldStyleBlock +
+      (cbLineEnd === -1 ? '' : mutated.slice(cbLineEnd));
+
+    const syntheticCorpus: CorpusEntry[] = [{ path: '/synthetic/git.md', content: mutated }];
+    const violations = collectConventionsCommitPlacementViolations(syntheticCorpus);
+
+    expect(
+      violations.length,
+      `probe must detect >= 2 violations on the known-bad corpus; got: ${JSON.stringify(violations)}`,
+    ).toBeGreaterThan(1);
+    expect(
+      violations.some(v => v.startsWith('setup-task:')),
+      `probe must name 'setup-task' in at least one violation; got: ${JSON.stringify(violations)}`,
+    ).toBe(true);
+    expect(
+      violations.some(v => v.startsWith('learn-conventions:')),
+      `probe must name 'learn-conventions' in at least one violation; got: ${JSON.stringify(violations)}`,
+    ).toBe(true);
   });
 });
