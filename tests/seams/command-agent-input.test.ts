@@ -338,18 +338,24 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBe(gitFencesMentioningOperation)
   })
 
-  it('at least 10 operations have a live caller fence (key-map non-vacuity)', () => {
+  it('at least 13 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: the spec-level AC says git.md declares 17 ops (REQUIRED_OPS), but the
-    // corpus scan finds 13 live caller fences (17 ops minus ops with no callers yet, e.g.
-    // fetch-issues-batch). Floor is 10, not 17 — intentionally conservative pending Phase 1
-    // wiring. Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
+    // M9: git.md declares 18 ## Operation: sections; 13 have a live caller fence in
+    // dist/commands/. The five without are:
+    //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
+    //     agent itself, not by any command fence.
+    //   - check-ci-status: prose-only references in implement.md and resolve.md (the
+    //     Spawn description appears in text, not inside a parseable code fence).
+    //   - create-release, gather-release-evidence, backlink-shipped-issues: described
+    //     only in the hand-authored release.md prose; the operation names appear in
+    //     plain text, not in Agent(…) spawn fences the parser recognises.
+    // Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
     expect(
       keysPassedByOp.size,
-      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 10; ` +
+      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 13; ` +
       'the forward and reverse directions iterate this map and would be near-vacuous',
-    ).toBeGreaterThanOrEqual(10)
+    ).toBeGreaterThanOrEqual(13)
   })
 
   it('op→section map covers at least 15 operations [DR-24]', () => {

@@ -1,8 +1,8 @@
 /**
  * Retired-wording guard (P0-S22, AC-0.14, GAP-32).
  *
- * One shared grep guard with a per-phase allowlist narrowed once per phase.
- * Never a new grep per phase (GAP-32) — adding a new retired literal goes into
+ * One shared grep guard with a denylist of retired literals — grows once per phase;
+ * never a new grep; never emptied. Adding a new retired literal goes into
  * RETIRED_LITERALS, not into a new describe block.
  *
  * Phase-0 retired literals:
@@ -12,11 +12,11 @@
  *   - may pre-fetch    (removed from _wave.mds in A1)
  *   - issue-first gate (removed from implement.mds in A1; "step 1c" self-reference stays valid in git.md)
  *
- * Non-vacuity: allowlist size and corpus size are both asserted.
+ * Non-vacuity: denylist size and corpus size are both asserted.
  * Known-bad sample (mechanic 2, H10): a seeded retired literal in a synthetic file
  * fails the guard — proven inline without touching committed source.
  *
- * Allowlist format:
+ * Denylist entry format:
  *   { literal, phase, file, justification }
  * "file" is the dist/commands/*.md or src/assets/ path that contained the literal
  * before the A1 fix; it is recorded for traceability, not enforced dynamically.
@@ -29,7 +29,7 @@ import * as path from 'path';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
 // ---------------------------------------------------------------------------
-// Phase-0 allowlist — narrowed once per phase
+// Phase-0 denylist of retired literals — grows once per phase; never a new grep; never emptied
 // ---------------------------------------------------------------------------
 interface RetiredEntry {
   literal: string;
@@ -135,11 +135,11 @@ function collectRetiredLiteralViolations(
 // Guard
 // ---------------------------------------------------------------------------
 
-describe('retired-wording guard — per-phase allowlist (P0-S22, GAP-32)', () => {
-  it('allowlist is non-empty and each entry carries a justification (non-vacuity)', () => {
+describe('retired-wording guard — denylist of retired literals (P0-S22, GAP-32)', () => {
+  it('denylist is non-empty and each entry carries a justification (non-vacuity)', () => {
     expect(
       RETIRED_LITERALS.length,
-      'RETIRED_LITERALS allowlist must be non-empty',
+      'RETIRED_LITERALS denylist must be non-empty',
     ).toBeGreaterThan(0);
     for (const entry of RETIRED_LITERALS) {
       expect(entry.literal.length, `entry literal must be non-empty`).toBeGreaterThan(0);
@@ -154,7 +154,7 @@ describe('retired-wording guard — per-phase allowlist (P0-S22, GAP-32)', () =>
     // Non-vacuity: corpus size must be > 0 so the guard is not trivially green.
     expect(
       corpus.length,
-      `corpus is empty — check SKILLS_DIR and dist/commands/; guard is vacuous (PF-018)`,
+      `corpus is empty — check src/assets/ and dist/commands/; guard is vacuous (PF-018)`,
     ).toBeGreaterThan(0);
 
     // Use the named collector so the probe exercises the same logic (M12a).
