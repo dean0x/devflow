@@ -168,36 +168,67 @@ export function extractOpSectionFromCorpus(
   }
 }
 
+// ── File tree walker ─────────────────────────────────────────────────────────
+//
+// Used by gitAgentSinkCorpus for recursive references/ traversal.
+// The three existing walkers in tests/guards/ carry rel-prefix/extension lists
+// and a depth cap that serve their own collector contracts — leave them as-is.
+
+/**
+ * Recursively walk `dir`, returning the absolute paths of all files for which
+ * `accept` returns true, sorted deterministically.
+ *
+ * ENOENT on the top-level `dir` returns [] (directory simply absent).
+ * Other errors (e.g. EACCES) propagate — they indicate a genuine problem.
+ *
+ * @param dir - Absolute path of the directory to walk.
+ * @param accept - Predicate applied to each file's absolute path.
+ */
+export function walkFiles(dir: string, accept: (file: string) => boolean): string[] {
+  if (!existsSync(dir)) return []
+  const result: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const absPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      result.push(...walkFiles(absPath, accept))
+    } else if (accept(absPath)) {
+      result.push(absPath)
+    }
+  }
+  return result.sort()
+}
+
 // ── Git agent sink corpus ────────────────────────────────────────────────────
 //
-// git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on the dist side).
+// git.md ∪ dist/skills/git/references/** (ENOENT-tolerant on the dist side).
 // Used by the D11 forward/reverse/bypass guards so the floor stays ≥ 8
 // when posting-op mechanics move into compiled reference files (Phase 2+).
 
 /**
- * Build the D11 sink-class corpus: git.md (always) plus compiled skill
- * references (when present). The dist sibling is ENOENT-tolerant so that
- * Phase 0 guards pass before dist/skills/ is built.
+ * Build the D11 sink-class corpus: git.md (via the dist-preferred resolver)
+ * plus all compiled skill references under dist/skills/git/references/**
+ * (ENOENT-tolerant for Phase 0, before dist/skills/ is built).
+ *
+ * The references/ tree is walked recursively because Phase 2 nests operation
+ * files at references/tracker/github/{op}.md — a flat readdirSync would miss
+ * that depth.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to keep corpus construction hermetic.
  */
-export function gitAgentSinkCorpus(): CorpusEntry[] {
+export function gitAgentSinkCorpus(root = ROOT): CorpusEntry[] {
   const corpus: CorpusEntry[] = []
 
   // Primary: git.md (via dist-preferred resolver)
-  const git = resolveAgentSource('git')
+  const git = resolveAgentSource('git', root)
   corpus.push({ path: git.path, content: git.content })
 
-  // Secondary: compiled skill references (ENOENT-tolerant)
-  const refsDir = path.join(ROOT, 'dist', 'skills', 'git', 'references')
-  if (existsSync(refsDir)) {
-    try {
-      const files = readdirSync(refsDir).filter(f => f.endsWith('.md'))
-      for (const file of files) {
-        const filePath = path.join(refsDir, file)
-        corpus.push({ path: filePath, content: readFileSync(filePath, 'utf-8') })
-      }
-    } catch {
-      // ENOENT-tolerant: dist references are absent in Phase 0
-    }
+  // Secondary: compiled skill references — walked recursively so Phase 2's
+  // references/tracker/github/{op}.md depth is covered (ENOENT-tolerant)
+  const refsDir = path.join(root, 'dist', 'skills', 'git', 'references')
+  const refFiles = walkFiles(refsDir, f => f.endsWith('.md'))
+  for (const filePath of refFiles) {
+    corpus.push({ path: filePath, content: readFileSync(filePath, 'utf-8') })
   }
 
   return corpus
@@ -272,10 +303,14 @@ export function loadGolden(name: string): string {
  * Anchors (not line numbers) drive extraction so the function survives line insertions
  * in git.md without fixture drift. The optional `gitContent` parameter allows callers
  * to supply an alternative git.md body (e.g. a baseline snapshot for proof testing).
+ *
+ * Reads through the dist-preferred resolver. The resolver's dist-preferred/src-fallback
+ * choice is byte-neutral for this extractor because Phase 1's byte-equality gate requires
+ * dist/agents/git.md to equal the source it is generated from.
  */
 export function extractStatusLines(gitContent?: string): string {
-  const git = gitContent ?? readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8')
-  const code = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'code.md'), 'utf-8')
+  const git = gitContent ?? resolveAgentSource('git').content
+  const code = resolveAgentSource('code').content
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 

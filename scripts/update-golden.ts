@@ -22,10 +22,10 @@
  *   "frozen at Phase 0, never regenerated through Phase 3; green only with --unfreeze"
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { writeFileSync, mkdirSync } from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
-import { extractStatusLines } from '../tests/helpers.js'
+import { extractStatusLines, resolveAgentSource } from '../tests/helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -81,21 +81,14 @@ if (targetArg === 'github-status-lines' && !hasUnfreeze) {
 mkdirSync(destDir, { recursive: true })
 
 if (targetArg === 'git-agent') {
-  const src = path.join(ROOT, 'src', 'assets', 'agents', 'git.md')
   const dst = path.join(destDir, 'git-agent.md')
-  // Prefer dist/agents/git.md when it exists (Phase 1+ dist-preferred path)
-  let sourcePath = src
-  try {
-    const distSrc = path.join(ROOT, 'dist', 'agents', 'git.md')
-    readFileSync(distSrc) // probe
-    sourcePath = distSrc
-    console.log('Using dist/agents/git.md (dist-preferred)')
-  } catch {
-    console.log('Using src/assets/agents/git.md (src fallback)')
-  }
-  const content = readFileSync(sourcePath, 'utf-8')
-  writeFileSync(dst, content, 'utf-8')
-  console.log(`Written: ${dst} (${content.length} chars)`)
+  const source = resolveAgentSource('git')
+  const label = source.origin === 'dist'
+    ? 'dist/agents/git.md (dist-preferred)'
+    : 'src/assets/agents/git.md (src fallback)'
+  console.log(`Using ${label} (origin=${source.origin})`)
+  writeFileSync(dst, source.content, 'utf-8')
+  console.log(`Written: ${dst} (${source.content.length} chars)`)
 } else if (targetArg === 'github-status-lines') {
   const content = extractStatusLines()
   const dst = path.join(destDir, 'github-status-lines.txt')

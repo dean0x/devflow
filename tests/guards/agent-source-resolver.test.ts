@@ -19,6 +19,7 @@ import {
   resolveAgentSource,
   resolveAllAgents,
   extractOpSectionFromCorpus,
+  gitAgentSinkCorpus,
   type CorpusEntry,
 } from '../helpers.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
@@ -236,5 +237,82 @@ describe('extractOpSectionFromCorpus union mode [DR-18]', () => {
     expect(
       () => extractOpSectionFromCorpus(corpus, 'ghost-op', { mode: 'union' }),
     ).toThrow(/not found/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Guard: gitAgentSinkCorpus — walks references/ recursively (Phase 2 prep)
+// ---------------------------------------------------------------------------
+//
+// Phase 2 nests compiled reference files at references/tracker/github/{op}.md.
+// The corpus must include that depth — a flat readdirSync would miss it.
+
+describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)', () => {
+  let tmpRoot: string
+
+  beforeAll(() => {
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-corpus-recursive-'))
+
+    // Copy the real git.md (PF-043: real shape, not hand-authored).
+    // Use resolveAgentSource().path — no literal src/assets/agents/ path
+    // (the literal-agent-paths guard scans this file's parent directory).
+    const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
+    mkdirSync(srcAgentsDir, { recursive: true })
+    copyFileSync(resolveAgentSource('git').path, path.join(srcAgentsDir, 'git.md'))
+
+    // Build probe-op section from the first real operation section in git.md (PF-043):
+    // slice the section and rename the heading to probe-op.
+    const realGitContent = resolveAgentSource('git').content
+    const firstOpStart = realGitContent.indexOf('\n## Operation:')
+    const nextOpStart = realGitContent.indexOf('\n## Operation:', firstOpStart + 1)
+    const realSection = realGitContent.slice(firstOpStart + 1, nextOpStart === -1 ? undefined : nextOpStart)
+    const probeSection = realSection.replace(/^## Operation: \S+/m, '## Operation: probe-op')
+
+    // Flat reference file (currently served by Phase 0 flat readdirSync)
+    const flatRefsDir = path.join(tmpRoot, 'dist', 'skills', 'git', 'references')
+    mkdirSync(flatRefsDir, { recursive: true })
+    writeFileSync(path.join(flatRefsDir, 'flat.md'), probeSection, 'utf8')
+
+    // Nested reference file (Phase 2 depth: references/tracker/github/{op}.md)
+    const nestedRefsDir = path.join(flatRefsDir, 'tracker', 'github')
+    mkdirSync(nestedRefsDir, { recursive: true })
+    writeFileSync(path.join(nestedRefsDir, 'fetch-issue.md'), probeSection, 'utf8')
+  })
+
+  afterAll(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('corpus includes both the flat reference and the nested tracker/github reference', () => {
+    const corpus = gitAgentSinkCorpus(tmpRoot)
+    const paths = corpus.map(e => e.path)
+    const nestedPath = path.join(
+      tmpRoot, 'dist', 'skills', 'git', 'references', 'tracker', 'github', 'fetch-issue.md',
+    )
+    expect(paths, 'corpus must include the nested tracker/github/fetch-issue.md path').toContain(nestedPath)
+
+    // mode: 'union' — both flat.md and tracker/github/fetch-issue.md contribute one
+    // probe-op section each; matchCount must be 2 (a flat readdirSync returns 1)
+    const result = extractOpSectionFromCorpus(corpus, 'probe-op', { mode: 'union' })
+    expect(
+      result.matchCount,
+      "'union' matchCount must be 2 (flat.md + tracker/github/fetch-issue.md)",
+    ).toBe(2)
+  })
+
+  it('corpus has exactly one entry (git.md) when dist/skills/ is absent', () => {
+    const emptyRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-corpus-noskills-'))
+    try {
+      // Only src/assets/agents/git.md — no dist/skills/ at all
+      const srcDir = path.join(emptyRoot, 'src', 'assets', 'agents')
+      mkdirSync(srcDir, { recursive: true })
+      copyFileSync(resolveAgentSource('git').path, path.join(srcDir, 'git.md'))
+
+      const corpus = gitAgentSinkCorpus(emptyRoot)
+      expect(corpus, 'corpus must have exactly one entry when dist/skills/ is absent').toHaveLength(1)
+      expect(corpus[0].path, 'sole entry must end with git.md').toMatch(/git\.md$/)
+    } finally {
+      rmSync(emptyRoot, { recursive: true, force: true })
+    }
   })
 })
