@@ -6,10 +6,9 @@
  * and tests/guards/** catches regressions before they accumulate.
  *
  * EXCEPTION / OUT-OF-SCOPE DOCUMENTATION (files not scanned or explicitly excluded):
- *   tests/helpers.ts — hosts the resolver's single sanctioned src/assets/agents/ fallback
- *     path (inside resolveAgentSource). extractStatusLines() reads through the resolver and
- *     contains no literal src/assets/agents/ path for content resolution. It is outside the
- *     scan scope below.
+ *   tests/helpers.ts — resolveAgentSource names the fallback tree in its doc comment;
+ *     its resolution paths come from agentSourceDirs(root). extractStatusLines() reads
+ *     through the resolver. It is outside the scan scope below.
  *   tests/guards/literal-agent-paths.test.ts — self-excluded: this file defines the
  *     LITERAL constant, the error message strings, and the non-vacuity probe corpus entry,
  *     all of which necessarily contain the literal string.

@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
-import { skillsDir, agentsDir, compiledAgentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 
@@ -360,12 +360,27 @@ export interface FileCopyOptions {
   isPartialInstall: boolean;
   spinner: Spinner;
   /**
-   * Agent source directories, most-preferred first. Defaults to
-   * [compiledAgentsDir(), agentsDir()] so a generated agent supersedes a
-   * hand-authored file of the same name. Injectable so tests can prove the
-   * preference order against a temp tree instead of the live build state.
+   * Agent source directories, most-preferred first — see agentSourceDirs(),
+   * which owns the ordering convention and supplies the default. Injectable so
+   * tests can prove the preference order against a temp tree instead of the
+   * live build state.
    */
-  agentSourceDirs?: readonly string[];
+  agentSourceDirs?: AgentSourceDirs;
+}
+
+/**
+ * First path in `candidates` that exists on disk, or undefined when none do.
+ * Bounded by candidates.length. The fs.access rejection is the existence probe,
+ * not a failure: callers decide what an exhausted candidate list means.
+ */
+async function firstExisting(candidates: readonly string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch { /* not here — try the next directory in preference order */ }
+  }
+  return undefined;
 }
 
 /**
@@ -508,7 +523,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // build/packaging failure and throws rather than silently skipping (matches
   // command pattern); the message names the build step as well as the tree.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const agentDirs = options.agentSourceDirs ?? [compiledAgentsDir(), agentsDir()];
+  const agentDirs = options.agentSourceDirs ?? agentSourceDirs();
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -521,23 +536,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
       const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
-      let srcFile: string | undefined;
-      for (const candidate of candidates) {
-        try {
-          await fs.access(candidate);
-          srcFile = candidate;
-          break;
-        } catch {
-          // Try the next directory in preference order.
-        }
-      }
+      const srcFile = await firstExisting(candidates);
       if (srcFile === undefined) {
-        // Name the last (source-tree) candidate as the primary path, then list
-        // every location searched so the reader knows exactly where to look.
         throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${candidates[candidates.length - 1]}. ` +
-          `Ensure the agent file exists in src/assets/agents/, or run \`npm run build:mds\` if it is ` +
-          `compiled from an .mds generator host (searched: ${candidates.join(', ')}).`,
+          `Agent source not found for declared agent "${agentName}": ${candidates[0]}. ` +
+          `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
+          `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
       }
       await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs'
 import * as path from 'path'
 import { type ManifestData } from '../src/core/manifest.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
+import { agentSourceDirs } from '../src/core/assets.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -51,7 +52,9 @@ export function loadFile(relPath: string): string {
 
 // ── Agent-source resolver ────────────────────────────────────────────────────
 //
-// Dist-preferred, src-fallback. ENOENT-tolerant on the dist side only.
+// Dist-preferred, src-fallback — the directory order comes from
+// agentSourceDirs(), so this harness shares the production ordering convention
+// rather than re-spelling it. ENOENT-tolerant on the dist side only.
 // Throws with a build hint when neither location resolves — matching the
 // "throw-with-a-build-hint, never skip" contract of requireDistFile above.
 //
@@ -79,16 +82,18 @@ export interface CorpusEntry {
  *   use the default so no call sites change.
  */
 export function resolveAgentSource(name: string, root: string = ROOT): AgentSource {
-  const distPath = path.join(root, 'dist', 'agents', `${name}.md`)
+  // Order comes from agentSourceDirs() — the one owner of the dist-first policy.
+  const [compiledDir, sourceDir] = agentSourceDirs(root)
+  const distPath = path.join(compiledDir, `${name}.md`)
   if (existsSync(distPath)) {
     return { path: distPath, content: readFileSync(distPath, 'utf-8'), origin: 'dist' }
   }
-  const srcPath = path.join(root, 'src', 'assets', 'agents', `${name}.md`)
+  const srcPath = path.join(sourceDir, `${name}.md`)
   try {
     return { path: srcPath, content: readFileSync(srcPath, 'utf-8'), origin: 'src' }
   } catch {
     throw new Error(
-      `Agent '${name}' not found at dist/agents/${name}.md or src/assets/agents/${name}.md\n` +
+      `Agent '${name}' not found at ${distPath} or ${srcPath}\n` +
       '  Run `npm run build` first (dist side is ENOENT-tolerant, src side is not)',
     )
   }

@@ -18,6 +18,7 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
+import type { AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -436,13 +437,15 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     // Pin the filename and fix-hint literals from the installer error message. These are
     // stable across path reconfigurations and will survive Phase 1's resolver refactor.
     expect(caught!.message).toContain('nonexistent-xyz-ws6a-agent.md');
-    expect(caught!.message).toContain('Ensure the agent file exists');
+    expect(caught!.message).toContain('ensure the agent file exists');
   });
 
   it('throws when a declared agent is absent from BOTH the compiled and source dirs', async () => {
     // Phase 1 resolves agents dist-first with a src fallback. Neither present is
     // still a hard error, and the message must name the build step as well as
-    // the source tree — never a silent skip.
+    // the source tree — never a silent skip. The primary path it names is the
+    // most-preferred (compiled) candidate: for a generator-host agent the source
+    // path does not and will never exist, so leading with it misdirects.
     const claudeDir = path.join(tmpDir, 'claude');
     const devflowDir = path.join(tmpDir, 'devflow');
     const emptyDist = path.join(tmpDir, 'empty-dist-agents');
@@ -478,11 +481,15 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     expect(caught).toBeDefined();
     expect(caught!.message).toContain('nonexistent-xyz-ws6a-agent.md');
-    expect(caught!.message).toContain('Ensure the agent file exists');
+    expect(caught!.message).toContain('ensure the agent file exists');
     expect(caught!.message).toContain('build:mds');
     // Both searched locations are named so the reader knows where to look.
     expect(caught!.message).toContain(emptyDist);
     expect(caught!.message).toContain(emptySrc);
+    // The named primary path is the most-preferred candidate, not the last one.
+    expect(caught!.message).toContain(
+      `agent "nonexistent-xyz-ws6a-agent": ${path.join(emptyDist, 'nonexistent-xyz-ws6a-agent.md')}`,
+    );
   });
 
   it('throws when a declared skill source directory is absent', async () => {
@@ -705,8 +712,8 @@ describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', ()
 // over a stale hand-authored file of the same name while every ungenerated
 // agent keeps installing exactly as before.
 //
-// The dirs are injected here rather than mocked: the default is the real
-// [compiledAgentsDir(), agentsDir()] pair, so no production call site changes.
+// The dirs are injected here rather than mocked: the default is agentSourceDirs(),
+// the one owner of the ordering convention, so no production call site changes.
 
 describe('installViaFileCopy — dist-preferred agent resolution', () => {
   const spinner = { start: () => {}, stop: () => {}, message: () => {} };
@@ -729,7 +736,7 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
     return content;
   }
 
-  async function installWith(agentSourceDirs: string[]): Promise<string> {
+  async function installWith(agentSourceDirs: AgentSourceDirs): Promise<string> {
     const claudeDir = path.join(tmpDir, 'claude');
     const fakePlugin: PluginDefinition = {
       name: 'devflow-test-dist-preferred',

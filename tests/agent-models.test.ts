@@ -1038,13 +1038,14 @@ describe('parseAgentMappingEnvelope', () => {
 });
 
 // ---------------------------------------------------------------------------
-// loadShippedDefaults — compiled dir merged over source dir
+// loadShippedDefaults — compiled dir wins over source dir
 // ---------------------------------------------------------------------------
 //
 // Shipped defaults are read live from the agent files at convergence time, so
 // once an agent is generated into dist/agents/ its frontmatter must be the one
-// that answers "what model did devflow ship for this agent?". The compiled dir
-// is merged OVER the source dir; the dirs are injectable so the merge can be
+// that answers "what model did devflow ship for this agent?". The dirs are
+// most-preferred first (the convention owned by agentSourceDirs()) and the
+// first to supply a name wins; they are injectable so the precedence can be
 // proved against a synthetic tree instead of the live build state.
 
 describe('loadShippedDefaults — compiled over source merge', () => {
@@ -1084,7 +1085,7 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await writeAgent(srcDir, 'other', 'sonnet');
     await writeAgent(distDir, 'git', 'haiku');
 
-    const defaults = await loadShippedDefaults([srcDir, distDir]);
+    const defaults = await loadShippedDefaults([distDir, srcDir]);
     expect(defaults['git']).toBe('haiku');
     expect(defaults['other']).toBe('sonnet');
   });
@@ -1107,16 +1108,16 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await writeAgent(srcDir, 'git', 'opus');
     await writeAgent(distDir, 'git', 'haiku');
 
-    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('haiku');
-    // Reversing the order must change the answer, or the merge proves nothing.
-    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('opus');
+    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
+    // Reversing the order must change the answer, or the precedence proves nothing.
+    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('opus');
   });
 
   it('tolerates an absent compiled dir', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
     await writeAgent(srcDir, 'git', 'haiku');
 
-    const defaults = await loadShippedDefaults([srcDir, path.join(mergeTmp, 'no-such-dir')]);
+    const defaults = await loadShippedDefaults([path.join(mergeTmp, 'no-such-dir'), srcDir]);
     expect(defaults['git']).toBe('haiku');
   });
 
@@ -1128,6 +1129,6 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await fs.writeFile(path.join(distDir, 'git.mds'), '---\nmodel: opus\n---\n', 'utf-8');
 
     // The .mds source must not be mistaken for a compiled agent.
-    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('haiku');
+    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
   });
 });

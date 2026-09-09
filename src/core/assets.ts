@@ -12,9 +12,13 @@ export function skillsDir(): string {
 /**
  * Flat agents source directory: src/assets/agents/{name}.md
  * All plugins' agents live here directly.
+ *
+ * @param root - Package root to resolve against. Injectable so a caller working
+ *   on a temp tree (the test harness) reads the layout from here rather than
+ *   spelling the path itself.
  */
-export function agentsDir(): string {
-  return join(getPackageRoot(), 'src', 'assets', 'agents');
+export function agentsDir(root: string = getPackageRoot()): string {
+  return join(root, 'src', 'assets', 'agents');
 }
 
 /**
@@ -45,11 +49,38 @@ export function commandsDir(): string {
 /**
  * Compiled agents directory: dist/agents/{name}.md
  *
- * Output of the .mds generator hosts. Agents are resolved from here first and
- * from agentsDir() as a fallback, so a generated agent supersedes a
- * hand-authored file of the same name. The directory is absent until at least
+ * Output of the .mds generator hosts. The directory is absent until at least
  * one generator host exists, so every reader must tolerate its absence.
+ *
+ * @param root - Package root to resolve against (see agentsDir).
  */
-export function compiledAgentsDir(): string {
-  return join(getPackageRoot(), 'dist', 'agents');
+export function compiledAgentsDir(root: string = getPackageRoot()): string {
+  return join(root, 'dist', 'agents');
 }
+
+/**
+ * Agent source directories, MOST-PREFERRED FIRST.
+ *
+ * The single owner of the dist-first agent-resolution policy: a generator
+ * host's compiled artifact in dist/agents/ supersedes a hand-authored file of
+ * the same name in src/assets/agents/. Every consumer reads the order from
+ * here — the installer's first-hit-wins resolve, loadShippedDefaults's
+ * first-wins merge, and the test harness's resolveAgentSource — so the
+ * convention is stated once and cannot drift apart between call sites.
+ *
+ * Order is invisible to the type system: a list spelled least-preferred-first
+ * still typechecks and silently inverts the answer. Consumers therefore take
+ * this list as-is and never re-spell it; tests/guards/agent-source-precedence
+ * pins that they agree.
+ *
+ * The non-empty tuple makes an empty list a compile error at every call site:
+ * an empty list would survive a `??` default and resolve to nothing.
+ *
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function agentSourceDirs(root: string = getPackageRoot()): AgentSourceDirs {
+  return [compiledAgentsDir(root), agentsDir(root)];
+}
+
+/** Agent source directories, most-preferred first and never empty. */
+export type AgentSourceDirs = readonly [string, ...string[]];

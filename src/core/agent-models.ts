@@ -28,7 +28,7 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
 import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
-import { agentsDir, compiledAgentsDir } from './assets.js';
+import { agentSourceDirs, type AgentSourceDirs } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
 import { isContainedIn } from './paths.js';
@@ -462,57 +462,70 @@ export function resolveEffective(
 // ---------------------------------------------------------------------------
 
 /**
+ * Parse the shipped model default out of every {name}.md in one directory.
+ *
+ * A missing or unreadable directory yields an empty map — dist/agents/ does not
+ * exist until a generator host does, and a source tree that produced no agents
+ * is caught by the registry-completeness guard rather than by a throw here.
+ * Unknown or malformed files are skipped individually.
+ */
+async function readDirDefaults(dir: string): Promise<Record<string, string>> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return {};
+  }
+
+  const pairs = await Promise.all(
+    entries.map(async (file): Promise<readonly [string, string] | null> => {
+      const agentName = mdEntryName(file);
+      if (agentName === null) return null;
+      try {
+        const content = await fs.readFile(path.join(dir, file), 'utf-8');
+        const result = readFrontmatterModel(content);
+        if (result.ok && result.value) {
+          return [agentName, result.value] as const;
+        }
+      } catch {
+        // Silently skip unreadable files
+      }
+      return null;
+    })
+  );
+
+  const defaults: Record<string, string> = {};
+  for (const pair of pairs) {
+    if (pair !== null) {
+      defaults[pair[0]] = pair[1];
+    }
+  }
+  return defaults;
+}
+
+/**
  * Load shipped default models from the agent files.
  *
- * Reads every .md file in each directory and parses the frontmatter model
- * field. Directories are applied in order and LATER ones win, so the default
- * `[agentsDir(), compiledAgentsDir()]` merges the compiled agents over the
- * source tree: once an agent is generated into dist/agents/, its frontmatter is
- * the shipped default. An unreadable directory contributes nothing — the
- * compiled dir does not exist until a generator host does, and a source tree
- * that produced no agents is caught by the registry-completeness guard rather
- * than by a throw here. Unknown or malformed files are silently skipped.
+ * Directories are MOST-PREFERRED FIRST — the convention owned by
+ * agentSourceDirs() — and the first directory to supply a name wins, so once an
+ * agent is generated into dist/agents/ its frontmatter is the shipped default.
  *
- * @param dirs - Agent directories, least-preferred first. Injectable so tests
- *   can prove the merge against a temp tree; all real callers use the default.
+ * @param dirs - Agent directories, most-preferred first. Injectable so tests can
+ *   prove the precedence against a temp tree; all real callers use the default.
  */
 export async function loadShippedDefaults(
-  dirs: readonly string[] = [agentsDir(), compiledAgentsDir()],
+  dirs: AgentSourceDirs = agentSourceDirs(),
 ): Promise<Record<string, string>> {
+  const perDir = await Promise.all(dirs.map(readDirDefaults));
+
   const defaults: Record<string, string> = {};
-
-  for (const dir of dirs) {
-    let entries: string[];
-    try {
-      entries = await fs.readdir(dir);
-    } catch {
-      continue;
-    }
-
-    const pairs = await Promise.all(
-      entries.map(async (file): Promise<readonly [string, string] | null> => {
-        const agentName = mdEntryName(file);
-        if (agentName === null) return null;
-        try {
-          const content = await fs.readFile(path.join(dir, file), 'utf-8');
-          const result = readFrontmatterModel(content);
-          if (result.ok && result.value) {
-            return [agentName, result.value] as const;
-          }
-        } catch {
-          // Silently skip unreadable files
-        }
-        return null;
-      })
-    );
-
-    for (const pair of pairs) {
-      if (pair !== null) {
-        defaults[pair[0]] = pair[1];
+  for (const dirDefaults of perDir) {
+    for (const [agentName, model] of Object.entries(dirDefaults)) {
+      if (!(agentName in defaults)) {
+        defaults[agentName] = model;
       }
     }
   }
-
   return defaults;
 }
 
