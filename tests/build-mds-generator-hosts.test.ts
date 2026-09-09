@@ -20,6 +20,7 @@
  *   8. a bare output-name: is a hard build error
  *   9. two hosts may not claim one destination
  *  10. a generator host must carry TWO frontmatter blocks
+ *  11. the whole-repo walk is depth-bounded and fails loudly at the bound
  *
  * Every negative runs the real script in a subprocess against an isolated
  * DEVFLOW_MDS_ROOT so the real src/assets/ and dist/ trees are never touched
@@ -471,9 +472,12 @@ describe('filename validation negatives', () => {
 // 5. IGNORE_DIRS covers tests/ and coverage/
 // ---------------------------------------------------------------------------
 //
-// This PR introduces .mds fixtures under tests/. Without these ignores a fixture
-// declaring output-dir: dist/commands would be discovered by the whole-repo walk
-// and would write into the real dist/ (EC-50).
+// A .mds committed under tests/ or coverage/ is a fixture or a coverage
+// artifact, never a shipped host: the ignores are what make it impossible for
+// such a file to be discovered by the whole-repo walk and written into the real
+// dist/ tree (EC-50). The ignore is by directory name, so it applies under
+// DEVFLOW_MDS_ROOT too — the fixtures below prove exactly that, by planting
+// under <tmpRoot>/tests/ and <tmpRoot>/coverage/ and finding nothing compiled.
 
 describe('IGNORE_DIRS covers tests/ and coverage/', () => {
   const FIXTURE_FM = 'description: planted fixture\noutput-dir: dist/commands\n';
@@ -803,7 +807,9 @@ describe('a generator host must carry TWO frontmatter blocks', () => {
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
       expect(run.combined).toContain('no second frontmatter block');
       expect(run.combined).toContain('TWO leading frontmatter blocks');
-      expect(run.combined).toContain('lonely.mds');
+      // Repo-relative, not a bare basename: two host directories can hold the
+      // same basename, so the failure label must say which file failed.
+      expect(run.combined).toContain(path.join('src', 'assets', 'agents', 'lonely.mds'));
       expect(
         await readIfPresent(path.join(fakeRoot, 'dist', 'agents', 'lonely.md')),
         'a headerless agent must never be written',
@@ -818,6 +824,53 @@ describe('a generator host must carry TWO frontmatter blocks', () => {
       expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
       const out = await readIfPresent(path.join(fakeRoot, 'dist', 'agents', 'git.md'));
       expect(out!.startsWith('---\nname: Git\n')).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. the whole-repo walk is depth-bounded and fails loudly at the bound
+// ---------------------------------------------------------------------------
+//
+// Discovery recurses the whole repo, so it carries a fixed upper bound like
+// every other loop in the project. The bound throws rather than truncating: a
+// host silently skipped for being too deep compiles nothing while the build
+// still reports success, which is a vacuous green (avoids PF-018).
+
+describe('the whole-repo walk is depth-bounded', () => {
+  /** Plant a compilable command host in `<fakeRoot>/d1/d2/…/d{levels}`. */
+  async function plantHostAtDepth(fakeRoot: string, levels: number, name: string): Promise<void> {
+    const dir = path.join(fakeRoot, ...Array.from({ length: levels }, (_, i) => `d${i + 1}`));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, `${name}.mds`),
+      `---\ndescription: planted at depth ${levels}\noutput-dir: dist/commands\n---\n\n# ${name}\n\nBody line.\n`,
+      'utf-8',
+    );
+  }
+
+  it('a host past the depth bound fails the build, naming the bound', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await plantHostAtDepth(fakeRoot, 13, 'too-deep');
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain('exceeds the walk bound of 12 levels');
+      expect(
+        await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'too-deep.md')),
+        'a host past the bound must not be compiled',
+      ).toBeNull();
+    });
+  });
+
+  it('non-vacuity: the same host one level shallower is discovered and compiled', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await plantHostAtDepth(fakeRoot, 12, 'deep-enough');
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+      expect(
+        await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'deep-enough.md')),
+        'a host within the bound must still be discovered and compiled',
+      ).not.toBeNull();
     });
   });
 });

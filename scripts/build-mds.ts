@@ -2,7 +2,8 @@
 /**
  * Unified MDS command compilation script
  *
- * Discovers every `.mds` file in the repo that declares a non-empty `output-dir:`
+ * Discovers every `.mds` file in the repo (walked to a bounded depth — see
+ * MAX_WALK_DEPTH) that declares a non-empty `output-dir:`
  * frontmatter key and compiles it to `{output-dir}/{name}.md`. Files without
  * `output-dir:` are treated as partials and skipped (they are imported by hosts).
  * The emitted name is the source basename unless the host declares
@@ -92,9 +93,13 @@ const ROOT = process.env['DEVFLOW_MDS_ROOT']
 /**
  * Directories skipped during the whole-repo walk.
  *
- * `tests` and `coverage` are ignored because the build's own test suite plants
- * .mds fixtures that declare `output-dir:`. Without the ignore they would be
- * discovered by the whole-repo walk and compiled into the real dist/ tree.
+ * `tests` and `coverage` are ignored so that a .mds file committed under either
+ * can never be compiled into the real dist/ tree: a .mds there is a fixture or a
+ * coverage artifact, never a shipped host, and discovery has no other way to
+ * tell the two apart. The skip is by directory NAME, so it holds under
+ * DEVFLOW_MDS_ROOT too — a fixture host planted at `<tmpRoot>/tests/` is
+ * likewise invisible to the walk, which is the same rule and not an exception
+ * to it.
  */
 const IGNORE_DIRS = new Set([
   "node_modules",
@@ -134,22 +139,75 @@ function formatMdsError(err: unknown, sourcePath: string): string {
   return String(err);
 }
 
-/** Yield every *.mds file under dir, skipping IGNORE_DIRS. */
-function* walkMds(dir: string): Generator<string> {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+/**
+ * Maximum directory depth the walk descends, counting ROOT as depth 0.
+ *
+ * The shipped tree needs far less: the deepest .mds lives at depth 4
+ * (src/assets/commands/_partials/) and the deepest directory under src/assets/
+ * at all is depth 6 (src/assets/skills/compliance/frameworks/<id>/), so 12
+ * leaves roughly double the headroom any plausible layout requires.
+ *
+ * It is a bound that fails, not a filter that truncates. A host skipped for
+ * being too deep compiles nothing while the build still prints its counts and
+ * exits 0 — the artifact is simply missing, and no test can see the difference
+ * between "not there" and "never looked" (avoids PF-018). Exceeding the bound
+ * therefore throws, naming the bound and the offending directory.
+ */
+const MAX_WALK_DEPTH = 12;
+
+/**
+ * Yield every *.mds file under dir, skipping IGNORE_DIRS.
+ *
+ * Bounded by MAX_WALK_DEPTH so the recursion has a fixed upper bound like every
+ * other loop in the project — a directory cycle (symlink loop) or a runaway
+ * tree fails loudly instead of spinning. ENOENT/ENOTDIR on readdir is tolerated:
+ * the entry can vanish or turn out not to be a directory between the parent's
+ * readdir and this call. Every other error is rethrown.
+ */
+function* walkMds(dir: string, depth = 0): Generator<string> {
+  if (depth > MAX_WALK_DEPTH) {
+    throw new Error(
+      `${path.relative(ROOT, dir) || dir}: directory nesting exceeds the walk bound of ` +
+      `${MAX_WALK_DEPTH} levels — a .mds host at or below this depth would never be ` +
+      `discovered. Move it shallower, or raise MAX_WALK_DEPTH in scripts/build-mds.ts.`,
+    );
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return;
+    throw err;
+  }
+
+  for (const entry of entries) {
     if (IGNORE_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      yield* walkMds(full);
+      yield* walkMds(full, depth + 1);
     } else if (entry.isFile() && entry.name.endsWith(".mds")) {
       yield full;
     }
   }
 }
 
+/**
+ * The leading `---…---` frontmatter block: the whole block in match[0], its
+ * inner text in match[1].
+ *
+ * One constant, two readers — frontmatterBlock takes the inner text, and
+ * stripGeneratorFrontmatter takes the block's length — so the shape of a
+ * frontmatter block is defined once in this file rather than drifting between
+ * them. No `g`/`y` flag, so the shared RegExp object carries no lastIndex state
+ * between calls.
+ */
+const LEADING_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+
 /** Extract the raw `---…---` frontmatter block, or null if absent. */
 function frontmatterBlock(text: string): string | null {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+  const match = LEADING_BLOCK_RE.exec(text);
   return match ? match[1] : null;
 }
 
@@ -237,7 +295,7 @@ function stripBuildKeys(compiled: string): string {
  */
 function stripGeneratorFrontmatter(compiled: string, sourcePath: string): string {
   const rel = path.relative(ROOT, sourcePath);
-  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(compiled);
+  const match = LEADING_BLOCK_RE.exec(compiled);
   if (!match) {
     throw new Error(
       `${rel}: generator host output has no leading frontmatter block to strip`,
@@ -487,7 +545,8 @@ async function main(): Promise<void> {
   if (hosts.length === 0) {
     console.error(
       "ERROR: No MDS host files discovered. " +
-      "Ensure src/assets/commands/*.mds files declare output-dir: in their frontmatter.",
+      "Ensure .mds host files (src/assets/commands/, src/assets/agents/) declare " +
+      "output-dir: in their frontmatter.",
     );
     process.exit(1);
   }
