@@ -3,17 +3,37 @@
  * Unified MDS command compilation script
  *
  * Discovers every `.mds` file in the repo that declares a non-empty `output-dir:`
- * frontmatter key and compiles it to `{output-dir}/{basename}.md`. Files without
+ * frontmatter key and compiles it to `{output-dir}/{name}.md`. Files without
  * `output-dir:` are treated as partials and skipped (they are imported by hosts).
+ * The emitted name is the source basename unless the host declares
+ * `name-template:`, in which case that value is used.
  *
  * Hard-fails the entire build on any compile error, ensuring a broken or stale
  * command never ships. Errors are reported with the mds::* code, message, and
  * source span for quick diagnosis.
  *
- * Dest safety: the parent directory of `output-dir` (e.g. `dist/`) must already
- * exist — if it does not, the build exits 1 with a "typo?" message. Only the
- * final `commands/` leaf is auto-created. This catches `output-dir` typos
- * before they silently write to unexpected locations.
+ * Two host kinds, distinguished by their destination:
+ *
+ *   - Command hosts (`output-dir: dist/commands`) declare `output-dir:` inside
+ *     their single, real frontmatter block. Only that key is stripped, so every
+ *     other key keeps its bytes exactly (stripOutputDirKey).
+ *
+ *   - Generator hosts (`output-dir: dist/agents`) carry TWO leading frontmatter
+ *     blocks: block 1 exists only to steer the build, block 2 is the artifact's
+ *     real frontmatter. The whole of block 1 is stripped after compilation
+ *     (stripGeneratorFrontmatter), leaving block 2 — which the MDS compiler
+ *     treats as ordinary body text — as the artifact's frontmatter, with the
+ *     blank line that follows it preserved.
+ *
+ * Both strips run AFTER compileFile: the compiler emits a frontmatter block at
+ * byte offset 0 verbatim (it is never interpolated), so block 1 survives
+ * compilation unchanged and is removed from the compiled bytes.
+ *
+ * Dest safety: `output-dir` must resolve to one of the two allowlisted
+ * directories (src/core/mds-variants.ts). A typo, a non-canonical spelling, or a
+ * path that escapes the repo root exits 1 rather than silently writing to an
+ * unexpected location. The emitted filename is validated by the same module
+ * before it is joined onto the destination.
  *
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
@@ -27,6 +47,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { init, compileFile, isMdsError } from "@mdscript/mds";
+import { validateOutputName, resolveOutputDir } from "../src/core/mds-variants.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -36,7 +57,13 @@ const ROOT = process.env['DEVFLOW_MDS_ROOT']
   ? path.resolve(process.env['DEVFLOW_MDS_ROOT'])
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Directories skipped during the whole-repo walk. */
+/**
+ * Directories skipped during the whole-repo walk.
+ *
+ * `tests` and `coverage` are ignored because the build's own test suite plants
+ * .mds fixtures that declare `output-dir:`. Without the ignore they would be
+ * discovered by the whole-repo walk and compiled into the real dist/ tree.
+ */
 const IGNORE_DIRS = new Set([
   "node_modules",
   "dist",
@@ -45,12 +72,20 @@ const IGNORE_DIRS = new Set([
   ".claude",
   ".release",
   "tmp",
+  "tests",
+  "coverage",
 ]);
+
+/** Absolute destination that identifies a generator host (whole-block strip). */
+const AGENTS_OUT_ABS = path.resolve(ROOT, "dist", "agents");
 
 interface HostEntry {
   file: string;
   outputDir: string;
+  /** Source basename, used as the output name when no name-template: is declared. */
   basename: string;
+  /** Declared `name-template:` value, or null when the key is absent. */
+  nameTemplate: string | null;
 }
 
 interface CompileOutcome {
@@ -89,17 +124,24 @@ function frontmatterBlock(text: string): string | null {
   return match ? match[1] : null;
 }
 
+/** Frontmatter keys the build itself consumes. Both are literal `[a-z-]` names. */
+type BuildKey = "output-dir" | "name-template";
+
 /**
- * Read the `output-dir:` value from a frontmatter block.
+ * Read a build-owned scalar key from a frontmatter block.
+ *
+ * Deliberately a scalar regex, not a YAML parse: the build must not gain a YAML
+ * dependency, and every key it reads is a plain single-line string.
  *
  * Returns the raw (untrimmed) value when the key is present — including an empty
  * string when the key is present but has no value (`output-dir:` with nothing
  * after the colon). Returns null only when the key is genuinely absent, which is
- * how a partial is distinguished from a host. The empty-value case is a host with
- * a malformed key and is hard-failed by the caller, per the discovery contract.
+ * how a partial is distinguished from a host. For `output-dir:` the empty-value
+ * case is a host with a malformed key and is hard-failed by the caller, per the
+ * discovery contract.
  */
-function readOutputDir(block: string): string | null {
-  const match = /^output-dir:[ \t]*(.*?)[ \t]*$/m.exec(block);
+function readFrontmatterKey(block: string, key: BuildKey): string | null {
+  const match = new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`, "m").exec(block);
   return match ? match[1] : null;
 }
 
@@ -123,6 +165,29 @@ function stripOutputDirKey(compiled: string): string {
   );
 }
 
+/**
+ * Strip the entire leading `---…---` block from compiled generator-host output.
+ *
+ * A generator host's block 1 exists only to steer the build; block 2 is the
+ * artifact's real frontmatter, which the compiler emitted as ordinary body text
+ * (only a block at byte offset 0 is treated as frontmatter). Removing block 1
+ * promotes block 2 into place with the blank line after it intact.
+ *
+ * Throws when no leading block is present. That cannot happen for a discovered
+ * host — discovery found `output-dir:` in exactly this block — so its absence
+ * means the compiler moved bytes it was expected to emit verbatim, which must
+ * fail the build rather than ship a headerless artifact.
+ */
+function stripGeneratorFrontmatter(compiled: string, sourcePath: string): string {
+  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(compiled);
+  if (!match) {
+    throw new Error(
+      `${path.relative(ROOT, sourcePath)}: generator host output has no leading frontmatter block to strip`,
+    );
+  }
+  return compiled.slice(match[0].length);
+}
+
 interface DiscoveryResult {
   hosts: HostEntry[];
   /** Total .mds files seen, including partials (files without output-dir:). */
@@ -138,47 +203,67 @@ function discoverHosts(): DiscoveryResult {
     const text = fs.readFileSync(file, "utf-8");
     const block = frontmatterBlock(text);
     if (!block) continue;
-    const outputDir = readOutputDir(block);
+    const outputDir = readFrontmatterKey(block, "output-dir");
     if (outputDir === null) continue;
     if (outputDir.trim() === "") {
       console.error(`ERROR: ${path.relative(ROOT, file)}: output-dir: is empty — must be a non-empty path`);
       process.exit(1);
     }
+    const nameTemplate = readFrontmatterKey(block, "name-template");
     hosts.push({
       file,
       outputDir: outputDir.trim(),
       basename: path.basename(file, ".mds"),
+      nameTemplate: nameTemplate === null ? null : nameTemplate.trim(),
     });
   }
   return { hosts, totalCount };
 }
 
 async function compileHost(host: HostEntry): Promise<CompileOutcome> {
-  const outAbs = path.resolve(ROOT, host.outputDir);
+  const rel = path.relative(ROOT, host.file);
 
-  // Path-escape guard: output-dir must resolve under ROOT.
-  if (!outAbs.startsWith(ROOT + path.sep) && outAbs !== ROOT) {
-    throw new Error(
-      `${path.relative(ROOT, host.file)}: output-dir '${host.outputDir}' escapes the repo root`,
-    );
-  }
-
-  // Dest safety: output-dir must be dist/commands — a typo'd value hard-fails.
-  const expectedOutputDir = 'dist/commands';
-  if (host.outputDir !== expectedOutputDir) {
+  // Dest safety: output-dir must resolve to an allowlisted directory under ROOT.
+  // The decision is made by the pure core module; this shell renders the errors
+  // and owns every exit.
+  const dirResult = resolveOutputDir(ROOT, host.outputDir);
+  if (!dirResult.ok) {
+    if (dirResult.error.kind === "escapes-root") {
+      throw new Error(
+        `${rel}: output-dir '${host.outputDir}' escapes the repo root`,
+      );
+    }
+    const expected = dirResult.error.allowed.join("' or '");
     console.error(
-      `ERROR: ${path.relative(ROOT, host.file)}: output-dir '${host.outputDir}' is not the expected '${expectedOutputDir}' — typo?`,
+      `ERROR: ${rel}: output-dir '${host.outputDir}' is not the expected '${expected}' — typo?`,
+    );
+    process.exit(1);
+  }
+  const outAbs = dirResult.value;
+
+  // Filename safety: the name that will be emitted is validated before it is
+  // joined onto the destination, so no host can write outside outAbs.
+  const declaredName = host.nameTemplate ?? host.basename;
+  const nameResult = validateOutputName(declaredName);
+  if (!nameResult.ok) {
+    console.error(
+      `ERROR: ${rel}: output filename '${declaredName}' is not a valid output filename ` +
+      `(${nameResult.error.kind}) — must match [a-z0-9][a-z0-9._-]{0,63}`,
     );
     process.exit(1);
   }
 
-  // Auto-create only the final commands/ leaf.
+  // Auto-create only the final destination leaf.
   fs.mkdirSync(outAbs, { recursive: true });
 
-  const dest = path.join(outAbs, `${host.basename}.md`);
+  const dest = path.join(outAbs, `${nameResult.value}.md`);
 
   const result = await compileFile(host.file);
-  const cleaned = stripOutputDirKey(result.output);
+  // Generator hosts shed their whole steering block; command hosts shed only the
+  // output-dir: key so every other byte of their frontmatter is preserved.
+  const cleaned = outAbs === AGENTS_OUT_ABS
+    ? stripGeneratorFrontmatter(result.output, host.file)
+    : stripOutputDirKey(result.output);
 
   // Atomic write: write to a temp file then rename into place so concurrent
   // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
