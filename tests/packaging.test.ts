@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { DIST_COMMAND_FILES } from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -278,8 +279,8 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  * AC-C3: The published tarball must:
  *  (a) Contain no plugins/ or shared/ source-tree paths — these directories
  *      only exist in the git repo and must never be published.
- *  (b) Contain exactly 14 dist/commands/*.md files — one per registered command.
- *      If the count changes, this guard forces an intentional update.
+ *  (b) Contain exactly the dist/commands/*.md set named in tests/fixtures/mds-manifest.ts.
+ *      If the set changes, this guard forces an intentional manifest update.
  *
  * Per PF-008: assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -322,18 +323,23 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toHaveLength(0);
   });
 
-  it('tarball contains exactly 14 dist/commands/*.md files (AC-C3)', () => {
+  it('tarball contains exactly the manifest\'s dist/commands/*.md set (AC-C3)', () => {
     const files = getPackFiles();
     expect(
       files.length,
       'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
     ).toBeGreaterThan(0);
-    const commandMds = files.filter(f => /^dist\/commands\/[^/]+\.md$/.test(f));
+    const commandMds = files
+      .filter(f => /^dist\/commands\/[^/]+\.md$/.test(f))
+      .map(f => f.replace(/^dist\/commands\//, ''))
+      .sort();
+    // Set equality against the shared manifest, not a bare count: a rename plus an
+    // addition in the same commit leaves the count at 14 and the tarball wrong.
     expect(
       commandMds,
-      `Expected 14 dist/commands/*.md files in tarball, got ${commandMds.length}.\n` +
+      `Tarball dist/commands/*.md set does not match tests/fixtures/mds-manifest.ts.\n` +
       `Files found: ${commandMds.join(', ')}\n` +
-      `If a command was added or removed, update this count intentionally.`,
-    ).toHaveLength(14);
+      `If a command was added or removed, update the manifest intentionally.`,
+    ).toEqual([...DIST_COMMAND_FILES].sort());
   });
 });

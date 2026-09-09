@@ -5,18 +5,18 @@
     {
       "id": "dist-host-count",
       "floor": 13,
-      "pattern": "toHaveLength(13)",
+      "pattern": "toBeGreaterThanOrEqual(13)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of compiled MDS host commands in dist/commands/ (ALL_HOSTS)"
+      "description": "Number of compiled MDS host commands in dist/commands/ (MDS_COMMAND_HOSTS). Re-spelled from toHaveLength(13) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts: the floor is now the manifest's length, asserted alongside the set. Same floor, new spelling."
     },
     {
       "id": "partial-count",
       "floor": 11,
-      "pattern": "toHaveLength(11)",
+      "pattern": "toBeGreaterThanOrEqual(11)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of _partials/*.mds partial files"
+      "description": "Number of _partials/*.mds partial files (MDS_PARTIALS). Re-spelled from toHaveLength(11) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts. Same floor, new spelling."
     },
     {
       "id": "dist-files-count",

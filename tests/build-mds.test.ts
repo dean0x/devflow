@@ -24,6 +24,13 @@ import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { init, compile, isMdsError } from '@mdscript/mds';
+import {
+  KNOWLEDGE_COMMAND_HOSTS,
+  DYNAMIC_COMMAND_HOSTS,
+  MDS_COMMAND_HOSTS,
+  MDS_PARTIALS,
+  DIST_COMMAND_FILES,
+} from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
@@ -33,29 +40,20 @@ const DIST_COMMANDS = 'dist/commands';
 /** Path to the local tsx binary (avoids npx install in temp dirs). */
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 
-/** The 9 knowledge host basenames (all compile to dist/commands). */
-const KNOWLEDGE_HOSTS = [
-  'implement', 'plan', 'resolve', 'code-review', 'self-review',
-  'research', 'bug-analysis', 'explore', 'debug',
-] as const;
-
-/** The 4 dynamic host basenames (all compile to dist/commands). */
-const DYNAMIC_HOSTS = [
-  'dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets',
-] as const;
-
-const ALL_HOSTS = [...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS] as const;
-
+// Names come from the shared manifest (tests/fixtures/mds-manifest.ts) so the four
+// sites that used to spell a bare count literal compare against ONE definition.
+// The aliases keep the long-standing local vocabulary of this file intact.
+//
 // DIST_FILES = all 14 deployed commands (13 compiled MDS hosts + 1 hand-authored).
 // release.md is hand-authored and stays so permanently — the divergence is deliberate
 // and recorded in .devflow/features/dynamic-workflow-engine/KNOWLEDGE.md (SG-13, §14.5).
 // Scope rule (§14.5):
 //   - compilation guards (escaped braces, un-expanded call sites) → ALL_HOSTS scope
 //   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
-const DIST_FILES = [
-  ...ALL_HOSTS.map(h => `${h}.md`),
-  'release.md',
-] as const;
+const KNOWLEDGE_HOSTS = KNOWLEDGE_COMMAND_HOSTS;
+const DYNAMIC_HOSTS = DYNAMIC_COMMAND_HOSTS;
+const ALL_HOSTS = MDS_COMMAND_HOSTS;
+const DIST_FILES = DIST_COMMAND_FILES;
 
 // ---------------------------------------------------------------------------
 // Shared MDS initialisation — required before compile calls
@@ -75,12 +73,44 @@ async function ensureInit(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('MDS host discovery', () => {
-  it('commands/ contains exactly 13 host .mds files (9 knowledge + 4 dynamic)', async () => {
-    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
-    const hostFiles = entries.filter(
-      e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
-    );
-    expect(hostFiles).toHaveLength(13);
+  /**
+   * Named collector: .mds basenames directly inside `dir`, split into hosts
+   * (no `_` prefix) and partials. Recursive by design — a partial parked in a
+   * subdirectory is still a partial, and the flat readdir that preceded this
+   * collector could not see one. Used by the manifest assertions AND by the
+   * known-bad probes, so a probe cannot pass against a shadow implementation.
+   */
+  async function collectMdsNames(dir: string, depth = 0): Promise<{
+    hosts: string[]; partials: string[]; subdirs: string[];
+  }> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const hosts: string[] = [];
+    const partials: string[] = [];
+    const subdirs: string[] = [];
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        subdirs.push(e.name);
+        if (depth < 4) {
+          const nested = await collectMdsNames(path.join(dir, e.name), depth + 1);
+          hosts.push(...nested.hosts);
+          partials.push(...nested.partials);
+        }
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith('.mds')) continue;
+      const base = path.basename(e.name, '.mds');
+      (base.startsWith('_') ? partials : hosts).push(base);
+    }
+    return { hosts: hosts.sort(), partials: partials.sort(), subdirs: subdirs.sort() };
+  }
+
+  it('commands/ holds exactly the manifest\'s 13 command hosts (both directions)', async () => {
+    // Set equality, not a count. A count stays green when one host is renamed and
+    // another added in the same commit; naming the set is what pins the roster.
+    const { hosts } = await collectMdsNames(COMMANDS_DIR);
+    expect(hosts).toEqual([...MDS_COMMAND_HOSTS].sort());
+    // Manifest length floor — floors never decrease (numeric-floors.json: dist-host-count).
+    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(13);
   });
 
   it('each expected host .mds exists in commands/', async () => {
@@ -93,10 +123,38 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 11 partials (no output-dir:)', async () => {
-    const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
-    const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(11);
+  it('commands/_partials/ holds exactly the manifest\'s 11 partials (both directions)', async () => {
+    const { partials } = await collectMdsNames(PARTIALS_DIR);
+    expect(partials).toEqual([...MDS_PARTIALS].sort());
+    // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
+    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(11);
+  });
+
+  it('commands/_partials/ is flat — no subdirectories', async () => {
+    // The flat readdir this replaced could not distinguish "no subdirectories"
+    // from "subdirectories present but unread". Assert the property directly.
+    const { subdirs } = await collectMdsNames(PARTIALS_DIR);
+    expect(
+      subdirs,
+      `_partials/ must stay flat; nested partials would be invisible to any flat reader: ${subdirs.join(', ')}`,
+    ).toHaveLength(0);
+  });
+
+  it('known-bad probe: a nested partial and a subdirectory are both detected', async () => {
+    // Mechanic 2 (H10): a seeded temp tree, never the real _partials/.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-partials-probe-'));
+    try {
+      await fs.writeFile(path.join(tmp, '_flat.mds'), 'x', 'utf-8');
+      await fs.mkdir(path.join(tmp, 'nested'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'nested', '_buried.mds'), 'x', 'utf-8');
+
+      const { partials, subdirs } = await collectMdsNames(tmp);
+      expect(subdirs, 'the subdirectory assertion must fire on a seeded subdir').toContain('nested');
+      expect(partials, 'the recursive collector must see a partial one level down').toContain('_buried');
+      expect(partials).not.toEqual([...MDS_PARTIALS].sort());
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -485,13 +543,19 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('dist/commands/ contains exactly 14 .md files (13 compiled + 1 hand-authored)', async () => {
+  it('dist/commands/ holds exactly the manifest\'s 14 output files (both directions)', async () => {
     // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
+    // Set equality names which files must be there; the length pin below keeps
+    // the SG-13 divergence (14 deployed vs 13 compiled) explicit.
     const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
-    const mdFiles = files.filter(f => f.endsWith('.md'));
+    const mdFiles = files.filter(f => f.endsWith('.md')).sort();
     expect(
-      mdFiles.length,
-      `Expected 14 .md files in dist/commands/ (13 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+      mdFiles,
+      `dist/commands/ must hold exactly the manifest's output set, got: ${mdFiles.join(', ')}`,
+    ).toEqual([...DIST_COMMAND_FILES].sort());
+    expect(
+      DIST_COMMAND_FILES.length,
+      'DIST_COMMAND_FILES = 13 compiled hosts + release.md (SG-13, permanent divergence)',
     ).toBe(14);
   });
 });

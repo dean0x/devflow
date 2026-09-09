@@ -30,17 +30,18 @@ import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 
 import { requireDistFiles, requireDistFile, resolveAgentSource } from './helpers.js';
+import {
+  MDS_COMMAND_HOSTS,
+  MDS_GENERATOR_HOSTS,
+  MDS_PARTIALS,
+} from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 const SCRIPT = path.join(ROOT, 'scripts', 'build-mds.ts');
 
 /** The 13 basenames compiled from .mds hosts into dist/commands/. */
-const COMPILED_COMMANDS = [
-  'implement', 'plan', 'resolve', 'code-review', 'self-review',
-  'research', 'bug-analysis', 'explore', 'debug',
-  'dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets',
-] as const;
+const COMPILED_COMMANDS = MDS_COMMAND_HOSTS;
 
 interface BuildRun {
   status: number | null;
@@ -426,4 +427,91 @@ describe('IGNORE_DIRS covers tests/ and coverage/', () => {
       expect(run.combined).toMatch(/1 host\(s\) to compile/);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// 6. printed host/partial counts agree with the manifest (AC-1.8)
+// ---------------------------------------------------------------------------
+//
+// The build prints two counts on every run:
+//
+//     {partialCount} partial(s) skipped (no output-dir:)
+//     {hosts.length} host(s) to compile:
+//
+// Until now nothing read them: `grep 'partial(s) skipped' tests/` returned zero
+// hits, so a discovery regression that silently dropped a host or reclassified a
+// host as a partial would print the wrong number into a log nobody asserted on.
+// discoverHosts() cannot be imported (build-mds.ts is a tsx script excluded from
+// tsc), so the printed output is the seam — which is also the seam a human reads.
+
+describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
+  /**
+   * Named collector: the two counts the build prints. Throws when either line is
+   * absent — a missing line must fail loudly, never parse as 0 (PF-018).
+   * Called by the real-root assertion AND by the seeded-tree probe below.
+   */
+  function parsePrintedCounts(output: string): { hosts: number; partials: number } {
+    const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
+    const partialMatch = /^\s*(\d+) partial\(s\) skipped \(no output-dir:\)/m.exec(output);
+    if (!hostMatch) {
+      throw new Error(`build output has no "N host(s) to compile:" line:\n${output}`);
+    }
+    if (!partialMatch) {
+      throw new Error(`build output has no "N partial(s) skipped" line:\n${output}`);
+    }
+    return { hosts: Number(hostMatch[1]), partials: Number(partialMatch[1]) };
+  }
+
+  /** Expected totals, derived from the manifest — never retyped as literals. */
+  const EXPECTED_HOSTS = MDS_COMMAND_HOSTS.length + MDS_GENERATOR_HOSTS.length;
+  const EXPECTED_PARTIALS = MDS_PARTIALS.length;
+
+  it('a real build prints the manifest host and partial counts', () => {
+    const run = runRealBuild();
+    expect(run.status, `real build should exit 0.\n${run.combined}`).toBe(0);
+
+    const counts = parsePrintedCounts(run.combined);
+    expect(
+      counts.hosts,
+      `build printed ${counts.hosts} host(s); the manifest names ${MDS_COMMAND_HOSTS.length} command ` +
+      `host(s) + ${MDS_GENERATOR_HOSTS.length} generator host(s). Update tests/fixtures/mds-manifest.ts ` +
+      `if a host was added or removed.`,
+    ).toBe(EXPECTED_HOSTS);
+    expect(
+      counts.partials,
+      `build printed ${counts.partials} skipped partial(s); the manifest names ${EXPECTED_PARTIALS}.`,
+    ).toBe(EXPECTED_PARTIALS);
+  }, 120_000);
+
+  it('known-bad probe: one extra host in a copied tree moves the printed count off the manifest', async () => {
+    // Mechanic 3 (H10): a DEVFLOW_MDS_ROOT copy of the real .mds tree, seeded with
+    // one extra host. The real src/ and dist/ are never written to.
+    await withFakeRoot(async fakeRoot => {
+      const srcCommands = path.join(ROOT, 'src', 'assets', 'commands');
+      const srcAgents = path.join(ROOT, 'src', 'assets', 'agents');
+      await fs.cp(srcCommands, path.join(fakeRoot, 'src', 'assets', 'commands'), { recursive: true });
+      await fs.cp(srcAgents, path.join(fakeRoot, 'src', 'assets', 'agents'), { recursive: true });
+
+      // Baseline: the copied tree reproduces the manifest counts exactly, so the
+      // probe below is measuring the seeded host and nothing else.
+      const baseline = runBuild(fakeRoot);
+      expect(baseline.status, `copied-tree build should exit 0.\n${baseline.combined}`).toBe(0);
+      const baseCounts = parsePrintedCounts(baseline.combined);
+      expect(baseCounts.hosts).toBe(EXPECTED_HOSTS);
+      expect(baseCounts.partials).toBe(EXPECTED_PARTIALS);
+
+      // RED: seed one extra host.
+      await writeCommandHost(fakeRoot, 'seeded-extra-host', 'description: seeded\noutput-dir: dist/commands\n');
+      const seeded = runBuild(fakeRoot);
+      expect(seeded.status, `seeded build should still exit 0.\n${seeded.combined}`).toBe(0);
+      const seededCounts = parsePrintedCounts(seeded.combined);
+
+      expect(
+        seededCounts.hosts,
+        'the printed host count must move when a host is added — otherwise the assertion above is vacuous',
+      ).not.toBe(EXPECTED_HOSTS);
+      expect(seededCounts.hosts).toBe(EXPECTED_HOSTS + 1);
+      expect(seededCounts.partials, 'a host must not be miscounted as a partial').toBe(EXPECTED_PARTIALS);
+    });
+  }, 180_000);
 });
