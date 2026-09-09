@@ -323,7 +323,10 @@ describe('agent resolution origins in the real tree (AC-1.6, AC-1.3)', () => {
   it('the compiled agent resolves with origin=dist', () => {
     // The dist-preferred branch of resolveAgentSource had no live consumer until
     // dist/agents/ existed. This asserts it is actually the branch being taken.
-    for (const name of agentSourceNames(agentsDir(), '.mds')) {
+    const hosts = agentSourceNames(agentsDir(), '.mds')
+    expect(hosts.length, 'no generator host present — this guard would be vacuous').toBeGreaterThan(0)
+
+    for (const name of hosts) {
       expect(resolveAgentSource(name).origin, `${name} must resolve from dist/agents/`).toBe('dist')
     }
   })
@@ -359,6 +362,16 @@ describe('agent resolution origins in the real tree (AC-1.6, AC-1.3)', () => {
 // AC-1.2 — Phase 1 built plumbing, not variant expansion
 // ---------------------------------------------------------------------------
 
+interface ForbiddenConstruct {
+  /** How the construct is named in the failure message and in the probe. */
+  label: string
+  /** Anchored matcher — the shape the construct actually takes in source. */
+  pattern: RegExp
+  /** A realistic instance of the construct the collector must flag (ADR-024). */
+  probe: string
+  appliesTo: 'all' | 'mds'
+}
+
 /**
  * Named collector: forbidden Phase-2 constructs found in a corpus.
  *
@@ -366,31 +379,47 @@ describe('agent resolution origins in the real tree (AC-1.6, AC-1.3)', () => {
  * references, which is where variant expansion, conditionals and templated file
  * naming belong. Pinning their absence now means their arrival is a reviewed
  * change rather than something that accreted through Phase 1 (clause iii).
+ *
+ * Each construct is matched by an ANCHORED regex, never a bare substring. The
+ * corpus deliberately includes src/core/mds-variants.ts and scripts/build-mds.ts
+ * — the two files whose entire subject is this machinery — so a substring like
+ * `variants:` or `tracker-` fires on any docblock that so much as names what
+ * Phase 2 will add, forcing authors to word around their own guard. The anchor
+ * is the shape the construct has in real source (a YAML key at line start, a
+ * call, a directive, a generated filename), so prose about Phase 2 stays legal
+ * and Phase-2 code does not.
  */
 function collectForbiddenConstructs(
   corpus: Array<{ name: string; content: string }>,
-  forbidden: ReadonlyArray<{ token: string; appliesTo: 'all' | 'mds' }>,
+  forbidden: ReadonlyArray<ForbiddenConstruct>,
 ): string[] {
   const violations: string[] = []
   for (const { name, content } of corpus) {
-    for (const { token, appliesTo } of forbidden) {
+    for (const { label, pattern, appliesTo } of forbidden) {
       if (appliesTo === 'mds' && !name.endsWith('.mds')) continue
-      if (content.includes(token)) violations.push(`${name}: contains '${token}'`)
+      if (pattern.test(content)) violations.push(`${name}: contains '${label}'`)
     }
   }
   return violations
 }
 
-const FORBIDDEN_PHASE2_CONSTRUCTS = [
-  { token: '@if', appliesTo: 'all' },
-  { token: 'variants:', appliesTo: 'all' },
-  { token: 'expandVariants', appliesTo: 'all' },
-  { token: '(module, op)', appliesTo: 'all' },
-  { token: 'tracker-', appliesTo: 'all' },
-  { token: '{provider}.md', appliesTo: 'all' },
-  { token: '@import', appliesTo: 'mds' },
-  { token: '@define', appliesTo: 'mds' },
-] as const
+const FORBIDDEN_PHASE2_CONSTRUCTS: ReadonlyArray<ForbiddenConstruct> = [
+  // A conditional directive, not the letters 'if' after an '@'.
+  { label: '@if', pattern: /@if\b/, probe: '@if provider == "github"\n', appliesTo: 'all' },
+  // A frontmatter/YAML key at line start, not the word in a sentence.
+  { label: 'variants:', pattern: /^[ \t]*variants:/m, probe: 'variants:\n  - github\n', appliesTo: 'all' },
+  // A call (or a declaration), not a mention of the future expander.
+  { label: 'expandVariants(', pattern: /\bexpandVariants\s*\(/, probe: 'const out = expandVariants(host)\n', appliesTo: 'all' },
+  // The Phase-2 (module, op) dispatch signature, whitespace-tolerant.
+  { label: '(module, op)', pattern: /\(\s*module\s*,\s*op\s*\)/, probe: 'dispatch(module, op)\n', appliesTo: 'all' },
+  // A per-provider tracker FILE, not the adjective 'tracker-agnostic'.
+  { label: 'tracker-<provider>.md', pattern: /\btracker-[a-z0-9-]+\.mds?\b/, probe: 'see tracker-github.md for the mapping\n', appliesTo: 'all' },
+  // A templated output filename.
+  { label: '{provider}.md', pattern: /\{provider\}\.mds?\b/, probe: 'output-name: tracker-{provider}.md\n', appliesTo: 'all' },
+  // MDS directives — unanchored on purpose: anywhere in a host is Phase 2.
+  { label: '@import', pattern: /@import\b/, probe: '@import "./_partials/_tracker.mds"\n', appliesTo: 'mds' },
+  { label: '@define', pattern: /@define\b/, probe: '@define providerBlock()\n', appliesTo: 'mds' },
+]
 
 describe('AC-1.2: no variant expansion, conditionals, or provider templating in Phase 1', () => {
   function buildScopeCorpus(): Array<{ name: string; content: string }> {
@@ -425,17 +454,37 @@ describe('AC-1.2: no variant expansion, conditionals, or provider templating in 
   })
 
   it('known-bad probe: each forbidden construct is detected by the same collector', () => {
+    // Every entry carries the instance that must trip it, so anchoring a pattern
+    // without keeping it able to catch its own construct is a red test.
     for (const entry of FORBIDDEN_PHASE2_CONSTRUCTS) {
       const name = entry.appliesTo === 'mds' ? 'seeded.mds' : 'seeded.ts'
       const violations = collectForbiddenConstructs(
-        [{ name, content: `prefix ${entry.token} suffix\n` }],
+        [{ name, content: entry.probe }],
         FORBIDDEN_PHASE2_CONSTRUCTS,
       )
       expect(
-        violations.some(v => v.includes(entry.token)),
-        `collector must flag a seeded '${entry.token}'`,
+        violations.some(v => v.includes(entry.label)),
+        `collector must flag its own seeded '${entry.label}': ${JSON.stringify(entry.probe)}`,
       ).toBe(true)
     }
+  })
+
+  it('known-bad probe: prose naming a Phase-2 construct is not itself a violation', () => {
+    // The other half of the anchoring contract. The corpus contains the two build
+    // files this guard is about, so a docblock that describes what Phase 2 adds
+    // must stay legal — otherwise the guard taxes its own documentation, and the
+    // next author words around it instead of writing what they mean.
+    const prose = [
+      ' * The variants: key is a Phase-2 concept; no Phase-1 host declares one.',
+      ' * Output naming stays tracker-agnostic until Phase 2.',
+      ' * A future expander (expandVariants) will fan one host out per provider.',
+      ' * The module and op arguments arrive with the Phase-2 dispatch.',
+    ].join('\n')
+
+    expect(
+      collectForbiddenConstructs([{ name: 'seeded.ts', content: prose }], FORBIDDEN_PHASE2_CONSTRUCTS),
+      'anchored patterns must not fire on prose that merely names the construct',
+    ).toHaveLength(0)
   })
 
   it('known-bad probe: an mds-scoped token is not reported against a non-mds file', () => {

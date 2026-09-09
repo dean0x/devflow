@@ -51,6 +51,29 @@ function valueOf<T, E>(result: { ok: true; value: T } | { ok: false; error: E })
 }
 
 // ---------------------------------------------------------------------------
+// Hostile corpora — one definition each, shared by the rejection tests and by
+// the error-union completeness proofs in section 3.
+// ---------------------------------------------------------------------------
+//
+// Naming them here rather than inlining them is what makes the completeness
+// probes possible: a probe can narrow a corpus and show the assertion goes red,
+// which is the only evidence that the corpus (not the expectation list) is
+// carrying the load (PF-018).
+
+/** Every name validateOutputName must reject, the empty name included. */
+const NAME_CORPUS: readonly string[] = [
+  '', '..', '../x', 'a/b', 'a\\b', 'Git', 'a b', '-lead', 'a'.repeat(65),
+];
+
+/** Every output-dir declaration resolveOutputDir must reject. */
+const DIR_CORPUS: readonly string[] = [
+  'dist/wrong-dir', 'dist', 'dist/skills',
+  'dist/../..', '/tmp/elsewhere',
+  'dist/commands/', './dist/agents', 'dist/skills/../commands',
+  'dist\\commands',
+];
+
+// ---------------------------------------------------------------------------
 // 1. validateOutputName
 // ---------------------------------------------------------------------------
 
@@ -112,8 +135,21 @@ describe('validateOutputName', () => {
   });
 
   it('carries the offending name on every non-empty rejection', () => {
-    const err = errorOf(validateOutputName('a/b'));
-    expect(err.kind === 'empty' ? undefined : err.name).toBe('a/b');
+    // "every" means the whole rejection corpus, not one sample: the build quotes
+    // err.name back to the author, so a kind that forgot to carry it produces a
+    // message naming nothing. 'empty' is the one kind with no name to carry and
+    // is excluded by the test's own name.
+    const nonEmpty = NAME_CORPUS.filter(input => input !== '');
+    expect(nonEmpty.length, 'non-empty rejection corpus must not be empty (PF-018)').toBeGreaterThan(0);
+
+    for (const input of nonEmpty) {
+      const err = errorOf(validateOutputName(input));
+      expect(err.kind, `'${input}' must not be rejected as the empty kind`).not.toBe('empty');
+      expect(
+        err.kind === 'empty' ? undefined : err.name,
+        `the rejection of '${input}' must carry the offending name`,
+      ).toBe(input);
+    }
   });
 });
 
@@ -247,8 +283,11 @@ describe('resolveOutputDir (host variant)', () => {
 // ---------------------------------------------------------------------------
 //
 // A union member that no input can produce is dead code (ADR-003 clause iii).
-// These two tests are the non-vacuity proof: each declared kind is reached by a
-// concrete input, and no input reaches a kind outside the declared set.
+// The two assertions here are the non-vacuity proof — each declared kind is
+// reached by a concrete input, and no input reaches a kind outside the declared
+// set — and the two probes below prove those assertions can actually go red, in
+// both of the directions that matter: a declared kind nothing reaches, and a
+// corpus that stopped reaching one (PF-018, ADR-024).
 
 describe('Result error-union completeness', () => {
   const NAME_KINDS: ReadonlyArray<OutputNameError['kind']> = [
@@ -258,54 +297,98 @@ describe('Result error-union completeness', () => {
     'escapes-root', 'backslash-separator', 'non-canonical', 'not-allowlisted',
   ];
 
-  /** Named collector: every OutputNameError kind produced by the hostile corpus. */
-  function collectNameKinds(): Set<string> {
-    const corpus = ['', '..', '../x', 'a/b', 'a\\b', 'Git', 'a b', '-lead', 'a'.repeat(65)];
+  /** Named collector: every OutputNameError kind the given corpus produces. */
+  function collectNameKinds(corpus: readonly string[] = NAME_CORPUS): Set<string> {
+    expect(corpus.length, 'name corpus must be non-empty (PF-018)').toBeGreaterThan(0);
     const kinds = new Set<string>();
     for (const input of corpus) {
       const result = validateOutputName(input);
       if (!result.ok) kinds.add(result.error.kind);
     }
-    expect(corpus.length, 'name corpus must be non-empty (PF-018)').toBeGreaterThan(0);
     return kinds;
   }
 
-  /** Named collector: every OutputDirError kind produced by the hostile corpus. */
-  function collectDirKinds(): Set<string> {
-    const corpus = [
-      'dist/wrong-dir', 'dist', 'dist/skills',
-      'dist/../..', '/tmp/elsewhere',
-      'dist/commands/', './dist/agents', 'dist/skills/../commands',
-      'dist\\commands',
-    ];
+  /** Named collector: every OutputDirError kind the given corpus produces. */
+  function collectDirKinds(corpus: readonly string[] = DIR_CORPUS): Set<string> {
+    expect(corpus.length, 'dir corpus must be non-empty (PF-018)').toBeGreaterThan(0);
     const kinds = new Set<string>();
     for (const input of corpus) {
       const result = resolveOutputDir(ROOT, input);
       if (!result.ok) kinds.add(result.error.kind);
     }
-    expect(corpus.length, 'dir corpus must be non-empty (PF-018)').toBeGreaterThan(0);
     return kinds;
   }
 
+  interface CompletenessVerdict {
+    /** Declared kinds the corpus never reached — a dead member, or lost coverage. */
+    missing: string[];
+    /** Kinds the corpus reached that the declared union does not list. */
+    unexpected: string[];
+  }
+
+  /** The single verdict both the assertions and the probes below read. */
+  function completeness(
+    reached: ReadonlySet<string>,
+    declared: readonly string[],
+  ): CompletenessVerdict {
+    return {
+      missing: declared.filter(kind => !reached.has(kind)),
+      unexpected: [...reached].filter(kind => !declared.includes(kind)),
+    };
+  }
+
   it('every OutputNameError kind is reachable from a real input', () => {
-    expect([...collectNameKinds()].sort()).toEqual([...NAME_KINDS].sort());
+    const verdict = completeness(collectNameKinds(), NAME_KINDS);
+    expect(verdict.missing, 'declared OutputNameError kind(s) no corpus input reaches').toEqual([]);
+    expect(verdict.unexpected, 'OutputNameError kind(s) outside the declared union').toEqual([]);
   });
 
   it('every OutputDirError kind is reachable from a real input', () => {
-    expect([...collectDirKinds()].sort()).toEqual([...DIR_KINDS].sort());
+    const verdict = completeness(collectDirKinds(), DIR_KINDS);
+    expect(verdict.missing, 'declared OutputDirError kind(s) no corpus input reaches').toEqual([]);
+    expect(verdict.unexpected, 'OutputDirError kind(s) outside the declared union').toEqual([]);
   });
 
-  it('no input produces a kind outside the declared unions (known-bad probe)', () => {
-    // Known-bad sample: an undeclared kind added to the expected set must fail
-    // the completeness assertion above, proving it is not vacuous.
-    const withPhantom = new Set([...collectNameKinds(), 'phantom-kind']);
-    expect([...withPhantom].sort()).not.toEqual([...NAME_KINDS].sort());
+  it('known-bad probe: a declared kind nothing reaches turns the verdict red', () => {
+    // The direction that has teeth. Adding a phantom to the REACHED set would be
+    // different from the declared set by construction — true of any
+    // implementation, and therefore proof of nothing. Seeding it into the
+    // DECLARED set runs the real collector over the real corpus and asks whether
+    // the verdict the assertions above read notices that nothing produces it.
+    expect(completeness(collectNameKinds(), [...NAME_KINDS, 'phantom-kind']).missing)
+      .toEqual(['phantom-kind']);
+    expect(completeness(collectDirKinds(), [...DIR_KINDS, 'phantom-kind']).missing)
+      .toEqual(['phantom-kind']);
+  });
 
-    for (const kind of collectNameKinds()) {
-      expect(NAME_KINDS as readonly string[]).toContain(kind);
+  it('known-bad probe: narrowing the corpus turns the verdict red for exactly the dropped kind', () => {
+    // Proves the corpus carries the load rather than the expectation list: for
+    // every declared kind, dropping the inputs that produce it must make the
+    // completeness assertion fail, naming that kind and nothing else. A kind
+    // whose inputs can all be removed with the check still green was never
+    // being proved reachable in the first place.
+    for (const kind of NAME_KINDS) {
+      const narrowed = NAME_CORPUS.filter(input => {
+        const result = validateOutputName(input);
+        return result.ok || result.error.kind !== kind;
+      });
+      expect(narrowed.length, `narrowed name corpus for '${kind}' must stay non-empty`).toBeGreaterThan(0);
+      expect(
+        completeness(collectNameKinds(narrowed), NAME_KINDS).missing,
+        `dropping every NAME_CORPUS input that produces '${kind}' left the check green`,
+      ).toEqual([kind]);
     }
-    for (const kind of collectDirKinds()) {
-      expect(DIR_KINDS as readonly string[]).toContain(kind);
+
+    for (const kind of DIR_KINDS) {
+      const narrowed = DIR_CORPUS.filter(input => {
+        const result = resolveOutputDir(ROOT, input);
+        return result.ok || result.error.kind !== kind;
+      });
+      expect(narrowed.length, `narrowed dir corpus for '${kind}' must stay non-empty`).toBeGreaterThan(0);
+      expect(
+        completeness(collectDirKinds(narrowed), DIR_KINDS).missing,
+        `dropping every DIR_CORPUS input that produces '${kind}' left the check green`,
+      ).toEqual([kind]);
     }
   });
 

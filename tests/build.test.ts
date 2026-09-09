@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { promises as fs } from 'fs';
+import { promises as fs, existsSync } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
 import { resolveAgentSource, resolveAllAgents, splitFrontmatter } from './helpers.js';
@@ -44,17 +44,19 @@ describe('skill frontmatter integrity', () => {
 });
 
 describe('agent references', () => {
-  it('every agent referenced in plugins exists in src/assets/agents/', async () => {
-    const allAgents = getAllAgentNames();
-    for (const agent of allAgents) {
-      // Dist-first with a src fallback: a generated agent lives in dist/agents/,
-      // a hand-authored one in src/assets/agents/. The resolver throws loudly
-      // when neither location has it.
-      const agentFile = resolveAgentSource(agent).path;
-      await expect(
-        fs.access(agentFile),
-        `agent '${agent}' should exist in src/assets/agents/`,
-      ).resolves.toBeUndefined();
+  it('every agent referenced in plugins resolves to a file that exists', () => {
+    // Dist-first with a src fallback: a generated agent lives in dist/agents/,
+    // a hand-authored one in src/assets/agents/. resolveAgentSource is the one
+    // owner of that order and throws with a build hint when neither location
+    // has the agent — so the only thing left to assert is that the path it
+    // chose is on disk, and the message names that path, not a fixed directory
+    // the agent may not live in (ADR-003: state the end state).
+    for (const agent of getAllAgentNames()) {
+      const { path: agentFile, origin } = resolveAgentSource(agent);
+      expect(
+        existsSync(agentFile),
+        `agent '${agent}' resolved to ${path.relative(ROOT, agentFile)} (origin=${origin}), but that file does not exist`,
+      ).toBe(true);
     }
   });
 });
