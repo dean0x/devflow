@@ -28,7 +28,7 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
 import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
-import { agentsDir } from './assets.js';
+import { agentSourceDirs, type AgentSourceDirs } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
 import { isContainedIn } from './paths.js';
@@ -462,19 +462,19 @@ export function resolveEffective(
 // ---------------------------------------------------------------------------
 
 /**
- * Load shipped default models from the source agent files.
- * Reads every file in agentsDir() and parses the frontmatter model field.
- * Unknown or malformed files are silently skipped.
+ * Parse the shipped model default out of every {name}.md in one directory.
+ *
+ * A missing or unreadable directory yields an empty map — dist/agents/ does not
+ * exist until a generator host does, and a source tree that produced no agents
+ * is caught by the registry-completeness guard rather than by a throw here.
+ * Unknown or malformed files are skipped individually.
  */
-export async function loadShippedDefaults(): Promise<Record<string, string>> {
-  const sourceDir = agentsDir();
-  const defaults: Record<string, string> = {};
-
+async function readDirDefaults(dir: string): Promise<Record<string, string>> {
   let entries: string[];
   try {
-    entries = await fs.readdir(sourceDir);
+    entries = await fs.readdir(dir);
   } catch {
-    return defaults;
+    return {};
   }
 
   const pairs = await Promise.all(
@@ -482,7 +482,7 @@ export async function loadShippedDefaults(): Promise<Record<string, string>> {
       const agentName = mdEntryName(file);
       if (agentName === null) return null;
       try {
-        const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
+        const content = await fs.readFile(path.join(dir, file), 'utf-8');
         const result = readFrontmatterModel(content);
         if (result.ok && result.value) {
           return [agentName, result.value] as const;
@@ -494,10 +494,61 @@ export async function loadShippedDefaults(): Promise<Record<string, string>> {
     })
   );
 
+  const defaults: Record<string, string> = {};
   for (const pair of pairs) {
     if (pair !== null) {
       defaults[pair[0]] = pair[1];
     }
+  }
+  return defaults;
+}
+
+export interface LoadShippedDefaultsOptions {
+  /** Called once when registry-declared agents resolve to no shipped default. */
+  onWarning?: (message: string) => void;
+}
+
+/**
+ * Load shipped default models from the agent files.
+ *
+ * Directories are MOST-PREFERRED FIRST — the convention owned by
+ * agentSourceDirs() — and the first directory to supply a name wins, so once an
+ * agent is generated into dist/agents/ its frontmatter is the shipped default.
+ *
+ * A registry agent that no directory supplies is reported through `onWarning`
+ * as ONE aggregate message naming every missing agent and the build step. The
+ * installer throws on the same invariant; this is a read path whose callers must
+ * keep rendering (`devflow agents --list`), so it warns instead. Staying silent
+ * is what makes the gap dangerous: resolveEffective returns an undefined model,
+ * reapplyAgentMapping buckets the agent 'unchanged', and disabling the proxy
+ * leaves an externally-pinned agent unreverted with nothing said (PF-022).
+ *
+ * @param dirs - Agent directories, most-preferred first. Injectable so tests can
+ *   prove the precedence against a temp tree; all real callers use the default.
+ * @param opts - Optional warning channel; the gap is silent without one.
+ */
+export async function loadShippedDefaults(
+  dirs: AgentSourceDirs = agentSourceDirs(),
+  opts?: LoadShippedDefaultsOptions,
+): Promise<Record<string, string>> {
+  const perDir = await Promise.all(dirs.map(readDirDefaults));
+
+  const defaults: Record<string, string> = {};
+  for (const dirDefaults of perDir) {
+    for (const [agentName, model] of Object.entries(dirDefaults)) {
+      if (!(agentName in defaults)) {
+        defaults[agentName] = model;
+      }
+    }
+  }
+
+  const missing = getAllAgentNames().filter(name => !(name in defaults));
+  if (missing.length > 0) {
+    opts?.onWarning?.(
+      `No shipped default found for declared agent(s): ${missing.join(', ')}. ` +
+      `Run \`npm run build:mds\` if they are compiled from .mds generator hosts, otherwise ` +
+      `ensure the agent files exist in src/assets/agents/ (searched: ${dirs.join(', ')}).`,
+    );
   }
 
   return defaults;
@@ -514,6 +565,13 @@ export interface ReapplyOptions {
   devflowDir: string;
   /** Whether the Devflow proxy is currently enabled. */
   proxyEnabled: boolean;
+  /**
+   * Agent source directories, most-preferred first — see agentSourceDirs(),
+   * which owns the ordering convention and supplies the default. Injectable so
+   * tests can drive the shipped defaults from a temp tree instead of the live
+   * build state.
+   */
+  agentSourceDirs?: AgentSourceDirs;
   /** Optional warning callback. */
   onWarning?: (message: string) => void;
 }
@@ -539,7 +597,10 @@ export interface ReapplyResult {
  * Idempotent convergence function: walk every installed agent file and
  * rewrite frontmatter model/effort to match the effective mapping.
  *
- * - Reads shipped defaults LIVE from src/assets/agents/ sources.
+ * - Reads shipped defaults LIVE from the agent sources — agentSourceDirs(),
+ *   dist/agents/ preferred over src/assets/agents/. An agent no source supplies
+ *   is reported through the warning channel rather than passing as 'unchanged'
+ *   with no explanation.
  * - Gets the agent name list from the registry (getAllAgentNames()) plus
  *   any mapping entries for agents not in the registry.
  * - Missing installed files → skip silently (recorded in skippedMissing).
@@ -560,7 +621,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   }
   const mapping = mappingResult.value;
 
-  const shippedDefaults = await loadShippedDefaults();
+  const shippedDefaults = await loadShippedDefaults(opts.agentSourceDirs, { onWarning: warn });
 
   // Build the union of: all registered agent names + all names in the mapping
   // (so agents not yet in the registry but configured are also processed).
@@ -683,6 +744,8 @@ export interface RevertOptions {
   installDir: string;
   /** Devflow state directory. */
   devflowDir: string;
+  /** Agent source directories, most-preferred first (see ReapplyOptions). */
+  agentSourceDirs?: AgentSourceDirs;
   /** Optional warning callback. */
   onWarning?: (message: string) => void;
 }
@@ -698,6 +761,7 @@ export async function revertExternalAgents(opts: RevertOptions): Promise<Reapply
     installDir: opts.installDir,
     devflowDir: opts.devflowDir,
     proxyEnabled: false,
+    agentSourceDirs: opts.agentSourceDirs,
     onWarning: opts.onWarning,
   });
 }

@@ -93,19 +93,53 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
     ).toHaveLength(0);
   });
 
+  /**
+   * Named collector: agent names declared by the files in src/assets/agents/.
+   *
+   * Two extensions declare an agent. `<name>.md` is hand-authored and installs as-is;
+   * `<name>.mds` is an MDS generator host whose compiled artifact is dist/agents/<name>.md.
+   * Both are sources, so both must be claimed by a plugin.
+   *
+   * Used by the orphan assertion AND by the known-bad probe below, so the probe
+   * exercises the real collector rather than a shadow re-implementation (ADR-024).
+   */
+  function collectAgentSourceNames(entries: readonly string[]): string[] {
+    return entries
+      .filter(f => f.endsWith('.md') || f.endsWith('.mds'))
+      .map(f => f.replace(/\.mds?$/, ''));
+  }
+
   it('every file in src/assets/agents/ is declared in DEVFLOW_PLUGINS', async () => {
     const referencedAgents = new Set(getAllAgentNames());
     const agentFiles = await fs.readdir(path.join(ASSETS_DIR, 'agents'));
+    const declared = collectAgentSourceNames(agentFiles);
 
-    const orphans = agentFiles
-      .filter(f => f.endsWith('.md'))
-      .map(f => path.basename(f, '.md'))
-      .filter(name => !referencedAgents.has(name));
+    // Non-vacuity: the collector must see every registered agent. An `.md`-only
+    // filter leaves 15 of 16 in place while `git` (an .mds generator host) silently
+    // disappears — an orphan check that passes because it looked at nothing (GAP-07).
+    expect(
+      declared.sort(),
+      'src/assets/agents/ must account for every registered agent — a filter that drops ' +
+      'generator hosts makes this orphan check vacuous for them (GAP-07)',
+    ).toEqual(expect.arrayContaining([...getAllAgentNames()].sort()));
+
+    const orphans = declared.filter(name => !referencedAgents.has(name));
 
     expect(
       orphans,
       `Orphaned agent files in src/assets/agents/ are not declared in DEVFLOW_PLUGINS:\n  ${orphans.join('\n  ')}\nAdd them to a plugin in src/core/plugins.ts.`,
     ).toHaveLength(0);
+  });
+
+  it('known-bad probe: an .md-only filter drops generator hosts from the orphan corpus (GAP-07)', () => {
+    // Mechanic 2 (H10): a synthetic directory listing, no committed file touched.
+    // The pre-repoint filter — `.filter(f => f.endsWith('.md'))` — is applied to the
+    // same listing; it must lose the generator host that the real collector keeps.
+    const listing = ['code.md', 'review.md', 'git.mds'];
+    const mdOnly = listing.filter(f => f.endsWith('.md')).map(f => path.basename(f, '.md'));
+
+    expect(collectAgentSourceNames(listing)).toContain('git');
+    expect(mdOnly, 'the .md-only filter must be the weaker of the two (this is the defect)').not.toContain('git');
   });
 
   it('every file in src/assets/rules/ is declared in DEVFLOW_PLUGINS', async () => {
@@ -487,7 +521,7 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
 
     expect(
       violations,
-      `Operation contract violations (fix src/assets/agents/git.md or caller commands):\n  ${violations.join('\n  ')}`,
+      `Operation contract violations (fix src/assets/agents/git.mds or caller commands):\n  ${violations.join('\n  ')}`,
     ).toHaveLength(0);
   });
 });

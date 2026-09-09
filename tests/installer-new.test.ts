@@ -18,6 +18,8 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
+import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
+import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -435,7 +437,59 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     // Pin the filename and fix-hint literals from the installer error message. These are
     // stable across path reconfigurations and will survive Phase 1's resolver refactor.
     expect(caught!.message).toContain('nonexistent-xyz-ws6a-agent.md');
-    expect(caught!.message).toContain('Ensure the agent file exists');
+    expect(caught!.message).toContain('ensure the agent file exists');
+  });
+
+  it('throws when a declared agent is absent from BOTH the compiled and source dirs', async () => {
+    // Phase 1 resolves agents dist-first with a src fallback. Neither present is
+    // still a hard error, and the message must name the build step as well as
+    // the source tree — never a silent skip. The primary path it names is the
+    // most-preferred (compiled) candidate: for a generator-host agent the source
+    // path does not and will never exist, so leading with it misdirects.
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const emptyDist = path.join(tmpDir, 'empty-dist-agents');
+    const emptySrc = path.join(tmpDir, 'empty-src-agents');
+    await fs.mkdir(emptyDist, { recursive: true });
+    await fs.mkdir(emptySrc, { recursive: true });
+
+    const fakePlugin: PluginDefinition = {
+      name: 'devflow-test-ws6a',
+      description: 'Test fixture',
+      commands: [],
+      agents: ['nonexistent-xyz-ws6a-agent'],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+
+    let caught: Error | undefined;
+    try {
+      await installViaFileCopy({
+        plugins: [fakePlugin],
+        claudeDir,
+        devflowDir,
+        skillsMap: new Map(),
+        agentsMap: buildAssetMaps([fakePlugin]).agentsMap,
+        isPartialInstall: false,
+        spinner,
+        agentSourceDirs: [emptyDist, emptySrc],
+      });
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('nonexistent-xyz-ws6a-agent.md');
+    expect(caught!.message).toContain('ensure the agent file exists');
+    expect(caught!.message).toContain('build:mds');
+    // Both searched locations are named so the reader knows where to look.
+    expect(caught!.message).toContain(emptyDist);
+    expect(caught!.message).toContain(emptySrc);
+    // The named primary path is the most-preferred candidate, not the last one.
+    expect(caught!.message).toContain(
+      `agent "nonexistent-xyz-ws6a-agent": ${path.join(emptyDist, 'nonexistent-xyz-ws6a-agent.md')}`,
+    );
   });
 
   it('throws when a declared skill source directory is absent', async () => {
@@ -645,5 +699,141 @@ describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', ()
 
     // Physical state: dir must survive the sweep
     await expect(fs.access(complianceSkillDir)).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1: dist-preferred agent source resolution
+// ---------------------------------------------------------------------------
+//
+// Agents may be generated (compiled from an .mds generator host into
+// dist/agents/) or hand-authored (src/assets/agents/). The installer resolves
+// each declared agent dist-first with a src fallback, so a generated agent wins
+// over a stale hand-authored file of the same name while every ungenerated
+// agent keeps installing exactly as before.
+//
+// The dirs are injected here rather than mocked: the default is agentSourceDirs(),
+// the one owner of the ordering convention, so no production call site changes.
+
+describe('installViaFileCopy — dist-preferred agent resolution', () => {
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+  /** A real registry agent name, so the orphan sweep keeps the installed file. */
+  const AGENT = 'git';
+
+  /**
+   * Write an agent fixture derived from the real {AGENT} agent's frontmatter
+   * (PF-043), resolved dist-first with a src fallback, with a marker line
+   * identifying which tree it came from.
+   */
+  async function writeAgentFixture(dir: string, marker: string): Promise<string> {
+    const { path: realPath, content: real } = resolveAgentSource(AGENT);
+    const fm = splitFrontmatter(real);
+    if (!fm) throw new Error(`${realPath} has no frontmatter — fixture cannot be derived`);
+    const content = `${fm.block}\nMARKER: ${marker}\n`;
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${AGENT}.md`), content, 'utf-8');
+    return content;
+  }
+
+  async function installWith(agentSourceDirs: AgentSourceDirs): Promise<string> {
+    const claudeDir = path.join(tmpDir, 'claude');
+    const fakePlugin: PluginDefinition = {
+      name: 'devflow-test-dist-preferred',
+      description: 'Test fixture for dist-preferred agent resolution',
+      commands: [],
+      agents: [AGENT],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+    await installViaFileCopy({
+      plugins: [fakePlugin],
+      claudeDir,
+      devflowDir: path.join(tmpDir, 'devflow'),
+      skillsMap: new Map(),
+      agentsMap: buildAssetMaps([fakePlugin]).agentsMap,
+      isPartialInstall: false,
+      spinner,
+      agentSourceDirs,
+    });
+    return fs.readFile(path.join(claudeDir, 'agents', 'devflow', `${AGENT}.md`), 'utf-8');
+  }
+
+  it('installs the compiled agent when the name exists in both dirs', async () => {
+    const distDir = path.join(tmpDir, 'dist-agents');
+    const srcDir = path.join(tmpDir, 'src-agents');
+    const distContent = await writeAgentFixture(distDir, 'from-dist');
+    const srcContent = await writeAgentFixture(srcDir, 'from-src');
+    expect(distContent, 'fixtures must differ or the test proves nothing').not.toBe(srcContent);
+
+    expect(await installWith([distDir, srcDir])).toBe(distContent);
+  });
+
+  it('falls back to the source agent when the compiled dir has no such file', async () => {
+    const distDir = path.join(tmpDir, 'dist-agents-empty');
+    const srcDir = path.join(tmpDir, 'src-agents');
+    await fs.mkdir(distDir, { recursive: true });
+    const srcContent = await writeAgentFixture(srcDir, 'from-src');
+
+    expect(await installWith([distDir, srcDir])).toBe(srcContent);
+  });
+
+  it('falls back to the source agent when the compiled dir does not exist at all', async () => {
+    // This is the live shape until a generator host exists: dist/agents/ is absent.
+    const srcDir = path.join(tmpDir, 'src-agents');
+    const srcContent = await writeAgentFixture(srcDir, 'from-src');
+
+    expect(await installWith([path.join(tmpDir, 'no-such-dist-dir'), srcDir])).toBe(srcContent);
+  });
+
+  it('known-bad probe: a src-first order installs the wrong file', async () => {
+    // Reversing the preference must change the observed result. If it did not,
+    // the assertions above would be passing for the wrong reason.
+    const distDir = path.join(tmpDir, 'dist-agents');
+    const srcDir = path.join(tmpDir, 'src-agents');
+    const distContent = await writeAgentFixture(distDir, 'from-dist');
+    const srcContent = await writeAgentFixture(srcDir, 'from-src');
+
+    expect(await installWith([srcDir, distDir])).toBe(srcContent);
+    expect(await installWith([srcDir, distDir])).not.toBe(distContent);
+  });
+
+  it('defaults to the real accessors when no dirs are injected', async () => {
+    // No agentSourceDirs: the production path must install the COMPILED artifact.
+    // Byte-comparing against dist/agents/ is what makes the assertion specific —
+    // `starts with ---` and `contains model:` are true of the source tree too, so
+    // they would pass on a src-first resolution that silently shipped the wrong file.
+    const claudeDir = path.join(tmpDir, 'claude-default');
+    const fakePlugin: PluginDefinition = {
+      name: 'devflow-test-default-dirs',
+      description: 'Test fixture',
+      commands: [],
+      agents: [AGENT],
+      skills: [],
+      optional: false,
+      rules: [],
+    };
+    await installViaFileCopy({
+      plugins: [fakePlugin],
+      claudeDir,
+      devflowDir: path.join(tmpDir, 'devflow-default'),
+      skillsMap: new Map(),
+      agentsMap: buildAssetMaps([fakePlugin]).agentsMap,
+      isPartialInstall: false,
+      spinner,
+    });
+    const installed = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', `${AGENT}.md`), 'utf-8');
+
+    // The compiled artifact, read directly — not through the resolver under test.
+    const compiled = await fs.readFile(path.join(compiledAgentsDir(), `${AGENT}.md`), 'utf-8');
+    expect(installed, 'the installed agent must be the compiled artifact, byte for byte').toBe(compiled);
+
+    // And those bytes can only have come from dist/: the source tree has no file
+    // of that name at all, so a src-first resolution would have thrown instead.
+    await expect(
+      fs.access(path.join(agentsDir(), `${AGENT}.md`)),
+      `${AGENT} still has a hand-authored source — pick an agent with only a generator host`,
+    ).rejects.toThrow();
   });
 });

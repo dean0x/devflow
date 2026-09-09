@@ -114,14 +114,15 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 ### Shared Agents (used by multiple plugins)
 
-1. Create agent in `src/assets/agents/{agent-name}.md`
+1. Create the agent in `src/assets/agents/{agent-name}.md`
 2. Follow existing agent patterns (clear specialty, restricted tools, focused scope, specific output)
 3. Add agent name to the `agents` array of each plugin entry in DEVFLOW_PLUGINS (`src/core/plugins.ts`) that needs it
-4. Run `node dist/cli.js init` to install (no build step required for agents)
-5. Test with explicit invocation
+4. For an agent whose prompt is generated rather than hand-written, author it instead as an `.mds` generator host `src/assets/agents/{agent-name}.mds` declaring `output-dir: dist/agents` in its leading steering block, and run `npm run build:mds` to compile it to `dist/agents/{agent-name}.md`
+5. Run `node dist/cli.js init` to install (a hand-authored `.md` needs no build step; a generator host must be compiled first)
+6. Test with explicit invocation
 
 ### Plugin-Specific Agents (tightly coupled to one workflow)
 
 All agents live in `src/assets/agents/` — there is no separate per-plugin agent directory. For an agent used by only one plugin, add it to `src/assets/agents/` and declare it in only that plugin's `agents` array in DEVFLOW_PLUGINS.
 
-**Note:** `src/assets/agents/` is the single source of truth for all agents (e.g., `git.md`, `code.md`, `design.md`). No build step distributes agents — they install directly at `node dist/cli.js init` time.
+**Note:** `src/assets/agents/` holds the source for every agent, in one of two shapes. A hand-authored `{name}.md` (e.g. `code.md`, `design.md`) installs directly at `node dist/cli.js init` time. An `.mds` generator host (e.g. `git.mds`) is compiled by `npm run build:mds` to `dist/agents/{name}.md`, and that artifact is what installs — the installer resolves `dist/agents/` ahead of `src/assets/agents/` and takes the first hit, throwing when neither has the agent.

@@ -50,9 +50,10 @@ Skills are read-only (`allowed-tools: Read, Grep, Glob`) and auto-activate based
 
 ## How to Add a New Agent
 
-1. Create `src/assets/agents/{agent-name}.md` with frontmatter
+1. Create the agent source in `src/assets/agents/` — either a hand-authored `{agent-name}.md` with frontmatter, or an `.mds` generator host `{agent-name}.mds` declaring `output-dir: dist/agents` in its leading steering block
 2. Add the agent name to the relevant plugin entry's `agents` array in `src/core/plugins.ts`
-3. Run `node dist/cli.js init` to install locally (no rebuild required for agents)
+3. For a generator host, run `npm run build:mds` to compile it to `dist/agents/{agent-name}.md` — the installer prefers that artifact over `src/assets/agents/`
+4. Run `node dist/cli.js init` to install locally (a hand-authored `.md` needs no rebuild)
 
 Agents target 50-150 lines depending on type (Utility 50-80, Worker 80-120).
 
@@ -75,9 +76,9 @@ npm run test:watch    # Run tests in watch mode
 ## Build Commands
 
 ```bash
-npm run build          # Full build (TypeScript + MDS command compilation)
-npm run build:cli      # TypeScript compilation only
-npm run build:mds      # Compile src/assets/commands/*.mds → dist/commands/
+npm run build          # Full build (TypeScript + MDS compilation)
+npm run build:cli      # TypeScript compilation only — does not produce installable agents
+npm run build:mds      # Compile every .mds host: commands → dist/commands/, agents → dist/agents/
 ```
 
 ## Commit Conventions

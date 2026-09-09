@@ -537,7 +537,12 @@ export const agentsCommand = new Command('agents')
     const mapping = mappingResult.value;
 
     const proxyEnabled = await isProxyEnabled(devflowDir);
-    const shippedDefaults = await loadShippedDefaults();
+    // An agent with no shipped default renders a blank DEFAULT column and can
+    // never be reverted off an external model; surface the gap rather than
+    // letting the table imply the agent simply ships without one.
+    const shippedDefaults = await loadShippedDefaults(undefined, {
+      onWarning: (msg) => p.log.warn(msg),
+    });
 
     // ── --list ──────────────────────────────────────────────────────────────
     if (options.list) {

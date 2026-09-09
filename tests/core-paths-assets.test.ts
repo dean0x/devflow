@@ -13,7 +13,8 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 
 import { getPackageRoot } from '../src/core/paths.js';
-import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../src/core/assets.js';
+import { skillsDir, agentsDir, compiledAgentsDir, rulesDir, commandsDir, scriptsDir } from '../src/core/assets.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -71,10 +72,34 @@ describe('agentsDir', () => {
     await expect(fs.access(agentsDir())).resolves.toBeUndefined();
   });
 
-  it('contains at least one .md file', async () => {
+  it('accounts for every registered agent (.md hand-authored or .mds generator host)', async () => {
+    // `entries.filter(f => f.endsWith('.md')).length > 0` was the old assertion: it
+    // stays green at 15 of 16 while the one .mds generator host disappears (GAP-07).
+    // Naming the expected set instead of counting is what makes the loss loud.
     const entries = await fs.readdir(agentsDir());
-    const mdFiles = entries.filter(f => f.endsWith('.md'));
-    expect(mdFiles.length, 'src/assets/agents/ should contain .md files').toBeGreaterThan(0);
+    const declared = entries
+      .filter(f => f.endsWith('.md') || f.endsWith('.mds'))
+      .map(f => f.replace(/\.mds?$/, ''));
+
+    expect(
+      declared.sort(),
+      'src/assets/agents/ must hold a source file for every agent in DEVFLOW_PLUGINS',
+    ).toEqual(expect.arrayContaining([...getAllAgentNames()].sort()));
+  });
+});
+
+describe('compiledAgentsDir', () => {
+  it('returns {root}/dist/agents', () => {
+    expect(compiledAgentsDir()).toBe(path.join(ROOT, 'dist', 'agents'));
+  });
+
+  it('is a sibling of commandsDir under dist/, not a source directory', () => {
+    expect(path.dirname(compiledAgentsDir())).toBe(path.dirname(commandsDir()));
+    expect(compiledAgentsDir()).not.toBe(agentsDir());
+  });
+
+  it('is stable across repeated calls (no FS side effects)', () => {
+    expect(compiledAgentsDir()).toBe(compiledAgentsDir());
   });
 });
 

@@ -3,10 +3,10 @@
  *
  * Post-regeneration measurements (commit 7, after conventions-commit and ref-handling fixes):
  *
- *   tests/fixtures/golden/git-agent.md          65,677 ch / 992 L   (== src/assets/agents/git.md)
- *   src/assets/skills/git/SKILL.md               9,204 ch / 283 L
+ *   tests/fixtures/golden/git-agent.md          65,677 ch / 992 L   (== dist/agents/git.md)
+ *   src/assets/skills/git/SKILL.md               9,205 ch / 283 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           77,823 ch / 1,367 L
+ *   Total (all three)                           77,824 ch / 1,367 L
  *
  * Pre-Phase-0 baseline at main@e726874:
  *   PRE_PHASE0_GIT_MD_BYTES = 59,376 (wc -c) / PRE_PHASE0_GIT_MD_CHARS = 58,903 (.length) / PRE_PHASE0_GIT_MD_LINES = 938 L
@@ -43,7 +43,10 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // D4 degradation clauses added to fetch-issue + fetch-issues-batch.
 export const GIT_MD_CHARS = 65_677
 export const GIT_MD_LINES = 992
-export const SKILL_GIT_CHARS = 9_204
+// +1 char in Phase 1: the SKILL.md cross-reference to the Git agent moved from
+// src/assets/agents/git.md (deleted) to src/assets/agents/git.mds (the generator
+// host). An equality baseline moves in the SAME commit as the file it measures.
+export const SKILL_GIT_CHARS = 9_205
 export const SKILL_GIT_LINES = 283
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92

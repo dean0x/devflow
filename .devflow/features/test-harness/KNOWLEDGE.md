@@ -1,7 +1,7 @@
 ---
 feature: test-harness
 name: Test Harness (agent-source resolver, goldens, seam and guard tests, integration helpers)
-description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs ALL_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
+description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs COMMAND_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
 category: conventions
 directories: [tests/helpers.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration]
 created: 2026-09-06
@@ -22,17 +22,17 @@ The harness has four cohesive pieces: (1) `helpers.ts` exports the shared API �
 
 **Injectable `root` parameters enforce test isolation.** Every function that touches `dist/` or `src/` — `resolveAgentSource`, `resolveAllAgents`, `requireDistFile`, `requireDistFiles` — accepts an optional `root` parameter (default `ROOT`). Pass `mkdtempSync(...)` roots in tests that verify throw behaviour or fixture creation; never write into the real `dist/` or `src/`. Vitest runs test files in parallel workers; cross-worker filesystem mutations corrupt other workers' results.
 
-**No literal `src/assets/agents/` paths in new test files.** The `literal-agent-paths` guard (`tests/guards/literal-agent-paths.test.ts`) scans `tests/seams/`, `tests/goldens/`, and `tests/guards/` for non-comment lines containing `src/assets/agents/`. Use `resolveAgentSource(name)` for all agent content access. The only `src/assets/agents` literals left in `tests/` are inside `resolveAgentSource` itself — its fallback path, doc comment, and error message. `tests/installer-new.test.ts` is not an exception: it pins the installer error strings `nonexistent-xyz-ws6a-agent.md` / `Ensure the agent file exists`, not a resolution path. Documented exceptions: `tests/helpers.ts` (hosts `resolveAgentSource`'s single sanctioned `src/assets/agents/` fallback; `extractStatusLines()` reads git.md and code.md through `resolveAgentSource`) and the guard file itself.
+**No literal `src/assets/agents/` paths in new test files.** The `literal-agent-paths` guard (`tests/guards/literal-agent-paths.test.ts`) scans `tests/seams/`, `tests/goldens/`, and `tests/guards/` for non-comment lines containing `src/assets/agents/`. Use `resolveAgentSource(name)` for all agent content access. `resolveAgentSource` itself resolves both directories through `agentSourceDirs(root)` from `src/core/assets.ts`, so the only `src/assets/agents` mention left in `tests/helpers.ts` is its doc comment; the `removedFrom` metadata in `retired-wording.test.ts` is the other remaining literal. New guards under `tests/guards/` reach the agent directories through `agentSourceDirs()` / `agentsDir()` / `compiledAgentsDir()` from `src/core/assets.ts`. `tests/installer-new.test.ts` is not an exception: it pins the installer error strings `nonexistent-xyz-ws6a-agent.md` / `ensure the agent file exists`, not a resolution path. Documented exceptions: `tests/helpers.ts` (doc comment only) and the guard file itself.
 
 ## Standard Patterns
 
 ### resolveAgentSource / resolveAllAgents
 
-Dist-preferred, src-fallback resolver. `resolveAgentSource(name, root?)` checks `dist/agents/<name>.md` first, falls back to `src/assets/agents/<name>.md`, throws with a build hint when neither exists. `resolveAllAgents(root?)` covers every agent declared in `getAllAgentNames()` — currently 16.
+Dist-preferred, src-fallback resolver. `resolveAgentSource(name, root?)` reads its directory order from `agentSourceDirs(root)` (the one owner of the dist-first policy, `src/core/assets.ts`): compiled `dist/agents/<name>.md` first, hand-authored source tree second, throws with a build hint naming both resolved paths when neither exists. `resolveAllAgents(root?)` covers every agent declared in `getAllAgentNames()` — currently 16.
 
 The canonical anti-pattern has a name: `scanned > 0` over the agent corpus. 15 of 16 agents survive that assertion while coverage of `git` silently disappears (GAP-07). Always use the completeness assertion `expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))` and pin the expected count — `AGENTS_DIR`/`readAgent` are no longer used anywhere in tests.
 
-The resolver's `origin` field (`'dist' | 'src'`) distinguishes which path was used. In Phase 0, before `dist/agents/` is built, all agents resolve from `src` — this is expected and the non-vacuity probe in `agent-source-resolver.test.ts` accounts for it.
+The resolver's `origin` field (`'dist' | 'src'`) distinguishes which path was used. `git` is compiled from the generator host `src/assets/agents/git.mds` and resolves with `origin: 'dist'`; the other 15 agents are hand-authored and resolve with `origin: 'src'`. `tests/guards/dist-agents.test.ts` asserts both arms against the real tree, and the loud-failure arm (an unbuilt tree) on the generated agent.
 
 ### extractOpSectionFromCorpus
 
@@ -54,6 +54,10 @@ Both throw with a build hint when `dist/commands/` is absent or the named file d
 ### walkFiles
 
 `walkFiles(dir, accept, maxDepth = 8)` — recursive `readdirSync(withFileTypes)`, deterministic (sorted) order. On `ENOENT` or `ENOTDIR` for a node: returns `[]`. Other errors rethrow. Descent stops at `maxDepth`. Accepts a predicate `accept(filename)` to filter by extension or name. Used by `gitAgentSinkCorpus` for recursive `references/` traversal.
+
+### splitFrontmatter
+
+`splitFrontmatter(text)` → `{ block, inner, body } | null` — splits a document at its leading `---…---` frontmatter block: `block` is the whole block including both delimiters and the trailing newline, `inner` its text between them, `body` everything after. Returns `null` when there is no block at byte offset 0 (a block further down the file is body text, the same rule the Claude Code loader and the MDS build apply). One owner for a shape that had been reimplemented per test file, so every caller agrees on CRLF handling and on what counts as frontmatter. Callers: `build.test.ts` (agent `skills:` collector), `build-mds.test.ts` (host `output-dir:`-is-last assertion), `build-mds-generator-hosts.test.ts` (real-agent fixture derivation, compiled-shape and leaked-build-key collectors), `installer-new.test.ts` (agent fixture derivation).
 
 ### gitAgentSinkCorpus
 
@@ -86,16 +90,11 @@ The fix splits into two independent assertions with **named matching op sets**:
 
 Rule: when a guard predicate is a logical OR, you cannot tell which branch is carrying the floor. Split into independent assertions with named op sets. Never rely on a combined predicate to validate two distinct contracts.
 
-### DIST_FILES vs ALL_HOSTS
+### DIST_FILES vs COMMAND_HOSTS
 
-A permanent divergence (SG-13) between two related counts:
+The 13/14/14 count rule is owned by the `dynamic-workflow-engine` KB — see there for which number counts what and why the two 14s are different sets.
 
-| Name | Count | What it is |
-|------|-------|-----------|
-| `DIST_FILES` | 14 | Deployed `dist/commands/*.md` files — 13 MDS-compiled + `release.md` (hand-authored) |
-| `ALL_HOSTS` | 13 | MDS host files compiled by `npm run build:mds` |
-
-Guards that test deployed behaviour use `DIST_FILES` (14). Guards that test compilation rules use `ALL_HOSTS` (13). Conflating them produces off-by-one failures. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
+What the harness owns is how those sets are asserted. Both names are aliases of `tests/fixtures/mds-manifest.ts`, the single definition of *which* files the build owns (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`). Every assertion site compares against a manifest by set-equality in both directions rather than by a count literal, so a rename plus an addition in one commit cannot stay green; the length floors (`>= 13`, `>= 11`) sit alongside the set-equality and are what `numeric-floors.json` pins. Guards that test deployed behaviour take `DIST_FILES`; guards that test compilation rules take `COMMAND_HOSTS` — picking the wrong one produces an off-by-one failure. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
 
 ### OPERATION: anchor regex
 
@@ -110,7 +109,7 @@ The correct regex for compiled fences is `/^[ \t]*"?OPERATION: (\S+)/m` — allo
 Goldens are committed fixtures that assert file content remains stable. "A golden mismatch means the source is wrong, never the fixture" (H2).
 
 **Two fixtures:**
-- `tests/fixtures/golden/git-agent.md` — byte-equals `git.md` (via `resolveAgentSource('git')`, dist-preferred). Current metrics: 992 newlines, 65,677 chars, 66,180 bytes.
+- `tests/fixtures/golden/git-agent.md` — byte-equals the resolved `git` agent, i.e. the compiled `dist/agents/git.md` (via `resolveAgentSource('git')`, dist-preferred). Current metrics: 992 newlines, 65,677 chars, 66,180 bytes. `GIT_AGENT_BYTES = 66_180` in `tests/goldens/git-agent-golden.test.ts` is an equality baseline on the fixture, derived once from `stat -f %z` and deliberately not a floor.
 - `tests/fixtures/golden/github-status-lines.txt` — equals `extractStatusLines()` output. Current metrics: 17,914 bytes, 246 newlines. **FROZEN through Phase 3.**
 
 **Regeneration protocol:**
@@ -134,7 +133,7 @@ CI never regenerates goldens. The `--out-dir <dir>` flag exists specifically so 
 **Sanctioned post-capture source fix procedure:**
 Source fix commit → `npm run build` → fixture-only re-capture commit (authorised `--unfreeze`). This procedure was used three times during Phase 0: twice in the initial PR and once in commit `3a95c92` (authorised unfreeze after containment changes to `git.md` altered content inside sampled operation sections).
 
-**`extractStatusLines()` is CONTENT-ANCHORED, not line-offset based.** The function locates each excerpt in `src/assets/agents/git.md` and `src/assets/agents/code.md` using **unique text anchors** rather than hard-coded line numbers. This is the single most important fact for maintainers: the old implementation used 21 hard-coded ranges like `getLines(git, 238, 252)`, which meant ANY line insertion above a range silently shifted every anchor below it.
+**`extractStatusLines()` is CONTENT-ANCHORED, not line-offset based.** The function locates each excerpt in the resolved `git` and `code` agent sources (via `resolveAgentSource`, so `git` comes from `dist/agents/git.md`) using **unique text anchors** rather than hard-coded line numbers. This is the single most important fact for maintainers: the old implementation used 21 hard-coded ranges like `getLines(git, 238, 252)`, which meant ANY line insertion above a range silently shifted every anchor below it.
 
 The three core helpers:
 - `gitOp(opName)` — extracts a named operation section from `git.md`. Uses `\n## Operation:` as the section boundary (deliberately NOT `\n## `) to avoid false splits at `## Issue #{n}:` headings inside output templates.
@@ -185,7 +184,7 @@ The guard (`tests/guards/numeric-floor-manifest.test.ts`) verifies the pattern a
 To raise a floor: update both the assertion in the source file AND the `floor`, `pattern`, and `occurrences` fields in the manifest.
 
 **Current floor entries of note:**
-- The manifest has **17 entries**. `GIT_MD_LINES` and `GIT_MD_CHARS` are NOT floor manifest entries — they are equality baselines stored directly in `tests/goldens/github-status-lines.test.ts` as `toBe` assertions. A prior draft referenced `git-agent-line-floor` and `git-agent-char-floor` ids; these never existed and were not added (user decision D1).
+- The manifest has **17 entries**. `dist-host-count` and `partial-count` were re-spelled in Phase 1 from `toHaveLength(N)` to `toBeGreaterThanOrEqual(N)` at the SAME floors, because the assertions they pinned became set-equalities against `tests/fixtures/mds-manifest.ts` and the floor moved onto the manifest's length. Re-registering a replaced pattern at an equal-or-higher floor is the sanctioned move; removing the entry is not. `GIT_MD_LINES` and `GIT_MD_CHARS` are NOT floor manifest entries — they are equality baselines stored directly in `tests/goldens/github-status-lines.test.ts` as `toBe` assertions. A prior draft referenced `git-agent-line-floor` and `git-agent-char-floor` ids; these never existed and were not added (user decision D1).
 - `containment-ops-floor` was split (commit `c56c105`) into two entries: `containment-issue-body-floor` (predicate `<untrusted-issue-body>`, floor 3) and `containment-external-thread-floor` (predicate `<external-thread>`, floor 3). The old single entry could not distinguish which half was carrying the floor.
 - `issue-capture-contract-size` was corrected 5 → 3 (a deliberate DECREASE; the old value counted two entries that had no actual producer in `git.md`).
 
@@ -202,7 +201,7 @@ This file spawns real `claude` CLI sessions. Key constraints:
 - **Session identity is deterministic.** `runClaudeAndWait` generates a UUID before spawning and passes it via `--session-id <uuid>`. The subagents directory is then read at the known path rather than by directory-diff. Without `--session-id`, a concurrent devflow memory worker session can create a new UUID directory that the diff picks up instead.
 - **3-second post-SIGTERM wait.** The spawned subagent runs independently and may still be writing its initialization transcript (skill preloads appear in the first JSONL lines) when the parent exits. Resolving immediately races with that write.
 - **One bounded retry.** `MAX_SPAWN_ATTEMPTS = 2`. Haiku may occasionally answer the parent prompt directly without calling the Agent tool, leaving no `subagents/` directory. One retry almost always succeeds.
-- **Must be excluded from routine integration runs.** It spawns live `claude` against the developer's real `~/.claude` and has historically committed to this repo mid-run.
+- **Excluded from routine integration runs** by `exclude` in `vitest.integration.config.ts`. It spawns live `claude` against the developer's real `~/.claude` and has historically committed to this repo mid-run (PF-060, PF-055). The only way back in is `DEVFLOW_INTEGRATION_ALL` set to an explicit affirmative (`1`/`true`/`yes`, case- and space-insensitive) — `exclude` is applied at glob time, so naming the file on the command line cannot re-add it, and `=0`/`false`/`no`/`off` all keep it out. The gate is the pure `isAffirmative`/`integrationExclude` pair exported from that config and asserted by `tests/integration-config-gate.test.ts`; both of its branches spread `configDefaults.exclude`, because setting `exclude` replaces vitest's defaults rather than merging with them.
 
 The `subagents/` path follows Claude Code's layout:  
 `~/.claude/projects/-{encoded-cwd}/{sessionId}/subagents/agent-*.jsonl`  
@@ -256,13 +255,17 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 
 **Fixture byte/line counts must move in the same commit as the fixture.** `FIXTURE_BYTES` and `FIXTURE_NEWLINES` in `tests/goldens/github-status-lines.test.ts` are exact `toBe` pins. Moving them in a separate commit from the fixture leaves the tree red at that boundary commit. Similarly, `GIT_MD_LINES` and `GIT_MD_CHARS` must move in the same fixture-only regeneration commit as `tests/fixtures/golden/git-agent.md`.
 
-**Known load-sensitive tests.** These tests flake under full-suite load and should be re-run in isolation before blaming a branch: `hud-render` pair, `capture-hooks memory-worker`, `compliance-e2e S16b`, `eager-memory-refresh S18`, `spawnSync npx ETIMEDOUT` in `build-mds`, `redact-secrets`, `ledger-ops`, `shell-hooks` (json-helper describe), `decisions-usage-scan`, goldens `--out-dir` refusal. A full `npm test` may show 10–12 failures across 7 files that all pass 3/3 in isolation — these are load-induced subprocess-spawn flakes, not regressions.
+**Known load-sensitive tests.** These tests flake under full-suite load and should be re-run in isolation before blaming a branch: `hud-render` pair, `capture-hooks memory-worker`, `compliance-e2e S16b`, `eager-memory-refresh S18`, `redact-secrets`, `ledger-ops`, `shell-hooks` (json-helper describe), `decisions-usage-scan`, goldens `--out-dir` refusal. A full `npm test` may show 10–12 failures across 7 files that all pass 3/3 in isolation — these are load-induced subprocess-spawn flakes, not regressions.
+
+**No test writes the real `dist/`.** Both build-spawning files — `tests/build-mds.test.ts` and `tests/build-mds-generator-hosts.test.ts` — scope every spawn to a temp `DEVFLOW_MDS_ROOT`, and each ends with a self-scan (`collectSpawnScoping`, with a known-bad probe and a non-vacuity floor) that fails the file if a spawn is added without one. The corpus both need comes from `buildCommittedTree()` in `tests/helpers.ts`: `src/assets/{commands,agents}` are `fs.cp`-copied into a temp root and built there, memoised per test file so one spawn serves every caller. `build-mds.test.ts` reads every compiled-command assertion out of that tree (`BUILT_COMMANDS`) instead of rebuilding the repo's own `dist/` in twenty `beforeAll` hooks — 71 tests, one build, ~0.8s where twenty rebuilds cost ~12s. What those rebuilds cost beyond time: PID-scoping the build's staging file (`<dest>.<pid>.tmp`) closed the writer/writer clash, but the writer/reader clash outlived it — a real-root build silently REPAIRS a stale `dist/` while parallel workers read those same paths (`goldens/git-agent-golden`, `packaging`, `registry-integrity`, `seams/command-agent-input`), so the staleness surfaces as a flake in whichever reader lost the race rather than as itself (PF-055). `cwd:` is not a scope: `build-mds.ts` resolves its fallback root from the script's own location, so a spawn with `cwd: <tmp>` and no env var walks and rewrites the real repo while asserting about a tree the build never opened — which is how the P3 ignored-dir test passed for the wrong reason. The two files that still READ the deployed `dist/` do so read-only, via `requireDistFiles`/`requireDistFile` (fail-loud when unbuilt); whether its bytes still match `src/` is the byte-level compare owned by `build-mds-generator-hosts.test.ts`.
 
 **PF-043 shape requirement.** Test fixtures must be built from real runtime shapes — copy actual agent files rather than hand-authoring content. A fixture built from an invented shape asserts nothing about production code. The resolver tests use `copyFileSync` to populate the temp root from real agent files.
 
 ## Key Files
 
-- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
+- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `splitFrontmatter(text)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`, and the isolated-build set — `runMdsBuild(fakeRoot)`, `copyCommittedSources(fakeRoot)`, `buildCommittedTree()` / `cleanupCommittedTree()` (memoised per test file; pair the cleanup in an `afterAll`), `collectSpawnScoping(source)`
+- `tests/fixtures/mds-manifest.ts` — the name manifests (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`); consumed by `build-mds.test.ts`, `packaging.test.ts`, `build-mds-generator-hosts.test.ts` and `mds-variants.test.ts` (the last imports `ALL_MDS_HOSTS` for the `validateOutputName` roster check) — the manifest's own header lists all four
+- `tests/guards/dist-agents.test.ts` — dist/agents parity (both directions, fail-loud), escaped-brace guard, frontmatter-shape guard (every compiled agent starts with a block carrying `name:` — its collector emits one row **per header found**, not per file, so a headerless artifact shows up as a short array the caller compares against the file count rather than as a row whose flag someone forgot to assert; PF-018), no-.md-shadowing-an-.mds guard, resolver-origin proofs (AC-1.6/AC-1.3, each with its own non-empty floor), and the AC-1.2 absence guard for Phase-2 constructs. That last guard matches **anchored regexes, not substrings** — its corpus includes `src/core/mds-variants.ts` and `scripts/build-mds.ts`, the two files whose whole subject is this machinery, so `variants:` is pinned as a line-start YAML key, `expandVariants` as a call, `tracker-<provider>` as a `.md`/`.mds` filename, and prose that merely names a Phase-2 construct stays legal. Each entry carries both its pattern and the seeded instance that must trip it, and a second probe asserts a docblock describing Phase 2 is **not** a violation
 - `tests/guards/agent-source-resolver.test.ts` — resolver unit tests; dist-preferred and src-fallback proofs; `extractOpSectionFromCorpus` sole/union mode tests
 - `tests/guards/numeric-floor-manifest.test.ts` — floor pinning guard; occurrence-aware, decrement probe covers every entry
 - `tests/guards/literal-agent-paths.test.ts` — forbids `src/assets/agents/` literals in new test files; exception list with justifications; `requireDistFile`/`requireDistFiles` throw-contract tests
@@ -274,7 +277,7 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 - `tests/git-agent.test.ts` — includes `collectConventionsCommitPlacementViolations(corpus)`: asserts `setup-task` contains `commit --only -- .devflow/conventions.md`, `CONVENTIONS_COMMIT: skipped (no branch)`, and `4b.` AFTER `git checkout -b`; asserts `learn-conventions` has no `commit --only` (file-scoped slice); asserts `fetch-issues-batch`/`fetch-issue` contain `NOT_FOUND ({refs})` and `Strip a leading \`#\``
 - `tests/fixtures/golden/git-agent.md` — frozen byte-equal snapshot of `git.md` (992 newlines, 65,677 chars, 66,180 bytes); regenerate via `npm run test:golden:update -- git-agent`
 - `tests/fixtures/golden/github-status-lines.txt` — frozen output of `extractStatusLines()`; refused by update script without `--unfreeze`; 17,914 bytes / 246 newlines
-- `tests/fixtures/numeric-floors.json` — 17-entry occurrence-aware floor manifest; hand-registered; `containment-issue-body-floor` + `containment-external-thread-floor` (split from old `containment-ops-floor`); `issue-capture-contract-size` = 3; `seam-ops-with-callers` = 13
+- `tests/fixtures/numeric-floors.json` — 18-entry occurrence-aware floor manifest; hand-registered; `containment-issue-body-floor` + `containment-external-thread-floor` (split from old `containment-ops-floor`); `issue-capture-contract-size` = 3; `seam-ops-with-callers` = 13; the 60 000 ms build-spawn floor is pinned twice — `slow-test-timeout-ms` (3 sites, `tests/build-mds.test.ts`) and `mds-build-spawn-timeout-ms` (1 site, `runMdsBuild` in `tests/helpers.ts`), the value unchanged where the sites moved
 - `scripts/update-golden.ts` — golden update script (tsx); named target required; `--out-dir` for safe test exercising; `--unfreeze` for frozen targets; resolves git.md through `resolveAgentSource` and logs `origin`
 - `tests/integration/helpers.ts` — `isClaudeAvailable`, `runClaudeAndWait`, `runClaudeStreaming`, `getSubagentPreloadResult`, `buildSubagentsPath`, `parseStreamEvent`
 - `tests/integration/subagent-skill-preload.test.ts` — real claude CLI spawn tests; `MAX_SPAWN_ATTEMPTS = 2`; skips when claude absent; must be excluded from routine integration runs
@@ -286,8 +289,7 @@ These are deliberate, documented divergences from the general rules:
 
 | File | Exception | Justification |
 |------|-----------|---------------|
-| `tests/helpers.ts` | Hosts `resolveAgentSource`'s single sanctioned `src/assets/agents/` fallback; `extractStatusLines()` reads git.md and code.md through the resolver | The fallback path, doc comment, and error message are the ONLY `src/assets/agents` literals remaining in tests/ |
-| `tests/goldens/git-agent-golden.test.ts` | Mentions literal path in test description string | Human-readable label, not a file-reading path; uses `resolveAgentSource()` for all content access |
+| `tests/helpers.ts` | `resolveAgentSource`'s doc comment names the fallback tree in prose; `extractStatusLines()` reads git.md and code.md through the resolver | The doc comment is the ONLY `src/assets/agents` mention remaining in tests/ — the resolution paths come from `agentSourceDirs(root)` |
 | `tests/guards/literal-agent-paths.test.ts` | Self-excluded from its own scan | Defines `LITERAL`, error message strings, and non-vacuity probe corpus entry |
 | `tests/guards/retired-wording.test.ts` | Contains `src/assets/agents/` in `removedFrom` metadata | Historical documentation of pre-Phase-0 paths, not code |
 | `release.md:85` | Hand-authored in `DIST_FILES` | Inlines its own COMPLIANCE gate; not MDS-compiled |

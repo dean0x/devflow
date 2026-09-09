@@ -6,18 +6,14 @@
  * and tests/guards/** catches regressions before they accumulate.
  *
  * EXCEPTION / OUT-OF-SCOPE DOCUMENTATION (files not scanned or explicitly excluded):
- *   tests/helpers.ts — hosts the resolver's single sanctioned src/assets/agents/ fallback
- *     path (inside resolveAgentSource). extractStatusLines() reads through the resolver and
- *     contains no literal src/assets/agents/ path for content resolution. It is outside the
- *     scan scope below.
+ *   tests/helpers.ts — resolveAgentSource names the fallback tree in its doc comment;
+ *     its resolution paths come from agentSourceDirs(root). extractStatusLines() reads
+ *     through the resolver. It is outside the scan scope below.
  *   tests/guards/literal-agent-paths.test.ts — self-excluded: this file defines the
  *     LITERAL constant, the error message strings, and the non-vacuity probe corpus entry,
  *     all of which necessarily contain the literal string.
  *   tests/guards/retired-wording.test.ts — excluded: its removedFrom metadata records
  *     legacy src paths present before Phase-0 renaming (historical documentation only).
- *   tests/goldens/git-agent-golden.test.ts — excluded: its it() test description string
- *     mentions the literal as a human-readable label, not as a file-reading path. The test
- *     uses resolveAgentSource() for all content access.
  *
  * Comment lines (// and * prefixed) are skipped by the collector: literal mentions in
  * comments are documentation and are not path-resolution code.
@@ -46,7 +42,6 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 const LITERAL_SCAN_EXCLUSIONS: ReadonlyArray<string> = [
   'tests/guards/literal-agent-paths.test.ts', // guard mechanics: defines LITERAL, error messages, and non-vacuity probe
   'tests/guards/retired-wording.test.ts',      // removedFrom metadata: historical src path before Phase-0 rename
-  'tests/goldens/git-agent-golden.test.ts',    // test description string: mentions path as a label, not a file-reading path
 ];
 
 // ---------------------------------------------------------------------------

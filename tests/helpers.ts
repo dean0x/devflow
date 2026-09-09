@@ -1,7 +1,10 @@
-import { readFileSync, readdirSync, existsSync } from 'fs'
+import { readFileSync, readdirSync, existsSync, promises as fsp } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
+import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
+import { agentSourceDirs } from '../src/core/assets.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -49,9 +52,120 @@ export function loadFile(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), 'utf8')
 }
 
+// ── Isolated MDS builds ──────────────────────────────────────────────────────
+//
+// A test that needs compiled artifacts must never get them by rebuilding the
+// real dist/ tree: vitest runs other files in parallel workers that READ those
+// same paths, so an unscoped build silently REPAIRS a stale dist/ mid-suite and
+// whichever reader lost the race reports a flake instead of the staleness
+// (avoids PF-055). Every build spawned from here is redirected to a throwaway
+// root via DEVFLOW_MDS_ROOT, and the corpus it compiles is a COPY of the
+// committed sources — so the real src/ and dist/ trees are only ever read.
+
+const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx')
+const BUILD_MDS_SCRIPT = path.join(ROOT, 'scripts', 'build-mds.ts')
+
+/** Exit status and merged stdout+stderr of one `build-mds.ts` run. */
+export interface BuildRun {
+  status: number | null
+  combined: string
+}
+
+/**
+ * Run the real build script against an isolated fake root.
+ * `cwd` stays at the repo root so module resolution is unchanged; the root the
+ * build walks and writes comes from DEVFLOW_MDS_ROOT alone.
+ */
+export function runMdsBuild(fakeRoot: string): BuildRun {
+  const result = spawnSync(TSX_BIN, [BUILD_MDS_SCRIPT], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 60_000,
+    env: { ...process.env, DEVFLOW_MDS_ROOT: fakeRoot },
+  })
+  if (result.error) throw result.error
+  return { status: result.status, combined: (result.stdout ?? '') + (result.stderr ?? '') }
+}
+
+/** Copy the two directories the walk discovers hosts in into a fake root. */
+export async function copyCommittedSources(fakeRoot: string): Promise<void> {
+  for (const sub of ['commands', 'agents']) {
+    await fsp.cp(
+      path.join(ROOT, 'src', 'assets', sub),
+      path.join(fakeRoot, 'src', 'assets', sub),
+      { recursive: true },
+    )
+  }
+}
+
+export interface CommittedTreeBuild {
+  run: BuildRun
+  /** Temp root holding the COPY of src/assets/ and the dist/ tree built from it. */
+  root: string
+}
+
+let committedTreeBuild: Promise<CommittedTreeBuild> | null = null
+
+/**
+ * Compile the committed .mds corpus ONCE, into a copy of it under a temp root.
+ *
+ * Callers that need real compiled artifacts — the printed host/partial census,
+ * the dist/-is-in-sync compare, every content assertion over a compiled command
+ * — read them from `<root>/dist/` instead of the repo's own dist/, which stays
+ * untouched and can therefore be COMPARED rather than overwritten.
+ *
+ * Memoised per test file (each vitest file loads its own module instance): one
+ * spawn serves every caller in that file. The promise, not the value, is cached
+ * so concurrent callers await the same build. Pair with `cleanupCommittedTree`
+ * in an `afterAll`.
+ */
+export function buildCommittedTree(): Promise<CommittedTreeBuild> {
+  committedTreeBuild ??= (async (): Promise<CommittedTreeBuild> => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-committed-'))
+    await copyCommittedSources(root)
+    return { run: runMdsBuild(root), root }
+  })()
+  return committedTreeBuild
+}
+
+/** Remove the memoised committed-tree build's temp root. Safe to call twice. */
+export async function cleanupCommittedTree(): Promise<void> {
+  const built = await committedTreeBuild?.catch(() => null)
+  committedTreeBuild = null
+  if (built) await fsp.rm(built.root, { recursive: true, force: true })
+}
+
+/**
+ * Named collector: every `spawnSync(` site in a source text, and which of them
+ * do not scope the child to DEVFLOW_MDS_ROOT. A test file that spawns builds
+ * scans its own source with this so the isolation above cannot decay silently —
+ * a prose invariant cannot detect a spawn someone adds without the env var.
+ *
+ * The options object is taken as the text up to the call's closing `});`,
+ * bounded so a malformed source cannot make this scan run away.
+ */
+export function collectSpawnScoping(source: string): { total: number; unscoped: number[] } {
+  const CALL = 'spawn' + 'Sync('   // split so this scanner never matches itself
+  const MAX_SITES = 64
+  const unscoped: number[] = []
+  let total = 0
+  for (let at = source.indexOf(CALL); at !== -1; at = source.indexOf(CALL, at + CALL.length)) {
+    if (++total > MAX_SITES) {
+      throw new Error(`more than ${MAX_SITES} ${CALL} sites — bound exceeded, scan aborted`)
+    }
+    const tail = source.slice(at, at + 1000)
+    const end = tail.indexOf('});')
+    const call = end === -1 ? tail : tail.slice(0, end)
+    if (!call.includes('DEVFLOW_MDS_ROOT')) unscoped.push(at)
+  }
+  return { total, unscoped }
+}
+
 // ── Agent-source resolver ────────────────────────────────────────────────────
 //
-// Dist-preferred, src-fallback. ENOENT-tolerant on the dist side only.
+// Dist-preferred, src-fallback — the directory order comes from
+// agentSourceDirs(), so this harness shares the production ordering convention
+// rather than re-spelling it. ENOENT-tolerant on the dist side only.
 // Throws with a build hint when neither location resolves — matching the
 // "throw-with-a-build-hint, never skip" contract of requireDistFile above.
 //
@@ -79,16 +193,18 @@ export interface CorpusEntry {
  *   use the default so no call sites change.
  */
 export function resolveAgentSource(name: string, root: string = ROOT): AgentSource {
-  const distPath = path.join(root, 'dist', 'agents', `${name}.md`)
+  // Order comes from agentSourceDirs() — the one owner of the dist-first policy.
+  const [compiledDir, sourceDir] = agentSourceDirs(root)
+  const distPath = path.join(compiledDir, `${name}.md`)
   if (existsSync(distPath)) {
     return { path: distPath, content: readFileSync(distPath, 'utf-8'), origin: 'dist' }
   }
-  const srcPath = path.join(root, 'src', 'assets', 'agents', `${name}.md`)
+  const srcPath = path.join(sourceDir, `${name}.md`)
   try {
     return { path: srcPath, content: readFileSync(srcPath, 'utf-8'), origin: 'src' }
   } catch {
     throw new Error(
-      `Agent '${name}' not found at dist/agents/${name}.md or src/assets/agents/${name}.md\n` +
+      `Agent '${name}' not found at ${distPath} or ${srcPath}\n` +
       '  Run `npm run build` first (dist side is ENOENT-tolerant, src side is not)',
     )
   }
@@ -504,4 +620,30 @@ export function computeFpRatio(fpCount: number, fixedCount: number, deferredCoun
   const denominator = fpCount + fixedCount + deferredCount
   if (denominator === 0) return 0
   return fpCount / denominator
+}
+
+// ── Frontmatter splitting ────────────────────────────────────────────────────
+
+/** A document's leading `---…---` frontmatter block and the text after it. */
+export interface FrontmatterSplit {
+  /** The whole block, both `---` delimiters and the trailing newline included. */
+  block: string
+  /** The block's inner text, delimiters and their newlines excluded. */
+  inner: string
+  /** Everything after the block. */
+  body: string
+}
+
+/**
+ * Split a document at its leading frontmatter block; null when it has none.
+ *
+ * One owner for the `^---…---` shape, which was reimplemented per test file:
+ * every caller then agrees on the same CRLF handling and the same answer for a
+ * block that is not at byte offset 0. Only a block at the very start counts —
+ * that is the rule the Claude Code loader and the MDS build both apply.
+ */
+export function splitFrontmatter(text: string): FrontmatterSplit | null {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text)
+  if (!match) return null
+  return { block: match[0], inner: match[1], body: text.slice(match[0].length) }
 }

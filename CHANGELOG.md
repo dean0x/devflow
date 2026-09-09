@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Git agent is now compiled from an MDS generator host** — before: `src/assets/agents/git.md` was a hand-authored file the installer copied verbatim; the build owned command files only. After: `src/assets/agents/git.mds` declares `output-dir: dist/agents` in a leading steering block and compiles to `dist/agents/git.md`, which is byte-identical to the file it replaces (66,180 bytes, unchanged SHA-256). Both agent readers take their directory order from one owner, `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/`. The installer resolves each declared agent against that list and copies the first hit, throwing with both candidate paths and `npm run build:mds` named when neither directory has it; `loadShippedDefaults()` walks the same list first-wins and warns through its `onWarning` channel when a registry-declared agent has no shipped default in either. The compiled artifact wins for a generated agent and the other 15 agents install exactly as before. The 13 compiled command outputs in `dist/commands/` are byte-unchanged, and the hand-authored `release.md` beside them is untouched — 14 deployed command files in all. Zero user-visible change.
+
+- **`npm run build:cli` alone no longer produces installable agents** — before: `build:cli` (TypeScript) plus the shipped `src/assets/agents/*.md` were enough to install every agent. After: an agent authored as a generator host exists only as a `.mds` source until `npm run build:mds` compiles it, so a publish or install path that runs `build:cli` alone would ship without a Git agent. `npm run build` runs both and is unchanged; the packaging and pack-install guards now fail loudly if the compiled agent is missing from the tarball.
+
+- **`tests/integration/subagent-skill-preload.test.ts` is excluded from `npm run test:integration`** — before: `vitest.integration.config.ts` declared only an `include` glob, so the file was collected by every integration run, including CI, and no-op'd only where the `claude` binary was absent, through its own `describe.skipIf(!isClaudeAvailable())` guard; on a machine with `claude` installed it spawned live sessions. After: the config carries a real `exclude` entry. The test drives live `claude` sessions against the developer's own `~/.claude` with `--dangerously-skip-permissions` and has previously committed to this repo mid-run, so it is opt-in: set `DEVFLOW_INTEGRATION_ALL=1` to include it. A command-line path alone cannot re-add it — `exclude` is applied at glob time.
+
 ### Fixed
 
 - **`/debug #42` wrong Git-op spawn key** — before: `debug.mds` passed `ISSUE: {issue number}` to the `fetch-issue` Git operation, which declares `ISSUE_INPUT:`; the key mismatch meant no issue was ever fetched. After: `debug.mds` passes `ISSUE_INPUT: {issue reference}` — the key the op declares. (AC-0.1)

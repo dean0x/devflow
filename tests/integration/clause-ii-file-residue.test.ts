@@ -298,4 +298,33 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
     // Verify the scratch HOME is not the real HOME (belt-and-suspenders).
     expect(SCRATCH_HOME).not.toBe(os.homedir());
   });
+
+  // ── Step 9: the installed Git agent came from dist/agents/ (AC-1.9) ────────
+
+  it.skipIf(!CLI_BUILT)('the installed Git agent is byte-identical to dist/agents/git.md (AC-1.9)', async () => {
+    // The Git agent ships only as a compiled artifact now. The installer resolves
+    // agents dist-first, but nothing observed that end to end: this compares the
+    // file `devflow init` wrote under the scratch HOME against the compiled
+    // artifact inside the installed tarball. A src-first installer, or a publish
+    // built with `npm run build:cli` alone, fails here.
+    const compiled = path.join(
+      INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', 'git.md',
+    );
+    const installed = path.join(SCRATCH_HOME, '.claude', 'agents', 'devflow', 'git.md');
+
+    const compiledContent = await fs.readFile(compiled, 'utf-8');
+    const installedContent = await fs.readFile(installed, 'utf-8');
+
+    expect(
+      compiledContent.length,
+      'compiled agent is empty — the guard would compare nothing',
+    ).toBeGreaterThan(0);
+    expect(
+      installedContent,
+      `The installed Git agent must be the compiled artifact.\n` +
+      `  compiled: ${compiled}\n  installed: ${installed}\n` +
+      `A mismatch means the installer resolved a source file instead, or the tarball\n` +
+      `was built without \`npm run build:mds\`.`,
+    ).toBe(compiledContent);
+  });
 });
