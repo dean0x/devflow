@@ -4,6 +4,12 @@ export default defineConfig({
   test: {
     root: '.',
     include: ['tests/integration/**/*.test.ts'],
+    // subagent-skill-preload spawns real `claude` sessions against the developer's
+    // own ~/.claude with --dangerously-skip-permissions, and has historically made
+    // a commit in this repo mid-run. It stays runnable by explicit path:
+    //   npx vitest run --config vitest.integration.config.ts \
+    //     tests/integration/subagent-skill-preload.test.ts
+    exclude: ['tests/integration/subagent-skill-preload.test.ts'],
     globals: false,
     environment: 'node',
     restoreMocks: true,
