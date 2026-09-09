@@ -521,7 +521,7 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
 
     expect(
       violations,
-      `Operation contract violations (fix src/assets/agents/git.md or caller commands):\n  ${violations.join('\n  ')}`,
+      `Operation contract violations (fix src/assets/agents/git.mds or caller commands):\n  ${violations.join('\n  ')}`,
     ).toHaveLength(0);
   });
 });
