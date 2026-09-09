@@ -80,7 +80,7 @@
       "pattern": "toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from git.md alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from the resolved Git agent (dist/agents/git.md) alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
     },
     {
       "id": "agent-roster-count",

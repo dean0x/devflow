@@ -21,7 +21,8 @@ devflow/
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
-│   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
+│   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
+│   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
 │   │   ├── flags.ts                  # Claude Code flag registry (29 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write

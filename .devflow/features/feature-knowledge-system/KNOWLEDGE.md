@@ -41,10 +41,13 @@ team opts back out by re-adding `.devflow/features/` to their own `.gitignore`.
 
 This knowledge base also covers the **MDS build pipeline** (`scripts/build-mds.ts` +
 `src/core/mds-variants.ts`) that compiles `.mds` sources into `dist/commands/` (13 command
-hosts) and `dist/agents/` (1 generator host, the Git agent). The build pipeline is grouped
-here because the knowledge partials (`_knowledge.mds`) are themselves MDS hosts, and the
-generator-host convention that lets an *agent* be compiled from `.mds` was introduced in
-the same tracker phase (#323/PR #334) as this KB's last refresh.
+hosts) and `dist/agents/` (1 generator host, the Git agent). `build-mds.ts` is the single
+compiler for BOTH host kinds, so two KBs legitimately cover it from different sides: the
+`dynamic-workflow-engine` KB owns the command-host side (what the compiled commands must
+say), and this KB owns the pipeline itself — discovery, destination validation, the
+frontmatter strips, and the generator-host convention that lets an *agent* be compiled
+from `.mds`. The knowledge partials (`_knowledge.mds`) are themselves MDS sources, which
+is why the mechanism is documented here rather than only where its outputs are asserted.
 
 ## System Context
 
@@ -121,9 +124,11 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 5. Compiles each host via `@mdscript/mds` `compileFile()`, THEN strips frontmatter — dispatched by an exhaustive `switch` over the `HostVariant` returned in step 3 (`never` default), never by comparing the resolved path against a re-derived `dist/agents` constant. For a **command host** (variant `commands`), `stripBuildKeys` removes every `BUILD_KEYS` line from the single real frontmatter block (every other key, including `|`, `[]`, em-dashes, survives byte-untouched — no YAML round-trip); for a **generator host** (variant `agents`), `stripGeneratorFrontmatter` removes the ENTIRE first frontmatter block, promoting the second block (the artifact's real frontmatter, which the compiler treated as ordinary body text since only byte-offset-0 is frontmatter) into place with its trailing blank line intact. The generator strip verifies **both ends** of the transform: a leading block must exist before the slice (PRE), and a second block must be what the slice exposes (POST). A single-block generator host — the shape every hand-authored agent has, so the likeliest thing an author converting an agent will write — would otherwise lose its whole frontmatter (`name:`/`description:`/`model:`) and ship headerless with the build reporting success (PF-061). Both strips run AFTER `compileFile` — the compiler emits a byte-0 frontmatter block verbatim (never interpolated), so block 1 survives compilation unchanged and is safe to slice off afterward.
 6. Writes `{basename}.md` — or `{output-name}.md` — to the declared `output-dir` via a temp file (`{dest}.{pid}.tmp` — scoped to the writing process so two concurrent builds never share one staging path) + `renameSync` (per-file atomic; the `.tmp` is cleaned up on rename failure; concurrent readers, e.g. parallel vitest workers, never see a partial write)
 7. Hard-fails on any compile error — no stale command ever ships. Prints `N partial(s) skipped (no output-dir:)` and `N host(s) to compile:` — both lines are parsed by `tests/build-mds-generator-hosts.test.ts` §6 (AC-1.8); do not reword them.
-8. **Prunes `dist/agents/`** (`pruneOrphanAgents`, only after step 7 finds zero errors): every `.md` there that no host in this build emitted is deleted, one `pruned:   {path} (no generator host)` line each. That directory is gitignored and outranks `src/assets/agents/` in both the installer's resolve and `loadShippedDefaults`'s merge, so a file left behind — a renamed host's old output, a hand-dropped one — is installed in preference to the audited source on every `devflow init`; the CI parity check catches it a commit later, which is too late for the machine that ran the build. Scope is deliberate: **`dist/commands/` is never pruned** (it also receives `release.md`, copied verbatim from a hand-authored source that is not a host, so "unclaimed" there does not mean "orphan"), non-`.md` entries are left alone (a concurrent build's `{dest}.{pid}.tmp` staging file lives there), and a refused build prunes nothing — `dist/` is left exactly as the refusal found it. The directory comes from `AGENTS_OUTPUT_DIR` in `mds-variants.ts` (the allowlist table's own spelling) rather than a second hardcoded path, because a build with zero generator hosts — where every file in the directory is an orphan — cannot derive it from the plan.
+8. **Prunes `dist/agents/`** (`pruneOrphanAgents`, only after step 7 finds zero errors): every `.md` there that no host in this build emitted is deleted, one `pruned:   {path} (no generator host)` line each. That directory is gitignored and outranks `src/assets/agents/` in every consumer of `agentSourceDirs()` — the installer's resolve and `loadShippedDefaults`'s first-wins walk alike — so a file left behind — a renamed host's old output, a hand-dropped one — is installed in preference to the audited source on every `devflow init`; the CI parity check catches it a commit later, which is too late for the machine that ran the build. Scope is deliberate: **`dist/commands/` is never pruned** (it also receives `release.md`, copied verbatim from a hand-authored source that is not a host, so "unclaimed" there does not mean "orphan"), non-`.md` entries are left alone (a concurrent build's `{dest}.{pid}.tmp` staging file lives there), and a refused build prunes nothing — `dist/` is left exactly as the refusal found it. The directory comes from `AGENTS_OUTPUT_DIR` in `mds-variants.ts` (the allowlist table's own spelling) rather than a second hardcoded path, because a build with zero generator hosts — where every file in the directory is an orphan — cannot derive it from the plan.
 
-13 MDS-compiled **command** hosts (`MDS_COMMAND_HOSTS` in `tests/fixtures/mds-manifest.ts`): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). One further host is a **generator host** outside `commands/` — `src/assets/agents/git.mds`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md` — so the build reports 14 hosts total (`ALL_MDS_HOSTS`, command hosts + generator hosts). `DIST_COMMAND_FILES` = 14 counts `dist/commands/` only: the 13 compiled command outputs plus `release.md`, which is hand-authored and copied verbatim (not MDS-compiled; SG-13 permanent divergence; see `dynamic-workflow-engine` KB). `ALL_MDS_HOSTS` (14, command+generator) and `DIST_COMMAND_FILES` (14, dist/commands/ only, incl. release.md) are different sets that happen to share a length — never conflate them. `MDS_PARTIALS` (11, `src/assets/commands/_partials/`) have no `output-dir:` and are skipped automatically; the `_` prefix convention is also enforced structurally — `validateOutputName` would refuse a filename starting with `_` if a partial were ever mistakenly treated as a host, since the regex requires `[a-z0-9]` as the first character.
+The 13/14/14 count rule is owned by the `dynamic-workflow-engine` KB — see there for which number counts what and why the two 14s are different sets.
+
+What this KB owns is the split those numbers count: the build has two host kinds. 13 MDS-compiled **command** hosts (`MDS_COMMAND_HOSTS` in `tests/fixtures/mds-manifest.ts`) — 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`) — plus one **generator host** outside `commands/`: `src/assets/agents/git.mds`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md`. `MDS_PARTIALS` (11, `src/assets/commands/_partials/`) have no `output-dir:` and are skipped automatically; the `_` prefix convention is also enforced structurally — `validateOutputName` would refuse a filename starting with `_` if a partial were ever mistakenly treated as a host, since the regex requires `[a-z0-9]` as the first character.
 
 ## Integration Patterns
 
@@ -150,13 +155,25 @@ the same three properties `tests/guards/dist-agents.test.ts` enforces: (a) sourc
 parity in both directions, fail-loud (never a silent `catch { return }` skip on a missing
 build — PF-018), (b) no leaked `\{`/`\}` escape sequences in compiled output (PF-024), (c)
 no agent with both a hand-authored `.md` and a generator `.mds` source (the resolver would
-silently pick a winner). Downstream consumers of `dist/agents`: `compiledAgentsDir()` in
-`src/core/assets.ts`; the installer's agent-source loop (dist-first, `agentsDir()` as
-fallback — first hit wins, and a hit on neither throws naming both dirs plus an
-`npm run build:mds` hint); `loadShippedDefaults()` (merges dist over src for defaults;
-ENOENT tolerated on the dist side only); the test resolver `resolveAgentSource` in
-`tests/helpers.ts` (returns `origin: 'dist'` for the Git agent, `origin: 'src'` for every
-other agent, and throws with a build hint when neither source resolves). `npm run
+silently pick a winner). The dist-first precedence has exactly one owner: `agentSourceDirs()` in
+`src/core/assets.ts`, a non-empty tuple spelled MOST-PREFERRED FIRST
+(`[compiledAgentsDir(), agentsDir()]`). Order is invisible to the type system — a list
+spelled the other way round still typechecks and silently inverts the answer — so every
+consumer takes that list as-is and never re-spells it. Consumers: the installer's
+agent-source loop (first hit wins; a hit on no directory throws, naming every candidate
+path plus an `npm run build:mds` hint); `loadShippedDefaults(dirs = agentSourceDirs(),
+opts)` (walks the list first-wins over a per-directory `readDirDefaults(dir)`, tolerating
+a missing directory symmetrically on EVERY entry — a `dist/agents/` that does not exist
+yet and a `src/assets/agents/` that does not either are the same empty map here). What
+catches an empty source tree is not a throw: after the walk, `loadShippedDefaults` emits
+ONE aggregate `onWarning` naming every `getAllAgentNames()` entry no directory supplied,
+which `reapplyAgentMapping` surfaces in `ReapplyResult.warnings` and
+`src/cli/commands/agents.ts` logs — it warns rather than throwing because `devflow agents
+--list` must keep rendering. The test resolver `resolveAgentSource` in `tests/helpers.ts`
+reads the same order from `agentSourceDirs()` but is a different resolver with a stricter
+contract: only its dist side is ENOENT-tolerant, and a missing src file throws with a
+build hint (it returns `origin: 'dist'` for the Git agent, `origin: 'src'` for every other
+agent). `npm run
 build:cli` alone no longer produces installable agents — `npm run build:mds` (or the
 combined `npm run build`) is required.
 

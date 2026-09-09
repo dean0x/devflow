@@ -92,16 +92,9 @@ Rule: when a guard predicate is a logical OR, you cannot tell which branch is ca
 
 ### DIST_FILES vs COMMAND_HOSTS
 
-A permanent divergence (SG-13) between two related counts:
+The 13/14/14 count rule is owned by the `dynamic-workflow-engine` KB — see there for which number counts what and why the two 14s are different sets.
 
-| Name | Count | What it is |
-|------|-------|-----------|
-| `DIST_FILES` | 14 | Deployed `dist/commands/*.md` files — 13 MDS-compiled + `release.md` (hand-authored) |
-| `COMMAND_HOSTS` | 13 | MDS **command** host files compiled into `dist/commands/` |
-
-Both are aliases of `tests/fixtures/mds-manifest.ts`, which is the single definition of *which* files the build owns (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `DIST_COMMAND_FILES`). The build discovers 14 hosts in total — the 13 command hosts plus the one generator host, `src/assets/agents/git.mds` → `dist/agents/git.md`. Sites that used to spell `toHaveLength(13)` / `toHaveLength(11)` / `toBe(14)` now assert set-equality against the manifest in both directions; the length floors (`>= 13`, `>= 11`) sit alongside them and are what `numeric-floors.json` pins.
-
-Guards that test deployed behaviour use `DIST_FILES` (14). Guards that test compilation rules use `COMMAND_HOSTS` (13). Conflating them produces off-by-one failures. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
+What the harness owns is how those sets are asserted. Both names are aliases of `tests/fixtures/mds-manifest.ts`, the single definition of *which* files the build owns (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`). Every assertion site compares against a manifest by set-equality in both directions rather than by a count literal, so a rename plus an addition in one commit cannot stay green; the length floors (`>= 13`, `>= 11`) sit alongside the set-equality and are what `numeric-floors.json` pins. Guards that test deployed behaviour take `DIST_FILES`; guards that test compilation rules take `COMMAND_HOSTS` — picking the wrong one produces an off-by-one failure. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
 
 ### OPERATION: anchor regex
 
