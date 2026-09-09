@@ -321,6 +321,98 @@ describe('dest allowlist negatives', () => {
       expect(runBuild(fakeRoot).status).toBe(0);
     });
   });
+
+  it('names the canonical spelling when a declaration is non-canonical', async () => {
+    // A trailing slash resolves ONTO an allowlisted target, so "is not the
+    // expected 'dist/commands' or 'dist/agents'" misdirects the reader — the
+    // declaration IS one of those, spelled wrong. The computed correction must
+    // reach the message.
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(fakeRoot, '_neg-canonical-msg', 'description: neg\noutput-dir: dist/commands/\n');
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toMatch(/is not spelled canonically/);
+      expect(run.combined).toContain("write 'dist/commands' instead");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3b. every refusal is aggregated — no mid-loop exit leaves dist/ half-updated
+// ---------------------------------------------------------------------------
+//
+// resolveOutputDir and validateOutputName return uniform Results, so the shell
+// must route every refusal through the same channel: a throw the main loop
+// aggregates, with one exit after the loop. A mid-loop process.exit() abandons
+// the remaining hosts, leaving dist/ a mix of fresh and stale artifacts and
+// reporting only the first of several independent mistakes.
+
+describe('refusals are aggregated, not exited mid-loop', () => {
+  /**
+   * Named collector: for a fake root, the build's exit status, whether the
+   * healthy host was still compiled, and whether the aggregate summary printed.
+   */
+  function collectAggregation(run: BuildRun, healthyOutput: string | null): {
+    status: number | null;
+    healthyCompiled: boolean;
+    aggregated: boolean;
+  } {
+    return {
+      status: run.status,
+      healthyCompiled: healthyOutput !== null,
+      aggregated: /compile error\(s\) — build FAILED/.test(run.combined),
+    };
+  }
+
+  it('a non-allowlisted host does not abort the healthy host that follows it', async () => {
+    await withFakeRoot(async fakeRoot => {
+      // '_neg-…' sorts before 'zz-healthy', so the refusal is encountered first.
+      await writeCommandHost(fakeRoot, '_neg-wrong-dir', 'description: neg\noutput-dir: dist/wrong-dir\n');
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+
+      const run = runBuild(fakeRoot);
+      const healthy = await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'zz-healthy.md'));
+      const collected = collectAggregation(run, healthy);
+
+      expect(collected.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(
+        collected.healthyCompiled,
+        `the healthy host must still be compiled — a mid-loop exit leaves dist/ half-updated.\n${run.combined}`,
+      ).toBe(true);
+      expect(collected.aggregated, `the refusal must reach main()'s aggregation.\n${run.combined}`).toBe(true);
+    });
+  });
+
+  it('an invalid output filename does not abort the healthy host that follows it', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_neg-bad-name',
+        'description: neg\noutput-dir: dist/commands\nname-template: Not-A-Name\n',
+      );
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+
+      const run = runBuild(fakeRoot);
+      const healthy = await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'zz-healthy.md'));
+      const collected = collectAggregation(run, healthy);
+
+      expect(collected.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(collected.healthyCompiled, `the healthy host must still be compiled.\n${run.combined}`).toBe(true);
+      expect(collected.aggregated).toBe(true);
+      expect(run.combined).toMatch(/invalid-charset/);
+    });
+  });
+
+  it('known-bad probe: the collector reports a build that never reached the healthy host', () => {
+    // A synthetic run standing in for the mid-loop-exit behaviour: exit 1, no
+    // healthy output, no aggregate summary. The assertions above must fail on it.
+    const midLoopExit: BuildRun = {
+      status: 1,
+      combined: "ERROR: _neg-wrong-dir.mds: output-dir 'dist/wrong-dir' is not the expected — typo?\n",
+    };
+    const collected = collectAggregation(midLoopExit, null);
+    expect(collected.healthyCompiled).toBe(false);
+    expect(collected.aggregated).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

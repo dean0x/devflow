@@ -28,6 +28,7 @@ import {
   resolveOutputDir,
   type OutputNameError,
   type OutputDirError,
+  type HostVariant,
 } from '../src/core/mds-variants.js';
 import { ALL_MDS_HOSTS } from './fixtures/mds-manifest.js';
 
@@ -122,12 +123,12 @@ describe('validateOutputName', () => {
 
 describe('resolveOutputDir (containment)', () => {
   it('accepts dist/commands and returns the resolved absolute directory', () => {
-    expect(valueOf(resolveOutputDir(ROOT, 'dist/commands')))
+    expect(valueOf(resolveOutputDir(ROOT, 'dist/commands')).abs)
       .toBe(path.join(ROOT, 'dist', 'commands'));
   });
 
   it('accepts dist/agents and returns the resolved absolute directory', () => {
-    expect(valueOf(resolveOutputDir(ROOT, 'dist/agents')))
+    expect(valueOf(resolveOutputDir(ROOT, 'dist/agents')).abs)
       .toBe(path.join(ROOT, 'dist', 'agents'));
   });
 
@@ -167,9 +168,18 @@ describe('resolveOutputDir (containment)', () => {
     expect(errorOf(resolveOutputDir(ROOT, 'dist/skills/../commands')).kind).toBe('non-canonical');
   });
 
+  it('rejects a backslash-spelled declaration (dist\\commands) on every platform', () => {
+    // path.posix.normalize() leaves a backslash untouched, so on win32 this
+    // spelling would resolve onto dist/commands and pass the canonical check.
+    // The declaration charset is POSIX by contract, so the backslash is refused
+    // outright and the module behaves identically on darwin, linux, and win32.
+    expect(errorOf(resolveOutputDir(ROOT, 'dist\\commands')).kind).toBe('backslash-separator');
+    expect(errorOf(resolveOutputDir(ROOT, 'dist\\agents')).kind).toBe('backslash-separator');
+  });
+
   it('resolves against the supplied root, not the process cwd (pure, injectable)', () => {
     const fakeRoot = path.join(path.sep, 'nonexistent-root-for-purity-check');
-    expect(valueOf(resolveOutputDir(fakeRoot, 'dist/agents')))
+    expect(valueOf(resolveOutputDir(fakeRoot, 'dist/agents')).abs)
       .toBe(path.join(fakeRoot, 'dist', 'agents'));
   });
 
@@ -180,6 +190,55 @@ describe('resolveOutputDir (containment)', () => {
     // The build's message renders the allowlist into the pre-existing template:
     //   output-dir '<declared>' is not the expected '<expected>' — typo?
     expect(err.allowed.join("' or '")).toBe("dist/commands' or 'dist/agents");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. resolveOutputDir — the host variant travels with the resolved directory
+// ---------------------------------------------------------------------------
+//
+// The allowlist entry that matched is the only thing that knows which strip
+// strategy a host needs. Returning it means scripts/build-mds.ts dispatches on a
+// discriminant it was handed, never on absolute-path string equality it derived
+// for itself — one source of truth, per the allowlist's extension-point contract.
+
+describe('resolveOutputDir (host variant)', () => {
+  /** Named collector: the variant every allowlisted declaration resolves to. */
+  function collectVariants(declarations: readonly string[]): Map<string, HostVariant> {
+    const variants = new Map<string, HostVariant>();
+    for (const declared of declarations) {
+      const result = resolveOutputDir(ROOT, declared);
+      if (result.ok) variants.set(declared, result.value.variant);
+    }
+    expect(declarations.length, 'declaration corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    return variants;
+  }
+
+  it('tags dist/commands as the commands variant and dist/agents as the agents variant', () => {
+    const variants = collectVariants(['dist/commands', 'dist/agents']);
+    expect(variants.get('dist/commands')).toBe('commands');
+    expect(variants.get('dist/agents')).toBe('agents');
+  });
+
+  it('every allowlisted directory carries a distinct variant (no two share a strip)', () => {
+    const variants = collectVariants(['dist/commands', 'dist/agents']);
+    expect(variants.size).toBe(2);
+    expect(new Set(variants.values()).size).toBe(2);
+  });
+
+  it('known-bad probe: a phantom variant is not what the allowlist produces', () => {
+    // If resolveOutputDir returned a bare string (or a constant variant), the
+    // assertions above would hold for the wrong reason. Seeding the expected
+    // value with a variant no allowlist entry declares must fail.
+    const variants = collectVariants(['dist/commands', 'dist/agents']);
+    expect(variants.get('dist/agents')).not.toBe('commands');
+    expect([...variants.values()]).not.toContain('skills');
+  });
+
+  it('a rejected declaration carries no variant at all', () => {
+    const rejected = resolveOutputDir(ROOT, 'dist/wrong-dir');
+    expect(rejected.ok).toBe(false);
+    expect(!rejected.ok && 'value' in rejected).toBe(false);
   });
 });
 
@@ -196,7 +255,7 @@ describe('Result error-union completeness', () => {
     'empty', 'dot-segment', 'path-separator', 'invalid-charset',
   ];
   const DIR_KINDS: ReadonlyArray<OutputDirError['kind']> = [
-    'escapes-root', 'non-canonical', 'not-allowlisted',
+    'escapes-root', 'backslash-separator', 'non-canonical', 'not-allowlisted',
   ];
 
   /** Named collector: every OutputNameError kind produced by the hostile corpus. */
@@ -217,6 +276,7 @@ describe('Result error-union completeness', () => {
       'dist/wrong-dir', 'dist', 'dist/skills',
       'dist/../..', '/tmp/elsewhere',
       'dist/commands/', './dist/agents', 'dist/skills/../commands',
+      'dist\\commands',
     ];
     const kinds = new Set<string>();
     for (const input of corpus) {

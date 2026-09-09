@@ -11,8 +11,16 @@
  *
  * Scope guarantee: this module answers exactly two questions for an MDS host —
  *   1. Is the filename it will emit safe? (validateOutputName)
- *   2. Is the directory it declares one the build may write into? (resolveOutputDir)
+ *   2. Is the directory it declares one the build may write into, and which host
+ *      variant does that directory select? (resolveOutputDir)
  * It performs no templating, no expansion, and no iteration over hosts.
+ *
+ * The `-variants` in the filename is a reservation, not a description of today's
+ * contents: Phase 2's variant-expansion entry point lands in this module, so it
+ * is named for the home it will grow into rather than renamed twice (DR-16, PR
+ * #334). Until then the only variant notion here is HostVariant below — which
+ * output directory a host declares, and therefore how the build treats its
+ * compiled bytes.
  */
 
 import * as path from 'path';
@@ -88,38 +96,100 @@ export function validateOutputName(name: string): Result<string, OutputNameError
 // ---------------------------------------------------------------------------
 
 /**
- * The only directories the MDS build may write into.
+ * The kinds of artifact the MDS build emits — one per allowlisted output
+ * directory.
+ *
+ * The directory a host declares is what selects its treatment downstream: a
+ * `commands` host keeps its frontmatter minus the build-owned key, an `agents`
+ * host sheds its whole steering block. Callers dispatch on this discriminant
+ * rather than re-deriving the answer from the resolved path, so the allowlist
+ * below stays the single place that knows which directory means what.
+ *
+ * Widening this union is the deliberate act that adds a build destination with
+ * new semantics: every exhaustive dispatch over it stops compiling until the new
+ * variant is handled.
+ */
+export type HostVariant = 'commands' | 'agents';
+
+interface AllowedOutputDir {
+  readonly dir: string;
+  readonly variant: HostVariant;
+}
+
+/**
+ * The only directories the MDS build may write into, each tagged with the host
+ * variant it selects.
  *
  * `dist/commands` holds compiled slash commands; `dist/agents` holds agents
  * compiled from generator hosts. Adding an entry here is the single place a new
- * build destination becomes legal.
+ * build destination becomes legal — and `satisfies` forces that entry to declare
+ * a HostVariant, so no destination can arrive without saying how it is treated.
  */
-const ALLOWED_OUTPUT_DIRS = ['dist/commands', 'dist/agents'] as const;
+const ALLOWED_OUTPUT_DIRS = [
+  { dir: 'dist/commands', variant: 'commands' },
+  { dir: 'dist/agents', variant: 'agents' },
+] as const satisfies readonly AllowedOutputDir[];
+
+/** The allowlisted directory names, in declaration order, for error rendering. */
+const ALLOWED_OUTPUT_DIR_NAMES: readonly string[] = ALLOWED_OUTPUT_DIRS.map(entry => entry.dir);
+
+/**
+ * Compile-time proof that the table above covers every declared variant.
+ *
+ * `satisfies` proves each entry names a real HostVariant; this proves the
+ * reverse — a variant nothing maps to would be unreachable and dead. Adding a
+ * member to HostVariant without a directory turns the conditional `false`, which
+ * is not assignable to `true`.
+ */
+type Assert<T extends true> = T;
+type MappedVariants = (typeof ALLOWED_OUTPUT_DIRS)[number]['variant'];
+type _EveryVariantHasADirectory = Assert<[HostVariant] extends [MappedVariants] ? true : false>;
 
 export type OutputDirError =
   | { kind: 'escapes-root'; declared: string }
+  | { kind: 'backslash-separator'; declared: string; allowed: readonly string[] }
   | { kind: 'non-canonical'; declared: string; canonical: string; allowed: readonly string[] }
   | { kind: 'not-allowlisted'; declared: string; allowed: readonly string[] };
+
+/** A declaration that passed every check: where to write, and what kind of host it is. */
+export interface ResolvedOutputDir {
+  /** Which artifact kind this destination selects. */
+  readonly variant: HostVariant;
+  /** The resolved absolute directory, so callers never re-derive it. */
+  readonly abs: string;
+}
 
 /**
  * Resolve a host's declared `output-dir:` against `root` and check it against
  * the allowlist.
  *
- * Three refusals, in order:
- *  1. `escapes-root`    — the declaration resolves outside `root` (`dist/../..`,
- *     an absolute path elsewhere). Containment is decided by isContainedIn,
- *     which compares resolved paths rather than string prefixes.
- *  2. `non-canonical`   — the declaration resolves onto an allowlisted target
+ * Four refusals, in order:
+ *  1. `escapes-root`        — the declaration resolves outside `root`
+ *     (`dist/../..`, an absolute path elsewhere). Containment is decided by
+ *     isContainedIn, which compares resolved paths rather than string prefixes.
+ *  2. `backslash-separator` — the declaration contains a backslash. Declarations
+ *     are POSIX-spelled by contract; the canonical check below normalises as
+ *     POSIX, where a backslash is an ordinary character, so a win32-style
+ *     spelling would otherwise slip through as canonical on win32 only.
+ *  3. `non-canonical`       — the declaration resolves onto an allowlisted target
  *     but is not spelled canonically (`dist/commands/`, `./dist/agents`,
  *     `dist/skills/../commands`). One target must have exactly one spelling.
- *  3. `not-allowlisted` — the resolved target is not an allowlisted directory.
+ *  4. `not-allowlisted`     — the resolved target is not an allowlisted directory.
  *
- * On success the resolved absolute directory is returned, so callers never
- * re-derive it.
+ * On success the resolved absolute directory is returned together with the host
+ * variant the matching allowlist entry declares, so callers dispatch on a value
+ * they were handed rather than one they re-derive.
  */
-export function resolveOutputDir(root: string, declared: string): Result<string, OutputDirError> {
+export function resolveOutputDir(
+  root: string,
+  declared: string,
+): Result<ResolvedOutputDir, OutputDirError> {
   if (!isContainedIn(root, declared)) {
     return Err({ kind: 'escapes-root', declared });
+  }
+
+  if (declared.includes('\\')) {
+    return Err({ kind: 'backslash-separator', declared, allowed: ALLOWED_OUTPUT_DIR_NAMES });
   }
 
   // Canonical spelling: POSIX-normalised, no trailing separator. The frontmatter
@@ -127,14 +197,14 @@ export function resolveOutputDir(root: string, declared: string): Result<string,
   // resolve with the platform resolver.
   const canonical = path.posix.normalize(declared).replace(/\/+$/, '');
   if (canonical !== declared) {
-    return Err({ kind: 'non-canonical', declared, canonical, allowed: ALLOWED_OUTPUT_DIRS });
+    return Err({ kind: 'non-canonical', declared, canonical, allowed: ALLOWED_OUTPUT_DIR_NAMES });
   }
 
   const abs = path.resolve(root, declared);
-  const match = ALLOWED_OUTPUT_DIRS.find(dir => path.resolve(root, dir) === abs);
+  const match = ALLOWED_OUTPUT_DIRS.find(entry => path.resolve(root, entry.dir) === abs);
   if (match === undefined) {
-    return Err({ kind: 'not-allowlisted', declared, allowed: ALLOWED_OUTPUT_DIRS });
+    return Err({ kind: 'not-allowlisted', declared, allowed: ALLOWED_OUTPUT_DIR_NAMES });
   }
 
-  return Ok(abs);
+  return Ok({ variant: match.variant, abs });
 }

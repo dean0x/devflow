@@ -12,15 +12,18 @@
  * command never ships. Errors are reported with the mds::* code, message, and
  * source span for quick diagnosis.
  *
- * Two host kinds, distinguished by their destination:
+ * Two host kinds. The destination allowlist in src/core/mds-variants.ts tags each
+ * directory with the host variant it selects, and resolveOutputDir hands that tag
+ * back with the resolved path — so this script dispatches on a discriminant it
+ * was given, never on a destination it re-derived:
  *
- *   - Command hosts (`output-dir: dist/commands`) declare `output-dir:` inside
- *     their single, real frontmatter block. Only that key is stripped, so every
- *     other key keeps its bytes exactly (stripOutputDirKey).
+ *   - Command hosts (`output-dir: dist/commands`, variant `commands`) declare
+ *     `output-dir:` inside their single, real frontmatter block. Only that key is
+ *     stripped, so every other key keeps its bytes exactly (stripOutputDirKey).
  *
- *   - Generator hosts (`output-dir: dist/agents`) carry TWO leading frontmatter
- *     blocks: block 1 exists only to steer the build, block 2 is the artifact's
- *     real frontmatter. The whole of block 1 is stripped after compilation
+ *   - Generator hosts (`output-dir: dist/agents`, variant `agents`) carry TWO
+ *     leading frontmatter blocks: block 1 exists only to steer the build, block 2
+ *     is the artifact's real frontmatter. The whole of block 1 is stripped after compilation
  *     (stripGeneratorFrontmatter), leaving block 2 — which the MDS compiler
  *     treats as ordinary body text — as the artifact's frontmatter, with the
  *     blank line that follows it preserved.
@@ -30,10 +33,15 @@
  * compilation unchanged and is removed from the compiled bytes.
  *
  * Dest safety: `output-dir` must resolve to one of the two allowlisted
- * directories (src/core/mds-variants.ts). A typo, a non-canonical spelling, or a
- * path that escapes the repo root exits 1 rather than silently writing to an
- * unexpected location. The emitted filename is validated by the same module
- * before it is joined onto the destination.
+ * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
+ * non-canonical spelling, or a path that escapes the repo root is refused rather
+ * than silently writing to an unexpected location. The emitted filename is
+ * validated by the same module before it is joined onto the destination.
+ *
+ * One exit: every refusal — dest, filename, or compile error — is thrown and
+ * aggregated by main(), which reports all of them and exits 1 once, after the
+ * loop. No refusal abandons the hosts that follow it, so dist/ is never left
+ * half-updated with a mix of fresh and stale artifacts.
  *
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
@@ -47,7 +55,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { init, compileFile, isMdsError } from "@mdscript/mds";
-import { validateOutputName, resolveOutputDir } from "../src/core/mds-variants.js";
+import {
+  validateOutputName,
+  resolveOutputDir,
+  type HostVariant,
+  type OutputDirError,
+  type OutputNameError,
+} from "../src/core/mds-variants.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -75,9 +89,6 @@ const IGNORE_DIRS = new Set([
   "tests",
   "coverage",
 ]);
-
-/** Absolute destination that identifies a generator host (whole-block strip). */
-const AGENTS_OUT_ABS = path.resolve(ROOT, "dist", "agents");
 
 interface HostEntry {
   file: string;
@@ -220,37 +231,121 @@ function discoverHosts(): DiscoveryResult {
   return { hosts, totalCount };
 }
 
+/**
+ * Render an `output-dir:` refusal as the error the build throws.
+ *
+ * One arm per OutputDirError kind, with a `never` default: a kind added to the
+ * union in the core module cannot fall through into a message that does not
+ * describe it. Each arm returns an Error rather than exiting, so main()'s
+ * aggregation owns the single exit and a refusal never abandons the hosts that
+ * follow it (which would leave dist/ half-updated).
+ */
+function outputDirRefusal(rel: string, declared: string, error: OutputDirError): Error {
+  switch (error.kind) {
+    case "escapes-root":
+      return new Error(`${rel}: output-dir '${declared}' escapes the repo root`);
+    case "backslash-separator":
+      return new Error(
+        `${rel}: output-dir '${declared}' uses a backslash separator — declare it with ` +
+        `forward slashes, as '${error.allowed.join("' or '")}' — typo?`,
+      );
+    case "non-canonical":
+      return new Error(
+        `${rel}: output-dir '${declared}' is not spelled canonically — ` +
+        `write '${error.canonical}' instead (expected '${error.allowed.join("' or '")}') — typo?`,
+      );
+    case "not-allowlisted":
+      return new Error(
+        `${rel}: output-dir '${declared}' is not the expected '${error.allowed.join("' or '")}' — typo?`,
+      );
+    default: {
+      const unhandled: never = error;
+      return new Error(`${rel}: unhandled output-dir refusal ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * Render an emitted-filename refusal as the error the build throws.
+ *
+ * Same shape as outputDirRefusal: one arm per OutputNameError kind, a `never`
+ * default, and a thrown Error so the refusal is aggregated rather than exiting
+ * mid-loop. Every message names the kind, so the reason is readable without
+ * cross-referencing the core module.
+ */
+function outputNameRefusal(rel: string, declared: string, error: OutputNameError): Error {
+  const prefix = `${rel}: output filename '${declared}' is not a valid output filename`;
+  switch (error.kind) {
+    case "empty":
+      return new Error(`${rel}: output filename is empty (empty) — a host must emit a non-empty name`);
+    case "dot-segment":
+      return new Error(`${prefix} (dot-segment) — '.' and '..' segments are refused`);
+    case "path-separator":
+      return new Error(`${prefix} (path-separator) — the name must not contain a path separator`);
+    case "invalid-charset":
+      return new Error(`${prefix} (invalid-charset) — must match [a-z0-9][a-z0-9._-]{0,63}`);
+    default: {
+      const unhandled: never = error;
+      return new Error(`${rel}: unhandled output filename refusal ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * The staging path a destination is written through before being renamed into
+ * place.
+ *
+ * Scoped to the writing process: two builds running at once (the test suite
+ * spawns the real build from more than one file, and vitest runs files in
+ * parallel workers) would otherwise share one `<dest>.tmp`, and the first
+ * rename would pull the file out from under the second, failing it with ENOENT.
+ * The rename onto `dest` stays atomic either way.
+ */
+function tempPathFor(dest: string): string {
+  return `${dest}.${process.pid}.tmp`;
+}
+
+/**
+ * Apply the frontmatter strip the host's variant calls for.
+ *
+ * The variant travels with the resolved destination (resolveOutputDir), so the
+ * allowlist in src/core/mds-variants.ts remains the only place that knows which
+ * directory means which treatment. The `never` default means a third variant
+ * cannot silently inherit the command-host strip.
+ */
+function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath: string): string {
+  switch (variant) {
+    case "agents":
+      return stripGeneratorFrontmatter(compiled, sourcePath);
+    case "commands":
+      return stripOutputDirKey(compiled);
+    default: {
+      const unhandled: never = variant;
+      throw new Error(
+        `${path.relative(ROOT, sourcePath)}: unhandled host variant '${String(unhandled)}'`,
+      );
+    }
+  }
+}
+
 async function compileHost(host: HostEntry): Promise<CompileOutcome> {
   const rel = path.relative(ROOT, host.file);
 
   // Dest safety: output-dir must resolve to an allowlisted directory under ROOT.
-  // The decision is made by the pure core module; this shell renders the errors
-  // and owns every exit.
+  // The decision is made by the pure core module; this shell renders the errors.
+  // Every refusal is thrown so main() aggregates them and exits once.
   const dirResult = resolveOutputDir(ROOT, host.outputDir);
   if (!dirResult.ok) {
-    if (dirResult.error.kind === "escapes-root") {
-      throw new Error(
-        `${rel}: output-dir '${host.outputDir}' escapes the repo root`,
-      );
-    }
-    const expected = dirResult.error.allowed.join("' or '");
-    console.error(
-      `ERROR: ${rel}: output-dir '${host.outputDir}' is not the expected '${expected}' — typo?`,
-    );
-    process.exit(1);
+    throw outputDirRefusal(rel, host.outputDir, dirResult.error);
   }
-  const outAbs = dirResult.value;
+  const { variant, abs: outAbs } = dirResult.value;
 
   // Filename safety: the name that will be emitted is validated before it is
   // joined onto the destination, so no host can write outside outAbs.
   const declaredName = host.nameTemplate ?? host.basename;
   const nameResult = validateOutputName(declaredName);
   if (!nameResult.ok) {
-    console.error(
-      `ERROR: ${rel}: output filename '${declaredName}' is not a valid output filename ` +
-      `(${nameResult.error.kind}) — must match [a-z0-9][a-z0-9._-]{0,63}`,
-    );
-    process.exit(1);
+    throw outputNameRefusal(rel, declaredName, nameResult.error);
   }
 
   // Auto-create only the final destination leaf.
@@ -261,15 +356,13 @@ async function compileHost(host: HostEntry): Promise<CompileOutcome> {
   const result = await compileFile(host.file);
   // Generator hosts shed their whole steering block; command hosts shed only the
   // output-dir: key so every other byte of their frontmatter is preserved.
-  const cleaned = outAbs === AGENTS_OUT_ABS
-    ? stripGeneratorFrontmatter(result.output, host.file)
-    : stripOutputDirKey(result.output);
+  const cleaned = stripFrontmatterFor(variant, result.output, host.file);
 
   // Atomic write: write to a temp file then rename into place so concurrent
   // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
   // observe a missing file between the old and new content. (avoids PF-011)
   // Clean up the .tmp on rename failure so no orphan is left behind.
-  const tmp = `${dest}.tmp`;
+  const tmp = tempPathFor(dest);
   fs.writeFileSync(tmp, cleaned, "utf-8");
   try {
     fs.renameSync(tmp, dest);
@@ -351,7 +444,7 @@ async function main(): Promise<void> {
   for (const src of handAuthored) {
     if (fs.existsSync(src)) {
       const dest = path.join(commandsDest, path.basename(src));
-      const tmp = `${dest}.tmp`;
+      const tmp = tempPathFor(dest);
       fs.copyFileSync(src, tmp);
       try {
         fs.renameSync(tmp, dest);
