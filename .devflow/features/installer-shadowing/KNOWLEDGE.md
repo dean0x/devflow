@@ -33,12 +33,13 @@ Every path to a source asset is obtained through a named accessor — no scatter
 | Accessor | Resolves to |
 |----------|-------------|
 | `skillsDir()` | `{root}/src/assets/skills/` — flat; one subdir per skill |
-| `agentsDir()` | `{root}/src/assets/agents/` — flat; one `.md` per agent |
+| `agentsDir()` | `{root}/src/assets/agents/` — flat; source agents: hand-authored `.md` files plus `.mds` generator hosts |
+| `compiledAgentsDir()` | `{root}/dist/agents/` — compiled output of the `.mds` generator hosts; today `git.md` |
 | `rulesDir()` | `{root}/src/assets/rules/` — flat; one `.md` per rule |
 | `scriptsDir()` | `{root}/src/assets/scripts/` — hooks/ subdirectory and hud.sh |
 | `commandsDir()` | `{root}/dist/commands/` — compiled MDS + verbatim .md files |
 
-All five call `getPackageRoot()` internally.
+All six call `getPackageRoot()` internally.
 
 ### Package Root Resolution (`src/core/paths.ts`)
 
@@ -53,9 +54,11 @@ All four asset types now **throw** when a declared source is absent — there ar
 | Asset type | Source checked | Error trigger |
 |------------|---------------|---------------|
 | Command | `dist/commands/{name}.md` | `fs.access` fails |
-| Agent | `src/assets/agents/{name}.md` | `fs.access` fails |
+| Agent | `dist/agents/{name}.md`, then `src/assets/agents/{name}.md` | `fs.access` fails for **both** candidates |
 | Skill | `src/assets/skills/{name}/` | `stat` not a directory |
 | Rule | `src/assets/rules/{name}.md` | `fs.access` fails |
+
+Agents resolve **dist-first with a src fallback**: `installViaFileCopy` walks `options.agentSourceDirs ?? [compiledAgentsDir(), agentsDir()]` in order and installs the first `{name}.md` that `fs.access` accepts, so the compiled artifact of a `.mds` generator host wins and hand-authored agents install unchanged. When neither candidate exists it throws, naming the source-tree candidate as the primary path, listing every location searched, and pointing at `npm run build:mds` for the generator-host case.
 
 Shadow paths remain tolerant: invalid/missing shadows warn-and-install-source (applies ADR-010). The hard-error policy applies only to declared Devflow sources.
 
@@ -505,11 +508,11 @@ VALUE+BLURB = 46, preserving the prior total from the single VALUE column. All w
 ## Key Files
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets(dir, knownNames, extractRegistryName) => Promise<SweepResult>`; `SweepResult = { scanned, removed, failed }`; `mdFileName` / `mdEntryName` inverse pair; shared by both installer and uninstall; per-item failure isolation on both readdir and rm
-- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport` (+ `sweptOrphans`, `sweepFailures`), `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills, commands, agents via `sweepOrphanedAssets`
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport` (+ `sweptOrphans`, `sweepFailures`), `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`; ungated orphan sweeps for skills, commands, agents via `sweepOrphanedAssets`; agent install resolves `options.agentSourceDirs ?? [compiledAgentsDir(), agentsDir()]` dist-first and throws naming both candidates plus the `npm run build:mds` hint when neither has the file
 - `src/targets/claude-code/post-install.ts` — `DEVFLOW_GITIGNORE_BLOCK` (full block including `.claudeignore`), `DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE` (block minus the `.claudeignore` line; used when the project already has that entry), `computeDevflowGitignore(existingContent)` (idempotent; upgrade paths v3→v4, v2→v4, legacy→v4); sentinels V2/V3 are module-private constants (not exported); no DEVFLOW_GITIGNORE_SENTINEL_V4 export; must stay byte-identical with `ensure-root-gitignore`
 - `src/assets/scripts/hooks/ensure-root-gitignore` — shell implementation of the same gitignore block logic; cross-parity tested (15 PARITY_CASES) against `post-install.ts` in `tests/shell-hooks.test.ts`; fast-path marker is project-local `.devflow/.root-gitignore-configured-v4`
 - `src/assets/scripts/hooks/ensure-devflow-init` — fast-path checks for `.root-gitignore-configured-v4` (project-local marker; must match the stamper version in both `post-install.ts` and `ensure-root-gitignore`)
-- `src/core/assets.ts` — `skillsDir`, `agentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
+- `src/core/assets.ts` — `skillsDir`, `agentsDir`, `compiledAgentsDir`, `rulesDir`, `scriptsDir`, `commandsDir` accessors; single source of truth for all asset source paths
 - `src/core/paths.ts` — `getPackageRoot()` with hard `package.json` assertion; 2-level-up resolution from `dist/core/paths.js`; `isContainedIn(parent, candidate)` pure containment predicate (guards path-traversal in reapplyAgentMapping)
 - `src/targets/claude-code/legacy.ts` — `LEGACY_SKILL_NAMES` (composed from `LEGACY_SKILLS_PRE_V1`, `LEGACY_SKILLS_V2`, `LEGACY_SKILLS_V2X`); target-specific delete lists for upgrade cleanup
 - `src/cli/commands/init.ts` — consumes `InstallReport` and `InitSeed`; proxy preflight block using `buildRealPreflightDeps` factory (`swallowSettingsReadError: true`); `reapplyAgentMapping` call (ordering load-bearing, guarded when mapping is empty AND proxy is off); exhaustive `ShadowSkipReason` switch with `never` guard; attribution step in Advanced path only (`shouldRunAttributionStep`, `attributionSeedFrom`, `applyAttributionAnswer`, `runAttributionStep`); mode passed as `useRecommended ? 'recommended' : 'advanced'` (not a string literal)

@@ -48,7 +48,7 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 16 agents
+│       ├── agents/                   # 16 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
 │       │   ├── synthesize.md
 │       │   ├── code.md

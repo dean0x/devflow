@@ -18,7 +18,7 @@ directories:
   - dist/commands
   - tests/build-mds.test.ts
 created: 2026-07-07
-updated: 2026-08-22
+updated: 2026-09-09
 ---
 
 # Dynamic Workflow Engine
@@ -68,7 +68,7 @@ Partials declare **no** `output-dir:` frontmatter key. Host files declare it as 
 
 ### Compiled output and test pinning
 
-`scripts/build-mds.ts` compiles all 13 host files (9 knowledge + 4 dynamic) — `ALL_HOSTS = 13`. **`DIST_FILES` = 14**: the 13 compiled outputs plus `release.md`, which is hand-authored and copied verbatim by the build; the divergence is permanent (SG-13). Compilation-scope guards use `ALL_HOSTS`; deployed-behaviour guards (gh-issue scope, compliance_gate, retired wording) use `DIST_FILES`. The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
+`scripts/build-mds.ts` compiles 14 host files: the **13 command hosts** under `src/assets/commands/` (9 knowledge + 4 dynamic) — `ALL_HOSTS = 13`, the test constant for that set — plus the **`git.mds` generator host** under `src/assets/agents/`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md`. Host and partial names are shared across the suite by the manifest at `tests/fixtures/mds-manifest.ts` (`MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS`, `MDS_PARTIALS`, `ALL_MDS_HOSTS`, `DIST_COMMAND_FILES`) rather than by count literals. **`DIST_FILES` = 14** counts a different set — `dist/commands/` only: the 13 compiled command outputs plus `release.md`, which is hand-authored and copied verbatim by the build; the divergence is permanent (SG-13). `ALL_HOSTS = 13` and `DIST_FILES = 14` are not the compiled-host total; never conflate the three numbers. Compilation-scope guards use `ALL_HOSTS`; deployed-behaviour guards (gh-issue scope, compliance_gate, retired wording) use `DIST_FILES`. The test file `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps for exact doctrine strings. Changing a doctrine literal in a partial immediately breaks the relevant test — by design. The test suite pins:
 - `Simplify` and `Scrutinize` each appearing exactly **2 times** (Gate 1 #1 + Gate 1 #2 only)
 - **C1 (single-pass review):** presence: `The review pass runs exactly ONCE`, `The pass runs exactly ONCE`, `Never author additional cycles or a delta re-review of fix commits` (invariant #7 unique), `Budget scales roster and verification votes, NEVER the number of passes` (review_pass prose unique); absence: `DELTA REVIEW`, `reviewBaseSha`, `preFixSha`, `maxCycles`, `cyclesRun`, `fixedInCycle`, `allCoverageGaps`, `for (let cycle` (skeleton guard), `review_loop`, `/review[- ]loop/i`
 - `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `NEVER wrapped in`, `Gate 1 #2`, `gate1-final`, `No unauthorized GitHub side-effects`
@@ -275,7 +275,8 @@ In the SINGLE mode workflow's final Gate 1 (#2, `gate1-final` phase), retry atte
 - `src/assets/commands/dynamic-build.mds` — main build command source with inline SINGLE + WAVE workflow scripts
 - `dist/commands/dynamic-build.md` — compiled artifact pinned by test suite
 - `tests/build-mds.test.ts` — doctrine-literal pinning tests (sections 10, 12, 13)
-- `scripts/build-mds.ts` — unified MDS compiler (13 compiled hosts `ALL_HOSTS`; `DIST_FILES` = 14 including hand-authored `release.md` — SG-13 permanent divergence)
+- `scripts/build-mds.ts` — unified MDS compiler; 14 hosts total: 13 command hosts → `dist/commands/` (`ALL_HOSTS = 13`) plus the `git.mds` generator host → `dist/agents/git.md`; `DIST_FILES` = 14 counts `dist/commands/` only (13 compiled + hand-authored `release.md` — SG-13 permanent divergence)
+- `tests/fixtures/mds-manifest.ts` — shared name manifest for the suite: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS` (`['git']`), `MDS_PARTIALS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS` — tests derive counts from these instead of pinning literals
 
 ## Deliberate Exceptions (AC-0.4 gh-issue scope guard)
 

@@ -60,7 +60,15 @@ function runBuild(fakeRoot: string): BuildRun {
   return { status: result.status, combined: (result.stdout ?? '') + (result.stderr ?? '') };
 }
 
-/** Run the real build script against the real repo root. */
+/**
+ * Run the real build script against the real repo root — the two callers below
+ * therefore write into the real `dist/` while vitest runs workers in parallel.
+ * That is deliberate: AC-1.8 pins the whole-repo host census, which only the real
+ * root produces (the DEVFLOW_MDS_ROOT harness sees a synthetic tree). It is safe
+ * because the build is deterministic — every output is rewritten byte-identically
+ * — and each file lands via a temp-file + rename, so a concurrent reader sees the
+ * old or the new bytes, never a partial write.
+ */
 function runRealBuild(): BuildRun {
   const result = spawnSync(TSX_BIN, [SCRIPT], {
     cwd: ROOT,

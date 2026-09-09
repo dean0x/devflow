@@ -321,7 +321,8 @@ describe('Guard 4 (commands source): every dist/commands/*.md has a known source
  * required for a working npm install:
  *
  *   - `dist/`         compiled CLI entry point and compiled commands
- *   - `src/assets/`   skills, agents, rules, hook scripts, command sources
+ *   - `src/assets/`   skills, agents, rules, hook scripts, and the MDS generator
+ *                     sources (*.mds under commands/ and agents/)
  *   - `src/targets/claude-code/templates/`  install templates (.claudeignore, settings.json)
  *
  * A missing entry causes npm to silently omit files from the tarball, breaking

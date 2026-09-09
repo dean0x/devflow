@@ -11,7 +11,7 @@ directories:
   - src/assets/commands/_partials
   - scripts/build-mds.ts
 created: 2026-06-21
-updated: 2026-08-22
+updated: 2026-09-09
 ---
 
 # Feature Knowledge Base System
@@ -58,7 +58,7 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 | MDS partial module | `src/assets/commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
 | Host command sources (9) | `src/assets/commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
 | Host command sources (4 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
-| Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md`; hard-fails on any error |
+| Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md` (or `{name-template}.md` when that optional key is declared); hard-fails on any error |
 | Author agent | `src/assets/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
@@ -99,14 +99,14 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 
 `npm run build:mds` (part of `npm run build` = `build:cli` + `build:mds`):
 
-1. Walks the repo from root, skipping `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`
+1. Walks the repo from root, skipping `IGNORE_DIRS`: `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`, `tests`, `coverage` (`tests` and `coverage` are skipped because the build's own suite plants `.mds` fixtures that declare `output-dir:`)
 2. For each `.mds` file: reads frontmatter; if it declares a non-empty `output-dir:` key, treats it as a host
-3. Validates the parent plugin directory of each `output-dir` exists (hard-fail with "typo?" message if not)
+3. Validates each `output-dir` against a two-entry allowlist — `dist/commands` and `dist/agents` (`resolveOutputDir`): a path outside the repo root throws `escapes the repo root`, anything else off the allowlist exits 1 with the `— typo?` message; the emitted filename is then validated separately (`validateOutputName`, `is not a valid output filename`) before it is joined onto the destination
 4. Compiles each host via `@mdscript/mds` `compileFile()`, strips `output-dir:` from the output
-5. Writes `{basename}.md` to the declared `output-dir` (per-file clean; no dir wipe)
+5. Writes `{basename}.md` — or `{name-template}.md` when the host declares the optional `name-template:` key — to the declared `output-dir` via a temp file + rename (per-file clean; no dir wipe)
 6. Hard-fails on any compile error — no stale command ever ships
 
-13 MDS-compiled hosts (`ALL_HOSTS`): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). `DIST_FILES` = 14 — the 13 compiled outputs plus `release.md`, which is hand-authored and not MDS-compiled (SG-13 permanent divergence; see `dynamic-workflow-engine` KB).
+13 MDS-compiled **command** hosts (`ALL_HOSTS`, the test constant for that set): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). One further host lives outside `commands/` — the `git.mds` generator host in `src/assets/agents/`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md` — so the build reports 14 hosts to compile. `DIST_FILES` = 14 counts `dist/commands/` only: the 13 compiled command outputs plus `release.md`, which is hand-authored and not MDS-compiled (SG-13 permanent divergence; see `dynamic-workflow-engine` KB). Host and partial names are shared across the suite by `tests/fixtures/mds-manifest.ts`.
 Partials in `src/assets/commands/_partials/` have no `output-dir:` and are skipped automatically.
 
 ## Integration Patterns
@@ -185,7 +185,7 @@ compiled output.
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
-- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers all 13 host `.mds` files by `output-dir:` key; validates plugin dirs; hard-fails on any compile error
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole `src/assets/` walk (minus `IGNORE_DIRS`, which now also skips `tests` and `coverage` so the build's own `.mds` fixtures are never compiled into the real tree), yielding the 13 command hosts (`output-dir: dist/commands`) plus the `git.mds` generator host (`output-dir: dist/agents`); validates the destination dirs; hard-fails on any compile error
 - `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
