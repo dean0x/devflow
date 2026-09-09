@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Git agent is now compiled from an MDS generator host** — before: `src/assets/agents/git.md` was a hand-authored file the installer copied verbatim; the build owned command files only. After: `src/assets/agents/git.mds` declares `output-dir: dist/agents` in a leading steering block and compiles to `dist/agents/git.md`, which is byte-identical to the file it replaces (66,180 bytes, unchanged SHA-256). The installer and `loadShippedDefaults()` resolve every agent dist-first with a `src/assets/agents/` fallback, so the compiled artifact wins for a generated agent and the other 15 agents install exactly as before. The 14 compiled command outputs in `dist/commands/` are byte-unchanged. Zero user-visible change.
+
+- **`npm run build:cli` alone no longer produces installable agents** — before: `build:cli` (TypeScript) plus the shipped `src/assets/agents/*.md` were enough to install every agent. After: an agent authored as a generator host exists only as a `.mds` source until `npm run build:mds` compiles it, so a publish or install path that runs `build:cli` alone would ship without a Git agent. `npm run build` runs both and is unchanged; the packaging and pack-install guards now fail loudly if the compiled agent is missing from the tarball.
+
+- **`tests/integration/subagent-skill-preload.test.ts` is excluded from `npm run test:integration`** — before: `vitest.integration.config.ts` declared only an `include` glob, so the file was covered by the integration run and was kept out of it by naming the other files on the command line. After: the config carries a real `exclude` entry. The test spawns live `claude` sessions against the developer's own `~/.claude` with `--dangerously-skip-permissions`; it remains runnable by explicit path.
+
 ### Fixed
 
 - **`/debug #42` wrong Git-op spawn key** — before: `debug.mds` passed `ISSUE: {issue number}` to the `fetch-issue` Git operation, which declares `ISSUE_INPUT:`; the key mismatch meant no issue was ever fetched. After: `debug.mds` passes `ISSUE_INPUT: {issue reference}` — the key the op declares. (AC-0.1)

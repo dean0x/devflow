@@ -75,9 +75,9 @@ npm run test:watch    # Run tests in watch mode
 ## Build Commands
 
 ```bash
-npm run build          # Full build (TypeScript + MDS command compilation)
-npm run build:cli      # TypeScript compilation only
-npm run build:mds      # Compile src/assets/commands/*.mds → dist/commands/
+npm run build          # Full build (TypeScript + MDS compilation)
+npm run build:cli      # TypeScript compilation only — does not produce installable agents
+npm run build:mds      # Compile every .mds host: commands → dist/commands/, agents → dist/agents/
 ```
 
 ## Commit Conventions

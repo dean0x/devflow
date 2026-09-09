@@ -362,7 +362,7 @@ The following test files provide static content guards that fail loudly when loa
 - `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (phases 0-10 + 1b, 9b, 9c); compiled to `dist/commands/`
 - `src/assets/agents/triage.md` — Triage agent (opus): duplicate grouping pre-pass, blast-radius disposition matrix, evidence rules, verdict ledger format (7 buckets including DUPLICATE)
 - `src/assets/agents/code.md` — Code agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
-- `src/assets/agents/git.md` — Git agent: all traceability operations (validate-branch, fetch-review-threads, resolve-review-threads, post-review-summary, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status); D7/D8/D9 decision markers defined here
+- `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) — Git agent: all traceability operations (validate-branch, fetch-review-threads, resolve-review-threads, post-review-summary, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status); D7/D8/D9 decision markers defined here
 - `src/assets/commands/_partials/_compliance.mds` — `compliance_gate()` partial: sets `COMPLIANCE_SKILL_INSTALLED` as plain boolean
 - `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
 - `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b COMPLIANCE_SKILL_INSTALLED resolution, REVIEW_TIMESTAMP spawn input

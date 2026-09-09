@@ -43,7 +43,10 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // D4 degradation clauses added to fetch-issue + fetch-issues-batch.
 export const GIT_MD_CHARS = 65_677
 export const GIT_MD_LINES = 992
-export const SKILL_GIT_CHARS = 9_204
+// +1 char in Phase 1: the SKILL.md cross-reference to the Git agent moved from
+// src/assets/agents/git.md (deleted) to src/assets/agents/git.mds (the generator
+// host). An equality baseline moves in the SAME commit as the file it measures.
+export const SKILL_GIT_CHARS = 9_205
 export const SKILL_GIT_LINES = 283
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92

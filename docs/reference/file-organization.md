@@ -49,7 +49,7 @@ devflow/
 │       │   ├── software-design/
 │       │   └── ...
 │       ├── agents/                   # 16 agents
-│       │   ├── git.md
+│       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
 │       │   ├── synthesize.md
 │       │   ├── code.md
 │       │   └── ...
@@ -58,9 +58,9 @@ devflow/
 │       │   ├── security.md
 │       │   └── ...
 │       ├── commands/                 # Command sources
-│       │   ├── *.mds                 # 13 MDS host files (compiled to dist/commands/ by build:mds)
+│       │   ├── *.mds                 # MDS command hosts (compiled to dist/commands/ by build:mds)
 │       │   ├── *.md                  # 1 static command file
-│       │   └── _partials/            # 11 MDS partial files (no output-dir:, never compiled directly)
+│       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
@@ -143,7 +143,8 @@ Assets live once in `src/assets/` and install directly to the user's `~/.claude/
 | Asset type | Source | Install path | Build step |
 |------------|--------|--------------|-----------|
 | Skills | `src/assets/skills/{name}/` | `~/.claude/skills/devflow:{name}/` | None — edit → init |
-| Agents | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
+| Agents (hand-authored) | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
+| Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
 | Scripts | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |

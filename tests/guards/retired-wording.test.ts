@@ -12,6 +12,9 @@
  *   - may pre-fetch    (removed from _wave.mds in A1)
  *   - issue-first gate (removed from implement.mds in A1; "step 1c" self-reference stays valid in git.md)
  *
+ * Phase-1 retired literals:
+ *   - no generated copies anywhere (falsified by dist/agents/git.md; CLAUDE.md restated, GAP-53)
+ *
  * Non-vacuity: denylist size and corpus size are both asserted.
  * Known-bad sample (mechanic 2, H10): a seeded retired literal in a synthetic file
  * fails the guard — proven inline without touching committed source.
@@ -73,10 +76,28 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       '"step 1c" itself is still a valid self-reference in git.md (git create-branch step); ' +
       '"issue-first gate" is the unique retired phrase.',
   },
+  {
+    literal: 'no generated copies anywhere',
+    phase: '1',
+    removedFrom: 'CLAUDE.md',
+    justification:
+      'The Build System section claimed src/assets/{skills,agents,rules}/ were the single source ' +
+      'of truth with "no generated copies anywhere in the repo". Phase 1 falsified it: ' +
+      'dist/agents/git.md is a generated copy of an agent. Restated as "generated files never ' +
+      'live in src/" — the rule that is actually true and actually load-bearing (GAP-53).',
+  },
 ];
 
 // ---------------------------------------------------------------------------
-// Corpus: src/assets/ + dist/commands/ + all .md/.mds in the repo root dirs
+// Corpus: src/assets/ + dist/commands/ + the repo's own prose (root .md, docs/)
+//
+// The corpus widens when a retired literal lives outside the shipping assets —
+// a Phase-1 entry was retired from CLAUDE.md, which nothing scanned. Widening is
+// the correct response; loosening the denylist is not (R2).
+//
+// .devflow/features/*/KNOWLEDGE.md is deliberately NOT in the corpus. Those files
+// record what each literal WAS and why it was retired; a residue grep must not
+// demand that provenance be deleted (PF-040).
 // ---------------------------------------------------------------------------
 
 function buildCorpus(): Array<{ relPath: string; content: string }> {
@@ -105,6 +126,19 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
   // retired-wording checks are not silently skipped for that corpus (e.g. capture-prompt, ensure-proxy).
   addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh', '']);
   addDir(path.join(ROOT, 'dist', 'commands'), 'dist/commands', ['.md']);
+  addDir(path.join(ROOT, 'dist', 'agents'), 'dist/agents', ['.md']);
+  addDir(path.join(ROOT, 'docs'), 'docs', ['.md']);
+
+  // Root-level prose. Read individually rather than by walking ROOT, which would
+  // pull in node_modules/ and every dot-directory.
+  for (const name of ['CLAUDE.md', 'README.md', 'CONTRIBUTING.md']) {
+    try {
+      corpus.push({ relPath: name, content: readFileSync(path.join(ROOT, name), 'utf-8') });
+    } catch {
+      // Absent root doc — the corpus-size assertion below is what catches a corpus
+      // that has collapsed; a single missing file is not a guard failure.
+    }
+  }
 
   return corpus;
 }
@@ -148,14 +182,20 @@ describe('retired-wording guard — denylist of retired literals (P0-S22, GAP-32
     }
   });
 
-  it('no retired literal appears in any src/assets/ or dist/commands/ file (Phase-0 corpus)', () => {
+  it('no retired literal appears in the shipping assets, the compiled output, or the repo docs', () => {
     const corpus = buildCorpus();
 
     // Non-vacuity: corpus size must be > 0 so the guard is not trivially green.
     expect(
       corpus.length,
-      `corpus is empty — check src/assets/ and dist/commands/; guard is vacuous (PF-018)`,
+      `corpus is empty — check src/assets/, dist/, and docs/; guard is vacuous (PF-018)`,
     ).toBeGreaterThan(0);
+    // …and the doc half specifically, since a Phase-1 entry was retired from CLAUDE.md
+    // and would have gone unchecked while the src/assets half kept the corpus non-empty.
+    expect(
+      corpus.map(e => e.relPath),
+      'root prose must be in the corpus — a retired literal lives there',
+    ).toContain('CLAUDE.md');
 
     // Use the named collector so the probe exercises the same logic (M12a).
     const violations = collectRetiredLiteralViolations(corpus);
