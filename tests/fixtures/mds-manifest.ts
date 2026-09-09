@@ -1,21 +1,26 @@
 /**
  * MDS name manifests — the single definition of *which* files the build owns.
  *
- * Four assertion sites used to spell a bare count literal (`toHaveLength(13)`,
- * `toHaveLength(11)`, `toBe(14)` twice). A count answers "how many?", which stays
- * green when one host is renamed and another added in the same commit. These
- * manifests answer "which?", and every one of those sites now compares against
- * them in both directions.
+ * A count answers "how many?"; these manifests answer "which?". Every assertion
+ * site compares against them in both directions, so a rename plus an addition in
+ * the same commit cannot stay green.
  *
  * Bidirectional-registry model, mirroring src/core/compliance-compose.ts:20/:36/:50
  * ("every token here must exist in the template; every template token must be
- * listed here"). The enforcing tests, named here so a reader of the manifest can
- * find its guard:
+ * listed here"). Every file that imports these manifests, and what each enforces,
+ * named here so a reader of the manifest can find its guards:
  *
- *   - tests/build-mds.test.ts        "MDS host discovery"  — hosts and partials, both directions
- *   - tests/build-mds.test.ts        "script happy path"   — the dist/commands/*.md output set
- *   - tests/packaging.test.ts        Guard 6               — the same set inside the tarball
- *   - tests/build-mds-generator-hosts.test.ts §6           — the counts the build itself prints
+ *   - tests/build-mds.test.ts
+ *       "MDS host discovery"            — hosts and partials on disk, both directions
+ *       "expected-command-set guard"    — the dist/commands/*.md output set
+ *   - tests/build-mds-generator-hosts.test.ts
+ *       "printed host/partial counts…"  — the counts the build itself prints
+ *       "13 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
+ *   - tests/packaging.test.ts
+ *       Guard 6                         — the same output set, the generator hosts' compiled
+ *                                         agents, and the shipped .mds sources, inside the tarball
+ *   - tests/mds-variants.test.ts
+ *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *
  * Length floors (`>= 13`, `>= 11`) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.

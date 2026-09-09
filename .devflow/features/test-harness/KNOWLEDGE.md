@@ -1,7 +1,7 @@
 ---
 feature: test-harness
 name: Test Harness (agent-source resolver, goldens, seam and guard tests, integration helpers)
-description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs ALL_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
+description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs COMMAND_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
 category: conventions
 directories: [tests/helpers.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration]
 created: 2026-09-06
@@ -90,18 +90,18 @@ The fix splits into two independent assertions with **named matching op sets**:
 
 Rule: when a guard predicate is a logical OR, you cannot tell which branch is carrying the floor. Split into independent assertions with named op sets. Never rely on a combined predicate to validate two distinct contracts.
 
-### DIST_FILES vs ALL_HOSTS
+### DIST_FILES vs COMMAND_HOSTS
 
 A permanent divergence (SG-13) between two related counts:
 
 | Name | Count | What it is |
 |------|-------|-----------|
 | `DIST_FILES` | 14 | Deployed `dist/commands/*.md` files — 13 MDS-compiled + `release.md` (hand-authored) |
-| `ALL_HOSTS` | 13 | MDS **command** host files compiled into `dist/commands/` |
+| `COMMAND_HOSTS` | 13 | MDS **command** host files compiled into `dist/commands/` |
 
 Both are aliases of `tests/fixtures/mds-manifest.ts`, which is the single definition of *which* files the build owns (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `DIST_COMMAND_FILES`). The build discovers 14 hosts in total — the 13 command hosts plus the one generator host, `src/assets/agents/git.mds` → `dist/agents/git.md`. Sites that used to spell `toHaveLength(13)` / `toHaveLength(11)` / `toBe(14)` now assert set-equality against the manifest in both directions; the length floors (`>= 13`, `>= 11`) sit alongside them and are what `numeric-floors.json` pins.
 
-Guards that test deployed behaviour use `DIST_FILES` (14). Guards that test compilation rules use `ALL_HOSTS` (13). Conflating them produces off-by-one failures. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
+Guards that test deployed behaviour use `DIST_FILES` (14). Guards that test compilation rules use `COMMAND_HOSTS` (13). Conflating them produces off-by-one failures. The seam test asserts `DIST_FILES.length === 14` as a non-vacuous floor.
 
 ### OPERATION: anchor regex
 
@@ -208,7 +208,7 @@ This file spawns real `claude` CLI sessions. Key constraints:
 - **Session identity is deterministic.** `runClaudeAndWait` generates a UUID before spawning and passes it via `--session-id <uuid>`. The subagents directory is then read at the known path rather than by directory-diff. Without `--session-id`, a concurrent devflow memory worker session can create a new UUID directory that the diff picks up instead.
 - **3-second post-SIGTERM wait.** The spawned subagent runs independently and may still be writing its initialization transcript (skill preloads appear in the first JSONL lines) when the parent exits. Resolving immediately races with that write.
 - **One bounded retry.** `MAX_SPAWN_ATTEMPTS = 2`. Haiku may occasionally answer the parent prompt directly without calling the Agent tool, leaving no `subagents/` directory. One retry almost always succeeds.
-- **Excluded from routine integration runs** by `exclude` in `vitest.integration.config.ts`. It spawns live `claude` against the developer's real `~/.claude` and has historically committed to this repo mid-run. Still runnable by explicit path. Before Phase 1 the config had only an `include` filter, so the exclusion was carried out by naming the other files on the command line — i.e. it was a convention, not a config.
+- **Excluded from routine integration runs** by `exclude` in `vitest.integration.config.ts`. It spawns live `claude` against the developer's real `~/.claude` and has historically committed to this repo mid-run (PF-060, PF-055). The only way back in is `DEVFLOW_INTEGRATION_ALL` set to an explicit affirmative (`1`/`true`/`yes`, case- and space-insensitive) — `exclude` is applied at glob time, so naming the file on the command line cannot re-add it, and `=0`/`false`/`no`/`off` all keep it out. The gate is the pure `isAffirmative`/`integrationExclude` pair exported from that config and asserted by `tests/integration-config-gate.test.ts`; both of its branches spread `configDefaults.exclude`, because setting `exclude` replaces vitest's defaults rather than merging with them.
 
 The `subagents/` path follows Claude Code's layout:  
 `~/.claude/projects/-{encoded-cwd}/{sessionId}/subagents/agent-*.jsonl`  
@@ -271,8 +271,8 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 ## Key Files
 
 - `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `splitFrontmatter(text)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
-- `tests/fixtures/mds-manifest.ts` — the name manifests (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`); consumed by `build-mds.test.ts`, `packaging.test.ts` and `build-mds-generator-hosts.test.ts`
-- `tests/guards/dist-agents.test.ts` — dist/agents parity (both directions, fail-loud), escaped-brace guard, frontmatter-shape guard (every compiled agent starts with a block carrying `name:` — its collector emits one row **per header found**, not per file, so a headerless artifact shows up as a short array the caller compares against the file count rather than as a row whose flag someone forgot to assert; PF-018), no-.md-shadowing-an-.mds guard, resolver-origin proofs (AC-1.6/AC-1.3), and the AC-1.2 absence guard for Phase-2 constructs
+- `tests/fixtures/mds-manifest.ts` — the name manifests (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`); consumed by `build-mds.test.ts`, `packaging.test.ts`, `build-mds-generator-hosts.test.ts` and `mds-variants.test.ts` (the last imports `ALL_MDS_HOSTS` for the `validateOutputName` roster check) — the manifest's own header lists all four
+- `tests/guards/dist-agents.test.ts` — dist/agents parity (both directions, fail-loud), escaped-brace guard, frontmatter-shape guard (every compiled agent starts with a block carrying `name:` — its collector emits one row **per header found**, not per file, so a headerless artifact shows up as a short array the caller compares against the file count rather than as a row whose flag someone forgot to assert; PF-018), no-.md-shadowing-an-.mds guard, resolver-origin proofs (AC-1.6/AC-1.3, each with its own non-empty floor), and the AC-1.2 absence guard for Phase-2 constructs. That last guard matches **anchored regexes, not substrings** — its corpus includes `src/core/mds-variants.ts` and `scripts/build-mds.ts`, the two files whose whole subject is this machinery, so `variants:` is pinned as a line-start YAML key, `expandVariants` as a call, `tracker-<provider>` as a `.md`/`.mds` filename, and prose that merely names a Phase-2 construct stays legal. Each entry carries both its pattern and the seeded instance that must trip it, and a second probe asserts a docblock describing Phase 2 is **not** a violation
 - `tests/guards/agent-source-resolver.test.ts` — resolver unit tests; dist-preferred and src-fallback proofs; `extractOpSectionFromCorpus` sole/union mode tests
 - `tests/guards/numeric-floor-manifest.test.ts` — floor pinning guard; occurrence-aware, decrement probe covers every entry
 - `tests/guards/literal-agent-paths.test.ts` — forbids `src/assets/agents/` literals in new test files; exception list with justifications; `requireDistFile`/`requireDistFiles` throw-contract tests

@@ -41,19 +41,21 @@ const DIST_COMMANDS = 'dist/commands';
 /** Path to the local tsx binary (avoids npx install in temp dirs). */
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 
-// Names come from the shared manifest (tests/fixtures/mds-manifest.ts) so the four
-// sites that used to spell a bare count literal compare against ONE definition.
-// The aliases keep the long-standing local vocabulary of this file intact.
+// Names come from the shared manifest (tests/fixtures/mds-manifest.ts) — the one
+// definition of which files the build owns. These aliases are this file's local
+// vocabulary for those sets; COMMAND_HOSTS is the manifest's MDS_COMMAND_HOSTS
+// (13 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
+// also carries the generator host.
 //
 // DIST_FILES = all 14 deployed commands (13 compiled MDS hosts + 1 hand-authored).
 // release.md is hand-authored and stays so permanently — the divergence is deliberate
 // and recorded in .devflow/features/dynamic-workflow-engine/KNOWLEDGE.md (SG-13, §14.5).
 // Scope rule (§14.5):
-//   - compilation guards (escaped braces, un-expanded call sites) → ALL_HOSTS scope
+//   - compilation guards (escaped braces, un-expanded call sites) → COMMAND_HOSTS scope
 //   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
 const KNOWLEDGE_HOSTS = KNOWLEDGE_COMMAND_HOSTS;
 const DYNAMIC_HOSTS = DYNAMIC_COMMAND_HOSTS;
-const ALL_HOSTS = MDS_COMMAND_HOSTS;
+const COMMAND_HOSTS = MDS_COMMAND_HOSTS;
 const DIST_FILES = DIST_COMMAND_FILES;
 
 // ---------------------------------------------------------------------------
@@ -75,11 +77,15 @@ async function ensureInit(): Promise<void> {
 
 describe('MDS host discovery', () => {
   /**
-   * Named collector: .mds basenames directly inside `dir`, split into hosts
-   * (no `_` prefix) and partials. Recursive by design — a partial parked in a
-   * subdirectory is still a partial, and the flat readdir that preceded this
-   * collector could not see one. Used by the manifest assertions AND by the
-   * known-bad probes, so a probe cannot pass against a shadow implementation.
+   * Named collector: .mds basenames anywhere under `dir`, split into hosts
+   * (no `_` prefix) and partials, plus every subdirectory found. Recursive by
+   * design — a partial parked in a subdirectory is still a partial, and the
+   * flat readdir that preceded this collector could not see one. `subdirs`
+   * recurses on the same terms: a nested directory is reported path-qualified
+   * relative to `dir` (`nested/deeper`), so the flatness assertion below means
+   * "no directories anywhere under _partials/", not "none at depth 1".
+   * Used by the manifest assertions AND by the known-bad probes, so a probe
+   * cannot pass against a shadow implementation.
    */
   async function collectMdsNames(dir: string, depth = 0): Promise<{
     hosts: string[]; partials: string[]; subdirs: string[];
@@ -95,6 +101,7 @@ describe('MDS host discovery', () => {
           const nested = await collectMdsNames(path.join(dir, e.name), depth + 1);
           hosts.push(...nested.hosts);
           partials.push(...nested.partials);
+          subdirs.push(...nested.subdirs.map(s => `${e.name}/${s}`));
         }
         continue;
       }
@@ -115,7 +122,7 @@ describe('MDS host discovery', () => {
   });
 
   it('each expected host .mds exists in commands/', async () => {
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const sourcePath = path.join(COMMANDS_DIR, `${basename}.mds`);
       await expect(
         fs.access(sourcePath),
@@ -131,9 +138,11 @@ describe('MDS host discovery', () => {
     expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(11);
   });
 
-  it('commands/_partials/ is flat — no subdirectories', async () => {
+  it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
     // The flat readdir this replaced could not distinguish "no subdirectories"
-    // from "subdirectories present but unread". Assert the property directly.
+    // from "subdirectories present but unread". Assert the property directly,
+    // and at every depth: the collector reports nested directories too, so a
+    // directory buried two levels down cannot hide behind a depth-1 sweep.
     const { subdirs } = await collectMdsNames(PARTIALS_DIR);
     expect(
       subdirs,
@@ -146,11 +155,15 @@ describe('MDS host discovery', () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-partials-probe-'));
     try {
       await fs.writeFile(path.join(tmp, '_flat.mds'), 'x', 'utf-8');
-      await fs.mkdir(path.join(tmp, 'nested'), { recursive: true });
+      await fs.mkdir(path.join(tmp, 'nested', 'deeper'), { recursive: true });
       await fs.writeFile(path.join(tmp, 'nested', '_buried.mds'), 'x', 'utf-8');
 
       const { partials, subdirs } = await collectMdsNames(tmp);
       expect(subdirs, 'the subdirectory assertion must fire on a seeded subdir').toContain('nested');
+      expect(
+        subdirs,
+        'the flatness assertion must see subdirectories at every depth, not just depth 1',
+      ).toContain('nested/deeper');
       expect(partials, 'the recursive collector must see a partial one level down').toContain('_buried');
       expect(partials).not.toEqual([...MDS_PARTIALS].sort());
     } finally {
@@ -167,7 +180,7 @@ describe('MDS host discovery', () => {
   });
 
   it('every host .mds declares a non-empty output-dir: as its last frontmatter key', async () => {
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const content = await fs.readFile(path.join(COMMANDS_DIR, `${basename}.mds`), 'utf-8');
       const fmSplit = splitFrontmatter(content);
       expect(fmSplit, `${basename}.mds must have a frontmatter block`).not.toBeNull();
@@ -205,7 +218,7 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('no compiled output contains output-dir:', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
@@ -224,7 +237,7 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('every compiled output that has frontmatter still has description:', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
@@ -312,7 +325,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
 
   it('no compiled output contains a literal @import line', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
@@ -351,11 +364,11 @@ describe('escape-regression guard: no dist command contains literal backslash-br
   });
 
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
-    // ALL_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
+    // COMMAND_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
     // output only.  release.md is hand-authored and not produced by the MDS compiler —
-    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
+    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
@@ -493,7 +506,7 @@ describe('build-mds.ts script subprocess contract', () => {
 
   it('produces at least one .md command file after the script runs', async () => {
     let foundAtLeastOne = false;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       try {
         await fs.access(path.join(ROOT, DIST_COMMANDS, `${basename}.md`));
         foundAtLeastOne = true;
@@ -799,12 +812,12 @@ describe('compiled knowledge commands — no stale call-site references', () => 
   });
 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
-    // ALL_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
+    // COMMAND_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
     // applies to MDS compiler outputs only.  release.md is hand-authored — it never
-    // contains MDS call sites (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
+    // contains MDS call sites (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {
@@ -1075,9 +1088,9 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // Title corrected (P0-S22): the body asserts COMPLIANCE: {enabled (not COMPLIANCE: ${).
     // dist/commands/dynamic-build.md:210 legitimately contains COMPLIANCE: ${COMPLIANCE}
     // (a JS template literal in a code block) — that is intentional, not an MDS escape bug.
-    // M8: DIST_FILES (not ALL_HOSTS) — release.md is a hand-authored dist file that must
+    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md is a hand-authored dist file that must
     // pass the same COMPLIANCE_ENABLED/devflow-compliance/comment-pr cleanliness checks.
-    // ALL_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = ALL_HOSTS + release.md (14 total).
+    // COMMAND_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = COMMAND_HOSTS + release.md (14 total).
     // DIST_FILES entries already include the '.md' extension (e.g. 'implement.md').
     // Use `basename` directly as the filename — do NOT append '.md' again.
     let scanned = 0;
@@ -1120,7 +1133,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
-    // M8: DIST_FILES (not ALL_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
+    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
     // DIST_FILES entries include the '.md' extension — use basename directly (no extra .md).
     let scanned = 0;
     for (const basename of DIST_FILES) {
@@ -1445,7 +1458,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
       let content: string;
       try {

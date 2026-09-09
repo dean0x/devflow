@@ -24,7 +24,7 @@
       "pattern": "toBe(14)",
       "occurrences": 3,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "DIST_FILES count = ALL_HOSTS (13) + release.md (1); DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)"
+      "description": "DIST_FILES count = COMMAND_HOSTS (13) + release.md (1); DIST_FILES vs COMMAND_HOSTS divergence is permanent (SG-13)"
     },
     {
       "id": "slow-test-timeout-ms",
