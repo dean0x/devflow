@@ -1069,8 +1069,6 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await fs.rm(mergeTmp, { recursive: true, force: true });
   });
 
-  const writeAgent = writeAgentFile;
-
   it('covers every agent in the registry, not merely "some agents were scanned"', async () => {
     // `scanned > 0` would survive 15 of 16 agents silently disappearing (GAP-07).
     const defaults = await loadShippedDefaults();
@@ -1085,8 +1083,8 @@ describe('loadShippedDefaults — compiled over source merge', () => {
   it('reads an agent that exists ONLY in the compiled dir', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
     const distDir = path.join(mergeTmp, 'dist-agents');
-    await writeAgent(srcDir, 'other', 'sonnet');
-    await writeAgent(distDir, 'git', 'haiku');
+    await writeAgentFile(srcDir, 'other', 'sonnet');
+    await writeAgentFile(distDir, 'git', 'haiku');
 
     const defaults = await loadShippedDefaults([distDir, srcDir]);
     expect(defaults['git']).toBe('haiku');
@@ -1097,8 +1095,8 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     // Non-vacuity for the test above: without the dist side, git is simply absent.
     const srcDir = path.join(mergeTmp, 'src-agents');
     const distDir = path.join(mergeTmp, 'dist-agents');
-    await writeAgent(srcDir, 'other', 'sonnet');
-    await writeAgent(distDir, 'git', 'haiku');
+    await writeAgentFile(srcDir, 'other', 'sonnet');
+    await writeAgentFile(distDir, 'git', 'haiku');
 
     const srcOnly = await loadShippedDefaults([srcDir]);
     expect(srcOnly['git']).toBeUndefined();
@@ -1108,8 +1106,8 @@ describe('loadShippedDefaults — compiled over source merge', () => {
   it('lets the compiled dir win for a name present in both', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
     const distDir = path.join(mergeTmp, 'dist-agents');
-    await writeAgent(srcDir, 'git', 'opus');
-    await writeAgent(distDir, 'git', 'haiku');
+    await writeAgentFile(srcDir, 'git', 'opus');
+    await writeAgentFile(distDir, 'git', 'haiku');
 
     expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
     // Reversing the order must change the answer, or the precedence proves nothing.
@@ -1118,7 +1116,7 @@ describe('loadShippedDefaults — compiled over source merge', () => {
 
   it('tolerates an absent compiled dir', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
-    await writeAgent(srcDir, 'git', 'haiku');
+    await writeAgentFile(srcDir, 'git', 'haiku');
 
     const defaults = await loadShippedDefaults([path.join(mergeTmp, 'no-such-dir'), srcDir]);
     expect(defaults['git']).toBe('haiku');
@@ -1127,7 +1125,7 @@ describe('loadShippedDefaults — compiled over source merge', () => {
   it('ignores non-.md entries in either dir', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
     const distDir = path.join(mergeTmp, 'dist-agents');
-    await writeAgent(srcDir, 'git', 'haiku');
+    await writeAgentFile(srcDir, 'git', 'haiku');
     await fs.mkdir(distDir, { recursive: true });
     await fs.writeFile(path.join(distDir, 'git.mds'), '---\nmodel: opus\n---\n', 'utf-8');
 

@@ -418,7 +418,7 @@ function outputNameRefusal(rel: string, declared: string, error: OutputNameError
   const prefix = `${rel}: output filename '${declared}' is not a valid output filename`;
   switch (error.kind) {
     case "empty":
-      return new Error(`${rel}: output filename is empty (empty) — a host must emit a non-empty name`);
+      return new Error(`${prefix} (empty) — a host must emit a non-empty name`);
     case "dot-segment":
       return new Error(`${prefix} (dot-segment) — '.' and '..' segments are refused`);
     case "path-separator":
