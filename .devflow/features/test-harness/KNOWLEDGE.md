@@ -55,6 +55,10 @@ Both throw with a build hint when `dist/commands/` is absent or the named file d
 
 `walkFiles(dir, accept, maxDepth = 8)` — recursive `readdirSync(withFileTypes)`, deterministic (sorted) order. On `ENOENT` or `ENOTDIR` for a node: returns `[]`. Other errors rethrow. Descent stops at `maxDepth`. Accepts a predicate `accept(filename)` to filter by extension or name. Used by `gitAgentSinkCorpus` for recursive `references/` traversal.
 
+### splitFrontmatter
+
+`splitFrontmatter(text)` → `{ block, inner, body } | null` — splits a document at its leading `---…---` frontmatter block: `block` is the whole block including both delimiters and the trailing newline, `inner` its text between them, `body` everything after. Returns `null` when there is no block at byte offset 0 (a block further down the file is body text, the same rule the Claude Code loader and the MDS build apply). One owner for a shape that had been reimplemented per test file, so every caller agrees on CRLF handling and on what counts as frontmatter. Callers: `build.test.ts` (agent `skills:` collector), `build-mds.test.ts` (host `output-dir:`-is-last assertion), `build-mds-generator-hosts.test.ts` (real-agent fixture derivation, compiled-shape and leaked-build-key collectors), `installer-new.test.ts` (agent fixture derivation).
+
 ### gitAgentSinkCorpus
 
 Builds the D11 sink-class corpus: `git.md` (via `resolveAgentSource('git', root)`) plus all `.md` files under `dist/skills/git/references/` (recursive via `walkFiles`; ENOENT-tolerant — returns `[]` when the directory is absent for Phase 0). The recursive descent covers Phase 2's `references/tracker/github/{op}.md` depth without any changes to the corpus builder. Accepts an injectable `root` parameter (default `ROOT`) for test isolation. Does NOT include `dist/commands` — that is Phase 3a-S14 work. Used by forward/reverse/bypass D11 guards so the posting-op floor stays valid when mechanics split into compiled reference files in later phases.
@@ -264,7 +268,7 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 
 ## Key Files
 
-- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
+- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `splitFrontmatter(text)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`
 - `tests/fixtures/mds-manifest.ts` — the name manifests (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`); consumed by `build-mds.test.ts`, `packaging.test.ts` and `build-mds-generator-hosts.test.ts`
 - `tests/guards/dist-agents.test.ts` — dist/agents parity (both directions, fail-loud), escaped-brace guard, frontmatter-shape guard (every compiled agent starts with a block carrying `name:` — its collector emits one row **per header found**, not per file, so a headerless artifact shows up as a short array the caller compares against the file count rather than as a row whose flag someone forgot to assert; PF-018), no-.md-shadowing-an-.mds guard, resolver-origin proofs (AC-1.6/AC-1.3), and the AC-1.2 absence guard for Phase-2 constructs
 - `tests/guards/agent-source-resolver.test.ts` — resolver unit tests; dist-preferred and src-fallback proofs; `extractOpSectionFromCorpus` sole/union mode tests

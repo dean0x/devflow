@@ -34,7 +34,7 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 
-import { requireDistFiles, requireDistFile, resolveAgentSource } from './helpers.js';
+import { requireDistFiles, requireDistFile, resolveAgentSource, splitFrontmatter } from './helpers.js';
 import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
@@ -96,14 +96,14 @@ function sha256(text: string): string {
  */
 async function realAgentShape(): Promise<{ frontmatter: string; bodyHead: string }> {
   const { path: realPath, content: real } = resolveAgentSource('git');
-  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(real);
-  if (!match) {
+  const fm = splitFrontmatter(real);
+  if (!fm) {
     throw new Error(`${realPath} has no leading frontmatter block — fixture cannot be derived`);
   }
   // First few body lines only: the strip semantics are what is under test, and
   // git.md's full body contains {…} spans that MDS would treat as interpolation.
-  const bodyHead = real.slice(match[0].length).split('\n').slice(0, 4).join('\n') + '\n';
-  return { frontmatter: match[0], bodyHead };
+  const bodyHead = fm.body.split('\n').slice(0, 4).join('\n') + '\n';
+  return { frontmatter: fm.block, bodyHead };
 }
 
 /** Write a generator host (block 1 = output-dir, block 2 = real agent frontmatter). */
@@ -229,11 +229,11 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     hasDescription: boolean;
   }> {
     return contents.map(({ name, text }) => {
-      const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
-      const block = match ? match[1] : '';
+      const fm = splitFrontmatter(text);
+      const block = fm ? fm.inner : '';
       return {
         name,
-        hasBlock: match !== null,
+        hasBlock: fm !== null,
         hasOutputDir: /^output-dir:/m.test(block),
         hasDescription: /^description:/m.test(block),
       };
@@ -637,9 +637,9 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
 describe('build-owned keys never reach a command artifact', () => {
   /** Named collector: which build-owned keys survive into an emitted frontmatter block. */
   function collectLeakedBuildKeys(text: string): string[] {
-    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
-    if (match === null) return ['<no frontmatter block>'];
-    return ['output-dir', 'output-name'].filter(key => new RegExp(`^${key}:`, 'm').test(match[1]));
+    const fm = splitFrontmatter(text);
+    if (fm === null) return ['<no frontmatter block>'];
+    return ['output-dir', 'output-name'].filter(key => new RegExp(`^${key}:`, 'm').test(fm.inner));
   }
 
   it('a command host declaring output-name: ships neither build key', async () => {

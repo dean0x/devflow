@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
-import { resolveAgentSource, resolveAllAgents } from './helpers.js';
+import { resolveAgentSource, resolveAllAgents, splitFrontmatter } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
@@ -121,10 +121,10 @@ describe('agent frontmatter compliance contract', () => {
     const result = new Map<string, string[]>();
     for (const [name, { content }] of sources) {
       // Parse only the YAML frontmatter block (between first --- markers), not body text
-      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-      if (!fmMatch) continue;
+      const fm = splitFrontmatter(content);
+      if (!fm) continue;
 
-      const fmLines = fmMatch[1].split('\n');
+      const fmLines = fm.inner.split('\n');
       let inSkills = false;
       const skillItems: string[] = [];
       for (const line of fmLines) {

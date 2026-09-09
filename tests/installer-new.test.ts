@@ -18,7 +18,7 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
-import { resolveAgentSource } from './helpers.js';
+import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -721,9 +721,9 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
    */
   async function writeAgentFixture(dir: string, marker: string): Promise<string> {
     const { path: realPath, content: real } = resolveAgentSource(AGENT);
-    const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(real);
-    if (!match) throw new Error(`${realPath} has no frontmatter — fixture cannot be derived`);
-    const content = `${match[0]}\nMARKER: ${marker}\n`;
+    const fm = splitFrontmatter(real);
+    if (!fm) throw new Error(`${realPath} has no frontmatter — fixture cannot be derived`);
+    const content = `${fm.block}\nMARKER: ${marker}\n`;
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, `${AGENT}.md`), content, 'utf-8');
     return content;

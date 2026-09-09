@@ -31,6 +31,7 @@ import {
   MDS_PARTIALS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
+import { splitFrontmatter } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
@@ -168,9 +169,9 @@ describe('MDS host discovery', () => {
   it('every host .mds declares a non-empty output-dir: as its last frontmatter key', async () => {
     for (const basename of ALL_HOSTS) {
       const content = await fs.readFile(path.join(COMMANDS_DIR, `${basename}.mds`), 'utf-8');
-      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content);
-      expect(fmMatch, `${basename}.mds must have a frontmatter block`).not.toBeNull();
-      const fm = fmMatch![1];
+      const fmSplit = splitFrontmatter(content);
+      expect(fmSplit, `${basename}.mds must have a frontmatter block`).not.toBeNull();
+      const fm = fmSplit!.inner;
       expect(fm, `${basename}.mds must declare output-dir:`).toMatch(/^output-dir:/m);
       // output-dir: should be the last key (no non-blank lines after it inside the block)
       const lines = fm.split(/\r?\n/);

@@ -505,3 +505,29 @@ export function computeFpRatio(fpCount: number, fixedCount: number, deferredCoun
   if (denominator === 0) return 0
   return fpCount / denominator
 }
+
+// ── Frontmatter splitting ────────────────────────────────────────────────────
+
+/** A document's leading `---…---` frontmatter block and the text after it. */
+export interface FrontmatterSplit {
+  /** The whole block, both `---` delimiters and the trailing newline included. */
+  block: string
+  /** The block's inner text, delimiters and their newlines excluded. */
+  inner: string
+  /** Everything after the block. */
+  body: string
+}
+
+/**
+ * Split a document at its leading frontmatter block; null when it has none.
+ *
+ * One owner for the `^---…---` shape, which was reimplemented per test file:
+ * every caller then agrees on the same CRLF handling and the same answer for a
+ * block that is not at byte offset 0. Only a block at the very start counts —
+ * that is the rule the Claude Code loader and the MDS build both apply.
+ */
+export function splitFrontmatter(text: string): FrontmatterSplit | null {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text)
+  if (!match) return null
+  return { block: match[0], inner: match[1], body: text.slice(match[0].length) }
+}
