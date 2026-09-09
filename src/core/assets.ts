@@ -41,3 +41,15 @@ export function scriptsDir(): string {
 export function commandsDir(): string {
   return join(getPackageRoot(), 'dist', 'commands');
 }
+
+/**
+ * Compiled agents directory: dist/agents/{name}.md
+ *
+ * Output of the .mds generator hosts. Agents are resolved from here first and
+ * from agentsDir() as a fallback, so a generated agent supersedes a
+ * hand-authored file of the same name. The directory is absent until at least
+ * one generator host exists, so every reader must tolerate its absence.
+ */
+export function compiledAgentsDir(): string {
+  return join(getPackageRoot(), 'dist', 'agents');
+}

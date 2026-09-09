@@ -28,7 +28,7 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
 import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
-import { agentsDir } from './assets.js';
+import { agentsDir, compiledAgentsDir } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
 import { isContainedIn } from './paths.js';
@@ -462,41 +462,54 @@ export function resolveEffective(
 // ---------------------------------------------------------------------------
 
 /**
- * Load shipped default models from the source agent files.
- * Reads every file in agentsDir() and parses the frontmatter model field.
- * Unknown or malformed files are silently skipped.
+ * Load shipped default models from the agent files.
+ *
+ * Reads every .md file in each directory and parses the frontmatter model
+ * field. Directories are applied in order and LATER ones win, so the default
+ * `[agentsDir(), compiledAgentsDir()]` merges the compiled agents over the
+ * source tree: once an agent is generated into dist/agents/, its frontmatter is
+ * the shipped default. An unreadable directory contributes nothing — the
+ * compiled dir does not exist until a generator host does, and a source tree
+ * that produced no agents is caught by the registry-completeness guard rather
+ * than by a throw here. Unknown or malformed files are silently skipped.
+ *
+ * @param dirs - Agent directories, least-preferred first. Injectable so tests
+ *   can prove the merge against a temp tree; all real callers use the default.
  */
-export async function loadShippedDefaults(): Promise<Record<string, string>> {
-  const sourceDir = agentsDir();
+export async function loadShippedDefaults(
+  dirs: readonly string[] = [agentsDir(), compiledAgentsDir()],
+): Promise<Record<string, string>> {
   const defaults: Record<string, string> = {};
 
-  let entries: string[];
-  try {
-    entries = await fs.readdir(sourceDir);
-  } catch {
-    return defaults;
-  }
+  for (const dir of dirs) {
+    let entries: string[];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      continue;
+    }
 
-  const pairs = await Promise.all(
-    entries.map(async (file): Promise<readonly [string, string] | null> => {
-      const agentName = mdEntryName(file);
-      if (agentName === null) return null;
-      try {
-        const content = await fs.readFile(path.join(sourceDir, file), 'utf-8');
-        const result = readFrontmatterModel(content);
-        if (result.ok && result.value) {
-          return [agentName, result.value] as const;
+    const pairs = await Promise.all(
+      entries.map(async (file): Promise<readonly [string, string] | null> => {
+        const agentName = mdEntryName(file);
+        if (agentName === null) return null;
+        try {
+          const content = await fs.readFile(path.join(dir, file), 'utf-8');
+          const result = readFrontmatterModel(content);
+          if (result.ok && result.value) {
+            return [agentName, result.value] as const;
+          }
+        } catch {
+          // Silently skip unreadable files
         }
-      } catch {
-        // Silently skip unreadable files
-      }
-      return null;
-    })
-  );
+        return null;
+      })
+    );
 
-  for (const pair of pairs) {
-    if (pair !== null) {
-      defaults[pair[0]] = pair[1];
+    for (const pair of pairs) {
+      if (pair !== null) {
+        defaults[pair[0]] = pair[1];
+      }
     }
   }
 

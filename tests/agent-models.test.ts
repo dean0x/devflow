@@ -35,6 +35,7 @@ import {
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1033,5 +1034,100 @@ describe('parseAgentMappingEnvelope', () => {
     await fs.writeFile(filePath, '{"agents":null}', 'utf-8');
     const result = await parseAgentMappingEnvelope(filePath);
     expect(result.kind).toBe('skip');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadShippedDefaults — compiled dir merged over source dir
+// ---------------------------------------------------------------------------
+//
+// Shipped defaults are read live from the agent files at convergence time, so
+// once an agent is generated into dist/agents/ its frontmatter must be the one
+// that answers "what model did devflow ship for this agent?". The compiled dir
+// is merged OVER the source dir; the dirs are injectable so the merge can be
+// proved against a synthetic tree instead of the live build state.
+
+describe('loadShippedDefaults — compiled over source merge', () => {
+  let mergeTmp: string;
+
+  beforeEach(async () => {
+    mergeTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-shipped-defaults-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(mergeTmp, { recursive: true, force: true });
+  });
+
+  async function writeAgent(dir: string, name: string, model: string): Promise<void> {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, `${name}.md`),
+      `---\nname: ${name}\nmodel: ${model}\n---\n\nbody\n`,
+      'utf-8',
+    );
+  }
+
+  it('covers every agent in the registry, not merely "some agents were scanned"', async () => {
+    // `scanned > 0` would survive 15 of 16 agents silently disappearing (GAP-07).
+    const defaults = await loadShippedDefaults();
+    expect(Object.keys(defaults)).toEqual(expect.arrayContaining([...getAllAgentNames()]));
+  });
+
+  it('reports the git agent as haiku from the live tree', async () => {
+    const defaults = await loadShippedDefaults();
+    expect(defaults['git']).toBe('haiku');
+  });
+
+  it('reads an agent that exists ONLY in the compiled dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgent(srcDir, 'other', 'sonnet');
+    await writeAgent(distDir, 'git', 'haiku');
+
+    const defaults = await loadShippedDefaults([srcDir, distDir]);
+    expect(defaults['git']).toBe('haiku');
+    expect(defaults['other']).toBe('sonnet');
+  });
+
+  it('known-bad probe: dropping the compiled dir loses the generated agent', async () => {
+    // Non-vacuity for the test above: without the dist side, git is simply absent.
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgent(srcDir, 'other', 'sonnet');
+    await writeAgent(distDir, 'git', 'haiku');
+
+    const srcOnly = await loadShippedDefaults([srcDir]);
+    expect(srcOnly['git']).toBeUndefined();
+    expect(srcOnly['other']).toBe('sonnet');
+  });
+
+  it('lets the compiled dir win for a name present in both', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgent(srcDir, 'git', 'opus');
+    await writeAgent(distDir, 'git', 'haiku');
+
+    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('haiku');
+    // Reversing the order must change the answer, or the merge proves nothing.
+    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('opus');
+  });
+
+  it('tolerates an absent compiled dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    await writeAgent(srcDir, 'git', 'haiku');
+
+    const defaults = await loadShippedDefaults([srcDir, path.join(mergeTmp, 'no-such-dir')]);
+    expect(defaults['git']).toBe('haiku');
+  });
+
+  it('ignores non-.md entries in either dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgent(srcDir, 'git', 'haiku');
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(path.join(distDir, 'git.mds'), '---\nmodel: opus\n---\n', 'utf-8');
+
+    // The .mds source must not be mistaken for a compiled agent.
+    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('haiku');
   });
 });

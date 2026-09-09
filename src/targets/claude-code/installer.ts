@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
-import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
+import { skillsDir, agentsDir, compiledAgentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 
@@ -359,6 +359,13 @@ export interface FileCopyOptions {
   rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
   spinner: Spinner;
+  /**
+   * Agent source directories, most-preferred first. Defaults to
+   * [compiledAgentsDir(), agentsDir()] so a generated agent supersedes a
+   * hand-authored file of the same name. Injectable so tests can prove the
+   * preference order against a temp tree instead of the live build state.
+   */
+  agentSourceDirs?: readonly string[];
 }
 
 /**
@@ -495,11 +502,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     mdEntryName,
   ));
 
-  // Install agents (deduplicated) from flat src/assets/agents/{name}.md.
-  // A declared agent whose source file is absent is a build/packaging failure
-  // and throws rather than silently skipping (matches command pattern).
+  // Install agents (deduplicated), resolved dist-first with a src fallback:
+  // dist/agents/{name}.md (compiled from an .mds generator host) wins over
+  // src/assets/agents/{name}.md. A declared agent absent from BOTH is a
+  // build/packaging failure and throws rather than silently skipping (matches
+  // command pattern); the message names the build step as well as the tree.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const aDir = agentsDir();
+  const agentDirs = options.agentSourceDirs ?? [compiledAgentsDir(), agentsDir()];
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -511,13 +520,24 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (allAgentNames.size > 0) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
-      const srcFile = path.join(aDir, mdFileName(agentName));
-      try {
-        await fs.access(srcFile);
-      } catch {
+      const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
+      let srcFile: string | undefined;
+      for (const candidate of candidates) {
+        try {
+          await fs.access(candidate);
+          srcFile = candidate;
+          break;
+        } catch {
+          // Try the next directory in preference order.
+        }
+      }
+      if (srcFile === undefined) {
+        // Name the last (source-tree) candidate as the primary path, then list
+        // every location searched so the reader knows exactly where to look.
         throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${srcFile}. ` +
-          `Ensure the agent file exists in src/assets/agents/.`,
+          `Agent source not found for declared agent "${agentName}": ${candidates[candidates.length - 1]}. ` +
+          `Ensure the agent file exists in src/assets/agents/, or run \`npm run build:mds\` if it is ` +
+          `compiled from an .mds generator host (searched: ${candidates.join(', ')}).`,
         );
       }
       await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));

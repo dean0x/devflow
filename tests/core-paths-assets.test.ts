@@ -13,7 +13,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 
 import { getPackageRoot } from '../src/core/paths.js';
-import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../src/core/assets.js';
+import { skillsDir, agentsDir, compiledAgentsDir, rulesDir, commandsDir, scriptsDir } from '../src/core/assets.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -75,6 +75,21 @@ describe('agentsDir', () => {
     const entries = await fs.readdir(agentsDir());
     const mdFiles = entries.filter(f => f.endsWith('.md'));
     expect(mdFiles.length, 'src/assets/agents/ should contain .md files').toBeGreaterThan(0);
+  });
+});
+
+describe('compiledAgentsDir', () => {
+  it('returns {root}/dist/agents', () => {
+    expect(compiledAgentsDir()).toBe(path.join(ROOT, 'dist', 'agents'));
+  });
+
+  it('is a sibling of commandsDir under dist/, not a source directory', () => {
+    expect(path.dirname(compiledAgentsDir())).toBe(path.dirname(commandsDir()));
+    expect(compiledAgentsDir()).not.toBe(agentsDir());
+  });
+
+  it('is stable across repeated calls (no FS side effects)', () => {
+    expect(compiledAgentsDir()).toBe(compiledAgentsDir());
   });
 });
 
