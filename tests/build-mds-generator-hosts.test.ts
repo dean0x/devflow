@@ -37,7 +37,17 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 
-import { requireDistFiles, requireDistFile, resolveAgentSource, splitFrontmatter } from './helpers.js';
+import {
+  requireDistFiles,
+  requireDistFile,
+  resolveAgentSource,
+  splitFrontmatter,
+  buildCommittedTree,
+  cleanupCommittedTree,
+  copyCommittedSources,
+  collectSpawnScoping,
+  type BuildRun,
+} from './helpers.js';
 import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
@@ -64,12 +74,13 @@ vi.setConfig({ testTimeout: 120_000 });
 /** The 13 basenames compiled from .mds hosts into dist/commands/. */
 const COMPILED_COMMANDS = MDS_COMMAND_HOSTS;
 
-interface BuildRun {
-  status: number | null;
-  combined: string;
-}
-
-/** Run the real build script against an isolated fake root. */
+/**
+ * Run the real build script against an isolated fake root.
+ *
+ * Deliberately spelled out here rather than imported from helpers: this file's
+ * scenario-12 self-scan reads its own source for `spawnSync(` sites, so the one
+ * spawn it is allowed to make must be visible to that scan.
+ */
 function runBuild(fakeRoot: string): BuildRun {
   const result = spawnSync(TSX_BIN, [SCRIPT], {
     cwd: ROOT,
@@ -85,58 +96,7 @@ function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf-8').digest('hex');
 }
 
-interface CommittedTreeBuild {
-  run: BuildRun;
-  /** Temp root holding the COPY of src/assets/ and the dist/ tree built from it. */
-  root: string;
-}
-
-let committedTreeBuild: Promise<CommittedTreeBuild> | null = null;
-
-/**
- * Compile the committed .mds corpus ONCE, into a copy of it under a temp root.
- *
- * Two properties below need the whole committed corpus rather than a synthetic
- * fixture: the printed host/partial census (AC-1.8) and the dist/-is-in-sync
- * check. Both used to get it by running the build against the real repo root,
- * which REWROTE the real dist/ tree while vitest ran other files in parallel
- * workers that read those same paths (goldens/git-agent-golden, build-mds,
- * packaging, registry-integrity, seams/command-agent-input). Two hazards, not
- * one: a writer/writer clash on the staging file, and — the one that outlasted
- * PID-scoping the staging name — a writer/reader clash in which a stale dist/
- * gets silently REPAIRED mid-suite, so a reader's verdict depends on which side
- * of the rebuild it landed and the original staleness reports as a flake
- * (avoids PF-055). Copying src/assets/ into a temp root gives the same corpus
- * with no shared mutable state, and lets the on-disk dist/ be COMPARED rather
- * than overwritten.
- *
- * Memoised for the file: one spawn serves every caller. The promise (not the
- * value) is cached so concurrent callers await the same build.
- */
-function buildCommittedTree(): Promise<CommittedTreeBuild> {
-  committedTreeBuild ??= (async (): Promise<CommittedTreeBuild> => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-committed-'));
-    await copyCommittedSources(root);
-    return { run: runBuild(root), root };
-  })();
-  return committedTreeBuild;
-}
-
-/** Copy the two directories the walk discovers hosts in into a fake root. */
-async function copyCommittedSources(fakeRoot: string): Promise<void> {
-  for (const sub of ['commands', 'agents']) {
-    await fs.cp(
-      path.join(ROOT, 'src', 'assets', sub),
-      path.join(fakeRoot, 'src', 'assets', sub),
-      { recursive: true },
-    );
-  }
-}
-
-afterAll(async () => {
-  const built = await committedTreeBuild?.catch(() => null);
-  if (built) await fs.rm(built.root, { recursive: true, force: true });
-});
+afterAll(cleanupCommittedTree);
 
 /** sha256 of every .md under `<root>/dist/<sub>/`, keyed `<sub>/<file>`. */
 async function hashDistSubtree(root: string, sub: string): Promise<Map<string, string>> {
@@ -1167,30 +1127,6 @@ describe('orphans in dist/agents/ are pruned', () => {
 // staleness (PF-055). A prose invariant cannot detect that, so it is scanned.
 
 describe('this file never spawns a build against the real repo root', () => {
-  /**
-   * Named collector: every `spawnSync(` site in a source text, and which of them
-   * do not scope the child to DEVFLOW_MDS_ROOT.
-   *
-   * The options object is taken as the text up to the call's closing `});`,
-   * bounded so a malformed source cannot make this scan run away.
-   */
-  function collectSpawnScoping(source: string): { total: number; unscoped: number[] } {
-    const CALL = 'spawn' + 'Sync(';   // split so this scanner never matches itself
-    const MAX_SITES = 64;
-    const unscoped: number[] = [];
-    let total = 0;
-    for (let at = source.indexOf(CALL); at !== -1; at = source.indexOf(CALL, at + CALL.length)) {
-      if (++total > MAX_SITES) {
-        throw new Error(`more than ${MAX_SITES} ${CALL} sites — bound exceeded, scan aborted`);
-      }
-      const tail = source.slice(at, at + 1000);
-      const end = tail.indexOf('});');
-      const call = end === -1 ? tail : tail.slice(0, end);
-      if (!call.includes('DEVFLOW_MDS_ROOT')) unscoped.push(at);
-    }
-    return { total, unscoped };
-  }
-
   it('every spawned build is scoped to a temp DEVFLOW_MDS_ROOT', async () => {
     const source = await fs.readFile(SELF, 'utf-8');
     const { total, unscoped } = collectSpawnScoping(source);
