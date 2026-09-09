@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
+import { resolveAgentSource } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
@@ -46,7 +47,10 @@ describe('agent references', () => {
   it('every agent referenced in plugins exists in src/assets/agents/', async () => {
     const allAgents = getAllAgentNames();
     for (const agent of allAgents) {
-      const agentFile = path.join(ASSETS_DIR, 'agents', `${agent}.md`);
+      // Dist-first with a src fallback: a generated agent lives in dist/agents/,
+      // a hand-authored one in src/assets/agents/. The resolver throws loudly
+      // when neither location has it.
+      const agentFile = resolveAgentSource(agent).path;
       await expect(
         fs.access(agentFile),
         `agent '${agent}' should exist in src/assets/agents/`,
@@ -86,7 +90,10 @@ describe('no orphaned declarations', () => {
     const referencedAgents = new Set(getAllAgentNames());
 
     for (const file of agentFiles) {
-      const name = path.basename(file, '.md');
+      // Both extensions declare an agent: `.md` is hand-authored, `.mds` is an
+      // MDS generator host compiled into dist/agents/. Stripping only `.md`
+      // would let a generator host slip past the orphan check unnoticed.
+      const name = file.replace(/\.mds?$/, '');
       expect(referencedAgents.has(name), `src/assets/agents/${file} is not referenced by any plugin`).toBe(true);
     }
   });

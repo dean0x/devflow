@@ -18,6 +18,7 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
+import { resolveAgentSource } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -714,16 +715,14 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
   const AGENT = 'git';
 
   /**
-   * Write an agent fixture derived from the real src/assets/agents/{AGENT}.md
-   * frontmatter (PF-043), with a marker line identifying which tree it came from.
+   * Write an agent fixture derived from the real {AGENT} agent's frontmatter
+   * (PF-043), resolved dist-first with a src fallback, with a marker line
+   * identifying which tree it came from.
    */
   async function writeAgentFixture(dir: string, marker: string): Promise<string> {
-    const real = await fs.readFile(
-      path.join(path.resolve(import.meta.dirname, '..'), 'src', 'assets', 'agents', `${AGENT}.md`),
-      'utf-8',
-    );
+    const { path: realPath, content: real } = resolveAgentSource(AGENT);
     const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(real);
-    if (!match) throw new Error(`src/assets/agents/${AGENT}.md has no frontmatter — fixture cannot be derived`);
+    if (!match) throw new Error(`${realPath} has no frontmatter — fixture cannot be derived`);
     const content = `${match[0]}\nMARKER: ${marker}\n`;
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, `${AGENT}.md`), content, 'utf-8');

@@ -91,9 +91,10 @@ describe('resolveAgentSource: dist-preferred, src-fallback', () => {
     const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
     mkdirSync(srcAgentsDir, { recursive: true })
     for (const name of getAllAgentNames()) {
-      copyFileSync(
-        path.join(ROOT, 'src', 'assets', 'agents', `${name}.md`),
+      writeFileSync(
         path.join(srcAgentsDir, `${name}.md`),
+        resolveAgentSource(name).content,
+        'utf8',
       )
     }
 

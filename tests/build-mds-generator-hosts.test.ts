@@ -29,7 +29,7 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 
-import { requireDistFiles, requireDistFile } from './helpers.js';
+import { requireDistFiles, requireDistFile, resolveAgentSource } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
@@ -75,14 +75,16 @@ function sha256(text: string): string {
 }
 
 /**
- * Split the real src/assets/agents/git.md into its frontmatter block and body.
+ * Split the real git agent into its frontmatter block and body. Resolved
+ * dist-first with a src fallback, so the fixture keeps working whether the
+ * agent is compiled from a generator host or hand-authored.
  * Fixtures are derived from this real runtime shape rather than invented (PF-043).
  */
 async function realAgentShape(): Promise<{ frontmatter: string; bodyHead: string }> {
-  const real = await fs.readFile(path.join(ROOT, 'src', 'assets', 'agents', 'git.md'), 'utf-8');
+  const { path: realPath, content: real } = resolveAgentSource('git');
   const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(real);
   if (!match) {
-    throw new Error('src/assets/agents/git.md has no leading frontmatter block — fixture cannot be derived');
+    throw new Error(`${realPath} has no leading frontmatter block — fixture cannot be derived`);
   }
   // First few body lines only: the strip semantics are what is under test, and
   // git.md's full body contains {…} spans that MDS would treat as interpolation.
