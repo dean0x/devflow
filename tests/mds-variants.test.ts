@@ -29,6 +29,7 @@ import {
   type OutputNameError,
   type OutputDirError,
 } from '../src/core/mds-variants.js';
+import { ALL_MDS_HOSTS } from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -53,17 +54,11 @@ function valueOf<T, E>(result: { ok: true; value: T } | { ok: false; error: E })
 // ---------------------------------------------------------------------------
 
 describe('validateOutputName', () => {
-  // Every basename the repo actually ships today, plus the Phase 1 generator
-  // host. A rule that rejected any of these would break the build.
-  const REAL_BASENAMES = [
-    'implement', 'plan', 'resolve', 'code-review', 'self-review',
-    'research', 'bug-analysis', 'explore', 'debug',
-    'dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets',
-    'git',
-  ] as const;
-
   it('accepts every basename the repo ships today', () => {
-    for (const name of REAL_BASENAMES) {
+    // ALL_MDS_HOSTS (tests/fixtures/mds-manifest.ts) is the single definition of
+    // every basename the build owns, command hosts and the Phase 1 generator
+    // host alike. A rule that rejected any of these would break the build.
+    for (const name of ALL_MDS_HOSTS) {
       const result = validateOutputName(name);
       expect(result.ok, `expected '${name}' to be accepted, got ${JSON.stringify(result)}`).toBe(true);
       expect(valueOf(result)).toBe(name);
