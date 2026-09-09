@@ -15,9 +15,6 @@
  *     all of which necessarily contain the literal string.
  *   tests/guards/retired-wording.test.ts — excluded: its removedFrom metadata records
  *     legacy src paths present before Phase-0 renaming (historical documentation only).
- *   tests/goldens/git-agent-golden.test.ts — excluded: its it() test description string
- *     mentions the literal as a human-readable label, not as a file-reading path. The test
- *     uses resolveAgentSource() for all content access.
  *
  * Comment lines (// and * prefixed) are skipped by the collector: literal mentions in
  * comments are documentation and are not path-resolution code.
@@ -46,7 +43,6 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 const LITERAL_SCAN_EXCLUSIONS: ReadonlyArray<string> = [
   'tests/guards/literal-agent-paths.test.ts', // guard mechanics: defines LITERAL, error messages, and non-vacuity probe
   'tests/guards/retired-wording.test.ts',      // removedFrom metadata: historical src path before Phase-0 rename
-  'tests/goldens/git-agent-golden.test.ts',    // test description string: mentions path as a label, not a file-reading path
 ];
 
 // ---------------------------------------------------------------------------
