@@ -256,14 +256,28 @@ not the intended future). No shipped host declares `output-name:`; its exerciser
 build's own fixtures, which is deliberate — they are the end-to-end proof that
 `validateOutputName` is wired into the write path at all.
 
-**`runRealBuild()` in `tests/build-mds-generator-hosts.test.ts` writes into the real
-`dist/`**: Unlike most of that file's tests (which use an isolated `DEVFLOW_MDS_ROOT`
-temp tree), the two real-build assertions deliberately run the actual build against the
-real repo root, because AC-1.8's whole-repo host census can only be produced there. This
-is safe because every output is rewritten byte-identically via temp+rename, but two test
-files invoking a real build concurrently under full-suite load can race (observed once as
-an ENOENT on a `.tmp` rename; both pass in isolation) — not a correctness bug, a known
-test-harness hazard.
+**No test in `tests/build-mds-generator-hosts.test.ts` writes the real `dist/`**: every
+build that file spawns is scoped to a temp `DEVFLOW_MDS_ROOT`, and its scenario-12 self-scan
+(`collectSpawnScoping`, with a known-bad probe) is the mechanical proof — a spawn added
+without `DEVFLOW_MDS_ROOT` fails the file. The two assertions that need the WHOLE committed
+corpus (AC-1.8's printed host/partial census, and the dist/-is-in-sync check) get it from
+`buildCommittedTree()`: `src/assets/{commands,agents}` are `fs.cp`-copied into a temp root
+and built there, memoised so both share ONE spawn. Earlier these ran against the real repo
+root; PID-scoping the staging file (`<dest>.<pid>.tmp`) closed the writer/writer clash, but
+the writer/reader clash outlived it — a real-root build silently REPAIRS a stale `dist/`
+while parallel workers read it, so the staleness surfaces as a flake in whichever reader
+lost the race rather than as itself (PF-055). `tests/build-mds.test.ts` still spawns
+real-root builds (`:477`, and a `beforeAll` at `:515`); it is the remaining writer.
+
+**What the dist/-staleness check does and does not prove**: `dist/` is gitignored
+(`git ls-files dist` → 0), so the check compares a fresh build of the committed `src/`
+against whatever `dist/` the working tree holds — not against reviewed bytes frozen in git.
+It catches "src/ changed and nobody rebuilt", a hand-edited `dist/`, and stale orphans; it
+cannot catch a `src/` change that was rebuilt before review. AC-1.5's pre-S1 SHA-256 list
+was verified by hand and lives only in the PR #334 body, so the check carries that claim
+forward exactly as long as `dist/` carries the reviewed bytes (PF-019: the PR-body list is
+a claim, not re-runnable evidence). The byte-idempotence test it replaced proved a property
+of the build agreeing with itself, not a property of the artifacts (PF-057).
 
 ## Key Files
 

@@ -11,8 +11,8 @@
  *   1. generator frontmatter whole-block strip — a dist/agents host compiles to
  *      dist/agents/<name>.md with block 2 surviving as body text.
  *   2. 13 command outputs byte-unchanged (key-only strip retained) — command
- *      outputs keep their frontmatter minus output-dir:, and a real build is
- *      byte-idempotent.
+ *      outputs keep their frontmatter minus output-dir:, and the on-disk dist/
+ *      tree is byte-for-byte what the committed src/ tree compiles to.
  *   3. dest allowlist negatives — dist/wrong-dir, dist/commands/, dist/../..
  *   4. filename validation negatives — output-name: ../x and a/b
  *   5. IGNORE_DIRS covers tests/ and coverage/
@@ -21,13 +21,16 @@
  *   9. two hosts may not claim one destination
  *  10. a generator host must carry TWO frontmatter blocks
  *  11. the whole-repo walk is depth-bounded and fails loudly at the bound
+ *  12. this file never spawns a build against the real repo root
  *
- * Every negative runs the real script in a subprocess against an isolated
- * DEVFLOW_MDS_ROOT so the real src/assets/ and dist/ trees are never touched
- * (avoids PF-011: no racing the packaging tests).
+ * EVERY build this file spawns — negatives, positives, and the whole-repo census
+ * alike — runs against an isolated DEVFLOW_MDS_ROOT temp tree, so the real
+ * src/assets/ and dist/ trees are only ever READ (avoids PF-011 and PF-055: no
+ * mutating shared state other vitest workers are reading concurrently).
+ * Scenario 12 is the mechanical proof of that claim rather than this sentence.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -39,11 +42,24 @@ import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_PARTIALS,
+  DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 const SCRIPT = path.join(ROOT, 'scripts', 'build-mds.ts');
+/** This file's own source, read by the scenario-12 self-scan. */
+const SELF = import.meta.filename;
+
+/**
+ * Every test here spawns at least one `tsx scripts/build-mds.ts` subprocess, and
+ * the whole-tree ones spawn a build over the entire committed .mds corpus. The
+ * 5s vitest default is far below what a cold tsx start costs under full-suite
+ * load, so the file declares its own floor once rather than annotating each of
+ * ~25 tests (the copied-tree probe, which builds twice, raises it further at its
+ * own call site).
+ */
+vi.setConfig({ testTimeout: 120_000 });
 
 /** The 13 basenames compiled from .mds hosts into dist/commands/. */
 const COMPILED_COMMANDS = MDS_COMMAND_HOSTS;
@@ -65,27 +81,123 @@ function runBuild(fakeRoot: string): BuildRun {
   return { status: result.status, combined: (result.stdout ?? '') + (result.stderr ?? '') };
 }
 
-/**
- * Run the real build script against the real repo root — the two callers below
- * therefore write into the real `dist/` while vitest runs workers in parallel.
- * That is deliberate: AC-1.8 pins the whole-repo host census, which only the real
- * root produces (the DEVFLOW_MDS_ROOT harness sees a synthetic tree). It is safe
- * because the build is deterministic — every output is rewritten byte-identically
- * — and each file lands via a temp-file + rename, so a concurrent reader sees the
- * old or the new bytes, never a partial write.
- */
-function runRealBuild(): BuildRun {
-  const result = spawnSync(TSX_BIN, [SCRIPT], {
-    cwd: ROOT,
-    encoding: 'utf-8',
-    timeout: 120_000,
-  });
-  if (result.error) throw result.error;
-  return { status: result.status, combined: (result.stdout ?? '') + (result.stderr ?? '') };
-}
-
 function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf-8').digest('hex');
+}
+
+interface CommittedTreeBuild {
+  run: BuildRun;
+  /** Temp root holding the COPY of src/assets/ and the dist/ tree built from it. */
+  root: string;
+}
+
+let committedTreeBuild: Promise<CommittedTreeBuild> | null = null;
+
+/**
+ * Compile the committed .mds corpus ONCE, into a copy of it under a temp root.
+ *
+ * Two properties below need the whole committed corpus rather than a synthetic
+ * fixture: the printed host/partial census (AC-1.8) and the dist/-is-in-sync
+ * check. Both used to get it by running the build against the real repo root,
+ * which REWROTE the real dist/ tree while vitest ran other files in parallel
+ * workers that read those same paths (goldens/git-agent-golden, build-mds,
+ * packaging, registry-integrity, seams/command-agent-input). Two hazards, not
+ * one: a writer/writer clash on the staging file, and — the one that outlasted
+ * PID-scoping the staging name — a writer/reader clash in which a stale dist/
+ * gets silently REPAIRED mid-suite, so a reader's verdict depends on which side
+ * of the rebuild it landed and the original staleness reports as a flake
+ * (avoids PF-055). Copying src/assets/ into a temp root gives the same corpus
+ * with no shared mutable state, and lets the on-disk dist/ be COMPARED rather
+ * than overwritten.
+ *
+ * Memoised for the file: one spawn serves every caller. The promise (not the
+ * value) is cached so concurrent callers await the same build.
+ */
+function buildCommittedTree(): Promise<CommittedTreeBuild> {
+  committedTreeBuild ??= (async (): Promise<CommittedTreeBuild> => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-committed-'));
+    await copyCommittedSources(root);
+    return { run: runBuild(root), root };
+  })();
+  return committedTreeBuild;
+}
+
+/** Copy the two directories the walk discovers hosts in into a fake root. */
+async function copyCommittedSources(fakeRoot: string): Promise<void> {
+  for (const sub of ['commands', 'agents']) {
+    await fs.cp(
+      path.join(ROOT, 'src', 'assets', sub),
+      path.join(fakeRoot, 'src', 'assets', sub),
+      { recursive: true },
+    );
+  }
+}
+
+afterAll(async () => {
+  const built = await committedTreeBuild?.catch(() => null);
+  if (built) await fs.rm(built.root, { recursive: true, force: true });
+});
+
+/** sha256 of every .md under `<root>/dist/<sub>/`, keyed `<sub>/<file>`. */
+async function hashDistSubtree(root: string, sub: string): Promise<Map<string, string>> {
+  const dir = path.join(root, 'dist', sub);
+  let names: string[];
+  try {
+    names = (await fs.readdir(dir)).filter(f => f.endsWith('.md'));
+  } catch {
+    return new Map();
+  }
+  const hashes = new Map<string, string>();
+  for (const name of names.sort()) {
+    hashes.set(`${sub}/${name}`, sha256(await fs.readFile(path.join(dir, name), 'utf-8')));
+  }
+  return hashes;
+}
+
+/** Both build destinations of a dist/ tree, hashed into one map. */
+async function hashDistTree(root: string): Promise<Map<string, string>> {
+  const [commands, agents] = await Promise.all([
+    hashDistSubtree(root, 'commands'),
+    hashDistSubtree(root, 'agents'),
+  ]);
+  return new Map([...commands, ...agents]);
+}
+
+interface TreeDiff {
+  /** Built from the committed sources but absent on disk — dist/ is behind src/. */
+  missingOnDisk: string[];
+  /** Present on disk but not produced by the build — a stale orphan. */
+  orphanOnDisk: string[];
+  /** Present in both, different bytes — dist/ does not match its source. */
+  differing: string[];
+  /** How many files were actually byte-compared (0 means the check is vacuous). */
+  compared: number;
+}
+
+/**
+ * Named collector: how a freshly built tree differs from the on-disk one.
+ * Shared by the staleness assertion and its known-bad probe below.
+ */
+function diffDistTrees(fresh: Map<string, string>, onDisk: Map<string, string>): TreeDiff {
+  const missingOnDisk: string[] = [];
+  const differing: string[] = [];
+  let compared = 0;
+  for (const [file, hash] of fresh) {
+    const disk = onDisk.get(file);
+    if (disk === undefined) {
+      missingOnDisk.push(file);
+      continue;
+    }
+    compared++;
+    if (disk !== hash) differing.push(file);
+  }
+  const orphanOnDisk = [...onDisk.keys()].filter(f => !fresh.has(f));
+  return {
+    missingOnDisk: missingOnDisk.sort(),
+    orphanOnDisk: orphanOnDisk.sort(),
+    differing: differing.sort(),
+    compared,
+  };
 }
 
 /**
@@ -271,16 +383,68 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     expect(shapes[0].hasDescription, 'known-bad sample must fail the description check').toBe(false);
   });
 
-  it('a real build is byte-idempotent over dist/commands/', () => {
-    const before = new Map(requireDistFiles().map(f => [f, sha256(requireDistFile(f))]));
-    const run = runRealBuild();
-    expect(run.status, `real build should exit 0.\n${run.combined}`).toBe(0);
-    const after = new Map(requireDistFiles().map(f => [f, sha256(requireDistFile(f))]));
+  /**
+   * AC-1.5 ("the 13 command outputs are byte-unchanged across the S1 refactor")
+   * needs a mechanical proof that outlives the PR that made the claim. The
+   * pre-S1 SHA-256 list was captured and compared by hand and is recorded in the
+   * PR #334 body; it is not in the repo, so it cannot re-run and is a claim, not
+   * evidence (PF-019).
+   *
+   * A byte-IDEMPOTENCE check does not stand in for it: agreeing with itself
+   * across two runs is a property of the build, not of the artifacts, and it
+   * passes just as green over a dist/ tree that no longer matches src/ at all
+   * (PF-057 — a golden must freeze what it says it freezes).
+   *
+   * What this pins instead: the dist/ tree on disk is byte-for-byte what the
+   * committed src/ tree compiles to. Combined with the hand-verified pre-S1
+   * hashes, that carries AC-1.5 forward for as long as dist/ carries the
+   * reviewed bytes — but note the scope honestly: dist/ is gitignored, so this
+   * compares a fresh build against whatever dist/ the working tree holds, not
+   * against reviewed bytes committed to git. It catches "someone edited src/ and
+   * did not rebuild" and "someone hand-edited dist/"; it cannot catch a src/
+   * change that was rebuilt before review.
+   */
+  it('the on-disk dist/ tree is byte-for-byte a build of the committed src/ tree', async () => {
+    const { run, root } = await buildCommittedTree();
+    expect(run.status, `copied-tree build should exit 0.\n${run.combined}`).toBe(0);
 
-    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
-    for (const [file, hash] of before) {
-      expect(after.get(file), `dist/commands/${file} changed across a rebuild`).toBe(hash);
+    const fresh = await hashDistTree(root);
+    const onDisk = await hashDistTree(ROOT);
+
+    // Non-vacuity: the fresh tree must hold every artifact the manifest names,
+    // or an empty/partial build would compare zero files and pass (PF-018).
+    for (const file of DIST_COMMAND_FILES) {
+      expect([...fresh.keys()], `commands/${file} missing from the fresh build`)
+        .toContain(`commands/${file}`);
     }
+    for (const name of MDS_GENERATOR_HOSTS) {
+      expect([...fresh.keys()], `agents/${name}.md missing from the fresh build`)
+        .toContain(`agents/${name}.md`);
+    }
+
+    const diff = diffDistTrees(fresh, onDisk);
+    const remedy = 'run `npm run build:mds` — dist/ is out of sync with src/';
+    expect(diff.compared, 'no file was byte-compared (PF-018)')
+      .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length);
+    expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
+    expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
+    expect(diff.differing, `dist/ bytes differ from a fresh build of src/ — ${remedy}`).toEqual([]);
+  });
+
+  it('known-bad probe: the tree collector reports drift in each direction', () => {
+    const fresh = new Map([['commands/a.md', 'h1'], ['commands/b.md', 'h2']]);
+
+    expect(diffDistTrees(fresh, new Map(fresh)))
+      .toEqual({ missingOnDisk: [], orphanOnDisk: [], differing: [], compared: 2 });
+    expect(diffDistTrees(fresh, new Map([['commands/a.md', 'EDITED'], ['commands/b.md', 'h2']])).differing)
+      .toEqual(['commands/a.md']);
+    expect(diffDistTrees(fresh, new Map([['commands/a.md', 'h1']])).missingOnDisk)
+      .toEqual(['commands/b.md']);
+    expect(diffDistTrees(fresh, new Map([...fresh, ['commands/stale.md', 'h3']])).orphanOnDisk)
+      .toEqual(['commands/stale.md']);
+    // An empty fresh tree compares nothing — the `compared` floor is what stops
+    // that from reading as agreement.
+    expect(diffDistTrees(new Map(), new Map()).compared).toBe(0);
   });
 });
 
@@ -556,7 +720,7 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
   /**
    * Named collector: the two counts the build prints. Throws when either line is
    * absent — a missing line must fail loudly, never parse as 0 (PF-018).
-   * Called by the real-root assertion AND by the seeded-tree probe below.
+   * Called by the committed-tree assertion AND by the seeded-tree probe below.
    */
   function parsePrintedCounts(output: string): { hosts: number; partials: number } {
     const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
@@ -574,9 +738,10 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
   const EXPECTED_HOSTS = MDS_COMMAND_HOSTS.length + MDS_GENERATOR_HOSTS.length;
   const EXPECTED_PARTIALS = MDS_PARTIALS.length;
 
-  it('a real build prints the manifest host and partial counts', () => {
-    const run = runRealBuild();
-    expect(run.status, `real build should exit 0.\n${run.combined}`).toBe(0);
+  it('a build of the committed tree prints the manifest host and partial counts', async () => {
+    // Shares the one memoised spawn with the dist/-staleness check above.
+    const { run } = await buildCommittedTree();
+    expect(run.status, `copied-tree build should exit 0.\n${run.combined}`).toBe(0);
 
     const counts = parsePrintedCounts(run.combined);
     expect(
@@ -595,10 +760,7 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     // Mechanic 3 (H10): a DEVFLOW_MDS_ROOT copy of the real .mds tree, seeded with
     // one extra host. The real src/ and dist/ are never written to.
     await withFakeRoot(async fakeRoot => {
-      const srcCommands = path.join(ROOT, 'src', 'assets', 'commands');
-      const srcAgents = path.join(ROOT, 'src', 'assets', 'agents');
-      await fs.cp(srcCommands, path.join(fakeRoot, 'src', 'assets', 'commands'), { recursive: true });
-      await fs.cp(srcAgents, path.join(fakeRoot, 'src', 'assets', 'agents'), { recursive: true });
+      await copyCommittedSources(fakeRoot);
 
       // Baseline: the copied tree reproduces the manifest counts exactly, so the
       // probe below is measuring the seeded host and nothing else.
@@ -872,5 +1034,78 @@ describe('the whole-repo walk is depth-bounded', () => {
         'a host within the bound must still be discovered and compiled',
       ).not.toBeNull();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. this file never spawns a build against the real repo root
+// ---------------------------------------------------------------------------
+//
+// The header claims every build here is scoped to a temp DEVFLOW_MDS_ROOT. That
+// claim decays the moment someone adds a spawn without one — and the failure it
+// reintroduces is invisible locally: an unscoped build rewrites the real dist/
+// while parallel vitest workers read it, so a stale tree is silently repaired
+// mid-suite and whichever reader lost the race reports a flake instead of the
+// staleness (PF-055). A prose invariant cannot detect that, so it is scanned.
+
+describe('this file never spawns a build against the real repo root', () => {
+  /**
+   * Named collector: every `spawnSync(` site in a source text, and which of them
+   * do not scope the child to DEVFLOW_MDS_ROOT.
+   *
+   * The options object is taken as the text up to the call's closing `});`,
+   * bounded so a malformed source cannot make this scan run away.
+   */
+  function collectSpawnScoping(source: string): { total: number; unscoped: number[] } {
+    const CALL = 'spawn' + 'Sync(';   // split so this scanner never matches itself
+    const MAX_SITES = 64;
+    const unscoped: number[] = [];
+    let total = 0;
+    for (let at = source.indexOf(CALL); at !== -1; at = source.indexOf(CALL, at + CALL.length)) {
+      if (++total > MAX_SITES) {
+        throw new Error(`more than ${MAX_SITES} ${CALL} sites — bound exceeded, scan aborted`);
+      }
+      const tail = source.slice(at, at + 1000);
+      const end = tail.indexOf('});');
+      const call = end === -1 ? tail : tail.slice(0, end);
+      if (!call.includes('DEVFLOW_MDS_ROOT')) unscoped.push(at);
+    }
+    return { total, unscoped };
+  }
+
+  it('every spawned build is scoped to a temp DEVFLOW_MDS_ROOT', async () => {
+    const source = await fs.readFile(SELF, 'utf-8');
+    const { total, unscoped } = collectSpawnScoping(source);
+
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+      .toBeGreaterThan(0);
+    expect(
+      unscoped,
+      'a build in this file is spawned without DEVFLOW_MDS_ROOT: it would write the real ' +
+      'dist/ tree while parallel workers read it. Route it through runBuild(fakeRoot), or ' +
+      'buildCommittedTree() when the whole committed corpus is needed.',
+    ).toEqual([]);
+  });
+
+  it('non-vacuity: the real dist/ tree is what those builds would have written', async () => {
+    // The scan is structural, so it is paired with the fact it protects: the real
+    // dist/ tree exists and is readable from here. If the file's builds had been
+    // repairing it, the staleness check above would be the thing that noticed.
+    const onDisk = await hashDistTree(ROOT);
+    expect(onDisk.size, 'dist/ must be built before this file runs').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the collector flags an unscoped spawn and clears a scoped one', () => {
+    // Built by concatenation for the same reason the collector splits its needle:
+    // a literal here would be found by the scan over this very file.
+    const CALL = 'spawn' + 'Sync(';
+    const unscopedSite = `${CALL}TSX_BIN, [SCRIPT], {\n  cwd: ROOT,\n  timeout: 120_000,\n});`;
+    const scopedSite =
+      `${CALL}TSX_BIN, [SCRIPT], {\n  cwd: ROOT,\n  env: { DEVFLOW_MDS_ROOT: fakeRoot },\n});`;
+
+    expect(collectSpawnScoping(unscopedSite)).toEqual({ total: 1, unscoped: [0] });
+    expect(collectSpawnScoping(scopedSite)).toEqual({ total: 1, unscoped: [] });
+    expect(collectSpawnScoping(`${unscopedSite}\n${scopedSite}`).unscoped).toHaveLength(1);
+    expect(collectSpawnScoping('no spawns here').total).toBe(0);
   });
 });
