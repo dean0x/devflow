@@ -13,7 +13,13 @@
  *   - issue-first gate (removed from implement.mds in A1; "step 1c" self-reference stays valid in git.md)
  *
  * Phase-1 retired literals:
- *   - no generated copies anywhere (falsified by dist/agents/git.md; CLAUDE.md restated, GAP-53)
+ *   - no generated copies anywhere         (falsified by dist/agents/git.md; CLAUDE.md restated, GAP-53)
+ *   - The only intermediate build step     (docs/reference/file-organization.md — dist/agents/ is a second one)
+ *   - No build step distributes agents     (docs/reference/agent-design.md — a generator host is compiled first)
+ *
+ * A widened corpus only raises detection when the vocabulary widens with it: the two
+ * Phase-1 doc literals above survived the CLAUDE.md sweep purely by being spelled
+ * differently, in files the corpus already scanned (PF-025).
  *
  * Non-vacuity: denylist size and corpus size are both asserted.
  * Known-bad sample (mechanic 2, H10): a seeded retired literal in a synthetic file
@@ -85,6 +91,27 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'of truth with "no generated copies anywhere in the repo". Phase 1 falsified it: ' +
       'dist/agents/git.md is a generated copy of an agent. Restated as "generated files never ' +
       'live in src/" — the rule that is actually true and actually load-bearing (GAP-53).',
+  },
+  {
+    literal: 'The only intermediate build step',
+    phase: '1',
+    removedFrom: 'docs/reference/file-organization.md',
+    justification:
+      'The Asset Distribution section named compiling .mds command sources to dist/commands/ as the ' +
+      'sole intermediate build step. Phase 1 falsified it: an .mds agent generator host compiles to ' +
+      'dist/agents/ in the same build. Restated as the two host kinds the build serves. Registered ' +
+      'because the claim outlived the CLAUDE.md sweep purely by being spelled differently, in a file ' +
+      'the corpus already scanned.',
+  },
+  {
+    literal: 'No build step distributes agents',
+    phase: '1',
+    removedFrom: 'docs/reference/agent-design.md',
+    justification:
+      'agent-design.md asserted src/assets/agents/ was the single source of truth for every agent and ' +
+      'that no build step distributes them. Phase 1 falsified both: src/assets/agents/git.mds compiles ' +
+      'to dist/agents/git.md, which the installer prefers over the src tree. Restated as the ' +
+      'hand-authored vs generator-host split.',
   },
 ];
 

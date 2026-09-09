@@ -82,11 +82,11 @@ mkdirSync(destDir, { recursive: true })
 
 if (targetArg === 'git-agent') {
   const dst = path.join(destDir, 'git-agent.md')
+  // The resolver is the one authority on which file wins, so print the path it
+  // actually returned — a hand-written label per origin drifts the moment the
+  // agent's authoring shape changes.
   const source = resolveAgentSource('git')
-  const label = source.origin === 'dist'
-    ? 'dist/agents/git.md (dist-preferred)'
-    : 'src/assets/agents/git.md (src fallback)'
-  console.log(`Using ${label} (origin=${source.origin})`)
+  console.log(`Using ${path.relative(ROOT, source.path)} (origin=${source.origin})`)
   writeFileSync(dst, source.content, 'utf-8')
   console.log(`Written: ${dst} (${source.content.length} chars)`)
 } else if (targetArg === 'github-status-lines') {
