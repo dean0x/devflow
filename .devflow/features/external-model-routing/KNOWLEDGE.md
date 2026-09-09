@@ -314,8 +314,10 @@ Effort is orthogonal to dormancy — it always applies regardless of proxy state
 ### `loadShippedDefaults` and `reapplyAgentMapping` — parallel execution
 
 Both use `Promise.all` for parallel I/O:
-- `loadShippedDefaults()` reads all agent `.md` files from `agentsDir()` concurrently.
-- `reapplyAgentMapping()` processes all agent files concurrently via `Promise.all` over the agent name list.
+- `loadShippedDefaults(dirs = agentSourceDirs(), opts?)` reads every agent `.md` in each directory of `agentSourceDirs()` concurrently (`readDirDefaults` per directory) and merges them **first-wins**, so `dist/agents/` supersedes `src/assets/agents/` for a name present in both. A missing directory on either side yields an empty map.
+- `reapplyAgentMapping()` processes all agent files concurrently via `Promise.all` over the agent name list. It accepts an optional `agentSourceDirs` (same convention, injectable for tests) and passes its own warning channel down to `loadShippedDefaults`; `revertExternalAgents` forwards both.
+
+**Registry-gap warning**: after the merge, `loadShippedDefaults` compares the resolved names against `getAllAgentNames()` and emits ONE aggregate `onWarning` message naming every registry agent no directory supplied, pointing at `npm run build:mds` (mirrors the installer's throw message, which fires on the same invariant). It does not throw — `devflow agents --list` must still render. This is the disclosure for a real silent failure: in a `build:cli`-only tree `dist/agents/` is absent and the generated agent has no `.md` source, so `resolveEffective` returns `model === undefined`, `reapplyAgentMapping` buckets the agent `'unchanged'`, and **disabling the proxy leaves a GPT-pinned agent unreverted** (PF-022). `devflow agents` passes `p.log.warn` as the channel; `reapplyAgentMapping` routes it into `ReapplyResult.warnings`.
 
 Warning collection is **deterministic**: each parallel task returns its local warnings alongside its bucket result; the outer loop aggregates in `allNamesList` insertion order. Warnings are emitted to `opts.onWarning` immediately for live feedback and also collected for the returned `ReapplyResult.warnings` array.
 

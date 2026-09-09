@@ -18,7 +18,7 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
-import type { AgentSourceDirs } from '../src/core/assets.js';
+import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -800,7 +800,10 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
   });
 
   it('defaults to the real accessors when no dirs are injected', async () => {
-    // No agentSourceDirs: the production path must still install every agent.
+    // No agentSourceDirs: the production path must install the COMPILED artifact.
+    // Byte-comparing against dist/agents/ is what makes the assertion specific —
+    // `starts with ---` and `contains model:` are true of the source tree too, so
+    // they would pass on a src-first resolution that silently shipped the wrong file.
     const claudeDir = path.join(tmpDir, 'claude-default');
     const fakePlugin: PluginDefinition = {
       name: 'devflow-test-default-dirs',
@@ -821,7 +824,16 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       spinner,
     });
     const installed = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', `${AGENT}.md`), 'utf-8');
-    expect(installed.startsWith('---\n')).toBe(true);
-    expect(installed).toContain('model:');
+
+    // The compiled artifact, read directly — not through the resolver under test.
+    const compiled = await fs.readFile(path.join(compiledAgentsDir(), `${AGENT}.md`), 'utf-8');
+    expect(installed, 'the installed agent must be the compiled artifact, byte for byte').toBe(compiled);
+
+    // And those bytes can only have come from dist/: the source tree has no file
+    // of that name at all, so a src-first resolution would have thrown instead.
+    await expect(
+      fs.access(path.join(agentsDir(), `${AGENT}.md`)),
+      `${AGENT} still has a hand-authored source — pick an agent with only a generator host`,
+    ).rejects.toThrow();
   });
 });
