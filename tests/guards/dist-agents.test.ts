@@ -164,15 +164,15 @@ function collectEscapedBraceLeaks(files: Array<{ name: string; content: string }
   return leaks
 }
 
-describe('compiled agents carry no escaped braces', () => {
-  function compiledAgentContents(): Array<{ name: string; content: string }> {
-    const dir = compiledAgentsDir()
-    return requireCompiledAgents(dir).map(name => ({
-      name,
-      content: readFileSync(path.join(dir, name), 'utf-8'),
-    }))
-  }
+function compiledAgentContents(): Array<{ name: string; content: string }> {
+  const dir = compiledAgentsDir()
+  return requireCompiledAgents(dir).map(name => ({
+    name,
+    content: readFileSync(path.join(dir, name), 'utf-8'),
+  }))
+}
 
+describe('compiled agents carry no escaped braces', () => {
   it('no dist/agents/*.md contains a literal \\{ or \\}', () => {
     const files = compiledAgentContents()
     expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
@@ -190,6 +190,89 @@ describe('compiled agents carry no escaped braces', () => {
     expect(leaks.length, 'the collector must flag a seeded backslash-brace').toBeGreaterThan(0)
     // And a clean placeholder must NOT be flagged, or the collector is a blanket fail.
     expect(collectEscapedBraceLeaks([{ name: 'clean.md', content: 'cycle:{CYCLE_NUMBER}\n' }])).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// (d) every compiled agent still HAS its frontmatter
+// ---------------------------------------------------------------------------
+
+interface AgentHeaderShape {
+  name: string
+  /** True when the leading frontmatter block declares a non-empty `name:`. */
+  hasNameKey: boolean
+}
+
+/**
+ * Named collector: one row per compiled agent whose leading frontmatter block was
+ * actually FOUND — a headerless file contributes no row at all.
+ *
+ * Counting headers rather than files is the point (PF-018): a collector that
+ * emitted a row per input with `hasBlock: false` would let the caller iterate a
+ * full-length array of rows and forget to assert on the flag. Here a lost header
+ * shows up as a short array, which the caller compares against the file count.
+ *
+ * The failure this guards is silent by construction: the generator strip removes
+ * the leading block, so a source with only ONE block loses its whole frontmatter
+ * and produces a plausible-looking markdown file (PF-061).
+ */
+function collectAgentHeaderShapes(
+  files: ReadonlyArray<{ name: string; content: string }>,
+): AgentHeaderShape[] {
+  const shapes: AgentHeaderShape[] = []
+  for (const { name, content } of files) {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content)
+    if (match === null) continue
+    shapes.push({ name, hasNameKey: /^name:[ \t]*\S/m.test(match[1]) })
+  }
+  return shapes
+}
+
+describe('every compiled agent starts with a frontmatter block carrying name:', () => {
+  it('no dist/agents/*.md was emitted headerless or nameless', () => {
+    const files = compiledAgentContents()
+    expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
+
+    const shapes = collectAgentHeaderShapes(files)
+    const headerless = files
+      .filter(f => !shapes.some(s => s.name === f.name))
+      .map(f => f.name)
+    expect(
+      headerless,
+      `Compiled agent(s) with no leading frontmatter block:\n  ${headerless.join('\n  ')}\n` +
+      `A generator host must declare TWO leading blocks — block 1 steers the build,\n` +
+      `block 2 is the agent's own frontmatter. A single-block source loses it entirely.`,
+    ).toHaveLength(0)
+
+    const nameless = shapes.filter(s => !s.hasNameKey).map(s => s.name)
+    expect(
+      nameless,
+      `Compiled agent(s) whose frontmatter carries no name::\n  ${nameless.join('\n  ')}`,
+    ).toHaveLength(0)
+  })
+
+  it('known-bad probe: a stripped-to-headerless file and a nameless block are both caught', () => {
+    // (i) What a single-block generator host actually produces: the block gone,
+    //     the body intact. The collector must return NO row for it.
+    const stripped = [{ name: 'stripped.md', content: '\n# Git Agent\n\nBody text.\n' }]
+    expect(
+      collectAgentHeaderShapes(stripped),
+      'a headerless file must contribute no header row — otherwise the count check is vacuous',
+    ).toHaveLength(0)
+
+    // (ii) A block that survived but lost name: must be reported, not skipped.
+    const nameless = collectAgentHeaderShapes([
+      { name: 'nameless.md', content: '---\nmodel: haiku\n---\n\nBody text.\n' },
+    ])
+    expect(nameless).toHaveLength(1)
+    expect(nameless[0].hasNameKey, 'the collector must flag a block with no name: key').toBe(false)
+
+    // (iii) And a healthy artifact must NOT be flagged, or the collector is a blanket fail.
+    const healthy = collectAgentHeaderShapes([
+      { name: 'healthy.md', content: '---\nname: Git\nmodel: haiku\n---\n\nBody text.\n' },
+    ])
+    expect(healthy).toHaveLength(1)
+    expect(healthy[0].hasNameKey).toBe(true)
   })
 })
 

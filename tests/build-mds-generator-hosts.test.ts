@@ -14,8 +14,12 @@
  *      outputs keep their frontmatter minus output-dir:, and a real build is
  *      byte-idempotent.
  *   3. dest allowlist negatives — dist/wrong-dir, dist/commands/, dist/../..
- *   4. filename validation negatives — name-template: ../x and a/b
+ *   4. filename validation negatives — output-name: ../x and a/b
  *   5. IGNORE_DIRS covers tests/ and coverage/
+ *   7. build-owned keys never reach a command artifact
+ *   8. a bare output-name: is a hard build error
+ *   9. two hosts may not claim one destination
+ *  10. a generator host must carry TWO frontmatter blocks
  *
  * Every negative runs the real script in a subprocess against an isolated
  * DEVFLOW_MDS_ROOT so the real src/assets/ and dist/ trees are never touched
@@ -193,15 +197,15 @@ describe('generator frontmatter whole-block strip', () => {
   });
 
   it('a generator host may not smuggle a second key into the generator block', async () => {
-    // The generator block carries output-dir: (and, when present, name-template:).
+    // The generator block carries output-dir: (and, when present, output-name:).
     // Whatever it carries is stripped whole — it must never reach the artifact.
     await withFakeRoot(async fakeRoot => {
-      await writeGeneratorHost(fakeRoot, 'git', 'name-template: git\n');
+      await writeGeneratorHost(fakeRoot, 'git', 'output-name: git\n');
       const run = runBuild(fakeRoot);
       expect(run.status, run.combined).toBe(0);
       const out = await readIfPresent(path.join(fakeRoot, 'dist', 'agents', 'git.md'));
       expect(out).not.toBeNull();
-      expect(out).not.toContain('name-template:');
+      expect(out).not.toContain('output-name:');
       expect(out).not.toContain('output-dir:');
       expect(out!.startsWith('---\nname: Git\n')).toBe(true);
     });
@@ -387,7 +391,7 @@ describe('refusals are aggregated, not exited mid-loop', () => {
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(
         fakeRoot, '_neg-bad-name',
-        'description: neg\noutput-dir: dist/commands\nname-template: Not-A-Name\n',
+        'description: neg\noutput-dir: dist/commands\noutput-name: Not-A-Name\n',
       );
       await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
 
@@ -420,11 +424,11 @@ describe('refusals are aggregated, not exited mid-loop', () => {
 // ---------------------------------------------------------------------------
 
 describe('filename validation negatives', () => {
-  it('exits 1 when name-template escapes the output directory (../x)', async () => {
+  it('exits 1 when output-name escapes the output directory (../x)', async () => {
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(
         fakeRoot, '_neg-name-traversal',
-        'description: neg\noutput-dir: dist/commands\nname-template: ../x\n',
+        'description: neg\noutput-dir: dist/commands\noutput-name: ../x\n',
       );
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
@@ -435,11 +439,11 @@ describe('filename validation negatives', () => {
     });
   });
 
-  it('exits 1 when name-template nests a path (a/b)', async () => {
+  it('exits 1 when output-name nests a path (a/b)', async () => {
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(
         fakeRoot, '_neg-name-nested',
-        'description: neg\noutput-dir: dist/commands\nname-template: a/b\n',
+        'description: neg\noutput-dir: dist/commands\noutput-name: a/b\n',
       );
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
@@ -449,11 +453,11 @@ describe('filename validation negatives', () => {
     });
   });
 
-  it('a valid name-template drives the emitted filename (the validated value has a consumer)', async () => {
+  it('a valid output-name drives the emitted filename (the validated value has a consumer)', async () => {
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(
         fakeRoot, '_source-basename',
-        'description: ok\noutput-dir: dist/commands\nname-template: renamed-output\n',
+        'description: ok\noutput-dir: dist/commands\noutput-name: renamed-output\n',
       );
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
@@ -614,4 +618,206 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       expect(seededCounts.partials, 'a host must not be miscounted as a partial').toBe(EXPECTED_PARTIALS);
     });
   }, 180_000);
+});
+
+// ---------------------------------------------------------------------------
+// 7. build-owned keys never reach a command artifact
+// ---------------------------------------------------------------------------
+//
+// A command host's frontmatter block is the ARTIFACT's frontmatter minus the
+// keys the build consumes. `output-dir:` was stripped from the outset; a second
+// build-owned key was later read from the same block but not stripped, so a host
+// declaring it shipped a build directive inside the deployed command. Both keys
+// are the build's, and neither may survive into dist/.
+
+describe('build-owned keys never reach a command artifact', () => {
+  /** Named collector: which build-owned keys survive into an emitted frontmatter block. */
+  function collectLeakedBuildKeys(text: string): string[] {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+    if (match === null) return ['<no frontmatter block>'];
+    return ['output-dir', 'output-name'].filter(key => new RegExp(`^${key}:`, 'm').test(match[1]));
+  }
+
+  it('a command host declaring output-name: ships neither build key', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_leak-probe',
+        'description: leak probe\noutput-name: renamed-leak\noutput-dir: dist/commands\n',
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      const out = await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'renamed-leak.md'));
+      expect(out, 'the renamed output should have been produced').not.toBeNull();
+
+      expect(
+        collectLeakedBuildKeys(out!),
+        'a build-owned key survived into the shipped command frontmatter',
+      ).toHaveLength(0);
+      // The strip is key-scoped, not block-scoped: real keys are untouched.
+      expect(out).toContain('description: leak probe');
+    });
+  });
+
+  it('known-bad probe: the collector flags each build key when it is present', () => {
+    expect(collectLeakedBuildKeys('---\ndescription: x\noutput-dir: dist/commands\n---\n\nBody\n'))
+      .toEqual(['output-dir']);
+    expect(collectLeakedBuildKeys('---\ndescription: x\noutput-name: y\n---\n\nBody\n'))
+      .toEqual(['output-name']);
+    expect(collectLeakedBuildKeys('---\ndescription: x\n---\n\nBody\n')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. a bare output-name: is a hard build error
+// ---------------------------------------------------------------------------
+//
+// readFrontmatterKey returns '' — not null — for a valueless key, so `?? basename`
+// never fires and the empty string reaches validateOutputName. Falling back to the
+// basename would silently hide an authoring mistake, so a bare key is refused with
+// the same explicit message shape `output-dir:` has always used.
+
+describe('a bare output-name: is a hard build error', () => {
+  it('exits 1 naming the key and the host, writing nothing', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_neg-bare-name',
+        'description: neg\noutput-dir: dist/commands\noutput-name:\n',
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain('output-name: is empty');
+      expect(run.combined).toContain('_neg-bare-name.mds');
+      // The basename fallback must NOT have fired.
+      expect(await readIfPresent(path.join(fakeRoot, 'dist', 'commands', '_neg-bare-name.md'))).toBeNull();
+    });
+  });
+
+  it('non-vacuity: the same host with a valued output-name: compiles', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_neg-bare-name',
+        'description: ok\noutput-dir: dist/commands\noutput-name: valued\n',
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+      expect(await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'valued.md'))).not.toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. two hosts may not claim one destination
+// ---------------------------------------------------------------------------
+//
+// Destinations are joined per host with no cross-host bookkeeping, so two hosts
+// resolving to the same path both write it and the last in walk order silently
+// wins — one host's bytes shipped under the other's name. `output-name:` makes
+// this reachable from a single directory; two same-basename hosts in different
+// source directories reach it without any key at all.
+
+describe('two hosts may not claim one destination', () => {
+  it('exits 1 naming BOTH hosts and writes neither', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_collide-a',
+        'description: a\noutput-dir: dist/commands\noutput-name: contested\n',
+      );
+      await writeCommandHost(
+        fakeRoot, '_collide-b',
+        'description: b\noutput-dir: dist/commands\noutput-name: contested\n',
+      );
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined, 'the first claimant must be named').toContain('_collide-a.mds');
+      expect(run.combined, 'the second claimant must be named').toContain('_collide-b.mds');
+      // Neither host wins: the build cannot know which was meant.
+      expect(
+        await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'contested.md')),
+        'a contested destination must not be written by either claimant',
+      ).toBeNull();
+    });
+  });
+
+  it('two hosts sharing a basename across source directories also collide', async () => {
+    // The collision class predates output-name:. A command host and a generator
+    // host may share a basename (different destinations); two hosts pointed at
+    // one destination may not.
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(fakeRoot, 'twin', 'description: a\noutput-dir: dist/commands\n');
+      const other = path.join(fakeRoot, 'src', 'assets', 'other');
+      await fs.mkdir(other, { recursive: true });
+      await fs.writeFile(
+        path.join(other, 'twin.mds'),
+        '---\ndescription: b\noutput-dir: dist/commands\n---\n\n# twin\n\nBody.\n',
+        'utf-8',
+      );
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'twin.md'))).toBeNull();
+    });
+  });
+
+  it('non-vacuity: distinct destinations from the same directory both compile', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(
+        fakeRoot, '_collide-a',
+        'description: a\noutput-dir: dist/commands\noutput-name: first\n',
+      );
+      await writeCommandHost(
+        fakeRoot, '_collide-b',
+        'description: b\noutput-dir: dist/commands\noutput-name: second\n',
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+      expect(await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'first.md'))).not.toBeNull();
+      expect(await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'second.md'))).not.toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. a generator host must carry TWO frontmatter blocks
+// ---------------------------------------------------------------------------
+//
+// The generator strip removes the leading block unconditionally. On a host with
+// only ONE block — the shape every hand-authored agent has — that block IS the
+// artifact's frontmatter (name:/description:/model:), and removing it produced a
+// headerless agent while the build reported success (PF-061: a delete-a-block
+// transform verified its pre-condition and not its post-condition).
+
+describe('a generator host must carry TWO frontmatter blocks', () => {
+  it('a single-block dist/agents host fails the build and writes nothing', async () => {
+    await withFakeRoot(async fakeRoot => {
+      const dir = path.join(fakeRoot, 'src', 'assets', 'agents');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'lonely.mds'),
+        '---\nname: Lonely\ndescription: single-block agent\nmodel: haiku\noutput-dir: dist/agents\n---\n\n# Lonely Agent\n\nBody.\n',
+        'utf-8',
+      );
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain('no second frontmatter block');
+      expect(run.combined).toContain('TWO leading frontmatter blocks');
+      expect(run.combined).toContain('lonely.mds');
+      expect(
+        await readIfPresent(path.join(fakeRoot, 'dist', 'agents', 'lonely.md')),
+        'a headerless agent must never be written',
+      ).toBeNull();
+    });
+  });
+
+  it('non-vacuity: the same host with a second block compiles and keeps its frontmatter', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeGeneratorHost(fakeRoot, 'git');
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+      const out = await readIfPresent(path.join(fakeRoot, 'dist', 'agents', 'git.md'));
+      expect(out!.startsWith('---\nname: Git\n')).toBe(true);
+    });
+  });
 });

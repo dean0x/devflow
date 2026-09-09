@@ -6,7 +6,10 @@
  * frontmatter key and compiles it to `{output-dir}/{name}.md`. Files without
  * `output-dir:` are treated as partials and skipped (they are imported by hosts).
  * The emitted name is the source basename unless the host declares
- * `name-template:`, in which case that value is used.
+ * `output-name:`, in which case that value is used. The key says what it does:
+ * it names one output file. It performs no templating and no expansion, which is
+ * what `name-template:` would promise and what src/core/mds-variants.ts
+ * explicitly disclaims — that spelling stays free for Phase 2.
  *
  * Hard-fails the entire build on any compile error, ensuring a broken or stale
  * command never ships. Errors are reported with the mds::* code, message, and
@@ -18,15 +21,23 @@
  * was given, never on a destination it re-derived:
  *
  *   - Command hosts (`output-dir: dist/commands`, variant `commands`) declare
- *     `output-dir:` inside their single, real frontmatter block. Only that key is
- *     stripped, so every other key keeps its bytes exactly (stripOutputDirKey).
+ *     their build keys inside their single, real frontmatter block. Only the
+ *     build-owned keys are stripped (stripBuildKeys), so every other key keeps
+ *     its bytes exactly. BUILD_KEYS is the one list of keys the build both reads
+ *     and strips: a key the build consumes is a build directive, never part of
+ *     the shipped artifact, and deriving the strip from the same list means a
+ *     newly-read key cannot leak into dist/.
  *
  *   - Generator hosts (`output-dir: dist/agents`, variant `agents`) carry TWO
  *     leading frontmatter blocks: block 1 exists only to steer the build, block 2
  *     is the artifact's real frontmatter. The whole of block 1 is stripped after compilation
  *     (stripGeneratorFrontmatter), leaving block 2 — which the MDS compiler
  *     treats as ordinary body text — as the artifact's frontmatter, with the
- *     blank line that follows it preserved.
+ *     blank line that follows it preserved. The two-block shape is checked on
+ *     BOTH ends: a leading block must be present before the slice, and a second
+ *     block must be present after it. Without the post-condition a single-block
+ *     host — the shape every hand-authored agent has — silently loses its whole
+ *     frontmatter and ships headerless with the build reporting success.
  *
  * Both strips run AFTER compileFile: the compiler emits a frontmatter block at
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
@@ -36,12 +47,19 @@
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
  * non-canonical spelling, or a path that escapes the repo root is refused rather
  * than silently writing to an unexpected location. The emitted filename is
- * validated by the same module before it is joined onto the destination.
+ * validated by the same module before it is joined onto the destination, and
+ * every host's destination is resolved in a plan pass that runs to completion
+ * before the first byte is written — so two hosts claiming one destination are
+ * caught while dist/ is still untouched, instead of the later one silently
+ * overwriting the earlier one's artifact.
  *
- * One exit: every refusal — dest, filename, or compile error — is thrown and
- * aggregated by main(), which reports all of them and exits 1 once, after the
- * loop. No refusal abandons the hosts that follow it, so dist/ is never left
- * half-updated with a mix of fresh and stale artifacts.
+ * One exit: every refusal — dest, filename, destination collision, or compile
+ * error — is thrown and aggregated by main(), which reports all of them and
+ * exits 1 once, after the loop. No refusal abandons the hosts that follow it, so
+ * dist/ is never left half-updated with a mix of fresh and stale artifacts. The
+ * exception is a malformed build key (an `output-dir:` or `output-name:` with no
+ * value), which is refused during discovery — before any host is planned or
+ * written, so an immediate exit leaves dist/ wholly untouched.
  *
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
@@ -93,10 +111,10 @@ const IGNORE_DIRS = new Set([
 interface HostEntry {
   file: string;
   outputDir: string;
-  /** Source basename, used as the output name when no name-template: is declared. */
+  /** Source basename, used as the output name when no output-name: is declared. */
   basename: string;
-  /** Declared `name-template:` value, or null when the key is absent. */
-  nameTemplate: string | null;
+  /** Declared `output-name:` value, or null when the key is absent. */
+  outputName: string | null;
 }
 
 interface CompileOutcome {
@@ -135,8 +153,17 @@ function frontmatterBlock(text: string): string | null {
   return match ? match[1] : null;
 }
 
-/** Frontmatter keys the build itself consumes. Both are literal `[a-z-]` names. */
-type BuildKey = "output-dir" | "name-template";
+/**
+ * Frontmatter keys the build itself consumes — all literal `[a-z-]` names.
+ *
+ * One list, two duties: every key here is read out of a host's frontmatter
+ * (readFrontmatterKey) AND removed from a command host's compiled frontmatter
+ * (stripBuildKeys). Tying the strip to the read list is what keeps a build
+ * directive from shipping inside the artifact it directed — adding a key to this
+ * list makes it both readable and stripped in the same edit.
+ */
+const BUILD_KEYS = ["output-dir", "output-name"] as const;
+type BuildKey = (typeof BUILD_KEYS)[number];
 
 /**
  * Read a build-owned scalar key from a frontmatter block.
@@ -147,8 +174,9 @@ type BuildKey = "output-dir" | "name-template";
  * Returns the raw (untrimmed) value when the key is present — including an empty
  * string when the key is present but has no value (`output-dir:` with nothing
  * after the colon). Returns null only when the key is genuinely absent, which is
- * how a partial is distinguished from a host. For `output-dir:` the empty-value
- * case is a host with a malformed key and is hard-failed by the caller, per the
+ * how a partial is distinguished from a host, and how an absent `output-name:`
+ * falls back to the source basename. A present-but-empty value is a host with a
+ * malformed key and is hard-failed by the caller for every build key, per the
  * discovery contract.
  */
 function readFrontmatterKey(block: string, key: BuildKey): string | null {
@@ -157,18 +185,25 @@ function readFrontmatterKey(block: string, key: BuildKey): string | null {
 }
 
 /**
- * Strip `output-dir:` from compiled output.
+ * Strip every BUILD_KEYS line from compiled command-host output.
  *
- * Operates on the FIRST `---…---` block only. Removes the single `output-dir:`
- * line using a block-scoped regex and cleans up any resulting double blank line.
+ * Operates on the FIRST `---…---` block only. Removes each build-owned key line
+ * using a block-scoped regex and cleans up any resulting double blank line.
  * Leaves `description:`, `argument-hint:`, and all other keys byte-untouched
  * (no YAML round-trip, so `|`, `[]`, em-dashes are preserved exactly).
+ *
+ * The key list is BUILD_KEYS itself rather than a second, hand-maintained list:
+ * a key the build reads out of the frontmatter is a directive to the build, and
+ * shipping it inside the artifact leaks build plumbing into a deployed command.
  */
-function stripOutputDirKey(compiled: string): string {
+function stripBuildKeys(compiled: string): string {
   return compiled.replace(
     /^(---\r?\n)([\s\S]*?)(^---\r?\n)/m,
     (_match, open, body, close) => {
-      const stripped = body.replace(/^output-dir:[ \t]*.*(\r?\n|$)/m, "");
+      let stripped: string = body;
+      for (const key of BUILD_KEYS) {
+        stripped = stripped.replace(new RegExp(`^${key}:[ \\t]*.*(\\r?\\n|$)`, "m"), "");
+      }
       // Remove a trailing blank line that stripping may leave inside the block.
       const cleaned = stripped.replace(/\n{2,}$/, "\n");
       return open + cleaned + close;
@@ -184,19 +219,41 @@ function stripOutputDirKey(compiled: string): string {
  * (only a block at byte offset 0 is treated as frontmatter). Removing block 1
  * promotes block 2 into place with the blank line after it intact.
  *
- * Throws when no leading block is present. That cannot happen for a discovered
- * host — discovery found `output-dir:` in exactly this block — so its absence
- * means the compiler moved bytes it was expected to emit verbatim, which must
- * fail the build rather than ship a headerless artifact.
+ * Both ends of the transform are verified, because a delete-a-block transform
+ * that checks only one end fails silently on the other:
+ *
+ *   - PRE: a leading block must exist. That cannot happen for a discovered host
+ *     — discovery found `output-dir:` in exactly this block — so its absence
+ *     means the compiler moved bytes it was expected to emit verbatim.
+ *   - POST: a SECOND block must be what the slice exposes. Nothing about a host
+ *     forces it to have two blocks, and a single-block host is not exotic: it is
+ *     the shape every hand-authored agent has, so it is exactly what an author
+ *     converting an agent into a generator host is most likely to write. Without
+ *     this check that host's whole frontmatter (name:, description:, model:) is
+ *     deleted, the remaining body still looks like a plausible agent file, and
+ *     the build reports success.
+ *
+ * Either failure fails the build rather than shipping a headerless artifact.
  */
 function stripGeneratorFrontmatter(compiled: string, sourcePath: string): string {
+  const rel = path.relative(ROOT, sourcePath);
   const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(compiled);
   if (!match) {
     throw new Error(
-      `${path.relative(ROOT, sourcePath)}: generator host output has no leading frontmatter block to strip`,
+      `${rel}: generator host output has no leading frontmatter block to strip`,
     );
   }
-  return compiled.slice(match[0].length);
+
+  const promoted = compiled.slice(match[0].length);
+  if (!/^---\r?\n/.test(promoted)) {
+    throw new Error(
+      `${rel}: generator host output has no second frontmatter block — a generator host must ` +
+      `declare TWO leading frontmatter blocks: block 1 steers the build (output-dir:), block 2 ` +
+      `is the artifact's own frontmatter and is all that survives the strip. Stripping the only ` +
+      `block here would ship an agent with no frontmatter.`,
+    );
+  }
+  return promoted;
 }
 
 interface DiscoveryResult {
@@ -205,7 +262,20 @@ interface DiscoveryResult {
   totalCount: number;
 }
 
-/** Walk the repo and return all host entries (files declaring output-dir:) plus the total .mds count. */
+/**
+ * Walk the repo and return all host entries (files declaring output-dir:) plus
+ * the total .mds count.
+ *
+ * A build key that is present but valueless is a malformed host, not a default:
+ * readFrontmatterKey returns `''` rather than null for a bare `output-name:`, so
+ * `?? basename` would not fire and the fallback would look like it had. Falling
+ * back silently would hide the authoring mistake behind a plausible filename, so
+ * both keys hard-fail here with the same message shape.
+ *
+ * Discovery precedes every plan and every write, so exiting here leaves dist/
+ * wholly untouched — unlike a mid-loop exit, which is why plan- and compile-phase
+ * refusals are aggregated instead.
+ */
 function discoverHosts(): DiscoveryResult {
   const hosts: HostEntry[] = [];
   let totalCount = 0;
@@ -220,12 +290,19 @@ function discoverHosts(): DiscoveryResult {
       console.error(`ERROR: ${path.relative(ROOT, file)}: output-dir: is empty — must be a non-empty path`);
       process.exit(1);
     }
-    const nameTemplate = readFrontmatterKey(block, "name-template");
+    const outputName = readFrontmatterKey(block, "output-name");
+    if (outputName !== null && outputName.trim() === "") {
+      console.error(
+        `ERROR: ${path.relative(ROOT, file)}: output-name: is empty — must be a non-empty filename, ` +
+        `or omit the key to emit the source basename`,
+      );
+      process.exit(1);
+    }
     hosts.push({
       file,
       outputDir: outputDir.trim(),
       basename: path.basename(file, ".mds"),
-      nameTemplate: nameTemplate === null ? null : nameTemplate.trim(),
+      outputName: outputName === null ? null : outputName.trim(),
     });
   }
   return { hosts, totalCount };
@@ -318,7 +395,7 @@ function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath:
     case "agents":
       return stripGeneratorFrontmatter(compiled, sourcePath);
     case "commands":
-      return stripOutputDirKey(compiled);
+      return stripBuildKeys(compiled);
     default: {
       const unhandled: never = variant;
       throw new Error(
@@ -328,12 +405,29 @@ function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath:
   }
 }
 
-async function compileHost(host: HostEntry): Promise<CompileOutcome> {
+/** Where a host will write, and how its compiled frontmatter will be treated. */
+interface HostPlan {
+  variant: HostVariant;
+  /** Resolved absolute destination directory. */
+  outAbs: string;
+  /** Resolved absolute destination file. */
+  dest: string;
+}
+
+/**
+ * Resolve where a host will write — without writing anything.
+ *
+ * Separated from the write so every destination in the build is known before the
+ * first byte lands: two hosts claiming one destination is only detectable across
+ * hosts, and detecting it after a write has happened is too late to prevent the
+ * overwrite it describes. Every refusal is thrown so main() aggregates it and
+ * exits once.
+ */
+function planHost(host: HostEntry): HostPlan {
   const rel = path.relative(ROOT, host.file);
 
   // Dest safety: output-dir must resolve to an allowlisted directory under ROOT.
   // The decision is made by the pure core module; this shell renders the errors.
-  // Every refusal is thrown so main() aggregates them and exits once.
   const dirResult = resolveOutputDir(ROOT, host.outputDir);
   if (!dirResult.ok) {
     throw outputDirRefusal(rel, host.outputDir, dirResult.error);
@@ -342,16 +436,20 @@ async function compileHost(host: HostEntry): Promise<CompileOutcome> {
 
   // Filename safety: the name that will be emitted is validated before it is
   // joined onto the destination, so no host can write outside outAbs.
-  const declaredName = host.nameTemplate ?? host.basename;
+  const declaredName = host.outputName ?? host.basename;
   const nameResult = validateOutputName(declaredName);
   if (!nameResult.ok) {
     throw outputNameRefusal(rel, declaredName, nameResult.error);
   }
 
+  return { variant, outAbs, dest: path.join(outAbs, `${nameResult.value}.md`) };
+}
+
+async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {
+  const { variant, outAbs, dest } = plan;
+
   // Auto-create only the final destination leaf.
   fs.mkdirSync(outAbs, { recursive: true });
-
-  const dest = path.join(outAbs, `${nameResult.value}.md`);
 
   const result = await compileFile(host.file);
   // Generator hosts shed their whole steering block; command hosts shed only the
@@ -401,9 +499,60 @@ async function main(): Promise<void> {
   const outcomes: CompileOutcome[] = [];
   const errors: string[] = [];
 
+  /**
+   * Plan pass — resolve every destination before anything is written.
+   *
+   * `output-name:` decouples the emitted filename from the source filename, and
+   * two source directories can hold the same basename, so nothing about a host
+   * guarantees its destination is unique. path.join + write is per-host and
+   * knows nothing of its siblings: without this pass the later host in walk
+   * order silently overwrites the earlier one's artifact, shipping one host's
+   * bytes under the other's name with the build reporting success.
+   */
+  const claims = new Map<string, HostEntry[]>();
+  const planned: Array<{ host: HostEntry; plan: HostPlan }> = [];
+
+  const recordFailure = (label: string, message: string): void => {
+    errors.push(message);
+    console.error(`  FAILED:   ${label}`);
+    console.error(`    ${message}`);
+  };
+
   for (const host of hosts) {
     try {
-      const outcome = await compileHost(host);
+      const plan = planHost(host);
+      const claimants = claims.get(plan.dest);
+      if (claimants === undefined) {
+        claims.set(plan.dest, [host]);
+      } else {
+        claimants.push(host);
+      }
+      planned.push({ host, plan });
+    } catch (err) {
+      recordFailure(path.relative(ROOT, host.file), formatMdsError(err, host.file));
+    }
+  }
+
+  // A contested destination disqualifies EVERY claimant. Letting the first
+  // claimant win would pick an arbitrary one of two equally-declared intents and
+  // write it — the same silent overwrite, one host earlier.
+  const contested = new Set<string>();
+  for (const [dest, claimants] of claims) {
+    if (claimants.length < 2) continue;
+    contested.add(dest);
+    const named = claimants.map(h => path.relative(ROOT, h.file)).join(", ");
+    recordFailure(
+      path.relative(ROOT, dest),
+      `${path.relative(ROOT, dest)}: destination claimed by ${claimants.length} hosts — ${named}. ` +
+      `Two hosts may not emit the same file; rename one, or give it a distinct output-name:. ` +
+      `Neither was written.`,
+    );
+  }
+
+  for (const { host, plan } of planned) {
+    if (contested.has(plan.dest)) continue;
+    try {
+      const outcome = await compileHost(host, plan);
       outcomes.push(outcome);
 
       const warnNote =
@@ -416,10 +565,7 @@ async function main(): Promise<void> {
         console.warn(`    WARNING: ${w}`);
       }
     } catch (err) {
-      const formatted = formatMdsError(err, host.file);
-      errors.push(formatted);
-      console.error(`  FAILED:   ${host.basename}.mds`);
-      console.error(`    ${formatted}`);
+      recordFailure(path.relative(ROOT, host.file), formatMdsError(err, host.file));
     }
   }
 

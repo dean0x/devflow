@@ -75,7 +75,7 @@ describe('validateOutputName', () => {
     expect(errorOf(validateOutputName('')).kind).toBe('empty');
   });
 
-  it('rejects a parent-directory traversal name (name-template: ../x)', () => {
+  it('rejects a parent-directory traversal name (output-name: ../x)', () => {
     // The exact hostile value the build must refuse. Traversal is reported as
     // its own kind so the build message can say why, not just "invalid".
     expect(errorOf(validateOutputName('../x')).kind).toBe('dot-segment');
@@ -85,7 +85,7 @@ describe('validateOutputName', () => {
     expect(errorOf(validateOutputName('..')).kind).toBe('dot-segment');
   });
 
-  it('rejects a nested path name (name-template: a/b)', () => {
+  it('rejects a nested path name (output-name: a/b)', () => {
     expect(errorOf(validateOutputName('a/b')).kind).toBe('path-separator');
   });
 
