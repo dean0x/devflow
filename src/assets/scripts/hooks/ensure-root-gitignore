@@ -23,9 +23,21 @@
 # Both reach this one writer so the rule is applied identically everywhere; this
 # decouples git-tracking of .devflow/ from any single feature toggle (avoids PF-014).
 #
-# Idempotent and O(1) after the first run via the .root-gitignore-configured-v3
-# marker. The marker is versioned: bumping it (v2 → v3) forces existing installs
-# to re-run once and upgrade their block (adds !.devflow/conventions.md line).
+# Idempotent and O(1) after the first run via the .root-gitignore-configured-v4
+# marker under .devflow/ (project-local). The marker is a claim, not proof, so the
+# fast path also requires the block's own sentinel AND a .claudeignore entry to be
+# present; a .gitignore that lost the block to a merge resolution is healed on the
+# next run.
+#
+# D-GITIGNORE-V4: the block is detected by its devflow-unique sentinel
+# `!.devflow/conventions.md` — NEVER by `.claudeignore`, which users legitimately
+# author themselves. Keying presence off a user-authored line inverts both halves of
+# the contract: projects that already ignore `.claudeignore` never receive the
+# carve-out (so .devflow/ runtime files leak into git), and re-appending
+# `.claudeignore` after a user's `!.claudeignore` reverses their intent under
+# gitignore's last-match-wins. Hence: a `.claudeignore` OR `!.claudeignore` entry
+# means "the user owns that line" — emit the block without it. All matching is
+# whole-line and whitespace-tolerant; never substring.
 #
 # Usage: source ensure-root-gitignore "$PROJECT_ROOT"
 # Sourced helper: uses `return` (never exit), _ERG_-prefixed locals (never clobbers
@@ -34,26 +46,36 @@
 [ -z "$1" ] && return 1
 
 _ERG_DEVFLOW_DIR="$1/.devflow"
-_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3"
+_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v4"
 _ERG_GITIGNORE="$1/.gitignore"
 
-# Fast-path with verification: marker normally means the block is installed, but
-# the marker is a claim, not proof — a merge-conflict resolution may have dropped
-# the block. Gate the fast-path return on the v3 sentinel actually being present
-# in .gitignore. Idempotent: sentinel present → return 0; sentinel absent → heal.
-if [ -f "$_ERG_MARKER" ]; then
-  grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE" 2>/dev/null && return 0
-  # Sentinel absent — marker is stale; fall through to re-apply the block.
+# Whole-line, whitespace-tolerant matchers. `*` and `.` are escaped so the ERE
+# matches the literal gitignore patterns.
+_ERG_RE_OPTOUT='^[[:space:]]*/\.devflow/[[:space:]]*$'
+_ERG_RE_LEGACY='^[[:space:]]*\.devflow/[[:space:]]*$'
+_ERG_RE_SENTINEL='^[[:space:]]*!\.devflow/conventions\.md[[:space:]]*$'
+_ERG_RE_SENTINEL_V2='^[[:space:]]*!\.devflow/features/\*/KNOWLEDGE\.md[[:space:]]*$'
+_ERG_RE_CLAUDEIGNORE='^[[:space:]]*!?\.claudeignore[[:space:]]*$'
+
+# Fast path: converged only when the marker is stamped AND the block sentinel is
+# present AND a .claudeignore entry exists. Every other state falls through and
+# recomputes.
+if [ -f "$_ERG_MARKER" ] \
+  && grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null \
+  && grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null; then
+  return 0
 fi
 
 # The marker lives under .devflow/, so the directory must exist before we touch it.
 # (ensure-devflow-init creates it earlier; session-start-context may reach here first.)
 mkdir -p "$_ERG_DEVFLOW_DIR" 2>/dev/null || return 1
 
-# The carve-out block, built once into _ERG_BLOCK (emitted on create and append).
-# Keep byte-identical to ensureDevflowGitignore in src/targets/claude-code/post-install.ts.
-# D-GITIGNORE-V3: v3 adds !.devflow/conventions.md (naming authority, git-tracked).
-printf -v _ERG_BLOCK '%s\n' \
+# The carve-out block, built once. _ERG_BLOCK_NO_CI is the block a project that owns
+# its own .claudeignore entry receives; _ERG_BLOCK is that plus the final line.
+# Both trail a newline. Keep byte-identical to DEVFLOW_GITIGNORE_BLOCK and
+# DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE in
+# src/targets/claude-code/post-install.ts.
+printf -v _ERG_BLOCK_NO_CI '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
   '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/' \
   '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming' \
@@ -67,49 +89,98 @@ printf -v _ERG_BLOCK '%s\n' \
   '.devflow/features/*/*' \
   '!.devflow/features/*/KNOWLEDGE.md' \
   '!.devflow/conventions.md'
+printf -v _ERG_LINE_SENTINEL '%s\n' '!.devflow/conventions.md'
+printf -v _ERG_LINE_CLAUDEIGNORE '%s\n' '.claudeignore'
+_ERG_BLOCK="$_ERG_BLOCK_NO_CI$_ERG_LINE_CLAUDEIGNORE"
 
-_ERG_OK=0
-if [ ! -f "$_ERG_GITIGNORE" ]; then
-  # No .gitignore yet — create it with the block.
-  printf '%s' "$_ERG_BLOCK" > "$_ERG_GITIGNORE" && _ERG_OK=1
-elif grep -qF '!.devflow/conventions.md' "$_ERG_GITIGNORE"; then
-  # v3 carve-out already present — nothing to do.
-  _ERG_OK=1
-elif grep -qE '^/\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
+# Does the file already carry a .claudeignore entry of the user's own (either form)?
+# Computed BEFORE the legacy filter below, which rewrites the file.
+_ERG_HAS_CI=0
+grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null && _ERG_HAS_CI=1
+
+# Classify: noop (nothing to do) | continue (extend an existing block) |
+# block (install a fresh block) | fail (a rewrite failed; leave the file alone).
+_ERG_MODE=noop
+_ERG_APPEND=''
+if grep -qE "$_ERG_RE_OPTOUT" "$_ERG_GITIGNORE" 2>/dev/null; then
   # User-authored `/.devflow/` (leading slash) — respect it; don't force the carve-out.
-  # Checked BEFORE the v2 sentinel so a file containing both keeps the user-authored
-  # entry (matches ensureDevflowGitignore TS order: v3→/.devflow/→v2→wholesale→append).
-  _ERG_OK=1
-elif grep -qF '!.devflow/features/*/KNOWLEDGE.md' "$_ERG_GITIGNORE"; then
-  # v2→v3 upgrade: v2 sentinel present but conventions.md line absent — append just the
-  # missing line. A .gitignore whose last byte is not a newline would otherwise fuse the
-  # appended line onto the last existing one, corrupting BOTH patterns; the sibling append
-  # branches below get this for free by emitting a leading '\n'. `tail -c 1` yields the
-  # empty string when the file already ends in a newline (command substitution strips it).
-  if [ -n "$(tail -c 1 "$_ERG_GITIGNORE" 2>/dev/null)" ]; then
-    printf '\n' >> "$_ERG_GITIGNORE"
+  # Checked FIRST so a file containing both it and a sentinel keeps the user's entry.
+  _ERG_MODE=noop
+elif grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null; then
+  # Current block installed — complete it only if the .claudeignore line is missing.
+  if [ "$_ERG_HAS_CI" = 0 ]; then
+    _ERG_MODE=continue
+    _ERG_APPEND="$_ERG_LINE_CLAUDEIGNORE"
   fi
-  printf '!.devflow/conventions.md\n' >> "$_ERG_GITIGNORE" && _ERG_OK=1
-elif grep -qE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE"; then
-  # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
-  # comment, then append the carve-out block. Portable (grep filter + mv; no sed -i,
-  # which differs on BSD/GNU). An empty filter result is fine — the block is appended
-  # regardless; a leading blank is added only when prior content survived.
-  _ERG_TMP="$_ERG_GITIGNORE.devflow-tmp.$$"
-  grep -vE '^\.devflow/[[:space:]]*$' "$_ERG_GITIGNORE" 2>/dev/null \
-    | grep -vF '# Devflow runtime data (local by default; remove to share via git)' \
-    > "$_ERG_TMP" 2>/dev/null
-  { [ -s "$_ERG_TMP" ] && printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_TMP" \
-    && mv "$_ERG_TMP" "$_ERG_GITIGNORE" && _ERG_OK=1
-  [ "$_ERG_OK" = 1 ] || rm -f "$_ERG_TMP" 2>/dev/null
+elif grep -qE "$_ERG_RE_SENTINEL_V2" "$_ERG_GITIGNORE" 2>/dev/null; then
+  # v2 block installed — append the lines it lacks, in block order.
+  _ERG_MODE=continue
+  if [ "$_ERG_HAS_CI" = 1 ]; then
+    _ERG_APPEND="$_ERG_LINE_SENTINEL"
+  else
+    _ERG_APPEND="$_ERG_LINE_SENTINEL$_ERG_LINE_CLAUDEIGNORE"
+  fi
 else
-  # .gitignore exists but has no Devflow entry — append the block.
-  { printf '\n'; printf '%s' "$_ERG_BLOCK"; } >> "$_ERG_GITIGNORE" && _ERG_OK=1
+  # No devflow block — install one, omitting the .claudeignore line the user owns.
+  _ERG_MODE=block
+  if [ "$_ERG_HAS_CI" = 1 ]; then
+    _ERG_APPEND="$_ERG_BLOCK_NO_CI"
+  else
+    _ERG_APPEND="$_ERG_BLOCK"
+  fi
+  if grep -qE "$_ERG_RE_LEGACY" "$_ERG_GITIGNORE" 2>/dev/null; then
+    # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
+    # comment first, then fall through to the shared append below. Portable (grep
+    # filter + mv; no sed -i, which differs on BSD/GNU).
+    # The pipeline's own status is deliberately ignored: grep -v exits 1 when it
+    # emits no lines, which is the correct outcome for a .gitignore whose only
+    # content was the legacy entry. The redirect creates _ERG_TMP either way.
+    _ERG_TMP="$_ERG_GITIGNORE.devflow-tmp.$$"
+    grep -vE "$_ERG_RE_LEGACY" "$_ERG_GITIGNORE" 2>/dev/null \
+      | grep -vF '# Devflow runtime data (local by default; remove to share via git)' \
+      > "$_ERG_TMP" 2>/dev/null
+    if [ -f "$_ERG_TMP" ] && mv "$_ERG_TMP" "$_ERG_GITIGNORE"; then
+      :
+    else
+      rm -f "$_ERG_TMP" 2>/dev/null
+      _ERG_MODE=fail
+    fi
+  fi
 fi
 
-# On success, stamp the current-format v3 marker and drop legacy markers.
+# The two append shapes, mirrored byte-for-byte by the TS twin's appendLines and
+# appendBlock. `tail -c 1` yields the empty string when the file already ends in a
+# newline (command substitution strips it), so a file whose last byte is not a
+# newline gets one before the appended text fuses onto its last line. Existing
+# trailing newlines are preserved verbatim — no trimming, no blank-line dedupe.
+_ERG_OK=0
+case "$_ERG_MODE" in
+  noop)
+    _ERG_OK=1
+    ;;
+  continue)
+    if [ -n "$(tail -c 1 "$_ERG_GITIGNORE" 2>/dev/null)" ]; then
+      printf '\n' >> "$_ERG_GITIGNORE"
+    fi
+    printf '%s' "$_ERG_APPEND" >> "$_ERG_GITIGNORE" && _ERG_OK=1
+    ;;
+  block)
+    if [ ! -s "$_ERG_GITIGNORE" ]; then
+      # Absent or empty — the block is the whole file, with no leading blank line.
+      printf '%s' "$_ERG_APPEND" > "$_ERG_GITIGNORE" && _ERG_OK=1
+    else
+      if [ -n "$(tail -c 1 "$_ERG_GITIGNORE" 2>/dev/null)" ]; then
+        printf '\n' >> "$_ERG_GITIGNORE"
+      fi
+      { printf '\n'; printf '%s' "$_ERG_APPEND"; } >> "$_ERG_GITIGNORE" && _ERG_OK=1
+    fi
+    ;;
+esac
+
+# On success, stamp the current-format v4 marker and drop legacy markers.
 [ "$_ERG_OK" = 1 ] && {
   touch "$_ERG_MARKER"
+  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3" 2>/dev/null
   rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2" 2>/dev/null
   rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null
 }

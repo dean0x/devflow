@@ -40,6 +40,24 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 }
 
 /**
+ * Sentinel line whose presence means the current (v3-and-later) carve-out block is
+ * installed. Devflow-unique: no user writes `!.devflow/conventions.md` by hand.
+ */
+const DEVFLOW_GITIGNORE_SENTINEL_V3 = '!.devflow/conventions.md';
+
+/** Sentinel line whose presence means the v2 carve-out block is installed (no conventions.md line). */
+const DEVFLOW_GITIGNORE_SENTINEL_V2 = '!.devflow/features/*/KNOWLEDGE.md';
+
+/**
+ * The block's final line: ignore the devflow-managed `.claudeignore` file.
+ * NOT a sentinel — users legitimately author this line themselves.
+ */
+const CLAUDEIGNORE_LINE = '.claudeignore';
+
+/** A user's explicit un-ignore of `.claudeignore`; never overridden. */
+const CLAUDEIGNORE_NEGATION = '!.claudeignore';
+
+/**
  * The shared .devflow/ gitignore block. Everything under .devflow/ is local
  * (memory, learning, docs, locks) EXCEPT:
  * - Feature knowledge bases: index.md and every {slug}/KNOWLEDGE.md are tracked
@@ -53,10 +71,8 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
  *
  * Kept BYTE-IDENTICAL to the block emitted by src/assets/scripts/hooks/ensure-root-gitignore
  * so the init-time path and the always-on hook path produce the same file.
- *
- * D-GITIGNORE-V3: v3 of the carve-out block (adds !.devflow/conventions.md).
  */
-export const DEVFLOW_GITIGNORE_BLOCK = [
+const DEVFLOW_GITIGNORE_BLOCK_LINES = [
   '# Devflow runtime data — local by default (memory, learning, docs, locks).',
   '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/',
   '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming',
@@ -68,15 +84,21 @@ export const DEVFLOW_GITIGNORE_BLOCK = [
   '!.devflow/features/index.md',
   '!.devflow/features/*/',
   '.devflow/features/*/*',
-  '!.devflow/features/*/KNOWLEDGE.md',
-  '!.devflow/conventions.md',
-].join('\n');
+  DEVFLOW_GITIGNORE_SENTINEL_V2,
+  DEVFLOW_GITIGNORE_SENTINEL_V3,
+  CLAUDEIGNORE_LINE,
+];
 
-/** Sentinel line whose presence means the v3 carve-out block is installed. */
-const DEVFLOW_GITIGNORE_SENTINEL_V3 = '!.devflow/conventions.md';
+/** The full carve-out block, `.claudeignore` line included. */
+export const DEVFLOW_GITIGNORE_BLOCK = DEVFLOW_GITIGNORE_BLOCK_LINES.join('\n');
 
-/** Sentinel line whose presence means the v2 carve-out block is installed (no conventions.md line). */
-const DEVFLOW_GITIGNORE_SENTINEL_V2 = '!.devflow/features/*/KNOWLEDGE.md';
+/**
+ * The carve-out block without its final `.claudeignore` line — emitted instead of
+ * the full block when the target .gitignore already carries a `.claudeignore` or
+ * `!.claudeignore` entry of the user's own.
+ */
+export const DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE =
+  DEVFLOW_GITIGNORE_BLOCK_LINES.slice(0, -1).join('\n');
 
 /** The legacy wholesale comment our pre-carve-out writers emitted. */
 const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove to share via git)';
@@ -86,40 +108,89 @@ const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove
  * `.devflow/` with the feature-knowledge + conventions.md carve-out — or `null`
  * when no change is needed. Idempotent: feeding its own output back returns `null`.
  *
- * - v3 sentinel already present → `null` (already at current format).
- * - User-authored `/.devflow/` (leading slash) present → `null` (respect manual config).
- * - v2 sentinel present but not v3 → UPGRADE: append just `!.devflow/conventions.md`.
- * - Legacy bare `.devflow/` present → strip it (+ our old comment), append the full block.
- * - Otherwise → append the full block (or the block alone when content is empty).
+ * D-GITIGNORE-V4: the block is detected by its own devflow-unique sentinel
+ * (`!.devflow/conventions.md`), never by `.claudeignore` — a line users legitimately
+ * author themselves. A presence check on a user-authored line inverts both halves of
+ * the contract: projects that already ignore `.claudeignore` are told the block is
+ * installed when it is not, and a user's `!.claudeignore` un-ignore is silently
+ * reversed by re-appending `.claudeignore` under last-match-wins (applies PF-059).
+ *
+ * `hasClaudeignoreEntry` is true when some whole line, trimmed, is exactly
+ * `.claudeignore` OR `!.claudeignore`. Treating both forms as "present" both honours
+ * an un-ignore and makes every branch converge on re-run.
+ *
+ * 1. A `/.devflow/` line present → `null` (user opt-out; respect manual config).
+ * 2. v3 sentinel present → `null` when `hasClaudeignoreEntry`, else append `.claudeignore`.
+ * 3. v2 sentinel present, no v3 → append `!.devflow/conventions.md`, plus `.claudeignore`
+ *    only when `!hasClaudeignoreEntry` — both together, in that order.
+ * 4. Legacy bare `.devflow/` present → strip it (+ our old comment), then append the
+ *    block; no block at all → append the block. The block is emitted MINUS its final
+ *    `.claudeignore` line when `hasClaudeignoreEntry`.
+ * 5. `.claudeignore` is never a sentinel. The marker file
+ *    (`.devflow/.root-gitignore-configured-v4`) is a fast-path claim, never proof.
+ *
+ * Sentinel matching is whole-line, whitespace-tolerant, exact text — never substring.
+ * Both append forms are mirrored byte-for-byte in the shell twin
+ * (src/assets/scripts/hooks/ensure-root-gitignore), which is what the cross-implementation
+ * parity table in tests/shell-hooks.test.ts pins.
  */
 export function computeDevflowGitignore(existingContent: string): string | null {
   const lines = existingContent.split('\n');
   const trimmed = lines.map(l => l.trim());
 
-  if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V3)) return null;
-  if (trimmed.some(l => l === '/.devflow/')) return null;
+  const hasClaudeignoreEntry = trimmed.some(
+    l => l === CLAUDEIGNORE_LINE || l === CLAUDEIGNORE_NEGATION,
+  );
 
-  // v2→v3 upgrade: v2 sentinel present, v3 sentinel absent → append the missing line only.
-  // Preserve existing trailing newlines byte-for-byte (matches shell twin's tail -c 1 guard).
-  if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V2)) {
-    const sep = existingContent.endsWith('\n') ? '' : '\n';
-    return `${existingContent}${sep}${DEVFLOW_GITIGNORE_SENTINEL_V3}\n`;
+  /**
+   * Continue an existing devflow block with the lines it is missing. One newline
+   * guard, no blank separator — the appended lines belong to the block above them.
+   */
+  const appendLines = (body: string, block: string): string =>
+    `${body}${body.endsWith('\n') ? '' : '\n'}${block}\n`;
+
+  /**
+   * Start a new block after unrelated content: one blank separator line. Existing
+   * trailing newlines are preserved verbatim (no trimEnd, no blank-line dedupe) so
+   * the shell twin's `tail -c 1` guard produces the identical bytes.
+   */
+  const appendBlock = (body: string, block: string): string =>
+    body.length === 0
+      ? `${block}\n`
+      : `${body}${body.endsWith('\n') ? '' : '\n'}\n${block}\n`;
+
+  // 1. User opt-out wins over every sentinel.
+  if (trimmed.includes('/.devflow/')) return null;
+
+  // 2. Current block installed — complete it only if the .claudeignore line is missing.
+  if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V3)) {
+    return hasClaudeignoreEntry ? null : appendLines(existingContent, CLAUDEIGNORE_LINE);
   }
 
-  const append = (body: string): string =>
-    body.trimEnd()
-      ? `${body.trimEnd()}\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`
-      : `${DEVFLOW_GITIGNORE_BLOCK}\n`;
+  // 3. v2 block installed — append the lines it lacks, in block order.
+  if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V2)) {
+    return appendLines(
+      existingContent,
+      hasClaudeignoreEntry
+        ? DEVFLOW_GITIGNORE_SENTINEL_V3
+        : `${DEVFLOW_GITIGNORE_SENTINEL_V3}\n${CLAUDEIGNORE_LINE}`,
+    );
+  }
 
-  if (trimmed.some(l => l === '.devflow/')) {
+  // 4. No devflow block — install one, respecting any .claudeignore entry of the user's own.
+  const block = hasClaudeignoreEntry
+    ? DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE
+    : DEVFLOW_GITIGNORE_BLOCK;
+
+  if (trimmed.includes('.devflow/')) {
     // Upgrade our legacy wholesale entry: drop the bare line + old comment, append block.
     const kept = lines
       .filter(l => l.trim() !== '.devflow/' && l.trim() !== LEGACY_DEVFLOW_COMMENT)
       .join('\n');
-    return append(kept);
+    return appendBlock(kept, block);
   }
 
-  return append(existingContent);
+  return appendBlock(existingContent, block);
 }
 
 /**
@@ -1061,8 +1132,10 @@ export async function updateGitignore(
 }
 
 /** Current carve-out marker version. Bump when the block format changes. */
+const GITIGNORE_MARKER_V4 = '.root-gitignore-configured-v4';
+/** Previous marker — removed when upgrading to v4. */
 const GITIGNORE_MARKER_V3 = '.root-gitignore-configured-v3';
-/** Previous marker — removed when upgrading to v3. */
+/** Two-versions-ago marker — also removed on upgrade. */
 const GITIGNORE_MARKER_V2 = '.root-gitignore-configured-v2';
 
 /**
@@ -1071,17 +1144,21 @@ const GITIGNORE_MARKER_V2 = '.root-gitignore-configured-v2';
  *
  * Manages ONLY `.devflow/` — never `.claude/` — because user-scope installs must
  * not gitignore `.claude/`. This is the init-time counterpart to the always-on
- * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both write the identical
- * DEVFLOW_GITIGNORE_BLOCK, so the two paths are byte-compatible and mutually
- * idempotent. Called unconditionally (independent of install scope and every
- * feature toggle) whenever a git root is known.
+ * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both resolve the same
+ * shape for a given .gitignore — DEVFLOW_GITIGNORE_BLOCK, or
+ * DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE when the project owns that entry — and
+ * emit identical bytes, so the two paths are byte-compatible and mutually idempotent.
+ * Called unconditionally (independent of install scope and every feature toggle)
+ * whenever a git root is known.
  *
- * Uses a versioned marker file (`.devflow/.root-gitignore-configured-v3`) for fast-path
- * detection — the same pattern as the shell twin. Bumping the version forces existing
- * installs to re-run once and upgrade their block (v2→v3: adds conventions.md line).
+ * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v4`)
+ * for fast-path detection — the same pattern as the shell twin. The marker is a claim,
+ * not proof, so even a marked install re-reads .gitignore and re-runs
+ * computeDevflowGitignore; bumping the version forces a re-run once per install.
  *
- * Idempotent: already-v3 installs return immediately (marker fast-path). Errors are
- * swallowed (verbose-logged) — a gitignore write must never abort init.
+ * Idempotent: computeDevflowGitignore returns null for a converged file, so a
+ * marked install performs one read and no write. Errors are swallowed
+ * (verbose-logged) — a gitignore write must never abort init.
  */
 export async function ensureDevflowGitignore(
   gitRoot: string,
@@ -1089,17 +1166,17 @@ export async function ensureDevflowGitignore(
 ): Promise<void> {
   try {
     const devflowDir = path.join(gitRoot, '.devflow');
-    const markerV3 = path.join(devflowDir, GITIGNORE_MARKER_V3);
+    const markerV4 = path.join(devflowDir, GITIGNORE_MARKER_V4);
     const gitignorePath = path.join(gitRoot, '.gitignore');
 
-    // Fast-path with verification: v3 marker normally means the block is installed,
+    // Fast-path with verification: v4 marker normally means the block is installed,
     // but the marker is a claim, not proof — a merge-conflict resolution may have
     // dropped the block. Even when the marker exists, read .gitignore (one cheap
     // read) and run computeDevflowGitignore; write only when it returns non-null.
     // Idempotent: sentinel present → computeDevflowGitignore returns null → no write.
-    let v3Marked = false;
-    try { await fs.access(markerV3); v3Marked = true; } catch { /* absent */ }
-    if (v3Marked) {
+    let v4Marked = false;
+    try { await fs.access(markerV4); v4Marked = true; } catch { /* absent */ }
+    if (v4Marked) {
       let existingContent = '';
       try { existingContent = await fs.readFile(gitignorePath, 'utf-8'); } catch { /* absent */ }
       const healContent = computeDevflowGitignore(existingContent);
@@ -1125,9 +1202,10 @@ export async function ensureDevflowGitignore(
       }
     }
 
-    // Stamp v3 marker so subsequent runs fast-path; drop the legacy v2 marker.
+    // Stamp v4 marker so subsequent runs fast-path; drop the legacy v3 and v2 markers.
     await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(markerV3, '', 'utf-8');
+    await fs.writeFile(markerV4, '', 'utf-8');
+    try { await fs.rm(path.join(devflowDir, GITIGNORE_MARKER_V3), { force: true }); } catch { /* ok if absent */ }
     try { await fs.rm(path.join(devflowDir, GITIGNORE_MARKER_V2), { force: true }); } catch { /* ok if absent */ }
   } catch (error) {
     if (verbose) {

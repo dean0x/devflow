@@ -13,7 +13,7 @@
  *     share dirA; describe (c) + edge "no remote configured" share dirNoRemote;
  *     edge "no origin/HEAD symref" + "no gh network call" share dirNoOriginHead1).
  *
- *   • All 11 shape IIFEs launch concurrently in one Promise.all. Git calls are
+ *   • All 14 shape IIFEs launch concurrently in one Promise.all. Git calls are
  *     unserialized; concurrent setup completes in under a second.
  *
  *   • One exception: the "no gh network call" test must call gatherGitStatus live so it
@@ -259,7 +259,7 @@ afterAll(() => {
 
 // ─── single module-level fixture setup + gatherGitStatus pre-computation ─────
 beforeAll(async () => {
-  // All 11 shapes launch concurrently. Each IIFE creates its own temp directory,
+  // All 14 shapes launch concurrently. Each IIFE creates its own temp directory,
   // runs git setup, then calls gatherGitStatus so all subprocess work is done
   // before any test body runs. Concurrent setup completes in under a second.
   //

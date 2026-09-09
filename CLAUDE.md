@@ -91,7 +91,16 @@ devflow/
 │       ├── commands/       # MDS command sources (13 hosts + 11 partials in _partials/; 1 static .md)
 │       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
-├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts)
+├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts, update-golden.ts)
+├── tests/                  # Test harness
+│   ├── helpers.ts          # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
+│   ├── seams/              # Command→agent input contract
+│   ├── goldens/            # Byte-equality against tests/fixtures/golden/
+│   ├── guards/             # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, extended-references
+│   ├── integration/        # Real claude / tarball installs
+│   └── fixtures/
+│       ├── golden/         # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen through Phase 3)
+│       └── numeric-floors.json  # Hand-registered floor manifest — floors raise, never lower
 ├── docs/reference/         # Detailed reference documentation
 ├── .devflow/               # Per-project runtime data — local by default; EXCEPTION: features/ knowledge bases (index.md + {slug}/KNOWLEDGE.md) are tracked & shared via git (ensure-root-gitignore writes the carve-out)
 │   ├── docs/               # Project docs (reviews, design)
@@ -132,7 +141,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only), `npm run build:mds` (compile all 13 MDS host commands from `src/assets/commands/` to `dist/commands/`)
+**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only), `npm run build:mds` (compile all 13 MDS host commands from `src/assets/commands/` to `dist/commands/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the git.md golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`)
 
 ## Documentation Artifacts
 
@@ -294,3 +303,4 @@ For detailed specifications beyond this overview:
 - **Release process**: `docs/reference/release-process.md` — CI-driven one-click releases via GitHub Actions `workflow_dispatch`
 - **File organization**: `docs/reference/file-organization.md` — source tree, build distribution, install paths, settings
 - **Docs framework skill**: `src/assets/skills/docs-framework/SKILL.md` — documentation naming conventions and templates
+- **Platform assumptions**: `docs/reference/platform-assumptions.md` — Claude Code behavioural assumptions devflow agents and tests rely on; each entry carries a date stamp and an observable drift symptom

@@ -135,7 +135,7 @@ Sequential execution with progress checkpoints:
 4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); when COMPLIANCE_SKILL_INSTALLED, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
-6. **Post-release steps** — version bump to next dev, close milestone, etc.
+6. **Post-release steps** — version bump to next dev
 
 Delete `.release/.progress.json` on success.
 

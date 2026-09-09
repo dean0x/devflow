@@ -432,7 +432,10 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     }
 
     expect(caught).toBeDefined();
-    expect(caught!.message).toContain('src/assets/agents');
+    // Pin the filename and fix-hint literals from the installer error message. These are
+    // stable across path reconfigurations and will survive Phase 1's resolver refactor.
+    expect(caught!.message).toContain('nonexistent-xyz-ws6a-agent.md');
+    expect(caught!.message).toContain('Ensure the agent file exists');
   });
 
   it('throws when a declared skill source directory is absent', async () => {

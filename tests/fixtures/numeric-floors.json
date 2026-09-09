@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. Each entry pins a floor value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so lowering one site out of several is caught. New entries are allowed; raise `floor`/`pattern` (and `occurrences`) deliberately when an assertion is raised. Equality baselines (the GIT_MD_* / SKILL_* / TOTAL_* constants in tests/goldens/github-status-lines.test.ts) are not floors and are not registered here.",
+  "floors": [
+    {
+      "id": "dist-host-count",
+      "floor": 13,
+      "pattern": "toHaveLength(13)",
+      "occurrences": 1,
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Number of compiled MDS host commands in dist/commands/ (ALL_HOSTS)"
+    },
+    {
+      "id": "partial-count",
+      "floor": 11,
+      "pattern": "toHaveLength(11)",
+      "occurrences": 1,
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Number of _partials/*.mds partial files"
+    },
+    {
+      "id": "dist-files-count",
+      "floor": 14,
+      "pattern": "toBe(14)",
+      "occurrences": 3,
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "DIST_FILES count = ALL_HOSTS (13) + release.md (1); DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)"
+    },
+    {
+      "id": "slow-test-timeout-ms",
+      "floor": 60000,
+      "pattern": "60_000",
+      "occurrences": 21,
+      "sourceFile": "tests/build-mds.test.ts",
+      "description": "Minimum timeout in ms for slow shell-exec tests that call npm run build:mds"
+    },
+    {
+      "id": "subagent-literal-count",
+      "floor": 50,
+      "pattern": "toBeGreaterThanOrEqual(50)",
+      "occurrences": 1,
+      "sourceFile": "tests/agent-name-guards.test.ts",
+      "description": "Minimum number of subagent_type literal sites across dist+scripts corpus (currently ~66+)"
+    },
+    {
+      "id": "charter-char-max",
+      "floor": 3072,
+      "pattern": "3072",
+      "occurrences": 1,
+      "sourceFile": "tests/agent-name-guards.test.ts",
+      "description": "MAX_CHARTER_CHARS = 75% of the 4096-char shell injection cap; orchestrator charter must stay at or below this"
+    },
+    {
+      "id": "plugin-count",
+      "floor": 8,
+      "pattern": "toBeGreaterThanOrEqual(8)",
+      "occurrences": 1,
+      "sourceFile": "tests/plugins.test.ts",
+      "description": "Minimum number of DEVFLOW_PLUGINS registry entries"
+    },
+    {
+      "id": "install-path-refs",
+      "floor": 2,
+      "pattern": "toBeGreaterThanOrEqual(2)",
+      "occurrences": 1,
+      "sourceFile": "tests/skill-references.test.ts",
+      "description": "Minimum install-path references in dist/commands/ files"
+    },
+    {
+      "id": "d11-posting-ops",
+      "floor": 8,
+      "pattern": "toBeGreaterThanOrEqual(8)",
+      "occurrences": 1,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from git.md alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
+    },
+    {
+      "id": "agent-roster-count",
+      "floor": 16,
+      "pattern": "toBe(16)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-source-resolver.test.ts",
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07)"
+    },
+    {
+      "id": "seam-op-section-map",
+      "floor": 15,
+      "pattern": "toBeGreaterThanOrEqual(15)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]"
+    },
+    {
+      "id": "seam-ops-with-callers",
+      "floor": 13,
+      "pattern": "toBeGreaterThanOrEqual(13)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud)."
+    },
+    {
+      "id": "issue-capture-contract-size",
+      "floor": 3,
+      "pattern": "toBe(3)",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/command-agent-input.test.ts",
+      "description": "Entries in issue_capture_contract() checked by the seam test's producer direction — corrected from 5 to 3 after removing ISSUE_ID and ISSUE_URL (c7bff85: no emitted producer in git.md for either name)"
+    },
+    {
+      "id": "manage-debt-archive-cap",
+      "floor": 60000,
+      "pattern": "toContain('60000')",
+      "occurrences": 4,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "manage-debt archive character cap (60 000 chars) — 4 tests assert this value; lowering one test out of the set is caught"
+    },
+    {
+      "id": "d10-dedup-marker-floor",
+      "floor": 2,
+      "pattern": "toBeGreaterThanOrEqual(2)",
+      "occurrences": 2,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "D10 dedup-marker guard: two >= 2 floors in git-agent.test.ts (post-review-summary and post-resolution-summary dedup markers); lowering either site is caught"
+    },
+    {
+      "id": "containment-issue-body-floor",
+      "floor": 3,
+      "pattern": "toBeGreaterThanOrEqual(3)",
+      "occurrences": 2,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "AC-0.10 containment guard (issue-body): ops wrapping remote issue content in <untrusted-issue-body> — setup-task, fetch-issue, fetch-issues-batch (three ops added in commit 75f13e7). Split from the prior combined predicate to make this assertion non-vacuous on main."
+    },
+    {
+      "id": "containment-external-thread-floor",
+      "floor": 3,
+      "pattern": "toBeGreaterThanOrEqual(3)",
+      "occurrences": 2,
+      "sourceFile": "tests/git-agent.test.ts",
+      "description": "AC-0.10 containment guard (external-thread): ops carrying <external-thread> for review thread bodies — fetch-review-threads, post-resolution-summary, post-wave-report (pre-existing on main, Principle 8 stabilisation)."
+    }
+  ]
+}

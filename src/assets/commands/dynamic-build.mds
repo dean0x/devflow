@@ -70,7 +70,7 @@ When ambiguous, ask the user before authoring: "Is this a single ticket or a wav
 
 Check for (in priority order):
 - A plan document passed as input (path or inline)
-- A GitHub issue body (fetch via `gh issue view <number>`)
+- A GitHub issue body (fetched via the Git agent using `OPERATION: fetch-issue`)
 - The current working context (recent `/devflow:dynamic-plan` output)
 - An in-context task description
 

@@ -46,6 +46,17 @@ const DYNAMIC_HOSTS = [
 
 const ALL_HOSTS = [...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS] as const;
 
+// DIST_FILES = all 14 deployed commands (13 compiled MDS hosts + 1 hand-authored).
+// release.md is hand-authored and stays so permanently — the divergence is deliberate
+// and recorded in .devflow/features/dynamic-workflow-engine/KNOWLEDGE.md (SG-13, §14.5).
+// Scope rule (§14.5):
+//   - compilation guards (escaped braces, un-expanded call sites) → ALL_HOSTS scope
+//   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
+const DIST_FILES = [
+  ...ALL_HOSTS.map(h => `${h}.md`),
+  'release.md',
+] as const;
+
 // ---------------------------------------------------------------------------
 // Shared MDS initialisation — required before compile calls
 // ---------------------------------------------------------------------------
@@ -281,6 +292,9 @@ describe('escape-regression guard: no dist command contains literal backslash-br
   });
 
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
+    // ALL_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
+    // output only.  release.md is hand-authored and not produced by the MDS compiler —
+    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
     let scanned = 0;
     for (const basename of ALL_HOSTS) {
       const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
@@ -720,6 +734,9 @@ describe('compiled knowledge commands — no stale call-site references', () => 
   });
 
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
+    // ALL_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
+    // applies to MDS compiler outputs only.  release.md is hand-authored — it never
+    // contains MDS call sites (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
     for (const basename of ALL_HOSTS) {
@@ -927,9 +944,11 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 // ---------------------------------------------------------------------------
 
 describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
+  // bug-analysis added in P0-S22 (AC-0.8 harness gap closure).
   const SKILL_CHECK_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
     'plan':        DIST_COMMANDS,
+    'bug-analysis': DIST_COMMANDS,
   };
 
   beforeAll(() => {
@@ -945,7 +964,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     ).toBe(0);
   });
 
-  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
+  it('code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
     for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
       const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
@@ -987,10 +1006,18 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     ).toBe(1);
   });
 
-  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, COMPLIANCE: ${ (interpolated JS), or comment-pr (AC-32)', async () => {
+  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, or comment-pr; implement.md has exactly one COMPLIANCE: {enabled line (AC-32)', async () => {
+    // Title corrected (P0-S22): the body asserts COMPLIANCE: {enabled (not COMPLIANCE: ${).
+    // dist/commands/dynamic-build.md:210 legitimately contains COMPLIANCE: ${COMPLIANCE}
+    // (a JS template literal in a code block) — that is intentional, not an MDS escape bug.
+    // M8: DIST_FILES (not ALL_HOSTS) — release.md is a hand-authored dist file that must
+    // pass the same COMPLIANCE_ENABLED/devflow-compliance/comment-pr cleanliness checks.
+    // ALL_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = ALL_HOSTS + release.md (14 total).
+    // DIST_FILES entries already include the '.md' extension (e.g. 'implement.md').
+    // Use `basename` directly as the filename — do NOT append '.md' again.
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of DIST_FILES) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1000,24 +1027,24 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
       scanned++;
       expect(
         content,
-        `${basename}.md must not contain COMPLIANCE_ENABLED`,
+        `${basename} must not contain COMPLIANCE_ENABLED`,
       ).not.toContain('COMPLIANCE_ENABLED');
       expect(
         content,
-        `${basename}.md must not contain devflow-compliance`,
+        `${basename} must not contain devflow-compliance`,
       ).not.toContain('devflow-compliance');
       // COMPLIANCE: {enabled is sanctioned only in implement.md (Git setup-task spawn, AC-32).
       // All other files must not contain it.
-      if (basename !== 'implement') {
+      if (basename !== 'implement.md') {
         expect(
           content,
-          `${basename}.md must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
+          `${basename} must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
         ).not.toContain('COMPLIANCE: {enabled');
       }
       // comment-pr was retired; post-review-summary replaces it.
       expect(
         content,
-        `${basename}.md must not contain comment-pr (retired operation)`,
+        `${basename} must not contain comment-pr (retired operation)`,
       ).not.toContain('comment-pr');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -1028,9 +1055,11 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
+    // M8: DIST_FILES (not ALL_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
+    // DIST_FILES entries include the '.md' extension — use basename directly (no extra .md).
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of DIST_FILES) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1056,7 +1085,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
 
       expect(
         violations,
-        `${basename}.md: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
+        `${basename}: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
       ).toHaveLength(0);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
@@ -1382,5 +1411,203 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
       ).toHaveLength(0);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous (PF-018)').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §20  DIST_FILES non-vacuity + compliance_gate adoption guard (P0-S21, P0-S22)
+//
+// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = 13
+// compiled MDS hosts + 1 hand-authored release.md).
+//
+// compliance_gate() adoption guard: 6 importers (bug-analysis, code-review,
+// dynamic-build, implement, plan, resolve) must use the shared {compliance_gate()}
+// partial. release.md inlines its own COMPLIANCE_SKILL_INSTALLED check — it never
+// calls {compliance_gate()} — recorded as an allowlisted exception by name (§14.5).
+// hostsScanned === 6 asserts non-vacuity [DR-27a].
+// ---------------------------------------------------------------------------
+
+describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('DIST_FILES contains exactly 14 entries (13 compiled hosts + release.md) — non-vacuity (P0-S21)', () => {
+    // SG-13: the divergence is permanent; release.md stays hand-authored.
+    expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (13 compiled + release.md)').toBe(14);
+    expect(DIST_FILES).toContain('release.md');
+  });
+
+  it('all 6 compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
+    // The 6 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds:
+    //   bug-analysis.mds:27, code-review.mds:43, dynamic-build.mds:49,
+    //   implement.mds:54, plan.mds:163, resolve.mds:104
+    // Exception (allowlisted by name): release.md inlines its own COMPLIANCE_SKILL_INSTALLED
+    // check and never calls {compliance_gate()} — it is not in this list (§14.5).
+    const COMPLIANCE_GATE_IMPORTERS = [
+      'bug-analysis',
+      'code-review',
+      'dynamic-build',
+      'implement',
+      'plan',
+      'resolve',
+    ] as const;
+
+    let hostsScanned = 0;
+    for (const basename of COMPLIANCE_GATE_IMPORTERS) {
+      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const content = await fs.readFile(outputPath, 'utf-8');
+      hostsScanned++;
+      expect(
+        content,
+        `${DIST_COMMANDS}/${basename}.md must contain COMPLIANCE_SKILL_INSTALLED (compliance_gate expansion)`,
+      ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    }
+
+    // hostsScanned === 6: asserts non-vacuity (PF-018, [DR-27a]).
+    // Known-bad sample: a host with @import but no {compliance_gate()} call would
+    // produce a compiled output without COMPLIANCE_SKILL_INSTALLED and fail here.
+    expect(
+      hostsScanned,
+      `compliance_gate guard is vacuous: expected hostsScanned === 6, got ${hostsScanned}`,
+    ).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §21  gh issue scope guard (AC-0.4, P0-S21)
+//
+// No `gh issue` invocation or descriptive mention in any DIST_FILE entry
+// outside a Git spawn fence. Scans all 14 DIST_FILES (§14.5 deployed-behaviour
+// rule). Three recorded exceptions encoded as an explicit allowlist (never a
+// loosened regex):
+//
+//   1. `gh pr view` at code-review.mds:76-78 (dist: code-review.md:71)
+//   2. `gh pr view` at bug-analysis.mds:43-45 (dist: bug-analysis.md:39)
+//   3. `gh pr view` at resolve.mds:63 (dist: resolve.md:57)
+//
+// These are PR-description fetches that legitimately appear outside spawn
+// fences. All other `gh` invocations must be inside Git-agent spawn blocks.
+//
+// Non-vacuity: DIST_FILES.length === 14 (proven in §20 above).
+// Known-bad sample (mechanic 2): inline corpus with a bare `gh issue view` line
+// — asserted inside the test.
+// ---------------------------------------------------------------------------
+
+describe('gh issue scope guard — no gh issue calls outside Git spawn fences (AC-0.4, P0-S21)', () => {
+  // Recorded exceptions: gh pr view for PR-description fetch (allowlisted by file + pattern).
+  // These appear in prose bash blocks, not in Agent spawn blocks, which is permitted.
+  const GH_PR_VIEW_EXCEPTION_FILES = new Set([
+    'code-review.md',  // code-review.mds:76-78
+    'bug-analysis.md', // bug-analysis.mds:43-45
+    'resolve.md',      // resolve.mds:63
+  ]);
+
+  beforeAll(() => {
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    expect(
+      result.status,
+      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    ).toBe(0);
+  });
+
+  it('no dist command contains gh issue invocations or descriptive mentions outside a Git spawn fence', async () => {
+    // Deployed-behaviour guard → DIST_FILES scope (§14.5).
+    const distDir = path.join(ROOT, DIST_COMMANDS);
+
+    // Fail-loud: dist must exist (R3 — throw with build hint, never skip).
+    let distFiles: string[];
+    try {
+      distFiles = (await fs.readdir(distDir)).filter(f => f.endsWith('.md'));
+    } catch {
+      throw new Error(
+        'dist/commands/ is absent — run `npm run build` first\n' +
+        '  (this guard reads deployed command files and cannot be skipped)',
+      );
+    }
+    expect(
+      distFiles.length,
+      `dist/commands/ has ${distFiles.length} .md files — expected 14`,
+    ).toBe(14);
+
+    // Named collector — used by both the main guard loop and the non-vacuity probe (M12c).
+    // Extracts `gh issue` occurrences in prose (non-fence) content.
+    function collectGhIssueProseViolations(filename: string, content: string): string[] {
+      const fencePattern = /```[^\n]*\n[\s\S]*?```/g;
+      const stripped = content.replace(fencePattern, (match) => '\n'.repeat(match.split('\n').length - 1));
+      const results: string[] = [];
+      const re = /\bgh issue\b/g;
+      let m;
+      while ((m = re.exec(stripped)) !== null) {
+        results.push(`${filename}: prose contains 'gh issue' at char ${m.index}`);
+      }
+      return results;
+    }
+
+    const violations: string[] = [];
+
+    for (const filename of DIST_FILES) {
+      const content = await fs.readFile(path.join(distDir, filename), 'utf-8');
+
+      // Extract lines NOT inside triple-backtick fences (prose lines).
+      const fencePattern = /```[^\n]*\n[\s\S]*?```/g;
+      const stripped = content.replace(fencePattern, (m) => '\n'.repeat(m.split('\n').length - 1));
+
+      // Check for `gh issue` in prose — always a violation (uses shared collector, M12c).
+      violations.push(...collectGhIssueProseViolations(filename, content));
+
+      // Check for `gh` calls in spawn fences — only Git fences are allowed.
+      const fenceMatch = /```[^\n]*\n([\s\S]*?)```/g;
+      let fence;
+      while ((fence = fenceMatch.exec(content)) !== null) {
+        const block = fence[0];
+        const hasGhIssue = /\bgh issue\b/.test(block);
+        if (!hasGhIssue) continue;
+        const hasGit =
+          /Agent\(subagent_type="Git"/.test(block) ||
+          /agentType:\s*"Git"/.test(block);
+        if (!hasGit) {
+          violations.push(`${filename}: spawn fence contains 'gh issue' outside a Git block`);
+        }
+      }
+
+      // Check for `gh pr view` outside fences — allowed only for the exception set.
+      const ghPrRe = /\bgh pr view\b/g;
+      let m;
+      while ((m = ghPrRe.exec(stripped)) !== null) {
+        if (!GH_PR_VIEW_EXCEPTION_FILES.has(filename)) {
+          violations.push(`${filename}: prose contains 'gh pr view' — add to exception list if intentional`);
+        }
+      }
+    }
+
+    // Non-vacuity (mechanic 2, M12c): calls the shared collectGhIssueProseViolations helper
+    // to prove the guard isn't vacuous — a bare `gh issue view` in prose must be flagged.
+    // This is NOT an inline re-implementation; it calls the same function as the main loop.
+    const knownBadProse = 'OPERATION: fetch-issue\ngh issue view 42\n';
+    const knownBadViolations = collectGhIssueProseViolations('known-bad.md', knownBadProse);
+    expect(
+      knownBadViolations.length,
+      'non-vacuity: collectGhIssueProseViolations must flag a bare gh issue line in prose (H10)',
+    ).toBeGreaterThan(0);
+
+    expect(
+      violations,
+      `gh issue scope violations:\n${violations.join('\n')}`,
+    ).toHaveLength(0);
   });
 });

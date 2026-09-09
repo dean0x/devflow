@@ -92,7 +92,17 @@ devflow/
 │               └── safe-path.cjs       # Path safety validation
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: src/assets/commands/*.mds → dist/commands/*.md
-│   └── bump-version.ts               # Version bump script
+│   ├── bump-version.ts               # Version bump script
+│   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
+├── tests/                            # Test harness
+│   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
+│   ├── seams/                        # Command→agent input contract
+│   ├── goldens/                      # Byte-equality against tests/fixtures/golden/
+│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, extended-references
+│   ├── integration/                  # Real claude / tarball installs
+│   └── fixtures/
+│       ├── golden/                   # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen through Phase 3)
+│       └── numeric-floors.json       # Hand-registered floor manifest — floors raise, never lower
 ├── docs/
 │   └── reference/                    # Extracted reference docs
 ```

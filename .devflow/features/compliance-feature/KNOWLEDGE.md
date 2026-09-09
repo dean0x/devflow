@@ -16,7 +16,7 @@ directories:
   - src/assets/commands/resolve.mds
   - src/assets/commands/release.md
 created: 2026-08-20
-updated: 2026-08-21
+updated: 2026-09-06
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -171,7 +171,7 @@ The Git agent implements the SDLC traceability layer. All operations are declare
 
 | Marker | Operations | Key Details |
 |---|---|---|
-| D1 | `learn-conventions` | Bounded scan (≤50 branches, ≤20 tags, ≤30 merged PRs, ≤200 merges for integration-branch scoring). Writes `.devflow/conventions.md` **once** — never overwrites. Scanned strings are UNTRUSTED DATA: shape-derived patterns only, never verbatim. Post-composition verbatim-match check replaces any copied string with the generic default. |
+| D1 | `learn-conventions` | Bounded scan (≤50 branches, ≤20 tags, ≤30 merged PRs, ≤200 merges for integration-branch scoring). Writes `.devflow/conventions.md` **once** — never overwrites. Scanned strings are UNTRUSTED DATA: shape-derived patterns only, never verbatim. Post-composition verbatim-match check replaces any copied string with the generic default. After writing, **commits `.devflow/conventions.md` via scoped pathspec** (never `git add -A`, never push, never force, non-blocking on failure; reports `CONVENTIONS_COMMIT: failed` on error and continues — mirrors the Knowledge agent's commit pattern). |
 | D2 | `fetch-review-threads`, `resolve-review-threads` | GraphQL (≤2 pages of 50 = 100 max threads); external thread bodies wrapped in `<external-thread>...</external-thread>` and never echoed verbatim |
 | D3 | `ensure-traceable-issue` | D3 issue template sections: `## Initial Request`, `## Product Requirements`, `## Implementation Plan`. Template single-sourced in `devflow:git` skill (git/SKILL.md). Never rewrites issue body, posts comments only. All user-supplied strings (title, body, labels) bound to shell variables and passed via `--body-file`/`--label "$VAR"` — never interpolated into the command string. |
 | D4 | All traceability ops | **Degradation contract** (see table below) |
@@ -220,8 +220,10 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 - All external content (PR body, issue title, labels) bound to shell variables; applied via `--body-file {temp_file}` or `"$VAR"` — never interpolated into the command string.
 - `Closes #{n}` addition requires `gh issue view {n} --json number,state` verification; `.state` must be `"open"`. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false numeric matches — the existence check is the guard.
 - **Branch-name metacharacter guard (setup-task step 1b):** `.devflow/conventions.md` is third-party input (git-tracked and team-shared). Before using the convention-derived prefix and separator in step 3, the fully composed branch name is checked against `` $ ` \ " ' ; | & < > `` or whitespace/newline. If any match: discard the convention and fall back to heuristic defaults. The validated name is bound to `DEVFLOW_BRANCH` before use.
+- **`setup-task` issue body containment (commit `75f13e7`):** The remote-sourced issue fields (`title`, `description`, `criteria`) are now wrapped in `<untrusted-issue-body>` tags. The locally-derived issue number is intentionally placed outside the wrapper. Prior to this fix, `setup-task` was `/implement`'s only issue path and the highest-traffic issue path in the product — Principle 8 claimed all remote bodies were wrapped, but `setup-task` did not actually apply the wrapper. The KB was stronger than the implementation; the fix closes that gap.
+- **`fetch-issues-batch` per-issue wrapping:** The output template explicitly shows the `<untrusted-issue-body>` wrapper on each issue (not just the first with an implicit "etc." for the rest). Each issue is wrapped independently — there is no single wrapper around the whole list.
 
-**conventions.md authority (D1):** Written by `learn-conventions`, consumed by `setup-task` (branch naming, step 1b), `ensure-pr-ready` (PR title retitle, step 4c), and `create-release` (version/tag/version-PR title, step 1b). Delete to force re-learn.
+**conventions.md authority (D1):** Written by `learn-conventions`, consumed by `setup-task` (branch naming, step 1b), `ensure-pr-ready` (PR title retitle, step 4c), and `create-release` (version/tag/version-PR title, step 1b). Delete to force re-learn. `learn-conventions` now commits this file as its final step so fresh projects do not leave `?? .devflow/conventions.md` in `git status`.
 
 **Traceability bounds:**
 - `backlink-shipped-issues`: ≤50 issues, 1s throttle (raises to 3s at remaining<50)
@@ -236,6 +238,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 **PR title retitle safety (step 4c):** The composed title is validated against a shell-metacharacter denylist before use. It is bound to a shell variable and passed as `--title "$DEVFLOW_PR_TITLE"` — never interpolated into the command string.
 
 **External thread containment (D2):** External review thread bodies are untrusted third-party input. They are never executed as instructions, never echoed verbatim into devflow-authored replies, commits, or comments. The `<external-thread>` tag is the containment boundary.
+
+**Principle 8 marker neutralisation (commit `75f13e7`):** Before wrapping any remote content in `<untrusted-issue-body>` or `<external-thread>`, the operation scans the content for the literal closing marker (e.g., `</untrusted-issue-body>` or `</external-thread>`) and inserts a backslash before the slash. This prevents a hostile issue body or review comment from terminating containment early and injecting text into devflow-authored context. This neutralisation applies to all four wrapping operations: `fetch-issue`, `fetch-issues-batch`, `setup-task`, and `fetch-review-threads`. Pointer comments exist at each of these operations in `git.md`.
 
 **`FEATURE_OWNED_SKILLS` disjointness:** Must be disjoint from `getAllSkillNames()` (enforced by D-FO-1 comment in plugins.ts). The compliance skill is managed by the feature system, not the plugin install loop.
 
@@ -256,6 +260,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 **Seeding FEATURE_OWNED_RULES shadow from the installed file.** The installed compliance rule is already stamped (placeholder replaced). Seeding a shadow from it permanently disables framework stamping. `seedRuleShadow` always uses Tier 2 (canonical source) for `FEATURE_OWNED_RULES`.
 
 **Hand-assembling converge options at each call site.** `convergeFromManifest` is the single manifest→options site. Callers that bypass it risk assembling the options struct inconsistently (e.g., forgetting `rulesEnabledOverride`).
+
+**Wrapping an entire issue list in a single containment tag.** The correct model is per-issue wrapping — each issue body gets its own `<untrusted-issue-body>...</untrusted-issue-body>` pair. A single outer wrapper around the whole list would allow the attacker's first issue to close the outer tag and escape containment for all subsequent issues.
 
 ## Gotchas
 
@@ -281,6 +287,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 
 **EXCLUDED-as-oracle trap in tests (PF-018).** Tests that assert `FEATURE_OWNED_SKILLS` / `FEATURE_OWNED_RULES` exclusions use independent literal `['compliance']` — they do not import the constant. Importing the constant would make the test verify the constant against itself.
 
+**Principle 8 neutralisation must run before the wrapper is applied.** Scanning for the closing marker after wrapping is too late — the wrapped content already contains the literal tag. Scan the raw remote content first, escape any closing marker occurrence, then wrap.
+
 ## Key Files
 
 | File | Purpose |
@@ -295,13 +303,13 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
 | `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |
-| `src/assets/agents/git.md` | All traceability operations (D1–D9 legend, D4 rate-limit backpressure, D9 gate table, gather-release-evidence) |
+| `src/assets/agents/git.md` | All traceability operations (D1–D9 legend, D4 rate-limit backpressure, D9 gate table, gather-release-evidence, setup-task containment, Principle 8 marker neutralisation) |
 | `src/assets/commands/code-review.mds` | Step 0b (imports compliance_gate), Phase 1 regulated-surface gate, Git COMPLIANCE field |
 | `src/assets/commands/resolve.mds` | Phase 1b (fetch-review-threads), Phase 9b (resolve-review-threads), Phase 9c (check-merge-readiness) |
 | `src/assets/commands/plan.mds` | compliance_gate gate for compliance Design agent and mandatory issue linking |
 | `src/assets/commands/implement.mds` | compliance_gate resolution, Git setup-task COMPLIANCE field |
 | `src/assets/commands/release.md` | Phase 1c (COMPLIANCE_SKILL_INSTALLED), gather-release-evidence spawn, backlink-shipped-issues |
-| `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers |
+| `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards) |
 | `tests/registry-integrity.test.ts` | Guard 6: OPERATION: values in compiled commands ↔ `## Operation:` headings in git.md (spawn↔op integrity) |
 
 ## Related

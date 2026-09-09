@@ -5,63 +5,41 @@
  * Protocol: RED → GREEN → REFACTOR.
  *
  * Coverage:
- *  - All 16 real shipped agent files (verbatim round-trips)
+ *  - All registered agents resolved via resolveAllAgents() / getAllAgentNames() (verbatim
+ *    round-trips); enumeration is completeness-asserted so no agent is silently missing.
  *  - Synthetic edge cases: CRLF, missing frontmatter, unterminated frontmatter,
  *    model: in body, duplicate model lines, effort add/replace/remove
  */
 
 import { describe, it, expect } from 'vitest';
-import { promises as fs } from 'fs';
-import * as path from 'path';
 import {
   rewriteAgentFrontmatter,
   readFrontmatterModel,
 } from '../src/core/agent-frontmatter.js';
+import { resolveAgentSource, resolveAllAgents } from './helpers.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
-const AGENTS_DIR = path.resolve(import.meta.dirname, '../src/assets/agents');
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function readAgent(name: string): Promise<string> {
-  return fs.readFile(path.join(AGENTS_DIR, name), 'utf-8');
-}
+const AGENT_NAMES = getAllAgentNames();
 
 // ---------------------------------------------------------------------------
 // Real agent files — verbatim round-trips
 // ---------------------------------------------------------------------------
 
-describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
-  const AGENTS = [
-    'code.md',
-    'design.md',
-    'diagnose.md',
-    'evaluate.md',
-    'git.md',
-    'knowledge.md',
-    'learning.md',
-    'research.md',
-    'review.md',
-    'scrutinize.md',
-    'simplify.md',
-    'skim.md',
-    'synthesize.md',
-    'test.md',
-    'triage.md',
-    'validate.md',
-  ];
+describe(`rewriteAgentFrontmatter — all ${AGENT_NAMES.length} real agent files`, () => {
+  it('corpus covers all registered agents (completeness — avoids GAP-07)', () => {
+    expect([...resolveAllAgents().keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
+  });
 
-  for (const agentFile of AGENTS) {
-    describe(`${agentFile}`, () => {
-      it('sets a new model — only the model line differs in the frontmatter', async () => {
-        const original = await readAgent(agentFile);
+  for (const name of AGENT_NAMES) {
+    describe(`${name}.md`, () => {
+      it('sets a new model — only the model line differs in the frontmatter', () => {
+        const original = resolveAgentSource(name).content;
         const originalModel = readFrontmatterModel(original);
-        expect(originalModel.ok, `${agentFile} should have a readable model`).toBe(true);
+        expect(originalModel.ok, `${name}.md should have a readable model`).toBe(true);
         if (!originalModel.ok) return;
 
         const result = rewriteAgentFrontmatter(original, { model: 'haiku', effort: null });
-        expect(result.ok, `${agentFile} rewrite should succeed`).toBe(true);
+        expect(result.ok, `${name}.md rewrite should succeed`).toBe(true);
         if (!result.ok) return;
 
         // Body (everything after the closing ---) must be byte-identical
@@ -81,8 +59,8 @@ describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
         }
       });
 
-      it('re-applying same model is idempotent (changed: false)', async () => {
-        const original = await readAgent(agentFile);
+      it('re-applying same model is idempotent (changed: false)', () => {
+        const original = resolveAgentSource(name).content;
         const originalModel = readFrontmatterModel(original);
         if (!originalModel.ok) return;
 
@@ -95,8 +73,8 @@ describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
         expect(firstPass.value.content).toBe(original);
       });
 
-      it('reverts to original model — content is byte-identical to original', async () => {
-        const original = await readAgent(agentFile);
+      it('reverts to original model — content is byte-identical to original', () => {
+        const original = resolveAgentSource(name).content;
         const originalModel = readFrontmatterModel(original);
         if (!originalModel.ok) return;
 
@@ -115,8 +93,8 @@ describe('rewriteAgentFrontmatter — all 16 real agent files', () => {
         expect(reverted.value.content).toBe(original);
       });
 
-      it('does not touch other frontmatter lines (skills, tools, description, etc.)', async () => {
-        const original = await readAgent(agentFile);
+      it('does not touch other frontmatter lines (skills, tools, description, etc.)', () => {
+        const original = resolveAgentSource(name).content;
         const result = rewriteAgentFrontmatter(original, { model: 'opus', effort: null });
         if (!result.ok) return;
 
