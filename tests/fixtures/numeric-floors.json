@@ -30,9 +30,17 @@
       "id": "slow-test-timeout-ms",
       "floor": 60000,
       "pattern": "60_000",
-      "occurrences": 21,
+      "occurrences": 3,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Minimum timeout in ms for slow shell-exec tests that call npm run build:mds"
+      "description": "Minimum timeout in ms for the slow shell-exec tests that spawn scripts/build-mds.ts. The floor value is unchanged; the site count dropped from 21 to 3 when the twenty beforeAll hooks that rebuilt the real dist/ were replaced by one isolated buildCommittedTree() build (whose own timeout is pinned by the mds-build-spawn-timeout-ms entry below). The 3 remaining sites are this file's negative-path spawns: two dest-safety refusals and the ignored-dir walk."
+    },
+    {
+      "id": "mds-build-spawn-timeout-ms",
+      "floor": 60000,
+      "pattern": "60_000",
+      "occurrences": 1,
+      "sourceFile": "tests/helpers.ts",
+      "description": "Minimum timeout in ms for runMdsBuild() — the one spawn site every isolated MDS build now routes through, including buildCommittedTree(). Same floor as slow-test-timeout-ms, in the file the sites moved to."
     },
     {
       "id": "subagent-literal-count",

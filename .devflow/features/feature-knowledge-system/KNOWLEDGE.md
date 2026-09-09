@@ -257,18 +257,21 @@ not the intended future). No shipped host declares `output-name:`; its exerciser
 build's own fixtures, which is deliberate — they are the end-to-end proof that
 `validateOutputName` is wired into the write path at all.
 
-**No test in `tests/build-mds-generator-hosts.test.ts` writes the real `dist/`**: every
-build that file spawns is scoped to a temp `DEVFLOW_MDS_ROOT`, and its scenario-12 self-scan
-(`collectSpawnScoping`, with a known-bad probe) is the mechanical proof — a spawn added
-without `DEVFLOW_MDS_ROOT` fails the file. The two assertions that need the WHOLE committed
-corpus (AC-1.8's printed host/partial census, and the dist/-is-in-sync check) get it from
+**No test writes the real `dist/`**: every build spawned by
+`tests/build-mds-generator-hosts.test.ts` or `tests/build-mds.test.ts` is scoped to a temp
+`DEVFLOW_MDS_ROOT`, and each file's closing self-scan (`collectSpawnScoping` from
+`tests/helpers.ts`, with a known-bad probe and a non-vacuity floor) is the mechanical proof —
+a spawn added without `DEVFLOW_MDS_ROOT` fails the file. Assertions that need the WHOLE
+committed corpus (AC-1.8's printed host/partial census, the dist/-is-in-sync check, and
+every compiled-command content guard in `build-mds.test.ts`) get it from
 `buildCommittedTree()`: `src/assets/{commands,agents}` are `fs.cp`-copied into a temp root
-and built there, memoised so both share ONE spawn. Earlier these ran against the real repo
-root; PID-scoping the staging file (`<dest>.<pid>.tmp`) closed the writer/writer clash, but
-the writer/reader clash outlived it — a real-root build silently REPAIRS a stale `dist/`
-while parallel workers read it, so the staleness surfaces as a flake in whichever reader
-lost the race rather than as itself (PF-055). `tests/build-mds.test.ts` still spawns
-real-root builds (`:477`, and a `beforeAll` at `:515`); it is the remaining writer.
+and built there, memoised per test file so all callers share ONE spawn. Earlier these ran
+against the real repo root; PID-scoping the staging file (`<dest>.<pid>.tmp`) closed the
+writer/writer clash, but the writer/reader clash outlived it — a real-root build silently
+REPAIRS a stale `dist/` while parallel workers read it, so the staleness surfaces as a flake
+in whichever reader lost the race rather than as itself (PF-055). `cwd:` is not a scope: the
+root falls back to the script's own location, so `cwd: <tmp>` without the env var walks and
+rewrites the real repo while the test asserts about a tree the build never opened.
 
 **What the dist/-staleness check does and does not prove**: `dist/` is gitignored
 (`git ls-files dist` → 0), so the check compares a fresh build of the committed `src/`
