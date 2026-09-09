@@ -1038,6 +1038,124 @@ describe('the whole-repo walk is depth-bounded', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 13. orphans in dist/agents/ are pruned
+// ---------------------------------------------------------------------------
+//
+// dist/agents/ is gitignored and outranks src/assets/agents/ in both resolvers,
+// so a file left there — a renamed host's old output, a hand-dropped one —
+// silently supersedes the audited source on every `devflow init`. The build owns
+// that directory: after a clean plan, anything in it no generator host emits is
+// removed. Scoped to dist/agents/ only; dist/commands/ additionally receives
+// hand-authored copies (release.md) that no host claims.
+
+describe('orphans in dist/agents/ are pruned', () => {
+  /**
+   * Named collector: the repo-relative paths the build reported pruning.
+   * Shared by the assertion and every negative arm below.
+   */
+  function prunedPaths(combined: string): string[] {
+    const found: string[] = [];
+    for (const line of combined.split('\n')) {
+      const match = /^\s*pruned:\s+(\S+)/.exec(line);
+      if (match) found.push(match[1]);
+    }
+    return found;
+  }
+
+  /** Write a file into `<fakeRoot>/dist/agents/`, creating the directory. */
+  async function plantInDistAgents(fakeRoot: string, name: string, body: string): Promise<string> {
+    const dir = path.join(fakeRoot, 'dist', 'agents');
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, name);
+    await fs.writeFile(file, body, 'utf-8');
+    return file;
+  }
+
+  it('deletes an unclaimed dist/agents/*.md and names it in the output', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeGeneratorHost(fakeRoot, 'git');
+      const stale = await plantInDistAgents(fakeRoot, 'stale.md', '---\nname: Stale\n---\n\nold\n');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      expect(await readIfPresent(stale), 'an unclaimed artifact must not survive the build').toBeNull();
+      expect(prunedPaths(run.combined), 'the pruned path must be reported').toContain('dist/agents/stale.md');
+      expect(run.combined, 'the reason must be stated').toContain('(no generator host)');
+    });
+  });
+
+  it('known-bad probe: a claimed destination is never pruned', async () => {
+    // Non-vacuity for the test above: the same run that deletes the orphan must
+    // leave the real artifact alone, and a rebuild over an existing artifact must
+    // prune nothing at all.
+    await withFakeRoot(async fakeRoot => {
+      await writeGeneratorHost(fakeRoot, 'git');
+      await plantInDistAgents(fakeRoot, 'stale.md', 'old\n');
+
+      const first = runBuild(fakeRoot);
+      expect(first.status, first.combined).toBe(0);
+      const artifact = path.join(fakeRoot, 'dist', 'agents', 'git.md');
+      expect(await readIfPresent(artifact), 'the planned artifact must survive its own prune').not.toBeNull();
+      expect(prunedPaths(first.combined)).toEqual(['dist/agents/stale.md']);
+
+      const second = runBuild(fakeRoot);
+      expect(second.status, second.combined).toBe(0);
+      expect(await readIfPresent(artifact)).not.toBeNull();
+      expect(prunedPaths(second.combined), 'a rebuild must prune nothing').toEqual([]);
+    });
+  });
+
+  it('prunes nothing when the build refuses', async () => {
+    // The aggregation path exits 1 with dist/ as the refusal found it. Pruning
+    // there would delete a working artifact on the strength of a plan that was
+    // never carried out.
+    await withFakeRoot(async fakeRoot => {
+      await writeGeneratorHost(fakeRoot, 'git');
+      await writeCommandHost(fakeRoot, '_neg-wrong-dir', 'description: neg\noutput-dir: dist/wrong-dir\n');
+      const stale = await plantInDistAgents(fakeRoot, 'stale.md', 'old\n');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(await readIfPresent(stale), 'a refused build must leave dist/agents/ as it found it').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([]);
+    });
+  });
+
+  it('leaves non-.md entries alone', async () => {
+    // A concurrent build's `<dest>.<pid>.tmp` staging file lives here; deleting
+    // it would fail that build's rename.
+    await withFakeRoot(async fakeRoot => {
+      await writeGeneratorHost(fakeRoot, 'git');
+      const staging = await plantInDistAgents(fakeRoot, 'git.md.99999.tmp', 'staged\n');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(await readIfPresent(staging), 'only .md artifacts are the build\'s to remove').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([]);
+    });
+  });
+
+  it('does not prune dist/commands/', async () => {
+    // Deliberate scope: dist/commands/ holds release.md, copied verbatim from a
+    // hand-authored source that is not a host, so "unclaimed" does not mean
+    // "orphan" there.
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+      const dir = path.join(fakeRoot, 'dist', 'commands');
+      await fs.mkdir(dir, { recursive: true });
+      const unclaimed = path.join(dir, 'hand-authored.md');
+      await fs.writeFile(unclaimed, 'copied verbatim\n', 'utf-8');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(await readIfPresent(unclaimed), 'dist/commands/ is out of the prune\'s scope').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 12. this file never spawns a build against the real repo root
 // ---------------------------------------------------------------------------
 //

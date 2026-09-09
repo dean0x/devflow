@@ -125,9 +125,19 @@ interface AllowedOutputDir {
  * build destination becomes legal — and `satisfies` forces that entry to declare
  * a HostVariant, so no destination can arrive without saying how it is treated.
  */
+/**
+ * Repo-relative destination for `agents` hosts.
+ *
+ * Exported because the build's orphan prune must name this directory even when
+ * no generator host is planned — which is exactly the case where every file in
+ * it is an orphan, so the directory cannot be derived from the plan. Reading it
+ * from here keeps the table below the only place a destination is spelled.
+ */
+export const AGENTS_OUTPUT_DIR = 'dist/agents';
+
 const ALLOWED_OUTPUT_DIRS = [
   { dir: 'dist/commands', variant: 'commands' },
-  { dir: 'dist/agents', variant: 'agents' },
+  { dir: AGENTS_OUTPUT_DIR, variant: 'agents' },
 ] as const satisfies readonly AllowedOutputDir[];
 
 /** The allowlisted directory names, in declaration order, for error rendering. */

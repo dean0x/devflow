@@ -64,8 +64,13 @@
  *
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
- * A deleted source whose stale compiled output was previously gitignored will be
- * caught by the build.test.ts parity check.
+ *
+ * Prune: after a clean build, every `.md` in dist/agents/ that no host emitted is
+ * deleted (pruneOrphanAgents). That directory is gitignored and outranks
+ * src/assets/agents/ in both the installer's resolve and loadShippedDefaults's
+ * merge, so a file left there is installed in preference to the audited source on
+ * every `devflow init`. The parity check in build.test.ts catches the same orphan
+ * in CI, a commit later; this removes it on the machine that ran the build.
  *
  * Usage: npm run build:mds
  */
@@ -77,6 +82,7 @@ import { init, compileFile, isMdsError } from "@mdscript/mds";
 import {
   validateOutputName,
   resolveOutputDir,
+  AGENTS_OUTPUT_DIR,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
@@ -534,6 +540,51 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
   };
 }
 
+/**
+ * Delete every `.md` in dist/agents/ that no host in this build emits.
+ *
+ * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
+ * installer's resolve and loadShippedDefaults's merge, so a file left behind
+ * there — a renamed host's old output, a hand-dropped one — is installed in
+ * preference to the audited source on every `devflow init`, with nothing in the
+ * install path to notice. The build owns the directory, so it also owns removing
+ * what it no longer produces; the CI parity guard catches the same orphan a
+ * commit later, which is too late for a machine that only ever runs the build.
+ *
+ * Scoped to dist/agents/ deliberately. dist/commands/ additionally receives
+ * hand-authored files copied verbatim (release.md, below), so "no host claims
+ * it" does not mean "orphan" there.
+ *
+ * Only `.md` is considered: a concurrent build's `<dest>.<pid>.tmp` staging file
+ * lives in this directory and deleting it would fail that build's rename.
+ *
+ * @param claimed - Absolute destination paths this build wrote.
+ * @returns Repo-relative paths removed.
+ */
+function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
+  const agentsAbs = path.resolve(ROOT, AGENTS_OUTPUT_DIR);
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(agentsAbs, { withFileTypes: true });
+  } catch (err) {
+    // Absent until a generator host exists — nothing to prune, not a failure.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw err;
+  }
+
+  const pruned: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const full = path.join(agentsAbs, entry.name);
+    if (claimed.has(full)) continue;
+    fs.rmSync(full, { force: true });
+    pruned.push(path.relative(ROOT, full));
+  }
+  return pruned;
+}
+
 async function main(): Promise<void> {
   console.log("Building MDS commands...\n");
 
@@ -638,6 +689,12 @@ async function main(): Promise<void> {
       `\n${errors.length} compile error(s) — build FAILED. Fix the mds::* errors above before shipping.`,
     );
     process.exit(1);
+  }
+
+  // Every planned host was written (a refusal would have exited above), so the
+  // claimed set is complete and anything else in dist/agents/ is stale.
+  for (const rel of pruneOrphanAgents(new Set(planned.map(p => p.plan.dest)))) {
+    console.log(`  pruned:   ${rel} (no generator host)`);
   }
 
   // Copy 1 hand-authored command file verbatim into dist/commands/
