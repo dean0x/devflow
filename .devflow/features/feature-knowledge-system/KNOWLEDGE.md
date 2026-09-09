@@ -1,7 +1,7 @@
 ---
 feature: feature-knowledge-system
 name: Feature Knowledge Base System
-description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or understanding the MDS knowledge module. Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-mds, _knowledge.mds, index.md, apply-feature-knowledge, feature-knowledge."
+description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or working on the MDS build pipeline and generator hosts (build-mds.ts, mds-variants.ts, git.mds). Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-mds, _knowledge.mds, index.md, apply-feature-knowledge, generator host, output-dir, dist/agents, mds-variants, validateOutputName, resolveOutputDir, stripGeneratorFrontmatter, mds-manifest."
 category: architecture
 directories:
   - src/cli/commands/knowledge
@@ -10,6 +10,11 @@ directories:
   - src/assets/agents/knowledge.md
   - src/assets/commands/_partials
   - scripts/build-mds.ts
+  - src/core/mds-variants.ts
+  - src/assets/agents/git.mds
+  - tests/fixtures/mds-manifest.ts
+  - tests/build-mds-generator-hosts.test.ts
+  - tests/guards/dist-agents.test.ts
 created: 2026-06-21
 updated: 2026-09-09
 ---
@@ -34,6 +39,13 @@ the root `.gitignore` carve-out (`.devflow/*` + level-by-level `!` re-includes) 
 those paths to the current branch itself (scoped pathspec, no push, no force, no script). A
 team opts back out by re-adding `.devflow/features/` to their own `.gitignore`.
 
+This knowledge base also covers the **MDS build pipeline** (`scripts/build-mds.ts` +
+`src/core/mds-variants.ts`) that compiles `.mds` sources into `dist/commands/` (13 command
+hosts) and `dist/agents/` (1 generator host, the Git agent). The build pipeline is grouped
+here because the knowledge partials (`_knowledge.mds`) are themselves MDS hosts, and the
+generator-host convention that lets an *agent* be compiled from `.mds` was introduced in
+the same tracker phase (#323/PR #334) as this KB's last refresh.
+
 ## System Context
 
 **Purpose**: Give agents pre-computed codebase context for their specific task area without
@@ -44,8 +56,8 @@ Decisions pipeline). Knowledge is NOT a Learning task — it is written in-comma
 memory is handled by the background-memory-update worker.
 
 **External dependencies**: MDS compiler (`@mdscript/mds`) at build time to compile the
-knowledge partials; `claude` agent at runtime (the Knowledge agent, model=sonnet) to write
-KNOWLEDGE.md.
+knowledge partials AND the Git agent generator host; `claude` agent at runtime (the
+Knowledge agent, model=sonnet) to write KNOWLEDGE.md.
 
 **Toggle**: `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
 Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/core/feature-config.ts`).
@@ -58,7 +70,10 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 | MDS partial module | `src/assets/commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
 | Host command sources (9) | `src/assets/commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
 | Host command sources (4 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
-| Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md` (or `{name-template}.md` when that optional key is declared); hard-fails on any error |
+| Build script | `scripts/build-mds.ts` | Frontmatter-driven: walks the whole repo (minus `IGNORE_DIRS`) for `.mds` files declaring a non-empty `output-dir:`, validates the destination + emitted filename via `src/core/mds-variants.ts`, and compiles each to `{output-dir}/{name}.md` (or `{name-template}.md`); hard-fails on any error |
+| Output validation module | `src/core/mds-variants.ts` | Pure, zero-I/O core module: `validateOutputName` (filename charset/traversal) and `resolveOutputDir` (two-entry allowlist + canonical-spelling + containment check); returns `Result`, never throws or exits — the shell (`build-mds.ts`) owns every `process.exit` (avoids PF-014, applies ADR-013) |
+| Generator host | `src/assets/agents/git.mds` | The Git agent's `.mds` source; declares `output-dir: dist/agents` in a first frontmatter block, carries the agent's real frontmatter (name/description/model/skills) in a second block; compiles to `dist/agents/git.md` |
+| MDS name manifest | `tests/fixtures/mds-manifest.ts` | `MDS_COMMAND_HOSTS` (13), `MDS_PARTIALS` (11), `MDS_GENERATOR_HOSTS` (`['git']`), `ALL_MDS_HOSTS` (14), `DIST_COMMAND_FILES` (14, incl. hand-authored `release.md`) — the single named-set source every count-literal test compares against, in both directions |
 | Author agent | `src/assets/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
@@ -99,15 +114,15 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 
 `npm run build:mds` (part of `npm run build` = `build:cli` + `build:mds`):
 
-1. Walks the repo from root, skipping `IGNORE_DIRS`: `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`, `tests`, `coverage` (`tests` and `coverage` are skipped because the build's own suite plants `.mds` fixtures that declare `output-dir:`)
-2. For each `.mds` file: reads frontmatter; if it declares a non-empty `output-dir:` key, treats it as a host
-3. Validates each `output-dir` against a two-entry allowlist — `dist/commands` and `dist/agents` (`resolveOutputDir`): a path outside the repo root throws `escapes the repo root`, anything else off the allowlist exits 1 with the `— typo?` message; the emitted filename is then validated separately (`validateOutputName`, `is not a valid output filename`) before it is joined onto the destination
-4. Compiles each host via `@mdscript/mds` `compileFile()`, strips `output-dir:` from a command host's block; for a generator host (`output-dir: dist/agents`) the whole leading steering block is stripped, promoting the agent's real frontmatter block into place
-5. Writes `{basename}.md` — or `{name-template}.md` when the host declares the optional `name-template:` key — to the declared `output-dir` via a temp file + rename (per-file clean; no dir wipe)
-6. Hard-fails on any compile error — no stale command ever ships
+1. Walks the repo from root, skipping `IGNORE_DIRS`: `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`, `tests`, `coverage` (`tests` and `coverage` are skipped because the build's own suite plants `.mds` fixtures that declare `output-dir:`; a `DEVFLOW_MDS_ROOT` env var lets negative-path tests redirect the whole walk to a throwaway temp root instead of the real repo)
+2. For each `.mds` file: reads the FIRST `---…---` frontmatter block with a scalar regex (`readFrontmatterKey`, not a YAML parse — the build must not gain a YAML dependency); if it declares a non-empty `output-dir:` key, treats it as a host, else a partial (skipped)
+3. Validates the declared `output-dir` via `resolveOutputDir(root, declared)` from `src/core/mds-variants.ts`: containment (`isContainedIn`) → canonical-spelling check (POSIX-normalized, no trailing slash — `dist/commands/`, `./dist/agents`, `dist/skills/../commands` all refused) → two-entry allowlist match (`dist/commands`, `dist/agents`). Errors: `escapes-root` (thrown, "escapes the repo root"), `non-canonical`/`not-allowlisted` (exit 1, "… is not the expected 'dist/commands' or 'dist/agents' — typo?")
+4. Validates the filename that will be emitted (source basename, or the optional `name-template:` key's value) via `validateOutputName` — charset `^[a-z0-9][a-z0-9._-]{0,63}$`, refuses `..`/`.` segments and path separators — before it is joined onto the destination ("… is not a valid output filename")
+5. Compiles each host via `@mdscript/mds` `compileFile()`, THEN strips frontmatter — for a **command host** (`output-dir: dist/commands`), `stripOutputDirKey` removes only the `output-dir:` line from the single real frontmatter block (every other key, including `|`, `[]`, em-dashes, survives byte-untouched — no YAML round-trip); for a **generator host** (`output-dir: dist/agents`), `stripGeneratorFrontmatter` removes the ENTIRE first frontmatter block, promoting the second block (the artifact's real frontmatter, which the compiler treated as ordinary body text since only byte-offset-0 is frontmatter) into place with its trailing blank line intact. Both strips run AFTER `compileFile` — the compiler emits a byte-0 frontmatter block verbatim (never interpolated), so block 1 survives compilation unchanged and is safe to slice off afterward.
+6. Writes `{basename}.md` — or `{name-template}.md` — to the declared `output-dir` via a temp file (`{dest}.tmp`) + `renameSync` (per-file atomic; `.tmp` is cleaned up on rename failure; concurrent readers, e.g. parallel vitest workers, never see a partial write)
+7. Hard-fails on any compile error — no stale command ever ships. Prints `N partial(s) skipped (no output-dir:)` and `N host(s) to compile:` — both lines are parsed by `tests/build-mds-generator-hosts.test.ts` §6 (AC-1.8); do not reword them.
 
-13 MDS-compiled **command** hosts (`ALL_HOSTS`, the test constant for that set): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). One further host lives outside `commands/` — the `git.mds` generator host in `src/assets/agents/`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md` — so the build reports 14 hosts to compile. `DIST_FILES` = 14 counts `dist/commands/` only: the 13 compiled command outputs plus `release.md`, which is hand-authored and not MDS-compiled (SG-13 permanent divergence; see `dynamic-workflow-engine` KB). Host and partial names are shared across the suite by `tests/fixtures/mds-manifest.ts`.
-Partials in `src/assets/commands/_partials/` have no `output-dir:` and are skipped automatically.
+13 MDS-compiled **command** hosts (`MDS_COMMAND_HOSTS` in `tests/fixtures/mds-manifest.ts`): 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`). One further host is a **generator host** outside `commands/` — `src/assets/agents/git.mds`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md` — so the build reports 14 hosts total (`ALL_MDS_HOSTS`, command hosts + generator hosts). `DIST_COMMAND_FILES` = 14 counts `dist/commands/` only: the 13 compiled command outputs plus `release.md`, which is hand-authored and copied verbatim (not MDS-compiled; SG-13 permanent divergence; see `dynamic-workflow-engine` KB). `ALL_MDS_HOSTS` (14, command+generator) and `DIST_COMMAND_FILES` (14, dist/commands/ only, incl. release.md) are different sets that happen to share a length — never conflate them. `MDS_PARTIALS` (11, `src/assets/commands/_partials/`) have no `output-dir:` and are skipped automatically; the `_` prefix convention is also enforced structurally — `validateOutputName` would refuse a filename starting with `_` if a partial were ever mistakenly treated as a host, since the regex requires `[a-z0-9]` as the first character.
 
 ## Integration Patterns
 
@@ -128,12 +143,30 @@ knowledge creation block instead of using `knowledge_writeback()`, because the p
 writeback list omits research. This is intentional — the bespoke block is the equivalent
 of `knowledge_writeback` for the research workflow.
 
+**dist/agents as a shipping artifact directory**: Compiling the Git agent from a generator
+host makes `dist/agents/` a second build output directory alongside `dist/commands/`, with
+the same three properties `tests/guards/dist-agents.test.ts` enforces: (a) source↔output
+parity in both directions, fail-loud (never a silent `catch { return }` skip on a missing
+build — PF-018), (b) no leaked `\{`/`\}` escape sequences in compiled output (PF-024), (c)
+no agent with both a hand-authored `.md` and a generator `.mds` source (the resolver would
+silently pick a winner). Downstream consumers of `dist/agents`: `compiledAgentsDir()` in
+`src/core/assets.ts`; the installer's agent-source loop (dist-first, `agentsDir()` as
+fallback — first hit wins, and a hit on neither throws naming both dirs plus an
+`npm run build:mds` hint); `loadShippedDefaults()` (merges dist over src for defaults;
+ENOENT tolerated on the dist side only); the test resolver `resolveAgentSource` in
+`tests/helpers.ts` (returns `origin: 'dist'` for the Git agent, `origin: 'src'` for every
+other agent, and throws with a build hint when neither source resolves). `npm run
+build:cli` alone no longer produces installable agents — `npm run build:mds` (or the
+combined `npm run build`) is required.
+
 ## Constraints
 
 - **500-line cap**: KNOWLEDGE.md exceeding 500 lines must be split into focused sub-knowledge bases.
 - **index.md line format**: `- **{slug}** — {areas} — {Use-when description}` — frontmatter is authoritative if the line format changes.
 - **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `.devflow/config.json` is the sole toggle.
 - **No concurrent lock**: `index.md` write-through may clobber concurrent writes, but the frontmatter fallback self-heals. `index.md` is git-tracked (shared), so it can also merge-conflict when two branches add different slugs — resolve by keeping both lines.
+- **Output-dir allowlist is closed**: `ALLOWED_OUTPUT_DIRS` in `mds-variants.ts` holds exactly `dist/commands` and `dist/agents`. Adding a third build destination (e.g. `dist/skills`) means adding it to that one array — there is no other extension point.
+- **Phase-1 scope fence (AC-1.2)**: The generator-host mechanism intentionally has no variant expansion, `@if` conditionals, or per-provider templated filenames (`{provider}.md`). `tests/guards/dist-agents.test.ts` asserts their absence across the `.mds` host(s), `mds-variants.ts`, and `build-mds.ts` — a later phase that introduces them must update that guard deliberately, not accrete past it.
 
 ## Anti-Patterns
 
@@ -155,6 +188,19 @@ see `index.json`, it is a deprecated artifact — run `devflow init` to rename i
 used by the system (staleness detection is removed). Existing KBs may still have it in
 their frontmatter — it is silently ignored. New KBs should omit it.
 
+**De-indenting an MDS fence to "simplify" it**: Column-0 ` ``` ` fences are the only raw
+(non-interpolated) text in an `.mds` source. Indenting a fence — or de-indenting one that
+was deliberately indented — flips its interpolation treatment and is NOT byte-preserving.
+`git.mds` carries 10 indented fences (notably the `post-review-summary` FULL/STUB fences
+holding the D7 marker `cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}`) whose braces are
+deliberately escaped so the golden byte-count survives compilation; escaping is the only
+valid treatment, never re-indentation.
+
+**Adding a new build destination without editing `mds-variants.ts`**: `resolveOutputDir`'s
+allowlist is the single gate on where the build may write. A host declaring an
+unlisted `output-dir:` (even a real, sensible-looking path) is refused with the `typo?`
+message — this is by design, not a bug to route around by hardcoding a path elsewhere.
+
 ## Gotchas
 
 **`knowledge_writeback()` is conditional, not unconditional**: The partial always checks
@@ -171,21 +217,55 @@ treat a missing `index.md` as a problem — write-through creates it lazily.
 (`.devflow/features/.disabled`) is gone via the clean break — no migration removes it
 because it was never deployed on this branch.
 
-**MDS brace-escaping**: In the `.mds` host files, every literal `{…}` in prose must be
-escaped as `\{…\}`. Fenced code blocks (` ```bash `) use raw braces. Indented fences are
-treated as prose — un-indent to avoid MDS interpolation errors.
+**MDS brace-escaping**: In the `.mds` host files, every literal `{…}` in prose (including
+inline code and prose inside indented fences) must be escaped as `\{…\}`; only column-0
+` ``` ` fences are raw. `~~~` fences, inline code, and prose are all interpolated —
+`\{x\}` compiles to the literal `{x}`, an unescaped `{x}` is treated as a param
+reference, and 2+ blank lines collapse to 1 (even inside fences). `git.mds` has 171
+escaped brace pairs outside its column-0 fences. `stripGeneratorFrontmatter` and
+`stripOutputDirKey` both run on the compiler's OUTPUT, after this interpolation has
+already happened — they never see or touch escape sequences.
+
+**Converting a hand-authored agent to a generator host is not a re-emit**: The conversion
+method that produced `git.mds` was `git mv` + a scripted fence-state-machine transform +
+`cmp` against the golden fixture, never a fresh re-write of the body — regenerating the
+body from scratch risks losing exact byte parity with `tests/fixtures/golden/git-agent.md`
+(66,180 bytes, `GIT_AGENT_BYTES` derived once via `stat`, never hand-typed — PF-057: goldens
+are compared, never regenerated by hand).
 
 **output-dir: is kept as the last frontmatter key in host .mds files (test convention, not a strip requirement)**:
-A `build-mds.test.ts` case asserts `output-dir:` is the last key in every host's frontmatter, so keep it
+A `build-mds.test.ts` case asserts `output-dir:` is the last key in every command host's frontmatter, so keep it
 last to satisfy the test. This is a style convention only — `stripOutputDirKey`'s block-scoped regex removes
 the `output-dir:` line regardless of its position, so key ordering does not affect byte-identity of the
-compiled output.
+compiled output. Generator hosts are exempt: their entire first block is a dedicated steering block
+(`---\noutput-dir: dist/agents\n---`), not a shared block with other real keys.
+
+**A generator host's first block may not smuggle extra keys through to the artifact**:
+Whatever the first frontmatter block of a generator host carries (`output-dir:`, and
+optionally `name-template:`) is stripped WHOLE. There is no key-level filtering for
+generator hosts the way `stripOutputDirKey` does for command hosts — adding an unrelated
+key to a generator host's first block is harmless (it never reaches the compiled artifact)
+but also pointless; put real agent metadata in the second block only.
+
+**`runRealBuild()` in `tests/build-mds-generator-hosts.test.ts` writes into the real
+`dist/`**: Unlike most of that file's tests (which use an isolated `DEVFLOW_MDS_ROOT`
+temp tree), the two real-build assertions deliberately run the actual build against the
+real repo root, because AC-1.8's whole-repo host census can only be produced there. This
+is safe because every output is rewritten byte-identically via temp+rename, but two test
+files invoking a real build concurrently under full-suite load can race (observed once as
+an ENOENT on a `.tmp` rename; both pass in isolation) — not a correctness bug, a known
+test-harness hazard.
 
 ## Key Files
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
-- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (minus `IGNORE_DIRS`, which skips `tests` and `coverage` so the build's own `.mds` fixtures are never compiled into the real tree), yielding the 13 command hosts (`output-dir: dist/commands`) plus the `git.mds` generator host (`output-dir: dist/agents`); validates the destination dirs; hard-fails on any compile error
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (`DEVFLOW_MDS_ROOT` overrides the root for isolated tests; minus `IGNORE_DIRS`, which skips `tests` and `coverage` so the build's own `.mds` fixtures are never compiled into the real tree); owns every `process.exit`; renders errors from `mds-variants.ts` Result values
+- `src/core/mds-variants.ts` — pure, zero-I/O core module: `validateOutputName` (filename charset/traversal guard) and `resolveOutputDir` (two-entry allowlist `dist/commands`/`dist/agents`, containment + canonical-spelling checks); returns `Result<T, E>`, never throws for expected refusals and never calls `process.exit`
+- `src/assets/agents/git.mds` — the Git agent's generator-host source: first block `---\noutput-dir: dist/agents\n---`, second block the agent's real frontmatter; compiles to `dist/agents/git.md`; 171 escaped brace pairs, 10 indented fences
+- `tests/fixtures/mds-manifest.ts` — named-set manifest (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `ALL_MDS_HOSTS`, `DIST_COMMAND_FILES`) that every count-literal assertion across `build-mds.test.ts`, `build-mds-generator-hosts.test.ts`, and `packaging.test.ts` compares against in both directions; floors only ever rise
+- `tests/build-mds-generator-hosts.test.ts` — generator-host convention tests: whole-block strip, byte-unchanged command outputs, dest-allowlist negatives, filename-validation negatives, `IGNORE_DIRS` coverage, printed host/partial counts vs. the manifest (AC-1.8)
+- `tests/guards/dist-agents.test.ts` — `dist/agents/` shipping-artifact guards: source↔output parity (fail-loud both directions), no leaked `\{`/`\}` escapes, no `.md`/`.mds` shadowing, resolver-origin assertions, and the AC-1.2 Phase-1 scope fence (no `@if`/`variants:`/provider templating)
 - `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
@@ -197,3 +277,14 @@ compiled output.
 - Working Memory (`.devflow/memory/WORKING-MEMORY.md`, `background-memory-update` worker) — sibling persistence layer; independent toggle.
 - Decisions pipeline (`.devflow/learning/`, `decisions-ledger.jsonl`) — sibling persistence layer; independent toggle.
 - ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `src/assets/scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.
+- ADR-003 (end-state prose, clause iii — no artifact without a reachable consumer) — applies to the AC-1.2 Phase-1 scope fence in `tests/guards/dist-agents.test.ts`: forbidden Phase-2 constructs are pinned absent until a deliberate later change introduces them.
+- ADR-013 (pure core modules, I/O at edges) — `src/core/mds-variants.ts` is zero-I/O; `scripts/build-mds.ts` is the shell that owns every filesystem call and `process.exit`.
+- ADR-024 (named collectors + known-bad probes) — both `tests/build-mds-generator-hosts.test.ts` and `tests/guards/dist-agents.test.ts` follow this pattern (e.g. `collectAgentParity`, `collectEscapedBraceLeaks`, `collectForbiddenConstructs`, each with a paired known-bad probe).
+- PF-014 (no `process.exit` in core) — `mds-variants.ts` returns `Result`; only `build-mds.ts` exits.
+- PF-018 (non-vacuous guards) — `dist-agents.test.ts` deliberately avoids Guard 4's `catch { return }` skip-on-missing-build shape.
+- PF-024 (escaped-brace leakage into dist) — guarded by `collectEscapedBraceLeaks` in `dist-agents.test.ts`.
+- PF-035 (skim hook — use Read) — applies to this session's tool hygiene when reading `.mds`/`.ts` sources for verification.
+- PF-043 (fixtures from real shapes) — `realAgentShape()` in `build-mds-generator-hosts.test.ts` derives its fixture from the live Git agent rather than inventing one.
+- PF-057 (goldens compared, never regenerated) — `tests/fixtures/golden/git-agent.md` (`GIT_AGENT_BYTES`, derived once via `stat`) is the oracle for the generator-host conversion.
+- `dynamic-workflow-engine` KB — covers `DIST_COMMAND_FILES` / `ALL_HOSTS` split and the SG-13 `release.md` hand-authored divergence in more depth.
+- `test-harness` KB — covers `resolveAgentSource`, `requireDistFile(s)`, and the guard/goldens test-directory conventions these tests build on.
