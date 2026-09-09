@@ -102,7 +102,7 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 1. Walks the repo from root, skipping `IGNORE_DIRS`: `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`, `tests`, `coverage` (`tests` and `coverage` are skipped because the build's own suite plants `.mds` fixtures that declare `output-dir:`)
 2. For each `.mds` file: reads frontmatter; if it declares a non-empty `output-dir:` key, treats it as a host
 3. Validates each `output-dir` against a two-entry allowlist — `dist/commands` and `dist/agents` (`resolveOutputDir`): a path outside the repo root throws `escapes the repo root`, anything else off the allowlist exits 1 with the `— typo?` message; the emitted filename is then validated separately (`validateOutputName`, `is not a valid output filename`) before it is joined onto the destination
-4. Compiles each host via `@mdscript/mds` `compileFile()`, strips `output-dir:` from the output
+4. Compiles each host via `@mdscript/mds` `compileFile()`, strips `output-dir:` from a command host's block; for a generator host (`output-dir: dist/agents`) the whole leading steering block is stripped, promoting the agent's real frontmatter block into place
 5. Writes `{basename}.md` — or `{name-template}.md` when the host declares the optional `name-template:` key — to the declared `output-dir` via a temp file + rename (per-file clean; no dir wipe)
 6. Hard-fails on any compile error — no stale command ever ships
 
@@ -185,7 +185,7 @@ compiled output.
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
-- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole `src/assets/` walk (minus `IGNORE_DIRS`, which now also skips `tests` and `coverage` so the build's own `.mds` fixtures are never compiled into the real tree), yielding the 13 command hosts (`output-dir: dist/commands`) plus the `git.mds` generator host (`output-dir: dist/agents`); validates the destination dirs; hard-fails on any compile error
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (minus `IGNORE_DIRS`, which skips `tests` and `coverage` so the build's own `.mds` fixtures are never compiled into the real tree), yielding the 13 command hosts (`output-dir: dist/commands`) plus the `git.mds` generator host (`output-dir: dist/agents`); validates the destination dirs; hard-fails on any compile error
 - `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
