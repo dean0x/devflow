@@ -849,6 +849,9 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining issues as `THROTTLED (\{n\} not processed)`. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
 
 **Process:**
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+
 0. Validate inputs before any remote call — `VERSION` must match semver `X.Y.Z` (optionally
    `v`-prefixed) and every entry of `SHIPPED_ISSUES` must be digits only. Drop any entry
    that does not; if `VERSION` fails, emit `TRACEABILITY: DEGRADED (malformed version)` and
@@ -859,19 +862,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    `1.2.3` → `1.2.3`). All marker composition and comment text below use `v\{BARE_VERSION\}` —
    this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed.
 
-**Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-
 For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED (\{n\} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
-1. Fetch existing comments authored by the viewer: `gh issue view \{number\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-2. Check if `<!-- devflow:shipped v\{BARE_VERSION\} -->` already present in viewer-authored comments. If yes: skip.
-3. Write the two-line body to `$DEVFLOW_BODY_RAW` — a real newline, not a `\n` escape (bash does not
-   expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
-   ```
-   <!-- devflow:shipped v\{BARE_VERSION\} -->
-   This was shipped in v\{BARE_VERSION\}.
-   ```
-   Apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`.
-4. Wait 1s between issues.
 
 **Output:**
 ```markdown

@@ -222,6 +222,23 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
 
 **Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle.
+
+### Process
+
+**Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+
+Then, per issue, within the operation's ≤50 bound:
+
+1. Fetch existing comments authored by the viewer: `gh issue view \{number\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+2. Check if `<!-- devflow:shipped v\{BARE_VERSION\} -->` already present in viewer-authored comments. If yes: skip.
+3. Write the two-line body to `$DEVFLOW_BODY_RAW` — a real newline, not a `\n` escape (bash does not
+   expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
+   ```
+   <!-- devflow:shipped v\{BARE_VERSION\} -->
+   This was shipped in v\{BARE_VERSION\}.
+   ```
+   Apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`.
+4. Wait 1s between issues.
 @end
 
 @define ensure_traceable_issue():
