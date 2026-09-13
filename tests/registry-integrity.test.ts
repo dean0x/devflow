@@ -321,7 +321,6 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
   it('spawned subagent_types are declared, and declared agents are spawned (fail-loud when dist absent)', async () => {
     const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
     // FAIL-LOUD: a guard that silently skips on a missing build artifact is not a guard.
-    // This was previously a silent `return` — now it fails visibly so the developer knows to build.
     expect(
       distExists,
       'dist/commands/ is absent — run `npm run build` first (Guard 5 cannot verify without compiled files)',
