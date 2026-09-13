@@ -536,10 +536,12 @@ Collect release evidence — commit list and shipped issue numbers since the las
 **Degradation (D4):** `gh` unauthenticated or remote unreachable → collect git-only signals (commit list from local history); emit `TRACEABILITY: DEGRADED (\{reason\})` for any GitHub signal that could not be fetched; continue — never abort the caller's workflow.
 
 **Process:**
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+
 1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
 2. Collect commit list: `git log \{last_tag\}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and \{n\} more commits` note to signal truncation.
 3. Extract issue numbers from commit messages in `COMMIT_LIST`: parse for `#[0-9]+` references from `refs #`, `closes #`, `fixes #` patterns (case-insensitive).
-4. If `gh` is authenticated and remote is reachable: for each commit in the range, fetch merged PRs that include that commit and collect their `closingIssuesReferences` via `gh api`; merge with the commit-message set. On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
 5. Deduplicate all collected issue numbers; retain only digit-only entries; take the first ≤50; if more exist, append a `…and \{n\} more issues` note.
 
 **Output:**
