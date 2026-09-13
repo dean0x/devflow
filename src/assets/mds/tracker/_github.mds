@@ -111,6 +111,17 @@ DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -o
 Load when the resolved tracker provider is `github` and the operation is `fetch-issues-batch`.
 
 **Mechanics held here:** the `**Process:**` body — the single bounded batch query and the reporting of references it could not resolve.
+
+### Process
+
+2. Fetch all issues in a **single** GraphQL query using per-issue aliases (dynamically constructed for the resolved list); resolve owner/repo from the git remote context:
+   ```
+   gh api graphql -f query='query \{ repository(owner:"OWNER", name:"REPO") \{
+     i1: issue(number:N1) \{ number title body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     i2: issue(number:N2) \{ number title body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     ...
+   \}\}'
+   ```
 @end
 
 @define manage_debt():

@@ -470,7 +470,13 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('fetch-issues-batch: issues are fetched in a single GraphQL query, not N REST calls [DR-07]', () => {
-    const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
+    // Mode 'union' [DR-18]: P2-S6 moved the batch query itself — the one genuinely
+    // GitHub-specific step of this op — into the generated fetch-issues-batch
+    // reference, so the pin follows the text (GAP-21). The literals are unchanged;
+    // only the corpus widened. The op's provider-neutral contract (the `#`-strip, the
+    // ≤50 bound, TRUNCATED and NOT_FOUND) stays in git.md and is still pinned in
+    // 'sole' mode by the assertions above and by arm (c) of the conventions collector.
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'fetch-issues-batch', 'union');
     expect(
       sec,
       'fetch-issues-batch: missing the single-GraphQL-query mechanic — a per-issue loop reintroduces ' +
