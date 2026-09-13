@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Implement Command
 
@@ -23,9 +24,11 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 `$ARGUMENTS` contains whatever follows `/implement`:
 - Plan document path: `.devflow/docs/design/42-jwt-auth.2026-04-07_1430.md` (path to an existing `.md` file)
-- GitHub issue: `#42`
+- Issue reference: `#42`
 - Task description: "implement JWT auth"
 - Empty: use conversation context
+
+{issue_ref_grammar()}
 
 > **Tip**: For best results, run `/plan` first to produce a design artifact, then pass it to `/implement`.
 
@@ -70,9 +73,9 @@ Return the branch setup summary."
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
-- `ISSUE_NUMBER`: GitHub issue number (if provided or created by the Git agent's issue-first step in setup-task)
-- `ISSUE_CONTENT`: Full issue body including description (if provided)
-- `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
+- `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
+
+{issue_capture_contract()}
 
 **Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
 1. Read the plan document from the path provided

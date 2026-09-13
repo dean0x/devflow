@@ -6,6 +6,7 @@ output-dir: dist/commands
 @import { authoring_preamble } from "./_partials/_preamble.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
+@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 {authoring_preamble()}
 
@@ -56,10 +57,14 @@ If present, note its contents as `PREFERENCE_PROFILE`. This will be used to auto
 
 Determine the ticket source (in priority order):
 - A directory of ticket `.md` files (from `/devflow:dynamic-tickets` output)
-- A list of GitHub issue numbers/URLs
+- A list of candidate issue references or issue URLs
 - Inline ticket descriptions passed as args
 
+{issue_ref_grammar()}
+
 Read or note the tickets. The agents will read them in full; you need the list and any key constraints.
+
+{issue_capture_contract()}
 
 ---
 

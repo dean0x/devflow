@@ -12,11 +12,11 @@
     },
     {
       "id": "partial-count",
-      "floor": 11,
-      "pattern": "toBeGreaterThanOrEqual(11)",
+      "floor": 12,
+      "pattern": "toBeGreaterThanOrEqual(12)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of _partials/*.mds partial files (MDS_PARTIALS). Re-spelled from toHaveLength(11) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts. Same floor, new spelling."
+      "description": "Number of _partials/*.mds partial files (MDS_PARTIALS). Re-spelled from toHaveLength(11) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts. Raised 11 -> 12 in P2-S9 when _partials/_tracker.mds landed; floors rise with the roster, never fall."
     },
     {
       "id": "dist-files-count",

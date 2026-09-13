@@ -9,6 +9,7 @@ output-dir: dist/commands
 @import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_pass, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
+@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 {authoring_preamble()}
 
@@ -70,9 +71,11 @@ When ambiguous, ask the user before authoring: "Is this a single ticket or a wav
 
 Check for (in priority order):
 - A plan document passed as input (path or inline)
-- A GitHub issue body (fetched via the Git agent using `OPERATION: fetch-issue`)
+- An issue body (fetched via the Git agent using `OPERATION: fetch-issue`)
 - The current working context (recent `/devflow:dynamic-plan` output)
 - An in-context task description
+
+{issue_capture_contract()}
 
 Extract or note:
 - Implementation plan (for Code agent prompt and Evaluate agent)
@@ -83,9 +86,11 @@ If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never re
 **5. Resolve tracking-issue number (optional)**
 
 Check, in priority order:
-- An explicit issue number or GitHub issue URL in the user's input (e.g., `#42`, `42`, or `https://github.com/…/issues/42`)
+- An explicit candidate issue reference or issue URL in the user's input (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
 - The tracking-issue reference in the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets` at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`)
 - Otherwise: none
+
+{issue_ref_grammar()}
 
 If a number is found, record it as the command-level `ISSUE_NUMBER` and pass it as `issueNumber: <number>` when invoking the workflow (the Code agent threads it through as `ISSUE_NUMBER`). If none is found, pass nothing — `ISSUE_NUMBER` defaults to `"(none)"` in the workflow script.
 

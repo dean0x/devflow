@@ -56,7 +56,7 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 11 partials in src/assets/commands/_partials/. A partial declares no
+ * The 12 partials in src/assets/commands/_partials/. A partial declares no
  * `output-dir:`, so the build skips it — it is imported by hosts instead.
  * The `_` prefix is the partial convention (and is refused by validateOutputName,
  * so a partial can never become an output filename by accident).
@@ -72,7 +72,26 @@ export const MDS_PARTIALS = [
   '_publication',
   '_roster',
   '_ticket_template',
+  '_tracker',
   '_wave',
+] as const;
+
+/**
+ * The hosts that adopt `_partials/_tracker.mds` (P2-S9). Named as a set, not a
+ * count, for the same reason as every other roster here: a count stays green when
+ * one adopter is dropped and another added in the same commit.
+ *
+ * These are the five commands that either parse issue references out of
+ * `$ARGUMENTS` or read a Git-agent Output block — the two things the partial's
+ * defines govern. A sixth command that starts doing either must join this list
+ * rather than restate the rule inline, which is the divergence P2-S9 removed.
+ */
+export const TRACKER_PARTIAL_ADOPTERS = [
+  'debug',
+  'dynamic-build',
+  'dynamic-plan',
+  'implement',
+  'plan',
 ] as const;
 
 /**

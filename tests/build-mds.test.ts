@@ -41,6 +41,7 @@ import {
   DYNAMIC_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_PARTIALS,
+  TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
 import {
@@ -176,11 +177,11 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ holds exactly the manifest\'s 11 partials (both directions)', async () => {
+  it('commands/_partials/ holds exactly the manifest\'s 12 partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(11);
+    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(12);
   });
 
   it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
@@ -1419,6 +1420,199 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       hostsScanned,
       `compliance_gate guard is vacuous: expected hostsScanned === 6, got ${hostsScanned}`,
     ).toBe(6);
+  });
+
+  // GAP-31: the compliance gate must still resolve BEFORE its first consumer in
+  // every importer. P2-S9 inserts issue-grammar text into five of the same six
+  // hosts; an insertion above the gate would leave COMPLIANCE_SKILL_INSTALLED
+  // read before it is set, which no other assertion in this file would notice
+  // (they all check presence, never order).
+  it('the compliance gate resolves before its first consumer in all 6 importers (GAP-31)', async () => {
+    const COMPLIANCE_GATE_IMPORTERS = [
+      'bug-analysis',
+      'code-review',
+      'dynamic-build',
+      'implement',
+      'plan',
+      'resolve',
+    ] as const;
+
+    // Named collector — shared by the live guard and the known-bad probe below.
+    //
+    // Non-consumer mentions, excluded with a reason each:
+    //   **Produces:** / **Requires:**  — the phase-ordering DAG, not a read of the
+    //                                    value (PF-039; the seam test excludes the
+    //                                    same two literals as a set)
+    //   a heading line                 — names the step, does not read the variable
+    function collectGateOrderViolations(basename: string, content: string): string[] {
+      const GATE = 'Resolve `COMPLIANCE_SKILL_INSTALLED` once per run';
+      const lines = content.split('\n');
+      const gateLine = lines.findIndex(l => l.includes(GATE));
+      if (gateLine === -1) return [`${basename}: gate resolution sentence absent`];
+
+      const out: string[] = [];
+      for (let i = 0; i < gateLine; i++) {
+        const line = lines[i];
+        if (!line.includes('COMPLIANCE_SKILL_INSTALLED')) continue;
+        if (line.startsWith('**Produces:**') || line.startsWith('**Requires:**')) continue;
+        if (line.startsWith('#')) continue;
+        out.push(
+          `${basename}:${i + 1}: reads COMPLIANCE_SKILL_INSTALLED before the gate resolves it ` +
+          `at line ${gateLine + 1} — "${line.trim().slice(0, 80)}"`,
+        );
+      }
+      return out;
+    }
+
+    const violations: string[] = [];
+    let hostsScanned = 0;
+
+    for (const basename of COMPLIANCE_GATE_IMPORTERS) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
+      hostsScanned++;
+      violations.push(...collectGateOrderViolations(`${basename}.md`, content));
+    }
+
+    expect(
+      violations,
+      `compliance-gate ordering violations (GAP-31):\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+
+    // Known-bad probe (mechanic 2, H10): the same collector over a seeded corpus
+    // where a consumer line sits above the gate.
+    const seeded = [
+      '**Produces:** COMPLIANCE_SKILL_INSTALLED',
+      'COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}',
+      '**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** …',
+    ].join('\n');
+    expect(
+      collectGateOrderViolations('probe.md', seeded),
+      'the ordering collector must fire on a consumer line seeded above the gate',
+    ).toHaveLength(1);
+    expect(
+      hostsScanned,
+      `compliance-gate ordering guard is vacuous: expected 6 hosts, got ${hostsScanned}`,
+    ).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §22  _partials/_tracker.mds adoption + per-define non-emptiness (P2-S9)
+//
+// Mirrors the P0-S22 compliance_gate adoption guard above: a named set of
+// adopters (TRACKER_PARTIAL_ADOPTERS), a required literal per define, and a
+// hostsScanned non-vacuity floor.
+//
+// Why a required PHRASE and a minimum SIZE per define, and not just presence of
+// the call site: an exported define with a placeholder body compiles cleanly.
+// `mds::undefined_var` catches a define that was never written; nothing catches
+// a define that was written empty (GAP-44). The phrase pins what the define is
+// FOR; the size floor pins that the body was not hollowed out around the phrase.
+// ---------------------------------------------------------------------------
+
+describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
+  // One required phrase per define. Each is the sentence the define exists to
+  // state, so deleting the rule and keeping the heading fails here.
+  const TRACKER_DEFINES: Array<{ name: string; requiredPhrase: string; minBytes: number }> = [
+    {
+      name: 'issue_ref_grammar',
+      // The second arm of the two-armed GitHub foreign-shape rule (AC-2.9). The
+      // first arm (a well-shaped ref renders `#{n}`) is worthless on its own:
+      // a one-armed grammar silently drops everything it does not recognise.
+      requiredPhrase: 'does not match github reference grammar',
+      minBytes: 600,
+    },
+    {
+      name: 'issue_capture_contract',
+      // The producer literal git.md emits under `### Handoff Values`. If the
+      // capture list stops naming it, the Code agent's `Closes #{n}` rule has no
+      // input and dies silently — the GAP-15 defect P2-S10 exists to close.
+      requiredPhrase: '- **PR link line**:',
+      minBytes: 600,
+    },
+  ];
+
+  it('every adopting host carries both defines\' expanded bodies (AC-2.9)', async () => {
+    const violations: string[] = [];
+    let hostsScanned = 0;
+
+    for (const basename of TRACKER_PARTIAL_ADOPTERS) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
+      hostsScanned++;
+      for (const { name, requiredPhrase } of TRACKER_DEFINES) {
+        if (!content.includes(requiredPhrase)) {
+          violations.push(`${basename}.md: ${name}() body missing — "${requiredPhrase}" not found`);
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `_tracker.mds adoption violations:\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+    // Known-bad sample: a host that @imports the partial but never calls either
+    // define compiles fine and lands here with both phrases missing.
+    expect(
+      hostsScanned,
+      `_tracker adoption guard is vacuous: expected ${TRACKER_PARTIAL_ADOPTERS.length} hosts, got ${hostsScanned}`,
+    ).toBe(5);
+  });
+
+  it('each define has a non-empty body — required phrase plus a size floor (GAP-44)', async () => {
+    const source = await fs.readFile(
+      path.join(PARTIALS_DIR, '_tracker.mds'),
+      'utf-8',
+    );
+
+    /** Slice one `@define name():` … `@end` body out of the partial source. */
+    function defineBody(name: string): string {
+      const open = source.indexOf(`@define ${name}():`);
+      if (open === -1) return '';
+      const bodyStart = source.indexOf('\n', open) + 1;
+      const end = source.indexOf('\n@end', bodyStart);
+      return end === -1 ? '' : source.slice(bodyStart, end);
+    }
+
+    for (const { name, requiredPhrase, minBytes } of TRACKER_DEFINES) {
+      const body = defineBody(name);
+      expect(body, `${name}() must exist in _tracker.mds`).not.toBe('');
+      expect(
+        body.includes(requiredPhrase),
+        `${name}() body must state "${requiredPhrase}" — a define can be exported with a placeholder body and still compile`,
+      ).toBe(true);
+      expect(
+        body.length,
+        `${name}() body is ${body.length} bytes — below the ${minBytes}-byte floor, which is the shape a hollowed-out define takes`,
+      ).toBeGreaterThanOrEqual(minBytes);
+      // The Note: device (the partial's shape, per _publication.mds) pre-empts a
+      // misreading; losing it is how a two-armed rule quietly becomes one-armed.
+      expect(
+        body,
+        `${name}() must keep its "Note:" paragraph — the shape _publication.mds establishes`,
+      ).toContain('\nNote:');
+    }
+  });
+
+  it('known-bad probe: a hollowed-out define body is reported by the same slicer', () => {
+    const seeded = [
+      '@define issue_ref_grammar():',
+      '**Issue-reference grammar:** TODO',
+      '@end',
+      '',
+      '@export issue_ref_grammar',
+      '',
+    ].join('\n');
+
+    const open = seeded.indexOf('@define issue_ref_grammar():');
+    const bodyStart = seeded.indexOf('\n', open) + 1;
+    const end = seeded.indexOf('\n@end', bodyStart);
+    const body = seeded.slice(bodyStart, end);
+
+    expect(body.length, 'the seeded placeholder body must fall under the floor').toBeLessThan(600);
+    expect(
+      body.includes('does not match github reference grammar'),
+      'the seeded placeholder must not carry the required phrase',
+    ).toBe(false);
   });
 });
 
