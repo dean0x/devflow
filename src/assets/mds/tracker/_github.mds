@@ -340,6 +340,19 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
 **Mechanics held here:** the open-PR lookup and the PR-link rendering of step 4b only. The surrounding steps and the publication sink stay with the operation.
+
+### Process
+
+4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #\{n\}` link when a verified issue number is known. Resolution order:
+   a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
+   b. If unavailable, fall back to the branch name pattern `\{type\}/\{number\}-\{slug\}`: extract the numeric segment and verify with `gh issue view \{n\} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
+
+   Compose the updated PR body (existing body + `## Related Issues` section) to `$DEVFLOW_BODY_RAW`. The existing PR body is third-party-editable — never interpolate it into a command string. Apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+
+   If no verified issue number is discoverable, skip silently.
+   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED (\{reason\})` and continue — a failed Related Issues update never blocks the PR.
+
+The open-PR lookup this step depends on is `gh pr list --head \{branch\} --state open`; the link line it renders is `Closes #\{n\}`.
 @end
 
 <!-- op: setup-task -->
