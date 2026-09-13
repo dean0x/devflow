@@ -282,9 +282,9 @@ Fetch comprehensive issue details for implementation planning.
 **Input:** `ISSUE_INPUT` - Issue number (e.g., "123") or search term (e.g., "fix login bug")
 
 **Process:**
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+
 1. Strip a leading `#` from `ISSUE_INPUT` (`#42` ≡ `42`) before the numeric/text branch, so a `#`-prefixed reference takes the numeric path and is never treated as a search term. If numeric, fetch directly; if text, search and select first open match
-2. Fetch full issue data (title, body, labels, assignees, milestone, comments)
-3. Extract acceptance criteria and dependencies from body; neutralise any `</untrusted-issue-body>` in the body before wrapping (Principle 8 marker neutralisation).
 
 **Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable, or rate-limited at fetch time → `TRACEABILITY: DEGRADED (\{reason\})`; warn in output; return without issue content. Caller receives only the DEGRADED line; `/plan` proceeds from the task description alone.
 
@@ -309,6 +309,11 @@ Fetch comprehensive issue details for implementation planning.
 
 ### Suggested Branch
 {type}/{number}-{slug}
+
+### Handoff Values
+- **PR link line**: {rendered}
+- **Branch token**: {token}
+- **Issue ID**: {ISSUE_ID}
 ```
 
 ---
