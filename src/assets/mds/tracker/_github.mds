@@ -192,6 +192,12 @@ This issue reached the size limit.
 Load when the resolved tracker provider is `github` and the operation is `create-release`.
 
 **Mechanics held here:** the closed-issues step only. Tag creation, release creation and notes composition stay with the operation.
+
+### Process
+
+Inside step 5 (compose release notes):
+
+   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and \{n\} more issues` line (D4 degrade if enrichment fails)
 @end
 
 @define gather_release_evidence():

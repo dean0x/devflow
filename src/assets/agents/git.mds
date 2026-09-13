@@ -500,6 +500,9 @@ Create a GitHub release with version tag.
 **Degradation carve-out for primary-effect ops:** The global D4 "never abort" clause does NOT apply to the primary release effects in steps 1–6 below. A failed tag push or release create is a hard failure — report it and stop. Only the traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment and the `backlink-shipped-issues` call) degrade per D4 (emit `TRACEABILITY: DEGRADED (\{reason\})`, warn, continue).
 
 **Process:**
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+
 1a. Validate version format (semver: X.Y.Z) — fail loudly on mismatch
 1b. Conventions: if `.devflow/conventions.md` exists, read the `## Version Names` and `## Version PR Titles` sections. Use the detected tag format when creating the annotated tag in step 3 and when composing the release title in step 5 (defaults when file is absent: tag `v\{VERSION\}`, title `v\{VERSION\}`).
 2. Verify clean working directory — fail loudly if dirty
@@ -508,7 +511,6 @@ Create a GitHub release with version tag.
 5. Compose release notes body:
    - Start with `CHANGELOG_CONTENT`
    - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and \{n\} more commits` line (D4 degrade if enrichment fails)
-   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and \{n\} more issues` line (D4 degrade if enrichment fails)
    - Cap the composed body at 60000 characters (GitHub's limit is 65536); if it would exceed that, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`
 6. Write composed release notes to `$DEVFLOW_NOTES_RAW`; apply the Comment-sink scrub (D11) (using `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` in place of the body files) — non-zero exit → fail loudly: release notes with unredacted secrets must not be published. Create GitHub release via `gh release create \{tag\} --notes-file "$DEVFLOW_NOTES"` — fail loudly on error.
 
