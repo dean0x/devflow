@@ -341,8 +341,14 @@ export interface VariantModule {
  * Legend. The D4 and D11 rows are the ONLY definitions of labels whose controls
  * are always-loaded, so they stay inline in the agent (E10 / AC-2.13); the rest
  * are glossary entries a reader consults, not rules a spawn must have.
+ *
+ * `learn-conventions` holds that operation's bounded scan and its untrusted-string
+ * discipline. It is GENERATED rather than hand-authored on purpose [DR-15]: the
+ * Phase-3 Tracker agent NAMES this file instead of copying the block, so the
+ * bounded-scan literals and the post-composition verbatim-match check never exist
+ * in a second, independently maintained copy outside the single-authority corpus.
  */
-export const GIT_CROSS_CUTTING_DOCS = ['decision-markers'] as const;
+export const GIT_CROSS_CUTTING_DOCS = ['decision-markers', 'learn-conventions'] as const;
 
 export const VARIANT_MODULES = [
   {

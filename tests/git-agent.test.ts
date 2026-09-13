@@ -500,8 +500,17 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toMatch(/2 pages of 50|100 max|≤2 pages/);
   });
 
+  // Guard 2's four learn-conventions bound pins read the MOVED copy.
+  //
+  // P2-S5 cut 1 moved this op's `**Process:**` block into the generated
+  // references/learn-conventions.md, which carries its own `## Operation:
+  // learn-conventions` anchor (arm (b) of the conventions collector needs that
+  // anchor to keep seeing the moved body). Mode is therefore 'union' [DR-18] over
+  // the sink corpus at all four sites, in the same commit that moved the text
+  // (GAP-21) and with every literal unchanged. 'sole' is not available here: the
+  // anchor now matches in two corpus files by design, and 'sole' throws on that.
   it('learn-conventions: branch scan bound (head -50) is present', () => {
-    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing branch scan bound "head -50"',
@@ -509,7 +518,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: tag scan bound (head -20) is present', () => {
-    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing tag scan bound "head -20"',
@@ -517,7 +526,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: merged-PR scan bound (--limit 30) is present', () => {
-    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing merged-PR scan bound "--limit 30"',
@@ -525,7 +534,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: rev-list --max-count=200 integration-branch bound is present', () => {
-    const sec = extractOpSection(soleCorpus, 'learn-conventions', 'sole');
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing "--max-count=200" rev-list bound for integration-branch candidate scoring',

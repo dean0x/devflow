@@ -222,12 +222,17 @@ function nameableFrom(op: string): Set<string> {
  * compares this model against what the compiled agent actually lets an op name;
  * deriving both from one source would make the check a tautology.
  *
- * Empty entries are the T2 slots: `learn-conventions.md` joins `setup-task`, and
- * `publication-gate.md` joins the two summary ops, in the commit that moves
- * those bodies. Until then their cost is recorded as a named 0 row in the table.
+ * `learn-conventions.md` is attributed to BOTH `setup-task` and the
+ * `learn-conventions` op itself, because both can load it inside one spawn:
+ * setup-task step 1b invokes `learn-conventions` when `.devflow/conventions.md`
+ * is absent. setup-task is the row that gates — it is a tracker op, so its
+ * one-spawn load (own mechanics + learn-conventions.md) is the [DR-12] worst case
+ * §5 anticipated.
  */
 const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   'fetch-review-threads': ['github-api.md'],
+  'setup-task': ['learn-conventions.md'],
+  'learn-conventions': ['learn-conventions.md'],
 };
 
 /** The file set the budget formula sums for an operation. */
