@@ -52,8 +52,11 @@ import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_PARTIALS,
+  MDS_REFERENCE_MODULES,
+  ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
+import { TRACKER_GITHUB_OPS, ALLOWED_OUTPUT_DIR_NAMES } from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
@@ -98,30 +101,59 @@ function sha256(text: string): string {
 
 afterAll(cleanupCommittedTree);
 
-/** sha256 of every .md under `<root>/dist/<sub>/`, keyed `<sub>/<file>`. */
-async function hashDistSubtree(root: string, sub: string): Promise<Map<string, string>> {
-  const dir = path.join(root, 'dist', sub);
-  let names: string[];
-  try {
-    names = (await fs.readdir(dir)).filter(f => f.endsWith('.md'));
-  } catch {
-    return new Map();
+/**
+ * sha256 of every .md under `<root>/dist/<sub>/`, keyed by the path relative to
+ * `<root>/dist/`. Descends recursively (bounded), because the skill-references
+ * destination is nested `tracker/{provider}/{op}.md` and a flat read would
+ * silently compare zero of its files.
+ */
+async function hashDistSubtree(
+  root: string,
+  sub: string,
+  maxDepth = 6,
+): Promise<Map<string, string>> {
+  const base = path.join(root, 'dist', sub);
+
+  async function walk(dir: string, rel: string, depth: number): Promise<Map<string, string>> {
+    const hashes = new Map<string, string>();
+    if (depth > maxDepth) return hashes;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return hashes;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const key = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        for (const [k, v] of await walk(path.join(dir, entry.name), key, depth + 1)) hashes.set(k, v);
+      } else if (entry.name.endsWith('.md')) {
+        hashes.set(key, sha256(await fs.readFile(path.join(dir, entry.name), 'utf-8')));
+      }
+    }
+    return hashes;
   }
-  const hashes = new Map<string, string>();
-  for (const name of names.sort()) {
-    hashes.set(`${sub}/${name}`, sha256(await fs.readFile(path.join(dir, name), 'utf-8')));
-  }
-  return hashes;
+
+  return walk(base, sub, 0);
 }
 
-/** Both build destinations of a dist/ tree, hashed into one map. */
+/** Every build destination of a dist/ tree, hashed into one map. */
 async function hashDistTree(root: string): Promise<Map<string, string>> {
-  const [commands, agents] = await Promise.all([
+  const [commands, agents, skills] = await Promise.all([
     hashDistSubtree(root, 'commands'),
     hashDistSubtree(root, 'agents'),
+    hashDistSubtree(root, 'skills'),
   ]);
-  return new Map([...commands, ...agents]);
+  return new Map([...commands, ...agents, ...skills]);
 }
+
+/**
+ * The generated skill references, keyed as hashDistTree keys them.
+ * Derived from the production op roster, never retyped.
+ */
+const EXPECTED_REFERENCE_KEYS: readonly string[] = TRACKER_GITHUB_OPS.map(
+  op => `skills/git/references/tracker/github/${op}.md`,
+);
 
 interface TreeDiff {
   /** Built from the committed sources but absent on disk — dist/ is behind src/. */
@@ -381,11 +413,14 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
       expect([...fresh.keys()], `agents/${name}.md missing from the fresh build`)
         .toContain(`agents/${name}.md`);
     }
+    for (const key of EXPECTED_REFERENCE_KEYS) {
+      expect([...fresh.keys()], `${key} missing from the fresh build`).toContain(key);
+    }
 
     const diff = diffDistTrees(fresh, onDisk);
     const remedy = 'run `npm run build:mds` — dist/ is out of sync with src/';
     expect(diff.compared, 'no file was byte-compared (PF-018)')
-      .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length);
+      .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length);
     expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
     expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
     expect(diff.differing, `dist/ bytes differ from a fresh build of src/ — ${remedy}`).toEqual([]);
@@ -420,7 +455,11 @@ describe('dest allowlist negatives', () => {
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
       expect(run.combined).toMatch(/typo\?/i);
       // The pre-existing message template is preserved, now rendering both entries.
-      expect(run.combined).toContain("is not the expected 'dist/commands' or 'dist/agents' — typo?");
+      // The expected list comes from the allowlist table itself, not a retyped
+      // copy: adding a destination must not need this string edited twice.
+      expect(run.combined).toContain(
+        `is not the expected '${ALLOWED_OUTPUT_DIR_NAMES.join("' or '")}' — typo?`,
+      );
     });
   });
 
@@ -695,7 +734,7 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
   }
 
   /** Expected totals, derived from the manifest — never retyped as literals. */
-  const EXPECTED_HOSTS = MDS_COMMAND_HOSTS.length + MDS_GENERATOR_HOSTS.length;
+  const EXPECTED_HOSTS = ALL_DISCOVERED_HOSTS.length;
   const EXPECTED_PARTIALS = MDS_PARTIALS.length;
 
   it('a build of the committed tree prints the manifest host and partial counts', async () => {
@@ -707,8 +746,8 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     expect(
       counts.hosts,
       `build printed ${counts.hosts} host(s); the manifest names ${MDS_COMMAND_HOSTS.length} command ` +
-      `host(s) + ${MDS_GENERATOR_HOSTS.length} generator host(s). Update tests/fixtures/mds-manifest.ts ` +
-      `if a host was added or removed.`,
+      `host(s) + ${MDS_GENERATOR_HOSTS.length} generator host(s) + ${MDS_REFERENCE_MODULES.length} ` +
+      `reference module(s). Update tests/fixtures/mds-manifest.ts if a host was added or removed.`,
     ).toBe(EXPECTED_HOSTS);
     expect(
       counts.partials,

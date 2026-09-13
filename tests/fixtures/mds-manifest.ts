@@ -83,6 +83,24 @@ export const MDS_PARTIALS = [
 export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
+ * Reference modules: .mds sources under src/assets/mds/ that fan out into MANY
+ * output files instead of one. Today exactly one — the GitHub tracker mechanics
+ * module, src/assets/mds/tracker/_github.mds → dist/skills/git/references/tracker/github/*.md.
+ *
+ * Named by repo-relative source path, not by basename, and deliberately NOT part
+ * of ALL_MDS_HOSTS: that roster exists because each of its entries becomes an
+ * output FILENAME, and a reference module's filenames come from its operation
+ * registry in src/core/mds-variants.ts. `_github` would not even pass
+ * validateOutputName — which is the point, and why the two sets are separate
+ * rather than one set with an exception.
+ *
+ * The emitted file set itself is not restated here: it is derived from
+ * TRACKER_GITHUB_OPS in src/core/mds-variants.ts, so there is one roster, not a
+ * production copy and a test copy that can drift.
+ */
+export const MDS_REFERENCE_MODULES = ['src/assets/mds/tracker/_github.mds'] as const;
+
+/**
  * Hand-authored files copied verbatim into dist/commands/. release.md inlines its
  * own COMPLIANCE gate and is not MDS-compiled; the divergence is permanent (SG-13).
  */
@@ -97,8 +115,22 @@ export const DIST_COMMAND_FILES: readonly string[] = [
   ...HAND_AUTHORED_COMMAND_FILES,
 ];
 
-/** Total hosts the build discovers and compiles: command hosts + generator hosts. */
+/**
+ * Every host basename that becomes an output FILENAME: command hosts + generator
+ * hosts. Reference modules are excluded by construction — see
+ * MDS_REFERENCE_MODULES.
+ */
 export const ALL_MDS_HOSTS: readonly string[] = [
   ...MDS_COMMAND_HOSTS,
   ...MDS_GENERATOR_HOSTS,
+];
+
+/**
+ * Total hosts the build DISCOVERS — everything declaring `output-dir:`, which is
+ * the number the build prints as "N host(s) to compile:".
+ */
+export const ALL_DISCOVERED_HOSTS: readonly string[] = [
+  ...MDS_COMMAND_HOSTS,
+  ...MDS_GENERATOR_HOSTS,
+  ...MDS_REFERENCE_MODULES,
 ];

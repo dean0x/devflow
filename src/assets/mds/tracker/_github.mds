@@ -1,0 +1,125 @@
+---
+output-dir: dist/skills/git/references
+---
+GitHub tracker mechanics for the `devflow:git` skill.
+
+One section per tracker operation. The build emits each section as its own file
+under `tracker/github/` inside the skill's `references/` directory; the op roster
+and the sub-directory come from `VARIANT_MODULES` in `src/core/mds-variants.ts`,
+and the two must agree in both directions or the build fails. Everything above
+the first section marker is module-level prose and is emitted nowhere.
+
+Each section states what the Git agent loads it for. An operation's contract —
+its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
+clause — is never restated here: that is the agent's, and a second copy outside
+the single-authority corpus is the divergence this split exists to prevent.
+
+@define setup_task():
+# GitHub mechanics — setup-task
+
+Load when the resolved tracker provider is `github` and the operation is `setup-task`.
+
+**Mechanics held here:** the `**Process:**` steps that talk to GitHub — issue lookup, branch-token rendering, and the conventions probe.
+@end
+
+@define fetch_issue():
+# GitHub mechanics — fetch-issue
+
+Load when the resolved tracker provider is `github` and the operation is `fetch-issue`.
+
+**Mechanics held here:** the `**Process:**` body — single-issue lookup and the field projection it requests.
+@end
+
+@define fetch_issues_batch():
+# GitHub mechanics — fetch-issues-batch
+
+Load when the resolved tracker provider is `github` and the operation is `fetch-issues-batch`.
+
+**Mechanics held here:** the `**Process:**` body — the single bounded batch query and the reporting of references it could not resolve.
+@end
+
+@define manage_debt():
+# GitHub mechanics — manage-debt
+
+Load when the resolved tracker provider is `github` and the operation is `manage-debt`.
+
+**Mechanics held here:** the `**Process:**` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
+@end
+
+@define create_release():
+# GitHub mechanics — create-release
+
+Load when the resolved tracker provider is `github` and the operation is `create-release`.
+
+**Mechanics held here:** the closed-issues step only. Tag creation, release creation and notes composition stay with the operation.
+@end
+
+@define gather_release_evidence():
+# GitHub mechanics — gather-release-evidence
+
+Load when the resolved tracker provider is `github` and the operation is `gather-release-evidence`.
+
+**Mechanics held here:** resolving which issues a commit range closes, batch-first and with its sequential sub-bound.
+@end
+
+@define backlink_shipped_issues():
+# GitHub mechanics — backlink-shipped-issues
+
+Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
+
+**Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle.
+@end
+
+@define ensure_traceable_issue():
+# GitHub mechanics — ensure-traceable-issue
+
+Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
+
+**Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment.
+@end
+
+@define post_wave_report():
+# GitHub mechanics — post-wave-report
+
+Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
+
+**Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting or updating the report.
+@end
+
+@define ensure_pr_ready():
+# GitHub mechanics — ensure-pr-ready
+
+Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
+
+**Mechanics held here:** the open-PR lookup and the PR-link rendering of step 4b only. The surrounding steps and the publication sink stay with the operation.
+@end
+
+<!-- op: setup-task -->
+{setup_task()}
+
+<!-- op: fetch-issue -->
+{fetch_issue()}
+
+<!-- op: fetch-issues-batch -->
+{fetch_issues_batch()}
+
+<!-- op: manage-debt -->
+{manage_debt()}
+
+<!-- op: create-release -->
+{create_release()}
+
+<!-- op: gather-release-evidence -->
+{gather_release_evidence()}
+
+<!-- op: backlink-shipped-issues -->
+{backlink_shipped_issues()}
+
+<!-- op: ensure-traceable-issue -->
+{ensure_traceable_issue()}
+
+<!-- op: post-wave-report -->
+{post_wave_report()}
+
+<!-- op: ensure-pr-ready -->
+{ensure_pr_ready()}

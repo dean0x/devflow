@@ -109,7 +109,11 @@ export function runMdsBuild(fakeRoot: string): BuildRun {
 
 /** Copy the two directories the walk discovers hosts in into a fake root. */
 export async function copyCommittedSources(fakeRoot: string): Promise<void> {
-  for (const sub of ['commands', 'agents']) {
+  // 'mds' carries the reference modules (src/assets/mds/tracker/*.mds). Omitting
+  // it would leave the copied tree one host short of the committed one, so the
+  // build's printed census and the dist/-staleness compare would both assert
+  // about a corpus the real build does not have.
+  for (const sub of ['commands', 'agents', 'mds']) {
     await fsp.cp(
       path.join(ROOT, 'src', 'assets', sub),
       path.join(fakeRoot, 'src', 'assets', sub),

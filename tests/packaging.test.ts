@@ -26,6 +26,7 @@ import {
   DIST_COMMAND_FILES,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
+  MDS_REFERENCE_MODULES,
   MDS_PARTIALS,
 } from './fixtures/mds-manifest.js';
 
@@ -499,7 +500,8 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    * a new partial, or a source that silently stops shipping all move this number.
    */
   const EXPECTED_SHIPPED_MDS =
-    MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length; // 13 + 11 + 1
+    MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
+    MDS_REFERENCE_MODULES.length; // 13 + 11 + 1 + 1
 
   it(`tarball ships all ${EXPECTED_SHIPPED_MDS} src/assets/**/*.mds generator sources (D-A(a))`, () => {
     const files = getPackFiles();
@@ -513,13 +515,19 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       shippedMds.length,
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
       `(${MDS_COMMAND_HOSTS.length} command hosts + ${MDS_PARTIALS.length} partials + ` +
-      `${MDS_GENERATOR_HOSTS.length} generator host), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
+      `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
+      `module), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
     ).toBe(EXPECTED_SHIPPED_MDS);
 
     // Name the generator host explicitly — it is the one whose shipping is new.
     for (const host of MDS_GENERATOR_HOSTS) {
       expect(shippedMds, `src/assets/agents/${host}.mds must ship`).toContain(`src/assets/agents/${host}.mds`);
+    }
+    // Reference modules ship for the same reason: an installed package should
+    // show what its generated skill references were compiled from.
+    for (const source of MDS_REFERENCE_MODULES) {
+      expect(shippedMds, `${source} must ship`).toContain(source);
     }
   });
 });

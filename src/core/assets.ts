@@ -1,5 +1,6 @@
 import { join } from 'path';
 import { getPackageRoot } from './paths.js';
+import { SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
 
 /**
  * Flat skills source directory: src/assets/skills/{name}/
@@ -56,6 +57,24 @@ export function commandsDir(): string {
  */
 export function compiledAgentsDir(root: string = getPackageRoot()): string {
   return join(root, 'dist', 'agents');
+}
+
+/**
+ * Compiled skill-reference directory: dist/skills/git/references/
+ *
+ * Output of the `.mds` reference modules — the generated `devflow:git` mechanics
+ * files, one per (provider, operation) pair under `tracker/{provider}/`. Like
+ * compiledAgentsDir(), the directory is absent until the build has run, so every
+ * reader must tolerate its absence.
+ *
+ * The spelling comes from SKILL_REFS_OUTPUT_DIR in src/core/mds-variants.ts —
+ * the build's own allowlist table — rather than being retyped here, so the
+ * destination has exactly one definition.
+ *
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function compiledSkillRefsDir(root: string = getPackageRoot()): string {
+  return join(root, ...SKILL_REFS_OUTPUT_DIR.split('/'));
 }
 
 /**
