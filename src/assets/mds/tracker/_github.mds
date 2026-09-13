@@ -131,6 +131,19 @@ Load when the resolved tracker provider is `github` and the operation is `manage
 
 **Mechanics held here:** the `**Process:**` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
 
+### Process
+
+1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
+2. Check issue body size; archive if > 60000 chars (per devflow:git)
+3. Extract items to add:
+   - `## Fix Separately` entries from `\{REVIEW_DIR\}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
+   - `## Deferred to Tech Debt` entries from `\{REVIEW_DIR\}/resolution-summary.md` (TECH_DEBT from Triage agent)
+   - Pre-existing issues (Category 3) from review reports
+4. Deduplicate against existing items using semantic matching
+5. Remove items that have been fixed (verify in codebase)
+6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit \{number\} --body-file "$DEVFLOW_BODY"`
+7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
+
 ### Tech Debt Issue Management
 
 Every body below reaches GitHub through `$DEVFLOW_BODY`, the file the D11 scrub chain

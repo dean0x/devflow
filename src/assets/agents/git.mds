@@ -439,16 +439,8 @@ Update tech debt backlog with deferred issues from resolution and pre-existing i
 **Input:** `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional)
 
 **Process:**
-1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
-2. Check issue body size; archive if > 60000 chars (per devflow:git)
-3. Extract items to add:
-   - `## Fix Separately` entries from `\{REVIEW_DIR\}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
-   - `## Deferred to Tech Debt` entries from `\{REVIEW_DIR\}/resolution-summary.md` (TECH_DEBT from Triage agent)
-   - Pre-existing issues (Category 3) from review reports
-4. Deduplicate against existing items using semantic matching
-5. Remove items that have been fixed (verify in codebase)
-6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit \{number\} --body-file "$DEVFLOW_BODY"`
-7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
 
 **Degradation (D4):** `gh` unauthenticated or absent, or GitHub API error → `TRACEABILITY: DEGRADED (\{reason\})`; warn in output; return without updating the backlog. Caller records the failure; `Tracked` stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` in resolution-summary.md.
 
