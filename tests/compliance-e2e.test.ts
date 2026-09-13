@@ -12,7 +12,7 @@
  *          cannot feed keystrokes. The seeding layer (resolveInitSeed) is covered
  *          by tests/init-seed.test.ts and tests/compliance-cli.test.ts.
  *
- * Guard: all tests skip when dist/cli.js is absent (no silent vacuous pass).
+ * Guard: throws when dist/cli.js is absent (no silent vacuous pass) — see requireBuiltCli.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -22,8 +22,7 @@ import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
 
 // Guard: fail-loud when dist/cli.js is absent — run `npm run build` first.
-// A guard that silently skips is not a guard; mirrors requireDistFiles' approach —
-// requireBuiltCli is now the single owner of this message.
+// requireBuiltCli owns this message; mirrors requireDistFiles' approach.
 const CLI = requireBuiltCli();
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
