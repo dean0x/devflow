@@ -21,8 +21,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
 
-// Guard: fail-loud when dist/cli.js is absent — run `npm run build` first.
-// requireBuiltCli owns this message; mirrors requireDistFiles' approach.
 const CLI = requireBuiltCli();
 
 // ── Shared helper ─────────────────────────────────────────────────────────────

@@ -24,6 +24,9 @@
  *
  * Non-vacuity (mechanic 2, H10): both guards use a synthetic corpus / temp root so that
  * the detection logic is proven live without modifying committed source.
+ *
+ * Requires a build: the requireBuiltCli GREEN contract test reads the real dist/cli.js, so
+ * `npm run build` must run first.
  */
 
 import { describe, it, expect } from 'vitest';
