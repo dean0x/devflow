@@ -43,11 +43,16 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // D4 degradation clauses added to fetch-issue + fetch-issues-batch.
 export const GIT_MD_CHARS = 65_677
 export const GIT_MD_LINES = 992
-// +1 char in Phase 1: the SKILL.md cross-reference to the Git agent moved from
-// src/assets/agents/git.md (deleted) to src/assets/agents/git.mds (the generator
-// host). An equality baseline moves in the SAME commit as the file it measures.
-export const SKILL_GIT_CHARS = 9_205
-export const SKILL_GIT_LINES = 283
+// Phase 1 took this to 9_205 / 283 (the SKILL.md cross-reference to the Git agent
+// moved from src/assets/agents/git.md to the git.mds generator host). Phase 2's
+// P2-S7 cut re-baselines it: the D3 template moved to the generated
+// ensure-traceable-issue reference; the throttling, PR-comment and releases
+// recipes moved to references/github-api.md; the naming-conventions and
+// anti-patterns blocks collapsed into pointers. An equality baseline moves in the
+// SAME commit as the file it measures — never afterwards, and never to make a red
+// test green on its own.
+export const SKILL_GIT_CHARS = 6_581
+export const SKILL_GIT_LINES = 213
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92
 export const TOTAL_CHARS = GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS

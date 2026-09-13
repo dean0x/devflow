@@ -21,11 +21,7 @@ Unified skill for safe git operations, atomic commits, honest PR descriptions, a
 
 ## When This Skill Activates
 
-- Staging files, creating commits, pushing branches
-- Creating or updating pull requests
-- Rebasing, force-pushing, merge conflicts, undoing commits
-- GitHub API operations (PR comments, issues, releases)
-- Any `git` or `gh` CLI command
+Any `git` or `gh` operation: staging, commits, branches, pull requests, rebases, merge conflicts, PR comments, issues, releases.
 
 ---
 
@@ -70,7 +66,7 @@ Only use `--amend` when ALL conditions are met:
 
 ### Branch Safety
 
-Never force push to: `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
+Never force push to a protected branch — `devflow:worktree-support` holds the canonical list.
 
 **Branch naming**: `feat/`, `fix/`, `release/`, `hotfix/` prefixes with short descriptions.
 
@@ -114,6 +110,8 @@ See `references/patterns.md` for extended recovery and stash workflows.
 
 ### HEREDOC Format (Required)
 
+Compose the issue/PR reference line BEFORE the heredoc. The heredoc delimiter is single-quoted; unquoting it makes every interpolated value a command.
+
 ```bash
 git commit -m "$(cat <<'EOF'
 feat(auth): add JWT token validation
@@ -149,7 +147,7 @@ EOF
 | Changes | Features, fixes, refactoring by category |
 | Breaking Changes | User action required (or "None") |
 | Testing | Coverage, manual steps, gaps |
-| Related Issues | Closes/relates to links |
+| Related Issues | `Closes {ISSUE_REF}` / relates-to links |
 
 ### Size Assessment
 
@@ -187,78 +185,9 @@ See `references/detection.md` for full `check_for_secrets()` function.
 
 ## GitHub API
 
-> **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — remaining < 10 wait 60s, 1-2s between calls, batch where possible.
+> **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — at `X-RateLimit-Remaining` < 10 STOP the fan-out and report `THROTTLED` (D4); 1-2s between calls. Throttling, PR-comment rules and releases live in `references/github-api.md`.
 
-### Standard Throttling
-
-```bash
-REMAINING=$(gh api rate_limit --jq '.resources.core.remaining')
-if [ "$REMAINING" -lt 10 ]; then sleep 60; fi
-sleep 1  # Between each API call
-```
-
-### PR Comments
-
-- Only lines in the PR diff can receive inline comments
-- Deduplicate before posting (same file + line = keep one)
-- Always include a suggested fix; every comment carries the `<!-- devflow:* -->` marker, and the visible devflow footer (*Posted by [devflow](https://github.com/dean0x/devflow)*) is appended only on summary comments (see src/assets/agents/git.mds)
-
-### Releases
-
-```bash
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1  # Validate semver
-git tag -a "v${VERSION}" -m "Version ${VERSION}" && git push origin "v${VERSION}"
-gh release create "v${VERSION}" --title "v${VERSION}" --notes "$NOTES"
-```
-
-See `references/github-api.md` for extended API, CLI, and GraphQL patterns.
-
----
-
-## Anti-Patterns
-
-| Violation | Impact | Fix |
-|-----------|--------|-----|
-| Parallel git commands | Index corruption | Sequential `&&` chains |
-| Grab-bag commits | Impossible to revert | One logical change per commit |
-| Blind staging (`git add .`) | Accidental secret commits | Stage specific files |
-| Force push to main | Destroys shared history | Create new commits |
-| Ignoring rate limits | API lockout | Check remaining, throttle |
-| Vague PR descriptions | Lost review context | Use structured template |
-| Hidden breaking changes | Consumer surprises | Mandatory section |
-
----
-
-## Traceability Issue Template (D3)
-
-When creating or enriching a GitHub issue via the `ensure-traceable-issue` operation, use the following canonical D3 template:
-
-```markdown
-## Initial Request
-{The verbatim or paraphrased user request / scope statement that drove this task}
-
-## Product Requirements
-{Discovered requirements summary — user needs, acceptance criteria, constraints}
-
-## Implementation Plan
-[Design artifact posted as a collapsed comment — see linked comment below]
-```
-
-**Rules:**
-- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
-- New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
-- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
-
-## Naming Conventions Authority
-
-When `.devflow/conventions.md` is present, it is the authoritative source for:
-- Branch Naming — prefix style (`feat/`, `fix/`, etc.), separator style, slug rules
-- PR Titles — conventional commit format, scope rules
-- Version PR Titles and Version Names (when applicable)
-
-The `learn-conventions` operation writes `.devflow/conventions.md` with a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles). To re-learn conventions from scratch, delete `.devflow/conventions.md` and re-run `learn-conventions`.
-
-When `.devflow/conventions.md` is absent, fall back to heuristic branch-prefix detection from existing remote branches.
+Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles) and is its single authority.
 
 ---
 
@@ -271,6 +200,7 @@ When `.devflow/conventions.md` is absent, fall back to heuristic branch-prefix d
 | `references/violations.md` | Safety, commit, and PR anti-patterns |
 | `references/detection.md` | Sensitive file regex patterns and check functions |
 | `references/github-api.md` | Rate limiting, CLI commands, GraphQL, releases, review thread GraphQL |
+| `references/tracker/{provider}/{op}.md` | Generated per-op tracker mechanics (incl. the D3 template) |
 
 ## Checklist
 

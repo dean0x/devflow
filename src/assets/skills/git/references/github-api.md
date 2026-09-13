@@ -6,6 +6,19 @@ Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 
 ## Rate Limit Handling
 
+> **D4 is the authority on what happens at the limit: STOP the fan-out, report
+> `THROTTLED ({n} not processed)`, emit `TRACEABILITY: DEGRADED (rate limited)`.
+> Never sleep out an active secondary limit — that extends GitHub's penalty window.**
+> The recipes below implement that rule; they do not compete with it.
+
+### Standard Throttling
+
+```bash
+REMAINING=$(gh api rate_limit --jq '.resources.core.remaining')
+if [ "$REMAINING" -lt 10 ]; then echo "TRACEABILITY: DEGRADED (rate limited)" >&2; exit 1; fi
+sleep 1  # Between each API call
+```
+
 ### Check Before Batch Operations
 
 ```bash
@@ -16,12 +29,12 @@ check_rate_limit() {
     if [ "$remaining" -lt 10 ]; then
         local reset_time
         reset_time=$(gh api rate_limit --jq '.resources.core.reset')
-        echo "Rate limit low ($remaining remaining), waiting..."
-        sleep 60
+        echo "TRACEABILITY: DEGRADED (rate limited) — resets at $reset_time" >&2
+        return 1
     fi
 }
 
-check_rate_limit
+check_rate_limit || exit 1   # D4: STOP the fan-out; never wait it out
 for issue in $(seq 1 100); do
     gh api repos/{owner}/{repo}/issues/${issue}
     sleep 1  # Throttle between calls
@@ -77,6 +90,12 @@ fi
 ---
 
 ## PR Comments
+
+### Comment Rules
+
+- Only lines in the PR diff can receive inline comments
+- Deduplicate before posting (same file + line = keep one)
+- Always include a suggested fix; every comment carries the `<!-- devflow:* -->` marker, and the visible devflow footer (*Posted by [devflow](https://github.com/dean0x/devflow)*) is appended only on summary comments (see src/assets/agents/git.mds)
 
 ### Inline Comment with Commit SHA
 
@@ -219,6 +238,18 @@ DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -o
 
 ## Release Operations
 
+### Releases
+
+```bash
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1  # Validate semver
+git tag -a "v${VERSION}" -m "Version ${VERSION}" && git push origin "v${VERSION}"
+gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_BODY"
+```
+
+Release notes are a GitHub-visible sink, so `$DEVFLOW_BODY` is the SCRUBBED file the
+D11 chain produced — never `$DEVFLOW_BODY_RAW`, and never an inline `--notes` string,
+which cannot be scrubbed at all.
+
 ### Version Validation
 
 ```bash
@@ -245,9 +276,10 @@ create_release() {
 ${changelog}"
     git push origin "v${version}"
 
+    # D11: the notes reach GitHub through the scrubbed file, never as an inline string.
     gh release create "v${version}" \
         --title "v${version}" \
-        --notes "$changelog"
+        --notes-file "$DEVFLOW_BODY"
 }
 ```
 
@@ -463,8 +495,9 @@ batch_api_calls() {
         REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
 
         if [ "$REMAINING" -lt 10 ]; then
-            echo "Rate limit low, waiting 60s..." >&2
-            sleep 60
+            # D4: STOP; the caller reports THROTTLED ({n} not processed).
+            echo "TRACEABILITY: DEGRADED (rate limited)" >&2
+            break
         fi
 
         result=$(gh api "$api_path" 2>&1) || {

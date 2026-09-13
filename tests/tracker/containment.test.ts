@@ -168,10 +168,14 @@ function isStructuralLine(line: string): boolean {
  * moves" stops being a reviewer's attention span and becomes a list someone had to
  * write a sentence for. A rewrite with no entry here is reported as a lost line.
  *
- * The list is EMPTY until the first deliberate rewrite lands; the non-emptiness
- * assertion arrives in that same commit (the SKILL.md cut, P2-S7), because an
- * assertion that a list is non-empty before anything may legitimately be in it is
- * an assertion that fails for being correct.
+ * P2-S7 filled it. Three of the SKILL.md entries below go beyond the cut table in
+ * the plan and are marked BEYOND-TABLE: the plan's `9,204 − 2,604 = 6,600`
+ * derivation did not budget for the pointers P2-S7 itself mandates (the naming
+ * pointer, the Extended-References row, the heredoc sentence, the protected-branch
+ * pointer, the GitHub-API pointer), which cost roughly 700 characters of add-back.
+ * Each BEYOND-TABLE cut removes a section that RESTATES rules already stated once
+ * in the same preloaded file — the single-convergence-point rule (PF-023) the phase
+ * is built on — rather than removing any rule.
  */
 interface ContainmentExemption {
   readonly file: string;
@@ -180,7 +184,145 @@ interface ContainmentExemption {
   readonly rationale: string;
 }
 
-export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [];
+export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
+  // ── skills/git/SKILL.md (P2-S7) ────────────────────────────────────────────
+  {
+    file: 'SKILL.md',
+    startLine: 24,
+    endLine: 28,
+    rationale:
+      'BEYOND-TABLE. The five activation bullets restate the frontmatter `description:` ' +
+      'field one-for-one, and `description:` is what actually drives activation. ' +
+      'Compressed to a single line; the heading survives so the skill keeps the ' +
+      'template shape every other skill has.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 73,
+    endLine: 73,
+    rationale:
+      'The protected-branch list is duplicated from devflow:worktree-support, which is ' +
+      'the canonical list (that skill is preloaded on the same spawns). Replaced by a ' +
+      'pointer, so the list has one owner.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 152,
+    endLine: 152,
+    rationale:
+      'Related-Issues row moved to {ISSUE_REF} vocabulary. The GitHub rendering (`#N`) ' +
+      'is unchanged; the row no longer hardcodes a provider-specific reference shape.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 190,
+    endLine: 190,
+    rationale:
+      '"remaining < 10 wait 60s" is the same D4 contradiction as :196 in prose form: D4 ' +
+      'says STOP the fan-out and report THROTTLED. Rewritten to state D4\'s rule. ' +
+      'Deleting :196 while leaving this line would have fixed the recipe and kept the ' +
+      'contradiction.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 196,
+    endLine: 196,
+    rationale:
+      'DELETED, not moved: `if [ "$REMAINING" -lt 10 ]; then sleep 60; fi` directly ' +
+      'contradicts the D4 degradation contract\'s STOP clause (GAP-25). Two opposed ' +
+      'rate-limit policies were preloaded in one context; sleeping out an active ' +
+      'secondary limit extends GitHub\'s penalty window.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 200,
+    endLine: 200,
+    rationale:
+      'Heading renamed `### PR Comments` → `### Comment Rules` on the move, because its ' +
+      'destination in references/github-api.md already has a `## PR Comments` section ' +
+      'and a same-named child would read as a second one. The three rule bullets ' +
+      'underneath moved byte-identically.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 211,
+    endLine: 211,
+    rationale:
+      '`gh release create … --notes "$NOTES"` is an inline-body recipe in a file that is ' +
+      'preloaded on every spawn, while create-release mandates --notes-file after a D11 ' +
+      'scrub whose failure is a HARD fail. Rewritten as the --notes-file form; this is ' +
+      'the known-bad sample the widened INLINE_BODY_RE was proven red against.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 214,
+    endLine: 214,
+    rationale:
+      'The "See references/github-api.md" pointer was rewritten to name what actually ' +
+      'moved there (throttling, PR-comment rules, releases) instead of the generic ' +
+      '"extended API, CLI, and GraphQL patterns".',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 218,
+    endLine: 228,
+    rationale:
+      'BEYOND-TABLE. Every row of the Anti-Patterns table restates a rule already stated ' +
+      'in its own section above (Sequential Operations, Atomic Grouping, Sensitive File ' +
+      'Detection, Branch Safety, GitHub API, Description Sections) — and ' +
+      'references/violations.md, already listed under Extended References, is the named ' +
+      'authority for git/PR anti-patterns. A third copy in the preloaded file is what ' +
+      'PF-023 forbids.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 252,
+    endLine: 261,
+    rationale:
+      'The Naming Conventions Authority block is replaced by a one-line pointer to ' +
+      'learn-conventions, which owns .devflow/conventions.md. The `≤50 branches` bound ' +
+      'survives in that pointer so it is stated exactly once across git.md ∪ ' +
+      'skills/git/** (GAP-25).',
+  },
+
+  // ── skills/git/references/github-api.md (P2-S7 fallout) ────────────────────
+  {
+    file: 'github-api.md',
+    startLine: 19,
+    endLine: 20,
+    rationale:
+      'check_rate_limit\'s "wait, then continue" is the same D4 contradiction the ' +
+      'SKILL.md sleep-60 line was cut for, in a file the Git agent loads. Rewritten to ' +
+      'emit TRACEABILITY: DEGRADED (rate limited) and return non-zero so the caller STOPs.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 24,
+    endLine: 24,
+    rationale:
+      'The `check_rate_limit` call site now honours the STOP: `check_rate_limit || exit 1`. ' +
+      'Leaving the bare call would have made the rewritten function advisory.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 250,
+    endLine: 250,
+    rationale:
+      'Complete Release Flow posted release notes inline (`--notes "$changelog"`). It sits ' +
+      'in the same file as the --notes-file recipe moved in from SKILL.md, so leaving it ' +
+      'would have re-created the two-authorities defect one section apart. The multi-line ' +
+      'form is invisible to INLINE_BODY_RE, which is why it needed fixing by hand.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 466,
+    endLine: 467,
+    rationale:
+      'batch_api_calls had the third `sleep 60` wait-and-continue. Rewritten to break out ' +
+      'of the fan-out after emitting the DEGRADED line, which is what D4 requires and what ' +
+      'the caller reports as THROTTLED ({n} not processed).',
+  },
+];
 
 /** Exemptions grouped by baseline file, as a set of 1-based line numbers. */
 function exemptedLines(
@@ -309,6 +451,14 @@ describe('containment: baseline ∪ exemptions — zero unaccounted lines (AC-2.
 // ---------------------------------------------------------------------------
 
 describe('containment: rewrite exemption list — justified [DR-17]', () => {
+  it('is non-empty — AC-2.1\'s "only intended moves" half has something to check', () => {
+    expect(
+      CONTAINMENT_EXEMPTIONS.length,
+      'the exemption list is empty while deliberate rewrites exist — the zero-unaccounted ' +
+      'assertion would then be passing for the wrong reason',
+    ).toBeGreaterThan(0);
+  });
+
   it('every entry names a real baseline range and gives a reason', () => {
     const problems: string[] = [];
     const byName = new Map(BASELINES.map(b => [b.file, b]));

@@ -16,7 +16,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 import { skillsDir } from '../src/core/assets.js';
-import { resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
@@ -88,6 +88,44 @@ function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: Inlin
     }
   }
   return { corpus, offenders };
+}
+
+// ── Single-authority literal scan (GAP-25) ──────────────────────────────────
+
+/**
+ * `dist/agents/git.md ∪ src/assets/skills/git/**` — the text a Git spawn preloads
+ * plus every reference it can reach, which is the scope GAP-25's two literal rules
+ * are stated over.
+ */
+function gitAuthorityCorpus(): CorpusEntry[] {
+  const corpus: CorpusEntry[] = [resolveAgentSource('git')].map(s => ({
+    path: s.path,
+    content: s.content,
+  }));
+  for (const file of walkFiles(path.join(skillsDir(), 'git'), f => f.endsWith('.md'))) {
+    corpus.push({ path: file, content: readFileSync(file, 'utf-8') });
+  }
+  return corpus;
+}
+
+/** Named collector: every occurrence of a literal in a corpus, with its file. */
+function collectLiteralOccurrences(corpus: CorpusEntry[], literal: string): string[] {
+  const hits: string[] = [];
+  for (const entry of corpus) {
+    entry.content.split('\n').forEach((line, index) => {
+      if (line.includes(literal)) hits.push(`${entry.path}:${index + 1}`);
+    });
+  }
+  return hits;
+}
+
+/** The pre-split bytes, committed at tests/fixtures/tracker/baseline/ (see containment.test.ts). */
+function baselineCorpus(): CorpusEntry[] {
+  const dir = path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline');
+  return ['git-agent.md', 'SKILL.md', 'github-api.md'].map(name => ({
+    path: path.join(dir, name),
+    content: readFileSync(path.join(dir, name), 'utf-8'),
+  }));
 }
 
 /**
@@ -767,6 +805,53 @@ describe('git agent — static content guards (PF-018)', () => {
   it('D11: erasure guidance — rotation (/rotat/i) and edit-history retention are documented', () => {
     expect(content, 'D11: rotation guidance (/rotat/i) missing — a found live secret requires rotation, not just deletion').toMatch(/rotat/i);
     expect(content, 'D11: "edit history" retention note missing — GitHub retains edit history; deletion is not remediation').toContain('edit history');
+  });
+
+  // ── Guard 7b: GAP-25 single-authority literals (P2-S7) ─────────────────────
+  //
+  // Two rules over `dist/agents/git.md ∪ src/assets/skills/git/**`. Both were RED on
+  // the pre-split tree, and the proof is permanent rather than anecdotal: the probes
+  // below run the SAME collector over tests/fixtures/tracker/baseline/, which holds
+  // the byte-exact pre-split files. H10 — the fix is never un-landed to show red.
+
+  it('GAP-25: no `sleep 60` survives in git.md ∪ skills/git/** — D4 says STOP, not wait', () => {
+    const hits = collectLiteralOccurrences(gitAuthorityCorpus(), 'sleep 60');
+    expect(
+      hits,
+      'a rate-limit `sleep 60` is a second, opposed policy alongside D4\'s "STOP the ' +
+      'fan-out and report THROTTLED". Waiting out an active secondary limit extends ' +
+      `GitHub's penalty window:\n  ${hits.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('GAP-25 probe: the pre-split baseline had three `sleep 60` sites', () => {
+    const hits = collectLiteralOccurrences(baselineCorpus(), 'sleep 60');
+    expect(
+      hits.length,
+      'the collector must find the pre-split occurrences in the committed baseline — ' +
+      'otherwise the rule above is satisfied by a scan that reads nothing',
+    ).toBe(3);
+  });
+
+  it('GAP-25: the learn-conventions branch bound is stated exactly once', () => {
+    const hits = collectLiteralOccurrences(gitAuthorityCorpus(), '≤50 branches');
+    expect(
+      hits,
+      'the bounded-scan branch limit must be declared exactly once across git.md ∪ ' +
+      'skills/git/**; a second statement is a second authority on the bound:\n  ' +
+      hits.join('\n  '),
+    ).toHaveLength(1);
+  });
+
+  it('GAP-25 probe: a seeded second statement of the bound is detected', () => {
+    const corpus = [
+      ...gitAuthorityCorpus(),
+      { path: '/synthetic/second-authority.md', content: 'scan ≤50 branches for prefixes\n' },
+    ];
+    expect(
+      collectLiteralOccurrences(corpus, '≤50 branches').length,
+      'the collector must see a second statement — otherwise the count assertion is inert',
+    ).toBe(2);
   });
 
   // ── Guard 8: D9 caller guard (AC-0.5) ──────────────────────────────────────

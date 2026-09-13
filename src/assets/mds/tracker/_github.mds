@@ -75,7 +75,27 @@ Load when the resolved tracker provider is `github` and the operation is `backli
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
 
-**Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment.
+**Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
+
+## Traceability Issue Template (D3)
+
+When creating or enriching a GitHub issue via the `ensure-traceable-issue` operation, use the following canonical D3 template:
+
+```markdown
+## Initial Request
+{The verbatim or paraphrased user request / scope statement that drove this task}
+
+## Product Requirements
+{Discovered requirements summary — user needs, acceptance criteria, constraints}
+
+## Implementation Plan
+[Design artifact posted as a collapsed comment — see linked comment below]
+```
+
+**Rules:**
+- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
+- New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
+- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
 @end
 
 @define post_wave_report():
