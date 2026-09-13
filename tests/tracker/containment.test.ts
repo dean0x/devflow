@@ -313,6 +313,46 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'would have re-created the two-authorities defect one section apart. The multi-line ' +
       'form is invisible to INLINE_BODY_RE, which is why it needed fixing by hand.',
   },
+
+  // ── skills/git/references/github-api.md → per-op tracker references (P2-S8) ─
+  {
+    file: 'github-api.md',
+    startLine: 137,
+    endLine: 137,
+    rationale:
+      'The `## Issue Operations` container heading has no single destination: its four ' +
+      'subsections went to four different operations (fetch-issue, ensure-traceable-issue, ' +
+      'manage-debt). Carrying the heading into one of them would have implied the other ' +
+      'three live there too.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 184,
+    endLine: 184,
+    rationale:
+      'Tech-debt add: `gh issue comment … --body "$new_item"` became `--body-file ' +
+      '"$DEVFLOW_BODY"` on the move. manage-debt is a D11 posting sink, and moving the ' +
+      'inline form verbatim would have created a NEW D11 bypass inside the tracker ' +
+      'reference tree — the widened INLINE_BODY_RE freezes the pre-existing github-api.md ' +
+      'sites only, so a moved copy is a new offender by construction.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 202,
+    endLine: 202,
+    rationale:
+      'Tech-debt archive back-link: same rewrite, same reason as :184.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 283,
+    endLine: 283,
+    rationale:
+      '`## Branch Name from Issue` moved into the setup-task reference DEMOTED to `###`. ' +
+      'extractOpSectionFromCorpus slices an op section to the next `\\n## `, so a second ' +
+      'level-2 heading inside a generated reference truncates every union-mode guard at ' +
+      'that point. The recipe itself moved byte-identically.',
+  },
   {
     file: 'github-api.md',
     startLine: 466,

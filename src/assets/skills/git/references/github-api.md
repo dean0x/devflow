@@ -153,89 +153,6 @@ fi
 
 ---
 
-## Issue Operations
-
-### Fetch Issue with All Details
-
-```bash
-gh issue view "$ISSUE_NUMBER" \
-    --json number,title,body,state,labels,assignees,milestone,author,createdAt,comments
-```
-
-### Create Issue with Labels and Assignees
-
-```bash
-gh issue create \
-    --title "Bug: Login fails for SSO users" \
-    --label "bug,priority-high" \
-    --assignee "username" \
-    --body "$(cat <<'EOF'
-## Description
-Login fails when using SSO authentication.
-
-## Steps to Reproduce
-1. Click "Login with SSO"
-2. Enter credentials
-3. Observe error
-
-## Expected Behavior
-User should be logged in successfully.
-EOF
-)"
-```
-
-### Tech Debt Issue Management
-
-```bash
-MAX_SIZE=60000
-
-add_tech_debt_item() {
-    local new_item="$1"
-    local current_body
-    current_body=$(gh issue view $TECH_DEBT_ISSUE --json body -q '.body')
-    local body_length=${#current_body}
-
-    if [ $body_length -gt $MAX_SIZE ]; then
-        echo "Tech debt issue approaching size limit, archiving..."
-        archive_tech_debt_issue
-    fi
-
-    gh issue comment $TECH_DEBT_ISSUE --body "$new_item"
-}
-
-archive_tech_debt_issue() {
-    local old_issue=$TECH_DEBT_ISSUE
-    gh issue close $old_issue --comment "## Archived
-This issue reached the size limit.
-**Continued in:** (see linked issue)"
-
-    TECH_DEBT_ISSUE=$(gh issue create \
-        --title "Tech Debt Backlog" \
-        --label "tech-debt" \
-        --body "Continued from #${old_issue}
-
-## Items
-" \
-        --json number -q '.number')
-
-    gh issue comment $old_issue --body "**Continued in:** #${TECH_DEBT_ISSUE}"
-}
-```
-
-### Extract Issue Data
-
-```bash
-BODY=$(gh issue view $ISSUE --json body -q '.body')
-
-# Extract acceptance criteria
-CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\s*-\s*\[' || true)
-
-# Extract dependencies
-DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -oE '#[0-9]+' || true)
-```
-
----
-
 ## Release Operations
 
 ### Releases
@@ -307,31 +224,6 @@ generate_release_notes() {
     else
         git log --pretty=format:"- %s" --no-merges -20
     fi
-}
-```
-
----
-
-## Branch Name from Issue
-
-```bash
-generate_branch_name() {
-    local issue_number="$1"
-    local title="$2"
-    local labels="$3"
-
-    local branch_type="feature"
-    case "$labels" in
-        *bug*|*fix*) branch_type="fix" ;;
-        *documentation*|*docs*) branch_type="docs" ;;
-        *refactor*) branch_type="refactor" ;;
-        *chore*|*maintenance*) branch_type="chore" ;;
-    esac
-
-    local slug
-    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-40)
-
-    echo "${branch_type}/${issue_number}-${slug}"
 }
 ```
 

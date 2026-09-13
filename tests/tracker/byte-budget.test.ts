@@ -7,11 +7,11 @@
  * quietly, and records the four candidate shapes so the shape decision is not
  * re-litigated from memory.
  *
- * THREE ASSERTIONS HERE ARE EXPECTED RED UNTIL T2 LANDS — deliberately, as the
- * phase's progress meter, and they are named as such at their call sites:
- *   - chars(dist/agents/git.md)      <= BUDGET_GIT_MD
- *   - chars(skills/git/SKILL.md)     <= BUDGET_SKILL_MD
- *   - the worst-case loaded set      <= BUDGET_LOADED_SET
+ * THREE ASSERTIONS HERE WERE RED WHEN THE PHASE BRANCHED — deliberately, as its
+ * progress meter, and they are named as such at their call sites:
+ *   - chars(skills/git/SKILL.md)     <= BUDGET_SKILL_MD   — GREEN since the P2-S7 cut
+ *   - chars(dist/agents/git.md)      <= BUDGET_GIT_MD     — red until the op mechanics move
+ *   - the worst-case loaded set      <= BUDGET_LOADED_SET — red until the same move
  * None of them is skipped. A skipped budget asserts nothing and reads as "fine"
  * in a CI log (PF-018); a red one is the measurement the phase is steering by.
  *
@@ -241,11 +241,38 @@ function summedFor(op: string): Set<string> {
 
 const ALL_OPS = [...SECTIONS.keys()];
 
-/** max over ops of ( sum of every reference file that op can name in one spawn ). */
+/** The sum of every reference file an op's load instructions can name in one spawn. */
+function oneSpawnLoad(op: string): number {
+  return [...summedFor(op)].reduce((n, rel) => n + referenceChars(rel), 0);
+}
+
+/**
+ * D-LOADED-SET-SCOPE — the `max over ops` term is taken over TRACKER_GITHUB_OPS,
+ * not over every operation in the agent.
+ *
+ * AC-2.5 bounds "the worst-case TRACKER spawn": the question the budget answers is
+ * whether the contract/mechanics split makes a tracker operation cost more than the
+ * pre-split monolith did. A non-tracker op such as `fetch-review-threads` loads
+ * references/github-api.md and always did; it is not a cost the split introduces,
+ * and including it would make the budget a measure of a file this phase does not
+ * own. Non-tracker ops are RECORDED in the four-shape table below (so the number
+ * stays visible and is never quietly dropped) but do not gate.
+ */
 function worstCaseReferenceLoad(): { op: string; chars: number } {
   let worst = { op: '(none)', chars: 0 };
+  for (const op of TRACKER_GITHUB_OPS) {
+    const chars = oneSpawnLoad(op);
+    if (chars > worst.chars) worst = { op, chars };
+  }
+  return worst;
+}
+
+/** The same maximum over the ops the budget does NOT gate on — recorded, never asserted. */
+function worstCaseNonTrackerLoad(): { op: string; chars: number } {
+  let worst = { op: '(none)', chars: 0 };
   for (const op of ALL_OPS) {
-    const chars = [...summedFor(op)].reduce((n, rel) => n + referenceChars(rel), 0);
+    if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) continue;
+    const chars = oneSpawnLoad(op);
     if (chars > worst.chars) worst = { op, chars };
   }
   return worst;
@@ -308,6 +335,7 @@ describe('byte budget: four-shape table (recorded)', () => {
   it('records every shape, with learn-conventions.md and publication-gate.md as named rows', () => {
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
+    const nonTracker = worstCaseNonTrackerLoad();
     const allTrackerRefs = TRACKER_GITHUB_OPS.reduce((n, op) => n + referenceChars(trackerRefRel(op)), 0);
 
     // Named rows [DR-12]: recorded so their cost is visible, not merely deducted
@@ -349,7 +377,9 @@ describe('byte budget: four-shape table (recorded)', () => {
         bytes: m.bytes,
       })),
       { row: `max_op tracker reference (${largest.op})`, chars: largest.chars, bytes: NaN },
-      { row: `worst-case one-spawn reference load (${worst.op})`, chars: worst.chars, bytes: NaN },
+      { row: `worst-case one-spawn load, TRACKER ops (${worst.op})`, chars: worst.chars, bytes: NaN },
+      // Recorded, not gated — D-LOADED-SET-SCOPE at worstCaseReferenceLoad().
+      { row: `worst-case one-spawn load, NON-tracker ops (${nonTracker.op})`, chars: nonTracker.chars, bytes: NaN },
       { row: 'sum of all GitHub tracker references', chars: allTrackerRefs, bytes: NaN },
     ];
 
@@ -399,11 +429,12 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     ).toBeLessThanOrEqual(BUDGET_SKILL_MD);
   });
 
-  it('EXPECTED RED until T2: the worst-case tracker spawn <= BUDGET_LOADED_SET', () => {
+  it('EXPECTED RED until the op mechanics move: the worst-case tracker spawn <= BUDGET_LOADED_SET', () => {
     // worst = preloaded set
     //       + 0                                    /* _mcp.md, GitHub path */
     //       + max_op chars(tracker/github/{op}.md)
-    //       + max over ops of ( sum of every reference that op can name in one spawn )  [DR-12]
+    //       + max over TRACKER ops of ( sum of every reference that op can name in one
+    //         spawn )  [DR-12, scoped by D-LOADED-SET-SCOPE]
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
     const total = PRELOADED + 0 + largest.chars + worst.chars;

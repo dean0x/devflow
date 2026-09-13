@@ -20,6 +20,29 @@ the single-authority corpus is the divergence this split exists to prevent.
 Load when the resolved tracker provider is `github` and the operation is `setup-task`.
 
 **Mechanics held here:** the `**Process:**` steps that talk to GitHub — issue lookup, branch-token rendering, and the conventions probe.
+
+### Branch Name from Issue
+
+```bash
+generate_branch_name() {
+    local issue_number="$1"
+    local title="$2"
+    local labels="$3"
+
+    local branch_type="feature"
+    case "$labels" in
+        *bug*|*fix*) branch_type="fix" ;;
+        *documentation*|*docs*) branch_type="docs" ;;
+        *refactor*) branch_type="refactor" ;;
+        *chore*|*maintenance*) branch_type="chore" ;;
+    esac
+
+    local slug
+    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-40)
+
+    echo "${branch_type}/${issue_number}-${slug}"
+}
+```
 @end
 
 @define fetch_issue():
@@ -28,6 +51,25 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 Load when the resolved tracker provider is `github` and the operation is `fetch-issue`.
 
 **Mechanics held here:** the `**Process:**` body — single-issue lookup and the field projection it requests.
+
+### Fetch Issue with All Details
+
+```bash
+gh issue view "$ISSUE_NUMBER" \
+    --json number,title,body,state,labels,assignees,milestone,author,createdAt,comments
+```
+
+### Extract Issue Data
+
+```bash
+BODY=$(gh issue view $ISSUE --json body -q '.body')
+
+# Extract acceptance criteria
+CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\s*-\s*\[' || true)
+
+# Extract dependencies
+DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -oE '#[0-9]+' || true)
+```
 @end
 
 @define fetch_issues_batch():
@@ -44,6 +86,47 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 Load when the resolved tracker provider is `github` and the operation is `manage-debt`.
 
 **Mechanics held here:** the `**Process:**` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
+
+### Tech Debt Issue Management
+
+Every body below reaches GitHub through `$DEVFLOW_BODY`, the file the D11 scrub chain
+produced — manage-debt is a body-posting op, so the scrub is unconditional.
+
+```bash
+MAX_SIZE=60000
+
+add_tech_debt_item() {
+    local new_item="$1"
+    local current_body
+    current_body=$(gh issue view $TECH_DEBT_ISSUE --json body -q '.body')
+    local body_length=${#current_body}
+
+    if [ $body_length -gt $MAX_SIZE ]; then
+        echo "Tech debt issue approaching size limit, archiving..."
+        archive_tech_debt_issue
+    fi
+
+    gh issue comment $TECH_DEBT_ISSUE --body-file "$DEVFLOW_BODY"
+}
+
+archive_tech_debt_issue() {
+    local old_issue=$TECH_DEBT_ISSUE
+    gh issue close $old_issue --comment "## Archived
+This issue reached the size limit.
+**Continued in:** (see linked issue)"
+
+    TECH_DEBT_ISSUE=$(gh issue create \
+        --title "Tech Debt Backlog" \
+        --label "tech-debt" \
+        --body "Continued from #${old_issue}
+
+## Items
+" \
+        --json number -q '.number')
+
+    gh issue comment $old_issue --body-file "$DEVFLOW_BODY"
+}
+```
 @end
 
 @define create_release():
@@ -76,6 +159,28 @@ Load when the resolved tracker provider is `github` and the operation is `backli
 Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
 
 **Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
+
+### Create Issue with Labels and Assignees
+
+```bash
+gh issue create \
+    --title "Bug: Login fails for SSO users" \
+    --label "bug,priority-high" \
+    --assignee "username" \
+    --body "$(cat <<'EOF'
+## Description
+Login fails when using SSO authentication.
+
+## Steps to Reproduce
+1. Click "Login with SSO"
+2. Enter credentials
+3. Observe error
+
+## Expected Behavior
+User should be logged in successfully.
+EOF
+)"
+```
 
 ## Traceability Issue Template (D3)
 

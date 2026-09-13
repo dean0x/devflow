@@ -47,8 +47,10 @@ const INLINE_BODY_RE = /gh (?:pr|issue|release) [a-z-]+[^`\n]*--(?:body|notes)[ 
  */
 const KNOWN_GITHUB_API_INLINE_BODIES: readonly string[] = [
   '-f body=',
-  'gh issue comment $TECH_DEBT_ISSUE --body ',
-  'gh issue comment $old_issue --body ',
+  // The two `gh issue comment … --body "…"` tech-debt sites are GONE: P2-S8 moved that
+  // block into the manage-debt reference and rewrote both posts to --body-file. They
+  // were removed from this list by the "no longer match anything" arm going red, which
+  // is the ratchet working.
   'gh pr create --title "Add user authentication" --body ',
   'gh pr create --draft --title "WIP: Feature X" --body ',
   'gh pr review $PR_NUMBER --approve --body ',
