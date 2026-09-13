@@ -162,6 +162,52 @@ function collectGhRepoViewSites(corpus: CorpusEntry[]): string[] {
   return sites.sort();
 }
 
+// ── P2-S4 cross-cutting detector scan (GAP-03) ──────────────────────────────
+
+/** Provider-detector literals that must not survive in always-loaded text. */
+const PROVIDER_DETECTORS: readonly string[] = ['`gh`', 'gh ', 'X-RateLimit'];
+
+/**
+ * Named collector: the CROSS-CUTTING slices of the agent — everything outside a
+ * `## Operation:` section. That is the text every spawn loads whatever provider it
+ * resolved: the D4 block, the tracker preamble, the D11 section, the operations
+ * table, the marker legend, `## Principles` and `## Boundaries`.
+ */
+function collectCrossCuttingSections(text: string): Array<{ label: string; body: string }> {
+  const sections: Array<{ label: string; body: string }> = [];
+  const starts = [...text.matchAll(/^## (.+)$/gm)].map(m => ({ heading: m[1], index: m.index! }));
+  const firstOp = starts.findIndex(s => s.heading.startsWith('Operation: '));
+  const head = firstOp === -1 ? text : text.slice(0, starts[firstOp].index);
+  sections.push({ label: '(header)', body: head });
+  for (let i = 0; i < starts.length; i++) {
+    if (starts[i].heading.startsWith('Operation: ')) continue;
+    if (starts[i].index < (firstOp === -1 ? text.length : starts[firstOp].index)) continue;
+    const end = i + 1 < starts.length ? starts[i + 1].index : text.length;
+    sections.push({ label: starts[i].heading, body: text.slice(starts[i].index, end) });
+  }
+  return sections;
+}
+
+/** Named collector: `section:line` sites where a provider detector appears. */
+function collectProviderDetectors(
+  sections: ReadonlyArray<{ label: string; body: string }>,
+): string[] {
+  const hits: string[] = [];
+  for (const section of sections) {
+    section.body.split('\n').forEach(line => {
+      if (PROVIDER_DETECTORS.some(d => line.includes(d))) {
+        hits.push(`${section.label}: ${line.trim().slice(0, 90)}`);
+      }
+    });
+  }
+  return hits;
+}
+
+/** git.md ∪ every generated reference, joined — mode 'union' at file scope [DR-18]. */
+function joinedSinkText(): string {
+  return gitAgentSinkCorpus().map(e => e.content).join('\n');
+}
+
 /** Read a generated reference; throws with a build hint rather than returning ''. */
 function readGeneratedReference(relPath: string): string {
   const file = path.join(ROOT, 'dist', 'skills', 'git', 'references', ...relPath.split('/'));
@@ -626,18 +672,96 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('THROTTLED');
   });
 
+  // The two threshold pins follow the moved text [DR-18]. P2-S4 relocated both
+  // rate-limit SIGNALS out of the always-loaded D4 block and into the resolved
+  // provider's reference (GAP-03); the thresholds themselves are unchanged, so the
+  // literals below are untouched and only the corpus widened — mode 'union' over
+  // git.md ∪ the generated references. Scanning git.md alone after the split would
+  // pin a number that is no longer stated there.
   it('D4: X-RateLimit-Remaining < 10 is the full-STOP threshold', () => {
     expect(
-      content,
+      joinedSinkText(),
       'D4: X-RateLimit-Remaining < 10 must be the exact STOP boundary — changing this threshold silently widens the penalty window',
     ).toMatch(/X-RateLimit-Remaining[^<\n]*<\s*10/);
   });
 
   it('D4: X-RateLimit-Remaining < 50 is the backpressure threshold (1s → 3s delay)', () => {
     expect(
-      content,
+      joinedSinkText(),
       'D4: X-RateLimit-Remaining < 50 backpressure threshold must be present — raises inter-op delay from 1s to 3s; removing it silently disables backpressure',
     ).toMatch(/remaining < 50|X-RateLimit-Remaining[^<\n]*<\s*50/);
+  });
+
+  // ── Guard 4b: P2-S4 — invariants stay, detectors leave (GAP-03) ────────────
+  //
+  // The D4 and D11 blocks, the Decision Marker Legend, `## Principles` and
+  // `## Boundaries` are CROSS-CUTTING: every Git spawn loads them whatever provider
+  // it resolved. A provider DETECTOR there (`gh`, an `X-RateLimit-…` header name) is
+  // a second authority on a provider fact, loaded even when that provider is not the
+  // one in play — the two-authorities defect GAP-03 names. The invariants stay; the
+  // detectors move into the provider references, where the resolved provider's file
+  // is the single place its own signals are spelled.
+
+  it('P2-S4: no provider detector literal survives in a cross-cutting section of git.md', () => {
+    const sections = collectCrossCuttingSections(content);
+    expect(
+      sections.length,
+      'no cross-cutting section was found — the scan would pass by reading nothing (PF-018)',
+    ).toBeGreaterThan(1);
+    expect(
+      collectProviderDetectors(sections),
+      'provider detector(s) in always-loaded text. The invariant belongs here; the signal that ' +
+      'triggers it belongs in the resolved provider\'s reference (GAP-03, P2-S4)',
+    ).toEqual([]);
+  });
+
+  it('P2-S4 known-bad probe: the pre-split baseline carried these detectors cross-cutting', () => {
+    // Permanent RED evidence (H10): the same collector over the byte-exact pre-split
+    // file, which had the `gh` and X-RateLimit literals in D4, D11, Principles and
+    // Boundaries. Seven sites — the number the split had to reach zero from.
+    const baseline = readFileSync(
+      path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
+      'utf-8',
+    );
+    expect(
+      collectProviderDetectors(collectCrossCuttingSections(baseline)).length,
+      'the collector must find the pre-split cross-cutting detectors — otherwise the rule above ' +
+      'is satisfied by a scan that recognises nothing',
+    ).toBeGreaterThanOrEqual(6);
+  });
+
+  it('P2-S4: each moved detector has exactly one home in the GitHub provider tree', () => {
+    const providerFiles = walkFiles(
+      path.join(ROOT, 'dist', 'skills', 'git', 'references', 'tracker'),
+      f => f.endsWith('.md'),
+    );
+    expect(providerFiles.length, 'no provider reference was read').toBeGreaterThan(0);
+    for (const detector of ['X-RateLimit-Remaining` header < 10', 'X-RateLimit-Remaining` < 50']) {
+      const homes = providerFiles.filter(f => readFileSync(f, 'utf-8').includes(detector));
+      expect(
+        homes.map(f => path.basename(f)),
+        `the detector ${JSON.stringify(detector)} must be stated exactly once per provider — ` +
+        'a second copy is a second authority on that provider\'s rate-limit signal (PF-023)',
+      ).toHaveLength(1);
+    }
+  });
+
+  it('P2-S4: the D4 and D11 INVARIANTS stay in the always-loaded agent', () => {
+    // The other half of the split: nothing that decides whether to stop, or whether a
+    // body may be posted, may become a file the spawn might not have (PF-027).
+    for (const invariant of [
+      'STOP the current fan-out operation immediately',
+      'THROTTLED ({n} not processed)',
+      'DO NOT POST',
+      'TRACEABILITY: DEGRADED (redaction unavailable)',
+      'never pipelines',
+      '**Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**',
+      'DEVFLOW_BODY_RAW="$(mktemp)"',
+      'redact-secrets.cjs',
+    ]) {
+      expect(content, `P2-S4: the invariant ${JSON.stringify(invariant)} must stay in git.md`)
+        .toContain(invariant);
+    }
   });
 
   // ── Guard 5: Dedup marker formats ───────────────────────────────────────────

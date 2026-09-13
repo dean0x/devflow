@@ -221,7 +221,22 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 
 Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
 
-**Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle.
+**Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle — and, because this is the tracker operation that owns the fan-out, GitHub's rate-limit and posting signals for the always-loaded D4 and D11 contracts.
+
+### Provider signals (GitHub)
+
+The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's, stated once for this provider — no other GitHub mechanics file restates them.
+
+- **Secondary rate limit:** a 403 or 429 response with a rate-limit body, or an `X-RateLimit-Remaining` header < 10. Continuing to issue requests into one extends GitHub's penalty window, which is why D4 says STOP rather than wait.
+- **Backpressure rung:** `X-RateLimit-Remaining` < 50 — the point at which D4's inter-operation delay rises from 1s to 3s for the remainder of the batch.
+- **Unavailability:** `gh` absent or unauthenticated, or no remote — D4's "no remote" condition on this provider.
+
+**Scrub-then-post chain** — D11's `&&` discipline instantiated for GitHub. A pipeline's exit status would swallow a scrubber crash, so the chain is `&&` and never `|`:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh issue comment {number} --body-file "$DEVFLOW_BODY"
+```
 
 ### Process
 

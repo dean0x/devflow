@@ -24,11 +24,11 @@ The orchestrator provides:
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 **Degradation contract (D4):** Any operation that requires remote access (GitHub API, push, PR) MUST degrade gracefully:
-- No remote / `gh` unauthenticated / no PR → emit `TRACEABILITY: DEGRADED (\{reason\})`, warn in output, and continue — never abort the caller's workflow.
-- Secondary rate limit (403 or 429 response with a rate-limit body, or `X-RateLimit-Remaining` header < 10) → STOP the current fan-out operation immediately; report remaining items as `THROTTLED (\{n\} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue issuing requests into an active rate limit — doing so extends GitHub's penalty window.
+- No remote / the tracker unauthenticated or unreachable / no PR → emit `TRACEABILITY: DEGRADED (\{reason\})`, warn in output, and continue — never abort the caller's workflow.
+- A provider-signalled secondary rate limit (the signal itself is named in the resolved provider's reference) → STOP the current fan-out operation immediately; report remaining items as `THROTTLED (\{n\} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue issuing requests into an active rate limit — doing so extends the provider's penalty window.
 - Other 4xx on a traceability op (deleted issue, closed PR, permissions error) → DEGRADED for that item, continue.
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
-- **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
+- **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read the provider's remaining-budget signal from the last API response. When the provider's backpressure rung is reached, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
 ## Tracker provider resolution
 
@@ -61,12 +61,12 @@ File presence in the installed skill directory is the authoritative signal: if t
 
 ## Comment-sink scrub (D11)
 
-Applies **unconditionally** to every op that posts or edits a body to GitHub — never gated on visibility, config, or compliance mode.
+Applies **unconditionally** to every op that posts or edits a body to the tracker — never gated on visibility, config, or compliance mode.
 
 **Shell discipline — `&&` chains, never pipelines:**
 ```bash
 node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
-  && gh …
+  && <the resolved provider's post command>
 ```
 A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` only. Where a step must run between scrub and post (the summary ops' cap re-check), read the scrubber's exit code before that step and abort the post on non-zero.
 
@@ -877,7 +877,7 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
 
 ## Principles
 
-1. **Rate limit aware** - Throttle API calls (1s between operations; raise to 3s when `X-RateLimit-Remaining` < 50); on a secondary rate limit (403/429 or remaining < 10) STOP the operation and report `THROTTLED` — never continue into an active rate limit
+1. **Rate limit aware** - Throttle API calls (1s between operations; raise to 3s at the provider's backpressure rung); on a provider-signalled secondary rate limit STOP the operation and report `THROTTLED` — never continue into an active rate limit
 2. **Fail gracefully (D4)** - Degrade named (`TRACEABILITY: DEGRADED (\{reason\})`), warn, never abort caller's workflow; secondary rate limit = stop + THROTTLED; other 4xx = skip item; 5xx = 1 retry
 3. **Deduplicate** - Never spam duplicate comments or issues; always check for markers before posting
 4. **Actionable output** - Every response includes next steps
@@ -899,6 +899,6 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
 - Thread fetching and resolution
 
 **Escalate to orchestrator:**
-- Missing PR (suggest `gh pr create`)
+- Missing PR (suggest creating one first)
 - Rate limit exhaustion (report and wait)
 - Authentication failures

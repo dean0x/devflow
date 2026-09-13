@@ -286,6 +286,73 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'skills/git/** (GAP-25).',
   },
 
+  // ── dist/agents/git.md (P2-S4 — the invariant/detector split) ──────────────
+  //
+  // These seven ranges are the ONLY deliberate rewrites of always-loaded text in
+  // the phase. Each one carried BOTH halves of P2-S4's table in a single sentence:
+  // an invariant that must stay and a GitHub detector that must not. No relocation
+  // of verbatim text can split a sentence, so the invariant half is rewritten in
+  // place and the detector half is restated in the GitHub provider reference.
+  // These bytes are the reason the github-status-lines re-capture was authorised.
+  {
+    file: 'git-agent.md',
+    startLine: 24,
+    endLine: 25,
+    rationale:
+      'D4 remote-unavailable and secondary-rate-limit conditions. `:24` named `gh` as the ' +
+      'authentication that can fail and `:25` carried the GitHub signal (403/429 with a ' +
+      'rate-limit body, `X-RateLimit-Remaining` header < 10) inside the same sentence as the ' +
+      'STOP/THROTTLED invariant. Rewritten provider-neutrally ("a provider-signalled secondary ' +
+      'rate limit"); the STOP clause, the THROTTLED report and the DEGRADED reason are ' +
+      'byte-unchanged, and the signal is now stated once in the GitHub reference.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 28,
+    endLine: 28,
+    rationale:
+      'D4 backpressure rung. The `X-RateLimit-Remaining` < 50 threshold is a GitHub signal; the ' +
+      '1s → 3s delay it triggers is a policy bound and §14.3 keeps policy bounds in the contract ' +
+      'layer. The sentence is rewritten so the bound stays and the signal moves.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 45,
+    endLine: 45,
+    rationale:
+      'D11 scope sentence said "posts or edits a body to GitHub". The scrub is unconditional for ' +
+      'EVERY provider, so naming one made the rule read as GitHub-only the moment a second ' +
+      'provider exists. Rewritten to "to the tracker"; "unconditionally" and the rest are unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 50,
+    endLine: 50,
+    rationale:
+      'The `&& gh …` half of the D11 shell-discipline fence. The scrubber invocation on `:49` ' +
+      'STAYS — making the containment control loadable is PF-027\'s failure mode — and only the ' +
+      'provider\'s post command becomes a placeholder. The concrete GitHub chain is stated once ' +
+      'in the GitHub reference, where the `&&` discipline is restated with it.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 968,
+    endLine: 968,
+    rationale:
+      '`## Principles` item 1 restated both rate-limit thresholds in prose, in a cross-cutting ' +
+      'section every spawn loads. Rewritten to keep the 1s/3s policy bounds and the STOP rule ' +
+      'and to defer both signals to the provider — otherwise the D4 cut would have been half a fix.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 990,
+    endLine: 990,
+    rationale:
+      '`## Boundaries` suggested `gh pr create` to the orchestrator. A provider CLI named in ' +
+      'always-loaded escalation text is a detector like any other; the advice is kept, the tool ' +
+      'name dropped.',
+  },
+
   // ── dist/agents/git.md (P2-S6) ─────────────────────────────────────────────
   {
     file: 'git-agent.md',
