@@ -13,8 +13,10 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { readFileSync } from 'fs';
 import * as path from 'path';
-import { resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, type CorpusEntry } from './helpers.js';
+import { skillsDir } from '../src/core/assets.js';
+import { resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
@@ -28,6 +30,64 @@ const GIT_AGENT_PATH = GIT_AGENT_SOURCE.path;
  */
 function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' | 'sole'): string {
   return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
+}
+
+// ── Inline-body (D11 bypass) scan ───────────────────────────────────────────
+//
+// Pattern and scope both widened by P2-S7. `[^`\n]*` keeps a match on one line,
+// so `--body-file` / `--notes-file` (hyphen, not space or quote) never match.
+
+const INLINE_BODY_RE = /gh (?:pr|issue|release) [a-z-]+[^`\n]*--(?:body|notes)[ "]|-f body=/g;
+
+/**
+ * Pre-existing inline-body recipes in the hand-authored `references/github-api.md`,
+ * frozen verbatim. See D-INLINE-BODY-EXCLUSIONS at the guard's call site: these are
+ * generic `gh` examples that predate D11 and sit outside every Phase-2 cut table.
+ * The list may shrink, never grow.
+ */
+const KNOWN_GITHUB_API_INLINE_BODIES: readonly string[] = [
+  '-f body=',
+  'gh issue comment $TECH_DEBT_ISSUE --body ',
+  'gh issue comment $old_issue --body ',
+  'gh pr create --title "Add user authentication" --body ',
+  'gh pr create --draft --title "WIP: Feature X" --body ',
+  'gh pr review $PR_NUMBER --approve --body ',
+  'gh pr review $PR_NUMBER --request-changes --body ',
+  'gh pr create --title "..." --body ',
+  'gh pr create --title "WIP: Feature" --body ',
+];
+
+interface InlineBodyOffender {
+  readonly file: string;
+  readonly match: string;
+}
+
+/**
+ * Named collector: every inline-body form in the files a Git spawn can read.
+ *
+ * Scope — dist/agents/git.md ∪ dist/skills/git/references/** (both via
+ * gitAgentSinkCorpus) ∪ the hand-authored src/assets/skills/git/SKILL.md and
+ * src/assets/skills/git/references/*.md. The hand-authored half is what P2-S7
+ * added: SKILL.md is preloaded on every spawn and was previously unscanned.
+ */
+function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: InlineBodyOffender[] } {
+  const corpus: CorpusEntry[] = [...gitAgentSinkCorpus()];
+  const gitSkillDir = path.join(skillsDir(), 'git');
+  corpus.push({
+    path: path.join(gitSkillDir, 'SKILL.md'),
+    content: readFileSync(path.join(gitSkillDir, 'SKILL.md'), 'utf-8'),
+  });
+  for (const file of walkFiles(path.join(gitSkillDir, 'references'), f => f.endsWith('.md'), 1)) {
+    corpus.push({ path: file, content: readFileSync(file, 'utf-8') });
+  }
+
+  const offenders: InlineBodyOffender[] = [];
+  for (const entry of corpus) {
+    for (const match of entry.content.match(INLINE_BODY_RE) ?? []) {
+      offenders.push({ file: entry.path, match });
+    }
+  }
+  return { corpus, offenders };
 }
 
 /**
@@ -639,21 +699,55 @@ describe('git agent — static content guards (PF-018)', () => {
     // The forward guard above only inspects ops that ALREADY use --body-file, so it is
     // blind to a bypass: `gh pr create --body "…"` posts an unscrubbed body and would
     // never be visited. This guard is the reverse check — it fails on any inline body
-    // form anywhere in the sink corpus, which is exactly how a new sink escapes D11 (PF-023).
-    // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist) [AC-0.8].
-    const sinkCorpus = gitAgentSinkCorpus();
-    const sinkContent = sinkCorpus.map(e => e.content).join('\n');
-    const INLINE_BODY_RE = /gh (?:pr|issue) [a-z-]+[^`\n]*--body[ "]|-f body=/g;
-    const offenders = sinkContent.match(INLINE_BODY_RE) ?? [];
+    // form anywhere in the scanned corpus, which is exactly how a new sink escapes D11
+    // (PF-023).
+    //
+    // P2-S7 widened this guard on both axes:
+    //   pattern — `release` joins `pr`/`issue`, and `--notes` joins `--body`, because
+    //     `gh release create … --notes "$NOTES"` is an inline-body form that the old
+    //     pattern could not see at all;
+    //   scope  — the hand-authored skill files join the compiled ones. The old scope
+    //     (git.md ∪ dist references) made SKILL.md a blind spot, and SKILL.md is
+    //     PRELOADED on every spawn, so it was the worst possible place to be blind.
+    const { corpus, offenders } = collectInlineBodyOffenders();
     expect(
-      offenders,
-      `D11 bypass: inline body form(s) found — route the body through the scrubber and post with --body-file / -F body=@: ${offenders.join(' | ')}`,
-    ).toHaveLength(0);
+      corpus.length,
+      'inline-body scan corpus is empty — the guard would pass by scanning nothing',
+    ).toBeGreaterThan(1);
 
-    // Non-vacuous: the pattern must actually match the shape it is guarding against.
+    // D-INLINE-BODY-EXCLUSIONS — the widened scope surfaced twelve pre-existing inline
+    // recipes in references/github-api.md: generic `gh pr`/`gh issue`/`gh api` examples
+    // that predate D11 and are not in any Phase-2 cut table. They are FROZEN here by
+    // exact text rather than silently excluded by narrowing the scope back: a
+    // thirteenth goes red, and the list can only be shortened. A named exception is
+    // not a weakened guard (§14.6's release.md precedent); narrowing the scope would
+    // have been.
+    const unexpected = offenders.filter(
+      o => !(o.file.endsWith('github-api.md') && KNOWN_GITHUB_API_INLINE_BODIES.includes(o.match)),
+    );
+    expect(
+      unexpected.map(o => `${o.file}: ${o.match}`),
+      'D11 bypass: inline body form(s) found — route the body through the scrubber and ' +
+      'post with --body-file / -F body=@ / --notes-file',
+    ).toEqual([]);
+
+    // The frozen list must stay live: an entry that matches nothing is a stale
+    // exclusion silencing a line that no longer exists.
+    const seen = new Set(offenders.map(o => o.match));
+    expect(
+      KNOWN_GITHUB_API_INLINE_BODIES.filter(known => !seen.has(known)),
+      'frozen github-api.md exclusion(s) no longer match anything — delete them from the list',
+    ).toEqual([]);
+
+    // Non-vacuous: the pattern must match BOTH shapes it is guarding against — the
+    // pre-existing one and the arm P2-S7 added.
     expect(
       'gh pr create --title "x" --body "unscrubbed"'.match(INLINE_BODY_RE),
       'bypass guard regex no longer matches a known-bad inline body form — the guard is inert',
+    ).not.toBeNull();
+    expect(
+      'gh release create v1 --notes "unscrubbed"'.match(INLINE_BODY_RE),
+      'bypass guard regex no longer matches an inline release-notes body — the new arm is inert',
     ).not.toBeNull();
   });
 
