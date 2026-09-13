@@ -209,7 +209,11 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 
 ### Process
 
-4. If `gh` is authenticated and remote is reachable: for each commit in the range, fetch merged PRs that include that commit and collect their `closingIssuesReferences` via `gh api`; merge with the commit-message set. On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
+4. If `gh` is authenticated and remote is reachable, resolve which issues the commit range closes — **batch first, never one call per commit** — and merge the result with the commit-message set:
+   - **Batch (the normal path).** Resolve the whole range with `closing_refs_for_commits`: one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
+   - **Dedup by PR number** before collecting references: several commits of one merged PR resolve to that PR once, so its `closingIssuesReferences` are read once.
+   - **Sequential fallback, bounded at ≤25 commits.** Only when the batch query is unavailable or errors, fall back to per-commit resolution in range order for at most ≤25 commits; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while commits went unresolved.
+   - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
 @end
 
 @define backlink_shipped_issues():

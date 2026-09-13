@@ -285,6 +285,21 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'skills/git/** (GAP-25).',
   },
 
+  // ── dist/agents/git.md (P2-S6) ─────────────────────────────────────────────
+  {
+    file: 'git-agent.md',
+    startLine: 541,
+    endLine: 541,
+    rationale:
+      'DR-17 commit B: gather-release-evidence step 4 REWRITTEN, not relocated. The ' +
+      'pre-split line resolves closing references with one `gh api` call PER COMMIT — up ' +
+      'to 100 remote calls for a 100-commit range (GAP-26). Commit A moved it verbatim; ' +
+      'commit B replaced it in the reference with a batch-first `closing_refs_for_commits` ' +
+      'query, PR-number dedup and a ≤25 bounded sequential fallback. This is the phase\'s ' +
+      'ONE deliberate rewrite of moved text, and its RED proof is the collector at the ' +
+      'foot of this file, driven over this same baseline.',
+  },
+
   // ── skills/git/references/github-api.md (P2-S7 fallout) ────────────────────
   {
     file: 'github-api.md',
@@ -610,5 +625,74 @@ describe('containment: structural parity — every op has a file and every file 
       }
     }
     expect(problems, `generated reference problems:\n  ${problems.join('\n  ')}`).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. gather-release-evidence — the batch-first rewrite [DR-17 commit B, H12]
+// ---------------------------------------------------------------------------
+//
+// Commit A moved the step byte-identically; commit B replaced the per-commit
+// fan-out (up to 100 `gh api` calls for a 100-commit range, the N+1 GAP-26
+// names) with a batch-first resolution plus a bounded sequential fallback.
+// It is the ONE deliberate rewrite of moved text in this phase, which is why
+// its baseline range is the entry CONTAINMENT_EXEMPTIONS exists for.
+//
+// The probe is permanent rather than anecdotal: it runs the SAME collector over
+// tests/fixtures/tracker/baseline/git-agent.md, which still holds the pre-split
+// line byte-exactly. H10 — the fix is never un-landed to show red.
+
+/** Named collector: per-commit fan-out lines in a release-evidence mechanics text. */
+function collectPerCommitFanout(text: string): string[] {
+  return text.split('\n').filter(line => /each commit/i.test(line) && /gh api/i.test(line));
+}
+
+describe('gather-release-evidence: batch-first, never one call per commit [DR-17]', () => {
+  const RELEASE_EVIDENCE = path.join(REFS_DIR, 'tracker', 'github', 'gather-release-evidence.md');
+
+  it('the moved mechanics state the ≤25 sequential sub-bound', () => {
+    const text = requireFile('generated reference', RELEASE_EVIDENCE);
+    expect(
+      text,
+      'the bounded sequential fallback must name its own limit — an unbounded fallback is the ' +
+      'N+1 fan-out with an extra step in front of it',
+    ).toContain('≤25');
+  });
+
+  it('the moved mechanics carry no per-commit `gh api` loop', () => {
+    const text = requireFile('generated reference', RELEASE_EVIDENCE);
+    expect(
+      collectPerCommitFanout(text),
+      'a per-commit `gh api` loop resolves a 100-commit range with 100 remote calls, which is ' +
+      'the exposure GAP-26 names and what commit B replaced',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the pre-rewrite line is reported by the same collector', () => {
+    const baseline = BASELINES.find(b => b.file === 'git-agent.md');
+    expect(baseline, 'the git-agent.md baseline must be loaded').toBeDefined();
+    expect(
+      collectPerCommitFanout(baseline!.lines.join('\n')).length,
+      'the collector must see the pre-split fan-out line in the committed baseline — otherwise ' +
+      'the assertion above is satisfied by a scan that recognises nothing',
+    ).toBe(1);
+  });
+
+  it('H12: the D4 item-degradation clause stays with the operation in git.md', () => {
+    // The rewrite introduces new remote failure modes (a batch call that 4xx\'s
+    // where 100 individual calls previously item-degraded per D4), so the clause
+    // that says "degrade the item, continue" must remain in the always-loaded file.
+    const git = resolveAgentSource('git');
+    const start = git.content.indexOf('## Operation: gather-release-evidence');
+    expect(start, 'gather-release-evidence must still be an operation of the agent').toBeGreaterThan(-1);
+    const next = git.content.indexOf('\n## Operation:', start + 1);
+    const section = next === -1 ? git.content.slice(start) : git.content.slice(start, next);
+    expect(section, 'gather-release-evidence: **Degradation (D4):** clause missing').toContain(
+      '**Degradation (D4):**',
+    );
+    expect(
+      section,
+      'gather-release-evidence: the per-item degrade rule must stay in git.md (H12)',
+    ).toContain('for any GitHub signal that could not be fetched');
   });
 });
