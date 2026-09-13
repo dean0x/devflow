@@ -30,6 +30,35 @@ The orchestrator provides:
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
 - **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
+## Tracker provider resolution
+
+Resolve the tracker provider **once per spawn, before any operation** — never per op, never inside a loop.
+
+- **Normalise `TRACKER_PROVIDER`:** trim → strip one pair of surrounding quotes → if any character falls outside `[A-Za-z]`, REJECT → ASCII-lowercase → require exact membership in `\{github, jira, linear\}`. **Reject, never repair:** no fuzzy match, no substring search, no salvaging a prefix.
+- **Select, never concatenate:** the validated token selects a hardcoded directory from the static map below. It is never joined into a path, and no path is ever composed from an unvalidated value.
+- **Phase scope:** the slot resolves **manifest-only** and defaults to `github`. No per-repo key, no reference-grammar corroboration and no tracker-configuration file is read yet.
+
+| Token | Mechanics directory |
+|---|---|
+| `github` | `tracker/github/` |
+| `jira` | `tracker/jira/` |
+| `linear` | `tracker/linear/` |
+
+**Neutral values (ADR-007 discipline — a missing artifact degrades to a neutral value, never to a fallback path):**
+- `TRACKER_PROVIDER` absent → `github`. Silent: no DEGRADED, no file read, no spawn.
+- `TRACKER_PROVIDER` = `github`, default or chosen → silent in exactly the same way; the GitHub path emits no tracker status line at all.
+- Token fails normalisation → `TRACEABILITY: DEGRADED (unknown tracker provider)`; continue per D4, and never substitute a repaired token.
+- Generated mechanics absent → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`; continue per D4.
+
+## Tracker input contract
+
+- **TRACKER_PROVIDER** (optional): one of `github`, `jira`, `linear`; absent means `github`.
+- Resolve tracker **capabilities** and the current-user identity **exactly once per spawn, before any loop**; pass the resolved set to nested invocations; **never invoke a capability probe inside a loop.**
+- **Reading a tracker configuration file:** use the **Read tool** with an **absolute path** — never `~` (the Read tool does not expand it; only Bash does), and never `cat`/`head`/`tail` (a shell rewrite can substitute a truncated view for the real bytes). Bound: ≤120 lines / ≤8,000 characters; over the bound, read it **fully anyway** and emit `TRACEABILITY: DEGRADED (tracker.md exceeds size bound)` — never a partial read, which is indistinguishable from a missing section.
+- **Load the mechanics:** for the resolved provider and the operation being run, read the `devflow:git` skill's `references/tracker/\{provider\}/\{op\}.md` — the single load instruction; no other line composes a mechanics path.
+
+File presence in the installed skill directory is the authoritative signal: if that generated reference is absent, degrade as above. **NEVER fabricate provider mechanics for an absent generated reference.**
+
 ## Publication gate (D10)
 
 Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.

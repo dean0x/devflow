@@ -64,6 +64,14 @@ const BUDGET_SKILL_MD = 6_600;
  * + src/assets/skills/worktree-support/SKILL.md 2_942 ch
  * =                                           77_824 ch
  * The split must not make a tracker spawn cost more than the monolith did.
+ *
+ * Deliberately a frozen literal rather than TOTAL_CHARS imported from
+ * tests/goldens/github-status-lines.test.ts, even though those constants exist
+ * for exactly this arithmetic (C6). Those are EQUALITY baselines that move in
+ * each golden-regeneration commit; a budget derived from them would follow the
+ * artifact down and end up asserting "the current size is the current size".
+ * A budget is a number the artifact must reach, so it is pinned to the
+ * historical measurement and cited, not recomputed.
  */
 const BUDGET_LOADED_SET = 77_824;
 
@@ -556,5 +564,121 @@ describe('byte budget: written exclusions', () => {
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,
       ).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. The preamble's provider normalisation (P2-S3 Verify, GAP-10)
+// ---------------------------------------------------------------------------
+//
+// Lives here rather than in a file of its own: byte-budget.test.ts is the one
+// tracker test file this subtask owns, and §14.10's naming scheme reserves the
+// other four names for guards that come later.
+//
+// What can be asserted mechanically about a prompt: that the rule is stated
+// exactly once, that the static map it points at is real, and that the rule AS
+// WRITTEN rejects every hostile token and never yields a path derived from the
+// input. The hostile table mirrors compliance-install.test.ts AC-35.
+
+/** The token → directory map, parsed out of the preamble rather than retyped. */
+function parseProviderMap(block: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const m of block.matchAll(/^\|\s*`([a-z]+)`\s*\|\s*`([a-z/]+\/)`\s*\|\s*$/gm)) {
+    map.set(m[1], m[2]);
+  }
+  return map;
+}
+
+/**
+ * The preamble's normalisation, implemented exactly as it is written:
+ * trim → strip one pair of surrounding quotes → reject any character outside
+ * [A-Za-z] → ASCII-lowercase → exact membership in the static map.
+ *
+ * Returns the mapped DIRECTORY, never anything built from the input — which is
+ * the property that matters: a rejected token cannot become a path, and an
+ * accepted one selects a hardcoded string rather than being concatenated.
+ */
+function resolveProviderAsSpecified(raw: string, map: ReadonlyMap<string, string>): string | null {
+  const trimmed = raw.trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
+  if (!/^[A-Za-z]*$/.test(trimmed)) return null;
+  return map.get(trimmed.toLowerCase()) ?? null;
+}
+
+describe('preamble: provider normalisation (one convergence point, PF-023)', () => {
+  const block = preambleBlock(GIT_AGENT.content);
+  const map = parseProviderMap(block);
+
+  it('states the normalisation rule exactly once, over a real three-entry map', () => {
+    const occurrences = GIT_AGENT.content.split('**Normalise `TRACKER_PROVIDER`:**').length - 1;
+    expect(
+      occurrences,
+      'the normalisation rule must be stated exactly ONCE — a second statement is a second ' +
+      'authority on what a provider token may be (PF-023 requires one convergence point)',
+    ).toBe(1);
+
+    expect([...map.keys()].sort()).toEqual(['github', 'jira', 'linear']);
+    expect([...map.values()]).toEqual(['tracker/github/', 'tracker/jira/', 'tracker/linear/']);
+  });
+
+  it('accepts only the three tokens, after trimming, quote-stripping and lowercasing', () => {
+    const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
+      ['github', 'tracker/github/'],
+      ['GitHub', 'tracker/github/'],
+      ['  jira  ', 'tracker/jira/'],
+      ['jira ', 'tracker/jira/'],
+      ['"linear"', 'tracker/linear/'],
+      ["'github'", 'tracker/github/'],
+    ];
+    for (const [raw, expected] of ACCEPTED) {
+      expect(resolveProviderAsSpecified(raw, map), `'${raw}' must resolve to ${expected}`)
+        .toBe(expected);
+    }
+  });
+
+  it('known-bad table: every hostile token is REJECTED, and none produces a path', () => {
+    // Reject, never repair. `jira-cloud` is the instructive one: a "closest
+    // match" rule would map it onto jira, which is exactly the repair the
+    // preamble forbids.
+    const HOSTILE: readonly string[] = [
+      '../../../etc/passwd',
+      'github/../../rules/devflow',
+      'jira-cloud',
+      '`id`',
+      'github ' + String.fromCharCode(36) + '(id)',
+      '',
+      ' ',
+      'a'.repeat(200),
+      'github jira',
+      'github;linear',
+    ];
+    expect(HOSTILE.length, 'hostile corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+
+    const accepted = HOSTILE.filter(raw => resolveProviderAsSpecified(raw, map) !== null);
+    expect(
+      accepted,
+      `hostile provider token(s) were accepted: ${accepted.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('every accepted token yields a map VALUE — never a path built from the input', () => {
+    const values = new Set(map.values());
+    for (const raw of ['github', 'GitHub', ' jira ', '"linear"']) {
+      const resolved = resolveProviderAsSpecified(raw, map);
+      expect(resolved, `${raw} must resolve`).not.toBeNull();
+      expect(values.has(resolved!), `${raw} must resolve to a mapped directory`).toBe(true);
+    }
+  });
+
+  it('no reference path in the compiled agent is addressed through ~/.claude', () => {
+    // A hardcoded ~/.claude/... is simply absent for CLAUDE_CODE_DIR users and
+    // for local-scope installs, and the fail-closed neutral value would then
+    // cost such a GitHub user their traceability entirely.
+    const offenders = GIT_AGENT.content
+      .split('\n')
+      .filter(line => line.includes('references/') && line.includes('~/.claude'));
+    expect(
+      offenders,
+      `reference(s) addressed absolutely instead of skill-relatively:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
   });
 });
