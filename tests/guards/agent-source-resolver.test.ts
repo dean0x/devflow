@@ -11,11 +11,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, copyFileSync, existsSync } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, copyFileSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import {
-  ROOT,
   resolveAgentSource,
   resolveAllAgents,
   extractOpSectionFromCorpus,
@@ -58,20 +57,6 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (16 agents, AC-0.7)', () => {
       ).toBeGreaterThan(0)
     }
   })
-
-  it('resolved agents report origin=src when no dist/agents/ file is present (Phase 1 safe)', () => {
-    // Conditional: when dist/agents/<name>.md does not exist, origin must be 'src'.
-    // When it does exist (Phase 1+), origin will be 'dist' — also correct.
-    const resolved = resolveAllAgents()
-    for (const [name, source] of resolved) {
-      if (!existsSync(path.join(ROOT, 'dist', 'agents', `${name}.md`))) {
-        expect(
-          source.origin,
-          `Agent '${name}' must resolve from src when dist/agents/${name}.md is absent`,
-        ).toBe('src')
-      }
-    }
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -91,9 +76,10 @@ describe('resolveAgentSource: dist-preferred, src-fallback', () => {
     const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
     mkdirSync(srcAgentsDir, { recursive: true })
     for (const name of getAllAgentNames()) {
-      copyFileSync(
-        path.join(ROOT, 'src', 'assets', 'agents', `${name}.md`),
+      writeFileSync(
         path.join(srcAgentsDir, `${name}.md`),
+        resolveAgentSource(name).content,
+        'utf8',
       )
     }
 

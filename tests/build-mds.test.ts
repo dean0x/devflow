@@ -9,53 +9,99 @@
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
- *  5. Script happy-path exit — build:mds exits 0 and at least one compiled .md lands in dist/commands/ (exact cardinality is pinned by scenario 6).
+ *  5. Script happy-path exit — the committed sources compile cleanly and the compiled
+ *     set lands in dist/commands/ (exact cardinality is pinned by scenario 6).
  *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic outputs present.
  *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
  *  9. Ignored-dir walk (P3) — a .mds with output-dir: under node_modules/ is not compiled.
  * 10. dynamic-build.md doctrine greps.
  * 11. knowledge outputs contain no feature-knowledge.cjs references.
+ * 22. this file never spawns a build against the real repo root.
+ *
+ * EVERY build this file spawns runs against an isolated DEVFLOW_MDS_ROOT temp
+ * tree, so the real src/ and dist/ trees are only ever READ. Every assertion
+ * over a compiled command reads it from `BUILT_COMMANDS` — dist/commands/ inside
+ * a build of a COPY of the committed sources (buildCommittedTree) — rather than
+ * rebuilding the repo's own dist/ in a beforeAll. Rebuilding it here REPAIRED a
+ * stale dist/ mid-suite while parallel vitest workers read those same paths, so
+ * the staleness surfaced as a flake in whichever reader lost the race instead of
+ * as itself (avoids PF-055). Scenario 22 is the mechanical proof of that claim
+ * rather than this sentence.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { init, compile, isMdsError } from '@mdscript/mds';
+import {
+  KNOWLEDGE_COMMAND_HOSTS,
+  DYNAMIC_COMMAND_HOSTS,
+  MDS_COMMAND_HOSTS,
+  MDS_PARTIALS,
+  DIST_COMMAND_FILES,
+} from './fixtures/mds-manifest.js';
+import {
+  splitFrontmatter,
+  buildCommittedTree,
+  cleanupCommittedTree,
+  collectSpawnScoping,
+  requireDistFiles,
+} from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
 const PARTIALS_DIR = path.join(COMMANDS_DIR, '_partials');
+/** Label only — the deployed location these artifacts ship to. Never a read path. */
 const DIST_COMMANDS = 'dist/commands';
 
 /** Path to the local tsx binary (avoids npx install in temp dirs). */
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
 
-/** The 9 knowledge host basenames (all compile to dist/commands). */
-const KNOWLEDGE_HOSTS = [
-  'implement', 'plan', 'resolve', 'code-review', 'self-review',
-  'research', 'bug-analysis', 'explore', 'debug',
-] as const;
+/** This file's own source, read by the scenario-22 self-scan. */
+const SELF = import.meta.filename;
 
-/** The 4 dynamic host basenames (all compile to dist/commands). */
-const DYNAMIC_HOSTS = [
-  'dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets',
-] as const;
+/**
+ * dist/commands/ inside the temp tree built from a copy of the committed
+ * sources. Assigned by the file-level beforeAll below; every compiled-output
+ * assertion in this file reads from here, never from the repo's own dist/.
+ */
+let BUILT_COMMANDS: string;
 
-const ALL_HOSTS = [...KNOWLEDGE_HOSTS, ...DYNAMIC_HOSTS] as const;
+/**
+ * Several tests here spawn `tsx scripts/build-mds.ts`, and the committed-corpus
+ * build compiles all 14 outputs. The 5s vitest default is far below what a cold
+ * tsx start costs under full-suite load, so the file declares its own floor once
+ * rather than annotating each test.
+ */
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 180_000 });
 
+beforeAll(async () => {
+  const { run, root } = await buildCommittedTree();
+  expect(run.status, `committed-tree build should exit 0.\n${run.combined}`).toBe(0);
+  BUILT_COMMANDS = path.join(root, 'dist', 'commands');
+}, 180_000);
+
+afterAll(cleanupCommittedTree);
+
+// Names come from the shared manifest (tests/fixtures/mds-manifest.ts) — the one
+// definition of which files the build owns. These aliases are this file's local
+// vocabulary for those sets; COMMAND_HOSTS is the manifest's MDS_COMMAND_HOSTS
+// (13 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
+// also carries the generator host.
+//
 // DIST_FILES = all 14 deployed commands (13 compiled MDS hosts + 1 hand-authored).
 // release.md is hand-authored and stays so permanently — the divergence is deliberate
 // and recorded in .devflow/features/dynamic-workflow-engine/KNOWLEDGE.md (SG-13, §14.5).
 // Scope rule (§14.5):
-//   - compilation guards (escaped braces, un-expanded call sites) → ALL_HOSTS scope
+//   - compilation guards (escaped braces, un-expanded call sites) → COMMAND_HOSTS scope
 //   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
-const DIST_FILES = [
-  ...ALL_HOSTS.map(h => `${h}.md`),
-  'release.md',
-] as const;
+const KNOWLEDGE_HOSTS = KNOWLEDGE_COMMAND_HOSTS;
+const DYNAMIC_HOSTS = DYNAMIC_COMMAND_HOSTS;
+const COMMAND_HOSTS = MDS_COMMAND_HOSTS;
+const DIST_FILES = DIST_COMMAND_FILES;
 
 // ---------------------------------------------------------------------------
 // Shared MDS initialisation — required before compile calls
@@ -75,16 +121,53 @@ async function ensureInit(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('MDS host discovery', () => {
-  it('commands/ contains exactly 13 host .mds files (9 knowledge + 4 dynamic)', async () => {
-    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
-    const hostFiles = entries.filter(
-      e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
-    );
-    expect(hostFiles).toHaveLength(13);
+  /**
+   * Named collector: .mds basenames anywhere under `dir`, split into hosts
+   * (no `_` prefix) and partials, plus every subdirectory found. Recursive by
+   * design — a partial parked in a subdirectory is still a partial, and the
+   * flat readdir that preceded this collector could not see one. `subdirs`
+   * recurses on the same terms: a nested directory is reported path-qualified
+   * relative to `dir` (`nested/deeper`), so the flatness assertion below means
+   * "no directories anywhere under _partials/", not "none at depth 1".
+   * Used by the manifest assertions AND by the known-bad probes, so a probe
+   * cannot pass against a shadow implementation.
+   */
+  async function collectMdsNames(dir: string, depth = 0): Promise<{
+    hosts: string[]; partials: string[]; subdirs: string[];
+  }> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const hosts: string[] = [];
+    const partials: string[] = [];
+    const subdirs: string[] = [];
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        subdirs.push(e.name);
+        if (depth < 4) {
+          const nested = await collectMdsNames(path.join(dir, e.name), depth + 1);
+          hosts.push(...nested.hosts);
+          partials.push(...nested.partials);
+          subdirs.push(...nested.subdirs.map(s => `${e.name}/${s}`));
+        }
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith('.mds')) continue;
+      const base = path.basename(e.name, '.mds');
+      (base.startsWith('_') ? partials : hosts).push(base);
+    }
+    return { hosts: hosts.sort(), partials: partials.sort(), subdirs: subdirs.sort() };
+  }
+
+  it('commands/ holds exactly the manifest\'s 13 command hosts (both directions)', async () => {
+    // Set equality, not a count. A count stays green when one host is renamed and
+    // another added in the same commit; naming the set is what pins the roster.
+    const { hosts } = await collectMdsNames(COMMANDS_DIR);
+    expect(hosts).toEqual([...MDS_COMMAND_HOSTS].sort());
+    // Manifest length floor — floors never decrease (numeric-floors.json: dist-host-count).
+    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(13);
   });
 
   it('each expected host .mds exists in commands/', async () => {
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const sourcePath = path.join(COMMANDS_DIR, `${basename}.mds`);
       await expect(
         fs.access(sourcePath),
@@ -93,10 +176,44 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ contains exactly 11 partials (no output-dir:)', async () => {
-    const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
-    const partialFiles = entries.filter(e => e.isFile() && e.name.endsWith('.mds'));
-    expect(partialFiles).toHaveLength(11);
+  it('commands/_partials/ holds exactly the manifest\'s 11 partials (both directions)', async () => {
+    const { partials } = await collectMdsNames(PARTIALS_DIR);
+    expect(partials).toEqual([...MDS_PARTIALS].sort());
+    // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
+    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(11);
+  });
+
+  it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
+    // The flat readdir this replaced could not distinguish "no subdirectories"
+    // from "subdirectories present but unread". Assert the property directly,
+    // and at every depth: the collector reports nested directories too, so a
+    // directory buried two levels down cannot hide behind a depth-1 sweep.
+    const { subdirs } = await collectMdsNames(PARTIALS_DIR);
+    expect(
+      subdirs,
+      `_partials/ must stay flat; nested partials would be invisible to any flat reader: ${subdirs.join(', ')}`,
+    ).toHaveLength(0);
+  });
+
+  it('known-bad probe: a nested partial and a subdirectory are both detected', async () => {
+    // Mechanic 2 (H10): a seeded temp tree, never the real _partials/.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-partials-probe-'));
+    try {
+      await fs.writeFile(path.join(tmp, '_flat.mds'), 'x', 'utf-8');
+      await fs.mkdir(path.join(tmp, 'nested', 'deeper'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'nested', '_buried.mds'), 'x', 'utf-8');
+
+      const { partials, subdirs } = await collectMdsNames(tmp);
+      expect(subdirs, 'the subdirectory assertion must fire on a seeded subdir').toContain('nested');
+      expect(
+        subdirs,
+        'the flatness assertion must see subdirectories at every depth, not just depth 1',
+      ).toContain('nested/deeper');
+      expect(partials, 'the recursive collector must see a partial one level down').toContain('_buried');
+      expect(partials).not.toEqual([...MDS_PARTIALS].sort());
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
@@ -108,11 +225,11 @@ describe('MDS host discovery', () => {
   });
 
   it('every host .mds declares a non-empty output-dir: as its last frontmatter key', async () => {
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       const content = await fs.readFile(path.join(COMMANDS_DIR, `${basename}.mds`), 'utf-8');
-      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content);
-      expect(fmMatch, `${basename}.mds must have a frontmatter block`).not.toBeNull();
-      const fm = fmMatch![1];
+      const fmSplit = splitFrontmatter(content);
+      expect(fmSplit, `${basename}.mds must have a frontmatter block`).not.toBeNull();
+      const fm = fmSplit!.inner;
       expect(fm, `${basename}.mds must declare output-dir:`).toMatch(/^output-dir:/m);
       // output-dir: should be the last key (no non-blank lines after it inside the block)
       const lines = fm.split(/\r?\n/);
@@ -131,23 +248,10 @@ describe('MDS host discovery', () => {
 // ---------------------------------------------------------------------------
 
 describe('output-dir: stripped from compiled outputs', () => {
-  beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('no compiled output contains output-dir:', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -165,8 +269,8 @@ describe('output-dir: stripped from compiled outputs', () => {
 
   it('every compiled output that has frontmatter still has description:', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -188,7 +292,7 @@ describe('output-dir: stripped from compiled outputs', () => {
   it('dynamic compiled outputs preserve argument-hint:', async () => {
     let scanned = 0;
     for (const basename of DYNAMIC_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -216,7 +320,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -235,7 +339,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
   it('no compiled knowledge command references feature-knowledge.cjs', async () => {
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -253,8 +357,8 @@ describe('partial expansion in compiled knowledge outputs', () => {
 
   it('no compiled output contains a literal @import line', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -278,26 +382,13 @@ describe('partial expansion in compiled knowledge outputs', () => {
 // ---------------------------------------------------------------------------
 
 describe('escape-regression guard: no dist command contains literal backslash-brace (\\{)', () => {
-  beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
-    // ALL_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
+    // COMMAND_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
     // output only.  release.md is hand-authored and not produced by the MDS compiler —
-    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
+    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -319,23 +410,10 @@ describe('escape-regression guard: no dist command contains literal backslash-br
 // ---------------------------------------------------------------------------
 
 describe('decisions_load adoption in compiled knowledge command outputs', () => {
-  beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -355,7 +433,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
   it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -415,28 +493,26 @@ describe('MDS compiler mechanism', () => {
 // ---------------------------------------------------------------------------
 
 describe('build-mds.ts script subprocess contract', () => {
-  it('exits 0 when real sources compile cleanly (CI path)', () => {
-    const result = spawnSync(
-      TSX_BIN,
-      [path.join(ROOT, 'scripts', 'build-mds.ts')],
-      {
-        cwd: ROOT,
-        encoding: 'utf-8',
-        timeout: 60_000,
-      },
-    );
-    if (result.error) throw result.error;
+  it('exits 0 when the committed sources compile cleanly (CI path)', async () => {
+    // The committed corpus, compiled into a copy of itself — the same sources CI
+    // builds, with the repo's own dist/ left alone (see the header, and the
+    // scenario-22 self-scan that enforces it).
+    const { run } = await buildCommittedTree();
     expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      run.status,
+      `build-mds.ts should exit 0 but exited ${run.status}.\n${run.combined}`,
     ).toBe(0);
+    // Non-vacuity: an exit code alone says nothing about what was compiled.
+    expect(run.combined, 'the build must report the hosts it compiled').toMatch(
+      /\d+ host\(s\) to compile:/,
+    );
   });
 
   it('produces at least one .md command file after the script runs', async () => {
     let foundAtLeastOne = false;
-    for (const basename of ALL_HOSTS) {
+    for (const basename of COMMAND_HOSTS) {
       try {
-        await fs.access(path.join(ROOT, DIST_COMMANDS, `${basename}.md`));
+        await fs.access(path.join(BUILT_COMMANDS, `${basename}.md`));
         foundAtLeastOne = true;
         break;
       } catch {
@@ -452,22 +528,9 @@ describe('build-mds.ts script subprocess contract', () => {
 // ---------------------------------------------------------------------------
 
 describe('expected-command-set guard (C2)', () => {
-  beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('all 9 knowledge command outputs exist post-build', async () => {
     for (const basename of KNOWLEDGE_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       await expect(
         fs.access(outputPath),
         `Expected compiled output missing: ${DIST_COMMANDS}/${basename}.md`,
@@ -477,7 +540,7 @@ describe('expected-command-set guard (C2)', () => {
 
   it('all 4 dynamic command outputs exist post-build', async () => {
     for (const basename of DYNAMIC_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       await expect(
         fs.access(outputPath),
         `Expected compiled output missing: ${DIST_COMMANDS}/${basename}.md`,
@@ -485,14 +548,30 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('dist/commands/ contains exactly 14 .md files (13 compiled + 1 hand-authored)', async () => {
+  it('a build of the committed sources holds exactly the manifest\'s 14 output files (both directions)', async () => {
     // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
-    const files = await fs.readdir(path.join(ROOT, 'dist', 'commands'));
-    const mdFiles = files.filter(f => f.endsWith('.md'));
+    // Set equality names which files must be there; the length pin below keeps
+    // the SG-13 divergence (14 deployed vs 13 compiled) explicit.
+    const files = await fs.readdir(BUILT_COMMANDS);
+    const mdFiles = files.filter(f => f.endsWith('.md')).sort();
     expect(
-      mdFiles.length,
-      `Expected 14 .md files in dist/commands/ (13 compiled + 1 hand-authored), got ${mdFiles.length}: ${mdFiles.sort().join(', ')}`,
+      mdFiles,
+      `the built dist/commands/ must hold exactly the manifest's output set, got: ${mdFiles.join(', ')}`,
+    ).toEqual([...DIST_COMMAND_FILES].sort());
+    expect(
+      DIST_COMMAND_FILES.length,
+      'DIST_COMMAND_FILES = 13 compiled hosts + release.md (SG-13, permanent divergence)',
     ).toBe(14);
+  });
+
+  it('the deployed dist/commands/ holds the same set (read-only, fail-loud when unbuilt)', () => {
+    // Read-only companion to the assertion above: the set is checked where the
+    // installer actually reads it from. requireDistFiles throws with a build hint
+    // rather than skipping, so an unbuilt tree fails here instead of quietly
+    // passing (PF-018) — and nothing in this file repairs it (PF-055). Whether
+    // those bytes still match src/ is a separate, byte-level check, owned by
+    // tests/build-mds-generator-hosts.test.ts.
+    expect([...requireDistFiles()].sort()).toEqual([...DIST_COMMAND_FILES].sort());
   });
 });
 
@@ -629,7 +708,11 @@ describe('npm scripts (C4)', () => {
 
 describe('ignored-dir walk (P3)', () => {
   it('a .mds with output-dir: planted under node_modules/ is not compiled', async () => {
-    // Use a temp dir as root; plant a fake node_modules/.mds to confirm skip.
+    // The root the build walks comes from DEVFLOW_MDS_ROOT, never from cwd:
+    // build-mds.ts resolves its fallback root from the script's own location, so
+    // spawning with `cwd: tmpRoot` alone would have walked and REWRITTEN the real
+    // repo while asserting about a tmpRoot the build never looked at — green for
+    // the wrong reason (avoids PF-018), and a writer into shared dist/ (PF-055).
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-walk-'));
     try {
       const fakeNm = path.join(tmpRoot, 'node_modules', 'some-pkg');
@@ -640,20 +723,24 @@ describe('ignored-dir walk (P3)', () => {
         'utf-8',
       );
 
-      // Also create a valid host that would succeed to test the walk doesn't crash.
-      // (No valid plugin exists in tmpRoot, so if the stray is discovered, exit code = 1.
-      //  If only the stray exists and is skipped, hosts.length == 0 → also exit 1 with
-      //  "expected 13 hosts". Either way the compiled output must not exist.)
       const scriptPath = path.join(ROOT, 'scripts', 'build-mds.ts');
       const result = spawnSync(TSX_BIN, [scriptPath], {
-        cwd: tmpRoot,
+        cwd: ROOT,
         encoding: 'utf-8',
         timeout: 60_000,
+        env: { ...process.env, DEVFLOW_MDS_ROOT: tmpRoot },
       });
       if (result.error) throw result.error;
 
-      // The stray must not have been compiled (no output created in tmpRoot).
-      // The script will exit non-zero (no hosts found), but the stray file is what we check.
+      // Only the stray exists, and it is skipped → no hosts discovered at all,
+      // which is the build's own hard-fail. That the walk REACHED the planted
+      // tree (rather than never looking) is what the message proves.
+      expect(
+        result.status,
+        `expected exit 1 (no hosts discovered).\n${result.stdout}${result.stderr}`,
+      ).toBe(1);
+      expect((result.stdout ?? '') + (result.stderr ?? '')).toMatch(/No MDS host files discovered/);
+
       const strayShouldNotExist = path.join(tmpRoot, 'out', 'nope', 'commands', 'stray.md');
       let exists = false;
       try {
@@ -677,18 +764,8 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
   let compiled: string;
 
   beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
     compiled = await fs.readFile(
-      path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
+      path.join(BUILT_COMMANDS, 'dynamic-build.md'),
       'utf-8',
     );
   });
@@ -720,27 +797,14 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
 // ---------------------------------------------------------------------------
 
 describe('compiled knowledge commands — no stale call-site references', () => {
-  beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
-    // ALL_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
+    // COMMAND_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
     // applies to MDS compiler outputs only.  release.md is hand-authored — it never
-    // contains MDS call sites (SG-13 / DIST_FILES vs ALL_HOSTS divergence).
+    // contains MDS call sites (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -767,18 +831,8 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
   let compiled: string;
 
   beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
     compiled = await fs.readFile(
-      path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'),
+      path.join(BUILT_COMMANDS, 'dynamic-build.md'),
       'utf-8',
     );
   });
@@ -896,24 +950,10 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
 
 describe('compiled dynamic commands: --dry-run removal (C7)', () => {
   const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const;
-  const DYNAMIC_DIR = path.join(ROOT, 'dist', 'commands');
-
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
 
   it('dynamic-build, plan, tickets do NOT contain --dry-run', async () => {
     for (const basename of DRY_RUN_ABSENT) {
-      const content = await fs.readFile(path.join(DYNAMIC_DIR, `${basename}.md`), 'utf-8');
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
       expect(
         content,
         `${basename}.md must not contain --dry-run after C7 removal`,
@@ -922,7 +962,7 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
   });
 
   it('compiled dynamic-profile.md still contains --dry-run (untouched by plan)', async () => {
-    const content = await fs.readFile(path.join(DYNAMIC_DIR, 'dynamic-profile.md'), 'utf-8');
+    const content = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-profile.md'), 'utf-8');
     expect(content).toContain('--dry-run');
   });
 });
@@ -951,22 +991,9 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     'bug-analysis': DIST_COMMANDS,
   };
 
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
     for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(
         content,
@@ -980,7 +1007,7 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
   });
 
   it('implement.md contains ISSUE_NUMBER and COMPLIANCE setup-task wiring; no COMPLIANCE_ENABLED (Phase E, AC-32)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'implement.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     // Positive: issue-first threading — ISSUE_NUMBER must appear in Code-agent spawns
     expect(
@@ -1010,14 +1037,14 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // Title corrected (P0-S22): the body asserts COMPLIANCE: {enabled (not COMPLIANCE: ${).
     // dist/commands/dynamic-build.md:210 legitimately contains COMPLIANCE: ${COMPLIANCE}
     // (a JS template literal in a code block) — that is intentional, not an MDS escape bug.
-    // M8: DIST_FILES (not ALL_HOSTS) — release.md is a hand-authored dist file that must
+    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md is a hand-authored dist file that must
     // pass the same COMPLIANCE_ENABLED/devflow-compliance/comment-pr cleanliness checks.
-    // ALL_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = ALL_HOSTS + release.md (14 total).
+    // COMMAND_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = COMMAND_HOSTS + release.md (14 total).
     // DIST_FILES entries already include the '.md' extension (e.g. 'implement.md').
     // Use `basename` directly as the filename — do NOT append '.md' again.
     let scanned = 0;
     for (const basename of DIST_FILES) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
+      const outputPath = path.join(BUILT_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1055,11 +1082,11 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
     // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
     // verify the fence also references "Git" as the agent type.
-    // M8: DIST_FILES (not ALL_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
+    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
     // DIST_FILES entries include the '.md' extension — use basename directly (no extra .md).
     let scanned = 0;
     for (const basename of DIST_FILES) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, basename);
+      const outputPath = path.join(BUILT_COMMANDS, basename);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1103,21 +1130,8 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
 // ---------------------------------------------------------------------------
 
 describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () => {
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('code-review.md contains post-review-summary and passes REVIEW_TIMESTAMP input', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'code-review.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1133,7 +1147,7 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
   });
 
   it('code-review.md does not contain comment-pr (retired op)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'code-review.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'code-review.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1149,21 +1163,8 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
 // ---------------------------------------------------------------------------
 
 describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('resolve.md contains Phase D traceability ops', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'resolve.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(content, 'resolve.md must contain fetch-review-threads op').toContain('fetch-review-threads');
     expect(content, 'resolve.md must contain resolve-review-threads op').toContain('resolve-review-threads');
@@ -1173,7 +1174,7 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
   });
 
   it('resolve.md contains COMPLIANCE_SKILL_INSTALLED check (Step 0d compliance wiring)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'resolve.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'resolve.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1198,17 +1199,7 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
   let compiled: string;
 
   beforeAll(async () => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-    compiled = await fs.readFile(path.join(ROOT, DIST_COMMANDS, 'resolve.md'), 'utf-8');
+    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'resolve.md'), 'utf-8');
     expect(compiled.length, 'resolve.md must be non-empty').toBeGreaterThan(0);
   });
 
@@ -1251,21 +1242,8 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', () => {
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('plan.md contains ensure-traceable-issue (Phase 14 Git-agent spawn, Step 2.6)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'plan.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'plan.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1274,7 +1252,7 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
   });
 
   it('implement.md contains COMPLIANCE_SKILL_INSTALLED check (Step 2.5)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'implement.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'implement.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1291,21 +1269,8 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
 // ---------------------------------------------------------------------------
 
 describe('Phase F traceability — release.md evidence + dynamic-build compliance (Steps 2.9, 2.11)', () => {
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'release.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'release.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1322,7 +1287,7 @@ describe('Phase F traceability — release.md evidence + dynamic-build complianc
   });
 
   it('dynamic-build.md contains COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, and conventions.md (Step 2.11)', async () => {
-    const outputPath = path.join(ROOT, DIST_COMMANDS, 'dynamic-build.md');
+    const outputPath = path.join(BUILT_COMMANDS, 'dynamic-build.md');
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(
       content,
@@ -1351,23 +1316,10 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
     'resolve':     DIST_COMMANDS,
   };
 
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('code-review.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
     let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
-      const outputPath = path.join(ROOT, destRelDir, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       scanned++;
       expect(
@@ -1380,8 +1332,8 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
     let scanned = 0;
-    for (const basename of ALL_HOSTS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+    for (const basename of COMMAND_HOSTS) {
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       let content: string;
       try {
         content = await fs.readFile(outputPath, 'utf-8');
@@ -1428,19 +1380,6 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('DIST_FILES contains exactly 14 entries (13 compiled hosts + release.md) — non-vacuity (P0-S21)', () => {
     // SG-13: the divergence is permanent; release.md stays hand-authored.
     expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (13 compiled + release.md)').toBe(14);
@@ -1464,7 +1403,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
 
     let hostsScanned = 0;
     for (const basename of COMPLIANCE_GATE_IMPORTERS) {
-      const outputPath = path.join(ROOT, DIST_COMMANDS, `${basename}.md`);
+      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       hostsScanned++;
       expect(
@@ -1512,36 +1451,16 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
     'resolve.md',      // resolve.mds:63
   ]);
 
-  beforeAll(() => {
-    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-mds.ts')], {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
-    if (result.error) throw result.error;
-    expect(
-      result.status,
-      `build-mds.ts should exit 0 but exited ${result.status}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    ).toBe(0);
-  });
-
   it('no dist command contains gh issue invocations or descriptive mentions outside a Git spawn fence', async () => {
-    // Deployed-behaviour guard → DIST_FILES scope (§14.5).
-    const distDir = path.join(ROOT, DIST_COMMANDS);
+    // Deployed-behaviour guard → DIST_FILES scope (§14.5), read from the
+    // isolated build of the committed sources.
+    const distDir = BUILT_COMMANDS;
 
-    // Fail-loud: dist must exist (R3 — throw with build hint, never skip).
-    let distFiles: string[];
-    try {
-      distFiles = (await fs.readdir(distDir)).filter(f => f.endsWith('.md'));
-    } catch {
-      throw new Error(
-        'dist/commands/ is absent — run `npm run build` first\n' +
-        '  (this guard reads deployed command files and cannot be skipped)',
-      );
-    }
+    // Fail-loud: the build must have produced the tree (R3 — never skip).
+    const distFiles = (await fs.readdir(distDir)).filter(f => f.endsWith('.md'));
     expect(
       distFiles.length,
-      `dist/commands/ has ${distFiles.length} .md files — expected 14`,
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
     ).toBe(14);
 
     // Named collector — used by both the main guard loop and the non-vacuity probe (M12c).
@@ -1609,5 +1528,62 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
       violations,
       `gh issue scope violations:\n${violations.join('\n')}`,
     ).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 22. this file never spawns a build against the real repo root
+// ---------------------------------------------------------------------------
+//
+// The header claims every build here is scoped to a temp DEVFLOW_MDS_ROOT. That
+// claim decays the moment someone adds a spawn without one — and the failure it
+// reintroduces is invisible locally: an unscoped build rewrites the real dist/
+// while parallel vitest workers read it, so a stale tree is silently repaired
+// mid-suite and whichever reader lost the race reports a flake instead of the
+// staleness (PF-055). A prose invariant cannot detect that, so it is scanned.
+//
+// The scan is deliberately blind to WHERE the root comes from: `cwd:` is not a
+// scope. build-mds.ts resolves its fallback root from the script's own location,
+// so a spawn with `cwd: <tmp>` and no env var walks and rewrites the real repo
+// while the test asserts about a temp tree the build never opened.
+
+describe('this file never spawns a build against the real repo root', () => {
+  it('every spawned build is scoped to a temp DEVFLOW_MDS_ROOT', async () => {
+    const source = await fs.readFile(SELF, 'utf-8');
+    const { total, unscoped } = collectSpawnScoping(source);
+
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+      .toBeGreaterThan(0);
+    expect(
+      unscoped,
+      'a build in this file is spawned without DEVFLOW_MDS_ROOT: it would write the real ' +
+      'dist/ tree while parallel workers read it. Pass DEVFLOW_MDS_ROOT in its env, or ' +
+      'route it through buildCommittedTree() when the whole committed corpus is needed.',
+    ).toEqual([]);
+  });
+
+  it('non-vacuity: the real dist/ tree is what those builds would have written', () => {
+    // The scan is structural, so it is paired with the fact it protects: the real
+    // dist/commands/ exists and is readable from here, and stays exactly as this
+    // file found it. Its bytes are never this file's to write.
+    expect(requireDistFiles().length, 'dist/ must be built before this file runs')
+      .toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the collector flags an unscoped spawn and clears a scoped one', () => {
+    // Built by concatenation for the same reason the collector splits its needle:
+    // a literal here would be found by the scan over this very file.
+    const CALL = 'spawn' + 'Sync(';
+    // No numeral in the fixture: the timeout floor registered for this file in
+    // tests/fixtures/numeric-floors.json counts real spawn sites, and a fixture
+    // string spelling the same number would pad that count.
+    const unscopedSite = `${CALL}TSX_BIN, [SCRIPT], {\n  cwd: tmpRoot,\n  encoding: 'utf-8',\n});`;
+    const scopedSite =
+      `${CALL}TSX_BIN, [SCRIPT], {\n  cwd: ROOT,\n  env: { DEVFLOW_MDS_ROOT: fakeRoot },\n});`;
+
+    expect(collectSpawnScoping(unscopedSite)).toEqual({ total: 1, unscoped: [0] });
+    expect(collectSpawnScoping(scopedSite)).toEqual({ total: 1, unscoped: [] });
+    expect(collectSpawnScoping(`${unscopedSite}\n${scopedSite}`).unscoped).toHaveLength(1);
+    expect(collectSpawnScoping('no spawns here').total).toBe(0);
   });
 });

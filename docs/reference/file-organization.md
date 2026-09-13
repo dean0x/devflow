@@ -21,7 +21,8 @@ devflow/
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
 │   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
-│   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir
+│   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
+│   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
 │   │   ├── flags.ts                  # Claude Code flag registry (29 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
@@ -48,8 +49,8 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 16 agents
-│       │   ├── git.md
+│       ├── agents/                   # 16 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
+│       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
 │       │   ├── synthesize.md
 │       │   ├── code.md
 │       │   └── ...
@@ -58,9 +59,9 @@ devflow/
 │       │   ├── security.md
 │       │   └── ...
 │       ├── commands/                 # Command sources
-│       │   ├── *.mds                 # 13 MDS host files (compiled to dist/commands/ by build:mds)
+│       │   ├── *.mds                 # MDS command hosts (compiled to dist/commands/ by build:mds)
 │       │   ├── *.md                  # 1 static command file
-│       │   └── _partials/            # 11 MDS partial files (no output-dir:, never compiled directly)
+│       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
@@ -91,7 +92,7 @@ devflow/
 │               ├── project-paths.cjs   # Project slug + path resolution
 │               └── safe-path.cjs       # Path safety validation
 ├── scripts/                          # Dev tooling
-│   ├── build-mds.ts                  # MDS compiler: src/assets/commands/*.mds → dist/commands/*.md
+│   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md
 │   ├── bump-version.ts               # Version bump script
 │   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
 ├── tests/                            # Test harness
@@ -122,14 +123,14 @@ Plugins are entries in `DEVFLOW_PLUGINS` in `src/core/plugins.ts` — no per-plu
 }
 ```
 
-The `commands` array lists slash-command names (e.g., `'/implement'`). The installer maps each command name to a compiled `.md` file in `dist/commands/` and copies it to `~/.claude/commands/devflow/`. Skills, agents, and rules are copied directly from `src/assets/` — no build step required for them.
+The `commands` array lists slash-command names (e.g., `'/implement'`). The installer maps each command name to a compiled `.md` file in `dist/commands/` and copies it to `~/.claude/commands/devflow/`. Skills and rules are copied directly from `src/assets/` with no build step. Agents are mixed: a hand-authored `src/assets/agents/{name}.md` is copied directly, while an `.mds` generator host is installed from the `dist/agents/{name}.md` it compiles to.
 
 ## Installation Paths
 
 | Asset | Path | Notes |
 |-------|------|-------|
 | Commands | `~/.claude/commands/devflow/` | Namespaced; installed from `dist/commands/*.md` |
-| Agents | `~/.claude/agents/devflow/` | Namespaced; installed from `src/assets/agents/` |
+| Agents | `~/.claude/agents/devflow/` | Namespaced; resolved most-preferred-first over `dist/agents/` then `src/assets/agents/`, first hit wins |
 | Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix); installed from `src/assets/skills/` |
 | Rules | `~/.claude/rules/devflow/` | Flat `.md`; installed from `src/assets/rules/` (plugin-scoped) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
@@ -138,19 +139,20 @@ The `commands` array lists slash-command names (e.g., `'/implement'`). The insta
 
 ## Asset Distribution
 
-Assets live once in `src/assets/` and install directly to the user's `~/.claude/` — no duplication in the repo. The only intermediate build step is compiling `.mds` command sources to `dist/commands/`.
+Assets live once in `src/assets/` and install to the user's `~/.claude/` — no duplication in the repo. Two host kinds pass through a build first, both compiled by `npm run build:mds`: `.mds` command hosts to `dist/commands/`, and `.mds` agent generator hosts to `dist/agents/`. Everything else installs straight from its source file.
 
 | Asset type | Source | Install path | Build step |
 |------------|--------|--------------|-----------|
 | Skills | `src/assets/skills/{name}/` | `~/.claude/skills/devflow:{name}/` | None — edit → init |
-| Agents | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
+| Agents (hand-authored) | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
+| Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
 | Scripts | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS + commands) and `src/assets/` (skills, agents, rules, scripts). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, and compiled agents) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
@@ -160,13 +162,16 @@ Assets live once in `src/assets/` and install directly to the user's `~/.claude/
 
 ### Adding an Agent to a Plugin
 
-1. Ensure agent exists in `src/assets/agents/{agent-name}.md`
+1. Ensure the agent source exists in `src/assets/agents/` — either a hand-authored `{agent-name}.md`, or an `.mds` generator host `{agent-name}.mds` declaring `output-dir: dist/agents` in its leading steering block
 2. Add agent name to the plugin entry's `agents` array in DEVFLOW_PLUGINS
-3. Run `node dist/cli.js init` to install
+3. For a generator host, run `npm run build:mds` to compile it to `dist/agents/{agent-name}.md`
+4. Run `node dist/cli.js init` to install
 
 ### Agents
 
-All 16 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`) are shared — committed directly in `src/assets/agents/`.
+All 16 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`) are shared, and every source lives in `src/assets/agents/`. Fifteen are hand-authored `.md` files that install verbatim. `git` is an `.mds` generator host, compiled to `dist/agents/git.md` by `npm run build:mds`.
+
+The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
 ## Settings Override
 

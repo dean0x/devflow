@@ -9,7 +9,7 @@ directories:
   - src/cli/commands/compliance.ts
   - src/assets/skills/compliance
   - src/assets/rules/compliance.md
-  - src/assets/agents/git.md
+  - src/assets/agents/git.mds
   - src/assets/commands/code-review.mds
   - src/assets/commands/plan.mds
   - src/assets/commands/implement.mds
@@ -303,7 +303,7 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
 | `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |
-| `src/assets/agents/git.md` | All traceability operations (D1–D9 legend, D4 rate-limit backpressure, D9 gate table, gather-release-evidence, setup-task containment, Principle 8 marker neutralisation) |
+| `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) | All traceability operations (D1–D9 legend, D4 rate-limit backpressure, D9 gate table, gather-release-evidence, setup-task containment, Principle 8 marker neutralisation) |
 | `src/assets/commands/code-review.mds` | Step 0b (imports compliance_gate), Phase 1 regulated-surface gate, Git COMPLIANCE field |
 | `src/assets/commands/resolve.mds` | Phase 1b (fetch-review-threads), Phase 9b (resolve-review-threads), Phase 9c (check-merge-readiness) |
 | `src/assets/commands/plan.mds` | compliance_gate gate for compliance Design agent and mandatory issue linking |

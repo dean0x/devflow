@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { promises as fs } from 'fs';
+import { promises as fs, existsSync } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
+import { resolveAgentSource, resolveAllAgents, splitFrontmatter } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
@@ -43,14 +44,19 @@ describe('skill frontmatter integrity', () => {
 });
 
 describe('agent references', () => {
-  it('every agent referenced in plugins exists in src/assets/agents/', async () => {
-    const allAgents = getAllAgentNames();
-    for (const agent of allAgents) {
-      const agentFile = path.join(ASSETS_DIR, 'agents', `${agent}.md`);
-      await expect(
-        fs.access(agentFile),
-        `agent '${agent}' should exist in src/assets/agents/`,
-      ).resolves.toBeUndefined();
+  it('every agent referenced in plugins resolves to a file that exists', () => {
+    // Dist-first with a src fallback: a generated agent lives in dist/agents/,
+    // a hand-authored one in src/assets/agents/. resolveAgentSource is the one
+    // owner of that order and throws with a build hint when neither location
+    // has the agent — so the only thing left to assert is that the path it
+    // chose is on disk, and the message names that path, not a fixed directory
+    // the agent may not live in (ADR-003: state the end state).
+    for (const agent of getAllAgentNames()) {
+      const { path: agentFile, origin } = resolveAgentSource(agent);
+      expect(
+        existsSync(agentFile),
+        `agent '${agent}' resolved to ${path.relative(ROOT, agentFile)} (origin=${origin}), but that file does not exist`,
+      ).toBe(true);
     }
   });
 });
@@ -86,7 +92,10 @@ describe('no orphaned declarations', () => {
     const referencedAgents = new Set(getAllAgentNames());
 
     for (const file of agentFiles) {
-      const name = path.basename(file, '.md');
+      // Both extensions declare an agent: `.md` is hand-authored, `.mds` is an
+      // MDS generator host compiled into dist/agents/. Stripping only `.md`
+      // would let a generator host slip past the orphan check unnoticed.
+      const name = file.replace(/\.mds?$/, '');
       expect(referencedAgents.has(name), `src/assets/agents/${file} is not referenced by any plugin`).toBe(true);
     }
   });
@@ -103,19 +112,21 @@ describe('no orphaned declarations', () => {
 // ---------------------------------------------------------------------------
 
 describe('agent frontmatter compliance contract', () => {
-  it('no src/assets/agents/*.md frontmatter skills: block lists devflow:compliance', async () => {
-    const agentsPath = path.join(ASSETS_DIR, 'agents');
-    const agentFiles = await fs.readdir(agentsPath);
-
-    for (const file of agentFiles.filter(f => f.endsWith('.md'))) {
-      const agentName = path.basename(file, '.md');
-      const content = await fs.readFile(path.join(agentsPath, file), 'utf-8');
-
+  /**
+   * Named collector: the frontmatter `skills:` list of each agent, keyed by agent name.
+   * Called by the guard AND by both probes below, so a probe can never pass by
+   * re-implementing the parser it is meant to prove (ADR-024).
+   */
+  function collectFrontmatterSkills(
+    sources: ReadonlyMap<string, { content: string }>,
+  ): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    for (const [name, { content }] of sources) {
       // Parse only the YAML frontmatter block (between first --- markers), not body text
-      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-      if (!fmMatch) continue;
+      const fm = splitFrontmatter(content);
+      if (!fm) continue;
 
-      const fmLines = fmMatch[1].split('\n');
+      const fmLines = fm.inner.split('\n');
       let inSkills = false;
       const skillItems: string[] = [];
       for (const line of fmLines) {
@@ -127,13 +138,49 @@ describe('agent frontmatter compliance contract', () => {
           if (m) skillItems.push(m[1].trim());
         }
       }
+      result.set(name, skillItems);
+    }
+    return result;
+  }
 
+  it('no agent frontmatter skills: block lists devflow:compliance', () => {
+    // Resolved through the dist-preferred resolver so an agent compiled from an
+    // .mds generator host is scanned in its shipping form. A readdir filtered to
+    // `.md` inside src/assets/agents/ leaves 15 of 16 agents covered while `git`
+    // silently drops out (GAP-07) — the assertion below is what makes that loud.
+    const agents = resolveAllAgents();
+    expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
+
+    const skillsByAgent = collectFrontmatterSkills(agents);
+    expect(
+      [...skillsByAgent.keys()],
+      'every registered agent must have had its frontmatter parsed (non-vacuity, PF-018)',
+    ).toEqual(expect.arrayContaining(getAllAgentNames()));
+
+    for (const [name, skillItems] of skillsByAgent) {
       expect(
         skillItems,
-        `src/assets/agents/${agentName}.md frontmatter skills: must not list devflow:compliance — ` +
+        `${name}: frontmatter skills: must not list devflow:compliance — ` +
           `use body-instruction only (avoids PF-002: skill re-entrancy silent bail)`,
       ).not.toContain('devflow:compliance');
     }
+  });
+
+  it('known-bad probe: a frontmatter block listing devflow:compliance is flagged', () => {
+    // Mechanic 2 (H10): synthetic source, no committed file touched.
+    const synthetic = new Map([
+      ['synthetic', { content: '---\nname: Synthetic\nskills:\n  - devflow:git\n  - devflow:compliance\n---\n\nBody.\n' }],
+    ]);
+    expect(collectFrontmatterSkills(synthetic).get('synthetic')).toContain('devflow:compliance');
+  });
+
+  it("known-bad probe: an .md-only readdir of the agents dir loses the git agent (GAP-07)", async () => {
+    // The pre-repoint corpus builder, run against the real directory. It must be
+    // strictly weaker than resolveAllAgents() — this is the silent-degradation case.
+    const entries = await fs.readdir(path.join(ASSETS_DIR, 'agents'));
+    const mdOnly = entries.filter(f => f.endsWith('.md')).map(f => path.basename(f, '.md'));
+    expect([...resolveAllAgents().keys()]).toContain('git');
+    expect(mdOnly, 'an .md-only filter is the vacuous corpus this guard no longer uses').not.toContain('git');
   });
 });
 

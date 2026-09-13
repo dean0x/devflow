@@ -1,8 +1,9 @@
 /**
- * Static content guards for src/assets/agents/git.md.
+ * Static content guards for the Git agent.
  *
  * Pin the Git agent's safety-critical literals so silent edits fail loud (PF-018).
- * These guards read the source file directly — no build step required.
+ * The agent is read through resolveAgentSource, which is dist-preferred: since
+ * Phase 1 that means the compiled dist/agents/git.md, the artifact that ships.
  *
  * Guard 6 in registry-integrity.test.ts performs forward/reverse OPERATION-name
  * checking between compiled commands and git.md (build-gated). These guards cover
@@ -179,7 +180,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 0: Non-vacuousness ────────────────────────────────────────────────
 
   it('file is non-empty', () => {
-    expect(content.length, 'src/assets/agents/git.md is empty').toBeGreaterThan(0);
+    expect(content.length, `${GIT_AGENT_PATH} is empty`).toBeGreaterThan(0);
   });
 
   // ── Guard 1: Required traceability operation sections exist ─────────────────

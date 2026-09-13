@@ -6,35 +6,34 @@
  * and tests/guards/** catches regressions before they accumulate.
  *
  * EXCEPTION / OUT-OF-SCOPE DOCUMENTATION (files not scanned or explicitly excluded):
- *   tests/helpers.ts — hosts the resolver's single sanctioned src/assets/agents/ fallback
- *     path (inside resolveAgentSource). extractStatusLines() reads through the resolver and
- *     contains no literal src/assets/agents/ path for content resolution. It is outside the
- *     scan scope below.
+ *   tests/helpers.ts — resolveAgentSource names the fallback tree in its doc comment;
+ *     its resolution paths come from agentSourceDirs(root). extractStatusLines() reads
+ *     through the resolver. It is outside the scan scope below.
  *   tests/guards/literal-agent-paths.test.ts — self-excluded: this file defines the
  *     LITERAL constant, the error message strings, and the non-vacuity probe corpus entry,
  *     all of which necessarily contain the literal string.
  *   tests/guards/retired-wording.test.ts — excluded: its removedFrom metadata records
  *     legacy src paths present before Phase-0 renaming (historical documentation only).
- *   tests/goldens/git-agent-golden.test.ts — excluded: its it() test description string
- *     mentions the literal as a human-readable label, not as a file-reading path. The test
- *     uses resolveAgentSource() for all content access.
  *
  * Comment lines (// and * prefixed) are skipped by the collector: literal mentions in
  * comments are documentation and are not path-resolution code.
  *
- * AC-0.16 — requireDistFile / requireDistFiles throw with a build hint when the artifact
- * is absent. Injectable root parameter (mirroring resolveAgentSource's `root = ROOT`)
- * enables hermetic testing without touching the real dist/.
+ * AC-0.16 — requireDistFile / requireDistFiles / requireBuiltCli throw with a build hint
+ * when the artifact is absent. Injectable root parameter (mirroring resolveAgentSource's
+ * `root = ROOT`) enables hermetic testing without touching the real dist/.
  *
  * Non-vacuity (mechanic 2, H10): both guards use a synthetic corpus / temp root so that
  * the detection logic is proven live without modifying committed source.
+ *
+ * Requires a build: the requireBuiltCli GREEN contract test reads the real dist/cli.js, so
+ * `npm run build` must run first.
  */
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles } from '../helpers.js';
+import { requireDistFile, requireDistFiles, requireBuiltCli } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -46,7 +45,6 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 const LITERAL_SCAN_EXCLUSIONS: ReadonlyArray<string> = [
   'tests/guards/literal-agent-paths.test.ts', // guard mechanics: defines LITERAL, error messages, and non-vacuity probe
   'tests/guards/retired-wording.test.ts',      // removedFrom metadata: historical src path before Phase-0 rename
-  'tests/goldens/git-agent-golden.test.ts',    // test description string: mentions path as a label, not a file-reading path
 ];
 
 // ---------------------------------------------------------------------------
@@ -189,5 +187,28 @@ describe('requireDistFiles throw contract (AC-0.16)', () => {
     } finally {
       rmSync(tmpRoot, { recursive: true });
     }
+  });
+});
+
+describe('requireBuiltCli throw contract (AC-0.16)', () => {
+  it('RED: throws with a build hint when dist/cli.js is absent under a hermetic root', () => {
+    // Creates a temp root with no dist/ subdirectory — hermetic, no real dist/ touched.
+    const tmpRoot = mkdtempSync(path.join(tmpdir(), 'devflow-cli-test-'));
+    try {
+      expect(
+        () => requireBuiltCli(tmpRoot),
+      ).toThrow(/npm run build/);
+      expect(
+        () => requireBuiltCli(tmpRoot),
+      ).toThrow(/dist\/cli\.js is absent/);
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('GREEN: resolves to dist/cli.js under the real ROOT when the build artifact exists', () => {
+    const cliPath = requireBuiltCli(ROOT);
+    expect(cliPath).toBe(path.join(ROOT, 'dist', 'cli.js'));
+    expect(existsSync(cliPath)).toBe(true);
   });
 });

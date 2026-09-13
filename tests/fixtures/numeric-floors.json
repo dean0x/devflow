@@ -5,18 +5,18 @@
     {
       "id": "dist-host-count",
       "floor": 13,
-      "pattern": "toHaveLength(13)",
+      "pattern": "toBeGreaterThanOrEqual(13)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of compiled MDS host commands in dist/commands/ (ALL_HOSTS)"
+      "description": "Number of compiled MDS host commands in dist/commands/ (MDS_COMMAND_HOSTS). Re-spelled from toHaveLength(13) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts: the floor is now the manifest's length, asserted alongside the set. Same floor, new spelling."
     },
     {
       "id": "partial-count",
       "floor": 11,
-      "pattern": "toHaveLength(11)",
+      "pattern": "toBeGreaterThanOrEqual(11)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of _partials/*.mds partial files"
+      "description": "Number of _partials/*.mds partial files (MDS_PARTIALS). Re-spelled from toHaveLength(11) when the discovery assertion became a set-equality against tests/fixtures/mds-manifest.ts. Same floor, new spelling."
     },
     {
       "id": "dist-files-count",
@@ -24,15 +24,23 @@
       "pattern": "toBe(14)",
       "occurrences": 3,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "DIST_FILES count = ALL_HOSTS (13) + release.md (1); DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)"
+      "description": "DIST_FILES count = COMMAND_HOSTS (13) + release.md (1); DIST_FILES vs COMMAND_HOSTS divergence is permanent (SG-13)"
     },
     {
       "id": "slow-test-timeout-ms",
       "floor": 60000,
       "pattern": "60_000",
-      "occurrences": 21,
+      "occurrences": 3,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Minimum timeout in ms for slow shell-exec tests that call npm run build:mds"
+      "description": "Minimum timeout in ms for the slow shell-exec tests that spawn scripts/build-mds.ts. The floor value is unchanged; the site count dropped from 21 to 3 when the twenty beforeAll hooks that rebuilt the real dist/ were replaced by one isolated buildCommittedTree() build (whose own timeout is pinned by the mds-build-spawn-timeout-ms entry below). The 3 remaining sites are this file's negative-path spawns: two dest-safety refusals and the ignored-dir walk."
+    },
+    {
+      "id": "mds-build-spawn-timeout-ms",
+      "floor": 60000,
+      "pattern": "60_000",
+      "occurrences": 1,
+      "sourceFile": "tests/helpers.ts",
+      "description": "Minimum timeout in ms for runMdsBuild() — the one spawn site every isolated MDS build now routes through, including buildCommittedTree(). Same floor as slow-test-timeout-ms, in the file the sites moved to."
     },
     {
       "id": "subagent-literal-count",
@@ -72,7 +80,7 @@
       "pattern": "toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from git.md alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from the resolved Git agent (dist/agents/git.md) alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
     },
     {
       "id": "agent-roster-count",

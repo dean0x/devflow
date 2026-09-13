@@ -20,6 +20,7 @@ import { execSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { getAllAgentNames } from '../../src/core/plugins.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -152,7 +153,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     expect(hasMemoryWorker, 'memory-worker hook is missing from the installed package').toBe(true);
   });
 
-  it('installed package has src/assets/agents/ with at least one shared agent', async () => {
+  it('installed package has a source for every registered agent (.md or .mds)', async () => {
     const agentsDir = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'src', 'assets', 'agents');
 
     await expect(
@@ -162,11 +163,38 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     ).resolves.toBeUndefined();
 
     const agentFiles = await fs.readdir(agentsDir);
-    const hasCode = agentFiles.includes('code.md');
-    const hasReview = agentFiles.includes('review.md');
+    // Naming the whole roster instead of spot-checking two files: `git` ships only
+    // as a .mds generator host now, and an `includes('code.md')`-style check would
+    // stay green while it silently stopped shipping (GAP-07).
+    const installedAgents = agentFiles
+      .filter(f => f.endsWith('.md') || f.endsWith('.mds'))
+      .map(f => f.replace(/\.mds?$/, ''))
+      .sort();
 
-    expect(hasCode, 'code.md agent is missing from the installed package').toBe(true);
-    expect(hasReview, 'review.md agent is missing from the installed package').toBe(true);
+    expect(
+      installedAgents,
+      `Installed package is missing agent source(s). Present: ${installedAgents.join(', ')}`,
+    ).toEqual(expect.arrayContaining([...getAllAgentNames()].sort()));
+  });
+
+  it('installed package carries the compiled Git agent (AC-1.9)', async () => {
+    // dist/agents/git.md is now the ONLY shipping form of the Git agent — the
+    // hand-authored source is gone. Nothing pinned that it ships; a publish run
+    // that used `npm run build:cli` alone would produce a package with no Git
+    // agent, and every prior assertion here would still have passed.
+    const compiled = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', 'git.md');
+
+    await expect(
+      fs.access(compiled),
+      `dist/agents/git.md not found in the installed package. ` +
+      `\`npm run build:cli\` alone does not produce agents — \`npm run build:mds\` is required before publish.`,
+    ).resolves.toBeUndefined();
+
+    const compiledContent = await fs.readFile(compiled, 'utf-8');
+    expect(compiledContent.startsWith('---\n'), 'compiled agent must retain its frontmatter').toBe(true);
+    expect(compiledContent, 'compiled agent must carry its model tier').toContain('model:');
+    expect(compiledContent, 'compiled agent must not leak the build-steering key').not.toContain('output-dir:');
+    expect(compiledContent, 'compiled agent must not leak escaped braces (PF-024)').not.toContain('\\{');
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

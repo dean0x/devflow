@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
-import { skillsDir, agentsDir, rulesDir, commandsDir, scriptsDir } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 
@@ -359,6 +359,28 @@ export interface FileCopyOptions {
   rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
   spinner: Spinner;
+  /**
+   * Agent source directories, most-preferred first — see agentSourceDirs(),
+   * which owns the ordering convention and supplies the default. Injectable so
+   * tests can prove the preference order against a temp tree instead of the
+   * live build state.
+   */
+  agentSourceDirs?: AgentSourceDirs;
+}
+
+/**
+ * First path in `candidates` that exists on disk, or undefined when none do.
+ * Bounded by candidates.length. The fs.access rejection is the existence probe,
+ * not a failure: callers decide what an exhausted candidate list means.
+ */
+async function firstExisting(candidates: readonly string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch { /* not here — try the next directory in preference order */ }
+  }
+  return undefined;
 }
 
 /**
@@ -495,11 +517,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     mdEntryName,
   ));
 
-  // Install agents (deduplicated) from flat src/assets/agents/{name}.md.
-  // A declared agent whose source file is absent is a build/packaging failure
-  // and throws rather than silently skipping (matches command pattern).
+  // Install agents (deduplicated), resolved dist-first with a src fallback:
+  // dist/agents/{name}.md (compiled from an .mds generator host) wins over
+  // src/assets/agents/{name}.md. A declared agent absent from BOTH is a
+  // build/packaging failure and throws rather than silently skipping (matches
+  // command pattern); the message names the build step as well as the tree.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const aDir = agentsDir();
+  const agentDirs = options.agentSourceDirs ?? agentSourceDirs();
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -511,13 +535,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (allAgentNames.size > 0) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
-      const srcFile = path.join(aDir, mdFileName(agentName));
-      try {
-        await fs.access(srcFile);
-      } catch {
+      const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
+      const srcFile = await firstExisting(candidates);
+      if (srcFile === undefined) {
         throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${srcFile}. ` +
-          `Ensure the agent file exists in src/assets/agents/.`,
+          `Agent source not found for declared agent "${agentName}": ${candidates[0]}. ` +
+          `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
+          `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
       }
       await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));

@@ -18,8 +18,9 @@ import { spawnSync, execFileSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { requireBuiltCli } from './helpers.js';
 
-const CLI = path.resolve(import.meta.dirname, '../dist/cli.js');
+const CLI = requireBuiltCli();
 
 let tmpHome: string;
 let tmpRepo: string;

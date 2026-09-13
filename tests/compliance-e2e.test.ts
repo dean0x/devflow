@@ -12,26 +12,16 @@
  *          cannot feed keystrokes. The seeding layer (resolveInitSeed) is covered
  *          by tests/init-seed.test.ts and tests/compliance-cli.test.ts.
  *
- * Guard: all tests skip when dist/cli.js is absent (no silent vacuous pass).
+ * Guard: throws when dist/cli.js is absent (no silent vacuous pass) — see requireBuiltCli.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { requireBuiltCli } from './helpers.js';
 
-const CLI = path.resolve(import.meta.dirname, '..', 'dist', 'cli.js');
-
-// Guard: fail-loud when dist/cli.js is absent — run `npm run build` first.
-// A guard that silently skips is not a guard; mirrors skill-references.test.ts's requireDistFiles approach.
-// CI always builds first so this never triggers there; locally it fails clearly instead of vacuously passing.
-const distExists = await fs.access(CLI).then(() => true).catch(() => false);
-if (!distExists) {
-  throw new Error(
-    'dist/cli.js is absent — run `npm run build` first\n' +
-    ' (compliance-e2e.test.ts requires a compiled CLI binary)',
-  );
-}
+const CLI = requireBuiltCli();
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 

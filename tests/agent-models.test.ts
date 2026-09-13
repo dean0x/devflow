@@ -35,6 +35,7 @@ import {
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1033,5 +1034,254 @@ describe('parseAgentMappingEnvelope', () => {
     await fs.writeFile(filePath, '{"agents":null}', 'utf-8');
     const result = await parseAgentMappingEnvelope(filePath);
     expect(result.kind).toBe('skip');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadShippedDefaults — compiled dir wins over source dir
+// ---------------------------------------------------------------------------
+//
+// Shipped defaults are read live from the agent files at convergence time, so
+// once an agent is generated into dist/agents/ its frontmatter must be the one
+// that answers "what model did devflow ship for this agent?". The dirs are
+// most-preferred first (the convention owned by agentSourceDirs()) and the
+// first to supply a name wins; they are injectable so the precedence can be
+// proved against a synthetic tree instead of the live build state.
+
+/** Write a minimal agent file carrying a model: key. Shared by the two describes below. */
+async function writeAgentFile(dir: string, name: string, model: string): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, `${name}.md`),
+    `---\nname: ${name}\nmodel: ${model}\n---\n\nbody\n`,
+    'utf-8',
+  );
+}
+
+describe('loadShippedDefaults — compiled over source merge', () => {
+  let mergeTmp: string;
+
+  beforeEach(async () => {
+    mergeTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-shipped-defaults-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(mergeTmp, { recursive: true, force: true });
+  });
+
+  it('covers every agent in the registry, not merely "some agents were scanned"', async () => {
+    // `scanned > 0` would survive 15 of 16 agents silently disappearing (GAP-07).
+    const defaults = await loadShippedDefaults();
+    expect(Object.keys(defaults)).toEqual(expect.arrayContaining([...getAllAgentNames()]));
+  });
+
+  it('reports the git agent as haiku from the live tree', async () => {
+    const defaults = await loadShippedDefaults();
+    expect(defaults['git']).toBe('haiku');
+  });
+
+  it('reads an agent that exists ONLY in the compiled dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'other', 'sonnet');
+    await writeAgentFile(distDir, 'git', 'haiku');
+
+    const defaults = await loadShippedDefaults([distDir, srcDir]);
+    expect(defaults['git']).toBe('haiku');
+    expect(defaults['other']).toBe('sonnet');
+  });
+
+  it('known-bad probe: dropping the compiled dir loses the generated agent', async () => {
+    // Non-vacuity for the test above: without the dist side, git is simply absent.
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'other', 'sonnet');
+    await writeAgentFile(distDir, 'git', 'haiku');
+
+    const srcOnly = await loadShippedDefaults([srcDir]);
+    expect(srcOnly['git']).toBeUndefined();
+    expect(srcOnly['other']).toBe('sonnet');
+  });
+
+  it('lets the compiled dir win for a name present in both', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'git', 'opus');
+    await writeAgentFile(distDir, 'git', 'haiku');
+
+    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
+    // Reversing the order must change the answer, or the precedence proves nothing.
+    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('opus');
+  });
+
+  it('tolerates an absent compiled dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    await writeAgentFile(srcDir, 'git', 'haiku');
+
+    const defaults = await loadShippedDefaults([path.join(mergeTmp, 'no-such-dir'), srcDir]);
+    expect(defaults['git']).toBe('haiku');
+  });
+
+  it('ignores non-.md entries in either dir', async () => {
+    const srcDir = path.join(mergeTmp, 'src-agents');
+    const distDir = path.join(mergeTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'git', 'haiku');
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(path.join(distDir, 'git.mds'), '---\nmodel: opus\n---\n', 'utf-8');
+
+    // The .mds source must not be mistaken for a compiled agent.
+    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadShippedDefaults — registry-gap warning
+// ---------------------------------------------------------------------------
+//
+// A registry agent whose file is in NEITHER source directory has no shipped
+// default, and every downstream answer degrades quietly: resolveEffective
+// returns model === undefined, reapplyAgentMapping buckets the agent
+// 'unchanged', and `devflow agents --list` renders a blank default. The live
+// shape that produces it is ordinary — `npm run build:cli` leaves dist/agents/
+// unbuilt while the generated agent has no .md in the source tree — and its
+// worst consequence is that disabling the proxy silently fails to revert a
+// GPT-pinned agent (avoids PF-022: a feature is OFF when its files say so).
+// The installer throws on the same invariant; a read path that must keep
+// rendering warns instead.
+
+describe('loadShippedDefaults — registry-gap warning', () => {
+  let gapTmp: string;
+  /** Every registry agent except the one deliberately left unresolvable. */
+  const MISSING = 'git';
+
+  beforeEach(async () => {
+    gapTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-shipped-gap-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(gapTmp, { recursive: true, force: true });
+  });
+
+  /** A source tree holding every registry agent except MISSING (the build:cli-only shape). */
+  async function srcWithoutMissing(): Promise<string> {
+    const srcDir = path.join(gapTmp, 'src-agents');
+    for (const name of getAllAgentNames()) {
+      if (name === MISSING) continue;
+      await writeAgentFile(srcDir, name, 'sonnet');
+    }
+    return srcDir;
+  }
+
+  it('warns once, naming the unresolved agent and the build step', async () => {
+    const srcDir = await srcWithoutMissing();
+    const warnings: string[] = [];
+
+    const defaults = await loadShippedDefaults(
+      [path.join(gapTmp, 'no-such-dist-dir'), srcDir],
+      { onWarning: (msg) => warnings.push(msg) },
+    );
+
+    expect(defaults[MISSING], 'the gap is real — the agent has no shipped default').toBeUndefined();
+    expect(warnings, 'the gap must be reported as ONE aggregate warning').toHaveLength(1);
+    expect(warnings[0]).toContain(MISSING);
+    expect(warnings[0]).toContain('npm run build:mds');
+  });
+
+  it('non-vacuity: no warning when every registry agent resolves', async () => {
+    const srcDir = await srcWithoutMissing();
+    const distDir = path.join(gapTmp, 'dist-agents');
+    await writeAgentFile(distDir, MISSING, 'haiku');
+    const warnings: string[] = [];
+
+    const defaults = await loadShippedDefaults([distDir, srcDir], {
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    expect(defaults[MISSING]).toBe('haiku');
+    expect(warnings, 'a complete tree must warn about nothing').toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reapplyAgentMapping — the gap reaches the caller on the proxy-disable path
+// ---------------------------------------------------------------------------
+
+describe('reapplyAgentMapping — unresolved shipped default is reported, not silent', () => {
+  let gapTmp: string;
+  let installDir: string;
+  let devflowDir: string;
+  const MISSING = 'git';
+  const EXTERNAL = 'gpt-5.6-sol';
+
+  beforeEach(async () => {
+    gapTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-reapply-gap-'));
+    installDir = path.join(gapTmp, 'install');
+    devflowDir = path.join(gapTmp, 'devflow');
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+
+    // The installed agent is pinned to an external model, as proxy --enable left it.
+    await fs.writeFile(
+      path.join(installDir, `${MISSING}.md`),
+      `---\nname: Git\nmodel: ${EXTERNAL}\n---\n\nbody\n`,
+      'utf-8',
+    );
+    await saveAgentMapping(devflowDir, {
+      version: 1,
+      agents: { [MISSING]: { model: EXTERNAL } },
+    });
+  });
+
+  afterEach(async () => {
+    await fs.rm(gapTmp, { recursive: true, force: true });
+  });
+
+  /** Source tree missing the generated agent; dist/agents/ absent (build:cli-only). */
+  async function unbuiltDirs(): Promise<[string, string]> {
+    const srcDir = path.join(gapTmp, 'src-agents');
+    for (const name of getAllAgentNames()) {
+      if (name === MISSING) continue;
+      await writeAgentFile(srcDir, name, 'sonnet');
+    }
+    return [path.join(gapTmp, 'no-such-dist-dir'), srcDir];
+  }
+
+  it('revertExternalAgents reports the gap for the agent it could not revert', async () => {
+    const warnings: string[] = [];
+    const result = await revertExternalAgents({
+      installDir,
+      devflowDir,
+      agentSourceDirs: await unbuiltDirs(),
+      onWarning: (msg) => warnings.push(msg),
+    });
+
+    // The revert genuinely cannot happen — there is no shipped default to revert TO.
+    const content = await fs.readFile(path.join(installDir, `${MISSING}.md`), 'utf-8');
+    expect(content, 'without a shipped default the external model stays pinned').toContain(EXTERNAL);
+    expect(result.unchanged, 'the agent is bucketed unchanged — that is the silent no-op').toContain(MISSING);
+
+    // ...and that no-op must be visible to the caller rather than inferred.
+    expect(
+      result.warnings.some(w => w.includes(MISSING) && w.includes('npm run build:mds')),
+      `no warning named the unrevertable agent:\n  ${result.warnings.join('\n  ')}`,
+    ).toBe(true);
+    expect(warnings, 'the live onWarning channel must see it too').toEqual(result.warnings);
+  });
+
+  it('non-vacuity: a resolvable shipped default reverts and warns about nothing', async () => {
+    const [, srcDir] = await unbuiltDirs();
+    const distDir = path.join(gapTmp, 'dist-agents');
+    await writeAgentFile(distDir, MISSING, 'haiku');
+
+    const result = await revertExternalAgents({
+      installDir,
+      devflowDir,
+      agentSourceDirs: [distDir, srcDir],
+    });
+
+    const content = await fs.readFile(path.join(installDir, `${MISSING}.md`), 'utf-8');
+    expect(content).toContain('model: haiku');
+    expect(result.updated).toContain(MISSING);
+    expect(result.warnings).toEqual([]);
   });
 });

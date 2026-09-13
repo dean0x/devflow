@@ -5,6 +5,10 @@ import { randomUUID } from 'crypto';
 
 /**
  * Check if the `claude` CLI is available on this machine.
+ *
+ * This is a capability gate on an external binary, not a build gate — skipping when
+ * `claude` is absent is correct here. Build artifacts (dist/cli.js, dist/commands/)
+ * use `requireBuiltCli()` / `requireDistFile(s)` instead, which throw rather than skip.
  */
 export function isClaudeAvailable(): boolean {
   try {
