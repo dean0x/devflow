@@ -119,6 +119,49 @@ function collectLabelReferences(text: string): Set<string> {
   return new Set(withoutLegendRows.match(LABEL_REFERENCE_RE) ?? []);
 }
 
+// ── D10 publication-gate scope collectors [DR-20] ───────────────────────────
+
+/** Named collector: every `## Operation:` name declared in a text. */
+function collectOpNames(text: string): string[] {
+  return (text.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+}
+
+/** The slice of `text` belonging to one operation, ending at the next operation. */
+function opSlice(text: string, op: string): string {
+  const start = text.indexOf(`## Operation: ${op}`);
+  if (start === -1) return '';
+  const next = text.indexOf('\n## Operation: ', start + 1);
+  return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+/** Named collector: the operations whose own body names `references/<refName>`. */
+function collectOpsNamingReference(text: string, refName: string): string[] {
+  return collectOpNames(text).filter(op => opSlice(text, op).includes(`references/${refName}`));
+}
+
+/**
+ * Named collector: every site in the corpus that carries the `gh repo view`
+ * visibility probe, labelled `git.md:<op>` / `git.md:(cross-cutting)` for the
+ * agent and by basename for a generated reference.
+ */
+function collectGhRepoViewSites(corpus: CorpusEntry[]): string[] {
+  const PROBE = 'gh repo view';
+  const sites: string[] = [];
+  for (const entry of corpus) {
+    if (entry.path === GIT_AGENT_PATH) {
+      const firstOp = entry.content.indexOf('## Operation: ');
+      const crossCutting = firstOp === -1 ? entry.content : entry.content.slice(0, firstOp);
+      if (crossCutting.includes(PROBE)) sites.push('git.md:(cross-cutting)');
+      for (const op of collectOpNames(entry.content)) {
+        if (opSlice(entry.content, op).includes(PROBE)) sites.push(`git.md:${op}`);
+      }
+    } else if (entry.content.includes(PROBE)) {
+      sites.push(path.basename(entry.path));
+    }
+  }
+  return sites.sort();
+}
+
 /** Read a generated reference; throws with a build hint rather than returning ''. */
 function readGeneratedReference(relPath: string): string {
   const file = path.join(ROOT, 'dist', 'skills', 'git', 'references', ...relPath.split('/'));
@@ -618,9 +661,15 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 6: D10 publication visibility gate ─────────────────────────────
 
   it('D10: ## Publication gate (D10) section exists', () => {
+    // Follows the corpus [DR-18]: P2-S5 cut 2 moved the section into
+    // references/publication-gate.md, which the two summary ops name. The section
+    // must still EXIST somewhere a spawn can reach — that is what this pins; where
+    // it may be loaded FROM is [DR-20](i) below.
+    const joined = gitAgentSinkCorpus().map(e => e.content).join('\n');
     expect(
-      content,
-      'git.md is missing "## Publication gate (D10)" section — silent removal breaks the visibility-gated posting contract',
+      joined,
+      'git.md ∪ the generated references is missing the "## Publication gate (D10)" section — ' +
+      'silent removal breaks the visibility-gated posting contract',
     ).toContain('## Publication gate (D10)');
   });
 
@@ -687,23 +736,62 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)');
   });
 
-  it('D10: gh repo view appears ONLY in post-review-summary and post-resolution-summary (scope boundary, non-vacuous)', () => {
-    // Negative scope guard: extract all ## Operation: sections; only the two summary ops may probe visibility
-    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+  // ── [DR-20] the D10 scope guard's successor pair ───────────────────────────
+  //
+  // P2-S5 cut 2 moved `## Publication gate (D10)` into references/publication-gate.md.
+  // The old negative-scope `it` asked "which git.md op sections contain `gh repo
+  // view`" — recomputing that over the joined corpus would only establish that the
+  // literal EXISTS somewhere, and the scope property (CONTEXT-PACK B3: the probe is
+  // allowed in the two summary ops and nowhere else) would evaporate. The successor
+  // is two assertions, both non-vacuous, and they REPLACE one `it` with three, so
+  // AC-2.6's guard count rises rather than falls.
+  //
+  // Deviation recorded: [DR-20](ii) is written as "only in that file AND the two ops
+  // it is named from". SG-8 forbids moving post-review-summary / post-resolution-
+  // summary mechanics, so their step-3 probe lines stay in git.md by rule; asserting
+  // the literal appears in publication-gate.md ALONE would demand a move the phase
+  // prohibits. The set below is therefore the original scope property plus the file
+  // the section moved to — strictly stronger than "the literal exists".
+
+  it('D10 [DR-20](i): references/publication-gate.md is named from EXACTLY the two summary ops', () => {
+    const opNames = collectOpNames(content);
     expect(
       opNames.length,
       `corpus is only ${opNames.length} ops — expected > 2 for a non-vacuous scope check (PF-018)`,
     ).toBeGreaterThan(2);
-
-    const ghRepoViewOps: string[] = [];
-    for (const op of opNames) {
-      const sec = extractOpSection(soleCorpus, op, 'sole');
-      if (sec.includes('gh repo view')) ghRepoViewOps.push(op);
-    }
     expect(
-      ghRepoViewOps.sort(),
-      'D10 scope violation: gh repo view must appear ONLY in post-review-summary and post-resolution-summary',
+      collectOpsNamingReference(content, 'publication-gate.md').sort(),
+      'D10 scope violation: the publication gate must be loaded by the two summary ops and by ' +
+      'no other operation — any other op naming it is an op that probes repo visibility',
     ).toEqual(['post-resolution-summary', 'post-review-summary']);
+  });
+
+  it('D10 [DR-20](i) known-bad probe: a seeded third op naming the gate is detected', () => {
+    const seeded =
+      `${content}\n## Operation: post-fake-summary\n\nSee \`references/publication-gate.md\`.\n`;
+    expect(
+      collectOpsNamingReference(seeded, 'publication-gate.md').sort(),
+      'the collector must see a third naming op — otherwise the exact-set assertion is inert',
+    ).toEqual(['post-fake-summary', 'post-resolution-summary', 'post-review-summary']);
+  });
+
+  it('D10 [DR-20](ii): `gh repo view` appears only in publication-gate.md and the two ops that name it', () => {
+    expect(
+      collectGhRepoViewSites(gitAgentSinkCorpus()),
+      'D10 scope violation: the visibility probe escaped the publication gate and the two summary ' +
+      'operations — every other site is an op deciding publication for itself',
+    ).toEqual(['git.md:post-resolution-summary', 'git.md:post-review-summary', 'publication-gate.md']);
+  });
+
+  it('D10 [DR-20](ii) known-bad probe: a seeded fourth probe site is reported by the same collector', () => {
+    const seeded: CorpusEntry[] = [
+      ...gitAgentSinkCorpus(),
+      { path: '/synthetic/tracker/github/setup-task.md', content: "gh repo view --json visibility\n" },
+    ];
+    expect(
+      collectGhRepoViewSites(seeded),
+      'the collector must see a probe site outside the allowed set — otherwise (ii) is inert',
+    ).toContain('setup-task.md');
   });
 
   // ── Guard 7: D11 comment-sink scrub ─────────────────────────────────────

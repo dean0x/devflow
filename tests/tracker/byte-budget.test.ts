@@ -233,6 +233,8 @@ const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   'fetch-review-threads': ['github-api.md'],
   'setup-task': ['learn-conventions.md'],
   'learn-conventions': ['learn-conventions.md'],
+  'post-review-summary': ['publication-gate.md'],
+  'post-resolution-summary': ['publication-gate.md'],
 };
 
 /** The file set the budget formula sums for an operation. */
@@ -298,7 +300,11 @@ function largestTrackerReference(): { op: string; chars: number } {
 // ---------------------------------------------------------------------------
 
 const PREAMBLE_START = '## Tracker provider resolution';
-const PREAMBLE_END = '## Publication gate (D10)';
+// P2-S5 cut 2 moved `## Publication gate (D10)` into references/publication-gate.md,
+// so the heading that now follows the preamble is the D11 section — the one
+// cross-cutting block §14.4 forbids ever moving, which makes it a stabler end
+// anchor than the one it replaces.
+const PREAMBLE_END = '## Comment-sink scrub (D11)';
 const D4_ANCHOR = '**Degradation contract (D4):**';
 
 /**

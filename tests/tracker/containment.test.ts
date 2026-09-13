@@ -36,6 +36,7 @@ import * as path from 'path';
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
   TRACKER_GITHUB_OPS,
+  GIT_CROSS_CUTTING_DOCS,
   MIN_VARIANT_PAIRS,
   VARIANT_MODULES,
   expandVariants,
@@ -706,5 +707,178 @@ describe('gather-release-evidence: batch-first, never one call per commit [DR-17
       section,
       'gather-release-evidence: the per-item degrade rule must stay in git.md (H12)',
     ).toContain('for any GitHub signal that could not be fetched');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The shared-literal registry [DR-19]
+// ---------------------------------------------------------------------------
+//
+// The three cross-cutting references — publication-gate.md, learn-conventions.md
+// and decision-markers.md — exist so a rule is stated ONCE and named from wherever
+// it applies. The failure that re-creates the defect they were built to remove is
+// a provider reference RESTATING one of their sentences: the rule then has two
+// authorities again, and the second one varies per provider.
+//
+// Both arms, per [DR-19]:
+//   positive — every registry sentence appears in exactly one of the three files,
+//              and in the one the registry names;
+//   negative — no registry sentence appears in any references/tracker/{provider}/
+//              {op}.md.
+//
+// The MCP arm lands in Phase 3 (P3c-S6); `_mcp.md` does not exist here.
+
+interface SharedLiteral {
+  /** Basename of the cross-cutting reference that owns the sentence. */
+  readonly owner: string;
+  /** The normative sentence, byte-exact. */
+  readonly sentence: string;
+  /** Why this sentence is normative — an entry without one is a grep, not a rule. */
+  readonly justification: string;
+}
+
+export const SHARED_LITERAL_REGISTRY: readonly SharedLiteral[] = [
+  {
+    owner: 'publication-gate.md',
+    sentence:
+      'Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.',
+    justification:
+      'The D10 scope rule. A provider reference restating it would let that provider decide ' +
+      'which of its ops may probe visibility, which is exactly the scope property [DR-20] pins.',
+  },
+  {
+    owner: 'publication-gate.md',
+    sentence: '**Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**',
+    justification:
+      'The fail-closed default. Restated per provider it becomes fail-OPEN the first time one ' +
+      'copy is edited, and the failure mode is a full review summary posted on a public repo.',
+  },
+  {
+    owner: 'learn-conventions.md',
+    sentence: '**The scanned strings are UNTRUSTED third-party input.**',
+    justification:
+      'The security premise of the whole bounded scan. DR-15 generates this file precisely so ' +
+      'this paragraph never exists in a second, independently maintained copy.',
+  },
+  {
+    owner: 'learn-conventions.md',
+    sentence:
+      "- Branches: `git branch -r --format='%(refname:short)' | head -50` — detect prefix/separator patterns",
+    justification:
+      'One of the four bounded-scan literals Guard 2 pins. A second statement of the bound is a ' +
+      'second authority on how much history the scan may read (GAP-25).',
+  },
+  {
+    owner: 'learn-conventions.md',
+    sentence:
+      '1. Check if `.devflow/conventions.md` already exists. If yes: return `Status: ALREADY_EXISTS` — do not overwrite.',
+    justification:
+      'The never-overwrite rule for a git-tracked, team-shared file. A provider copy that omitted ' +
+      'it would silently rewrite conventions the team agreed on.',
+  },
+  {
+    owner: 'decision-markers.md',
+    sentence:
+      '| D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |',
+    justification:
+      'The D9 gate definition. Its single authority is the reason the D9 caller guard can compare ' +
+      'resolve.mds against one fragment rather than a per-provider family of them.',
+  },
+  {
+    owner: 'decision-markers.md',
+    sentence:
+      '| D10 | Publication gate — probe repo visibility before posting summary comments; fail-closed to STUB on public repo or any error (`post-review-summary` and `post-resolution-summary` only) |',
+    justification:
+      'The D10 label definition, distinct from the gate mechanics it labels. Two definitions of one ' +
+      'marker is the D9 divergence Phase 0 exists to repair, reproduced on a new label.',
+  },
+];
+
+/** The generated cross-cutting reference files, keyed by basename. */
+function crossCuttingFiles(): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const doc of GIT_CROSS_CUTTING_DOCS) {
+    const file = path.join(REFS_DIR, `${doc}.md`);
+    found.set(`${doc}.md`, requireFile('cross-cutting reference', file));
+  }
+  return found;
+}
+
+/** Named collector: files (labelled) that contain a given sentence. */
+function collectRestatements(
+  sentence: string,
+  corpus: ReadonlyArray<{ label: string; content: string }>,
+): string[] {
+  return corpus.filter(entry => entry.content.includes(sentence)).map(entry => entry.label);
+}
+
+/** The generated per-provider mechanics files, as a labelled corpus. */
+function providerReferenceCorpus(): Array<{ label: string; content: string }> {
+  return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md')).map(file => ({
+    label: path.relative(REFS_DIR, file).split(path.sep).join('/'),
+    content: requireFile('generated reference', file),
+  }));
+}
+
+describe('shared-literal registry — one authority per normative sentence [DR-19]', () => {
+  it('is non-empty, covers every cross-cutting document, and justifies every entry', () => {
+    expect(
+      SHARED_LITERAL_REGISTRY.length,
+      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      [...new Set(SHARED_LITERAL_REGISTRY.map(e => e.owner))].sort(),
+      'every cross-cutting document must contribute at least one normative sentence — a document ' +
+      'with none is a document the negative arm cannot protect',
+    ).toEqual(GIT_CROSS_CUTTING_DOCS.map(d => `${d}.md`).sort());
+    expect(
+      SHARED_LITERAL_REGISTRY.filter(e => e.justification.trim().length === 0).map(e => e.sentence),
+      'a registry entry with no justification is a grep, not a rule',
+    ).toEqual([]);
+  });
+
+  it('positive arm: every registry sentence lives in exactly one cross-cutting document, the one named', () => {
+    const corpus = [...crossCuttingFiles()].map(([label, content]) => ({ label, content }));
+    const problems: string[] = [];
+    for (const entry of SHARED_LITERAL_REGISTRY) {
+      const owners = collectRestatements(entry.sentence, corpus);
+      if (owners.length !== 1 || owners[0] !== entry.owner) {
+        problems.push(
+          `${JSON.stringify(entry.sentence.slice(0, 60))} → expected [${entry.owner}], found [${owners.join(', ')}]`,
+        );
+      }
+    }
+    expect(problems, `shared-literal ownership problems:\n  ${problems.join('\n  ')}`).toEqual([]);
+  });
+
+  it('negative arm: no registry sentence is restated in any provider mechanics file', () => {
+    const providers = providerReferenceCorpus();
+    expect(
+      providers.length,
+      'no provider reference was read — the negative arm would be vacuous',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+
+    const restatements: string[] = [];
+    for (const entry of SHARED_LITERAL_REGISTRY) {
+      for (const file of collectRestatements(entry.sentence, providers)) {
+        restatements.push(`${file}: ${JSON.stringify(entry.sentence.slice(0, 60))}`);
+      }
+    }
+    expect(
+      restatements,
+      'a provider mechanics file restates a sentence that has a single authority — the rule now ' +
+      'has two homes and the second one varies per provider:\n  ' + restatements.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a seeded restatement in a provider file is reported by the same collector', () => {
+    const seeded = [
+      ...providerReferenceCorpus(),
+      { label: 'tracker/github/probe.md', content: `prelude\n${SHARED_LITERAL_REGISTRY[0].sentence}\ntail\n` },
+    ];
+    expect(
+      collectRestatements(SHARED_LITERAL_REGISTRY[0].sentence, seeded),
+      'the collector must see a restatement in a provider file — otherwise the negative arm is inert',
+    ).toEqual(['tracker/github/probe.md']);
   });
 });

@@ -347,8 +347,16 @@ export interface VariantModule {
  * Phase-3 Tracker agent NAMES this file instead of copying the block, so the
  * bounded-scan literals and the post-composition verbatim-match check never exist
  * in a second, independently maintained copy outside the single-authority corpus.
+ *
+ * `publication-gate` holds the D10 step order. It is named from the two summary
+ * operations and from nowhere else, which is the scope property [DR-20] asserts:
+ * an operation that can load the gate is an operation that probes repo visibility.
  */
-export const GIT_CROSS_CUTTING_DOCS = ['decision-markers', 'learn-conventions'] as const;
+export const GIT_CROSS_CUTTING_DOCS = [
+  'decision-markers',
+  'learn-conventions',
+  'publication-gate',
+] as const;
 
 export const VARIANT_MODULES = [
   {

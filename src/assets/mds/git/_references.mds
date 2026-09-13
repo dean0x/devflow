@@ -95,8 +95,26 @@ already written, and never overwrites it.
 5. Post-composition verification: after composing the file content in step 4 and before writing it to disk, scan the composed content against the raw strings collected in step 2 (branch names, tag names, PR titles). Assert that no output line reproduces any scanned string verbatim (shape-derived patterns only). If a match is found, replace that line with the step-3 generic default for that section and note the substitution in the op's output under `### Substitutions`. If no matches are found, write the file.
 @end
 
+@define publication_gate():
+## Publication gate (D10)
+
+Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.
+
+**Step order inside each summary op:**
+1. Dedup check (D7/D8 marker — unchanged, stays first).
+2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: OFF (publication disabled by config)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
+3. Probe once: `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
+4. Compose body (full content in FULL mode; stub template in STUB mode — defined per op).
+5. Scrub per D11 (both modes — the stub is also scrubbed).
+6. Re-check 60000-char cap **after** the scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
+7. Post; 5xx retry-once (unchanged).
+@end
+
 <!-- op: decision-markers -->
 {decision_markers()}
 
 <!-- op: learn-conventions -->
 {learn_conventions()}
+
+<!-- op: publication-gate -->
+{publication_gate()}

@@ -59,19 +59,6 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 
 File presence in the installed skill directory is the authoritative signal: if that generated reference is absent, degrade as above. **NEVER fabricate provider mechanics for an absent generated reference.**
 
-## Publication gate (D10)
-
-Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.
-
-**Step order inside each summary op:**
-1. Dedup check (D7/D8 marker — unchanged, stays first).
-2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: OFF (publication disabled by config)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
-3. Probe once: `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Compose body (full content in FULL mode; stub template in STUB mode — defined per op).
-5. Scrub per D11 (both modes — the stub is also scrubbed).
-6. Re-check 60000-char cap **after** the scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
-7. Post; 5xx retry-once (unchanged).
-
 ## Comment-sink scrub (D11)
 
 Applies **unconditionally** to every op that posts or edits a body to GitHub — never gated on visibility, config, or compliance mode.
@@ -379,6 +366,8 @@ Post a consolidated code review summary as a single PR comment per review run (D
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (no PR)`, warn in output, return. Summary is written to disk only.
 
 **Process:**
+The publication gate this operation applies is the `devflow:git` skill's `references/publication-gate.md` (D10) — the step order below instantiates it.
+
 1. Check for existing comment with this run's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
@@ -708,6 +697,8 @@ Post the resolution summary as a single PR comment. Marker-based deduplication �
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
 **Process:**
+The publication gate this operation applies is the `devflow:git` skill's `references/publication-gate.md` (D10) — the step order below instantiates it.
+
 1. Check for existing marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
