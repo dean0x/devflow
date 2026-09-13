@@ -300,6 +300,18 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'foot of this file, driven over this same baseline.',
   },
 
+  {
+    file: 'SKILL.md',
+    startLine: 232,
+    endLine: 232,
+    rationale:
+      'The D3 template heading moved into the ensure-traceable-issue reference DEMOTED to ' +
+      '`###`. extractOpSectionFromCorpus slices an op section at the next `\\n## `, so this ' +
+      'level-2 heading hid the rest of that reference from every union-mode guard — the ' +
+      'hazard T2a recorded and T2b was told to repair in the commit that touches this op. ' +
+      'The template body, its fence and its Rules bullets moved byte-identically.',
+  },
+
   // ── skills/git/references/github-api.md (P2-S7 fallout) ────────────────────
   {
     file: 'github-api.md',

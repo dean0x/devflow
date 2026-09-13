@@ -248,6 +248,25 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
 **Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
 
+### Process
+
+1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
+   - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`. Comment template:
+     ```markdown
+     ## Devflow Traceability Update
+     **Initial Request**: \{TASK_DESCRIPTION or "(see issue body)"\}
+     **Status**: Linked to branch for implementation
+     ```
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
+   - Return the issue number.
+2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
+   - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
+   - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template from the devflow:git skill (loaded via frontmatter — see "Traceability Issue Template (D3)" section). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED, do not create issue.
+   - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
+   - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY"`.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
+3. Return the issue number.
+
 ### Create Issue with Labels and Assignees
 
 ```bash
@@ -270,7 +289,7 @@ EOF
 )"
 ```
 
-## Traceability Issue Template (D3)
+### Traceability Issue Template (D3)
 
 When creating or enriching a GitHub issue via the `ensure-traceable-issue` operation, use the following canonical D3 template:
 
