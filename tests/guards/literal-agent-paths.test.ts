@@ -18,9 +18,9 @@
  * Comment lines (// and * prefixed) are skipped by the collector: literal mentions in
  * comments are documentation and are not path-resolution code.
  *
- * AC-0.16 — requireDistFile / requireDistFiles throw with a build hint when the artifact
- * is absent. Injectable root parameter (mirroring resolveAgentSource's `root = ROOT`)
- * enables hermetic testing without touching the real dist/.
+ * AC-0.16 — requireDistFile / requireDistFiles / requireBuiltCli throw with a build hint
+ * when the artifact is absent. Injectable root parameter (mirroring resolveAgentSource's
+ * `root = ROOT`) enables hermetic testing without touching the real dist/.
  *
  * Non-vacuity (mechanic 2, H10): both guards use a synthetic corpus / temp root so that
  * the detection logic is proven live without modifying committed source.
@@ -30,7 +30,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles } from '../helpers.js';
+import { requireDistFile, requireDistFiles, requireBuiltCli } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -184,5 +184,28 @@ describe('requireDistFiles throw contract (AC-0.16)', () => {
     } finally {
       rmSync(tmpRoot, { recursive: true });
     }
+  });
+});
+
+describe('requireBuiltCli throw contract (AC-0.16)', () => {
+  it('RED: throws with a build hint when dist/cli.js is absent under a hermetic root', () => {
+    // Creates a temp root with no dist/ subdirectory — hermetic, no real dist/ touched.
+    const tmpRoot = mkdtempSync(path.join(tmpdir(), 'devflow-cli-test-'));
+    try {
+      expect(
+        () => requireBuiltCli(tmpRoot),
+      ).toThrow(/npm run build/);
+      expect(
+        () => requireBuiltCli(tmpRoot),
+      ).toThrow(/dist\/cli\.js is absent/);
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('GREEN: resolves to dist/cli.js under the real ROOT when the build artifact exists', () => {
+    const cliPath = requireBuiltCli(ROOT);
+    expect(cliPath).toBe(path.join(ROOT, 'dist', 'cli.js'));
+    expect(existsSync(cliPath)).toBe(true);
   });
 });

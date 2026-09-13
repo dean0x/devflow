@@ -19,20 +19,22 @@
  * D-P6-E2E: These tests are the authoritative acceptance gate for the fold-before-strip
  * ordering fix and the bridge removal. Unit tests in init-seed.test.ts cover the seed
  * computation; these tests cover the full write path including applyFlags.
+ *
+ * Requires a build: these tests spawn dist/cli.js as a subprocess, so `npm run build`
+ * must run first.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
-import { existsSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { type ManifestData } from '../src/core/manifest.js';
+import { requireBuiltCli } from './helpers.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const ROOT = path.resolve(import.meta.dirname ?? __dirname, '..');
-const CLI_PATH = path.join(ROOT, 'dist', 'cli.js');
+const CLI_PATH = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,22 +94,10 @@ afterEach(async () => {
   await fs.rm(tmpHome, { recursive: true, force: true });
 });
 
-// ── Guards ────────────────────────────────────────────────────────────────────
-
-/**
- * PF-018 vacuous-coverage guard: true when dist/cli.js exists.
- *
- * Uses existsSync (not async access) so it can be used with it.skipIf at
- * module evaluation time — it.skipIf requires a synchronous boolean.
- * Silent green (early `return`) is the forbidden state; it.skipIf produces an
- * explicit SKIP mark in the vitest output instead.
- */
-const CLI_BUILT = existsSync(CLI_PATH);
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('init e2e — flags Phase 6 integration', () => {
-  it.skipIf(!CLI_BUILT)('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
+  it('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
     // PF-018: seed a REAL old-format manifest (flags as string array) and settings with viewMode.
     // Non-vacuous: if the bridge removal regressed to string[], flags would be [] in the manifest.
     const oldManifest = {
@@ -224,7 +214,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(env.ENABLE_LSP_TOOL).toBeUndefined();
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied; no TUI entered', async () => {
+  it('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied; no TUI entered', async () => {
 
     // PF-018: no manifest means fresh install — all flags adopt their defaults.
     // Non-vacuous: if adoption is broken, max-concurrent-subagents env var would be absent.
@@ -271,7 +261,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect((settings['env'] as Record<string, string>)?.EXISTING_VAR).toBe('keep');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('(b) re-init preserves a modified flag value; adopts defaults only for absent flags', async () => {
+  it('(b) re-init preserves a modified flag value; adopts defaults only for absent flags', async () => {
     // Regression guard for D40/ADR-014: re-init must not overwrite a flag value the user
     // set via `devflow flags`. The manifest already owns the flag; init preserves it and
     // adopts registry defaults only for flags absent from the manifest record.
@@ -334,7 +324,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(result.stdout + result.stderr).not.toContain('Opening the flags editor');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('REG-H1 probe: hand-set managed keys survive init when manifest never owned them', async () => {
+  it('REG-H1 probe: hand-set managed keys survive init when manifest never owned them', async () => {
     // Scenario: user has an existing devflow install that predates the newly-registered flags
     // (max-concurrent-subagents, default-model, spellcheck, workflowSizeGuideline).
     // The user hand-set these keys in settings.json; on upgrade + reinit they must survive.
@@ -436,7 +426,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(env.CUSTOM_USER_VAR, 'custom user env var preserved').toBe('preserved');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('idempotency: second run produces content-stable settings (no viewMode thrash)', async () => {
+  it('idempotency: second run produces content-stable settings (no viewMode thrash)', async () => {
     // content-stable = deep-equal parsed objects (not byte-equal strings): stripFlags
     // removes managed keys from their original positions and applyFlags re-appends them
     // at the end, so key order can legitimately differ between runs while content is identical.
@@ -539,7 +529,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     };
   }
 
-  it.skipIf(!CLI_BUILT)('off→on: manifest flag true materialises the attribution block in settings.json', async () => {
+  it('off→on: manifest flag true materialises the attribution block in settings.json', async () => {
     const out = await seedAndInit(
       { 'suppress-attribution': true },
       { env: { CUSTOM_USER_VAR: 'preserved' } },   // no attribution key on disk
@@ -552,7 +542,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     expect((out.settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('on→off via --reset: the devflow block is removed and the manifest agrees', async () => {
+  it('on→off via --reset: the devflow block is removed and the manifest agrees', async () => {
     // --reset null-seeds the manifest and empties the settings snapshot, so the flag
     // seeds to the registry default (false) even though the block is on disk. This is
     // the only init path that turns attribution off — a plain re-init preserves it.
@@ -571,7 +561,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     expect((out.settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('a user-customised attribution survives init untouched (shape guard)', async () => {
+  it('a user-customised attribution survives init untouched (shape guard)', async () => {
     // The highest-value case: convergeFlagsIntoSettings runs stripFlags THEN
     // applyFlags, so the guard has to hold on BOTH passes within a single init.
     // Falsification: dropping settingDeleteGuard from the registry entry makes the
@@ -587,7 +577,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     expect(out.flags['suppress-attribution']).toBe(false);
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('upgrade path: an existing devflow block seeds the flag ON and is preserved', async () => {
+  it('upgrade path: an existing devflow block seeds the flag ON and is preserved', async () => {
     // Every install predating D27 has the block, written by the old template merge,
     // with no manifest entry for the flag. Init must adopt it as ON rather than
     // silently reverting the user's git attribution behaviour.
@@ -600,7 +590,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     expect(out.settings.attribution).toEqual(DEVFLOW_ATTRIBUTION);
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it.skipIf(!CLI_BUILT)('fresh install writes no attribution key and records the flag off', async () => {
+  it('fresh install writes no attribution key and records the flag off', async () => {
     await fs.writeFile(
       path.join(tmpHome, '.claude', 'settings.json'),
       JSON.stringify({ env: { CUSTOM_USER_VAR: 'preserved' } }, null, 2) + '\n',

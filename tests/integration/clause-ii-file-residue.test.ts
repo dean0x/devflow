@@ -27,8 +27,9 @@
  *     as a positive proof that init ran.
  *   - `.devflow/` directory — gitignored by the carve-out; does not appear in `git status`.
  *
- * Skip guard: all tests skip when `dist/cli.js` is absent — the tarball needs a working
- * compiled CLI to be meaningful. Uses `existsSync` (synchronous) for `it.skipIf`.
+ * Requires a build: the tarball this file packs needs a working compiled CLI to be
+ * meaningful — an unbuilt tree packs a tarball with no CLI, so a skipped clause-(ii)
+ * proof is no proof. `npm run build` must run first.
  *
  * Runtime: ~90–180 s on a warm machine (npm pack ~30s + npm install ~60s + init ~15s).
  * Lives in tests/integration/ — run via:
@@ -39,17 +40,16 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { execSync, execFileSync, spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
-import { existsSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { requireBuiltCli } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
-/**
- * Skip guard — synchronous so it can be used with it.skipIf at module evaluation time.
- * A skipped test produces an explicit SKIP mark rather than silently passing (PF-018).
- */
-const CLI_BUILT = existsSync(path.join(ROOT, 'dist', 'cli.js'));
+// This file drives the tarball-installed CLI, not the repo's dist/cli.js directly —
+// the return value is deliberately unused. Called only to fail loud when the repo's
+// tree is unbuilt, since npm pack below would otherwise pack a tarball with no CLI.
+requireBuiltCli(ROOT);
 
 // Module-level state shared across sequential tests.
 let PACK_DIR: string;
@@ -137,7 +137,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 1: pack the real tarball ─────────────────────────────────────────
 
-  it.skipIf(!CLI_BUILT)('npm pack exits 0 and produces a .tgz file', async () => {
+  it('npm pack exits 0 and produces a .tgz file', async () => {
     PACK_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'dfpk2-pack-'));
     const result = runSync(`npm pack --pack-destination "${PACK_DIR}"`, {
       cwd: ROOT,
@@ -159,7 +159,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 2: install tarball into a scratch node_modules tree ──────────────
 
-  it.skipIf(!CLI_BUILT)('npm install from tarball into scratch node_modules exits 0', async () => {
+  it('npm install from tarball into scratch node_modules exits 0', async () => {
     const entries = await fs.readdir(PACK_DIR);
     const tgzPath = path.join(PACK_DIR, entries.find(f => f.endsWith('.tgz'))!);
 
@@ -184,7 +184,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 3: create throwaway git repo in a clean, non-empty tracked state ─
 
-  it.skipIf(!CLI_BUILT)('throwaway git repo starts from a clean committed state', async () => {
+  it('throwaway git repo starts from a clean committed state', async () => {
     TARGET_REPO = await fs.mkdtemp(path.join(os.tmpdir(), 'dfpk2-repo-'));
 
     execFileSync('git', ['init', '-q'], { cwd: TARGET_REPO });
@@ -212,7 +212,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 4: prepare scratch HOME ──────────────────────────────────────────
 
-  it.skipIf(!CLI_BUILT)('scratch HOME is isolated from real HOME', async () => {
+  it('scratch HOME is isolated from real HOME', async () => {
     SCRATCH_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'dfpk2-home-'));
     // devflow init checks for ~/.claude and bails with "Claude Code not detected" if absent.
     await fs.mkdir(path.join(SCRATCH_HOME, '.claude'), { recursive: true });
@@ -223,7 +223,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 5: run devflow init --recommended ─────────────────────────────────
 
-  it.skipIf(!CLI_BUILT)('devflow init --recommended exits 0 from the installed tarball CLI', () => {
+  it('devflow init --recommended exits 0 from the installed tarball CLI', () => {
     const result = runDevflowInit({
       cliPath: installedCliPath,
       cwd: TARGET_REPO,
@@ -242,7 +242,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
   // FIX: `.claudeignore` is now listed in the devflow-managed gitignore block (v4), so it
   // is ignored by git and does not appear as an untracked entry. The clause-(ii) violation
   // is resolved: `git status --porcelain` now shows only ` M .gitignore` (the block update).
-  it.skipIf(!CLI_BUILT)('git status shows no untracked (??) entries after devflow init [clause-ii file-residue]', () => {
+  it('git status shows no untracked (??) entries after devflow init [clause-ii file-residue]', () => {
     const statusResult = runSync('git status --porcelain', { cwd: TARGET_REPO });
     expect(statusResult.exitCode, `git status failed: ${statusResult.stderr}`).toBe(0);
 
@@ -269,7 +269,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 7: positive assertion — init did its job ─────────────────────────
 
-  it.skipIf(!CLI_BUILT)('.gitignore was modified by devflow init (positive: init ran and wrote the carve-out)', () => {
+  it('.gitignore was modified by devflow init (positive: init ran and wrote the carve-out)', () => {
     const statusResult = runSync('git status --porcelain', { cwd: TARGET_REPO });
     expect(statusResult.exitCode, `git status failed: ${statusResult.stderr}`).toBe(0);
 
@@ -287,7 +287,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 8: nothing leaked to the real HOME ───────────────────────────────
 
-  it.skipIf(!CLI_BUILT)('devflow init wrote to scratch HOME, not the real developer HOME', async () => {
+  it('devflow init wrote to scratch HOME, not the real developer HOME', async () => {
     // Verify the scratch HOME received the devflow manifest (proof init wrote there).
     const scratchManifestPath = path.join(SCRATCH_HOME, '.devflow', 'manifest.json');
     await expect(
@@ -301,7 +301,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 9: the installed Git agent came from dist/agents/ (AC-1.9) ────────
 
-  it.skipIf(!CLI_BUILT)('the installed Git agent is byte-identical to dist/agents/git.md (AC-1.9)', async () => {
+  it('the installed Git agent is byte-identical to dist/agents/git.md (AC-1.9)', async () => {
     // The Git agent ships only as a compiled artifact now. The installer resolves
     // agents dist-first, but nothing observed that end to end: this compares the
     // file `devflow init` wrote under the scratch HOME against the compiled

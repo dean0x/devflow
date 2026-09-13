@@ -48,6 +48,26 @@ export function requireDistFile(name: string, root: string = ROOT): string {
   }
 }
 
+/**
+ * Resolve the compiled CLI entrypoint and return its absolute path.
+ * Throws — does NOT skip — when absent. A guard that silently skips on a
+ * missing build artifact is not a guard: a skipped subprocess-CLI test proves
+ * nothing about the CLI, and a SKIP mark reads as "fine" in a CI log.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to verify throw behaviour without touching the real dist.
+ */
+export function requireBuiltCli(root: string = ROOT): string {
+  const cliPath = path.join(root, 'dist', 'cli.js')
+  if (!existsSync(cliPath)) {
+    throw new Error(
+      'dist/cli.js is absent — run `npm run build` first\n' +
+      '  (this guard spawns the compiled CLI as a subprocess and cannot be skipped)',
+    )
+  }
+  return cliPath
+}
+
 export function loadFile(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), 'utf8')
 }
