@@ -251,6 +251,13 @@ beforeAll(() => {
   }))
 
   const git = resolveAgentSource('git')
+  // git.md ALONE, deliberately. Since Phase 2 the generated
+  // dist/skills/git/references/tracker/github/{op}.md files also open with a
+  // `## Operation: X` anchor, so a sink-wide corpus would make every lookup below
+  // match twice and 'sole' would throw. That is the right behaviour and this is the
+  // right corpus: git.md declares the **Input:** contract a command fence must
+  // satisfy; a reference carries mechanics. Unioning providers would let a key
+  // declared by one provider satisfy the forward check (DR-18).
   gitCorpus = [{ path: git.path, content: git.content }]
 
   // Build op→section map once [DR-24]: sole corpus (git.md), all declared ops.

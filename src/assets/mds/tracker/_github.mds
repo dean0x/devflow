@@ -15,7 +15,7 @@ clause — is never restated here: that is the agent's, and a second copy outsid
 the single-authority corpus is the divergence this split exists to prevent.
 
 @define setup_task():
-# GitHub mechanics — setup-task
+## Operation: setup-task
 
 Load when the resolved tracker provider is `github` and the operation is `setup-task`.
 
@@ -23,7 +23,7 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 @end
 
 @define fetch_issue():
-# GitHub mechanics — fetch-issue
+## Operation: fetch-issue
 
 Load when the resolved tracker provider is `github` and the operation is `fetch-issue`.
 
@@ -31,7 +31,7 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 @end
 
 @define fetch_issues_batch():
-# GitHub mechanics — fetch-issues-batch
+## Operation: fetch-issues-batch
 
 Load when the resolved tracker provider is `github` and the operation is `fetch-issues-batch`.
 
@@ -39,7 +39,7 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 @end
 
 @define manage_debt():
-# GitHub mechanics — manage-debt
+## Operation: manage-debt
 
 Load when the resolved tracker provider is `github` and the operation is `manage-debt`.
 
@@ -47,7 +47,7 @@ Load when the resolved tracker provider is `github` and the operation is `manage
 @end
 
 @define create_release():
-# GitHub mechanics — create-release
+## Operation: create-release
 
 Load when the resolved tracker provider is `github` and the operation is `create-release`.
 
@@ -55,7 +55,7 @@ Load when the resolved tracker provider is `github` and the operation is `create
 @end
 
 @define gather_release_evidence():
-# GitHub mechanics — gather-release-evidence
+## Operation: gather-release-evidence
 
 Load when the resolved tracker provider is `github` and the operation is `gather-release-evidence`.
 
@@ -63,7 +63,7 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 @end
 
 @define backlink_shipped_issues():
-# GitHub mechanics — backlink-shipped-issues
+## Operation: backlink-shipped-issues
 
 Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
 
@@ -71,7 +71,7 @@ Load when the resolved tracker provider is `github` and the operation is `backli
 @end
 
 @define ensure_traceable_issue():
-# GitHub mechanics — ensure-traceable-issue
+## Operation: ensure-traceable-issue
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
 
@@ -79,7 +79,7 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 @end
 
 @define post_wave_report():
-# GitHub mechanics — post-wave-report
+## Operation: post-wave-report
 
 Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
 
@@ -87,7 +87,7 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 @end
 
 @define ensure_pr_ready():
-# GitHub mechanics — ensure-pr-ready
+## Operation: ensure-pr-ready
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 

@@ -42,13 +42,32 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
  *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
  *   (d) fetch-issue strips #-prefixed refs in step 1 before the numeric/text branch.
  *
- * All four ops use sole-mode extraction (git.md is the single contract authority for each).
+ * Two corpora, because the four arms ask two different questions (DR-18):
+ *
+ *   contractCorpus — git.md ALONE. Arms (a), (c) and (d) read the operation's
+ *     CONTRACT (its Input/Process/Output declaration), and git.md is the single
+ *     authority for that. Since Phase 2 the generated references under
+ *     dist/skills/git/references/tracker/github/ also carry a `## Operation: X`
+ *     anchor, so a sink-wide corpus makes every one of these lookups match twice
+ *     and 'sole' throws by design — the reference is MECHANICS, not a second
+ *     contract. Repointing here is the GAP-21 "guard classes move with the text"
+ *     rule applied in the other direction: the text these three arms pin never
+ *     moved, so their corpus must not widen.
+ *
+ *   sinkCorpus — git.md ∪ the generated references. Arm (b) is a NEGATIVE check
+ *     ("no commit --only anywhere in learn-conventions"), and a negative check
+ *     narrowed to git.md would go blind the moment the learn-conventions body
+ *     moves into a reference. It stays wide on purpose.
+ *
  * Missing op = violation, never a silent pass (PF-018).
  */
-function collectConventionsCommitPlacementViolations(corpus: CorpusEntry[]): string[] {
+function collectConventionsCommitPlacementViolations(
+  contractCorpus: CorpusEntry[],
+  sinkCorpus: CorpusEntry[],
+): string[] {
   const violations: string[] = [];
 
-  if (corpus.length === 0) {
+  if (contractCorpus.length === 0 || sinkCorpus.length === 0) {
     violations.push('corpus is empty — cannot verify any operation');
     return violations;
   }
@@ -56,7 +75,7 @@ function collectConventionsCommitPlacementViolations(corpus: CorpusEntry[]): str
   // Helper: extract a sole-mode section; a missing op is a violation, not an unhandled throw.
   function getSection(opName: string): string | null {
     try {
-      return extractOpSectionFromCorpus(corpus, opName, { mode: 'sole' }).content;
+      return extractOpSectionFromCorpus(contractCorpus, opName, { mode: 'sole' }).content;
     } catch {
       violations.push(`operation '${opName}' not found in corpus — cannot verify placement`);
       return null;
@@ -109,10 +128,11 @@ function collectConventionsCommitPlacementViolations(corpus: CorpusEntry[]): str
   // before the post-output **Commit boundary:** area, which is where a misplaced
   // commit --only would live. Slicing from ## Operation: learn-conventions to
   // the next ## Operation: covers the full section including the post-output area.
+  // Sink-wide on purpose: this arm must still see the body after it moves.
   {
     const marker = '## Operation: learn-conventions';
     const matchingSections: string[] = [];
-    for (const entry of corpus) {
+    for (const entry of sinkCorpus) {
       const start = entry.content.indexOf(marker);
       if (start === -1) continue;
       const nextOp = entry.content.indexOf('\n## Operation:', start + marker.length);
@@ -907,7 +927,8 @@ describe('git agent — static content guards (PF-018)', () => {
   // Named collector + known-bad probe (H10, PF-043): proves detection is live.
 
   it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
-    const violations = collectConventionsCommitPlacementViolations(gitAgentSinkCorpus());
+    // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references (arm b).
+    const violations = collectConventionsCommitPlacementViolations(soleCorpus, gitAgentSinkCorpus());
     expect(
       violations,
       `conventions-commit placement: live guard found violations:\n${violations.map(v => `  • ${v}`).join('\n')}`,
@@ -952,7 +973,7 @@ describe('git agent — static content guards (PF-018)', () => {
       (cbLineEnd === -1 ? '' : mutated.slice(cbLineEnd));
 
     const syntheticCorpus: CorpusEntry[] = [{ path: '/synthetic/git.md', content: mutated }];
-    const violations = collectConventionsCommitPlacementViolations(syntheticCorpus);
+    const violations = collectConventionsCommitPlacementViolations(syntheticCorpus, syntheticCorpus);
 
     expect(
       violations.length,

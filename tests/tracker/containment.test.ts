@@ -398,7 +398,11 @@ describe('containment: structural parity — every op has a file and every file 
     expect(files.size, 'no generated reference was found at all').toBeGreaterThan(0);
   });
 
-  it('every generated reference is non-empty and names its own operation', () => {
+  it('every generated reference is non-empty and opens with its own `## Operation:` anchor', () => {
+    // The anchor is not decoration: the D11 forward/reverse guards find moved
+    // mechanics through `extractOpSectionFromCorpus(..., { mode: 'union' })`, which
+    // keys on exactly this heading. A reference titled anything else is invisible
+    // to the sink-class guards the moment its mechanics arrive.
     const problems: string[] = [];
     for (const op of TRACKER_GITHUB_OPS) {
       const content = files.get(op);
@@ -409,8 +413,10 @@ describe('containment: structural parity — every op has a file and every file 
       if (content.length < MIN_REFERENCE_CHARS) {
         problems.push(`${op}: ${content.length} ch, floor ${MIN_REFERENCE_CHARS}`);
       }
-      if (!content.includes(op)) {
-        problems.push(`${op}: the file never names the operation it carries mechanics for`);
+      if (!content.startsWith(`## Operation: ${op}\n`)) {
+        problems.push(
+          `${op}: must begin with "## Operation: ${op}" — got ${JSON.stringify(content.split('\n')[0])}`,
+        );
       }
     }
     expect(problems, `generated reference problems:\n  ${problems.join('\n  ')}`).toEqual([]);
