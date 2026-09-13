@@ -399,7 +399,11 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-wave-report: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(soleCorpus, 'post-wave-report', 'sole');
+    // Mode 'union' [DR-18]: P2-S6 moved this op's compose step into the generated
+    // post-wave-report reference, and §14.3 classes `size_cap` as one of the two
+    // genuine provider facts — so the cap travels with the mechanics and the pin
+    // follows it (GAP-21). The floor literal is unchanged; only the corpus widened.
+    const sec = extractOpSection(gitAgentSinkCorpus(), 'post-wave-report', 'union');
     expect(
       sec,
       'post-wave-report: missing 60000-char cap',
