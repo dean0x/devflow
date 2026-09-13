@@ -280,17 +280,43 @@ export const TRACKER_GITHUB_OPS = [
   'ensure-pr-ready',
 ] as const;
 
-/** One `.mds` module that fans out into a directory of per-op reference files. */
+/**
+ * How a module's emitted filenames are decided — and therefore whether the
+ * MIN_VARIANT_PAIRS floor applies to it.
+ *
+ * 'fanout' — one file per entry of a ROSTER (the tracker operation list). Parity
+ *   assertions range over that roster, which is exactly where GAP-42 bites: a
+ *   roster short enough to enumerate by hand is satisfied by any implementation
+ *   that returns something, so the floor is what stops a short one being
+ *   introduced. This is the default; a module must opt OUT deliberately.
+ * 'named' — a fixed set of cross-cutting documents, each named individually at
+ *   exactly one site in the agent (`references/decision-markers.md` and, later,
+ *   `learn-conventions.md` / `publication-gate.md`). Nothing ranges over the set,
+ *   so a floor over it would not make any assertion sharper — it would only
+ *   forbid the first such document from existing. What proves these correct is
+ *   splitVariantSections' bidirectional check plus the byte-budget's
+ *   formula ↔ nameable-set comparison, neither of which depends on a count.
+ */
+export type VariantModuleKind = 'fanout' | 'named';
+
+/** One `.mds` module that fans out into one reference file per registered name. */
 export interface VariantModule {
   /** Repo-relative, POSIX-spelled source path of the module host. */
   readonly source: string;
   /**
-   * POSIX sub-path under SKILL_REFS_OUTPUT_DIR that this module's files land in.
+   * POSIX sub-path under SKILL_REFS_OUTPUT_DIR that this module's files land in,
+   * or `''` for files that land directly in it.
    * Every segment is validated by the same rule as an output filename, so a
    * module can no more escape the destination than a host can.
    */
   readonly subdir: string;
-  /** The operations this module emits, one file each. */
+  /**
+   * Which floor and which naming discipline this module is held to.
+   * Omitted means 'fanout' — the strict answer, so a module cannot dodge the
+   * floor by forgetting a field.
+   */
+  readonly kind?: VariantModuleKind;
+  /** The names this module emits, one file each. */
   readonly ops: readonly string[];
 }
 
@@ -306,22 +332,44 @@ export interface VariantModule {
  * Phase 3 and are deliberately absent — an entry here with no module on disk
  * would be an artifact with no reachable consumer (ADR-003).
  */
+/**
+ * The cross-cutting `devflow:git` reference documents — provider-independent, so
+ * they land at the root of the references directory rather than under
+ * `tracker/{provider}/`.
+ *
+ * `decision-markers` holds the D1–D3 / D5–D10 rows of the agent's Decision Marker
+ * Legend. The D4 and D11 rows are the ONLY definitions of labels whose controls
+ * are always-loaded, so they stay inline in the agent (E10 / AC-2.13); the rest
+ * are glossary entries a reader consults, not rules a spawn must have.
+ */
+export const GIT_CROSS_CUTTING_DOCS = ['decision-markers'] as const;
+
 export const VARIANT_MODULES = [
   {
     source: 'src/assets/mds/tracker/_github.mds',
     subdir: 'tracker/github',
+    kind: 'fanout',
     ops: TRACKER_GITHUB_OPS,
+  },
+  {
+    source: 'src/assets/mds/git/_references.mds',
+    subdir: '',
+    kind: 'named',
+    ops: GIT_CROSS_CUTTING_DOCS,
   },
 ] as const satisfies readonly VariantModule[];
 
 /**
- * The floor a fanned-out pair list must clear.
+ * The floor a FAN-OUT module's pair list must clear.
  *
  * 8 is not a tuning knob: below it the "every op has a file and every file has
  * an op" parity assertions stop discriminating, because a list short enough to
  * be enumerated by hand is satisfied by any implementation that returns
  * something (GAP-42). Raising it is allowed; lowering it is the exact evasion
  * §14.5's no-threshold-lowered rule exists to prevent.
+ *
+ * It applies per module, and only to `kind: 'fanout'` modules — see
+ * VariantModuleKind for why a count proves nothing about a named document set.
  */
 export const MIN_VARIANT_PAIRS = 8;
 
@@ -370,15 +418,24 @@ export function expandVariants(
   for (const mod of modules) {
     if (mod.ops.length === 0) return Err({ kind: 'empty-module', module: mod.source });
 
-    for (const segment of mod.subdir.split('/')) {
-      if (!validateOutputName(segment).ok) {
-        return Err({
-          kind: 'invalid-subdir-segment',
-          module: mod.source,
-          subdir: mod.subdir,
-          segment,
-        });
+    // `''` means "land in the destination directory itself" — there is no segment
+    // to validate, and splitting it would produce one empty segment that every
+    // name rule rejects. Any other value is validated segment by segment.
+    if (mod.subdir !== '') {
+      for (const segment of mod.subdir.split('/')) {
+        if (!validateOutputName(segment).ok) {
+          return Err({
+            kind: 'invalid-subdir-segment',
+            module: mod.source,
+            subdir: mod.subdir,
+            segment,
+          });
+        }
       }
+    }
+
+    if ((mod.kind ?? 'fanout') === 'fanout' && mod.ops.length < MIN_VARIANT_PAIRS) {
+      return Err({ kind: 'too-few-pairs', count: mod.ops.length, minimum: MIN_VARIANT_PAIRS });
     }
 
     for (const op of mod.ops) {
@@ -386,7 +443,7 @@ export function expandVariants(
       if (!nameResult.ok) {
         return Err({ kind: 'invalid-op-name', module: mod.source, op, cause: nameResult.error });
       }
-      const relPath = `${mod.subdir}/${op}.md`;
+      const relPath = mod.subdir === '' ? `${op}.md` : `${mod.subdir}/${op}.md`;
       const claimants = claimedBy.get(relPath);
       if (claimants === undefined) {
         claimedBy.set(relPath, [mod.source]);
@@ -396,10 +453,6 @@ export function expandVariants(
       }
       pairs.push({ module: mod.source, op, relPath });
     }
-  }
-
-  if (pairs.length < MIN_VARIANT_PAIRS) {
-    return Err({ kind: 'too-few-pairs', count: pairs.length, minimum: MIN_VARIANT_PAIRS });
   }
 
   return Ok(pairs);

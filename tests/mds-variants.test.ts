@@ -38,6 +38,7 @@ import {
   SKILL_REFS_OUTPUT_DIR,
   VARIANT_MODULES,
   TRACKER_GITHUB_OPS,
+  GIT_CROSS_CUTTING_DOCS,
   MIN_VARIANT_PAIRS,
   type OutputNameError,
   type OutputDirError,
@@ -438,24 +439,50 @@ describe('expandVariants', () => {
     const pairs = valueOf(expandVariants());
     const expected = VARIANT_MODULES.reduce((n, m) => n + m.ops.length, 0);
     expect(pairs).toHaveLength(expected);
-    expect(pairs.map(p => p.op)).toEqual([...TRACKER_GITHUB_OPS]);
+    expect(pairs.map(p => p.op)).toEqual([...TRACKER_GITHUB_OPS, ...GIT_CROSS_CUTTING_DOCS]);
   });
 
-  it('the shipped pair list clears the minimum — a short list makes parity vacuous', () => {
-    // GAP-42 / AC-1.2: a one- or two-element list is structurally identical to a
+  it('every FAN-OUT module clears the minimum — a short roster makes parity vacuous', () => {
+    // GAP-42 / AC-1.2: a one- or two-element roster is structurally identical to a
     // single-arm conditional, and every "every op has a file" assertion over it
-    // passes for any implementation that returns something.
-    const pairs = valueOf(expandVariants());
-    expect(pairs.length).toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+    // passes for any implementation that returns something. The floor applies per
+    // module and to fan-out modules only — a `named` module's correctness comes from
+    // splitVariantSections' bidirectional check, not from a count, and a floor there
+    // would forbid the first cross-cutting document rather than prove anything.
+    const fanout = VARIANT_MODULES.filter(m => (m.kind ?? 'fanout') === 'fanout');
+    expect(fanout.length, 'there must be at least one fan-out module').toBeGreaterThan(0);
+    for (const mod of fanout) {
+      expect(mod.ops.length, `${mod.source} is below the fan-out floor`)
+        .toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+    }
     expect(MIN_VARIANT_PAIRS).toBeGreaterThanOrEqual(8);
   });
 
-  it('emits a nested, POSIX-spelled relative path per pair', () => {
+  it('every module under tracker/ is a fan-out module — `named` is not a floor escape', () => {
+    // The only way to dodge the floor is to declare `kind: 'named'`. This pins that
+    // a provider mechanics module can never do so.
+    for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
+      expect(mod.kind ?? 'fanout', `${mod.source} must be a fan-out module`).toBe('fanout');
+    }
+  });
+
+  it('emits a POSIX-spelled relative path per pair — nested or flat per its module', () => {
+    const bySource = new Map(VARIANT_MODULES.map(m => [m.source as string, m]));
     const pairs = valueOf(expandVariants());
     for (const pair of pairs) {
-      expect(pair.relPath).toBe(`tracker/github/${pair.op}.md`);
-      expect(pair.module).toBe('src/assets/mds/tracker/_github.mds');
+      const mod = bySource.get(pair.module);
+      expect(mod, `pair names an unregistered module: ${pair.module}`).toBeDefined();
+      const expected = mod!.subdir === '' ? `${pair.op}.md` : `${mod!.subdir}/${pair.op}.md`;
+      expect(pair.relPath).toBe(expected);
     }
+    expect(
+      pairs.some(p => p.relPath.includes('/')),
+      'no nested path emitted — the subdir arm is untested',
+    ).toBe(true);
+    expect(
+      pairs.some(p => !p.relPath.includes('/')),
+      'no flat path emitted — the empty-subdir arm is untested',
+    ).toBe(true);
   });
 
   it('every emitted relative path is unique', () => {
@@ -592,8 +619,11 @@ describe('VARIANT_MODULES (shipped registry)', () => {
 
   it('carries no Jira or Linear provider — Phase 2 is GitHub-only', () => {
     // ADR-003 clause (iii): a registry entry with no module on disk would be an
-    // artifact with no reachable consumer.
-    const subdirs = VARIANT_MODULES.map(m => m.subdir);
-    expect(subdirs).toEqual(['tracker/github']);
+    // artifact with no reachable consumer. Scoped to the provider subdirectories:
+    // the cross-cutting module is provider-independent and lands flat.
+    const providerSubdirs = VARIANT_MODULES
+      .map(m => m.subdir as string)
+      .filter(subdir => subdir.startsWith('tracker/'));
+    expect(providerSubdirs).toEqual(['tracker/github']);
   });
 });

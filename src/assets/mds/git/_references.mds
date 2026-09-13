@@ -1,0 +1,40 @@
+---
+output-dir: dist/skills/git/references
+---
+Cross-cutting references for the `devflow:git` skill — provider-independent, so
+they land at the root of `references/` rather than under a per-provider directory.
+
+One section per document. The names come from `GIT_CROSS_CUTTING_DOCS` in
+`src/core/mds-variants.ts`, and the module and that registry must agree in both
+directions or the build fails. Everything above the first section marker is
+module-level prose and is emitted nowhere.
+
+Unlike the tracker module, nothing ranges over this set: each document is named at
+exactly one site in the agent, and that naming is what the byte budget's
+formula ↔ nameable-set check tests. The module is registered `kind: 'named'` for
+that reason.
+
+@define decision_markers():
+## Decision Markers
+
+The `D\{N\}` labels used throughout the Git agent. **D4 (degradation contract) and
+D11 (comment-sink scrub) are NOT here** — their definitions stay inline in the
+agent, because they are the only two whose controls every spawn must already have
+loaded before it can act. The rest are glossary entries: a reader consults them to
+understand a label, and nothing breaks if that read is deferred.
+
+| Marker | Meaning |
+|--------|---------|
+| D1 | Conventions learning — `learn-conventions` writes `.devflow/conventions.md` once from a bounded git/gh scan |
+| D2 | Review-thread fetch/resolution — GraphQL thread fetch and the reply/resolve cycle |
+| D3 | Issue template — three-section structure (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) used by `ensure-traceable-issue` |
+| D5 | Issue creation/enrichment — `ensure-traceable-issue` creates or enriches a GitHub issue and returns the number for downstream use |
+| D6 | Merge-readiness report — `check-merge-readiness` is report-only; it never takes action |
+| D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
+| D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
+| D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
+| D10 | Publication gate — probe repo visibility before posting summary comments; fail-closed to STUB on public repo or any error (`post-review-summary` and `post-resolution-summary` only) |
+@end
+
+<!-- op: decision-markers -->
+{decision_markers()}

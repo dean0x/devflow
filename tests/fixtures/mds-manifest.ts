@@ -84,8 +84,11 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that fan out into MANY
- * output files instead of one. Today exactly one — the GitHub tracker mechanics
- * module, src/assets/mds/tracker/_github.mds → dist/skills/git/references/tracker/github/*.md.
+ * output files instead of one. Two today:
+ *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
+ *     (kind 'fanout' — one file per entry of TRACKER_GITHUB_OPS)
+ *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
+ *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
  *
  * Named by repo-relative source path, not by basename, and deliberately NOT part
  * of ALL_MDS_HOSTS: that roster exists because each of its entries becomes an
@@ -95,10 +98,13 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  * rather than one set with an exception.
  *
  * The emitted file set itself is not restated here: it is derived from
- * TRACKER_GITHUB_OPS in src/core/mds-variants.ts, so there is one roster, not a
- * production copy and a test copy that can drift.
+ * TRACKER_GITHUB_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there
+ * is one roster, not a production copy and a test copy that can drift.
  */
-export const MDS_REFERENCE_MODULES = ['src/assets/mds/tracker/_github.mds'] as const;
+export const MDS_REFERENCE_MODULES = [
+  'src/assets/mds/tracker/_github.mds',
+  'src/assets/mds/git/_references.mds',
+] as const;
 
 /**
  * Hand-authored files copied verbatim into dist/commands/. release.md inlines its

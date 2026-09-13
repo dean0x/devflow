@@ -56,7 +56,7 @@ import {
   ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
-import { TRACKER_GITHUB_OPS, ALLOWED_OUTPUT_DIR_NAMES } from '../src/core/mds-variants.js';
+import { TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS, ALLOWED_OUTPUT_DIR_NAMES } from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
@@ -151,9 +151,10 @@ async function hashDistTree(root: string): Promise<Map<string, string>> {
  * The generated skill references, keyed as hashDistTree keys them.
  * Derived from the production op roster, never retyped.
  */
-const EXPECTED_REFERENCE_KEYS: readonly string[] = TRACKER_GITHUB_OPS.map(
-  op => `skills/git/references/tracker/github/${op}.md`,
-);
+const EXPECTED_REFERENCE_KEYS: readonly string[] = [
+  ...TRACKER_GITHUB_OPS.map(op => `skills/git/references/tracker/github/${op}.md`),
+  ...GIT_CROSS_CUTTING_DOCS.map(doc => `skills/git/references/${doc}.md`),
+];
 
 interface TreeDiff {
   /** Built from the committed sources but absent on disk — dist/ is behind src/. */

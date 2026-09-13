@@ -117,17 +117,10 @@ Create both temp files per invocation — `DEVFLOW_BODY_RAW="$(mktemp)"` and `DE
 
 | Marker | Meaning |
 |--------|---------|
-| D1 | Conventions learning — `learn-conventions` writes `.devflow/conventions.md` once from a bounded git/gh scan |
-| D2 | Review-thread fetch/resolution — GraphQL thread fetch and the reply/resolve cycle |
-| D3 | Issue template — three-section structure (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) used by `ensure-traceable-issue` |
 | D4 | Degradation contract — every remote-dependent op degrades gracefully with `TRACEABILITY: DEGRADED (\{reason\})`, never aborting the caller's workflow |
-| D5 | Issue creation/enrichment — `ensure-traceable-issue` creates or enriches a GitHub issue and returns the number for downstream use |
-| D6 | Merge-readiness report — `check-merge-readiness` is report-only; it never takes action |
-| D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
-| D8 | Resolution-summary dedup — one posted resolution-summary comment per workflow run, marker-keyed, never edited after posting |
-| D9 | Thread-resolution gate — `resolveReviewThread` is called only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty |
-| D10 | Publication gate — probe repo visibility before posting summary comments; fail-closed to STUB on public repo or any error (`post-review-summary` and `post-resolution-summary` only) |
 | D11 | Comment-sink scrub — unconditional secret redaction on every body-posting op; fail-closed (`TRACEABILITY: DEGRADED (redaction unavailable)`) on scrubber error or missing script |
+
+D4 and D11 are defined here because their controls must be loaded before the agent acts. Every other `D\{N\}` label is defined in the `devflow:git` skill's `references/decision-markers.md`.
 
 ---
 

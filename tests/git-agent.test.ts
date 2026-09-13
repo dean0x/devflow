@@ -92,6 +92,46 @@ function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: Inlin
   return { corpus, offenders };
 }
 
+// ── Decision-marker legend (AC-2.13 / E10) ──────────────────────────────────
+
+/** A legend row defines a label: `| D4 | Degradation contract — … |`. */
+const LEGEND_ROW_RE = /^\|\s*(D\d{1,2})\s*\|/gm;
+
+/** A label is REFERENCED as `(D4)`, `(D2, D9)` or `per D11` in prose and tables. */
+const LABEL_REFERENCE_RE = /\bD\d{1,2}\b/g;
+
+/** Named collector: the D-labels a text DEFINES in a legend table. */
+function collectLegendDefinitions(text: string): Set<string> {
+  return new Set([...text.matchAll(LEGEND_ROW_RE)].map(m => m[1]));
+}
+
+/**
+ * Named collector: the D-labels a text USES.
+ *
+ * Legend rows are stripped first — a definition is not a use, and counting it as
+ * one would make every label trivially "referenced" and the set relation circular.
+ */
+function collectLabelReferences(text: string): Set<string> {
+  const withoutLegendRows = text
+    .split('\n')
+    .filter(line => !/^\|\s*D\d{1,2}\s*\|/.test(line))
+    .join('\n');
+  return new Set(withoutLegendRows.match(LABEL_REFERENCE_RE) ?? []);
+}
+
+/** Read a generated reference; throws with a build hint rather than returning ''. */
+function readGeneratedReference(relPath: string): string {
+  const file = path.join(ROOT, 'dist', 'skills', 'git', 'references', ...relPath.split('/'));
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    throw new Error(
+      `dist/skills/git/references/${relPath} is absent — run \`npm run build:mds\` first\n` +
+      '  (this guard reads a generated reference and cannot be skipped)',
+    );
+  }
+}
+
 // ── Single-authority literal scan (GAP-25) ──────────────────────────────────
 
 /**
@@ -854,6 +894,62 @@ describe('git agent — static content guards (PF-018)', () => {
       collectLiteralOccurrences(corpus, '≤50 branches').length,
       'the collector must see a second statement — otherwise the count assertion is inert',
     ).toBe(2);
+  });
+
+  // ── Guard 7c: AC-2.13 — no surviving D-label lacks its definition (E10) ────
+  //
+  // P2-S5 cut 3 keeps a two-row inline legend (D4, D11) and re-homes D1–D3 / D5–D10
+  // to the generated references/decision-markers.md. Asserted as a SET RELATION, not
+  // row by row: a per-row check passes while a label nobody remembered goes
+  // undefined, which is the exact failure the cut can cause.
+  //
+  // NOTE on the AC's wording. It was drafted as "referenced ⊆ defined in git.md's
+  // inline legend", which the cut makes unsatisfiable by construction — moving those
+  // definitions out is the cut. The relation below is the AC's stated property ("no
+  // surviving label lacks its definition") over the set of places a definition may
+  // now live, plus the separate clause that D4 and D11 are defined ONLY inline.
+
+  it('AC-2.13: every D-label used in git.md is defined in the inline legend or decision-markers.md', () => {
+    const defined = new Set([
+      ...collectLegendDefinitions(content),
+      ...collectLegendDefinitions(readGeneratedReference('decision-markers.md')),
+    ]);
+    const undefinedLabels = [...collectLabelReferences(content)].filter(l => !defined.has(l));
+    expect(
+      undefinedLabels,
+      `D-label(s) used in git.md with no definition in the inline legend or ` +
+      `references/decision-markers.md: ${undefinedLabels.join(', ')}`,
+    ).toEqual([]);
+    expect(defined.size, 'no D-label definitions were parsed at all — the relation is vacuous')
+      .toBeGreaterThanOrEqual(11);
+  });
+
+  it('AC-2.13: D4 and D11 are defined inline and ONLY inline (E10)', () => {
+    const inline = collectLegendDefinitions(content);
+    const rehomed = collectLegendDefinitions(readGeneratedReference('decision-markers.md'));
+    expect(
+      [...inline].sort(),
+      'the inline legend must define exactly D4 and D11 — their controls are always-loaded, ' +
+      'so making either definition a file the spawn might not have is PF-027\'s failure mode',
+    ).toEqual(['D11', 'D4']);
+    expect(
+      [...inline].filter(label => rehomed.has(label)),
+      'a label is defined in both places — two authorities for one definition (PF-023)',
+    ).toEqual([]);
+    expect(rehomed.size, 'decision-markers.md defines nothing — the cut dropped the rows')
+      .toBeGreaterThan(0);
+  });
+
+  it('AC-2.13 known-bad probe: a referenced label with no definition is reported', () => {
+    const seeded = `${content}\n| \`some-op\` | does a thing (D42) | none |\n`;
+    const defined = new Set([
+      ...collectLegendDefinitions(content),
+      ...collectLegendDefinitions(readGeneratedReference('decision-markers.md')),
+    ]);
+    expect(
+      [...collectLabelReferences(seeded)].filter(l => !defined.has(l)),
+      'the collectors must see an undefined label — otherwise the set relation is inert',
+    ).toEqual(['D42']);
   });
 
   // ── Guard 8: D9 caller guard (AC-0.5) ──────────────────────────────────────

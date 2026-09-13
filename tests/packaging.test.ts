@@ -501,7 +501,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    */
   const EXPECTED_SHIPPED_MDS =
     MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
-    MDS_REFERENCE_MODULES.length; // 13 + 11 + 1 + 1
+    MDS_REFERENCE_MODULES.length; // 13 + 11 + 1 + 2
 
   it(`tarball ships all ${EXPECTED_SHIPPED_MDS} src/assets/**/*.mds generator sources (D-A(a))`, () => {
     const files = getPackFiles();
@@ -516,7 +516,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
       `(${MDS_COMMAND_HOSTS.length} command hosts + ${MDS_PARTIALS.length} partials + ` +
       `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
-      `module), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
+      `module(s)), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
     ).toBe(EXPECTED_SHIPPED_MDS);
 
