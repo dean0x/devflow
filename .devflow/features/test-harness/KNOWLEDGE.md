@@ -1,11 +1,11 @@
 ---
 feature: test-harness
 name: Test Harness (agent-source resolver, goldens, seam and guard tests, integration helpers)
-description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs COMMAND_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine."
+description: "Use when adding a new guard test, modifying the agent-source resolver, updating golden fixtures, extending the seam test or integration helpers, understanding the DIST_FILES vs COMMAND_HOSTS split, or working in tests/seams, tests/goldens, tests/guards, or tests/integration. Keywords: guard, non-vacuity, golden, seam, agent-source resolver, resolveAgentSource, extractOpSectionFromCorpus, numeric-floor-manifest, retired-wording, literal-agent-path, extended-references, subagent-skill-preload, clause-ii-file-residue, content-anchored, gitOp, between, singleLine, requireBuiltCli, fail-loud, skipIf."
 category: conventions
 directories: [tests/helpers.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration]
 created: 2026-09-06
-updated: 2026-09-09
+updated: 2026-09-13
 ---
 
 # Test Harness
@@ -47,9 +47,11 @@ Sections end at the next `\n## ` in the file. When an op's Output template itsel
 
 `loadGolden(name)` reads from `tests/fixtures/golden/<name>` and throws with the update-command hint when absent. It never auto-regenerates — a guard that silently skips a missing fixture is not a guard (PF-018).
 
-### requireDistFile / requireDistFiles
+### requireDistFile / requireDistFiles / requireBuiltCli
 
-Both throw with a build hint when `dist/commands/` is absent or the named file does not exist. The injectable `root` parameter enables hermetic throw-behaviour tests without touching the real dist.
+All three throw with a build hint when the artifact is absent — `requireDistFile`/`requireDistFiles` for `dist/commands/`, `requireBuiltCli(root = ROOT)` for `dist/cli.js`. The injectable `root` parameter enables hermetic throw-behaviour tests without touching the real dist.
+
+**Doctrine: build artifact → throw (fail-loud); external binary the repo cannot produce → `skipIf` capability gate.** A missing build artifact (anything `npm run build` produces) must fail the suite loudly — a skipped subprocess-CLI test proves nothing and a SKIP mark reads as "fine" in a CI log (PF-018). A missing external binary the repo has no way to produce (e.g. the `claude` CLI) is a legitimate `skipIf` capability gate. Every subprocess-CLI test file in `tests/` calls `requireBuiltCli()` at module scope, so an unbuilt tree is a collection error (exit 1), not a green SKIP: `tests/cli-unknown-command.test.ts`, `tests/init-e2e-flags.test.ts`, `tests/compliance-e2e.test.ts`, `tests/init-review-publication.test.ts`, and `tests/integration/clause-ii-file-residue.test.ts` (bare `requireBuiltCli(ROOT)` call, return value unused — that file drives the tarball-installed CLI, not the repo's own `dist/`, so the call exists only to fail loud before `npm pack` produces a tarball with no CLI). The remaining `skipIf` sites in `tests/` are all capability gates, never build gates: `isClaudeAvailable()` (`tests/integration/subagent-skill-preload.test.ts`, `ambient-activation`), `IS_WIN32`, `canRevokeWrite`. `tests/integration/helpers.ts`'s `isClaudeAvailable` JSDoc states this distinction explicitly. CI (`ci.yml`, `release.yml`) runs `npm run build` before `npm test` with no `pretest` hook, so the fail-loud gate only bites locally on an unbuilt tree.
 
 ### walkFiles
 
@@ -215,7 +217,7 @@ Non-vacuity assertion: `.gitignore` shows as modified (`M`) so the test cannot p
 
 This test found a real leak on first run (`?? .claudeignore`) which was fixed by commit `7074733` (gitignore v4 carve-out adds `.claudeignore`). The `.fails()` marker was removed after the fix.
 
-What remains manual: the "no new prompt" half, and the five-command walk-through (`/plan → /implement → /code-review → /resolve → /release`) require a live model and authenticated GitHub project.
+What remains manual: the "no new prompt" half. The five-command live walk-through (`/plan → /implement → /code-review → /resolve → /release`) is formally waived per issue #321 until after Phase 3 merges (decision 2026-09-13) — it requires a live model and authenticated GitHub project. The mechanised file-residue half (this file) remains the gate for Phases 1–2.
 
 Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.integration.config.ts tests/integration/clause-ii-file-residue.test.ts`.
 
@@ -238,6 +240,8 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 **Searching the consumer (compiled commands) for a producer signal.** Direction 3 of the seam test must search `git.md` (the emitter), not `DIST_FILES` (which contains the consumer capture lines). Grepping the consumer and calling it the producer is vacuous and conceals missing producers.
 
 **Editing the golden fixture to match a new extractor before proving faithfulness.** Any extractor rewrite must reproduce the existing frozen fixture from the baseline tree FIRST (the faithfulness proof), THEN be run against the newer tree. Editing the fixture to match skips the proof entirely.
+
+**`skipIf` on a build artifact.** Gating a subprocess-CLI test with `it.skipIf(!existsSync(distPath))` (or an equivalent module-level boolean) lets an unbuilt tree pass green with SKIP marks instead of failing the suite. A skipped test proves nothing about the CLI (PF-018) and a SKIP mark reads as "fine" in a CI log. Use `requireBuiltCli()` / `requireDistFile(s)` (throw at module scope) instead; reserve `skipIf` for capability gates on external binaries the repo cannot produce, e.g. `isClaudeAvailable()`.
 
 ## Gotchas
 
@@ -263,12 +267,12 @@ Runtime: ~90–180 s on a warm machine. Run via `npx vitest run --config vitest.
 
 ## Key Files
 
-- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `splitFrontmatter(text)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `makeManifest`, `computeFpRatio`, and the isolated-build set — `runMdsBuild(fakeRoot)`, `copyCommittedSources(fakeRoot)`, `buildCommittedTree()` / `cleanupCommittedTree()` (memoised per test file; pair the cleanup in an `afterAll`), `collectSpawnScoping(source)`
+- `tests/helpers.ts` — shared helper API: `resolveAgentSource`, `resolveAllAgents`, `extractOpSectionFromCorpus`, `walkFiles(dir, accept, maxDepth = 8)`, `splitFrontmatter(text)`, `gitAgentSinkCorpus(root?)` (recursive references/**), `loadGolden`, `extractStatusLines(gitContent?)` (content-anchored; `gitOp`/`between`/`singleLine` helpers inside), `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `requireBuiltCli`, `makeManifest`, `computeFpRatio`, and the isolated-build set — `runMdsBuild(fakeRoot)`, `copyCommittedSources(fakeRoot)`, `buildCommittedTree()` / `cleanupCommittedTree()` (memoised per test file; pair the cleanup in an `afterAll`), `collectSpawnScoping(source)`
 - `tests/fixtures/mds-manifest.ts` — the name manifests (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`); consumed by `build-mds.test.ts`, `packaging.test.ts`, `build-mds-generator-hosts.test.ts` and `mds-variants.test.ts` (the last imports `ALL_MDS_HOSTS` for the `validateOutputName` roster check) — the manifest's own header lists all four
 - `tests/guards/dist-agents.test.ts` — dist/agents parity (both directions, fail-loud), escaped-brace guard, frontmatter-shape guard (every compiled agent starts with a block carrying `name:` — its collector emits one row **per header found**, not per file, so a headerless artifact shows up as a short array the caller compares against the file count rather than as a row whose flag someone forgot to assert; PF-018), no-.md-shadowing-an-.mds guard, resolver-origin proofs (AC-1.6/AC-1.3, each with its own non-empty floor), and the AC-1.2 absence guard for Phase-2 constructs. That last guard matches **anchored regexes, not substrings** — its corpus includes `src/core/mds-variants.ts` and `scripts/build-mds.ts`, the two files whose whole subject is this machinery, so `variants:` is pinned as a line-start YAML key, `expandVariants` as a call, `tracker-<provider>` as a `.md`/`.mds` filename, and prose that merely names a Phase-2 construct stays legal. Each entry carries both its pattern and the seeded instance that must trip it, and a second probe asserts a docblock describing Phase 2 is **not** a violation
 - `tests/guards/agent-source-resolver.test.ts` — resolver unit tests; dist-preferred and src-fallback proofs; `extractOpSectionFromCorpus` sole/union mode tests
 - `tests/guards/numeric-floor-manifest.test.ts` — floor pinning guard; occurrence-aware, decrement probe covers every entry
-- `tests/guards/literal-agent-paths.test.ts` — forbids `src/assets/agents/` literals in new test files; exception list with justifications; `requireDistFile`/`requireDistFiles` throw-contract tests
+- `tests/guards/literal-agent-paths.test.ts` — forbids `src/assets/agents/` literals in new test files; exception list with justifications; `requireDistFile`/`requireDistFiles`/`requireBuiltCli` throw-contract tests (build-dependent: the requireBuiltCli GREEN half reads the real `dist/cli.js`)
 - `tests/guards/retired-wording.test.ts` — denylist of retired literals (grows per phase, never emptied, never generates new greps); one shared grep guard (GAP-32); current entries include `ISSUE_NUMBERS`, `ISSUE: {issue`, `close milestone`, `may pre-fetch`, `issue-first gate`
 - `tests/guards/extended-references.test.ts` — SKILL.md Extended References table integrity; generated-path exception list seeded for Phase 2 (`references/tracker/`)
 - `tests/seams/command-agent-input.test.ts` — three-direction command→agent seam (PF-024); forward, reverse, producer (Direction 3 sources from git.md via gitCorpus, not DIST_FILES); `parseInputIdentifiers` scoped to `**Input:**`; 18 ops, 13 with caller fences, floor `toBeGreaterThanOrEqual(13)`
