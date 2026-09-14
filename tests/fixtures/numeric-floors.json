@@ -145,6 +145,22 @@
       "occurrences": 2,
       "sourceFile": "tests/git-agent.test.ts",
       "description": "AC-0.10 containment guard (external-thread): ops carrying <external-thread> for review thread bodies — fetch-review-threads, post-resolution-summary, post-wave-report (pre-existing on main, Principle 8 stabilisation)."
+    },
+    {
+      "id": "generated-reference-manifest-size",
+      "floor": 13,
+      "pattern": "toBeGreaterThanOrEqual(13)",
+      "occurrences": 2,
+      "sourceFile": "tests/installer/reference-overlay.test.ts",
+      "description": "P2-S14 overlay: the generated reference manifest (10 GitHub ops + 3 cross-cutting documents). Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists."
+    },
+    {
+      "id": "packed-reference-manifest-size",
+      "floor": 13,
+      "pattern": "toBeGreaterThanOrEqual(13)",
+      "occurrences": 1,
+      "sourceFile": "tests/packaging.test.ts",
+      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed."
     }
   ]
 }
