@@ -13,8 +13,8 @@
  * fails loud with a build hint rather than skipping when `dist/` is absent.
  *
  * HOME safety (avoids PF-060): every test passes an explicit mkdtemp `claudeDir` /
- * `devflowDir` / `referencesTarget`. No test reads or writes the real `~/.claude` or
- * `~/.devflow`, and no test shells out to `dist/cli.js init`.
+ * `devflowDir` / `referencesTarget`. No test reads or writes the real Claude or Devflow
+ * config directories under the user's home, and no test shells out to `dist/cli.js init`.
  *
  * Non-vacuity: every assertion below also pins the POSITIVE outcome — an overlay that
  * did nothing at all would fail these tests, not pass them (avoids PF-018).

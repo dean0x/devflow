@@ -525,8 +525,8 @@ async function promoteUnitStagingTree(
  *
  * Converge, not merge: every unit is rebuilt from the generated sources and swapped in
  * atomically, and anything under `references/tracker/**` that the manifest does not name
- * is then removed. A shadow that supplies its own `tracker/jira/comment.md` therefore
- * does not keep it (AC-2.4c), and a provider directory the manifest stops listing is
+ * is then removed. A shadow that supplies its own file under that subtree therefore does
+ * not keep it (AC-2.4c), and a provider directory the manifest stops listing is
  * gone rather than left to rot (GAP-24). Hand-authored references outside the generated
  * set are never pruned — they arrive with the skill copy and the prune is scoped to the
  * `tracker/` subtree.
