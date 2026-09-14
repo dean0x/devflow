@@ -110,6 +110,16 @@ function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: Inlin
   return { corpus, offenders };
 }
 
+/**
+ * The hand-authored reference both exception arms are about, spelled through the
+ * same source-tree accessor `collectInlineBodyOffenders` reads it with.
+ *
+ * The probes below seed offenders at this path so a seed carries the path shape the
+ * live collector actually produces — a relative stand-in would exercise the
+ * `endsWith` check against a string the guard never sees.
+ */
+const GITHUB_API_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-api.md');
+
 // ── Decision-marker legend (AC-2.13 / E10) ──────────────────────────────────
 
 /** A legend row defines a label: `| D4 | Degradation contract — … |`. */
@@ -1074,11 +1084,6 @@ describe('git agent — static content guards (PF-018)', () => {
       'bypass guard regex no longer matches an inline release-notes body — the new arm is inert',
     ).not.toBeNull();
   });
-
-  // Shared seed path for the two probes below — both simulate an offender or
-  // exception naming this exact file (the collectors only check
-  // `endsWith('github-api.md')`, but the real path keeps the seed honest).
-  const GITHUB_API_MD_PATH = 'src/assets/skills/git/references/github-api.md';
 
   it('D11: known-bad probe — an undeclared offender is reported by the same forward collector', () => {
     // The live forward arm runs over a corpus that holds no inline body, so its

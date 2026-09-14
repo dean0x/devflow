@@ -2,11 +2,12 @@
 
 Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 
-> **D11 is the authority on every body these recipes post: compose it to
-> `$DEVFLOW_BODY_RAW`, scrub with `redact-secrets.cjs`, and post the SCRUBBED
-> `$DEVFLOW_BODY` via `--body-file` / `-F body=@` / `--notes-file`, chained with
-> `&&` so a non-zero scrubber exit means DO NOT POST.** Create both temp files
-> with `mktemp` per invocation — an inline `--body "…"` cannot be scrubbed at all.
+> **D11 is the authority on every body these recipes post: compose it to the RAW
+> file, scrub with `redact-secrets.cjs`, and post the SCRUBBED one — `$DEVFLOW_BODY`
+> via `--body-file` / `-F body=@`, `$DEVFLOW_NOTES` via `--notes-file` — chained
+> with `&&` so a non-zero scrubber exit means DO NOT POST.** The recipes below
+> implement that rule; they do not compete with it: an inline `--body "…"` cannot
+> be scrubbed at all.
 
 ---
 
