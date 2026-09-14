@@ -160,12 +160,14 @@ fi
 ```bash
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1  # Validate semver
 git tag -a "v${VERSION}" -m "Version ${VERSION}" && git push origin "v${VERSION}"
-gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_BODY"
+gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_NOTES"
 ```
 
-Release notes are a GitHub-visible sink, so `$DEVFLOW_BODY` is the SCRUBBED file the
-D11 chain produced — never `$DEVFLOW_BODY_RAW`, and never an inline `--notes` string,
-which cannot be scrubbed at all.
+Release notes are a GitHub-visible sink, so `$DEVFLOW_NOTES` is the SCRUBBED file the
+D11 chain produced — never `$DEVFLOW_NOTES_RAW`, and never an inline `--notes` string,
+which cannot be scrubbed at all. The notes pair is named separately from the body pair
+because `create-release` composes notes while a body may already be staged in the same
+spawn; posting `$DEVFLOW_BODY` here would publish that unrelated body as the release.
 
 ### Version Validation
 
@@ -193,10 +195,15 @@ create_release() {
 ${changelog}"
     git push origin "v${version}"
 
-    # D11: the notes reach GitHub through the scrubbed file, never as an inline string.
-    gh release create "v${version}" \
+    # D11: the notes reach GitHub through the SCRUBBED file, never as an inline string.
+    # The composed notes are written to the RAW file here — the scrub is what produces
+    # "$DEVFLOW_NOTES", so chaining with && is what stops a scrubber failure publishing.
+    printf '%s\n' "$changelog" > "$DEVFLOW_NOTES_RAW"
+    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" \
+      && gh release create "v${version}" \
         --title "v${version}" \
-        --notes-file "$DEVFLOW_BODY"
+        --notes-file "$DEVFLOW_NOTES"
 }
 ```
 

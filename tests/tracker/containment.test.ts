@@ -353,6 +353,43 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'name dropped.',
   },
 
+  // ── Scrutinize pass: defects found reviewing the split ─────────────────────
+  {
+    file: 'git-agent.md',
+    startLine: 715,
+    endLine: 715,
+    rationale:
+      'resolve-review-threads D4 clause, EXTENDED not cut. `:28` defers the backpressure rung to ' +
+      '"the resolved provider\'s reference", but D4 names TWO batch ops and only ' +
+      'backlink-shipped-issues has a generated reference — so a resolve-review-threads spawn ' +
+      'could never learn the rung and the 1s → 3s escalation was unimplementable for it. The ' +
+      'rung is stated here, on the line that already names `X-RateLimit-Remaining` < 10 for the ' +
+      'same op, so no new provider surface is introduced. Every pre-split byte is retained.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 910,
+    endLine: 910,
+    rationale:
+      'ensure-traceable-issue D3 pointer, REPOINTED. The pre-split line sent the reader to the ' +
+      '"Traceability Issue Template (D3)" section of the devflow:git skill; P2-S7 deleted that ' +
+      'section from SKILL.md and the template now sits in this same generated reference. The ' +
+      'pointer named a location that no longer exists (ADR-003). The untrusted-interpolation ' +
+      'rule and the D11 clause on the same line are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 248,
+    endLine: 248,
+    rationale:
+      'create_release()\'s publish call, RE-INDENTED by two spaces as the second arm of an `&&` ' +
+      'chain. The pre-split recipe published `--notes-file "$DEVFLOW_BODY"` while create-release ' +
+      'mandates the `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` pair (git-agent.md:498), so the recipe ' +
+      'published either empty notes or an unrelated body already staged in the same spawn. The ' +
+      'call now follows the scrub it depends on, chained with `&&` per D11 — the command itself ' +
+      'is otherwise unchanged.',
+  },
+
   // ── dist/agents/git.md (P2-S6) ─────────────────────────────────────────────
   {
     file: 'git-agent.md',
@@ -362,8 +399,8 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'DR-17 commit B: gather-release-evidence step 4 REWRITTEN, not relocated. The ' +
       'pre-split line resolves closing references with one `gh api` call PER COMMIT — up ' +
       'to 100 remote calls for a 100-commit range (GAP-26). Commit A moved it verbatim; ' +
-      'commit B replaced it in the reference with a batch-first `closing_refs_for_commits` ' +
-      'query, PR-number dedup and a ≤25 bounded sequential fallback. This is the phase\'s ' +
+      'commit B replaced it in the reference with a batch-first paged GraphQL query, ' +
+      'PR-number dedup and a ≤25 bounded sequential fallback. This is the phase\'s ' +
       'ONE deliberate rewrite of moved text, and its RED proof is the collector at the ' +
       'foot of this file, driven over this same baseline.',
   },

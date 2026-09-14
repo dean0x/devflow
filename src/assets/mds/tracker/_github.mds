@@ -147,10 +147,22 @@ Load when the resolved tracker provider is `github` and the operation is `manage
 ### Tech Debt Issue Management
 
 Every body below reaches GitHub through `$DEVFLOW_BODY`, the file the D11 scrub chain
-produced — manage-debt is a body-posting op, so the scrub is unconditional.
+produced — manage-debt is a body-posting op, so the scrub is unconditional. Each post
+therefore writes ITS OWN content to `$DEVFLOW_BODY_RAW` first: `$DEVFLOW_BODY` is the
+scrubber's output, not a shared mailbox, and posting it without composing into
+`$DEVFLOW_BODY_RAW` in the same step publishes whatever the last scrub happened to leave.
 
 ```bash
 MAX_SIZE=60000
+
+post_scrubbed() {
+    # Compose → scrub → post, chained with && so a scrubber failure stops the post.
+    # Never a pipeline: a pipeline's exit status hides a scrubber crash (fail-open).
+    printf '%s\n' "$1" > "$DEVFLOW_BODY_RAW"
+    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && gh issue comment "$2" --body-file "$DEVFLOW_BODY"
+}
 
 add_tech_debt_item() {
     local new_item="$1"
@@ -163,7 +175,7 @@ add_tech_debt_item() {
         archive_tech_debt_issue
     fi
 
-    gh issue comment $TECH_DEBT_ISSUE --body-file "$DEVFLOW_BODY"
+    post_scrubbed "$new_item" "$TECH_DEBT_ISSUE"
 }
 
 archive_tech_debt_issue() {
@@ -181,7 +193,7 @@ This issue reached the size limit.
 " \
         --json number -q '.number')
 
-    gh issue comment $old_issue --body-file "$DEVFLOW_BODY"
+    post_scrubbed "**Continued in:** #${TECH_DEBT_ISSUE}" "$old_issue"
 }
 ```
 @end
@@ -210,7 +222,7 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 ### Process
 
 4. If `gh` is authenticated and remote is reachable, resolve which issues the commit range closes — **batch first, never one call per commit** — and merge the result with the commit-message set:
-   - **Batch (the normal path).** Resolve the whole range with `closing_refs_for_commits`: one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
+   - **Batch (the normal path).** Resolve the whole range with one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
    - **Dedup by PR number** before collecting references: several commits of one merged PR resolve to that PR once, so its `closingIssuesReferences` are read once.
    - **Sequential fallback, bounded at ≤25 commits.** Only when the batch query is unavailable or errors, fall back to per-commit resolution in range order for at most ≤25 commits; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while commits went unresolved.
    - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
@@ -225,7 +237,7 @@ Load when the resolved tracker provider is `github` and the operation is `backli
 
 ### Provider signals (GitHub)
 
-The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's, stated once for this provider — no other GitHub mechanics file restates them.
+The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's. The backpressure rung is stated only here and in the agent's `resolve-review-threads` clause — the two ops D4 names as batch ops; the secondary-rate-limit threshold is restated wherever an op's own D4 clause has to act on it.
 
 - **Secondary rate limit:** a 403 or 429 response with a rate-limit body, or an `X-RateLimit-Remaining` header < 10. Continuing to issue requests into one extends GitHub's penalty window, which is why D4 says STOP rather than wait.
 - **Backpressure rung:** `X-RateLimit-Remaining` < 50 — the point at which D4's inter-operation delay rises from 1s to 3s for the remainder of the batch.
@@ -276,7 +288,7 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
-   - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template from the devflow:git skill (loaded via frontmatter — see "Traceability Issue Template (D3)" section). `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED, do not create issue.
+   - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template in the `### Traceability Issue Template (D3)` section below. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED, do not create issue.
    - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
    - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY"`.
    - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
