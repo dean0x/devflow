@@ -510,7 +510,7 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
 
   // ── skills/git/references/github-api.md — the D11 inline-body recipes (#340) ─
   //
-  // Eleven lines across nine recipes, each REWRITTEN in place into the
+  // Eleven lines across ten recipes, each REWRITTEN in place into the
   // scrub-then-post chain D11 mandates: compose to `$DEVFLOW_BODY_RAW`, run
   // redact-secrets.cjs, and post the scrubbed `$DEVFLOW_BODY` through
   // `--body-file` / `-F body=@`, chained with `&&` so a non-zero scrubber exit

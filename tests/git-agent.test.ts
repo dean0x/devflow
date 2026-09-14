@@ -120,6 +120,15 @@ function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: Inlin
  */
 const GITHUB_API_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-api.md');
 
+/**
+ * A sibling reference in the same scanned corpus, spelled through the same accessor.
+ *
+ * The forward collector excuses a declared exception only inside github-api.md. Seeding
+ * an identical match here is what drives that file-scoping half of the predicate — a
+ * seed at GITHUB_API_MD_PATH alone can never distinguish it from an unscoped list.
+ */
+const SIBLING_REFERENCE_MD_PATH = path.join(skillsDir(), 'git', 'references', 'patterns.md');
+
 // ── Decision-marker legend (AC-2.13 / E10) ──────────────────────────────────
 
 /** A legend row defines a label: `| D4 | Degradation contract — … |`. */
@@ -1092,14 +1101,25 @@ describe('git agent — static content guards (PF-018)', () => {
     // probe red alongside the guard it backs.
     const seeded: InlineBodyOffender[] = [
       { file: GITHUB_API_MD_PATH, match: 'gh pr create --title "x" --body ' },
+      { file: SIBLING_REFERENCE_MD_PATH, match: 'gh pr create --title "x" --body ' },
     ];
     expect(
       collectUndeclaredOffenders(seeded, KNOWN_GITHUB_API_INLINE_BODIES),
       'an inline body with no declared exception must be reported — otherwise the forward arm ' +
       'is green because it filtered everything away, not because the corpus is clean',
-    ).toEqual([`${GITHUB_API_MD_PATH}: gh pr create --title "x" --body `]);
-    // …and a declared one is excused, so the exception mechanism itself still works.
-    expect(collectUndeclaredOffenders(seeded, [seeded[0].match])).toEqual([]);
+    ).toEqual([
+      `${GITHUB_API_MD_PATH}: gh pr create --title "x" --body `,
+      `${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `,
+    ]);
+    // …and a declared one is excused, so the exception mechanism itself still works —
+    // but only in github-api.md. The identical match text in a sibling reference is still
+    // reported, which is the file-scoping half of the predicate.
+    expect(
+      collectUndeclaredOffenders(seeded, [seeded[0].match]),
+      'a declared exception must excuse its match in github-api.md ONLY — the same text in ' +
+      'another scanned reference must still be reported, or the exception list silences files ' +
+      'it was never scoped to',
+    ).toEqual([`${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `]);
   });
 
   it('D11: known-bad probe — a declared exception that matches nothing is reported by the same reverse collector', () => {
