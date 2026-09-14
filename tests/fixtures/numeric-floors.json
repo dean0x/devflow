@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "Numeric floor manifest (DR-27a). No pinned floor may decrease — tests/guards/numeric-floor-manifest.test.ts enforces this. Each entry pins a floor value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so lowering one site out of several is caught. New entries are allowed; raise `floor`/`pattern` (and `occurrences`) deliberately when an assertion is raised. Equality baselines (the GIT_MD_* / SKILL_* / TOTAL_* constants in tests/goldens/github-status-lines.test.ts) are not floors and are not registered here.",
+  "comment": "Numeric ratchet manifest (DR-27a). Two arrays, two directions, one mechanism — tests/guards/numeric-floor-manifest.test.ts enforces both. `floors` entries may RISE, never fall. `ceilings` entries may be LOWERED, never raised: a budget or a maximum that can be raised to fit whatever the artifact grew into is not a budget, it asserts that the current size is the current size. Each entry pins a value AND the number of sites spelling it: the guard requires at least `occurrences` matches of `pattern` in `sourceFile`, so moving one site out of several is caught. New entries are allowed in either array; move `floor`/`ceiling`, `pattern` and `occurrences` together, and only in the permitted direction. Equality baselines (the GIT_MD_* / SKILL_* / TOTAL_* constants in tests/goldens/github-status-lines.test.ts) ratchet in neither direction and are not registered here.",
   "floors": [
     {
       "id": "dist-host-count",
@@ -177,6 +177,48 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/guard-census.test.ts",
       "description": "AC-2.6 / GAP-49: the number of `it(` guards DECLARED in tests/git-agent.test.ts (line-anchored declarations, not the 84 cases vitest runs — several declarations sit inside `for` loops over named op sets, so the runtime number moves with a roster and the declared number moves only when a guard is added or deleted). May rise, may never fall. Phase 0 stood at 40; this branch stands at 68 — P2-S7 widened the D11 inline-body guard, P2-S4 added four detector guards, and [DR-20] replaced ONE D10 scope guard with a successor pair of four, so the replacement is visibly not a net loss. The assertion reads the floor out of this manifest rather than spelling it, and the two are asserted equal, so the number cannot be lowered in one place only."
+    },
+    {
+      "id": "min-reference-chars",
+      "floor": 80,
+      "pattern": "const MIN_REFERENCE_CHARS = 80;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/containment.test.ts",
+      "description": "Minimum characters a generated tracker reference must carry. Registered as a FLOOR, not a ceiling: the assertion is `content.length < MIN_REFERENCE_CHARS` → problem, so raising it only makes the containment guard stricter, while LOWERING it is the weakening move — it re-admits the shape the constant exists to catch, a reference that kept its heading and lost its body. Its own JSDoc names it a floor."
+    }
+  ],
+  "ceilings": [
+    {
+      "id": "budget-git-md",
+      "ceiling": 55900,
+      "pattern": "const BUDGET_GIT_MD = 55_900;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "Max characters of dist/agents/git.md — preloaded on every Git spawn, so its size is a per-spawn cost. Derived as 65_677 baseline − 9_813 projected cut (see the constant's own JSDoc for the term-by-term formula). May be LOWERED as mechanics keep moving into references; may never be raised. §14.5: no threshold is lowered, and a budget raised to fit the artifact is not a budget."
+    },
+    {
+      "id": "budget-skill-md",
+      "ceiling": 6600,
+      "pattern": "const BUDGET_SKILL_MD = 6_600;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "Max characters of src/assets/skills/git/SKILL.md, derived as 9_204 − 2_604. The skill carries doctrine, not mechanics: anything that grows it back past this is mechanics that belong in a generated reference. May be LOWERED, never raised."
+    },
+    {
+      "id": "budget-loaded-set",
+      "ceiling": 77824,
+      "pattern": "const BUDGET_LOADED_SET = 77_824;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "Max characters of the worst-case tracker spawn (git.md + git SKILL.md + worktree-support SKILL.md), pinned to the PRE-SPLIT measurement. The split only pays for itself while the always-loaded half stays smaller than the monolith it replaced, so this is the one number the artifact must reach rather than define. Deliberately a frozen historical literal, never recomputed from the tree. May be LOWERED, never raised."
+    },
+    {
+      "id": "preamble-max-lines",
+      "ceiling": 40,
+      "pattern": "const PREAMBLE_MAX_LINES = 40;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "AC-2.5 [DR-13(a)] — max lines of the provider-resolution preamble, which is preloaded on every Git spawn. Raising it converts a per-spawn cost ceiling into a description of whatever the preamble currently is. May be LOWERED, never raised."
     }
   ]
 }

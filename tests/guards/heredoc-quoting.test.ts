@@ -14,7 +14,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import * as path from 'path';
 
 import { ROOT, walkFiles } from '../helpers.js';
@@ -111,14 +112,32 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
   });
 
   it('known-bad probe: a seeded unquoted heredoc is reported by the same collector', () => {
-    // Runs the real collector over a directory that is guaranteed to contain one,
-    // rather than re-testing the regex: this proves the walk reaches the text.
-    const seededDir = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks');
-    const seeded = collectUnquotedHeredocs(seededDir);
-    expect(
-      seeded.sites.length,
-      'the collector must find the known unquoted heredocs in the hook scripts — ' +
-      'otherwise the scan above passes because it never reaches any file',
-    ).toBe(KNOWN_UNQUOTED_HEREDOCS.length);
+    // A real seed, not a re-scan of a live subset. The previous shape pointed the
+    // collector at src/assets/scripts/hooks/ and asserted it found the three
+    // already-frozen sites — which proves the walk reaches THAT directory and
+    // nothing about the guard's ability to catch a NEW violation. Here the
+    // violation is written into a throwaway corpus and driven through the same
+    // collector, with a quoted control alongside it so a collector that flagged
+    // everything would not pass either. No committed file is touched (H10).
+    const dir = mkdtempSync(path.join(tmpdir(), 'devflow-heredoc-probe-'));
+    try {
+      // GREEN half: the safe form is scanned and NOT reported.
+      writeFileSync(path.join(dir, 'safe.sh'), "cat <<'EOF'\nno $expansion here\nEOF\n");
+      const clean = collectUnquotedHeredocs(dir);
+      expect(clean.filesScanned, 'the control file must be scanned').toBe(1);
+      expect(clean.sites, 'a quoted delimiter must not be reported').toEqual([]);
+
+      // RED half: the injection template, in the shape the guard exists for.
+      writeFileSync(path.join(dir, 'seeded.sh'), 'PROMPT="$(cat <<EOF\n${UNTRUSTED_TITLE}\nEOF\n)"\n');
+      const seeded = collectUnquotedHeredocs(dir);
+      expect(seeded.filesScanned, 'both probe files must be scanned').toBe(2);
+      expect(
+        seeded.sites.map(s => `${s.file.split('/').pop()}:${s.line}`),
+        'the collector must report the seeded unquoted heredoc, and only it — otherwise ' +
+        'the live scan above is green because it never reaches any file (PF-018)',
+      ).toEqual(['seeded.sh:1']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

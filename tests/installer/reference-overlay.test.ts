@@ -376,7 +376,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     await fs.rm(target, { recursive: true, force: true });
   });
 
-  it('one unreadable file leaves that provider byte-unchanged and installs the others', async () => {
+  it('one unreadable file leaves that provider byte-unchanged and installs the others', async (ctx) => {
     const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
@@ -387,7 +387,10 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const revoked = await canRevokeRead(abs(sourceRoot, 'tracker/jira/comment.md'));
     if (!revoked) {
       // Running as root, or a filesystem that ignores mode bits: the premise of the
-      // test cannot be established, so asserting on it would be theatre.
+      // test cannot be established, so asserting on it would be theatre. Report it
+      // as SKIPPED via vitest's ctx.skip() — a bare `return` here masked an
+      // unestablished premise as a PASS, the PF-018 vacuous-green shape.
+      ctx.skip();
       return;
     }
 

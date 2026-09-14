@@ -30,6 +30,56 @@ const PLAN_MD = requireDistFile('plan.md')
 const RESOLVE_MD = requireDistFile('resolve.md')
 const TICKETS_MD = requireDistFile('dynamic-tickets.md')
 
+// ── Named collectors (ADR-024) ───────────────────────────────────────────────
+//
+// The token checks below are stated once, as functions, so the positive arm
+// ("both sides carry the grammar token") and the negative arm ("the retired
+// placeholder is gone") run through the SAME code — and so the negative arm can
+// be proven live by seeding the retired placeholder into a synthetic corpus.
+// An `expect(x).not.toContain(y)` with no such probe is green whether the rule
+// holds or the string was simply never spellable there.
+
+/** One named source in the corpus: a label for messages and the text itself. */
+type NamedSource = readonly [label: string, source: string]
+
+/** The provider-canonical rendered reference, as an .mds source escapes it. */
+const GRAMMAR_TOKEN = '\\{ISSUE_REF\\}'
+
+/** The GitHub-bound placeholder the grammar token replaced. */
+const RETIRED_PLACEHOLDER = '#issue-number'
+
+/**
+ * Named collector: every offset at which `token` occurs in `source`.
+ * Bounded — a corpus with more sites than MAX_SITES is one this scan no longer
+ * understands, and is reported rather than silently truncated.
+ */
+function collectTokenSites(source: string, token: string): number[] {
+  const MAX_SITES = 256
+  const sites: number[] = []
+  for (let at = source.indexOf(token); at !== -1; at = source.indexOf(token, at + token.length)) {
+    if (sites.length >= MAX_SITES) {
+      throw new Error(`more than ${MAX_SITES} sites for "${token}" — bound exceeded, scan aborted`)
+    }
+    sites.push(at)
+  }
+  return sites
+}
+
+/** Named collector: which of the named sources do NOT carry `token`. */
+function collectSourcesMissing(sources: readonly NamedSource[], token: string): string[] {
+  return sources.filter(([, src]) => collectTokenSites(src, token).length === 0).map(([label]) => label)
+}
+
+/** Named collector: which of the named sources DO carry `token`. */
+function collectSourcesCarrying(sources: readonly NamedSource[], token: string): string[] {
+  return sources.filter(([, src]) => collectTokenSites(src, token).length > 0).map(([label]) => label)
+}
+
+const DEPENDS_ON_SIDES: readonly NamedSource[] = [
+  ['writer (_ticket_template.mds)', TICKET_TEMPLATE],
+  ['reader (_wave.mds)', WAVE],
+]
+
 describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () => {
   it('both sides are non-vacuous', () => {
     expect(TICKET_TEMPLATE.length).toBeGreaterThan(1000)
@@ -39,16 +89,37 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
   it('both sides name the same grammar token', () => {
     // The provider-canonical rendered reference. A writer emitting {ISSUE_REF}
     // into a reader that still looks for "#issue-number" reads zero dependencies.
-    for (const [name, src] of [['writer (_ticket_template.mds)', TICKET_TEMPLATE], ['reader (_wave.mds)', WAVE]] as const) {
-      expect(src, `${name} must use the {ISSUE_REF} grammar token`).toContain('\\{ISSUE_REF\\}')
-    }
+    expect(
+      collectSourcesMissing(DEPENDS_ON_SIDES, GRAMMAR_TOKEN),
+      `side(s) not using the ${GRAMMAR_TOKEN} grammar token`,
+    ).toEqual([])
   })
 
   it('the retired GitHub-bound placeholder is gone from the writer', () => {
     expect(
-      TICKET_TEMPLATE,
+      collectTokenSites(TICKET_TEMPLATE, RETIRED_PLACEHOLDER),
       '"#issue-number" hardcodes the GitHub rendering into the field the reader parses',
-    ).not.toContain('#issue-number')
+    ).toEqual([])
+  })
+
+  it('known-bad probe: the same collector reports a seeded retired placeholder', () => {
+    // The negative above is only meaningful if the collector can see the string
+    // it denies. Seed it into a COPY of the real writer — the committed file is
+    // never touched (H10) — and drive it through the identical call.
+    const seeded = TICKET_TEMPLATE.replace(
+      '**Depends on:**',
+      '**Depends on:** #issue-number (retired form)\n**Depends on:**',
+    )
+    expect(seeded, 'the seed must actually change the corpus').not.toBe(TICKET_TEMPLATE)
+    expect(
+      collectTokenSites(seeded, RETIRED_PLACEHOLDER).length,
+      'the collector must find a seeded retired placeholder — otherwise the negative ' +
+      'assertion above is green because nothing was ever scanned (PF-018)',
+    ).toBe(1)
+    // And the same collector, read as a corpus question, names the offending side.
+    expect(
+      collectSourcesCarrying([['writer (seeded)', seeded], ['reader (_wave.mds)', WAVE]], RETIRED_PLACEHOLDER),
+    ).toEqual(['writer (seeded)'])
   })
 
   it('both sides state cardinality explicitly', () => {

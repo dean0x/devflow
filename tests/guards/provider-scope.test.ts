@@ -319,14 +319,30 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
 // 3. The Git agent declares no `tools:` key
 // ---------------------------------------------------------------------------
 
+/**
+ * Named collector: the top-level keys declared in a frontmatter block's inner text.
+ *
+ * Extracted from the assertion below so the guard and its known-bad probe share
+ * one extractor. Inline, the negative `.not.toContain('tools')` was green whether
+ * the key was truly absent or the extractor had stopped returning keys at all —
+ * a regex typo would have read as a pass (ADR-024).
+ *
+ * Only column-0 keys count: an indented `tools:` is a nested value, not a
+ * declaration, and YAML list items never reach column 0.
+ */
+function collectFrontmatterKeys(inner: string): string[] {
+  return inner
+    .split('\n')
+    .map(l => /^([A-Za-z_][\w-]*):/.exec(l)?.[1])
+    .filter((k): k is string => k !== undefined);
+}
+
 describe('provider-scope: the compiled Git agent declares no tools: key', () => {
   it('git.md frontmatter carries no tools: allowlist', () => {
     const git = resolveAgentSource('git');
     const split = splitFrontmatter(git.content);
     expect(split, `${git.path}: no frontmatter block at offset 0`).not.toBeNull();
-    const keys = split!.inner.split('\n')
-      .map(l => /^([A-Za-z_][\w-]*):/.exec(l)?.[1])
-      .filter((k): k is string => k !== undefined);
+    const keys = collectFrontmatterKeys(split!.inner);
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
     expect(
       keys,
@@ -334,6 +350,19 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
       'op bodies instruct Bash and Read, and a frontmatter allowlist that omits either fails at ' +
       'runtime rather than at build time',
     ).not.toContain('tools');
+  });
+
+  it('known-bad probe: the same extractor reports a seeded tools: key', () => {
+    // Drives a synthetic frontmatter through the extractor the assertion uses.
+    // Without this, the negative above cannot distinguish "no tools: key" from
+    // "the extractor returns nothing".
+    const seeded = 'name: Git\ndescription: seeded probe\nmodel: haiku\ntools: Read, Bash\n';
+    expect(collectFrontmatterKeys(seeded)).toEqual(['name', 'description', 'model', 'tools']);
+
+    // And the shapes it must NOT mistake for a declaration: an indented key and a
+    // list item. A collector that reported these would fail the live guard for a
+    // frontmatter that declares no allowlist at all.
+    expect(collectFrontmatterKeys('skills:\n  - devflow:git\n  tools: Read\n')).toEqual(['skills']);
   });
 });
 
