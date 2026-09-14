@@ -162,12 +162,16 @@ function forwardViolationsFor(section: string, keys: Set<string>): string[] {
 // Searching DIST_FILES for them found only the consumer (plan.md's own capture line)
 // and called it the producer; that was the defect.
 //
-// ISSUE_ID and ISSUE_URL are excluded: neither name appears in git.md's Output templates
-// (no URL field is emitted; the issue id is embedded in the heading, not separately
-// labelled). Including them violated ADR-003 (no artifact without a reachable producer);
-// they were removed from the plan capture list in c7bff85.
+// ISSUE_URL stays excluded: no URL field is emitted by any Output template, so
+// listing it would violate ADR-003 (no artifact without a reachable producer).
+// ISSUE_ID was excluded for the same reason in c7bff85 and is BACK from Phase 2:
+// the `### Handoff Values` block T2b added to setup-task and fetch-issue emits it
+// under its own label, so it now has a producer. Same for ISSUE_PR_LINK and
+// ISSUE_BRANCH_TOKEN — the two values GAP-15 found consumed with no producer.
 //
-// From Phase 2 onward this runs against the compiled _tracker.mds define.
+// From Phase 2 onward this list is the compiled _tracker.mds issue_capture_contract()
+// define restated for the collector; both sides are asserted to name the same keys
+// by the `_tracker.mds define names the same keys` test below.
 const ISSUE_CAPTURE_CONTRACT: Array<{ label: string; producerPattern: string }> = [
   // The issue body is wrapped in <untrusted-issue-body> in both fetch-issue and
   // fetch-issues-batch Output templates (Principle 8 containment, commit 75f13e7).
@@ -176,7 +180,16 @@ const ISSUE_CAPTURE_CONTRACT: Array<{ label: string; producerPattern: string }> 
   { label: 'ACCEPTANCE_CRITERIA', producerPattern: 'Acceptance Criteria' },
   // "## Issue #{number}:" heading in fetch-issue; "### Issue #{number1}:" in batch.
   { label: 'ISSUE_REF', producerPattern: '## Issue #' },
+  // The three `### Handoff Values` producers (P2-S10, written in T2b). Each is
+  // matched on its full labelled prefix, not on the bare name: a prose mention of
+  // "the branch token" elsewhere in the section must not satisfy the check.
+  { label: 'ISSUE_ID', producerPattern: '- **Issue ID**:' },
+  { label: 'ISSUE_PR_LINK', producerPattern: '- **PR link line**:' },
+  { label: 'ISSUE_BRANCH_TOKEN', producerPattern: '- **Branch token**:' },
 ]
+
+/** The keys Direction 3 checks, as a set — used by the _tracker.mds parity test. */
+const ISSUE_CAPTURE_LABELS = ISSUE_CAPTURE_CONTRACT.map(e => e.label)
 
 // ── Build state shared across all directions (beforeAll) ─────────────────────
 
@@ -548,46 +561,95 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 // <untrusted-issue-body> content. Per-op full-file slicing avoids truncation
 // (same pattern as AC-0.3 / Guard 10 in git-agent.test.ts).
 
+/**
+ * Named collector — returns the contract labels with no producer in the given
+ * git.md body. Shared by the live guard and by the pre-split-baseline probe, so
+ * the probe exercises the real logic rather than a hand-written imitation.
+ *
+ * File-scoped slicing (not extractOpSectionFromCorpus): the Output templates in
+ * fetch-issue and fetch-issues-batch contain "## Issue #" headings that would
+ * truncate the extracted section at the first \n## , cutting off the
+ * <untrusted-issue-body> content.
+ */
+function collectMissingProducers(gitContent: string): string[] {
+  function fileSlice(op: string): string {
+    const start = gitContent.indexOf(`## Operation: ${op}`)
+    if (start === -1) return ''
+    const next = gitContent.indexOf('\n## Operation: ', start + 1)
+    return next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
+  }
+
+  // Concatenate the two issue-fetching op slices — both may emit a given field.
+  const producerContent = fileSlice('fetch-issue') + '\n' + fileSlice('fetch-issues-batch')
+
+  const missing: string[] = []
+  for (const { label, producerPattern } of ISSUE_CAPTURE_CONTRACT) {
+    if (!producerContent.includes(producerPattern)) {
+      missing.push(
+        `${label}: pattern "${producerPattern}" not found in git.md fetch-issue or fetch-issues-batch Output`,
+      )
+    }
+  }
+  return missing
+}
+
 describe('third direction: every issue_capture_contract() value has a producer in git.md', () => {
   it('every contract entry has a greppable producer in fetch-issue / fetch-issues-batch Output (git.md sole corpus)', () => {
-    // File-scoped slicing: slice the full git.md content between ## Operation: anchors so
-    // that ## headings inside Output templates do not prematurely end the section.
     const gitContent = gitCorpus[0]?.content ?? ''
     expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
-
-    function fileSlice(op: string): string {
-      const start = gitContent.indexOf(`## Operation: ${op}`)
-      if (start === -1) return ''
-      const next = gitContent.indexOf('\n## Operation: ', start + 1)
-      return next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
-    }
-
-    // Concatenate the two issue-fetching op slices — both may emit a given field.
-    const fetchIssueSec = fileSlice('fetch-issue')
-    const fetchBatchSec = fileSlice('fetch-issues-batch')
     expect(
-      fetchIssueSec.length + fetchBatchSec.length,
-      'fetch-issue and fetch-issues-batch sections must be non-empty (corpus non-vacuity)',
-    ).toBeGreaterThan(0)
-    const producerContent = fetchIssueSec + '\n' + fetchBatchSec
-
-    const missing: string[] = []
-    for (const { label, producerPattern } of ISSUE_CAPTURE_CONTRACT) {
-      if (!producerContent.includes(producerPattern)) {
-        missing.push(
-          `${label}: pattern "${producerPattern}" not found in git.md fetch-issue or fetch-issues-batch Output`,
-        )
-      }
-    }
+      gitContent.indexOf('## Operation: fetch-issue'),
+      'fetch-issue section must exist in the corpus (non-vacuity)',
+    ).toBeGreaterThan(-1)
 
     expect(
-      missing,
-      `issue_capture_contract values missing from git.md producer sections (fetch-issue / fetch-issues-batch):\n` +
-      missing.join('\n'),
+      collectMissingProducers(gitContent),
+      'issue_capture_contract values missing from git.md producer sections (fetch-issue / fetch-issues-batch)',
     ).toHaveLength(0)
   })
 
-  it('issue_capture_contract has 3 values (non-vacuous floor)', () => {
-    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(3)
+  it('known-bad probe: the three Handoff Values have no producer in the pre-split baseline', () => {
+    // The committed pre-split capture — the tree as it stood before T2b appended
+    // the `### Handoff Values` block. Driving the REAL collector over it is the
+    // permanent record that this direction was RED for these three keys and that
+    // the producers, not the list, are what turned it green (PF-018, H10: no
+    // landed fix is reverted to manufacture the proof).
+    const baseline = readFileSync(
+      path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
+      'utf-8',
+    )
+    expect(baseline.length, 'baseline fixture must be non-empty').toBeGreaterThan(1000)
+
+    const missing = collectMissingProducers(baseline)
+    expect(
+      missing.map(m => m.split(':')[0]).sort(),
+      'exactly the three Handoff Values must be missing from the baseline — the other three ' +
+      'had producers all along, so a probe that reported all six would prove nothing',
+    ).toEqual(['ISSUE_BRANCH_TOKEN', 'ISSUE_ID', 'ISSUE_PR_LINK'])
+  })
+
+  it('issue_capture_contract has 6 values (non-vacuous floor)', () => {
+    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(6)
+  })
+
+  it('the compiled _tracker.mds define names exactly these six keys', () => {
+    // Two-sided: this file's table is the checker's view of the contract; the
+    // compiled define is what the commands actually instruct. A key added to one
+    // and not the other is the drift the seam exists to catch.
+    const planCmd = readFileSync(path.join(DIST_COMMANDS_DIR, 'plan.md'), 'utf-8')
+    const start = planCmd.indexOf("**Capture from the Git agent's Output block, as written:**")
+    expect(start, 'the compiled issue_capture_contract() body must be present in plan.md').toBeGreaterThan(-1)
+    const body = planCmd.slice(start, planCmd.indexOf('\n\n', start))
+
+    for (const label of ISSUE_CAPTURE_LABELS) {
+      expect(body, `issue_capture_contract() must name ${label}`).toContain(`\`${label}\``)
+    }
+    // Reverse direction: no seventh backticked ISSUE_*/ACCEPTANCE_* identifier in
+    // the define that this table does not know about.
+    const named = [...body.matchAll(/`((?:ISSUE|ACCEPTANCE)_[A-Z_]+)`/g)].map(m => m[1])
+    expect(
+      [...new Set(named)].sort(),
+      'the define and the checker table must name the same key set',
+    ).toEqual([...ISSUE_CAPTURE_LABELS].sort())
   })
 })

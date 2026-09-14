@@ -108,11 +108,11 @@
     },
     {
       "id": "issue-capture-contract-size",
-      "floor": 3,
-      "pattern": "toBe(3)",
+      "floor": 6,
+      "pattern": "toBe(6)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Entries in issue_capture_contract() checked by the seam test's producer direction — corrected from 5 to 3 after removing ISSUE_ID and ISSUE_URL (c7bff85: no emitted producer in git.md for either name)"
+      "description": "Entries in issue_capture_contract() checked by the seam test's producer direction. Was 5, corrected to 3 in c7bff85 when ISSUE_ID and ISSUE_URL were found to have no emitted producer in git.md. Raised 3 -> 6 in P2-S9/S10: the `### Handoff Values` block T2b appended to setup-task and fetch-issue gives ISSUE_ID, ISSUE_PR_LINK and ISSUE_BRANCH_TOKEN real producers. ISSUE_URL still has none and stays out."
     },
     {
       "id": "manage-debt-archive-cap",

@@ -32,7 +32,7 @@ You receive from orchestrator:
 - **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW; do not re-litigate
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
-- **ISSUE_NUMBER** (optional): GitHub issue number linked to this task — when provided, include `## Related Issues` / `Closes #{n}` in the PR body
+- **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include `## Related Issues` / `Closes #{n}` in the PR body
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
@@ -93,6 +93,8 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    | Related Issues (ISSUE_NUMBER provided) | `## Related Issues` · `Closes #{n}` |
 
    When `ISSUE_NUMBER` is provided, always include `## Related Issues` / `Closes #{n}` in the PR body — whether composing from guidance or generating from context.
+
+   **Pasting the handoff values.** The Git agent's `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block: `- **PR link line**: {rendered}` is the already-rendered closing line for `## Related Issues`, and `- **Branch token**: {token}` is the branch name it derived. Paste `ISSUE_PR_LINK` verbatim — **after re-checking its shape against the resolved provider**: under `github` it must match `^Closes #[1-9][0-9]{0,8}$`. On a mismatch, do not paste it and do not repair it — emit `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)` and fall back to composing `## Related Issues` from `ISSUE_NUMBER`. The re-check runs here as well as at the producer because a value that was well-formed when it was returned is still attacker-influenceable text by the time it reaches a GitHub-visible sink. Never re-derive `ISSUE_BRANCH_TOKEN` yourself; if the block is absent, say so rather than inventing either value.
 
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 
