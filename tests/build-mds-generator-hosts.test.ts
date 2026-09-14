@@ -22,6 +22,9 @@
  *  10. a generator host must carry TWO frontmatter blocks
  *  11. the whole-repo walk is depth-bounded and fails loudly at the bound
  *  12. this file never spawns a build against the real repo root
+ *  13. orphans in dist/agents/ are pruned, and only there
+ *  14. orphans under dist/skills/git/references/ are pruned, recursively and
+ *      across the whole tree — root included, not just tracker/**
  *
  * EVERY build this file spawns — negatives, positives, and the whole-repo census
  * alike — runs against an isolated DEVFLOW_MDS_ROOT temp tree, so the real
@@ -56,7 +59,12 @@ import {
   ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
-import { TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS, ALLOWED_OUTPUT_DIR_NAMES } from '../src/core/mds-variants.js';
+import {
+  TRACKER_GITHUB_OPS,
+  GIT_CROSS_CUTTING_DOCS,
+  ALLOWED_OUTPUT_DIR_NAMES,
+  SKILL_REFS_OUTPUT_DIR,
+} from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
@@ -242,6 +250,23 @@ async function readIfPresent(file: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Named collector: the repo-relative paths the build reported pruning.
+ *
+ * Module-scoped because both prune describes below read it — the dist/agents/
+ * sweep and the dist/skills/git/references/ one share `pruneOrphans` and print
+ * through the same `pruned:` line, so two copies of this parse would be two
+ * chances to disagree about what the build said.
+ */
+function prunedPaths(combined: string): string[] {
+  const found: string[] = [];
+  for (const line of combined.split('\n')) {
+    const match = /^\s*pruned:\s+(\S+)/.exec(line);
+    if (match) found.push(match[1]);
+  }
+  return found;
 }
 
 async function withFakeRoot<T>(fn: (fakeRoot: string) => Promise<T>): Promise<T> {
@@ -1049,19 +1074,6 @@ describe('the whole-repo walk is depth-bounded', () => {
 // hand-authored copies (release.md) that no host claims.
 
 describe('orphans in dist/agents/ are pruned', () => {
-  /**
-   * Named collector: the repo-relative paths the build reported pruning.
-   * Shared by the assertion and every negative arm below.
-   */
-  function prunedPaths(combined: string): string[] {
-    const found: string[] = [];
-    for (const line of combined.split('\n')) {
-      const match = /^\s*pruned:\s+(\S+)/.exec(line);
-      if (match) found.push(match[1]);
-    }
-    return found;
-  }
-
   /** Write a file into `<fakeRoot>/dist/agents/`, creating the directory. */
   async function plantInDistAgents(fakeRoot: string, name: string, body: string): Promise<string> {
     const dir = path.join(fakeRoot, 'dist', 'agents');
@@ -1151,6 +1163,253 @@ describe('orphans in dist/agents/ are pruned', () => {
       expect(run.status, run.combined).toBe(0);
       expect(await readIfPresent(unclaimed), 'dist/commands/ is out of the prune\'s scope').not.toBeNull();
       expect(prunedPaths(run.combined)).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. orphans under dist/skills/git/references/ are pruned
+// ---------------------------------------------------------------------------
+//
+// `pruneOrphanReferences` shares `pruneOrphans` with the dist/agents/ sweep but
+// passes `recursive: true`, and until now had no describe of its own: the
+// whole-tree byte-compare would catch a MISSING or STALE reference file, never a
+// left-behind one, because an orphan is by construction absent from the freshly
+// built map it is compared against. The hazard it guards is the installer's, not
+// the build's — dist/skills/git/references/ is what the overlay copies into the
+// user's skill directory, so a renamed op's old output or a provider directory
+// that left the registry installs as if the build still produced it.
+//
+// SCOPE, asserted below rather than assumed: the sweep is NOT narrowed to
+// `tracker/**`. It walks the whole references tree from its root — including the
+// root itself, where the `kind: 'named'` cross-cutting documents land — so an
+// unclaimed `.md` anywhere under it is removed. That is correct *for dist/*,
+// which holds generated files only: the hand-authored references
+// (`github-api.md`, `violations.md`, …) live in src/assets/skills/git/references/
+// and are never copied here. The INSTALLER's sweep is the narrowed one
+// (`references/tracker/**`), precisely because the installed directory is where
+// the two kinds of file sit side by side.
+
+describe('dist/skills/git/references orphan prune', () => {
+  /**
+   * Spelled from the production constant, never retyped: the prune target and
+   * the destination allowlist are the same string, and a test that re-spells it
+   * would keep passing against a tree the build no longer writes.
+   */
+  const REFS_SEGMENTS = SKILL_REFS_OUTPUT_DIR.split('/');
+
+  /** Absolute path of a POSIX sub-path under the fake root's references tree. */
+  function refPath(fakeRoot: string, relPosix: string): string {
+    return path.join(fakeRoot, ...REFS_SEGMENTS, ...relPosix.split('/'));
+  }
+
+  /** Plant a file under the fake root's references tree, creating its parents. */
+  async function plantInDistRefs(fakeRoot: string, relPosix: string, body: string): Promise<string> {
+    const file = refPath(fakeRoot, relPosix);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, body, 'utf-8');
+    return file;
+  }
+
+  /**
+   * A fake root holding a COPY of the committed .mds corpus.
+   *
+   * The reference modules are a closed registry keyed by repo-relative source
+   * path (`VARIANT_MODULES`), so a synthetic module would be refused by the
+   * build and could never produce a claimed destination to contrast an orphan
+   * against. The fixture is therefore the real committed modules (PF-043), read
+   * through the same helper the census probes use.
+   */
+  async function withReferenceTree<T>(fn: (fakeRoot: string) => Promise<T>): Promise<T> {
+    return withFakeRoot(async fakeRoot => {
+      await copyCommittedSources(fakeRoot);
+      return fn(fakeRoot);
+    });
+  }
+
+  /** Assert every generated reference this build plans is on disk afterwards. */
+  async function expectGeneratedReferencesPresent(fakeRoot: string): Promise<void> {
+    expect(
+      EXPECTED_REFERENCE_KEYS.length,
+      'the expected-reference roster is empty — these assertions would be vacuous (PF-018)',
+    ).toBeGreaterThan(0);
+    for (const key of EXPECTED_REFERENCE_KEYS) {
+      const file = path.join(fakeRoot, 'dist', ...key.split('/'));
+      expect(
+        await readIfPresent(file),
+        `${key} is a planned output and must survive its own prune`,
+      ).not.toBeNull();
+    }
+  }
+
+  it('deletes an unclaimed .md under tracker/github/ and names it in the output', async () => {
+    await withReferenceTree(async fakeRoot => {
+      const stale = await plantInDistRefs(fakeRoot, 'tracker/github/retired-op.md', 'old mechanics\n');
+      expect(await readIfPresent(stale), 'the orphan must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      expect(await readIfPresent(stale), 'an unclaimed reference must not survive the build').toBeNull();
+      expect(prunedPaths(run.combined), 'the pruned path must be reported')
+        .toContain(`${SKILL_REFS_OUTPUT_DIR}/tracker/github/retired-op.md`);
+      expect(run.combined, 'the reason must be stated').toContain('(no reference module)');
+    });
+  });
+
+  it('descends into an unexpected nested provider directory', async () => {
+    // `recursive: true` is the whole difference from the dist/agents/ sweep. A
+    // flat read would leave every orphan exactly where the orphans live, since
+    // the tree is nested `tracker/{provider}/{op}.md` — and `tracker/jira/` is
+    // the concrete shape that arrives when a Phase-3 provider is reverted.
+    await withReferenceTree(async fakeRoot => {
+      const nested = await plantInDistRefs(fakeRoot, 'tracker/jira/x.md', 'reverted provider\n');
+      expect(await readIfPresent(nested), 'the orphan must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      expect(await readIfPresent(nested), 'the sweep must descend below tracker/').toBeNull();
+      expect(prunedPaths(run.combined)).toContain(`${SKILL_REFS_OUTPUT_DIR}/tracker/jira/x.md`);
+    });
+  });
+
+  it('leaves every claimed output in place', async () => {
+    // Non-vacuity for the two rows above: the same run that removes the orphan
+    // must leave all 13 planned references — the fanned-out tracker ops AND the
+    // flat cross-cutting documents — untouched, and a rebuild prunes nothing.
+    await withReferenceTree(async fakeRoot => {
+      await plantInDistRefs(fakeRoot, 'tracker/github/retired-op.md', 'old\n');
+
+      const first = runBuild(fakeRoot);
+      expect(first.status, `expected exit 0.\n${first.combined}`).toBe(0);
+      await expectGeneratedReferencesPresent(fakeRoot);
+      expect(prunedPaths(first.combined)).toEqual([`${SKILL_REFS_OUTPUT_DIR}/tracker/github/retired-op.md`]);
+
+      const second = runBuild(fakeRoot);
+      expect(second.status, second.combined).toBe(0);
+      await expectGeneratedReferencesPresent(fakeRoot);
+      expect(prunedPaths(second.combined), 'a rebuild must prune nothing').toEqual([]);
+    });
+  });
+
+  it('leaves a non-.md staging file alone', async () => {
+    // A concurrent build's `<dest>.<pid>.tmp` lives in this tree; deleting it
+    // would fail that build's rename. The name is the real staging shape —
+    // tempPathFor() appends `.<pid>.tmp` to the destination.
+    await withReferenceTree(async fakeRoot => {
+      const staging = await plantInDistRefs(fakeRoot, 'tracker/github/setup-task.md.99999.tmp', 'staged\n');
+      expect(await readIfPresent(staging), 'the staging file must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      expect(await readIfPresent(staging), 'only .md artifacts are the build\'s to remove').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([]);
+      await expectGeneratedReferencesPresent(fakeRoot);
+    });
+  });
+
+  it('sweeps the references root too — the scope is the whole tree, not tracker/**', async () => {
+    // The scope finding, asserted rather than assumed. `github-api.md` is the
+    // name of a real HAND-AUTHORED reference, and it is pruned here: the build's
+    // sweep does not distinguish generated names from any other. That is safe
+    // only because nothing ever copies src/assets/skills/git/references/ into
+    // dist/ — the hand-authored file is untouched where it actually lives, and
+    // it is the INSTALLER's narrower `references/tracker/**` sweep that protects
+    // it in the directory where generated and hand-authored files do mix.
+    await withReferenceTree(async fakeRoot => {
+      const atRoot = await plantInDistRefs(fakeRoot, 'github-api.md', 'hand-authored prose\n');
+      expect(await readIfPresent(atRoot), 'the file must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+
+      expect(
+        await readIfPresent(atRoot),
+        'the sweep covers the references root, where the cross-cutting documents land',
+      ).toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([`${SKILL_REFS_OUTPUT_DIR}/github-api.md`]);
+
+      // The source of that name is never touched — it is not in this tree at all.
+      expect(
+        await readIfPresent(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'references', 'github-api.md')),
+        'the hand-authored reference lives in src/assets/, outside every prune target',
+      ).not.toBeNull();
+    });
+  });
+
+  it('prunes nothing when the build refuses', async () => {
+    // The aggregation path exits 1 with dist/ as the refusal found it. Pruning
+    // there would delete a working reference on the strength of a plan that was
+    // never carried out. Seeded through the module's own contract: an `<!-- op: -->`
+    // section for an unregistered operation is refused by splitVariantSections.
+    await withReferenceTree(async fakeRoot => {
+      const moduleFile = path.join(fakeRoot, 'src', 'assets', 'mds', 'tracker', '_github.mds');
+      const pristine = await fs.readFile(moduleFile, 'utf-8');
+      await fs.writeFile(
+        moduleFile,
+        `${pristine}\n<!-- op: not-a-registered-op -->\nseeded section for an op no registry knows\n`,
+        'utf-8',
+      );
+      const stale = await plantInDistRefs(fakeRoot, 'tracker/github/retired-op.md', 'old\n');
+
+      const refused = runBuild(fakeRoot);
+      expect(refused.status, `expected exit 1.\n${refused.combined}`).toBe(1);
+      expect(refused.combined, 'the refusal must name the unregistered section').toContain('unknown-section');
+      expect(
+        await readIfPresent(stale),
+        'a refused build must leave the references tree as it found it',
+      ).not.toBeNull();
+      expect(prunedPaths(refused.combined)).toEqual([]);
+
+      // Non-vacuity: the refusal is what spared the orphan, not the orphan. Put
+      // the module back and the very same file is pruned.
+      await fs.writeFile(moduleFile, pristine, 'utf-8');
+      const clean = runBuild(fakeRoot);
+      expect(clean.status, `expected exit 0.\n${clean.combined}`).toBe(0);
+      expect(await readIfPresent(stale), 'the restored build must prune the same orphan').toBeNull();
+      expect(prunedPaths(clean.combined)).toEqual([`${SKILL_REFS_OUTPUT_DIR}/tracker/github/retired-op.md`]);
+    });
+  });
+
+  // MAX_PRUNE_DEPTH in scripts/build-mds.ts, mirrored here as the walk-bound
+  // test mirrors MAX_WALK_DEPTH: the bound is not exported, and asserting the
+  // message it names is what proves the descent stopped rather than silently
+  // truncating (avoids PF-018 — a filter that returns fewer results and a bound
+  // that fails are indistinguishable from the outside).
+  const PRUNE_DEPTH_BOUND = 8;
+
+  /** `d1/d2/…/d{levels}/{name}` under the references tree, planted. */
+  async function plantRefAtDepth(fakeRoot: string, levels: number, name: string): Promise<string> {
+    const rel = [...Array.from({ length: levels }, (_, i) => `d${i + 1}`), name].join('/');
+    return plantInDistRefs(fakeRoot, rel, `planted at depth ${levels}\n`);
+  }
+
+  it('a directory past the prune depth bound fails the build, naming the bound', async () => {
+    await withReferenceTree(async fakeRoot => {
+      const tooDeep = await plantRefAtDepth(fakeRoot, PRUNE_DEPTH_BOUND + 1, 'deep.md');
+      expect(await readIfPresent(tooDeep), 'the orphan must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain(`prune descent exceeds ${PRUNE_DEPTH_BOUND} levels`);
+      expect(
+        await readIfPresent(tooDeep),
+        'the bound fails the build rather than descending — the file is left, not removed',
+      ).not.toBeNull();
+    });
+  });
+
+  it('non-vacuity: an orphan one level shallower is descended to and pruned', async () => {
+    await withReferenceTree(async fakeRoot => {
+      const atBound = await plantRefAtDepth(fakeRoot, PRUNE_DEPTH_BOUND, 'deep.md');
+      expect(await readIfPresent(atBound), 'the orphan must exist before the build').not.toBeNull();
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 0.\n${run.combined}`).toBe(0);
+      expect(await readIfPresent(atBound), 'a directory within the bound is swept').toBeNull();
+      expect(prunedPaths(run.combined)).toHaveLength(1);
     });
   });
 });
