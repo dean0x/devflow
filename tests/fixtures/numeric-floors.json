@@ -161,6 +161,14 @@
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
       "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed."
+    },
+    {
+      "id": "git-agent-guard-count",
+      "floor": 68,
+      "pattern": "toBeGreaterThanOrEqual(68)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/guard-census.test.ts",
+      "description": "AC-2.6 / GAP-49: the number of `it(` guards DECLARED in tests/git-agent.test.ts (line-anchored declarations, not the 84 cases vitest runs — several declarations sit inside `for` loops over named op sets, so the runtime number moves with a roster and the declared number moves only when a guard is added or deleted). May rise, may never fall. Phase 0 stood at 40; this branch stands at 68 — P2-S7 widened the D11 inline-body guard, P2-S4 added four detector guards, and [DR-20] replaced ONE D10 scope guard with a successor pair of four, so the replacement is visibly not a net loss. The assertion reads the floor out of this manifest rather than spelling it, and the two are asserted equal, so the number cannot be lowered in one place only."
     }
   ]
 }

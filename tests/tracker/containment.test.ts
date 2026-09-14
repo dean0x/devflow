@@ -949,3 +949,94 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
     ).toEqual(['tracker/github/probe.md']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. AC-2.7 (positive form) — every generated reference is reachable on the gh path
+// ---------------------------------------------------------------------------
+//
+// AC-2.7 was amended from "no orphan" to the positive claim: every generated
+// Phase-2 reference line is REACHABLE. "Reachable" is defined structurally so the
+// check is mechanical rather than a reading of the preamble:
+//
+//   a generated file is reachable ⇔ instantiating the preamble's SINGLE load
+//   instruction with provider `github` and an op from TRACKER_GITHUB_OPS yields
+//   that file's path.
+//
+// Both directions, because either one alone is satisfiable by an accident: a file
+// nothing can name is dead weight installed on every user's machine (ADR-003), and
+// an op the instruction can name with no file behind it is the
+// `tracker mechanics unavailable` degradation shipped as the normal path.
+//
+// The instruction is read out of the compiled agent rather than restated here —
+// restating it would let the two drift and still pass (ADR-024).
+
+/** The `{provider}` / `{op}` template the preamble's one load instruction composes. */
+const LOAD_INSTRUCTION_TEMPLATE = 'references/tracker/{provider}/{op}.md';
+
+/** Named collector: lines of the compiled agent that name a `references/tracker/` path. */
+function collectTrackerNamingLines(content: string): string[] {
+  return content.split('\n').filter(line => line.includes('references/tracker/'));
+}
+
+/**
+ * Named collector: the relative paths the load instruction can reach for a
+ * provider, given a roster of ops. Derived from the template, never hand-listed.
+ */
+function reachablePaths(template: string, provider: string, ops: readonly string[]): string[] {
+  return ops.map(op => template.replace('{provider}', provider).replace('{op}', op)
+    .replace('references/', ''));
+}
+
+describe('containment: every generated GitHub reference is reachable on the gh path (AC-2.7)', () => {
+  const agent = resolveAgentSource('git');
+
+  it('the preamble states exactly one load instruction, and it is the template', () => {
+    const naming = collectTrackerNamingLines(agent.content);
+    expect(
+      naming.length,
+      `expected exactly one line naming a references/tracker/ path, found ${naming.length}:\n  ` +
+      naming.join('\n  '),
+    ).toBe(1);
+    expect(
+      naming[0],
+      'the single load instruction must compose the path from BOTH placeholders — an instruction ' +
+      'that hard-codes either one cannot reach the tree the registry emits',
+    ).toContain(LOAD_INSTRUCTION_TEMPLATE);
+  });
+
+  it('every op in the registry is reachable, and every emitted file is reachable (both directions)', () => {
+    const reachable = new Set(reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS));
+
+    const emitted = walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
+      .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'));
+
+    const unreachable = emitted.filter(rel => !reachable.has(rel));
+    expect(
+      unreachable,
+      'generated mechanics file(s) no load instruction can name — installed on every machine and ' +
+      'read by nothing (ADR-003):\n  ' + unreachable.join('\n  '),
+    ).toEqual([]);
+
+    const missing = [...reachable].filter(rel => !emitted.includes(rel));
+    expect(
+      missing,
+      'the load instruction can name file(s) the build does not emit — every spawn that runs those ' +
+      'ops takes the `tracker mechanics unavailable` degradation as its normal path:\n  ' +
+      missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the reachability check is non-vacuous on both sides', () => {
+    expect(TRACKER_GITHUB_OPS.length, 'empty op roster').toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+    expect(
+      walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md')).length,
+      'no generated mechanics files at all — run `npm run build`',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+  });
+
+  it('known-bad probe: an emitted file outside the registry is reported as unreachable', () => {
+    const reachable = new Set(reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS));
+    const emitted = ['tracker/github/setup-task.md', 'tracker/github/smuggled.md'];
+    expect(emitted.filter(rel => !reachable.has(rel))).toEqual(['tracker/github/smuggled.md']);
+  });
+});
