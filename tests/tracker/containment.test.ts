@@ -41,6 +41,7 @@ import {
   VARIANT_MODULES,
   expandVariants,
 } from '../../src/core/mds-variants.js';
+import { generatedReferenceManifest } from '../../src/targets/claude-code/installer.js';
 import { ROOT, resolveAgentSource, walkFiles } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -184,6 +185,18 @@ interface ContainmentExemption {
   readonly endLine: number;
   readonly rationale: string;
 }
+
+/**
+ * Minimum characters a rationale must carry.
+ *
+ * An emptiness-only check is cleared by `rationale: 'x'`, which records that
+ * someone typed something — not why a line the oracle would otherwise report as
+ * lost is allowed to be missing. 40 characters is roughly one clause: enough to
+ * name what was rewritten and what replaced it, which is the sentence [DR-17]
+ * asks for. It is a floor on effort, not on prose quality; every entry below
+ * clears it by a wide margin.
+ */
+const MIN_RATIONALE_CHARS = 40;
 
 export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
   // ── skills/git/SKILL.md (P2-S7) ────────────────────────────────────────────
@@ -647,11 +660,35 @@ describe('containment: rewrite exemption list — justified [DR-17]', () => {
       if (entry.endLine > baseline.lines.length) {
         problems.push(`${where}: past the end of the baseline (${baseline.lines.length} lines)`);
       }
-      if (entry.rationale.trim().length === 0) {
-        problems.push(`${where}: empty rationale — an exemption without a reason is a deletion`);
+      const rationale = entry.rationale.trim();
+      if (rationale.length < MIN_RATIONALE_CHARS) {
+        problems.push(
+          `${where}: rationale is ${rationale.length} ch, floor ${MIN_RATIONALE_CHARS} — ` +
+          'an exemption without a reason is a deletion',
+        );
       }
     }
     expect(problems, `malformed exemption entries:\n  ${problems.join('\n  ')}`).toEqual([]);
+  });
+
+  it('known-bad probe: a token rationale is reported by the same length rule', () => {
+    // Emptiness-only was satisfied by `rationale: 'x'` — a string that records a
+    // keystroke, not a reason. The probe drives the SAME predicate over seeded
+    // entries so the floor is proven live rather than asserted about (ADR-024).
+    const seeded: readonly ContainmentExemption[] = [
+      { file: 'probe.md', startLine: 1, endLine: 1, rationale: '' },
+      { file: 'probe.md', startLine: 2, endLine: 2, rationale: 'x' },
+      { file: 'probe.md', startLine: 3, endLine: 3, rationale: 'moved on purpose' },
+      { file: 'probe.md', startLine: 4, endLine: 4, rationale: 'a'.repeat(MIN_RATIONALE_CHARS) },
+    ];
+    const tooShort = seeded
+      .filter(e => e.rationale.trim().length < MIN_RATIONALE_CHARS)
+      .map(e => e.startLine);
+    expect(
+      tooShort,
+      'the length rule must reject the empty, the single-character and the 16-character ' +
+      'rationales and accept only the one that clears the floor',
+    ).toEqual([1, 2, 3]);
   });
 
   it('no entry exempts a range that is in fact still contained', () => {
@@ -1024,6 +1061,25 @@ function reachablePaths(template: string, provider: string, ops: readonly string
     .replace('references/', ''));
 }
 
+/**
+ * Named collector: every literal `references/<name>.md` the compiled agent spells
+ * out, as a manifest-relative path.
+ *
+ * The templated tracker instruction is skipped — it is handled by reachablePaths
+ * above, and a `{provider}`/`{op}` path is not a name any one file answers to.
+ * This is the OTHER half of reachability: the three cross-cutting documents are
+ * not reached by instantiating a template, they are named individually at exactly
+ * one site each [GIT_CROSS_CUTTING_DOCS, 'named' module kind].
+ */
+function collectLiteralReferenceNames(content: string): Set<string> {
+  const names = new Set<string>();
+  for (const match of content.matchAll(/references\/([A-Za-z0-9._/{}-]+\.md)/g)) {
+    if (match[1].includes('{')) continue;
+    names.add(match[1]);
+  }
+  return names;
+}
+
 describe('containment: every generated GitHub reference is reachable on the gh path (AC-2.7)', () => {
   const agent = resolveAgentSource('git');
 
@@ -1042,38 +1098,104 @@ describe('containment: every generated GitHub reference is reachable on the gh p
   });
 
   it('every op in the registry is reachable, and every emitted file is reachable (both directions)', () => {
-    const reachable = new Set(reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS));
+    // Scope: the WHOLE manifest, not the tracker/ subtree. Walking only
+    // tracker/ excluded the three GIT_CROSS_CUTTING_DOCS from BOTH directions —
+    // decision-markers.md, learn-conventions.md and publication-gate.md are
+    // generated, installed on every machine and shipped in the tarball, and were
+    // in neither "is it named" nor "is it emitted". A cross-cutting document that
+    // lost its one naming line was exactly as invisible here as an orphan file.
+    const reachable = new Set([
+      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      // The 'named' module kind: reachable ⇔ the compiled agent spells the path
+      // out literally. Read out of the agent, never restated here (ADR-024).
+      ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
+        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
+      ),
+    ]);
 
-    const emitted = walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
+    const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
       .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'));
+
+    // The walk must see the whole manifest — a narrowed walk is how this check
+    // lost the cross-cutting docs in the first place.
+    expect(
+      [...emitted].sort(),
+      'the emitted tree and the install manifest must be the same set — a file in one and not ' +
+      'the other is either shipped unreachable or named and absent',
+    ).toEqual([...generatedReferenceManifest()].sort());
 
     const unreachable = emitted.filter(rel => !reachable.has(rel));
     expect(
       unreachable,
-      'generated mechanics file(s) no load instruction can name — installed on every machine and ' +
+      'generated reference file(s) no load instruction can name — installed on every machine and ' +
       'read by nothing (ADR-003):\n  ' + unreachable.join('\n  '),
     ).toEqual([]);
 
     const missing = [...reachable].filter(rel => !emitted.includes(rel));
     expect(
       missing,
-      'the load instruction can name file(s) the build does not emit — every spawn that runs those ' +
-      'ops takes the `tracker mechanics unavailable` degradation as its normal path:\n  ' +
+      'the agent can name file(s) the build does not emit — every spawn that runs those ops takes ' +
+      'the `tracker mechanics unavailable` degradation as its normal path:\n  ' +
       missing.join('\n  '),
     ).toEqual([]);
   });
 
   it('the reachability check is non-vacuous on both sides', () => {
     expect(TRACKER_GITHUB_OPS.length, 'empty op roster').toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+    expect(GIT_CROSS_CUTTING_DOCS.length, 'empty cross-cutting roster').toBeGreaterThan(0);
     expect(
-      walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md')).length,
-      'no generated mechanics files at all — run `npm run build`',
-    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+      walkFiles(REFS_DIR, f => f.endsWith('.md')).length,
+      'no generated reference files at all — run `npm run build`',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length + GIT_CROSS_CUTTING_DOCS.length);
   });
 
   it('known-bad probe: an emitted file outside the registry is reported as unreachable', () => {
     const reachable = new Set(reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS));
     const emitted = ['tracker/github/setup-task.md', 'tracker/github/smuggled.md'];
     expect(emitted.filter(rel => !reachable.has(rel))).toEqual(['tracker/github/smuggled.md']);
+  });
+
+  it('known-bad probe: a cross-cutting doc whose naming line is removed is reported', () => {
+    // The direction the tracker-only walk could not express. Strip one document's
+    // single naming line from a COPY of the agent and drive the SAME collector:
+    // the file is still emitted, still installed, and now reachable by nothing.
+    const target = 'decision-markers.md';
+    const stripped = agent.content
+      .split('\n')
+      .filter(line => !line.includes(`references/${target}`))
+      .join('\n');
+    expect(stripped, 'the strip must actually change the agent copy').not.toBe(agent.content);
+
+    const namedInReal = collectLiteralReferenceNames(agent.content);
+    const namedInStripped = collectLiteralReferenceNames(stripped);
+    expect(
+      namedInReal.has(target),
+      `${target} must be named in the real agent — otherwise this probe proves nothing`,
+    ).toBe(true);
+    expect(
+      namedInStripped.has(target),
+      'the collector must stop seeing the name once its line is gone — otherwise the reachability ' +
+      'direction is green for a document nothing can load (PF-018)',
+    ).toBe(false);
+
+    // …and the same set difference the live check computes now reports it.
+    const reachable = new Set([
+      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      ...[...namedInStripped].filter(rel =>
+        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
+      ),
+    ]);
+    expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
+  });
+
+  it('known-bad probe: a seeded 14th manifest entry is reported against the emitted tree', () => {
+    const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
+      .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'));
+    const seededManifest = [...generatedReferenceManifest(), 'tracker/github/smuggled.md'];
+    expect(
+      seededManifest.filter(rel => !emitted.includes(rel)),
+      'a manifest entry with no emitted file must be reported — the install would copy nothing ' +
+      'and the agent would name a path that does not exist',
+    ).toEqual(['tracker/github/smuggled.md']);
   });
 });
