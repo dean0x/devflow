@@ -1592,6 +1592,69 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     ).toBe(5);
   });
 
+  /** Named collector: the `@define <name>():` / `@export <name>` names in a partial source. */
+  function collectTrackerDeclarations(source: string): { defines: string[]; exports: string[] } {
+    return {
+      defines: [...source.matchAll(/^@define ([A-Za-z_][A-Za-z0-9_]*)\(\):/gm)].map(m => m[1]),
+      exports: [...source.matchAll(/^@export ([A-Za-z_][A-Za-z0-9_]*)\s*$/gm)].map(m => m[1]),
+    };
+  }
+
+  it('_tracker.mds declares exactly these two defines and exports both (AC-2.9)', async () => {
+    // The per-define guards below range over TRACKER_DEFINES, so they are silent
+    // about a THIRD define: one added to the partial and exported would expand
+    // into all five adopting hosts — 5× its bytes on every spawn of those
+    // commands — with nothing here to notice. The reverse arm matters equally: a
+    // define left unexported compiles, and its call site fails only at build time
+    // in whichever host happens to call it.
+    const source = await fs.readFile(path.join(PARTIALS_DIR, '_tracker.mds'), 'utf-8');
+    const { defines, exports } = collectTrackerDeclarations(source);
+    const expected = TRACKER_DEFINES.map(d => d.name).sort();
+
+    expect(
+      [...defines].sort(),
+      `_tracker.mds defines [${defines.join(', ')}]; this guard knows [${expected.join(', ')}]. ` +
+      'A define this file does not model is expanded into every adopting host unchecked.',
+    ).toEqual(expected);
+    expect(
+      [...exports].sort(),
+      `_tracker.mds exports [${exports.join(', ')}] — every define must be exported and nothing else`,
+    ).toEqual(expected);
+  });
+
+  it('known-bad probe: a seeded third define/export is reported by the same collector', () => {
+    const seeded = [
+      '@define issue_ref_grammar():',
+      'body',
+      '@end',
+      '',
+      '@define issue_capture_contract():',
+      'body',
+      '@end',
+      '',
+      '@define smuggled_partial():',
+      'body',
+      '@end',
+      '',
+      '@export issue_ref_grammar',
+      '@export issue_capture_contract',
+      '@export smuggled_partial',
+      '',
+    ].join('\n');
+
+    const { defines, exports } = collectTrackerDeclarations(seeded);
+    expect(
+      defines,
+      'the collector must see the seeded third define — otherwise the equality above is ' +
+      'green because nothing was ever parsed (PF-018)',
+    ).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
+    expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
+    expect(
+      [...defines].sort(),
+      'and the seeded set must NOT equal the modelled two — the probe would be inert otherwise',
+    ).not.toEqual(TRACKER_DEFINES.map(d => d.name).sort());
+  });
+
   it('each define has a non-empty body — required phrase plus a size floor (GAP-44)', async () => {
     const source = await fs.readFile(
       path.join(PARTIALS_DIR, '_tracker.mds'),

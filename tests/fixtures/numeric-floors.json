@@ -80,7 +80,7 @@
       "pattern": "toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), from the resolved Git agent (dist/agents/git.md) alone (AC-0.8). This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), counted over the sink corpus gitAgentSinkCorpus() returns -- the resolved Git agent UNIONED with dist/skills/git/references/*.md, sliced in extractOpSection mode 'union' [DR-18]. Phase 2 moved posting mechanics into the generated references, so a git.md-only count would drop below the floor for reasons that are not a regression. This is the '>= 8' named in the Phase-0 exit gate; the plugin-count entry above pins a different >= 8 in a different file."
     },
     {
       "id": "agent-roster-count",
@@ -112,7 +112,7 @@
       "pattern": "toBe(6)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Entries in issue_capture_contract() checked by the seam test's producer direction. Was 5, corrected to 3 in c7bff85 when ISSUE_ID and ISSUE_URL were found to have no emitted producer in git.md. Raised 3 -> 6 in P2-S9/S10: the `### Handoff Values` block T2b appended to setup-task and fetch-issue gives ISSUE_ID, ISSUE_PR_LINK and ISSUE_BRANCH_TOKEN real producers. ISSUE_URL still has none and stays out."
+      "description": "KEYS in issue_capture_contract() checked by the seam test's producer direction. Was 5, corrected to 3 in c7bff85 when ISSUE_ID and ISSUE_URL were found to have no emitted producer in git.md. Raised 3 -> 6 in P2-S9/S10: the `### Handoff Values` block T2b appended to setup-task and fetch-issue gives ISSUE_ID, ISSUE_PR_LINK and ISSUE_BRANCH_TOKEN real producers. ISSUE_URL still has none and stays out. The direction is now checked PER PRODUCER OP rather than over a concatenation, so it ranges over more (key, op) pairs than there are keys; the key count is what this floor pins and it is unchanged at 6."
     },
     {
       "id": "manage-debt-archive-cap",
@@ -153,6 +153,14 @@
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
       "description": "P2-S14 overlay: the generated reference manifest (10 GitHub ops + 3 cross-cutting documents). Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists."
+    },
+    {
+      "id": "issue-pr-link-forwarding-sites",
+      "floor": 14,
+      "pattern": "const MIN_FORWARDING_SITES = 14",
+      "occurrences": 1,
+      "sourceFile": "tests/seams/pr-link-handoff.test.ts",
+      "description": "GAP-15 forwarding seam: Code-agent spawn sites carrying an ISSUE_NUMBER key across implement.md (8) and dynamic-build.md (6). The relational assertion -- every ISSUE_NUMBER payload also carries ISSUE_PR_LINK -- is vacuous over an empty or truncated payload set, so the site count is the non-vacuity floor and may only rise as spawn sites are added."
     },
     {
       "id": "packed-reference-manifest-size",
