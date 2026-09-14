@@ -16,6 +16,10 @@
  * Guard 5 (files[] coverage): the package.json `files` array includes every directory
  *   required for a working install (dist/, src/assets/, src/targets/claude-code/templates/).
  *   A missing entry causes `npm pack` to silently omit critical runtime files.
+ *
+ * Guard 6e (generated references): the tarball carries every file the installer's
+ *   reference overlay converges to. An absent generated reference makes the overlay
+ *   throw, so a packing regression would surface on a user's first init, not here.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -29,6 +33,7 @@ import {
   MDS_REFERENCE_MODULES,
   MDS_PARTIALS,
 } from './fixtures/mds-manifest.js';
+import { generatedReferenceManifest } from '../src/targets/claude-code/installer.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -529,5 +534,59 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     for (const source of MDS_REFERENCE_MODULES) {
       expect(shippedMds, `${source} must ship`).toContain(source);
     }
+  });
+
+  /**
+   * Guard 6e (P2-S14, prefix-shippability clause (i)): every generated skill reference
+   * is inside the tarball.
+   *
+   * The installer's reference overlay treats an absent generated reference as a
+   * build-artifact absence and THROWS with a build hint. If `files[]` ever stopped
+   * carrying `dist/skills/`, that loud failure would move from this repo to every
+   * user's first `devflow init` off a published tarball — the guard has to sit here,
+   * where the packed file list is the thing under test.
+   *
+   * `files[]` contains `dist/` wholesale today, so nothing pins that these particular
+   * paths ride along; that is exactly the accident this makes deliberate.
+   */
+  function collectMissingPackedReferences(
+    packed: readonly string[],
+    manifest: readonly string[],
+  ): string[] {
+    const packedSet = new Set(packed);
+    return manifest
+      .map(rel => `dist/skills/git/references/${rel}`)
+      .filter(p => !packedSet.has(p));
+  }
+
+  it('tarball carries every generated skill reference the installer overlay converges to', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+
+    const manifest = generatedReferenceManifest();
+    expect(
+      manifest.length,
+      'a manifest short enough to enumerate by hand makes this assertion vacuous',
+    ).toBeGreaterThanOrEqual(13);
+
+    expect(
+      collectMissingPackedReferences(files, manifest),
+      'The tarball must carry every file the reference overlay installs. ' +
+      'Run `npm run build:mds` before `npm pack`, and check that package.json `files` ' +
+      'still covers dist/skills/.',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a manifest entry missing from the packed list is reported by the same collector', () => {
+    const manifest = generatedReferenceManifest();
+    const seeded = getPackFiles().filter(
+      f => f !== `dist/skills/git/references/${manifest[0]}`,
+    );
+    expect(collectMissingPackedReferences(seeded, manifest)).toEqual([
+      `dist/skills/git/references/${manifest[0]}`,
+    ]);
   });
 });
