@@ -33,7 +33,7 @@ import { loadGolden, resolveAgentSource } from '../helpers.js'
  * way (parallel re-derivation is how derived constants rot — PF-057).
  * It moves only in the same commit as the fixture itself.
  */
-const GIT_AGENT_BYTES = 55_633
+const GIT_AGENT_BYTES = 56_134
 
 describe('golden: git agent source equality', () => {
   it('the resolved git agent is byte-equal to the golden fixture (AC-0.2)', () => {

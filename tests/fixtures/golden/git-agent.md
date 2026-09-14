@@ -45,16 +45,16 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 - `TRACKER_PROVIDER` absent → `github`. Silent: no DEGRADED, no file read, no spawn.
 - `TRACKER_PROVIDER` = `github`, default or chosen → silent in exactly the same way; the GitHub path emits no tracker status line at all.
 - Token fails normalisation → `TRACEABILITY: DEGRADED (unknown tracker provider)`; continue per D4, and never substitute a repaired token.
-- Generated mechanics absent → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`; continue per D4.
+- Generated mechanics absent **for an operation that names them** → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`; continue per D4. An operation that names no mechanics file has none to be missing, and never emits this line.
 
 ## Tracker input contract
 
 - **TRACKER_PROVIDER** (optional): one of `github`, `jira`, `linear`; absent means `github`.
 - Resolve tracker **capabilities** and the current-user identity **exactly once per spawn, before any loop**; pass the resolved set to nested invocations; **never invoke a capability probe inside a loop.**
 - **Reading a tracker configuration file:** use the **Read tool** with an **absolute path** — never `~` (the Read tool does not expand it; only Bash does), and never `cat`/`head`/`tail` (a shell rewrite can substitute a truncated view for the real bytes). Bound: ≤120 lines / ≤8,000 characters; over the bound, read it **fully anyway** and emit `TRACEABILITY: DEGRADED (tracker.md exceeds size bound)` — never a partial read, which is indistinguishable from a missing section.
-- **Load the mechanics:** for the resolved provider and the operation being run, read the `devflow:git` skill's `references/tracker/{provider}/{op}.md` — the single load instruction; no other line composes a mechanics path.
+- **Load the mechanics:** an operation whose section carries a `**Mechanics:**` pointer reads the `devflow:git` skill's `references/tracker/{provider}/{op}.md` for the resolved provider — the single load instruction; no other line composes a mechanics path. **An operation with no `**Mechanics:**` pointer loads nothing and degrades nothing:** its steps are stated inline in full, so a missing file is not a condition it can be in.
 
-File presence in the installed skill directory is the authoritative signal: if that generated reference is absent, degrade as above. **NEVER fabricate provider mechanics for an absent generated reference.**
+For an operation that names one, file presence in the installed skill directory is the authoritative signal: if that generated reference is absent, degrade as above. **NEVER fabricate provider mechanics for an absent generated reference.**
 
 ## Comment-sink scrub (D11)
 
@@ -653,7 +653,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 
 `resolveReviewThread` mutation is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN findings are the thread author's call to close — devflow replies with cited evidence but leaves the thread unresolved. ESCALATED, FAILED, and SKIPPED are always reply-only.
 
-**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining threads as `THROTTLED ({n} not processed)`. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
+**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining threads as `THROTTLED ({n} not processed)`. Backpressure rung: `X-RateLimit-Remaining` < 50 → raise the inter-operation delay from 1s to 3s for the remainder of the batch. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
 
 **Process:**
 For each `ext-{N}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`

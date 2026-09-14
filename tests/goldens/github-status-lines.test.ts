@@ -3,7 +3,7 @@
  *
  * Measurements after the Phase-2 golden regeneration (P2-S16):
  *
- *   tests/fixtures/golden/git-agent.md          55,228 ch / 904 L   (== dist/agents/git.md)
+ *   tests/fixtures/golden/git-agent.md          55,727 ch / 904 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
  *   Total (all three)                           64,751 ch / 1,209 L
@@ -48,9 +48,9 @@ export const PRE_PHASE0_GIT_MD_CHARS = 58_903  // JS .length (UTF-16 code units)
 export const PRE_PHASE0_GIT_MD_LINES = 938
 
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
-// byte-budget.test.ts can import them without re-deriving (C6). Updated after
-// D4 degradation clauses added to fetch-issue + fetch-issues-batch.
-export const GIT_MD_CHARS = 55_228
+// byte-budget.test.ts can import them without re-deriving (C6). These are equality
+// baselines: they move only in the same commit as the golden fixture.
+export const GIT_MD_CHARS = 55_727
 export const GIT_MD_LINES = 904
 // Phase 1 took this to 9_205 / 283 (the SKILL.md cross-reference to the Git agent
 // moved from src/assets/agents/git.md to the git.mds generator host). Phase 2's
