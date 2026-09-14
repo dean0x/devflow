@@ -255,6 +255,62 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
 // find today, so a vocabulary edit that also changed the rendering goes red here
 // rather than in a user's issue body.
 
+// AC-2.10 says BYTE-IDENTICAL. `toContain` cannot say that: it is satisfied by a
+// corpus that also renders the literal a second time, somewhere else, in a
+// context the AC never sanctioned — a second `Tracked = #{n}` in a stale example,
+// a duplicated `issue: 42` in a second frontmatter block. Each rendering below is
+// therefore pinned by OCCURRENCE-COUNT EQUALITY against the deployed file that
+// owns it: exactly one site, no more and no fewer. All four are single-site today
+// (verified on this tree), so the equality is the AC as written rather than a
+// weaker "appears somewhere" claim.
+
+/** One AC-2.10 rendering: the literal, and every deployed corpus that must carry it exactly once. */
+interface PinnedRendering {
+  readonly label: string
+  readonly literal: string
+  readonly sources: readonly NamedSource[]
+  /** The neutral-vocabulary sibling the rendering is the github expansion of. */
+  readonly neutralIn?: readonly [NamedSource, string]
+}
+
+const AC_2_10_RENDERINGS: readonly PinnedRendering[] = [
+  {
+    label: '1/4 `Tracked = #{n}` in resolve.md',
+    literal: 'Tracked = #{n}',
+    sources: [['resolve.md', RESOLVE_MD]],
+    neutralIn: [['resolve.md', RESOLVE_MD], 'Tracked = {ISSUE_REF}'],
+  },
+  {
+    label: '2/4 `Depends on: #{n}, #{n}` in dynamic-tickets.md',
+    literal: 'Depends on: #{n}, #{n}',
+    sources: [['dynamic-tickets.md', TICKETS_MD]],
+    neutralIn: [
+      ['dynamic-tickets.md', TICKETS_MD],
+      '**Depends on:** {ISSUE_REF}, {ISSUE_REF} (or "none")',
+    ],
+  },
+  {
+    label: '3/4 `42-jwt-auth.{ts}.md` in docs-framework and plan.md',
+    literal: '42-jwt-auth.2026-04-07_1430.md',
+    // Two corpora: docs-framework RECORDS the convention, plan.md WRITES to it.
+    // Pinning one and not the other lets writer and record drift apart silently.
+    sources: [['docs-framework/SKILL.md', DOCS_FRAMEWORK], ['plan.md', PLAN_MD]],
+  },
+  {
+    label: '4/4 `issue: 42` in plan.md',
+    literal: 'issue: 42',
+    sources: [['plan.md', PLAN_MD]],
+  },
+]
+
+/** Named collector: `{corpus}: {n}` for every corpus that does not carry `literal` exactly once. */
+function collectOffCountSites(sources: readonly NamedSource[], literal: string): string[] {
+  return sources
+    .map(([label, src]) => [label, collectTokenSites(src, literal).length] as const)
+    .filter(([, n]) => n !== 1)
+    .map(([label, n]) => `${label}: ${n}`)
+}
+
 describe('AC-2.10 — byte-identity of the four github renderings', () => {
   it('non-vacuity: all four deployed corpora are loaded', () => {
     for (const [name, src] of [
@@ -267,36 +323,58 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
     }
   })
 
-  it('1/4 — `Tracked = #{n}` renders unchanged in resolve.md', () => {
-    expect(
-      RESOLVE_MD,
-      'the Tracked field now carries {ISSUE_REF}; its github rendering must still be spelled out verbatim',
-    ).toContain('Tracked = {ISSUE_REF}')
-    expect(RESOLVE_MD, 'AC-2.10: the github rendering is unchanged').toContain('Tracked = #{n}')
+  it('the pin table covers all four renderings', () => {
+    expect(AC_2_10_RENDERINGS.map(r => r.label.slice(0, 3))).toEqual(['1/4', '2/4', '3/4', '4/4'])
   })
 
-  it('2/4 — `Depends on: #{n}` renders unchanged in dynamic-tickets.md', () => {
-    expect(
-      TICKETS_MD,
-      'the ticket template now carries {ISSUE_REF} with explicit cardinality',
-    ).toContain('**Depends on:** {ISSUE_REF}, {ISSUE_REF} (or "none")')
-    expect(TICKETS_MD, 'AC-2.10: the github rendering is unchanged').toContain('Depends on: #{n}, #{n}')
-  })
+  for (const rendering of AC_2_10_RENDERINGS) {
+    it(`${rendering.label} — exactly one site, byte-identical`, () => {
+      expect(
+        collectOffCountSites(rendering.sources, rendering.literal),
+        `AC-2.10 says the github rendering "${rendering.literal}" is byte-identical. ` +
+        'Corpus/count pair(s) that are not exactly 1 — 0 means the rendering changed or moved, ' +
+        '>1 means a second site now also renders it and the two can drift:\n  ' +
+        collectOffCountSites(rendering.sources, rendering.literal).join('\n  '),
+      ).toEqual([])
+    })
 
-  it('3/4 — `42-jwt-auth.{ts}.md` renders unchanged', () => {
-    expect(DOCS_FRAMEWORK, 'AC-2.10: the docs-framework example is pinned').toContain(
-      '42-jwt-auth.2026-04-07_1430.md',
-    )
-    expect(PLAN_MD, 'plan.md names the same example so writer and record agree').toContain(
-      '42-jwt-auth.2026-04-07_1430.md',
-    )
-  })
+    if (rendering.neutralIn) {
+      const [[label, src], neutral] = rendering.neutralIn
+      it(`${rendering.label} — its neutral sibling is present exactly once in ${label}`, () => {
+        // The rendering is the github EXPANSION of the neutral token. Pinning the
+        // expansion alone would stay green on a file that dropped the vocabulary
+        // change and kept the example.
+        expect(
+          collectTokenSites(src, neutral).length,
+          `"${neutral}" must be stated exactly once in ${label} — the rendering it expands to is ` +
+          'pinned above, and two statements of the neutral form are two authorities (PF-023)',
+        ).toBe(1)
+      })
+    }
+  }
 
-  it('4/4 — `issue: 42` renders unchanged in plan.md', () => {
-    expect(
-      PLAN_MD,
-      'the design-artifact frontmatter key and its example value are untouched by the vocabulary change',
-    ).toContain('issue: 42')
+  it('known-bad probe: a seeded second site is reported by the same collector', () => {
+    // Both failure directions, driven through collectOffCountSites — the SAME
+    // function the four pins above call, so a collector that stopped counting
+    // takes this probe red with the guards it backs (ADR-024).
+    for (const rendering of AC_2_10_RENDERINGS) {
+      const [, firstSrc] = rendering.sources[0]
+      const label = rendering.sources[0][0]
+
+      const duplicated = `${firstSrc}\n\nstale example: ${rendering.literal}\n`
+      expect(
+        collectOffCountSites([[label, duplicated]], rendering.literal),
+        `a seeded SECOND "${rendering.literal}" must be reported — otherwise the equality is a ` +
+        'toContain in disguise',
+      ).toEqual([`${label}: 2`])
+
+      const removed = firstSrc.replace(rendering.literal, '(rendering removed)')
+      expect(removed, 'the removal must actually change the corpus').not.toBe(firstSrc)
+      expect(
+        collectOffCountSites([[label, removed]], rendering.literal),
+        `a REMOVED "${rendering.literal}" must be reported too`,
+      ).toEqual([`${label}: 0`])
+    }
   })
 
   it('the `Closes` line keeps its github rendering', () => {
