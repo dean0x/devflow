@@ -156,10 +156,10 @@ describe('resolveSeedFlags', () => {
     expect(result['prompt-caching-1h']).toBe(true);
     expect(result['show-turn-duration']).toBe(true);
     expect(result['clear-context-on-plan']).toBe(true);
-    expect(result['disable-bundled-skills']).toBe(true);
-    expect(result['pin-sonnet-4-6']).toBe(true);
     // Default-OFF boolean flags are false
     expect(result['brief']).toBe(false);
+    expect(result['disable-bundled-skills']).toBe(false);
+    expect(result['pin-sonnet-4-6']).toBe(false);
     // Number flag with non-neutral default is present
     expect(result['max-concurrent-subagents']).toBe(40);
     // view-mode default is 'default' (neutralValue for the enum)

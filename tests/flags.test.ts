@@ -210,14 +210,14 @@ describe('getDefaultFlagsRecord', () => {
     expect(record['prompt-caching-1h']).toBe(true);
     expect(record['show-turn-duration']).toBe(true);
     expect(record['clear-context-on-plan']).toBe(true);
-    expect(record['disable-bundled-skills']).toBe(true);
-    expect(record['pin-sonnet-4-6']).toBe(true);
 
     // New recommended number flag
     expect(record['max-concurrent-subagents']).toBe(40);
 
     // Optional boolean flags (default OFF = false = neutral)
     expect(record['brief']).toBe(false);
+    expect(record['disable-bundled-skills']).toBe(false);
+    expect(record['pin-sonnet-4-6']).toBe(false);
     expect(record['thinking-summaries']).toBe(false);
     expect(record['subprocess-env-scrub']).toBe(false);
     expect(record['disable-nonessential-traffic']).toBe(false);
