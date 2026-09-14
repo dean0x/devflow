@@ -163,6 +163,14 @@
       "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed."
     },
     {
+      "id": "capability-hoist-block-floor",
+      "floor": 29,
+      "pattern": "toBeGreaterThanOrEqual(29)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/capability-hoist.test.ts",
+      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof."
+    },
+    {
       "id": "git-agent-guard-count",
       "floor": 68,
       "pattern": "toBeGreaterThanOrEqual(68)",

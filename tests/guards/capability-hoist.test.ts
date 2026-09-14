@@ -262,12 +262,29 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       'opener changed spelling; the guard would pass without reading anything (PF-018)',
     ).toBeGreaterThan(0);
 
-    // The agent alone declares 18 operations; a scan that found only a handful of
-    // blocks has lost the reference tree or the agent.
+    // BOTH corpora must contribute, asserted by provenance rather than by a total.
+    // A count alone cannot say this: git.md declares 18 operations by itself, so any
+    // floor at or below 18 is met with the generated tree entirely absent — the guard
+    // would then claim to scan both while scanning one (PF-018).
+    const fromReferences = blocks.filter(b => b.file.includes(`${path.sep}references${path.sep}`));
+    const fromAgent = blocks.filter(b => !b.file.includes(`${path.sep}references${path.sep}`));
+    expect(
+      fromAgent.length,
+      'no process block came from dist/agents/git.md — the agent half of the corpus is missing',
+    ).toBeGreaterThan(0);
+    expect(
+      fromReferences.length,
+      'no process block came from dist/skills/git/references/ — the generated tree is absent or ' +
+      'unreadable, and the guard is scanning only the agent. Run `npm run build`.',
+    ).toBeGreaterThan(0);
+
+    // 29 = 18 from git.md + 11 from the generated tree, measured on this branch.
+    // Registered as `capability-hoist-block-floor`; the literal is spelled here so a
+    // decrement is visible at the assertion, not only in the manifest.
     expect(
       blocks.length,
       'too few process blocks to be scanning both git.md and the generated references',
-    ).toBeGreaterThanOrEqual(18);
+    ).toBeGreaterThanOrEqual(29);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);
