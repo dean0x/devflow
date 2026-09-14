@@ -1075,19 +1075,24 @@ describe('git agent — static content guards (PF-018)', () => {
     ).not.toBeNull();
   });
 
+  // Shared seed path for the two probes below — both simulate an offender or
+  // exception naming this exact file (the collectors only check
+  // `endsWith('github-api.md')`, but the real path keeps the seed honest).
+  const GITHUB_API_MD_PATH = 'src/assets/skills/git/references/github-api.md';
+
   it('D11: known-bad probe — an undeclared offender is reported by the same forward collector', () => {
     // The live forward arm runs over a corpus that holds no inline body, so its
     // empty result proves the corpus and not the predicate. Seed one offender and
     // drive the SAME collector: a filter that stopped reporting extras takes this
     // probe red alongside the guard it backs.
     const seeded: InlineBodyOffender[] = [
-      { file: 'src/assets/skills/git/references/github-api.md', match: 'gh pr create --title "x" --body ' },
+      { file: GITHUB_API_MD_PATH, match: 'gh pr create --title "x" --body ' },
     ];
     expect(
       collectUndeclaredOffenders(seeded, KNOWN_GITHUB_API_INLINE_BODIES),
       'an inline body with no declared exception must be reported — otherwise the forward arm ' +
       'is green because it filtered everything away, not because the corpus is clean',
-    ).toEqual(['src/assets/skills/git/references/github-api.md: gh pr create --title "x" --body ']);
+    ).toEqual([`${GITHUB_API_MD_PATH}: gh pr create --title "x" --body `]);
     // …and a declared one is excused, so the exception mechanism itself still works.
     expect(collectUndeclaredOffenders(seeded, [seeded[0].match])).toEqual([]);
   });
@@ -1097,7 +1102,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // it is vacuous on the live inputs (PF-018). Seed the list instead and drive the
     // SAME collector, so the ratchet that forces a stale entry out is proven live.
     const offenders: InlineBodyOffender[] = [
-      { file: 'src/assets/skills/git/references/github-api.md', match: '-f body=' },
+      { file: GITHUB_API_MD_PATH, match: '-f body=' },
     ];
     expect(
       collectStaleExclusions(offenders, ['-f body=', 'gh pr create --title "gone" --body ']),
