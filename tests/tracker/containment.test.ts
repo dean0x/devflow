@@ -507,6 +507,115 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'of the fan-out after emitting the DEGRADED line, which is what D4 requires and what ' +
       'the caller reports as THROTTLED ({n} not processed).',
   },
+
+  // ── skills/git/references/github-api.md — the D11 inline-body recipes (#340) ─
+  //
+  // Eleven lines across nine recipes, each REWRITTEN in place into the
+  // scrub-then-post chain D11 mandates: compose to `$DEVFLOW_BODY_RAW`, run
+  // redact-secrets.cjs, and post the scrubbed `$DEVFLOW_BODY` through
+  // `--body-file` / `-F body=@`, chained with `&&` so a non-zero scrubber exit
+  // means DO NOT POST. Nothing relocated — a recipe that posts a body inline is
+  // loadable instruction text showing an agent how to bypass the comment-sink
+  // scrub (PF-027), and the file already carried the corrected form one section
+  // away in create_release(), so it contradicted itself.
+  {
+    file: 'github-api.md',
+    startLine: 88,
+    endLine: 88,
+    rationale:
+      '#340. The inline-comment `gh api` call, RE-INDENTED by two spaces as the second arm ' +
+      'of the `&&` chain the scrub now leads — same shape, and the same reason, as the ' +
+      'create_release publish call exempted at :248.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 91,
+    endLine: 91,
+    rationale:
+      '#340. `-f body="$COMMENT_BODY"` posted an unscrubbed inline body to a PR review ' +
+      'comment — a D11 sink. Rewritten to `-F body=@"$DEVFLOW_BODY"`, the file-ref form ' +
+      'git.md prescribes, preceded by the scrubber invocation that produces that file.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 313,
+    endLine: 313,
+    rationale:
+      '#340. The HEREDOC PR-body recipe built `--body "$(cat <<EOF …)"`. The heredoc now ' +
+      'writes `$DEVFLOW_BODY_RAW` and the scrub chains into ' +
+      '`gh pr create … --body-file "$DEVFLOW_BODY"`. A PR body publishes at repo ' +
+      'visibility, so it is a D11 sink like any comment (git.md step 4a).',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 328,
+    endLine: 328,
+    rationale:
+      '#340. The draft-PR recipe posted its body inline. Rewritten to compose, scrub and ' +
+      'post `--body-file "$DEVFLOW_BODY"`; draft status does not exempt a body from the ' +
+      'scrub, because a draft PR is as visible as any other.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 334,
+    endLine: 334,
+    rationale:
+      '#340. `gh pr review --approve --body "…"` is a posting sink with no scrub. Rewritten ' +
+      'to the composed-scrubbed-`--body-file` chain; the review verdict flag is unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 336,
+    endLine: 336,
+    rationale:
+      '#340. Same rewrite as :334 for the `--request-changes` review, whose heredoc body ' +
+      'now lands in `$DEVFLOW_BODY_RAW` before the scrub rather than in an inline `$(cat)`.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 504,
+    endLine: 504,
+    rationale:
+      '#340. An "assumes success" VIOLATION example that also modelled an inline `--body`. ' +
+      'The violation it teaches is unchanged — the exit status is still ignored — but the ' +
+      'body now comes from `--body-file "$DEVFLOW_BODY"`, so the sample stops teaching a ' +
+      'second defect it never meant to.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 541,
+    endLine: 541,
+    rationale:
+      '#340. The "missing commit_id" VIOLATION example carried `-f body="Comment"`. Now ' +
+      '`-F body=@"$DEVFLOW_BODY"`: the missing `commit_id` is still the defect on display, ' +
+      'and the body no longer demonstrates a D11 bypass alongside it.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 545,
+    endLine: 545,
+    rationale:
+      '#340. Same rewrite as :541 inside the "no rate limiting between comments" VIOLATION ' +
+      'loop; the absent throttle is still what the sample illustrates.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 552,
+    endLine: 552,
+    rationale:
+      '#340. The "non-draft for WIP" VIOLATION example. `--body "Not ready yet"` became ' +
+      '`--body-file "$DEVFLOW_BODY"`; the missing `--draft` flag is still the violation.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 638,
+    endLine: 638,
+    rationale:
+      '#340. The review-thread reply mutation passed `-f body="$REPLY_BODY"` inline. ' +
+      'Rewritten to `-F body=@"$DEVFLOW_BODY"` after the scrub, which is exactly the ' +
+      'file-ref form git.md\'s resolve-review-threads step 2 already mandates — the recipe ' +
+      'and the operation that uses it now agree.',
+  },
 ];
 
 /** Exemptions grouped by baseline file, as a set of 1-based line numbers. */

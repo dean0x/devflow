@@ -40,28 +40,46 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
 const INLINE_BODY_RE = /gh (?:pr|issue|release) [a-z-]+[^`\n]*--(?:body|notes)[ "]|-f body=/g;
 
 /**
- * Pre-existing inline-body recipes in the hand-authored `references/github-api.md`,
- * frozen verbatim. See D-INLINE-BODY-EXCLUSIONS at the guard's call site: these are
- * generic `gh` examples that predate D11 and sit outside every Phase-2 cut table.
- * The list may shrink, never grow.
+ * Declared inline-body exceptions in the hand-authored `references/github-api.md`,
+ * each frozen by the exact text `INLINE_BODY_RE` matches. See
+ * D-INLINE-BODY-EXCLUSIONS at the guard's call site.
+ *
+ * The list is EMPTY: every recipe in that file composes its body to
+ * `$DEVFLOW_BODY_RAW`, scrubs it, and posts the scrubbed `$DEVFLOW_BODY` through
+ * `--body-file` / `-F body=@`. It stays here because it is the only way to declare
+ * an exception, and because both arms below are asserted over it — an offender no
+ * entry names is red, and an entry that matches nothing is red. A new exception
+ * therefore has to be written down, with the text it excuses, to exist at all.
  */
-const KNOWN_GITHUB_API_INLINE_BODIES: readonly string[] = [
-  '-f body=',
-  // The two `gh issue comment … --body "…"` tech-debt sites are GONE: P2-S8 moved that
-  // block into the manage-debt reference and rewrote both posts to --body-file. They
-  // were removed from this list by the "no longer match anything" arm going red, which
-  // is the ratchet working.
-  'gh pr create --title "Add user authentication" --body ',
-  'gh pr create --draft --title "WIP: Feature X" --body ',
-  'gh pr review $PR_NUMBER --approve --body ',
-  'gh pr review $PR_NUMBER --request-changes --body ',
-  'gh pr create --title "..." --body ',
-  'gh pr create --title "WIP: Feature" --body ',
-];
+const KNOWN_GITHUB_API_INLINE_BODIES: readonly string[] = [];
 
 interface InlineBodyOffender {
   readonly file: string;
   readonly match: string;
+}
+
+/**
+ * Named collector (forward arm): offenders that no entry in `known` accounts for.
+ *
+ * Parameterised on both inputs so the known-bad probe drives the SAME predicate
+ * the live assertion does (PF-018).
+ */
+function collectUndeclaredOffenders(
+  offenders: readonly InlineBodyOffender[],
+  known: readonly string[],
+): string[] {
+  return offenders
+    .filter(o => !(o.file.endsWith('github-api.md') && known.includes(o.match)))
+    .map(o => `${o.file}: ${o.match}`);
+}
+
+/** Named collector (reverse arm): entries of `known` that no offender matches. */
+function collectStaleExclusions(
+  offenders: readonly InlineBodyOffender[],
+  known: readonly string[],
+): string[] {
+  const seen = new Set(offenders.map(o => o.match));
+  return known.filter(entry => !seen.has(entry));
 }
 
 /**
@@ -1026,28 +1044,23 @@ describe('git agent — static content guards (PF-018)', () => {
       'inline-body scan corpus is empty — the guard would pass by scanning nothing',
     ).toBeGreaterThan(1);
 
-    // D-INLINE-BODY-EXCLUSIONS — the widened scope surfaced twelve pre-existing inline
-    // recipes in references/github-api.md: generic `gh pr`/`gh issue`/`gh api` examples
-    // that predate D11 and are not in any Phase-2 cut table. They are FROZEN here by
-    // exact text rather than silently excluded by narrowing the scope back: a
-    // thirteenth goes red, and the list can only be shortened. A named exception is
-    // not a weakened guard (§14.6's release.md precedent); narrowing the scope would
-    // have been.
-    const unexpected = offenders.filter(
-      o => !(o.file.endsWith('github-api.md') && KNOWN_GITHUB_API_INLINE_BODIES.includes(o.match)),
-    );
+    // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md is
+    // allowed only when KNOWN_GITHUB_API_INLINE_BODIES names it by the exact text
+    // INLINE_BODY_RE matched. The list is empty, so the corpus must hold no inline
+    // body at all. Declaring an exception rather than narrowing the scope back is
+    // what keeps a named exception from being a weakened guard (§14.6's release.md
+    // precedent); narrowing the scope would have been.
     expect(
-      unexpected.map(o => `${o.file}: ${o.match}`),
+      collectUndeclaredOffenders(offenders, KNOWN_GITHUB_API_INLINE_BODIES),
       'D11 bypass: inline body form(s) found — route the body through the scrubber and ' +
       'post with --body-file / -F body=@ / --notes-file',
     ).toEqual([]);
 
-    // The frozen list must stay live: an entry that matches nothing is a stale
-    // exclusion silencing a line that no longer exists.
-    const seen = new Set(offenders.map(o => o.match));
+    // The list must stay live: an entry that matches nothing is a stale exclusion
+    // silencing a line that no longer exists.
     expect(
-      KNOWN_GITHUB_API_INLINE_BODIES.filter(known => !seen.has(known)),
-      'frozen github-api.md exclusion(s) no longer match anything — delete them from the list',
+      collectStaleExclusions(offenders, KNOWN_GITHUB_API_INLINE_BODIES),
+      'declared github-api.md exclusion(s) no longer match anything — delete them from the list',
     ).toEqual([]);
 
     // Non-vacuous: the pattern must match BOTH shapes it is guarding against — the
@@ -1060,6 +1073,37 @@ describe('git agent — static content guards (PF-018)', () => {
       'gh release create v1 --notes "unscrubbed"'.match(INLINE_BODY_RE),
       'bypass guard regex no longer matches an inline release-notes body — the new arm is inert',
     ).not.toBeNull();
+  });
+
+  it('D11: known-bad probe — an undeclared offender is reported by the same forward collector', () => {
+    // The live forward arm runs over a corpus that holds no inline body, so its
+    // empty result proves the corpus and not the predicate. Seed one offender and
+    // drive the SAME collector: a filter that stopped reporting extras takes this
+    // probe red alongside the guard it backs.
+    const seeded: InlineBodyOffender[] = [
+      { file: 'src/assets/skills/git/references/github-api.md', match: 'gh pr create --title "x" --body ' },
+    ];
+    expect(
+      collectUndeclaredOffenders(seeded, KNOWN_GITHUB_API_INLINE_BODIES),
+      'an inline body with no declared exception must be reported — otherwise the forward arm ' +
+      'is green because it filtered everything away, not because the corpus is clean',
+    ).toEqual(['src/assets/skills/git/references/github-api.md: gh pr create --title "x" --body ']);
+    // …and a declared one is excused, so the exception mechanism itself still works.
+    expect(collectUndeclaredOffenders(seeded, [seeded[0].match])).toEqual([]);
+  });
+
+  it('D11: known-bad probe — a declared exception that matches nothing is reported by the same reverse collector', () => {
+    // The reverse arm ranges over KNOWN_GITHUB_API_INLINE_BODIES, which is empty, so
+    // it is vacuous on the live inputs (PF-018). Seed the list instead and drive the
+    // SAME collector, so the ratchet that forces a stale entry out is proven live.
+    const offenders: InlineBodyOffender[] = [
+      { file: 'src/assets/skills/git/references/github-api.md', match: '-f body=' },
+    ];
+    expect(
+      collectStaleExclusions(offenders, ['-f body=', 'gh pr create --title "gone" --body ']),
+      'an exception matching no offender must be reported — otherwise the list can be left ' +
+      'half-drained and keeps silencing text that no longer exists',
+    ).toEqual(['gh pr create --title "gone" --body ']);
   });
 
   it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {

@@ -2,6 +2,13 @@
 
 Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 
+> **D11 is the authority on every body these recipes post: compose it to
+> `$DEVFLOW_BODY_RAW`, scrub it with `redact-secrets.cjs`, and post the SCRUBBED
+> `$DEVFLOW_BODY` through `--body-file` / `-F body=@` / `--notes-file`.**
+> Create both temp files with `mktemp` per invocation, and chain the post to the
+> scrub with `&&`: a non-zero scrubber exit means DO NOT POST. An inline
+> `--body "…"` cannot be scrubbed at all.
+
 ---
 
 ## Rate Limit Handling
@@ -104,10 +111,13 @@ OWNER=$(echo $REPO_INFO | cut -d'/' -f1)
 REPO=$(echo $REPO_INFO | cut -d'/' -f2)
 HEAD_SHA=$(gh pr view $PR_NUMBER --json headRefOid -q '.headRefOid')
 
-gh api \
+printf '%s\n' "$COMMENT_BODY" > "$DEVFLOW_BODY_RAW"
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh api \
     -X POST \
     "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments" \
-    -f body="$COMMENT_BODY" \
+    -F body=@"$DEVFLOW_BODY" \
     -f commit_id="$HEAD_SHA" \
     -f path="$FILE_PATH" \
     -F line=$LINE_NUMBER \
@@ -241,7 +251,7 @@ generate_release_notes() {
 ### PR with HEREDOC Body
 
 ```bash
-gh pr create --title "Add user authentication" --body "$(cat <<'EOF'
+cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Summary
 - Implement JWT-based authentication
 - Add login/logout endpoints
@@ -250,26 +260,38 @@ gh pr create --title "Add user authentication" --body "$(cat <<'EOF'
 - [ ] Test login with valid credentials
 - [ ] Test token expiration
 EOF
-)"
+
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr create --title "Add user authentication" --body-file "$DEVFLOW_BODY"
 ```
 
 ### Draft PR for WIP
 
 ```bash
-gh pr create --draft --title "WIP: Feature X" --body "Work in progress, not ready for review"
+printf '%s\n' "Work in progress, not ready for review" > "$DEVFLOW_BODY_RAW"
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr create --draft --title "WIP: Feature X" --body-file "$DEVFLOW_BODY"
 ```
 
 ### PR Review
 
 ```bash
-gh pr review $PR_NUMBER --approve --body "LGTM! Tested locally and all checks pass."
+printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW"
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr review $PR_NUMBER --approve --body-file "$DEVFLOW_BODY"
 
-gh pr review $PR_NUMBER --request-changes --body "$(cat <<'EOF'
+cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Requested Changes
 1. **Security**: Input validation missing in `handleLogin`
 2. **Performance**: N+1 query in user list endpoint
 EOF
-)"
+
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr review $PR_NUMBER --request-changes --body-file "$DEVFLOW_BODY"
 ```
 
 ---
@@ -433,7 +455,7 @@ if [ $? -ne 0 ]; then exit 1; fi
 
 ```bash
 # VIOLATION: Assumes success
-PR_NUMBER=$(gh pr create --title "..." --body "..." --json number -q '.number')
+PR_NUMBER=$(gh pr create --title "..." --body-file "$DEVFLOW_BODY" --json number -q '.number')
 gh pr merge $PR_NUMBER
 
 # VIOLATION: Silent failure
@@ -470,18 +492,18 @@ gh api repos/{owner}/{repo}/issues --jq '.[].number'
 gh api -X POST "repos/.../pulls/${PR}/comments" -f path="unchanged_file.ts" -F line=50
 
 # VIOLATION: Missing commit_id
-gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Comment" -f path="file.ts"
+gh api -X POST "repos/.../pulls/${PR}/comments" -F body=@"$DEVFLOW_BODY" -f path="file.ts"
 
 # VIOLATION: No rate limiting between comments
 for file in "${FILES[@]}"; do
-    gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Issue" -f path="$file"
+    gh api -X POST "repos/.../pulls/${PR}/comments" -F body=@"$DEVFLOW_BODY" -f path="$file"
 done
 
 # VIOLATION: Non-semver version
 gh release create "version-1.2" --title "Release"
 
 # VIOLATION: Non-draft for WIP
-gh pr create --title "WIP: Feature" --body "Not ready yet"
+gh pr create --title "WIP: Feature" --body-file "$DEVFLOW_BODY"
 ```
 
 ---
@@ -555,7 +577,10 @@ fetch_review_threads() {
 ### Reply to a Review Thread
 
 ```bash
-gh api graphql -f query='
+printf '%s\n' "$REPLY_BODY" > "$DEVFLOW_BODY_RAW"
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh api graphql -f query='
   mutation($threadId: ID!, $body: String!) {
     addPullRequestReviewThreadReply(input: {
       pullRequestReviewThreadId: $threadId
@@ -567,7 +592,7 @@ gh api graphql -f query='
       }
     }
   }
-' -f threadId="$THREAD_ID" -f body="$REPLY_BODY"
+' -f threadId="$THREAD_ID" -F body=@"$DEVFLOW_BODY"
 ```
 
 ### Resolve a Review Thread
