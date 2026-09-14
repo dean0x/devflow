@@ -50,6 +50,7 @@ import {
   cleanupCommittedTree,
   collectSpawnScoping,
   requireDistFiles,
+  gitAgentSinkCorpus,
 } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -905,8 +906,37 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('run-unique scratch file');
   });
 
-  it('C9: no unauthorized GitHub side-effects doctrine', () => {
-    expect(compiled).toContain('No unauthorized GitHub side-effects');
+  it('C9: no unauthorized side-effects doctrine — stated provider-neutrally (P2-S12, GAP-41)', () => {
+    // Invariant #6 is a SAFETY rule, not prose. Bound to one vendor it stops
+    // applying the moment a second tracker exists — a real regression, which is
+    // why the disposition here is guard-with-test rather than documentation.
+    expect(
+      compiled,
+      'the invariant must forbid side-effects on whatever tracker is resolved',
+    ).toContain('No unauthorized tracker or remote side-effects');
+    expect(compiled).toContain('issues/PRs on the tracker');
+    expect(
+      compiled,
+      'the rule must say it is not vendor-scoped, or a later reader re-narrows it',
+    ).toContain('This applies to whatever tracker is resolved, not to one vendor');
+    // Non-vacuous against the exact pre-neutralisation literal.
+    expect(
+      compiled,
+      'the GitHub-bound wording must be gone, not merely accompanied by the neutral one',
+    ).not.toContain('No unauthorized GitHub side-effects');
+    // The rule's FORCE must survive the rewording — a neutral sentence that
+    // dropped "NEVER" would pass a wording check and forbid nothing.
+    expect(compiled).toContain('Sub-agents NEVER create issues/PRs on the tracker');
+    expect(compiled).toContain('beyond the ticket-authorized branch');
+  });
+
+  it('C9b: the sandbox note does not read as gh-only (P2-S12)', () => {
+    // `gh` stays named — it is the concrete CLI an author would reach for, and
+    // naming it is what makes the denial legible. What changed is the scope:
+    // the denial is over any tracker CLI, not over one binary.
+    expect(compiled).toContain('NO filesystem / Node.js / CLI access');
+    expect(compiled).toContain('no tracker CLI of any kind, `gh` included');
+    expect(compiled).not.toContain('NO filesystem / Node.js / `gh` CLI access');
   });
 
   it('C10: post-wave-report Git spawn survived the dynamic-wave removal', () => {
@@ -921,8 +951,12 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('skip this step entirely in SINGLE mode');
     // DEGRADED-visibility literal when no tracking issue was resolved
     expect(compiled).toContain('TRACEABILITY: DEGRADED (no tracking issue for this run)');
-    // Dedup marker — verified present in the current compiled artifact
-    expect(compiled).toContain('<!-- devflow:wave-report wave:');
+    // The dedup marker literal is NOT pinned here any more. GAP-20: the operation
+    // owns the marker format; a caller that restates it has already diverged once
+    // and produced duplicate comments. The caller now says only that the Git agent
+    // deduplicates via its own marker, and the marker literal is pinned where it
+    // lives — see the `<!-- devflow:` negative guard in §23 below.
+    expect(compiled).toContain('deduplicates via its own marker');
   });
 
   it('meta.phases matches every phase("…") call site', () => {
@@ -1779,5 +1813,102 @@ describe('this file never spawns a build against the real repo root', () => {
     expect(collectSpawnScoping(scopedSite)).toEqual({ total: 1, unscoped: [] });
     expect(collectSpawnScoping(`${unscopedSite}\n${scopedSite}`).unscoped).toHaveLength(1);
     expect(collectSpawnScoping('no spawns here').total).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §23  Dedup-marker ownership — no `<!-- devflow:` literal in any dist command
+//      (P2-S12, GAP-20)
+//
+// The OPERATION owns its marker format; callers pass inputs only (§14.3,
+// `marker_format`). A command that restates the literal is a second authority on
+// a string whose two copies must match exactly for dedup to work — and they
+// already diverged once, producing duplicate comments.
+//
+// Deployed-behaviour guard -> DIST_FILES scope (§14.5), non-vacuity
+// distFilesScanned === 14. The marker literals themselves are asserted to still
+// exist in the Git agent's sink corpus, so this reads as a RELOCATION and not as
+// a deletion: if both halves went missing, the first assertion would pass
+// vacuously and nothing would dedup at all.
+// ---------------------------------------------------------------------------
+
+describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (P2-S12, GAP-20)', () => {
+  /** Named collector — shared by the live guard and the seeded probe. */
+  function collectMarkerLiterals(filename: string, content: string): string[] {
+    const out: string[] = [];
+    const re = /<!-- devflow:/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      out.push(`${filename}: restates a dedup marker at char ${m.index}`);
+    }
+    return out;
+  }
+
+  it('no dist command restates a `<!-- devflow:` marker literal', async () => {
+    const distFiles = (await fs.readdir(BUILT_COMMANDS)).filter(f => f.endsWith('.md'));
+    expect(
+      distFiles.length,
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
+    ).toBe(14);
+
+    const violations: string[] = [];
+    let distFilesScanned = 0;
+    for (const filename of DIST_FILES) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, filename), 'utf-8');
+      distFilesScanned++;
+      violations.push(...collectMarkerLiterals(filename, content));
+    }
+
+    expect(
+      violations,
+      `dedup-marker literals restated in commands (GAP-20 — the operation owns the marker):\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+    expect(
+      distFilesScanned,
+      `marker guard is vacuous: expected 14 files scanned, got ${distFilesScanned}`,
+    ).toBe(14);
+  });
+
+  it('known-bad probe: the same collector flags a seeded restatement in a temp copy', async () => {
+    // Mechanic 2 (H10): a temp copy of a real dist command with the retired
+    // sentence put back — never the committed tree.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-marker-probe-'));
+    try {
+      const real = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+      const seededPath = path.join(tmp, 'dynamic-build.md');
+      await fs.writeFile(
+        seededPath,
+        real + '\n   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:{WAVE_ID} -->`.\n',
+        'utf-8',
+      );
+      const seeded = await fs.readFile(seededPath, 'utf-8');
+      expect(
+        collectMarkerLiterals('dynamic-build.md', seeded),
+        'the collector must fire on a seeded restatement',
+      ).toHaveLength(1);
+      // …and must clear the unseeded original, or it is flagging something else.
+      expect(collectMarkerLiterals('dynamic-build.md', real)).toHaveLength(0);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('the marker literals still live in the Git agent sink — relocated, not deleted', () => {
+    // Guard 5's markers, read through the shared resolver + the generated
+    // references the mechanics moved into (GAP-21: guard classes move with the
+    // text). Without this arm, deleting dedup everywhere would turn the guard
+    // above green.
+    const joined = gitAgentSinkCorpus().map(e => e.content).join('\n');
+    expect(joined.length, 'the sink corpus must be non-empty').toBeGreaterThan(10000);
+    for (const marker of [
+      '<!-- devflow:review-summary',
+      '<!-- devflow:resolution-summary',
+      '<!-- devflow:wave-report',
+    ]) {
+      expect(
+        joined,
+        `${marker} must still be owned by the Git agent — the caller stopped restating it, the operation did not stop emitting it`,
+      ).toContain(marker);
+    }
   });
 });

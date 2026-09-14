@@ -22,9 +22,9 @@
       "id": "dist-files-count",
       "floor": 14,
       "pattern": "toBe(14)",
-      "occurrences": 3,
+      "occurrences": 5,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "DIST_FILES count = COMMAND_HOSTS (13) + release.md (1); DIST_FILES vs COMMAND_HOSTS divergence is permanent (SG-13)"
+      "description": "DIST_FILES count = COMMAND_HOSTS (13) + release.md (1); DIST_FILES vs COMMAND_HOSTS divergence is permanent (SG-13). Site count raised 3 -> 5 in P2-S12: the `<!-- devflow:` marker negative guard asserts both the built file count and its own distFilesScanned counter. The floor value is unchanged; only the number of places spelling it grew."
     },
     {
       "id": "slow-test-timeout-ms",

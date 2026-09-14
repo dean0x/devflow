@@ -28,7 +28,7 @@ workflow(fn)             // nest one level
 
 Globals available in the script body: `args`, `budget`, `workflow()`.
 
-**The script body has NO filesystem / Node.js / `gh` CLI access.** All file reading, issue fetching, git operations, and shell commands happen INSIDE the agents the script spawns — never in the script body itself. There is no `fs`, no `exec`, no `fetch` in scope.
+**The script body has NO filesystem / Node.js / CLI access** — no tracker CLI of any kind, `gh` included. All file reading, issue fetching, git operations, and shell commands happen INSIDE the agents the script spawns — never in the script body itself. There is no `fs`, no `exec`, no `fetch` in scope.
 
 ### Agent reuse via agentType
 

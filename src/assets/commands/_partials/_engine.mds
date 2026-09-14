@@ -229,7 +229,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
 3. **All written code passes Gate 1.** No code merge, commit, or handoff before Validate agent + Simplify agent + Scrutinize agent (in that order).
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
 5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
-6. **No unauthorized GitHub side-effects.** Sub-agents NEVER create GitHub issues/PRs, comment, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. Proposed follow-ups go in the run report.
+6. **No unauthorized tracker or remote side-effects.** Sub-agents NEVER create issues/PRs on the tracker, comment on them, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. This applies to whatever tracker is resolved, not to one vendor. Proposed follow-ups go in the run report.
 7. **The review pass runs exactly ONCE per ticket.** Never author additional cycles or a delta re-review of fix commits. Fix commits are covered by the fixing Code agent's self-verification and the final Gate 1 #2. Budget scales roster size and verification votes, never pass count.
 @end
 
