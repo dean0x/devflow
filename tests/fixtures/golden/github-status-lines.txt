@@ -1,9 +1,9 @@
 **Degradation contract (D4):** Any operation that requires remote access (GitHub API, push, PR) MUST degrade gracefully:
-- No remote / `gh` unauthenticated / no PR → emit `TRACEABILITY: DEGRADED ({reason})`, warn in output, and continue — never abort the caller's workflow.
-- Secondary rate limit (403 or 429 response with a rate-limit body, or `X-RateLimit-Remaining` header < 10) → STOP the current fan-out operation immediately; report remaining items as `THROTTLED ({n} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue issuing requests into an active rate limit — doing so extends GitHub's penalty window.
+- No remote / the tracker unauthenticated or unreachable / no PR → emit `TRACEABILITY: DEGRADED ({reason})`, warn in output, and continue — never abort the caller's workflow.
+- A provider-signalled secondary rate limit (the signal itself is named in the resolved provider's reference) → STOP the current fan-out operation immediately; report remaining items as `THROTTLED ({n} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue issuing requests into an active rate limit — doing so extends the provider's penalty window.
 - Other 4xx on a traceability op (deleted issue, closed PR, permissions error) → DEGRADED for that item, continue.
 - 5xx → 1 retry; if still 5xx → DEGRADED for that item, continue.
-- **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read `X-RateLimit-Remaining` from the last API response header. If remaining < 50, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
+- **Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`): Before each iteration, read the provider's remaining-budget signal from the last API response. When the provider's backpressure rung is reached, raise the inter-operation delay from 1s to 3s for the remainder of the batch.
 
 2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: OFF (publication disabled by config)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
 - Non-zero scrubber exit OR script missing → **DO NOT POST**; emit `TRACEABILITY: DEGRADED (redaction unavailable)` for that item and continue per D4.
@@ -129,6 +129,9 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 5. Remove items that have been fixed (verify in codebase)
 6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit {number} --body-file "$DEVFLOW_BODY"`
 7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
+**Process:**
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
 
 **Degradation (D4):** `gh` unauthenticated or absent, or GitHub API error → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without updating the backlog. Caller records the failure; `Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.
 
@@ -154,10 +157,12 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 **Degradation (D4):** `gh` unauthenticated or remote unreachable → collect git-only signals (commit list from local history); emit `TRACEABILITY: DEGRADED ({reason})` for any GitHub signal that could not be fetched; continue — never abort the caller's workflow.
 
 **Process:**
+
+**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+
 1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
 2. Collect commit list: `git log {last_tag}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and {n} more commits` note to signal truncation.
 3. Extract issue numbers from commit messages in `COMMIT_LIST`: parse for `#[0-9]+` references from `refs #`, `closes #`, `fixes #` patterns (case-insensitive).
-4. If `gh` is authenticated and remote is reachable: for each commit in the range, fetch merged PRs that include that commit and collect their `closingIssuesReferences` via `gh api`; merge with the commit-message set. On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
 5. Deduplicate all collected issue numbers; retain only digit-only entries; take the first ≤50; if more exist, append a `…and {n} more issues` note.
 
 **Output:**
@@ -169,7 +174,6 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
    {detected branching model description}
    ```
 5. Post-composition verification: after composing the file content in step 4 and before writing it to disk, scan the composed content against the raw strings collected in step 2 (branch names, tag names, PR titles). Assert that no output line reproduces any scanned string verbatim (shape-derived patterns only). If a match is found, replace that line with the step-3 generic default for that section and note the substitution in the op's output under `### Substitutions`. If no matches are found, write the file.
-
 **Degradation (D4):** If `gh` unauthenticated or remote unreachable: emit `TRACEABILITY: DEGRADED ({reason})`, fall back to git-only signals (branches, tags), note which sections used defaults, and continue — never abort the caller's workflow. Any 4xx on the `gh pr list` scan → skip the PR-title signal and use the default. 5xx → 1 retry; if still 5xx → use the default.
 
 **Output:**
@@ -227,7 +231,6 @@ unexplained unresolved threads.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
    - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`
-2. Resolve and read `WAVE_REPORT_PATH`: if absolute, use as-is; if repo-relative, resolve against WORKTREE_PATH when supplied, else against cwd. Read the resulting file (the wave-report.md written by the wave orchestrator).
 3. Compose the comment body:
    ```markdown
      <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
@@ -236,11 +239,11 @@ unexplained unresolved threads.
    | Related Issues (ISSUE_NUMBER provided) | `## Related Issues` · `Closes #{n}` |
    When `ISSUE_NUMBER` is provided, always include `## Related Issues` / `Closes #{n}` in the PR body — whether composing from guidance or generating from context.
    **D11 scrub (PR body is a GitHub-visible sink):** Compose the final PR body to `$DEVFLOW_BODY_RAW` (`DEVFLOW_BODY_RAW="$(mktemp)"`); scrub via `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (where `DEVFLOW_BODY="$(mktemp)"`). On success: create PR with `gh pr create … --body-file "$DEVFLOW_BODY"`. **On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable — but with a minimal body containing only the task reference, plan path (if available), and issue link (if ISSUE_NUMBER provided), plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`. Never post `$DEVFLOW_BODY_RAW`.
-   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+   The Git agent deduplicates via its own marker — it skips if a report for this `WAVE_ID` is already posted. The marker's format belongs to the operation; this caller passes `WAVE_ID` and never restates the literal. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED (\{reason\})` if manage-debt degrades).
 - **DEGRADED**: if Git agent returns `TRACEABILITY: DEGRADED (\{reason\})`, warn and record in resolution-summary.md; `Tracked` stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` for each affected item.
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=# (or TRACEABILITY: DEGRADED on failure)
+├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED (\{reason\})`); Tracked stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` — recorded, not dropped |
 | Issue | File:Line | Reason | Tracked |
