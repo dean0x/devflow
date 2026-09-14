@@ -359,7 +359,7 @@ export function generatedReferenceManifest(): readonly string[] {
  * then report three independent outcomes, and a reader of `overlayFailures` could not
  * tell a broken build from a single unlucky file.
  */
-interface OverlayUnit {
+export interface OverlayUnit {
   /** Reported on {@link OverlayFailure.provider}. */
   id: string;
   /** POSIX sub-path under the references root, or `''` for the flat set. */
@@ -488,13 +488,21 @@ async function buildUnitStagingTree(
 /**
  * Promote a fully built staging tree into place.
  *
- * A provider directory is swapped whole — remove the old target, rename the staging tree
- * over it — so the installed directory is either entirely the previous install or
- * entirely the new one (DR-05, risk P2-g). The flat set is promoted one `rename` per
- * document because its directory is shared with hand-authored references
- * (D-OVERLAY-FLAT-UNIT).
+ * A provider directory is swapped whole — displace the installed unit to a `.old`
+ * sibling, rename the staging tree into its place, then drop the backup — so the
+ * installed directory is either entirely the previous install or entirely the new one
+ * (DR-05, risk P2-g), and a rename that fails half-way restores the previous one rather
+ * than leaving the provider empty. The flat set is promoted one `rename` per document
+ * because its directory is shared with hand-authored references (D-OVERLAY-FLAT-UNIT).
+ *
+ * Exported for the sake of ONE property that cannot be driven through
+ * {@link overlayGeneratedReferences}: a promotion that fails AFTER the installed unit has
+ * been displaced. The overlay builds and promotes in the same breath, so there is no seam
+ * at which a real filesystem failure can be injected between the two — and the behaviour
+ * that failure selects (previous unit restored, not deleted) is exactly the one worth
+ * pinning.
  */
-async function promoteUnitStagingTree(
+export async function promoteUnitStagingTree(
   unit: OverlayUnit,
   referencesTarget: string,
   stagingDir: string,
@@ -511,8 +519,38 @@ async function promoteUnitStagingTree(
 
     const target = underRoot(referencesTarget, unit.subdir);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.rm(target, { recursive: true, force: true });
-    await fs.rename(stagingDir, target);
+
+    // Move the installed unit ASIDE, never delete it, before the staging tree takes
+    // its place. `rm(target)` then `rename(staging, target)` destroys the only copy
+    // first: a rename that then fails leaves the provider with NO mechanics at all,
+    // while the report — and the summary line init.ts renders from it — still claims
+    // the previously installed files were left unchanged. The backup is what makes
+    // that claim true, so a failed promotion is recoverable rather than a silent
+    // deletion (avoids PF-009: a reported failure must describe the state it left).
+    //
+    // The `.old` sibling is pre-cleaned like the `.tmp` one, and a crash that strands
+    // either is converged away by the tracker-subtree prune below (both names end in
+    // neither `/` nor `.md`, so no manifest entry can collide with them).
+    const backup = `${target}.old`;
+    await fs.rm(backup, { recursive: true, force: true });
+
+    let displaced = false;
+    try {
+      await fs.rename(target, backup);
+      displaced = true;
+    } catch (err) {
+      // Nothing installed yet — a first install has no unit to displace.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+
+    try {
+      await fs.rename(stagingDir, target);
+    } catch (err) {
+      if (displaced) await fs.rename(backup, target).catch(() => undefined);
+      throw err;
+    }
+
+    await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
     return { ok: true };
   } catch (err) {
     await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);

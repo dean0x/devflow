@@ -29,6 +29,8 @@ import {
   installViaFileCopy,
   overlayGeneratedReferences,
   generatedReferenceManifest,
+  promoteUnitStagingTree,
+  type OverlayUnit,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
 import { formatOverlaySummary } from '../../src/cli/commands/init.js';
@@ -421,6 +423,58 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       overlayFailures: second.overlayFailures,
     });
     expect(lines.some(l => l.level === 'warn' && l.message.includes('jira'))).toBe(true);
+  });
+
+  it('a successful provider swap leaves no .old or .tmp residue behind', async () => {
+    const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(result.overlayFailures, 'the swap must succeed for this assertion to mean anything').toEqual([]);
+
+    // The promotion displaces the installed unit to a `.old` sibling before renaming
+    // the staging tree over it, so the backup has to be dropped on the way out. A
+    // surviving `.old` would be installed prose sitting beside the references the
+    // agent reads, and — unlike `.tmp` — it holds a full previous copy.
+    const residue = (await walkTree(target)).filter(p => p.includes('.old') || p.includes('.tmp'));
+    expect(residue, 'a completed swap must leave neither backup nor staging residue').toEqual([]);
+    // Positive outcome: the swap actually happened (avoids PF-018).
+    expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
+  });
+
+  it('a promotion that fails after displacing the unit restores it instead of deleting it', async () => {
+    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
+
+    const unit: OverlayUnit = {
+      id: 'jira',
+      subdir: 'tracker/jira',
+      files: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+    };
+    const before = await Promise.all(unit.files.map(rel => fs.readFile(abs(target, rel))));
+
+    // An ABSENT staging tree is the injectable stand-in for any rename that fails once
+    // the installed unit has already been moved aside — the window a rm-then-rename
+    // promotion cannot survive, because by then it has deleted the only copy. Driving
+    // the real promotion step is what makes this a known-bad probe rather than a
+    // restatement of the implementation (ADR-024).
+    const missingStaging = abs(target, 'tracker/jira') + '.tmp';
+    expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
+
+    const promoted = await promoteUnitStagingTree(unit, target, missingStaging);
+
+    expect(promoted.ok, 'promoting an absent staging tree must be reported, never silently ok').toBe(false);
+
+    // The property: the previously installed mechanics are still there, byte for byte.
+    // This is precisely what formatOverlaySummary's warning line tells the user, so it
+    // is what has to be true.
+    const after = await Promise.all(unit.files.map(rel => fs.readFile(abs(target, rel))));
+    expect(
+      after[0].equals(before[0]) && after[1].equals(before[1]),
+      'a failed promotion must restore the displaced unit — leaving the provider empty ' +
+      'would strip the agent of every mechanics file while the report claims nothing changed',
+    ).toBe(true);
+
+    // …and the backup it used is not left parked beside the live references.
+    const residue = (await walkTree(target)).filter(p => p.includes('.old') || p.includes('.tmp'));
+    expect(residue, 'a failed promotion must leave neither backup nor staging residue').toEqual([]);
   });
 
   it('an absent canonical GitHub reference fails loud with a build hint (AC-2.4b)', async () => {
