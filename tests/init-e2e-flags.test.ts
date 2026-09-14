@@ -203,7 +203,15 @@ describe('init e2e — flags Phase 6 integration', () => {
     // Other adopted default-ON flags materialise too (proves applyFlags ran over the
     // whole adopted record, not just the one flag asserted above).
     expect(env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-sonnet-4-6');
+    expect(env.ENABLE_PROMPT_CACHING_1H).toBe('true');
+
+    // Adopted default-OFF flags write nothing: pin-sonnet-4-6 and disable-bundled-skills
+    // are optional (opt-in via `devflow flags --enable`), so a fresh adoption leaves
+    // the Sonnet alias and Claude Code's bundled skills untouched.
+    expect(flagsRecord['pin-sonnet-4-6']).toBe(false);
+    expect(flagsRecord['disable-bundled-skills']).toBe(false);
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+    expect(settings).not.toHaveProperty('disableBundledSkills');
 
     // Deliberate prior disables are PRESERVED, not re-adopted (ADR-014): the old manifest
     // recorded knownFlags ['tui','lsp'] with an empty enabled list, so both stay off and
