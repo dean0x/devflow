@@ -127,7 +127,8 @@ DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-ISSUE_NUMBER: {issue number or (none)}"
+ISSUE_NUMBER: {issue number or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 ```
 
 ---
@@ -150,6 +151,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {issue number or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -170,6 +172,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {issue number or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -194,7 +197,8 @@ DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-ISSUE_NUMBER: {issue number or (none)}"
+ISSUE_NUMBER: {issue number or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -207,7 +211,8 @@ DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-ISSUE_NUMBER: {issue number or (none)}"
+ISSUE_NUMBER: {issue number or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODE_AGENTS):
@@ -243,7 +248,8 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    VALIDATION_FAILURES: \{parsed failures from Validate agent\}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{issue number or (none)\}"
+   ISSUE_NUMBER: \{issue number or (none)\}
+   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
    ```
    - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
@@ -333,7 +339,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    MISALIGNMENTS: \{structured misalignments from Evaluate agent\}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{issue number or (none)\}"
+   ISSUE_NUMBER: \{issue number or (none)\}
+   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
@@ -376,7 +383,8 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    QA_FAILURES: \{structured failures from Test agent\}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{issue number or (none)\}"
+   ISSUE_NUMBER: \{issue number or (none)\}
+   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```

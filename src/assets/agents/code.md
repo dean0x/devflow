@@ -33,6 +33,7 @@ You receive from orchestrator:
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 - **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include `## Related Issues` / `Closes #{n}` in the PR body
+- **ISSUE_PR_LINK** (optional): the already-rendered closing line for `## Related Issues`, forwarded verbatim from the Git agent's `- **PR link line**: {rendered}` under `### Handoff Values`. `(none)`, or absent, means no rendered line was captured — compose the section from `ISSUE_NUMBER` instead. Paste it only after the shape re-check in Responsibility 7; it is never a substitute for `ISSUE_NUMBER`, which stays the spawn key
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
