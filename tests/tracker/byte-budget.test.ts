@@ -214,6 +214,65 @@ function nameableFrom(op: string): Set<string> {
   return nameable;
 }
 
+// ---------------------------------------------------------------------------
+// The CROSS-CUTTING scope — references named outside every op section
+// ---------------------------------------------------------------------------
+//
+// nameableFrom() reads `## Operation:` sections only. A reference named ABOVE the
+// first op heading is therefore in neither direction of the bidirectional check
+// below: not summed by the model, and not seen by the scan that is supposed to
+// catch what the model missed. `references/decision-markers.md` is named exactly
+// there (the Decision Marker Legend, above the first op), so until this scope
+// existed it was accounted for by nothing at all.
+//
+// Two scopes, not one widened scan: a name in the always-loaded part is reachable
+// from EVERY spawn, and a name inside an op section is reachable from that op.
+// Folding them together would attribute a cross-cutting document to whichever op
+// happened to sort first.
+
+/** The always-loaded part of the compiled agent: everything before the first `## Operation:`. */
+function crossCuttingSlice(content: string): string {
+  const first = content.search(/^## Operation: /m);
+  if (first === -1) {
+    throw new Error(
+      'no `## Operation:` heading in the compiled agent — the cross-cutting slice would be the ' +
+      'whole file and every op-scoped name would read as cross-cutting',
+    );
+  }
+  return content.slice(0, first);
+}
+
+/** Named collector: the literal `references/…` names the always-loaded part spells out. */
+function nameableCrossCutting(content: string): Set<string> {
+  const nameable = new Set<string>();
+  for (const rel of referenceMentions(crossCuttingSlice(content))) {
+    if (rel.includes('{')) continue;
+    nameable.add(rel);
+  }
+  return nameable;
+}
+
+/**
+ * The cross-cutting references the BUDGET MODEL knows the always-loaded part can
+ * name — declared, so the scan above has something independent to disagree with.
+ *
+ * D-CROSS-CUTTING-ON-DEMAND. These are RECORDED, not added to the asserted
+ * loaded-set term, and the distinction is the legend's own wording. git.md says
+ * D4 and D11 "are defined here because their controls must be loaded before the
+ * agent acts. Every other `D{N}` label IS DEFINED IN … references/decision-markers.md."
+ * That is a glossary pointer — where to look up a label — not an instruction to
+ * load the file, and the module registry says the same thing in
+ * GIT_CROSS_CUTTING_DOCS' own comment: "glossary entries a reader consults, not
+ * rules a spawn must have". A term added to the asserted worst case would claim
+ * every Git spawn pays 1_681 ch it does not pay.
+ *
+ * What the assertions below DO owe: that the declared set and the scanned set
+ * agree in both directions, so a document named cross-cuttingly can never again
+ * be invisible to the budget, and that the cost of treating it as mandatory is
+ * printed rather than assumed.
+ */
+const MODEL_CROSS_CUTTING_ON_DEMAND: readonly string[] = ['decision-markers.md'];
+
 /**
  * The cross-cutting references the BUDGET MODEL attributes to each operation,
  * beyond its own generated mechanics file [DR-12].
@@ -343,7 +402,7 @@ function preambleBlock(content: string): string {
 // pin a ratio nobody intends to hold constant.
 
 describe('byte budget: four-shape table (recorded)', () => {
-  it('records every shape, with learn-conventions.md and publication-gate.md as named rows', () => {
+  it('records every shape, with all three cross-cutting documents as named rows', () => {
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
     const nonTracker = worstCaseNonTrackerLoad();
@@ -358,6 +417,16 @@ describe('byte budget: four-shape table (recorded)', () => {
     const publicationGate = measureOptional(
       'references/publication-gate.md',
       path.join(REFS_DIR, 'publication-gate.md'),
+    );
+    // The third named row [D-CROSS-CUTTING-ON-DEMAND]. It sat in no row and no
+    // term at all until now: named above the first op heading, so invisible to
+    // nameableFrom(), and never a deduction from git.md either.
+    const decisionMarkers = measureOptional(
+      'references/decision-markers.md',
+      path.join(REFS_DIR, 'decision-markers.md'),
+    );
+    const crossCuttingOnDemand = MODEL_CROSS_CUTTING_ON_DEMAND.reduce(
+      (n, rel) => n + referenceChars(rel), 0,
     );
 
     const MCP_TERM = 0; // _mcp.md is not generated in Phase 2 and is 0 on the GitHub path (AC-2.7).
@@ -379,10 +448,19 @@ describe('byte budget: four-shape table (recorded)', () => {
         shape: '4. per-op without _mcp.md (GitHub path — identical to 2 in Phase 2)',
         chars: PRELOADED + largest.chars + worst.chars,
       },
+      {
+        // RECORDED ONLY, never the gate [D-CROSS-CUTTING-ON-DEMAND]. What shape 2
+        // would cost if the cross-cutting glossary were treated as a mandatory
+        // per-spawn load rather than a pointer a reader follows. Printed so the
+        // number is on the record and the classification is a decision someone
+        // can re-open with the figure in front of them, not an omission.
+        shape: '2b. shape 2 + cross-cutting glossary as if mandatory (RECORDED, not gated)',
+        chars: PRELOADED + MCP_TERM + largest.chars + worst.chars + crossCuttingOnDemand,
+      },
     ];
 
     const rows = [
-      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate].map(m => ({
+      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers].map(m => ({
         row: m.label + (m.present ? '' : '  (absent — recorded as 0)'),
         chars: m.chars,
         bytes: m.bytes,
@@ -392,6 +470,12 @@ describe('byte budget: four-shape table (recorded)', () => {
       // Recorded, not gated — D-LOADED-SET-SCOPE at worstCaseReferenceLoad().
       { row: `worst-case one-spawn load, NON-tracker ops (${nonTracker.op})`, chars: nonTracker.chars, bytes: NaN },
       { row: 'sum of all GitHub tracker references', chars: allTrackerRefs, bytes: NaN },
+      // Recorded, not gated — D-CROSS-CUTTING-ON-DEMAND at MODEL_CROSS_CUTTING_ON_DEMAND.
+      {
+        row: `cross-cutting glossary named in the always-loaded part (${MODEL_CROSS_CUTTING_ON_DEMAND.join(', ')})`,
+        chars: crossCuttingOnDemand,
+        bytes: NaN,
+      },
     ];
 
     // Recorded, not asserted: printed so a reviewer reads the numbers the split
@@ -403,13 +487,22 @@ describe('byte budget: four-shape table (recorded)', () => {
     })));
 
     // Structural sanity only — the table must actually have measured something.
-    expect(shapes).toHaveLength(4);
+    expect(shapes).toHaveLength(5);
     expect(PRELOADED, 'the preloaded set measured 0 — the table is vacuous').toBeGreaterThan(0);
     expect(allTrackerRefs, 'no tracker reference measured — the table is vacuous').toBeGreaterThan(0);
     expect(
-      [learnConventions.label, publicationGate.label],
-      'both DR-12 rows must be named in the table even while absent',
-    ).toEqual(['references/learn-conventions.md', 'references/publication-gate.md']);
+      [learnConventions.label, publicationGate.label, decisionMarkers.label],
+      'all three named cross-cutting rows must appear in the table even while absent',
+    ).toEqual([
+      'references/learn-conventions.md',
+      'references/publication-gate.md',
+      'references/decision-markers.md',
+    ]);
+    expect(
+      crossCuttingOnDemand,
+      'the cross-cutting glossary measured 0 — the recorded row would understate the cost of ' +
+      'reclassifying it as mandatory',
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -593,6 +686,55 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
       .toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
     expect(nameableTotal, 'no op can name a reference — both directions are vacuous')
       .toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+  });
+
+  it('the cross-cutting scope agrees with the model in both directions (direction 3)', () => {
+    // The scope nameableFrom() cannot see. Before this existed, a reference named
+    // above the first `## Operation:` heading was summed by nothing and scanned by
+    // nothing — the one place a file could be added to every user's install with
+    // no term anywhere in the budget.
+    const scanned = nameableCrossCutting(GIT_AGENT.content);
+    const modelled = new Set(MODEL_CROSS_CUTTING_ON_DEMAND);
+
+    expect(
+      collectMissingFrom('(always-loaded)', scanned, modelled),
+      'the always-loaded part of the agent names reference file(s) the budget model has never ' +
+      'heard of. Every Git spawn can reach them, so their cost must at least be RECORDED — add ' +
+      'the row to MODEL_CROSS_CUTTING_ON_DEMAND and re-record the table',
+    ).toEqual([]);
+    expect(
+      collectMissingFrom('(always-loaded)', modelled, scanned),
+      'the model declares a cross-cutting reference the agent no longer names — the file is ' +
+      'generated and installed and nothing can load it (ADR-003)',
+    ).toEqual([]);
+    expect(scanned.size, 'the cross-cutting scan found nothing — direction 3 is vacuous')
+      .toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the cross-cutting scope is scanned live, in the right half of the file', () => {
+    // Two failure modes, one probe. (a) A name seeded into the always-loaded part
+    // is seen — so the empty-difference assertions above are not green because the
+    // slice was empty. (b) A name seeded AFTER the first op heading is NOT seen —
+    // so the slice is really the always-loaded half and not the whole file, which
+    // would silently absorb every op-scoped name into the cross-cutting term.
+    const opAt = GIT_AGENT.content.search(/^## Operation: /m);
+    expect(opAt, 'the compiled agent must have an op heading for this probe').toBeGreaterThan(0);
+
+    const seededAbove =
+      GIT_AGENT.content.slice(0, opAt) +
+      'See the `devflow:git` skill\'s `references/smuggled.md`.\n\n' +
+      GIT_AGENT.content.slice(opAt);
+    expect(
+      collectMissingFrom('(always-loaded)', nameableCrossCutting(seededAbove), new Set(MODEL_CROSS_CUTTING_ON_DEMAND)),
+      'a reference newly named in the always-loaded part must be reported as unmodelled',
+    ).toEqual(['(always-loaded) → smuggled.md']);
+
+    const seededBelow = `${GIT_AGENT.content}\n\nSee \`references/smuggled.md\`.\n`;
+    expect(
+      nameableCrossCutting(seededBelow).has('smuggled.md'),
+      'a name below the first op heading must NOT land in the cross-cutting scope — otherwise ' +
+      'the two scopes are one scan wearing two names',
+    ).toBe(false);
   });
 
   it('known-bad probe: an unmodelled nameable file is reported by direction 2', () => {
