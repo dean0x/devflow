@@ -1,7 +1,7 @@
 ---
 feature: compliance-feature
 name: Compliance Feature & SDLC Traceability
-description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve COMPLIANCE_SKILL_INSTALLED, modifying traceability operations in the Git agent (learn-conventions, issue-first, thread resolution, shipped markers, release evidence), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_SKILL_INSTALLED, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState."
+description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve COMPLIANCE_SKILL_INSTALLED, modifying traceability SEMANTICS in the Git agent (D1-D11 decision markers, D4 degradation contract, D9 resolution gate, containment, Handoff Values), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_SKILL_INSTALLED, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState, Handoff Values, ISSUE_PR_LINK, issue_ref_grammar, issue_capture_contract, _tracker.mds, Provider signals, decision-markers.md, publication-gate.md, learn-conventions.md, tracker/github.
 category: architecture
 directories:
   - src/core/compliance.ts
@@ -10,13 +10,16 @@ directories:
   - src/assets/skills/compliance
   - src/assets/rules/compliance.md
   - src/assets/agents/git.mds
+  - src/assets/mds/tracker/_github.mds
+  - src/assets/mds/git/_references.mds
+  - src/assets/commands/_partials/_tracker.mds
   - src/assets/commands/code-review.mds
   - src/assets/commands/plan.mds
   - src/assets/commands/implement.mds
   - src/assets/commands/resolve.mds
   - src/assets/commands/release.md
 created: 2026-08-20
-updated: 2026-09-06
+updated: 2026-09-14
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -24,9 +27,11 @@ updated: 2026-09-06
 ## Overview
 
 Compliance is a built-in feature (not a plugin) that provides two interlinked capabilities:
-(1) a regulatory-framework skill system that applies framework-specific controls during code review, planning, and design; and (2) an SDLC traceability layer — wired into git.md operations — that ties branches to issues, PR titles to project conventions, review threads to verified fixes, and releases to shipped issues.
+(1) a regulatory-framework skill system that applies framework-specific controls during code review, planning, and design; and (2) an SDLC traceability layer — wired into Git agent operations — that ties branches to issues, PR titles to project conventions, review threads to verified fixes, and releases to shipped issues.
 
-The compliance skill is **installed on demand** by `convergeComplianceArtifacts` (not by `installViaFileCopy`). Host commands detect whether it is installed at runtime via the shared `compliance_gate()` partial from `_partials/_compliance.mds` (a single file-existence check). The traceability operations in git.md are also gated by `COMPLIANCE`, an input passed from the orchestrator.
+The compliance skill is **installed on demand** by `convergeComplianceArtifacts` (not by `installViaFileCopy`). Host commands detect whether it is installed at runtime via the shared `compliance_gate()` partial from `_partials/_compliance.mds` (a single file-existence check). The traceability operations in the Git agent are also gated by `COMPLIANCE`, an input passed from the orchestrator.
+
+**Tracker Phase 2 (#324, PR #339)** split the Git agent's traceability text into a provider-independent contract (semantics — stays in `git.mds`) and per-provider GitHub mechanics (generated references, loaded on demand). This KB owns the traceability **semantics** — the D1–D11 decision markers, the D4 degradation contract, the D9 resolution gate, containment discipline, and bounds — and says where each now physically lives. The sibling `.devflow/features/tracker-references/KNOWLEDGE.md` owns the split **mechanics**: the MDS build machinery, the byte budget, the containment oracle, and the installer overlay. Read that KB for "how the split works"; read this one for "what the rules mean and where to find them."
 
 ## System Context
 
@@ -165,38 +170,61 @@ Host command usage:
 
 `COMPLIANCE` is passed as `"enabled"` (string) or `"(none)"`. It is a **Git agent input only** — the spawn-scoped guard in build-mds §14 asserts that every `COMPLIANCE:` line in every compiled command appears inside a `subagent_type="Git"` spawn block.
 
-## Integration Patterns: Traceability Operations (git.md)
+## Integration Patterns: Traceability Operations (git.md) — post-split semantics
 
-The Git agent implements the SDLC traceability layer. All operations are declared in the **D1–D9 legend** at the top of the operations table in git.md. Traceability operations grouped by marker:
+Tracker Phase 2 split every traceability operation in `src/assets/agents/git.mds` into a **contract** (stays in `git.mds`, always loaded on every Git spawn) and **GitHub mechanics** (generated per-op references under `dist/skills/git/references/tracker/github/`, loaded only when an op's `**Mechanics:**` pointer directs it). This section documents what the contract still says and where the mechanics now live — for the mechanics split itself (MDS build machinery, byte budget, containment oracle, installer overlay) see `.devflow/features/tracker-references/KNOWLEDGE.md`.
 
-| Marker | Operations | Key Details |
+**What stays in `git.mds` per operation:** the `## Operation: {name}` heading, prose, `**Input:**`, `**Degradation (D4):**` (where present), `**Output:**` (including any `### Handoff Values` block), and a one-sentence `**Mechanics:**` pointer (e.g. *"the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs"*).
+
+**What moved to generated references:** the GitHub `gh`/GraphQL invocations and the `### Process` step bodies, for the 10 tracker ops (`TRACKER_GITHUB_OPS`): `setup-task`, `fetch-issue`, `fetch-issues-batch`, `manage-debt`, `create-release` (only its `## Closed Issues` / commit-list enrichment bullet), `gather-release-evidence`, `backlink-shipped-issues`, `ensure-traceable-issue`, `post-wave-report`, `ensure-pr-ready` (only step 4b). Source: `src/assets/mds/tracker/_github.mds` → `dist/skills/git/references/tracker/github/{op}.md`.
+
+**What did NOT move:** the 8 non-tracker ops (`fetch-review-threads`, `resolve-review-threads`, `check-merge-readiness`, `validate-branch`, `check-ci-status`) keep their `### Process` bodies inline in `git.md` unchanged. `post-review-summary` and `post-resolution-summary` mechanics never moved either (written exclusion — both are D10 **and** D11 sinks per `tracker-references`' SG-8: a containment/publication sink may move only in a PR that moves its guards, never as a size optimisation). `learn-conventions` is a partial exception: its `**Process:**` scan, heuristics, file template, and post-composition verification now live in `references/learn-conventions.md` (source: `src/assets/mds/git/_references.mds`), but loaded **conditionally** — only when `.devflow/conventions.md` is absent; when the file already exists the operation returns `Status: ALREADY_EXISTS` without reading it.
+
+**The Git agent still resolves the provider once per spawn** via the `## Tracker provider resolution` preamble (between the D4 block and `## Publication gate (D10)` in `git.md`) — `TRACKER_PROVIDER` normalises to `github`/`jira`/`linear` (reject-never-repair; defaults to `github`) and selects (never concatenates) a hardcoded mechanics directory. See `tracker-references` for the full preamble mechanics; this KB only needs the observable contract: an operation with no `**Mechanics:**` pointer loads nothing and can never emit `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`.
+
+### D1–D11 Decision Marker Legend
+
+The inline legend at the bottom of the `## Operations` table in `git.md` now keeps **only the D4 and D11 rows** — the two whose controls every spawn must already have loaded before it can act:
+
+| Marker | Meaning |
+|--------|---------|
+| D4 | Degradation contract — every remote-dependent op degrades gracefully with `TRACEABILITY: DEGRADED ({reason})`, never aborting the caller's workflow |
+| D11 | Comment-sink scrub — unconditional secret redaction on every body-posting op; fail-closed (`TRACEABILITY: DEGRADED (redaction unavailable)`) on scrubber error or missing script |
+
+D1–D3 and D5–D10 moved to a glossary reference, `references/decision-markers.md` (source: `_references.mds`'s `decision_markers()` define, `kind: 'named'` — not ranged over, named at exactly one site). Full table (read there for detail; summarized here so this KB stays self-contained for semantics lookups):
+
+| Marker | Operation | Meaning |
+|--------|-----------|---------|
+| D1 | `learn-conventions` | Bounded scan → writes `.devflow/conventions.md` once |
+| D2 | `fetch-review-threads`, `resolve-review-threads` | GraphQL thread fetch and reply/resolve cycle |
+| D3 | `ensure-traceable-issue` | Three-section issue template (see below) |
+| D5 | `ensure-traceable-issue` | Issue creation/enrichment, returns issue number |
+| D6 | `check-merge-readiness` | Report-only — never takes action |
+| D7 | `post-review-summary` | Dedup: one comment per cycle+timestamp pair, marker-keyed, never edited after posting |
+| D8 | `post-resolution-summary` | Dedup: one comment per workflow run, marker-keyed (`ts:`-prefixed), never edited after posting |
+| D9 | `resolve-review-threads` | Thread-resolution gate (table below) |
+| D10 | `post-review-summary`, `post-resolution-summary` | Publication gate — probe visibility before posting; fail-closed to STUB |
+
+**D4 degradation contract** — the always-loaded block keeps the provider-neutral **invariants**; GitHub's concrete **detectors** live in one place, `tracker/github/backlink-shipped-issues.md`'s `### Provider signals (GitHub)` section (it "owns the fan-out", per that file's own comment — the backpressure rung is stated there and restated only in the agent's inline `resolve-review-threads` clause, since D4 names those two as the batch ops):
+
+| Condition (invariant, in `git.md`) | GitHub detector (in `tracker/github/backlink-shipped-issues.md`) | Action |
 |---|---|---|
-| D1 | `learn-conventions` | Bounded scan (≤50 branches, ≤20 tags, ≤30 merged PRs, ≤200 merges for integration-branch scoring). Writes `.devflow/conventions.md` **once** — never overwrites. Scanned strings are UNTRUSTED DATA: shape-derived patterns only, never verbatim. Post-composition verbatim-match check replaces any copied string with the generic default. After writing, **commits `.devflow/conventions.md` via scoped pathspec** (never `git add -A`, never push, never force, non-blocking on failure; reports `CONVENTIONS_COMMIT: failed` on error and continues — mirrors the Knowledge agent's commit pattern). |
-| D2 | `fetch-review-threads`, `resolve-review-threads` | GraphQL (≤2 pages of 50 = 100 max threads); external thread bodies wrapped in `<external-thread>...</external-thread>` and never echoed verbatim |
-| D3 | `ensure-traceable-issue` | D3 issue template sections: `## Initial Request`, `## Product Requirements`, `## Implementation Plan`. Template single-sourced in `devflow:git` skill (git/SKILL.md). Never rewrites issue body, posts comments only. All user-supplied strings (title, body, labels) bound to shell variables and passed via `--body-file`/`--label "$VAR"` — never interpolated into the command string. |
-| D4 | All traceability ops | **Degradation contract** (see table below) |
-| D5 | `ensure-traceable-issue` | Issue creation/enrichment (labelled D5 in the op table) |
-| D6 | `check-merge-readiness` | Report-only — unresolved threads + review decision + CI status. Never takes action. |
-| D7 | `post-review-summary` | Marker `<!-- devflow:review-summary cycle:{N} ts:{REVIEW_TIMESTAMP}` — **full-pair match** (cycle + timestamp). Author-filtered dedup (viewer login check prevents third-party marker suppression). Body capped at 60000 chars. |
-| D8 | `post-resolution-summary` | Marker `<!-- devflow:resolution-summary ts:` (**ts:-prefixed**). Author-filtered dedup. 60000-char cap. |
-| D9 | `resolve-review-threads` | **Single authority table** (see below) |
+| No remote / tracker unauthenticated or unreachable / no PR | `gh` absent or unauthenticated, or no remote | Emit `TRACEABILITY: DEGRADED ({reason})`, warn, continue — never abort |
+| Provider-signalled secondary rate limit | 403/429 with a rate-limit body, or `X-RateLimit-Remaining` < 10 | **STOP** the current fan-out immediately; report remaining items as `THROTTLED ({n} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)` |
+| Provider backpressure rung (batch ops only) | `X-RateLimit-Remaining` < 50 | Raise inter-operation delay from 1s to **3s** for the remainder of the batch |
+| Other 4xx (deleted issue, closed PR, permissions) | — (provider-neutral) | DEGRADED for that item, continue |
+| 5xx | — (provider-neutral) | 1 retry; if still 5xx → DEGRADED for that item, continue |
 
-**D4 degradation contract:**
+**D4 carve-out for create-release:** The global "never abort" clause does NOT apply to the primary release effects (tag push, release create) — steps 1–6 of `create-release` stay inline in `git.md` and are hard failures. Only traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment, `backlink-shipped-issues`) degrade per D4.
 
-| Condition | Action |
-|---|---|
-| No remote / `gh` unauthenticated / no PR | Emit `TRACEABILITY: DEGRADED ({reason})`, warn, continue — never abort |
-| Secondary rate limit (403 or 429 with rate-limit body, or `X-RateLimit-Remaining` < 10) | **STOP** the current fan-out immediately; report remaining items as `THROTTLED ({n} not processed)`; emit `TRACEABILITY: DEGRADED (rate limited)`. Never continue into an active rate limit. |
-| `X-RateLimit-Remaining` < 50 (batch ops only) | Raise inter-operation delay from 1s to **3s** for the remainder of the batch (backpressure) |
-| Other 4xx (deleted issue, closed PR, permissions) | DEGRADED for that item, continue |
-| 5xx | 1 retry; if still 5xx → DEGRADED for that item, continue |
+**D11 comment-sink scrub — split, but the control itself never moved.** `## Comment-sink scrub (D11)` stays inline in `git.md` in full, including the scrubber invocation (`node …redact-secrets.cjs …`) — making the containment control itself loadable/optional is exactly PF-027's failure mode. Only the concrete GitHub half of the `&&` chain relocated: `git.md`'s D11 block now reads `&& <the resolved provider's post command>`, and `tracker/github/backlink-shipped-issues.md`'s "Scrub-then-post chain" section shows the instantiated form (`&& gh issue comment {number} --body-file "$DEVFLOW_BODY"`). The rule is unchanged: `&&` only, never a pipeline (a pipeline's exit status swallows a scrubber crash); non-zero scrubber exit or missing script → DO NOT POST, emit `TRACEABILITY: DEGRADED (redaction unavailable)`; always post the scrubbed `$DEVFLOW_BODY`, never `$DEVFLOW_BODY_RAW`.
 
-**D4 carve-out for create-release:** The global "never abort" clause does NOT apply to the primary release effects (tag push, release create). Only traceability adornments (commit list enrichment, shipped-issue back-links) degrade per D4.
+**D3 issue template.** The three sections (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) are still named at the D3 legend row, but the template body itself now lives in `tracker/github/ensure-traceable-issue.md` under `### Traceability Issue Template (D3)` (demoted from `##` to `###` on the move — a `##` heading is a section terminator inside a generated reference; see `tracker-references`' PF-063 gotcha).
 
-**D9 resolution gate — single authority:**
+**D9 resolution gate — single authority (unchanged, stays inline in `git.md`; `resolve-review-threads` did not move):**
 
 | Condition | Required value | Action |
-|---|---|---|
+|-----------|----------------|--------|
 | `VERIFICATION_STATUS` | `PASS` | prerequisite; if not met → reply-only for all verdicts |
 | Verdict `FIXED` | `commit_sha` non-empty | resolve via `resolveReviewThread` mutation + attribution reply |
 | Verdict `FALSE_POSITIVE` | `evidence` non-empty | **reply-only** with cited evidence; leave unresolved — thread author closes |
@@ -206,11 +234,36 @@ The Git agent implements the SDLC traceability layer. All operations are declare
 
 `resolveReviewThread` is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN are the thread author's call to close.
 
-**New op: `gather-release-evidence` (D4)**
+**D10 publication gate.** Applies to `post-review-summary` and `post-resolution-summary` only — no other op probes repo visibility. The 7-step order (dedup check → resolve `REVIEW_PUBLICATION` → probe visibility fail-closed to STUB → compose body → scrub per D11 → re-check 60000-char cap after scrub → post, 5xx retry-once) now lives once in `references/publication-gate.md` (`_references.mds`'s `publication_gate()` define) and is instantiated by both ops' inline `**Process:**` text ("The publication gate this operation applies is the `devflow:git` skill's `references/publication-gate.md` (D10) — the step order below instantiates it"). `gh repo view` (the visibility probe) appears only in `publication-gate.md` **and** the two operations that name it from it — never restated as a corpus-wide literal.
 
-Collects the commit list (≤100 entries) and shipped issue numbers (≤50) since the last tag. Called by `/release` **before** `create-release` when `COMPLIANCE_SKILL_INSTALLED`. Returns `COMMIT_LIST` and `SHIPPED_ISSUES` for `create-release` to embed in release notes. Degrades gracefully per D4 — falls back to git-only signals when `gh` is unavailable.
+### Handoff Values — issue-capture contract producers
 
-**`create-release` reads conventions.md:** Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.devflow/conventions.md` (when present) to determine the annotated tag format and release title. Compliance defaults apply when the file is absent.
+`setup-task` and `fetch-issue`'s `**Output:**` blocks each end with a `### Handoff Values` block:
+```markdown
+### Handoff Values
+- **PR link line**: {rendered}
+- **Branch token**: {token}
+- **Issue ID**: {ISSUE_ID}
+```
+These are the **only** producers — `fetch-issues-batch` answers `(none)` for all three (it identifies issues by `### Issue #{number}:` heading, an `ISSUE_REF` not an `ISSUE_ID`, and never synthesises the singular values from a batch heading).
+
+Consumers: `src/assets/commands/_partials/_tracker.mds`'s `issue_capture_contract()` define (scoped precisely to the real producers — read that partial, not this summary, for the exact capture rules) and `src/assets/agents/code.md`, which pastes `ISSUE_PR_LINK` only after **re-checking its shape** (`^Closes #[1-9][0-9]{0,8}$` under github — degrade-never-repair: a value well-formed when produced is still attacker-influenceable text by the time it's pasted). `ISSUE_PR_LINK` is forwarded as a sibling of `ISSUE_NUMBER` at all 14 Code-agent spawn sites across `implement.mds` and `dynamic-build.mds`.
+
+### Command-layer vocabulary (`_partials/_tracker.mds`)
+
+Two zero-arg defines, adopted by `plan.mds`, `implement.mds`, `debug.mds`, `dynamic-build.mds`, `dynamic-plan.mds`:
+- `issue_ref_grammar()` — the command-layer (L1) grammar: permissive and provider-blind, forwards raw `ISSUE_REFS` tokens verbatim. Under `github`, a token matching `^#?[1-9][0-9]{0,8}$` is a reference and the Git agent renders it as `#{n}`; any other shape is **never coerced or dropped silently** — the Git agent emits `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)` and continues with what it could resolve.
+- `issue_capture_contract()` — which operation emits which value: `ISSUE_CONTENT`/`ACCEPTANCE_CRITERIA` from every issue-bearing op; `ISSUE_REF` from the two fetch ops; the Handoff Values trio from `setup-task`/`fetch-issue` only, `(none)` on the batch path.
+
+GitHub rendering stays byte-identical pre/post-split: `Tracked = #{n}`, `Depends on: #{n}`, `42-jwt-auth.{ts}.md` filenames, `issue: 42`. `COMPLIANCE_SKILL_INSTALLED`/`compliance_gate()` ordering relative to this vocabulary is unchanged.
+
+### Markers — no restatement in compiled commands
+
+`dist/commands/*.md` carry zero `<!-- devflow:` literals — the D7/D8/wave-report marker formats live only in the Git agent (`git.md`) and its generated references. Any `dynamic-build.mds` or `code-review.mds` restatement of a marker format was removed as part of the split; commands reference operations by name, never by reproducing the marker string.
+
+### `create-release` reads conventions.md
+
+Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.devflow/conventions.md` (when present) to determine the annotated tag format and release title. Compliance defaults apply when the file is absent. This step stays inline in `git.md` (only the `## Closed Issues` enrichment bullet moved to the generated reference).
 
 **60000-char cap — ALL comment ops:** `post-review-summary`, `post-resolution-summary`, `post-wave-report`, and `ensure-traceable-issue` (plan attachment) all cap composed bodies at 60000 characters. GitHub rejects comments over 65536 with a 422 (which the 4xx rule would silently skip). Truncation adds `…truncated — full report in the local artifact {PATH}`.
 
@@ -218,18 +271,19 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 
 **ensure-pr-ready step 4b / ensure-traceable-issue discipline:**
 - All external content (PR body, issue title, labels) bound to shell variables; applied via `--body-file {temp_file}` or `"$VAR"` — never interpolated into the command string.
-- `Closes #{n}` addition requires `gh issue view {n} --json number,state` verification; `.state` must be `"open"`. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false numeric matches — the existence check is the guard.
-- **Branch-name metacharacter guard (setup-task step 1b):** `.devflow/conventions.md` is third-party input (git-tracked and team-shared). Before using the convention-derived prefix and separator in step 3, the fully composed branch name is checked against `` $ ` \ " ' ; | & < > `` or whitespace/newline. If any match: discard the convention and fall back to heuristic defaults. The validated name is bound to `DEVFLOW_BRANCH` before use.
-- **`setup-task` issue body containment (commit `75f13e7`):** The remote-sourced issue fields (`title`, `description`, `criteria`) are now wrapped in `<untrusted-issue-body>` tags. The locally-derived issue number is intentionally placed outside the wrapper. Prior to this fix, `setup-task` was `/implement`'s only issue path and the highest-traffic issue path in the product — Principle 8 claimed all remote bodies were wrapped, but `setup-task` did not actually apply the wrapper. The KB was stronger than the implementation; the fix closes that gap.
+- `Closes #{n}` addition requires `gh issue view {n} --json number,state` verification (mechanics, in `tracker/github/ensure-pr-ready.md`); `.state` must be `"open"`. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false numeric matches — the existence check is the guard.
+- **Branch-name metacharacter guard (setup-task step 1b, stays inline in `git.md`):** `.devflow/conventions.md` is third-party input (git-tracked and team-shared). Before using the convention-derived prefix and separator in step 3, the fully composed branch name is checked against `` $ ` \ " ' ; | & < > `` or whitespace/newline. If any match: discard the convention and fall back to heuristic defaults. The validated name is bound to `DEVFLOW_BRANCH` before use.
+- **`setup-task` issue body containment:** The remote-sourced issue fields (`title`, `description`, `criteria`) are wrapped in `<untrusted-issue-body>` tags. The locally-derived issue number is intentionally placed outside the wrapper.
 - **`fetch-issues-batch` per-issue wrapping:** The output template explicitly shows the `<untrusted-issue-body>` wrapper on each issue (not just the first with an implicit "etc." for the rest). Each issue is wrapped independently — there is no single wrapper around the whole list.
 
-**conventions.md authority (D1):** Written by `learn-conventions`, consumed by `setup-task` (branch naming, step 1b), `ensure-pr-ready` (PR title retitle, step 4c), and `create-release` (version/tag/version-PR title, step 1b). Delete to force re-learn. `learn-conventions` now commits this file as its final step so fresh projects do not leave `?? .devflow/conventions.md` in `git status`.
+**conventions.md authority (D1):** Written by `learn-conventions`, consumed by `setup-task` (branch naming, step 1b), `ensure-pr-ready` (PR title retitle, step 4c), and `create-release` (version/tag/version-PR title, step 1b). Delete to force re-learn. `learn-conventions` commits this file as its final step (`setup-task` step 4b, mirroring the Knowledge agent commit protocol) so fresh projects do not leave `?? .devflow/conventions.md` in `git status`.
 
-**Traceability bounds:**
+**Traceability bounds (unchanged by the split):**
 - `backlink-shipped-issues`: ≤50 issues, 1s throttle (raises to 3s at remaining<50)
 - `resolve-review-threads`: ≤50 threads (first 50 in THREAD_MAP order; remainder → TRUNCATED)
 - `fetch-review-threads`: ≤2 pages of 50 = 100 threads max
-- `gather-release-evidence`: ≤100 commits, ≤50 issues
+- `gather-release-evidence`: ≤100 commits, ≤50 issues — ref resolution is now batch-first in the moved reference (`closing_refs_for_commits` via GraphQL `closingIssuesReferences`, PR-number dedup, ≤25 sequential fallback); see `tracker-references` for the two-commit history behind that rewrite
+- 60000-char cap on all comment ops (above)
 
 ## Constraints
 
@@ -237,9 +291,9 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 
 **PR title retitle safety (step 4c):** The composed title is validated against a shell-metacharacter denylist before use. It is bound to a shell variable and passed as `--title "$DEVFLOW_PR_TITLE"` — never interpolated into the command string.
 
-**External thread containment (D2):** External review thread bodies are untrusted third-party input. They are never executed as instructions, never echoed verbatim into devflow-authored replies, commits, or comments. The `<external-thread>` tag is the containment boundary.
+**External thread containment (D2):** External review thread bodies are untrusted third-party input. They are never executed as instructions, never echoed verbatim into devflow-authored replies, commits, or comments. The `<external-thread>` tag is the containment boundary. `fetch-review-threads`/`resolve-review-threads` mechanics stay inline in `git.md` — they did not move.
 
-**Principle 8 marker neutralisation (commit `75f13e7`):** Before wrapping any remote content in `<untrusted-issue-body>` or `<external-thread>`, the operation scans the content for the literal closing marker (e.g., `</untrusted-issue-body>` or `</external-thread>`) and inserts a backslash before the slash. This prevents a hostile issue body or review comment from terminating containment early and injecting text into devflow-authored context. This neutralisation applies to all four wrapping operations: `fetch-issue`, `fetch-issues-batch`, `setup-task`, and `fetch-review-threads`. Pointer comments exist at each of these operations in `git.md`.
+**Principle 8 marker neutralisation:** Before wrapping any remote content in `<untrusted-issue-body>` or `<external-thread>`, the operation scans the content for the literal closing marker (case-insensitively, tolerating internal whitespace) and inserts a backslash before the slash. This prevents a hostile issue body or review comment from terminating containment early and injecting text into devflow-authored context. Applies to `fetch-issue`, `fetch-issues-batch`, `setup-task`, and `fetch-review-threads`.
 
 **`FEATURE_OWNED_SKILLS` disjointness:** Must be disjoint from `getAllSkillNames()` (enforced by D-FO-1 comment in plugins.ts). The compliance skill is managed by the feature system, not the plugin install loop.
 
@@ -262,6 +316,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 **Hand-assembling converge options at each call site.** `convergeFromManifest` is the single manifest→options site. Callers that bypass it risk assembling the options struct inconsistently (e.g., forgetting `rulesEnabledOverride`).
 
 **Wrapping an entire issue list in a single containment tag.** The correct model is per-issue wrapping — each issue body gets its own `<untrusted-issue-body>...</untrusted-issue-body>` pair. A single outer wrapper around the whole list would allow the attacker's first issue to close the outer tag and escape containment for all subsequent issues.
+
+**Moving a containment or publication control out of `git.md` to save bytes.** `## Comment-sink scrub (D11)` and the `post-review-summary`/`post-resolution-summary` mechanics are written exclusions (PF-027, SG-8) — they may move only in a PR that moves their guards, never as a size optimisation. If you're tempted to relocate one to shrink `git.md`, that is the signal to stop and re-read `tracker-references`' Anti-Patterns instead.
 
 ## Gotchas
 
@@ -289,6 +345,8 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 
 **Principle 8 neutralisation must run before the wrapper is applied.** Scanning for the closing marker after wrapping is too late — the wrapped content already contains the literal tag. Scan the raw remote content first, escape any closing marker occurrence, then wrap.
 
+**A D4/D11 sentence that "reads GitHub-specific" may actually be the invariant, not the detector.** When editing the always-loaded block in `git.md`, check whether the sentence names a concrete provider signal (status code, header name, `gh` invocation — belongs in `tracker/github/backlink-shipped-issues.md`) or a provider-neutral rule (STOP-on-secondary-rate-limit, THROTTLED reporting, never-COMPLETE-while-unprocessed — belongs inline). Getting this wrong re-creates the GAP-03 defect (two authorities on one path) that Tracker Phase 2 fixed.
+
 ## Key Files
 
 | File | Purpose |
@@ -303,13 +361,17 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
 | `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |
-| `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) | All traceability operations (D1–D9 legend, D4 rate-limit backpressure, D9 gate table, gather-release-evidence, setup-task containment, Principle 8 marker neutralisation) |
+| `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) | The traceability **contract**: D4/D11 legend, D4 invariants, D9 gate, D3 legend row, per-op `**Input:**`/`**Output:**`/`**Mechanics:**` pointers, Tracker provider resolution + input contract preamble |
+| `src/assets/mds/tracker/_github.mds` | The GitHub **mechanics** for the 10 `TRACKER_GITHUB_OPS` — `### Process` bodies, `### Provider signals (GitHub)` (D4 detectors, D11 scrub-then-post chain), `### Traceability Issue Template (D3)` |
+| `src/assets/mds/git/_references.mds` | The 3 cross-cutting glossary/gate documents — `decision-markers.md` (D1–D10 full table), `learn-conventions.md` (D1 scan/heuristics/template), `publication-gate.md` (D10 7-step order) |
+| `src/assets/commands/_partials/_tracker.mds` | `issue_ref_grammar()`, `issue_capture_contract()` — command-layer issue-reference vocabulary |
 | `src/assets/commands/code-review.mds` | Step 0b (imports compliance_gate), Phase 1 regulated-surface gate, Git COMPLIANCE field |
 | `src/assets/commands/resolve.mds` | Phase 1b (fetch-review-threads), Phase 9b (resolve-review-threads), Phase 9c (check-merge-readiness) |
 | `src/assets/commands/plan.mds` | compliance_gate gate for compliance Design agent and mandatory issue linking |
 | `src/assets/commands/implement.mds` | compliance_gate resolution, Git setup-task COMPLIANCE field |
 | `src/assets/commands/release.md` | Phase 1c (COMPLIANCE_SKILL_INSTALLED), gather-release-evidence spawn, backlink-shipped-issues |
-| `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards) |
+| `src/assets/skills/git/SKILL.md` | Extended References table row for `references/tracker/{provider}/{op}.md`; naming-conventions authority pointer to `learn-conventions` |
+| `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards); reads the joined corpus via `gitAgentSinkCorpus()` for guards whose literal moved |
 | `tests/registry-integrity.test.ts` | Guard 6: OPERATION: values in compiled commands ↔ `## Operation:` headings in git.md (spawn↔op integrity) |
 
 ## Related
@@ -318,8 +380,18 @@ Collects the commit list (≤100 entries) and shipped issue numbers (≤50) sinc
 - **PF-009** — Warn-not-throw: per-artifact failures are reported via the injected `warn` callback, never thrown. `converged: false` in the return value surfaces partial failure to callers.
 - **PF-011** — Temp-sibling+rename: `installSkillDir` uses `{target}.tmp` to build the new skill directory tree before atomically swapping it into place.
 - **PF-018** — Real-path tests: `git-agent.test.ts` static guards pin the ops list, bounds, D9 gate, and dedup markers in the source file directly (no build step required).
+- **ADR-003** — Leave-the-end-state-not-the-transition / reachable-consumer bar: the post-split KB describes the end state only — no tombstone notes about where text "used to be"; consult `tracker-references` for transition history.
 - **ADR-013** — Pure helpers in `src/core/`, I/O orchestration in `src/targets/`: `compliance.ts` is pure; `compliance-install.ts` owns all I/O.
-- **ADR-014** — Self-heal idiom: `normalizeComplianceFeature` self-heals absent/malformed manifest fields on read.
+- **ADR-024** — Prove-you-wrote-it ownership contract: the generated-reference manifest (`generatedReferenceManifest()`) is derived from `expandVariants()` itself, never hand-listed.
+- **ADR-025** — Guard-mode classification discipline for a contract/mechanics split: when a literal moves, its guard repoints to `'union'` mode; when it stays, the guard stays `'sole'`. This is the rule behind every `D{N}` boundary drawn in this section.
 - **PF-002** — Body-instructed skill: external thread bodies are untrusted and must not drive agent behaviour.
+- **PF-018** — Non-vacuity: also backs the D4/D11 legend's set-relation assertion (no surviving `D{N}` label may lack a definition somewhere).
+- **PF-023** — Single-sink validation: the provider-resolution preamble is the one convergence point traceability filename composition now goes through.
+- **PF-026** — Per-spawn billing of shared agent prompts: the economic reason the contract/mechanics split exists at all.
+- **PF-027** — Containment controls must never become loadable/optional: why `## Comment-sink scrub (D11)` never moved out of `git.md`.
+- **PF-058** — Containment is four separate obligations (every producer, every repetition, every escape, and the untrusted-vs-local boundary): the Principle 8 marker-neutralisation rule and the per-issue (never per-list) wrapping discipline documented above under Anti-Patterns/Constraints are this pitfall's direct fix.
+- **PF-063** — Byte-identical relocation is not semantics-preserving across a grammar boundary: the direct cause of the `###`-heading-depth rule applied to the moved D3 template.
+- Feature knowledge: **tracker-references** — owns the split mechanics in full detail: MDS build machinery (`VARIANT_MODULES`, `expandVariants`, `splitVariantSections`), the byte budget (`BUDGET_GIT_MD`, `BUDGET_SKILL_MD`, `BUDGET_LOADED_SET`, `PREAMBLE_MAX_LINES`), the containment oracle (`CONTAINMENT_EXEMPTIONS`, baselines from commit `101bda7`), and the installer overlay (`overlayGeneratedReferences`, converge-not-merge, prune). Read it before touching build-side plumbing; read this KB for what the contract means at runtime.
 - Feature knowledge: **installer-shadowing** — shadow resolution for SKILL.md and rule file follows `validateSkillShadow` / `validateRuleShadow` from the installer; `seedRuleShadow` tier logic lives in `rules.ts`.
 - Feature knowledge: **resolve-pipeline** — `/resolve` depends on `COMPLIANCE_SKILL_INSTALLED` for Phase 1b/9b/9c; resolution-summary.md format includes `## Third-Party Threads` section gated by this flag.
+</content>
