@@ -350,7 +350,7 @@ under ## Fix Separately and ## Deferred to Tech Debt."
 ```
 
 After manage-debt completes:
-- **Success**: backfill `Tracked = #\{backlog_issue_number\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item.
+- **Success**: backfill `Tracked = \{ISSUE_REF\}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item, using the backlog issue's provider-canonical rendered reference. Under `github` an `\{ISSUE_REF\}` is `#`-prefixed, so the field renders `Tracked = #\{n\}`.
 - **DEGRADED**: if Git agent returns `TRACEABILITY: DEGRADED (\{reason\})`, warn and record in resolution-summary.md; `Tracked` stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` for each affected item.
 
 ### Phase 9b: Thread Resolution + Resolution Comment
@@ -507,7 +507,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
 │  └─ Git agent (check-ci-status) → poll/fix loop
 │
-├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked=# (or TRACEABILITY: DEGRADED on failure)
+├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │  SEQUENTIAL across worktrees
 │
 ├─ Phase 9b: Thread resolution + resolution comment
@@ -618,7 +618,7 @@ Final gate: PASS | FAILED after {n} attempts
 ## Fix Separately
 | Issue | File:Line | Reason | Tracked |
 |-------|-----------|--------|---------|
-| {description} | {file}:{line} | {why out of scope} | #{backlog} |
+| {description} | {file}:{line} | {why out of scope} | {ISSUE_REF} |
 
 ## Deferred to Tech Debt
 | Issue | File:Line | Risk Factor |

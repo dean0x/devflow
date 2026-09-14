@@ -42,7 +42,7 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │       ├── bug-analysis-summary.md    # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve (if run)
 ├── design/                             # Design artifacts from /plan
-│   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
+│   └── {ISSUE_ID}-{topic-slug}.{timestamp}.md  # Design document
 ├── tickets/{slug}/                     # Ticket sets from /dynamic-tickets
 │   └── {YYYY-MM-DD_HHMM}/             # Timestamped ticket directory
 │       ├── {ticket-slug}.md            # Individual ticket files
@@ -103,7 +103,7 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Resolution summary | `resolution-summary.md` in timestamped dir | `2025-12-26_1430/resolution-summary.md` |
 | Review head marker | `.last-review-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
-| Design documents | `{issue}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
+| Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
 | Research outputs | `{type}.md` in timestamped dir | `2025-12-26_1430/codebase.md` |
 | Research summary | `research-summary.md` in timestamped dir | `2025-12-26_1430/research-summary.md` |
 | Bug analysis reports | `{focus}.md` in timestamped dir | `2025-12-26_1430/security.md` |
@@ -141,7 +141,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 | Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
 | Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
-| Design agent (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
+| Design agent (via /plan) | `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 | Research agent | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
 | Synthesize agent (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
 | Diagnose agent | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |

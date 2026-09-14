@@ -374,8 +374,8 @@ User can:
 **Store design artifact:**
 
 Write design artifact to disk:
-- If issue number: `.devflow/docs/design/\{issue-number\}-\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md`
-- If multi-issue: `.devflow/docs/design/\{first-issue-number\}-multi.\{YYYY-MM-DD_HHMM\}.md`
+- If one issue: `.devflow/docs/design/\{ISSUE_ID\}-\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
+- If multi-issue: `.devflow/docs/design/\{ISSUE_ID\}-multi.\{YYYY-MM-DD_HHMM\}.md`, using the first issue's `ISSUE_ID`
 - If no issue: `.devflow/docs/design/\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md`
 
 Create parent directory if needed.
@@ -428,8 +428,10 @@ Required sections:
 {areas needing careful review, with reasons}
 
 ### Related Issues
-Closes #{issue number}
+Closes {ISSUE_REF}
 ```
+
+Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\{n\}`.
 
 **Create or enrich GitHub issue:**
 
@@ -442,7 +444,7 @@ Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 ```
 Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
-ISSUE_INPUT: {issue_number_from_arguments if /plan invoked with #N, else omit}
+ISSUE_INPUT: {the raw candidate token from $ARGUMENTS if /plan was invoked with an issue reference, else omit}
 TASK_DESCRIPTION: {Gate 0 confirmed scope — one-line title}
 INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
 REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
