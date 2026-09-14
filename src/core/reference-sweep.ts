@@ -57,8 +57,7 @@ export async function sweepOrphanedReferences(
   knownRelPaths: ReadonlySet<string>,
 ): Promise<SweepResult> {
   const acc: SweepAccumulator = { scanned: 0, removed: [], failed: [] };
-  const known = [...knownRelPaths];
-  await sweepDirectory(root, '', 0, known, acc);
+  await sweepDirectory(root, '', 0, knownRelPaths, acc);
   return { scanned: acc.scanned, removed: acc.removed, failed: acc.failed };
 }
 
@@ -66,7 +65,7 @@ async function sweepDirectory(
   dir: string,
   prefix: string,
   depth: number,
-  known: readonly string[],
+  known: ReadonlySet<string>,
   acc: SweepAccumulator,
 ): Promise<void> {
   if (depth >= MAX_REFERENCE_SWEEP_DEPTH) return;
@@ -88,7 +87,7 @@ async function sweepDirectory(
     // leaf and removed rather than followed.
     if (entry.isDirectory()) {
       const descendant = `${relPath}/`;
-      if (known.some(p => p.startsWith(descendant))) {
+      if (hasPathUnder(known, descendant)) {
         await sweepDirectory(fullPath, relPath, depth + 1, known, acc);
         continue;
       }
@@ -103,7 +102,7 @@ async function sweepDirectory(
     }
 
     acc.scanned++;
-    if (knownHas(known, relPath)) continue;
+    if (known.has(relPath)) continue;
     try {
       await fs.rm(fullPath, { force: true });
       acc.removed.push(relPath);
@@ -113,6 +112,10 @@ async function sweepDirectory(
   }
 }
 
-function knownHas(known: readonly string[], relPath: string): boolean {
-  return known.includes(relPath);
+/** True if some path in `known` sits under the `descendant` prefix (a directory's trailing-slash relPath). */
+function hasPathUnder(known: ReadonlySet<string>, descendant: string): boolean {
+  for (const p of known) {
+    if (p.startsWith(descendant)) return true;
+  }
+  return false;
 }

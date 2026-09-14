@@ -547,9 +547,9 @@ export function splitVariantSections(
 
   const out = new Map<string, string>();
   for (const op of ops) {
-    const content = `${sections.get(op)!.join('\n').trim()}\n`;
-    if (content.trim().length === 0) return Err({ kind: 'empty-section', op });
-    out.set(op, content);
+    const trimmed = sections.get(op)!.join('\n').trim();
+    if (trimmed.length === 0) return Err({ kind: 'empty-section', op });
+    out.set(op, `${trimmed}\n`);
   }
   return Ok(out);
 }
