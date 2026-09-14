@@ -417,10 +417,17 @@ describe('Result error-union completeness', () => {
   });
 
   it('succeeding calls never carry an error and failing calls never carry a value', () => {
+    // The discriminant is asserted FIRST, on its own line. Folding it into the
+    // same expression (`good.ok && 'error' in good`) makes the assertion pass by
+    // short-circuit under exactly the failure it claims to catch: a `good` that
+    // came back `{ok: false}` yields `false`, which is the expected value.
     const good = validateOutputName('git');
-    expect(good.ok && 'error' in good).toBe(false);
+    expect(good.ok, 'validateOutputName("git") must succeed for this check to mean anything').toBe(true);
+    expect('error' in good, 'a successful Result must not carry an error arm').toBe(false);
+
     const bad = resolveOutputDir(ROOT, 'dist/wrong-dir');
-    expect(!bad.ok && 'value' in bad).toBe(false);
+    expect(bad.ok, 'resolveOutputDir must refuse a non-allowlisted directory').toBe(false);
+    expect('value' in bad, 'a refused Result must not carry a value arm').toBe(false);
   });
 });
 

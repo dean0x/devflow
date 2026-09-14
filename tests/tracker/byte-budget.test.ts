@@ -414,33 +414,33 @@ describe('byte budget: four-shape table (recorded)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. The budget gates — EXPECTED RED until T2 lands
+// 2. The budget gates
 // ---------------------------------------------------------------------------
 
 describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
-  it('EXPECTED RED until T2: chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
-    // The phase's progress meter. T2 moves ~9,400 characters of GitHub mechanics
-    // out of the always-loaded agent; until that lands this is red BY DESIGN and
-    // must not be skipped, relaxed, or have its constant raised.
+  it('chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
+    // The always-loaded half of the split. The only legitimate way back under this
+    // line is to move text out of the agent — never to raise the constant.
     expect(
       gitMd.chars,
       `dist/agents/git.md is ${gitMd.chars} ch, budget ${BUDGET_GIT_MD} ch ` +
-      `(over by ${gitMd.chars - BUDGET_GIT_MD}). EXPECTED RED until T2 moves the op mechanics. ` +
-      `Do NOT raise BUDGET_GIT_MD — §14.5: no threshold is lowered, and a budget raised to ` +
-      `meet the artifact measures nothing.`,
+      `(over by ${gitMd.chars - BUDGET_GIT_MD}). Move the mechanics into the operation's ` +
+      `generated reference. Do NOT raise BUDGET_GIT_MD — §14.5: no threshold is lowered, and a ` +
+      `budget raised to meet the artifact measures nothing.`,
     ).toBeLessThanOrEqual(BUDGET_GIT_MD);
   });
 
-  it('EXPECTED RED until T2: chars(skills/git/SKILL.md) <= BUDGET_SKILL_MD', () => {
+  it('chars(skills/git/SKILL.md) <= BUDGET_SKILL_MD', () => {
     expect(
       skillGit.chars,
       `skills/git/SKILL.md is ${skillGit.chars} ch, budget ${BUDGET_SKILL_MD} ch ` +
-      `(over by ${skillGit.chars - BUDGET_SKILL_MD}). EXPECTED RED until T2 cuts the D3 template, ` +
-      `the throttling recipe, the PR-comment and releases sections, and the naming authority block.`,
+      `(over by ${skillGit.chars - BUDGET_SKILL_MD}). The skill carries doctrine, not mechanics: ` +
+      `per-operation steps belong in that operation's generated reference. Do NOT raise ` +
+      `BUDGET_SKILL_MD.`,
     ).toBeLessThanOrEqual(BUDGET_SKILL_MD);
   });
 
-  it('EXPECTED RED until the op mechanics move: the worst-case tracker spawn <= BUDGET_LOADED_SET', () => {
+  it('the worst-case tracker spawn <= BUDGET_LOADED_SET', () => {
     // worst = preloaded set
     //       + 0                                    /* _mcp.md, GitHub path */
     //       + max_op chars(tracker/github/{op}.md)
@@ -450,12 +450,26 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     const worst = worstCaseReferenceLoad();
     const total = PRELOADED + 0 + largest.chars + worst.chars;
 
+    // referenceChars() answers 0 for a file it cannot resolve, so an absent
+    // dist/skills/git/references/ drives BOTH terms to 0 and this gate passes by
+    // measuring nothing — the PF-018 shape, in the one test whose green is the
+    // phase's headline claim. The non-vacuity floor belongs HERE, not in the
+    // four-shape table's `it` (which deliberately tolerates absent rows).
+    expect(
+      largest.chars,
+      'no tracker mechanics file resolved — the budget summed nothing. Run `npm run build`.',
+    ).toBeGreaterThan(0);
+    expect(
+      worst.chars,
+      'no one-spawn reference load resolved — the budget summed nothing. Run `npm run build`.',
+    ).toBeGreaterThan(0);
+
     expect(
       total,
       `worst-case tracker spawn is ${total} ch (preloaded ${PRELOADED} + max_op ${largest.chars} ` +
       `[${largest.op}] + worst one-spawn load ${worst.chars} [${worst.op}]), budget ` +
-      `${BUDGET_LOADED_SET} ch. EXPECTED RED until T2: the split has to make the always-loaded ` +
-      `half smaller than the references it adds back.`,
+      `${BUDGET_LOADED_SET} ch. The split only pays for itself while the always-loaded half ` +
+      `stays smaller than the references it adds back; Do NOT raise BUDGET_LOADED_SET.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET);
   });
 });
@@ -527,14 +541,27 @@ function collectTrackerNamingLines(content: string): string[] {
 // token here must exist in the template; every template token must be listed
 // here".
 
+/**
+ * Named collector: the entries of `have` that `want` does not contain, labelled
+ * `{op} → {rel}`.
+ *
+ * Both directions of the bidirectional check and the known-bad probe below call
+ * THIS — a probe that re-spells the comparison inline proves the expectation, not
+ * the guard, and stays green while the real one is mis-scoped (ADR-024).
+ */
+export function collectMissingFrom(
+  op: string,
+  have: ReadonlySet<string>,
+  want: ReadonlySet<string>,
+): string[] {
+  return [...have].filter(rel => !want.has(rel)).map(rel => `${op} → ${rel}`);
+}
+
 describe('byte budget: formula file-set ↔ nameable file-set (both directions)', () => {
   it('every file the formula sums for an op is nameable from that op (direction 1)', () => {
     const unnameable: string[] = [];
     for (const op of ALL_OPS) {
-      const nameable = nameableFrom(op);
-      for (const rel of summedFor(op)) {
-        if (!nameable.has(rel)) unnameable.push(`${op} → ${rel}`);
-      }
+      unnameable.push(...collectMissingFrom(op, summedFor(op), nameableFrom(op)));
     }
     expect(
       unnameable,
@@ -546,10 +573,7 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
   it('every file nameable from an op is summed by the formula (direction 2)', () => {
     const uncounted: string[] = [];
     for (const op of ALL_OPS) {
-      const summed = summedFor(op);
-      for (const rel of nameableFrom(op)) {
-        if (!summed.has(rel)) uncounted.push(`${op} → ${rel}`);
-      }
+      uncounted.push(...collectMissingFrom(op, nameableFrom(op), summedFor(op)));
     }
     expect(
       uncounted,
@@ -572,12 +596,15 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
   });
 
   it('known-bad probe: an unmodelled nameable file is reported by direction 2', () => {
-    // The probe runs the real comparison over a seeded pair of sets, so anchoring
-    // or scoping the scan without keeping it able to see an extra file is red.
+    // Drives collectMissingFrom — the SAME collector both directions above call —
+    // over a seeded pair of sets, so a collector that stopped reporting extras
+    // takes this probe red with the guards it backs.
     const summed = new Set(['tracker/github/setup-task.md']);
     const nameable = new Set(['tracker/github/setup-task.md', 'learn-conventions.md']);
-    const uncounted = [...nameable].filter(rel => !summed.has(rel));
-    expect(uncounted).toEqual(['learn-conventions.md']);
+    expect(collectMissingFrom('setup-task', nameable, summed))
+      .toEqual(['setup-task → learn-conventions.md']);
+    // …and the symmetric direction reports nothing when nothing is extra.
+    expect(collectMissingFrom('setup-task', summed, nameable)).toEqual([]);
   });
 });
 
