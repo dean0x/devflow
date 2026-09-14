@@ -1,7 +1,7 @@
 ---
 feature: feature-knowledge-system
 name: Feature Knowledge Base System
-description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or working on the MDS build pipeline and generator hosts (build-mds.ts, mds-variants.ts, git.mds). Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-mds, _knowledge.mds, index.md, apply-feature-knowledge, generator host, output-dir, dist/agents, mds-variants, validateOutputName, resolveOutputDir, stripGeneratorFrontmatter, mds-manifest."
+description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or working on the MDS build pipeline and its three host kinds (build-mds.ts, mds-variants.ts, git.mds). Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-mds, _knowledge.mds, index.md, apply-feature-knowledge, generator host, reference module, skill-refs, output-dir, dist/agents, mds-variants, validateOutputName, resolveOutputDir, expandVariants, splitVariantSections, VARIANT_MODULES, TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS, MIN_VARIANT_PAIRS, LEGALISED_IN_PHASE2, compiledSkillRefsDir, pruneOrphanReferences, stripGeneratorFrontmatter, mds-manifest."
 category: architecture
 directories:
   - src/cli/commands/knowledge
@@ -12,11 +12,13 @@ directories:
   - scripts/build-mds.ts
   - src/core/mds-variants.ts
   - src/assets/agents/git.mds
+  - src/assets/mds/tracker/_github.mds
+  - src/assets/mds/git/_references.mds
   - tests/fixtures/mds-manifest.ts
   - tests/build-mds-generator-hosts.test.ts
   - tests/guards/dist-agents.test.ts
 created: 2026-06-21
-updated: 2026-09-09
+updated: 2026-09-14
 ---
 
 # Feature Knowledge Base System
@@ -40,14 +42,20 @@ those paths to the current branch itself (scoped pathspec, no push, no force, no
 team opts back out by re-adding `.devflow/features/` to their own `.gitignore`.
 
 This knowledge base also covers the **MDS build pipeline** (`scripts/build-mds.ts` +
-`src/core/mds-variants.ts`) that compiles `.mds` sources into `dist/commands/` (13 command
-hosts) and `dist/agents/` (1 generator host, the Git agent). `build-mds.ts` is the single
-compiler for BOTH host kinds, so two KBs legitimately cover it from different sides: the
-`dynamic-workflow-engine` KB owns the command-host side (what the compiled commands must
-say), and this KB owns the pipeline itself — discovery, destination validation, the
-frontmatter strips, and the generator-host convention that lets an *agent* be compiled
-from `.mds`. The knowledge partials (`_knowledge.mds`) are themselves MDS sources, which
-is why the mechanism is documented here rather than only where its outputs are asserted.
+`src/core/mds-variants.ts`) that compiles `.mds` sources into three output kinds:
+`dist/commands/` (13 command hosts), `dist/agents/` (1 generator host, the Git agent), and
+— as of Tracker Phase 2 (PR #339) — `dist/skills/git/references/` (2 **reference modules**
+that each fan out into many files). `build-mds.ts` is the single compiler for all three host
+kinds, so several KBs legitimately cover it from different sides: **this KB owns the
+pipeline itself** — discovery, destination validation, the frontmatter strips, variant
+expansion/section-splitting, and the prune step, for all three variants. The sibling
+`tracker-references` KB owns what the generated reference files **contain** (the tracker
+operation mechanics, the byte-budget formula, and the installer's overlay of the compiled
+tree into the shipped `devflow:git` skill) — read that KB for content, this one for the
+compiler that produces it. The `dynamic-workflow-engine` KB owns the command-host side (what
+the compiled commands must say). The knowledge partials (`_knowledge.mds`) are themselves
+MDS sources, which is why the mechanism is documented here rather than only where its
+outputs are asserted.
 
 ## System Context
 
@@ -59,8 +67,8 @@ Decisions pipeline). Knowledge is NOT a Learning task — it is written in-comma
 memory is handled by the background-memory-update worker.
 
 **External dependencies**: MDS compiler (`@mdscript/mds`) at build time to compile the
-knowledge partials AND the Git agent generator host; `claude` agent at runtime (the
-Knowledge agent, model=sonnet) to write KNOWLEDGE.md.
+knowledge partials, the Git agent generator host, AND the two reference modules; `claude`
+agent at runtime (the Knowledge agent, model=sonnet) to write KNOWLEDGE.md.
 
 **Toggle**: `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
 Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/core/feature-config.ts`).
@@ -73,10 +81,12 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 | MDS partial module | `src/assets/commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
 | Host command sources (9) | `src/assets/commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
 | Host command sources (4 dynamic) | `src/assets/commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
-| Build script | `scripts/build-mds.ts` | Frontmatter-driven: walks the whole repo (minus `IGNORE_DIRS`, to a bounded depth) for `.mds` files declaring a non-empty `output-dir:`, validates the destination + emitted filename via `src/core/mds-variants.ts`, and compiles each to `{output-dir}/{name}.md` (or `{output-name}.md`); refuses two hosts claiming one destination; prunes unclaimed `.md` files from `dist/agents/` after a clean build; hard-fails on any error |
-| Output validation module | `src/core/mds-variants.ts` | Pure, zero-I/O core module: `validateOutputName` (filename charset/traversal) and `resolveOutputDir` (two-entry allowlist + backslash + canonical-spelling + containment check, returning `{ variant, abs }`); returns `Result`, never throws or exits — the shell (`build-mds.ts`) owns every `process.exit` (avoids PF-014, applies ADR-013) |
+| Build script | `scripts/build-mds.ts` | Frontmatter-driven: walks the whole repo (minus `IGNORE_DIRS`, to a bounded depth) for `.mds` files declaring a non-empty `output-dir:`, validates the destination + emitted filename(s) via `src/core/mds-variants.ts`, and compiles each to `{output-dir}/{name}.md` (command/agent hosts) or to `{output-dir}/{subdir}/{op}.md` per operation (reference modules); refuses two hosts claiming one destination; prunes unclaimed `.md` files from `dist/agents/` and, recursively, from `dist/skills/git/references/`, after a clean build; hard-fails on any error |
+| Output validation + variant module | `src/core/mds-variants.ts` | Pure, zero-I/O core module. Answers four questions for an MDS host: is the emitted filename safe (`validateOutputName`); is the declared directory writable, and which `HostVariant` does it select (`resolveOutputDir`, 3-entry allowlist); which files does a reference module fan out into (`expandVariants` over the `VARIANT_MODULES` registry); which slice of the compiled body belongs to each (`splitVariantSections`). Returns `Result`, never throws or exits — the shell (`build-mds.ts`) owns every `process.exit` (avoids PF-014, applies ADR-013) |
 | Generator host | `src/assets/agents/git.mds` | The Git agent's `.mds` source; declares `output-dir: dist/agents` in a first frontmatter block, carries the agent's real frontmatter (name/description/model/skills) in a second block; compiles to `dist/agents/git.md` |
-| MDS name manifest | `tests/fixtures/mds-manifest.ts` | `MDS_COMMAND_HOSTS` (13), `MDS_PARTIALS` (11), `MDS_GENERATOR_HOSTS` (`['git']`), `ALL_MDS_HOSTS` (14), `DIST_COMMAND_FILES` (14, incl. hand-authored `release.md`) — the single named-set source every count-literal test compares against, in both directions |
+| Reference modules (2) | `src/assets/mds/tracker/_github.mds`, `src/assets/mds/git/_references.mds` | ONE leading steering block (`output-dir: dist/skills/git/references`) each; the stripped body is a concatenation of per-operation sections, each introduced by a `<!-- op: NAME -->` marker, compiled to one file per op under `{output-dir}/{subdir}/{op}.md`. Content ownership belongs to the `tracker-references` KB — see there for what each op's mechanics say |
+| Reference-module registry | `VARIANT_MODULES` in `src/core/mds-variants.ts` | `{ source, subdir, kind: 'fanout' \| 'named', ops }[]` — the closed table naming every reference module, its destination subdir, and the op roster that decides its emitted filenames; a `skill-refs` host whose source path is absent from this table is refused rather than guessed at |
+| MDS name manifest | `tests/fixtures/mds-manifest.ts` | `MDS_COMMAND_HOSTS` (13), `MDS_PARTIALS` (12), `MDS_GENERATOR_HOSTS` (`['git']`), `MDS_REFERENCE_MODULES` (2 source paths), `ALL_MDS_HOSTS` (14 — filenames only, excludes reference modules by construction), `ALL_DISCOVERED_HOSTS` (16 — everything `output-dir:` finds), `DIST_COMMAND_FILES` (14, incl. hand-authored `release.md`) — the single named-set source every count-literal test compares against, in both directions |
 | Author agent | `src/assets/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
@@ -118,17 +128,20 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 `npm run build:mds` (part of `npm run build` = `build:cli` + `build:mds`):
 
 1. Walks the repo from root, skipping `IGNORE_DIRS`: `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`, `tests`, `coverage` (`tests` and `coverage` are skipped so a `.mds` committed under either — a fixture or a coverage artifact, never a shipped host — can never be compiled into the real `dist/` tree; the skip is by directory **name**, so it holds under `DEVFLOW_MDS_ROOT` as well, and a fixture host planted at `<tmpRoot>/tests/` is likewise invisible. A `DEVFLOW_MDS_ROOT` env var lets negative-path tests redirect the whole walk to a throwaway temp root instead of the real repo). The recursion is bounded by `MAX_WALK_DEPTH` (12, counting the root as depth 0; the deepest `.mds` in the shipped tree sits at depth 4 and the deepest directory under `src/assets/` at depth 6). The bound **throws**, it does not truncate: a host skipped for being too deep would compile nothing while the build still printed its counts and exited 0, and no test could distinguish "not there" from "never looked" (PF-018). `readdirSync` tolerates `ENOENT`/`ENOTDIR` (an entry can vanish between the parent's readdir and the descent) and rethrows everything else
-2. For each `.mds` file: reads the FIRST `---…---` frontmatter block with a scalar regex (`readFrontmatterKey`, not a YAML parse — the build must not gain a YAML dependency); if it declares a non-empty `output-dir:` key, treats it as a host, else a partial (skipped). `BUILD_KEYS` (`output-dir`, `output-name`) is the one list of keys the build consumes; it drives both the read here and the strip in step 5, so a key the build reads can never leak into a shipped artifact. A build key that is present but **valueless** is a malformed host and hard-fails during discovery with an explicit message (`output-dir: is empty …`, `output-name: is empty …`) — `readFrontmatterKey` returns `''` (not null) for a bare key, so `?? basename` would not fire and a silent basename fallback would hide the authoring mistake. Discovery precedes every plan and every write, so this exit leaves `dist/` wholly untouched
-3. Validates the declared `output-dir` via `resolveOutputDir(root, declared)` from `src/core/mds-variants.ts`: containment (`isContainedIn`) → backslash rejection (declarations are POSIX-spelled by contract; `path.posix.normalize` leaves `\` untouched, so `dist\commands` would pass the canonical check on win32) → canonical-spelling check (POSIX-normalized, no trailing slash — `dist/commands/`, `./dist/agents`, `dist/skills/../commands` all refused) → allowlist match. On success it returns `{ variant, abs }` — the resolved absolute directory plus the `HostVariant` (`'commands' | 'agents'`) the matching allowlist entry declares, which is what selects the strip strategy in step 5. All four error kinds (`escapes-root`, `backslash-separator`, `non-canonical`, `not-allowlisted`) are rendered by an exhaustive `switch` with a `never` default in `build-mds.ts` and **thrown**, so `main()`'s aggregation reports every refusal and exits 1 once after the loop — no mid-loop `process.exit` leaving `dist/` half-updated. Message text: "escapes the repo root", "is not spelled canonically — write '…' instead", "is not the expected 'dist/commands' or 'dist/agents' — typo?"
-4. Validates the filename that will be emitted (source basename, or the optional `output-name:` key's value) via `validateOutputName` — charset `^[a-z0-9][a-z0-9._-]{0,63}$`, refuses `..`/`.` segments and path separators — before it is joined onto the destination ("… is not a valid output filename"). Steps 3–4 run as a **plan pass over every host before the first byte is written**: `planHost` resolves a `{variant, outAbs, dest}` and the loop records each `dest` in a `Map<destAbs, HostEntry[]>`. A destination claimed by two or more hosts disqualifies **every** claimant (letting the first win would pick arbitrarily between two equally-declared intents and write it) — the build errors naming all claimants and writes none of them, while unrelated healthy hosts still compile. `output-name:` makes the collision reachable from one directory; two same-basename hosts in different source directories reach it with no key at all
-5. Compiles each host via `@mdscript/mds` `compileFile()`, THEN strips frontmatter — dispatched by an exhaustive `switch` over the `HostVariant` returned in step 3 (`never` default), never by comparing the resolved path against a re-derived `dist/agents` constant. For a **command host** (variant `commands`), `stripBuildKeys` removes every `BUILD_KEYS` line from the single real frontmatter block (every other key, including `|`, `[]`, em-dashes, survives byte-untouched — no YAML round-trip); for a **generator host** (variant `agents`), `stripGeneratorFrontmatter` removes the ENTIRE first frontmatter block, promoting the second block (the artifact's real frontmatter, which the compiler treated as ordinary body text since only byte-offset-0 is frontmatter) into place with its trailing blank line intact. The generator strip verifies **both ends** of the transform: a leading block must exist before the slice (PRE), and a second block must be what the slice exposes (POST). A single-block generator host — the shape every hand-authored agent has, so the likeliest thing an author converting an agent will write — would otherwise lose its whole frontmatter (`name:`/`description:`/`model:`) and ship headerless with the build reporting success (PF-061). Both strips run AFTER `compileFile` — the compiler emits a byte-0 frontmatter block verbatim (never interpolated), so block 1 survives compilation unchanged and is safe to slice off afterward.
-6. Writes `{basename}.md` — or `{output-name}.md` — to the declared `output-dir` via a temp file (`{dest}.{pid}.tmp` — scoped to the writing process so two concurrent builds never share one staging path) + `renameSync` (per-file atomic; the `.tmp` is cleaned up on rename failure; concurrent readers, e.g. parallel vitest workers, never see a partial write)
-7. Hard-fails on any compile error — no stale command ever ships. Prints `N partial(s) skipped (no output-dir:)` and `N host(s) to compile:` — both lines are parsed by `tests/build-mds-generator-hosts.test.ts` §6 (AC-1.8); do not reword them.
-8. **Prunes `dist/agents/`** (`pruneOrphanAgents`, only after step 7 finds zero errors): every `.md` there that no host in this build emitted is deleted, one `pruned:   {path} (no generator host)` line each. That directory is gitignored and outranks `src/assets/agents/` in every consumer of `agentSourceDirs()` — the installer's resolve and `loadShippedDefaults`'s first-wins walk alike — so a file left behind — a renamed host's old output, a hand-dropped one — is installed in preference to the audited source on every `devflow init`; the CI parity check catches it a commit later, which is too late for the machine that ran the build. Scope is deliberate: **`dist/commands/` is never pruned** (it also receives `release.md`, copied verbatim from a hand-authored source that is not a host, so "unclaimed" there does not mean "orphan"), non-`.md` entries are left alone (a concurrent build's `{dest}.{pid}.tmp` staging file lives there), and a refused build prunes nothing — `dist/` is left exactly as the refusal found it. The directory comes from `AGENTS_OUTPUT_DIR` in `mds-variants.ts` (the allowlist table's own spelling) rather than a second hardcoded path, because a build with zero generator hosts — where every file in the directory is an orphan — cannot derive it from the plan.
+2. For each `.mds` file: reads the FIRST `---…---` frontmatter block with a scalar regex (`readFrontmatterKey`, not a YAML parse — the build must not gain a YAML dependency); if it declares a non-empty `output-dir:` key, treats it as a host, else a partial (skipped). `BUILD_KEYS` (`output-dir`, `output-name`) is the one list of keys the build consumes; it drives both the read here and the strip in step 5 (for command hosts), so a key the build reads can never leak into a shipped artifact. A build key that is present but **valueless** is a malformed host and hard-fails during discovery with an explicit message (`output-dir: is empty …`, `output-name: is empty …`) — `readFrontmatterKey` returns `''` (not null) for a bare key, so `?? basename` would not fire and a silent basename fallback would hide the authoring mistake. Discovery precedes every plan and every write, so this exit leaves `dist/` wholly untouched
+3. Validates the declared `output-dir` via `resolveOutputDir(root, declared)` from `src/core/mds-variants.ts`: containment (`isContainedIn`) → backslash rejection (declarations are POSIX-spelled by contract; `path.posix.normalize` leaves `\` untouched, so `dist\commands` would pass the canonical check on win32) → canonical-spelling check (POSIX-normalized, no trailing slash — `dist/commands/`, `./dist/agents`, `dist/skills/../commands` all refused) → allowlist match. On success it returns `{ variant, abs }` — the resolved absolute directory plus the `HostVariant` (`'commands' | 'agents' | 'skill-refs'`) the matching allowlist entry declares, which is what selects the strip strategy in step 5. All four error kinds (`escapes-root`, `backslash-separator`, `non-canonical`, `not-allowlisted`) are rendered by an exhaustive `switch` with a `never` default in `build-mds.ts` and **thrown**, so `main()`'s aggregation reports every refusal and exits 1 once after the loop — no mid-loop `process.exit` leaving `dist/` half-updated
+4. **Plans the destination(s) before writing anything** (`planHost`). For `commands`/`agents` this is one file: the emitted filename (source basename, or the optional `output-name:` key's value) is validated via `validateOutputName` — charset `^[a-z0-9][a-z0-9._-]{0,63}$`, refuses `..`/`.` segments and path separators. For `skill-refs`, `output-name:` is **refused outright** (there is nothing for it to name — see Gotchas), the module's source path is looked up in `VARIANT_MODULES`, and `expandVariants([module])` turns its `ops` list into the flat `(module, op)` pair list this host will emit, each path re-validated segment-by-segment. Every host's destination(s) are recorded in a `Map<destAbs, HostEntry[]>` across the WHOLE plan pass — a destination claimed by two or more hosts disqualifies **every** claimant (letting the first win would pick arbitrarily between two equally-declared intents), and the build errors naming all claimants while unrelated healthy hosts still compile
+5. Compiles each host via `@mdscript/mds` `compileFile()`, THEN strips frontmatter — dispatched by an exhaustive `switch` over the `HostVariant` returned in step 3 (`never` default), never by comparing the resolved path against a re-derived destination constant. `commands` → `stripBuildKeys` removes every `BUILD_KEYS` line from the single real frontmatter block (every other key survives byte-untouched — no YAML round-trip); `agents` → `stripGeneratorFrontmatter` removes the ENTIRE first frontmatter block, promoting the second block (the artifact's real frontmatter) into place — verified on both ends (PRE: a leading block must exist; POST: a second block must be what the slice exposes — a single-block host, the shape every hand-authored agent has, would otherwise ship headerless with the build reporting success, PF-061); `skill-refs` → `stripReferenceFrontmatter` also removes the one leading block but verifies the OPPOSITE postcondition — a second block must NOT follow it, because a skill reference ships as plain markdown with no frontmatter at all (an author copying the generator-host habit of two blocks would otherwise leak `output-dir:` into every emitted file as content). All three strips run AFTER `compileFile` — the compiler emits a byte-0 frontmatter block verbatim, so block 1 survives compilation unchanged and is safe to slice off afterward
+6. For `skill-refs`, `materializeOutputs` then hands the stripped body to `splitVariantSections(body, ops)` (the same pure module), which walks the body line by line for `<!-- op: NAME -->` markers, drops any module-level preamble before the first marker (it belongs to no operation, so shipping it would duplicate it into every file), and returns one document per registered op. Bidirectional and load-bearing both ways: `unknown-section` (a marker names an op the registry doesn't) and `missing-section` (the registry names an op the body never marks) both refuse the build; `empty-section` is a third, independent refusal (GAP-44) for a marker whose body is blank — the other two checks cannot see it, because a marker with an empty body compiles cleanly and would otherwise ship a zero-byte reference with no build signal at all
+7. Writes each output — `{basename}.md`, `{output-name}.md`, or `{subdir}/{op}.md` per pair — to the declared `output-dir` via a temp file (`{dest}.{pid}.tmp` — scoped to the writing process so two concurrent builds never share one staging path) + `renameSync` (per-file atomic; the `.tmp` is cleaned up on rename failure; concurrent readers, e.g. parallel vitest workers, never see a partial write — avoids PF-011, whose ENOENT-window shape is exactly what the temp-then-rename sequence closes)
+8. Hard-fails on any compile error — no stale command ever ships. Prints `N partial(s) skipped (no output-dir:)` and `N host(s) to compile:` — both lines are parsed by `tests/build-mds-generator-hosts.test.ts` §6 (AC-1.8); do not reword them. There is **no separate "references emitted" line**: a reference module's fan-out is folded into the same `compiled: {source} → {dest}` line every host prints, rendered as `{outDir}/ (N file(s))` when a host emits more than one file, rather than as a distinct census line
+9. **Prunes** (`main()`, only after step 8 finds zero errors): `pruneOrphanAgents` deletes every `.md` under `dist/agents/` that no host in this build emitted, one `pruned: {path} (no generator host)` line each; `pruneOrphanReferences` runs the SAME sweep (shared `pruneOrphans` helper, bounded by `MAX_PRUNE_DEPTH = 8`) recursively over `dist/skills/git/references/`, one `pruned: {path} (no reference module)` line each — recursion is not optional there, since the tree is nested `tracker/{provider}/{op}.md` and a flat sweep would leave every orphan exactly where it lives. Both directories are gitignored and outrank their `src/` counterparts in every consumer that resolves from them, so a file left behind installs in preference to the audited source on every `devflow init`. Scope is deliberate: **`dist/commands/` is never pruned** (it also receives `release.md`, copied verbatim from a hand-authored source that is not a host); non-`.md` entries are left alone in every pruned directory (a concurrent build's `{dest}.{pid}.tmp` staging file lives there); and a refused build prunes nothing. `AGENTS_OUTPUT_DIR` and `SKILL_REFS_OUTPUT_DIR` (both the allowlist table's own spellings) name the prune targets even when zero hosts of that kind are planned — the case where every file in the directory is an orphan, so the target cannot be derived from the plan
 
-The 13/14/14 count rule is owned by the `dynamic-workflow-engine` KB — see there for which number counts what and why the two 14s are different sets.
+**What is and isn't test-verified today**: `pruneOrphanAgents` has a dedicated describe block ("orphans in dist/agents/ are pruned") in `tests/build-mds-generator-hosts.test.ts` covering delete-and-report, claimed-survives, refused-build-prunes-nothing, non-`.md`-survives, and `dist/commands/`-untouched. `pruneOrphanReferences` shares the same `pruneOrphans` implementation but, as of PR #339, has **no equivalent dedicated test** — its correctness is exercised only indirectly, through the whole-tree byte-compare in `tests/build-mds-generator-hosts.test.ts` (which would catch a *missing* or *stale* reference file, but not specifically assert the *prune-and-report* behavior for an orphaned one). Treat this as a known coverage gap, not a documented guarantee, until a describe block exists for it.
 
-What this KB owns is the split those numbers count: the build has two host kinds. 13 MDS-compiled **command** hosts (`MDS_COMMAND_HOSTS` in `tests/fixtures/mds-manifest.ts`) — 9 knowledge hosts (`src/assets/commands/{name}.mds`) + 4 dynamic hosts (`src/assets/commands/dynamic-*.mds`) — plus one **generator host** outside `commands/`: `src/assets/agents/git.mds`, which declares `output-dir: dist/agents` and compiles to `dist/agents/git.md`. `MDS_PARTIALS` (11, `src/assets/commands/_partials/`) have no `output-dir:` and are skipped automatically; the `_` prefix convention is also enforced structurally — `validateOutputName` would refuse a filename starting with `_` if a partial were ever mistakenly treated as a host, since the regex requires `[a-z0-9]` as the first character.
+The 13/14/14 count rule is owned by the `dynamic-workflow-engine` KB — see there for which number counts what and why the two 14s are different sets. What changed in Phase 2: the discovery census (step 8 above) now reports **12 partials / 16 hosts** (`MDS_PARTIALS.length` / `ALL_DISCOVERED_HOSTS.length`), where 16 = 13 command hosts + 1 generator host + 2 reference modules. `DIST_COMMAND_FILES` (14 files in `dist/commands/`) is unaffected — reference modules write nowhere near that directory.
+
+What this KB owns is the split those numbers count: the build has three host kinds. 13 MDS-compiled **command** hosts (`MDS_COMMAND_HOSTS`) — 9 knowledge hosts + 4 dynamic hosts — plus one **generator host** (`src/assets/agents/git.mds` → `dist/agents/git.md`) plus two **reference modules** (`MDS_REFERENCE_MODULES`, fanning out to `dist/skills/git/references/`). `MDS_PARTIALS` (12, `src/assets/commands/_partials/`) have no `output-dir:` and are skipped automatically; the `_` prefix convention is also enforced structurally — `validateOutputName` would refuse a filename starting with `_` if a partial were ever mistakenly treated as a one-file host, and a reference module's op names come from `VARIANT_MODULES` rather than its own `_`-prefixed basename, so the same convention holds there for a different reason (there is no basename fallback to protect).
 
 ## Integration Patterns
 
@@ -149,13 +162,14 @@ knowledge creation block instead of using `knowledge_writeback()`, because the p
 writeback list omits research. This is intentional — the bespoke block is the equivalent
 of `knowledge_writeback` for the research workflow.
 
-**dist/agents as a shipping artifact directory**: Compiling the Git agent from a generator
-host makes `dist/agents/` a second build output directory alongside `dist/commands/`, with
-the same three properties `tests/guards/dist-agents.test.ts` enforces: (a) source↔output
-parity in both directions, fail-loud (never a silent `catch { return }` skip on a missing
-build — PF-018), (b) no leaked `\{`/`\}` escape sequences in compiled output (PF-024), (c)
-no agent with both a hand-authored `.md` and a generator `.mds` source (the resolver would
-silently pick a winner). The dist-first precedence has exactly one owner: `agentSourceDirs()` in
+**dist/ as a shipping artifact area with three destinations**: Compiling the Git agent and
+the two reference modules makes `dist/agents/` and `dist/skills/git/references/` shipping
+output directories alongside `dist/commands/`. `dist/agents/` carries the same three
+properties `tests/guards/dist-agents.test.ts` enforces: (a) source↔output parity in both
+directions, fail-loud (never a silent `catch { return }` skip on a missing build — PF-018),
+(b) no leaked `\{`/`\}` escape sequences in compiled output (PF-024), (c) no agent with both
+a hand-authored `.md` and a generator `.mds` source (the resolver would silently pick a
+winner). The dist-first precedence has exactly one owner: `agentSourceDirs()` in
 `src/core/assets.ts`, a non-empty tuple spelled MOST-PREFERRED FIRST
 (`[compiledAgentsDir(), agentsDir()]`). Order is invisible to the type system — a list
 spelled the other way round still typechecks and silently inverts the answer — so every
@@ -163,19 +177,16 @@ consumer takes that list as-is and never re-spells it. Consumers: the installer'
 agent-source loop (first hit wins; a hit on no directory throws, naming every candidate
 path plus an `npm run build:mds` hint); `loadShippedDefaults(dirs = agentSourceDirs(),
 opts)` (walks the list first-wins over a per-directory `readDirDefaults(dir)`, tolerating
-a missing directory symmetrically on EVERY entry — a `dist/agents/` that does not exist
-yet and a `src/assets/agents/` that does not either are the same empty map here). What
-catches an empty source tree is not a throw: after the walk, `loadShippedDefaults` emits
-ONE aggregate `onWarning` naming every `getAllAgentNames()` entry no directory supplied,
-which `reapplyAgentMapping` surfaces in `ReapplyResult.warnings` and
-`src/cli/commands/agents.ts` logs — it warns rather than throwing because `devflow agents
---list` must keep rendering. The test resolver `resolveAgentSource` in `tests/helpers.ts`
-reads the same order from `agentSourceDirs()` but is a different resolver with a stricter
-contract: only its dist side is ENOENT-tolerant, and a missing src file throws with a
-build hint (it returns `origin: 'dist'` for the Git agent, `origin: 'src'` for every other
-agent). `npm run
-build:cli` alone no longer produces installable agents — `npm run build:mds` (or the
-combined `npm run build`) is required.
+a missing directory symmetrically on EVERY entry). The test resolver `resolveAgentSource` in
+`tests/helpers.ts` reads the same order from `agentSourceDirs()` but is a different resolver
+with a stricter contract: only its dist side is ENOENT-tolerant, and a missing src file
+throws with a build hint. `dist/skills/git/references/` has an analogous accessor,
+`compiledSkillRefsDir()` in `src/core/assets.ts`, which reads `SKILL_REFS_OUTPUT_DIR` off
+the allowlist table rather than re-spelling the path — the installer's reference overlay
+(owned by the `tracker-references` and `installer-shadowing` KBs) is that directory's
+consumer, the way `agentSourceDirs()`'s installer loop consumes `dist/agents/`. `npm run
+build:cli` alone no longer produces installable agents or references — `npm run build:mds`
+(or the combined `npm run build`) is required.
 
 ## Constraints
 
@@ -183,8 +194,8 @@ combined `npm run build`) is required.
 - **index.md line format**: `- **{slug}** — {areas} — {Use-when description}` — frontmatter is authoritative if the line format changes.
 - **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `.devflow/config.json` is the sole toggle.
 - **No concurrent lock**: `index.md` write-through may clobber concurrent writes, but the frontmatter fallback self-heals. `index.md` is git-tracked (shared), so it can also merge-conflict when two branches add different slugs — resolve by keeping both lines.
-- **Output-dir allowlist is closed**: `ALLOWED_OUTPUT_DIRS` in `mds-variants.ts` holds exactly `{ dir: 'dist/commands', variant: 'commands' }` and `{ dir: 'dist/agents', variant: 'agents' }`. Adding a third build destination means adding it to that one table — there is no other extension point, and `satisfies` forces the new entry to declare a `HostVariant`. Reusing an existing variant is a one-line change; introducing a new one widens the union and breaks every exhaustive dispatch over it until the new case is handled (that is the intended friction, not an obstacle to route around).
-- **Phase-1 scope fence (AC-1.2)**: The generator-host mechanism intentionally has no variant expansion, `@if` conditionals, or per-provider templated filenames (`{provider}.md`). `tests/guards/dist-agents.test.ts` asserts their absence across the `.mds` host(s), `mds-variants.ts`, and `build-mds.ts` — a later phase that introduces them must update that guard deliberately, not accrete past it.
+- **Output-dir allowlist is closed, now three entries**: `ALLOWED_OUTPUT_DIRS` in `mds-variants.ts` holds `{ dir: 'dist/commands', variant: 'commands' }`, `{ dir: 'dist/agents', variant: 'agents' }`, and `{ dir: 'dist/skills/git/references', variant: 'skill-refs' }` (D-SKILLREFS-ALLOWLIST — the third entry is deliberate: the alternative was letting the build write reference files through a path composed outside `resolveOutputDir`, which would have made the allowlist a partial gate, true for two destinations and bypassed for the third). Adding a fourth destination means adding it to that one table — `satisfies` forces the new entry to declare a `HostVariant`, and `_EveryVariantHasADirectory` is the reverse compile-time proof (a `HostVariant` member with no table entry is unreachable and fails to typecheck). Introducing a new variant widens the union and breaks every exhaustive dispatch over it until the new case is handled (that is the intended friction, not an obstacle to route around).
+- **Phase-2 scope fence (AC-1.2, narrowed from Phase 1)**: `tests/guards/dist-agents.test.ts` still forbids `@if` conditionals, a `variants:` YAML key, the `tracker-<provider>.md` filename token, the `{provider}.md` templated output name, and `@import`/`@define` inside a compiled AGENT host — none of these exist in Phase 2 either; the generated tree is `tracker/{provider}/{op}.md`, driven by the typed `VARIANT_MODULES` registry, not by a template or a conditional. Two constructs were deliberately **legalised** and are named in `LEGALISED_IN_PHASE2` rather than silently dropped from the forbidden list (ADR-003 — narrowing must be visible, not silent): the literal strings `expandVariants(` and `(module, op)`, both of which now live in `src/core/mds-variants.ts` and `scripts/build-mds.ts` — the guard's own corpus. A later phase that legalises more must update `LEGALISED_IN_PHASE2` (and the guard has its own test proving the fence still forbids ≥6 constructs after the narrowing).
 
 ## Anti-Patterns
 
@@ -209,10 +220,10 @@ their frontmatter — it is silently ignored. New KBs should omit it.
 **De-indenting an MDS fence to "simplify" it**: Column-0 ` ``` ` fences are the only raw
 (non-interpolated) text in an `.mds` source. Indenting a fence — or de-indenting one that
 was deliberately indented — flips its interpolation treatment and is NOT byte-preserving.
-`git.mds` carries 10 indented fences (notably the `post-review-summary` FULL/STUB fences
-holding the D7 marker `cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}`) whose braces are
-deliberately escaped so the golden byte-count survives compilation; escaping is the only
-valid treatment, never re-indentation.
+This rule is now load-bearing in three source directories, not one: `git.mds` (10 indented
+fences, brace escapes captured at Phase-1 build), and the two Phase-2 reference modules
+(`_github.mds`, `_references.mds`), which carry the same MDS grammar and the same
+escaping discipline for any prose that was moved into them from `git.mds`'s skill body.
 
 **Adding a new build destination without editing `mds-variants.ts`**: `resolveOutputDir`'s
 allowlist is the single gate on where the build may write. A host declaring an
@@ -239,10 +250,24 @@ because it was never deployed on this branch.
 inline code and prose inside indented fences) must be escaped as `\{…\}`; only column-0
 ` ``` ` fences are raw. `~~~` fences, inline code, and prose are all interpolated —
 `\{x\}` compiles to the literal `{x}`, an unescaped `{x}` is treated as a param
-reference, and 2+ blank lines collapse to 1 (even inside fences). `git.mds` has 171
-escaped brace pairs outside its column-0 fences. `stripGeneratorFrontmatter` and
-`stripBuildKeys` both run on the compiler's OUTPUT, after this interpolation has
-already happened — they never see or touch escape sequences.
+reference, and 2+ blank lines collapse to 1 (even inside fences). `git.mds` had 171
+escaped brace pairs outside its column-0 fences at Phase-1 capture; that count is not
+re-verified here after the Phase-2 move (op mechanics relocated out of `git.mds` into
+`_github.mds`/`_references.mds`, shrinking `git.mds` by roughly 10,000 characters) — treat
+the figure as historical, not current, and re-derive it from the file if it matters to your
+task. `stripGeneratorFrontmatter`, `stripBuildKeys`, and `stripReferenceFrontmatter` all run
+on the compiler's OUTPUT, after this interpolation has already happened — they never see or
+touch escape sequences.
+
+**A verbatim move between `.mds` files is not free of grammar hazards (PF-063)**: Tracker
+Phase 2 relocated prose (including at least one heading) out of `git.mds` and its skill
+body into the reference modules. The destination format has ITS OWN reserved tokens — a
+generated reference is sliced by heading level and by the `<!-- op: -->` marker regex, not
+by the source file's conventions — so text that was an ordinary section heading in one file
+can become a section TERMINATOR in another. A byte-identical move is not automatically a
+semantics-preserving one; check moved text against the destination's grammar, not the
+source's. Full incident detail (the SKILL.md → `ensure-traceable-issue.md` case) lives in
+PF-063 and in the `tracker-references` KB.
 
 **Converting a hand-authored agent to a generator host is not a re-emit**: The conversion
 method that produced `git.mds` was `git mv` + a scripted fence-state-machine transform +
@@ -255,24 +280,32 @@ are compared, never regenerated by hand).
 A `build-mds.test.ts` case asserts `output-dir:` is the last key in every command host's frontmatter, so keep it
 last to satisfy the test. This is a style convention only — `stripBuildKeys`'s block-scoped regex removes
 each build-owned key line regardless of its position, so key ordering does not affect byte-identity of the
-compiled output. Generator hosts are exempt: their entire first block is a dedicated steering block
-(`---\noutput-dir: dist/agents\n---`), not a shared block with other real keys.
+compiled output. Generator hosts and reference modules are exempt: their entire first block is a dedicated
+steering block, not a shared block with other real keys.
 
-**A generator host's first block may not smuggle extra keys through to the artifact**:
-Whatever the first frontmatter block of a generator host carries (`output-dir:`, and
-optionally `output-name:`) is stripped WHOLE. There is no key-level filtering for
-generator hosts the way `stripBuildKeys` does for command hosts — adding an unrelated
-key to a generator host's first block is harmless (it never reaches the compiled artifact)
-but also pointless; put real agent metadata in the second block only.
+**A generator or reference-module's first block may not smuggle extra keys through to the artifact**:
+Whatever the first frontmatter block of a generator host or reference module carries (`output-dir:`) is
+stripped WHOLE. There is no key-level filtering for these two variants the way `stripBuildKeys` does for
+command hosts — adding an unrelated key to that first block is harmless (it never reaches the compiled
+artifact) but also pointless.
 
-**`output-name:` names one file; it does not template one**: The key that lets a host emit
-a filename other than its source basename is spelled `output-name:`, matching what it does.
-`name-template:` stays unclaimed for Phase 2, where variant expansion gives a templating
-spelling real semantics — `src/core/mds-variants.ts` explicitly disclaims templating today,
-so a key promising it would mislead the next author (applies ADR-003: name the end state,
-not the intended future). No shipped host declares `output-name:`; its exercisers are the
-build's own fixtures, which is deliberate — they are the end-to-end proof that
-`validateOutputName` is wired into the write path at all.
+**`output-name:` names one file; a reference module has no basename to name**: `output-name:`
+decouples an emitted filename from a `commands`/`agents` host's source basename. On a
+`skill-refs` host it is **refused outright** — not silently ignored — because the emitted
+filenames come from the module's `ops` roster in `VARIANT_MODULES`, and there is no
+basename fallback to override; a key that is read on two variants and silently dropped on
+the third is exactly the authoring trap the refusal exists to avoid. There is still no
+templating key: variant expansion is registry-driven (edit `VARIANT_MODULES`), not
+frontmatter-templated — `name-template:` remains unclaimed.
+
+**`MIN_VARIANT_PAIRS = 8` is not a tuning knob**: `expandVariants` refuses any `kind:
+'fanout'` module whose `ops` list is shorter than 8 entries. Below that floor, "every op
+has a file and every file has an op" parity assertions stop discriminating, because a list
+short enough to enumerate by hand is satisfied by any implementation that returns something
+(GAP-42). It applies per module and only to `'fanout'` modules — `_references.mds` is
+`kind: 'named'` (3 fixed cross-cutting documents) and is exempt by design, not by oversight;
+see `VariantModuleKind`'s doc comment for why a count proves nothing about a named,
+non-enumerated document set.
 
 **No test writes the real `dist/`**: every build spawned by
 `tests/build-mds-generator-hosts.test.ts` or `tests/build-mds.test.ts` is scoped to a temp
@@ -298,18 +331,22 @@ cannot catch a `src/` change that was rebuilt before review. AC-1.5's pre-S1 SHA
 was verified by hand and lives only in the PR #334 body, so the check carries that claim
 forward exactly as long as `dist/` carries the reviewed bytes (PF-019: the PR-body list is
 a claim, not re-runnable evidence). The byte-idempotence test it replaced proved a property
-of the build agreeing with itself, not a property of the artifacts (PF-057).
+of the build agreeing with itself, not a property of the artifacts (PF-057). As of PR #339,
+this same byte-compare recurses into `dist/skills/` too (`hashDistSubtree` bounded to depth
+6), so it now covers all three output kinds with the same one property.
 
 ## Key Files
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
-- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (`DEVFLOW_MDS_ROOT` overrides the root for isolated tests; minus `IGNORE_DIRS`, which skips `tests` and `coverage` so a `.mds` committed under either can never be compiled into the real tree; bounded by `MAX_WALK_DEPTH = 12`, which throws rather than truncating, and tolerates `ENOENT`/`ENOTDIR` on readdir); owns the single `process.exit`, reached only from `main()` after the loop; prunes unclaimed `.md` files from `dist/agents/` once that exit is passed (`pruneOrphanAgents`); renders errors from `mds-variants.ts` Result values through per-kind exhaustive switches (`outputDirRefusal`, `outputNameRefusal`) and throws them for aggregation
-- `src/core/mds-variants.ts` — pure, zero-I/O core module: `validateOutputName` (filename charset/traversal guard) and `resolveOutputDir` (two-entry allowlist `dist/commands`/`dist/agents`, containment + backslash + canonical-spelling checks, returning `{ variant, abs }`); exports `HostVariant` and `AGENTS_OUTPUT_DIR` (the table's own spelling of the agents destination, consumed by the build's prune step); returns `Result<T, E>`, never throws for expected refusals and never calls `process.exit`. The `-variants` filename is a Phase-2 reservation recorded in its docblock (DR-16), not a description of today's contents
-- `src/assets/agents/git.mds` — the Git agent's generator-host source: first block `---\noutput-dir: dist/agents\n---`, second block the agent's real frontmatter; compiles to `dist/agents/git.md`; 171 escaped brace pairs, 10 indented fences
-- `tests/fixtures/mds-manifest.ts` — named-set manifest (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `ALL_MDS_HOSTS`, `DIST_COMMAND_FILES`) that every count-literal assertion across `build-mds.test.ts`, `build-mds-generator-hosts.test.ts`, `packaging.test.ts`, and `mds-variants.test.ts` (`ALL_MDS_HOSTS` → `validateOutputName`) compares against in both directions; floors only ever rise
-- `tests/build-mds-generator-hosts.test.ts` — generator-host convention tests: whole-block strip, byte-unchanged command outputs, dest-allowlist negatives, filename-validation negatives, `IGNORE_DIRS` coverage, the `MAX_WALK_DEPTH` bound (a host one level past the bound fails the build naming it; the non-vacuity arm compiles the same host one level shallower), printed host/partial counts vs. the manifest (AC-1.8), and the `dist/agents/` orphan prune (an unclaimed artifact is deleted and reported; a claimed one, a non-`.md` entry, a `dist/commands/` file, and every file in a refused build all survive)
-- `tests/guards/dist-agents.test.ts` — `dist/agents/` shipping-artifact guards: source↔output parity (fail-loud both directions), no leaked `\{`/`\}` escapes, no `.md`/`.mds` shadowing, resolver-origin assertions, and the AC-1.2 Phase-1 scope fence (no `@if`/`variants:`/provider templating)
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (`DEVFLOW_MDS_ROOT` overrides the root for isolated tests); dispatches all three host variants through one exhaustive switch at both the strip step (`stripFrontmatterFor`) and the plan step (`planHost`); owns the single `process.exit`, reached only from `main()` after the loop; prunes unclaimed `.md` files from `dist/agents/` and `dist/skills/git/references/` (`pruneOrphanAgents` / `pruneOrphanReferences`, sharing the `pruneOrphans` helper) once that exit is passed; renders errors from `mds-variants.ts` Result values through per-kind exhaustive switches and throws them for aggregation
+- `src/core/mds-variants.ts` — pure, zero-I/O core module: `validateOutputName`, `resolveOutputDir` (3-entry allowlist, returns `{ variant, abs }` with `HostVariant = 'commands' | 'agents' | 'skill-refs'`), `expandVariants` (registry → flat `(module, op)` pair list, `MIN_VARIANT_PAIRS = 8` floor on fan-out modules), `splitVariantSections` (compiled body → per-op document map, bidirectional parity + empty-section check). Exports `AGENTS_OUTPUT_DIR`, `SKILL_REFS_OUTPUT_DIR`, `VARIANT_MODULES`, `TRACKER_GITHUB_OPS`, `GIT_CROSS_CUTTING_DOCS`. Returns `Result<T, E>`, never throws for expected refusals and never calls `process.exit`
+- `src/assets/agents/git.mds` — the Git agent's generator-host source; compiles to `dist/agents/git.md`; lighter than at Phase-1 capture (op mechanics moved into the two reference modules below), carries a new `## Tracker provider resolution` preamble
+- `src/assets/mds/tracker/_github.mds`, `src/assets/mds/git/_references.mds` — the two reference-module sources; registered in `VARIANT_MODULES`; content ownership and byte-budget detail live in the `tracker-references` KB, not here
+- `tests/fixtures/mds-manifest.ts` — named-set manifest (`MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `MDS_GENERATOR_HOSTS`, `MDS_REFERENCE_MODULES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS`, `DIST_COMMAND_FILES`) that every count-literal assertion across `build-mds.test.ts`, `build-mds-generator-hosts.test.ts`, `packaging.test.ts`, and `mds-variants.test.ts` compares against in both directions; floors only ever rise; imports `TRACKER_GITHUB_OPS`/`GIT_CROSS_CUTTING_DOCS` from production rather than retyping them
+- `tests/build-mds-generator-hosts.test.ts` — generator-host and reference-module build tests: whole-block strip, byte-unchanged command outputs, dest-allowlist negatives (message text sourced from `ALLOWED_OUTPUT_DIR_NAMES`, not retyped), filename-validation negatives, `IGNORE_DIRS` coverage, the `MAX_WALK_DEPTH` bound, printed host/partial counts vs. the manifest (AC-1.8, now driven by `ALL_DISCOVERED_HOSTS`), and the `dist/agents/` orphan prune. The whole-tree byte-compare (`hashDistTree`/`hashDistSubtree`) recurses into `dist/skills/` to cover the fanned-out reference files; there is no equivalent dedicated describe block for `pruneOrphanReferences` yet (see Component Interactions, Flow 3)
+- `tests/mds-variants.test.ts` — unit coverage of the pure core module: `validateOutputName`, `resolveOutputDir` (including the `skill-refs` allowlist entry and per-directory variant tagging), `expandVariants` (shipped-registry expansion, `MIN_VARIANT_PAIRS` floor, one-element-list refusal, traversal/duplicate-output refusals, purity), `splitVariantSections` (op/section bidirectional parity, empty-section refusal, marker-format edge cases), and `VARIANT_MODULES` shape assertions (no Jira/Linear provider yet — Phase 2 is GitHub-only)
+- `tests/guards/dist-agents.test.ts` — `dist/agents/` shipping-artifact guards: source↔output parity (fail-loud both directions), no leaked `\{`/`\}` escapes, no `.md`/`.mds` shadowing, resolver-origin assertions, and the AC-1.2 Phase-2 scope fence (`@if`/`variants:`/provider templating remain forbidden; `expandVariants(` and `(module, op)` are named in `LEGALISED_IN_PHASE2` as the deliberate narrowing)
 - `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
@@ -321,14 +358,18 @@ of the build agreeing with itself, not a property of the artifacts (PF-057).
 - Working Memory (`.devflow/memory/WORKING-MEMORY.md`, `background-memory-update` worker) — sibling persistence layer; independent toggle.
 - Decisions pipeline (`.devflow/learning/`, `decisions-ledger.jsonl`) — sibling persistence layer; independent toggle.
 - ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `src/assets/scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.
-- ADR-003 (end-state prose, clause iii — no artifact without a reachable consumer) — applies to the AC-1.2 Phase-1 scope fence in `tests/guards/dist-agents.test.ts`: forbidden Phase-2 constructs are pinned absent until a deliberate later change introduces them.
+- ADR-003 (end-state prose, clause iii — no artifact without a reachable consumer) — applies to the AC-1.2 Phase-2 scope fence (`LEGALISED_IN_PHASE2` names what was deliberately narrowed rather than silently dropping it) and to the reference-module registry (`VARIANT_MODULES` has no Phase-3 provider entries with no module on disk).
 - ADR-013 (pure core modules, I/O at edges) — `src/core/mds-variants.ts` is zero-I/O; `scripts/build-mds.ts` is the shell that owns every filesystem call and `process.exit`.
-- ADR-024 (named collectors + known-bad probes) — both `tests/build-mds-generator-hosts.test.ts` and `tests/guards/dist-agents.test.ts` follow this pattern (e.g. `collectAgentParity`, `collectEscapedBraceLeaks`, `collectForbiddenConstructs`, each with a paired known-bad probe).
+- ADR-024 (named collectors + known-bad probes) — `tests/build-mds-generator-hosts.test.ts`, `tests/mds-variants.test.ts`, and `tests/guards/dist-agents.test.ts` all follow this pattern (e.g. `collectAgentParity`, `collectEscapedBraceLeaks`, `collectForbiddenConstructs`, each with a paired known-bad probe).
+- PF-011 (delete-then-write ENOENT window) — avoided by the temp-file + `renameSync` write pattern used for every output of all three host variants.
 - PF-014 (no `process.exit` in core) — `mds-variants.ts` returns `Result`; only `build-mds.ts` exits.
-- PF-018 (non-vacuous guards) — `dist-agents.test.ts` deliberately avoids Guard 4's `catch { return }` skip-on-missing-build shape.
+- PF-018 (non-vacuous guards) — `dist-agents.test.ts` deliberately avoids Guard 4's `catch { return }` skip-on-missing-build shape; the `MAX_WALK_DEPTH` bound throws rather than silently truncating for the same reason.
 - PF-024 (escaped-brace leakage into dist) — guarded by `collectEscapedBraceLeaks` in `dist-agents.test.ts`.
 - PF-035 (skim hook — use Read) — applies to this session's tool hygiene when reading `.mds`/`.ts` sources for verification.
-- PF-043 (fixtures from real shapes) — `realAgentShape()` in `build-mds-generator-hosts.test.ts` derives its fixture from the live Git agent rather than inventing one.
+- PF-055 (real-root build repairs stale dist/ under parallel readers) — every build in the MDS test suite is scoped to `DEVFLOW_MDS_ROOT`, verified by `collectSpawnScoping`.
 - PF-057 (goldens compared, never regenerated) — `tests/fixtures/golden/git-agent.md` (`GIT_AGENT_BYTES`, derived once via `stat`) is the oracle for the generator-host conversion.
+- PF-061 (verify both ends of a block-delete transform) — `stripGeneratorFrontmatter` and `stripReferenceFrontmatter` both check PRE (a leading block exists) and POST (a second block does/does not follow, opposite expectations for the two variants).
+- PF-063 (a verbatim move is not grammar-safe) — applies to any future relocation of prose between `.mds` sources; see the Gotchas entry above and the `tracker-references` KB for the incident this pitfall generalises from.
 - `dynamic-workflow-engine` KB — covers `DIST_COMMAND_FILES` / `COMMAND_HOSTS` split and the SG-13 `release.md` hand-authored divergence in more depth.
+- `tracker-references` KB — owns what the generated reference files CONTAIN (tracker operation mechanics, byte-budget formula, the installer's overlay of the compiled tree into `devflow:git`); read it for content, this KB for the compiler.
 - `test-harness` KB — covers `resolveAgentSource`, `requireDistFile(s)`, and the guard/goldens test-directory conventions these tests build on.
