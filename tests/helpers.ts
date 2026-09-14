@@ -4,7 +4,7 @@ import * as path from 'path'
 import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
-import { agentSourceDirs } from '../src/core/assets.js'
+import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -456,6 +456,57 @@ export function loadGolden(name: string): string {
 // rather than a hard-coded line number. Adding or removing lines above a sampled
 // section does not break the extractor. Must remain in sync with
 // tests/fixtures/golden/github-status-lines.txt (AC-0.9).
+//
+// PHASE-2 RETARGET — what changed and why the fixture moved with it.
+// ---------------------------------------------------------------------------
+// Phase 2 split the Git agent's GitHub mechanics out of dist/agents/git.md into
+// generated skill references. Nine of the 24 git-side samples were sampling the
+// text that moved. Of those, seven are recoverable by naming the file the text
+// moved to; two STRADDLE the retained/moved boundary — their start anchor moved
+// and their end anchor stayed — and no concatenation of the two files contains
+// the original bytes as a contiguous substring.
+//
+// `D-STRADDLE-SPLIT`: the two straddling samples (manage-debt, learn-conventions)
+// are SPLIT into two samples each — the moved half read from the reference, the
+// retained half read from git.md — rather than being repointed to one side. Both
+// halves were sampled before the split and both are still sampled after it; the
+// alternative (repoint the start anchor and keep the end anchor on git.md) cannot
+// be expressed by `between()`, which slices ONE string, and dropping either half
+// would silently shrink the fixture's coverage of that operation.
+//
+// The fixture was therefore re-captured ONCE, under an explicit user
+// authorisation dated 2026-09-14, in its own fixture-only commit. That
+// authorisation is spent: it covers this retarget and nothing after it.
+//
+// PROOF OBLIGATION AFTER THE RE-CAPTURE. The Phase-0 faithfulness gate ran the
+// rewritten extractor over the `b6928e5` snapshot and required the old fixture
+// back byte-for-byte. That gate cannot be re-run across a deliberate re-capture —
+// the old bytes are the ones the retarget changes. The standing proof is the
+// DERIVATION test in tests/goldens/github-status-lines.test.ts: the `--unfreeze
+// --out-dir` case re-derives the whole fixture from the live tree on every run
+// and compares it byte-for-byte, and the inputs it derives from are themselves
+// frozen (git.md by the git-agent.md golden; the generated references by the
+// containment oracle's 101bda7 baselines). A FUTURE extractor rewrite inherits
+// the Phase-0 obligation unchanged, with the baseline tree being the re-capture
+// commit rather than b6928e5.
+
+/**
+ * Generated skill references the status-line corpus samples.
+ *
+ * A closed list, not a convenience: `ref()` refuses a path that is not on it, and
+ * the extractor refuses to return unless every entry was actually read. Together
+ * those two arms mean a later edit cannot quietly repoint a reference-sourced
+ * sample back at git.md and leave the list as decoration — the retarget would stop
+ * being covered and the extractor would say so.
+ */
+export const STATUS_LINE_REFERENCE_FILES = [
+  'learn-conventions.md',
+  'publication-gate.md',
+  'tracker/github/backlink-shipped-issues.md',
+  'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/manage-debt.md',
+  'tracker/github/post-wave-report.md',
+] as const
 
 /**
  * Extract the status-line corpus that matches tests/fixtures/golden/github-status-lines.txt.
@@ -466,13 +517,41 @@ export function loadGolden(name: string): string {
  *
  * Reads through the dist-preferred resolver. The resolver's dist-preferred/src-fallback
  * choice is byte-neutral for this extractor because Phase 1's byte-equality gate requires
- * dist/agents/git.md to equal the source it is generated from.
+ * dist/agents/git.md to equal the source it is generated from. Generated references are
+ * addressed through `compiledSkillRefsDir()` — never through a hard-coded `dist/` string,
+ * which would put a second definition of the build's output directory in the harness.
  */
 export function extractStatusLines(gitContent?: string): string {
   const git = gitContent ?? resolveAgentSource('git').content
   const code = resolveAgentSource('code').content
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
+
+  const readRefs = new Set<string>()
+
+  /**
+   * Read a generated skill reference by its path relative to the references root.
+   * Fail-loud on both an unlisted path and an absent file: an extractor that
+   * silently sampled nothing would re-capture a shorter fixture and call it stable.
+   */
+  function ref(relPath: (typeof STATUS_LINE_REFERENCE_FILES)[number]): string {
+    if (!(STATUS_LINE_REFERENCE_FILES as readonly string[]).includes(relPath)) {
+      throw new Error(
+        `extractStatusLines: "${relPath}" is not in STATUS_LINE_REFERENCE_FILES — ` +
+        'add it there so the read is declared, or sample a file that is',
+      )
+    }
+    readRefs.add(relPath)
+    const abs = path.join(compiledSkillRefsDir(ROOT), ...relPath.split('/'))
+    try {
+      return readFileSync(abs, 'utf-8')
+    } catch {
+      throw new Error(
+        `extractStatusLines: generated reference "${relPath}" is absent at ${abs}\n` +
+        '  Run `npm run build` first — the status-line corpus samples the generated mechanics',
+      )
+    }
+  }
 
   /**
    * Extract the named operation section from git.md.
@@ -515,8 +594,9 @@ export function extractStatusLines(gitContent?: string): string {
     between(git, '**Degradation contract (D4):**', 'raise the inter-operation delay from 1s to 3s for the remainder of the batch.'),
     // blank separator line within the D10 section (baseline line 33)
     '',
-    // D10 step 2 (baseline line 36)
-    singleLine(git, '2. Resolve `REVIEW_PUBLICATION` input:'),
+    // D10 step 2 — MOVED whole: the `## Publication gate (D10)` section is now
+    // references/publication-gate.md, named from the two summary ops (P2-S5 cut 2).
+    singleLine(ref('publication-gate.md'), '2. Resolve `REVIEW_PUBLICATION` input:'),
     // D11 Comment-sink scrub rules (baseline lines 54-57)
     between(git, '- Non-zero scrubber exit OR script missing → **DO NOT POST**', '- **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**'),
     // ensure-pr-ready output template (baseline lines 140-149)
@@ -533,16 +613,24 @@ export function extractStatusLines(gitContent?: string): string {
     between(gitOp('fetch-issues-batch'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '- **Conflicts**: {conflicting requirements if any}'),
     // post-review-summary STUB output template (baseline lines 381-386)
     between(gitOp('post-review-summary'), '     {counts-by-severity table verbatim from local artifact', 'Cap body at 60000 characters'),
-    // manage-debt process + D4 (baseline lines 411-420)
-    between(gitOp('manage-debt'), '3. Extract items to add:', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
+    // manage-debt — STRADDLES, split per D-STRADDLE-SPLIT. The process steps moved
+    // to the provider reference; the D4 clause they degrade into stayed in git.md,
+    // and both halves are still sampled.
+    between(ref('tracker/github/manage-debt.md'), '3. Extract items to add:', '7. Return the backlog issue number for Tracked field backfill in resolution-summary.md'),
+    between(gitOp('manage-debt'), '**Process:**', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
     // check-ci-status input + process (baseline lines 441-451): leading and trailing blank lines
     '\n' + between(gitOp('check-ci-status'), '**Input:** `PR_NUMBER`', '6. List failing/pending checks with names') + '\n',
     // create-release process steps (baseline lines 479-485)
     between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
     // gather-release-evidence input + process (baseline lines 507-518)
     between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', '**Output:**'),
-    // learn-conventions version-names + degradation + output opener (baseline lines 582-594): leading blank
-    '\n' + between(gitOp('learn-conventions'), '   ## Version Names', '**Output:**\n```markdown'),
+    // learn-conventions — STRADDLES, split per D-STRADDLE-SPLIT. The bounded scan,
+    // the file template and the post-composition verification moved to
+    // references/learn-conventions.md (P2-S5 cut 1, loaded only when
+    // .devflow/conventions.md is absent); the D4 clause and the Output template
+    // stayed in git.md. Leading blank preserved on the first half.
+    '\n' + between(ref('learn-conventions.md'), '   ## Version Names', 'If no matches are found, write the file.'),
+    between(gitOp('learn-conventions'), '**Degradation (D4):** If `gh` unauthenticated or remote unreachable', '**Output:**\n```markdown'),
     // fetch-review-threads process + output header (baseline lines 625-644)
     between(gitOp('fetch-review-threads'), '3. Apply devflow-authored exclusion predicate', '### External Thread Records'),
     // resolve-review-threads reply loop (baseline lines 694-704): trailing blank
@@ -551,24 +639,29 @@ export function extractStatusLines(gitContent?: string): string {
     between(gitOp('post-resolution-summary'), '     Full summary withheld (public repository).', '     {counts-by-severity table verbatim from local artifact') + '\n',
     // check-merge-readiness PR + CI fetch steps (baseline lines 785-787)
     between(gitOp('check-merge-readiness'), '2. Fetch PR review decision:', '3. Fetch CI status (same logic as `check-ci-status`)'),
-    // backlink-shipped-issues per-issue steps (baseline lines 834-842)
-    between(gitOp('backlink-shipped-issues'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
-    // ensure-traceable-issue plan-artifact + create steps (baseline lines 877-881)
-    between(gitOp('ensure-traceable-issue'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
-    // post-wave-report dedup check + compose steps (baseline lines 917-920)
-    between(gitOp('post-wave-report'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
+    // backlink-shipped-issues per-issue steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/backlink-shipped-issues.md'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
+    // ensure-traceable-issue plan-artifact + create steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/ensure-traceable-issue.md'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
+    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
     // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
     // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
     // that also reference these markers within the same operation section.
     singleLine(gitOp('post-review-summary'), '     <!-- devflow:review-summary'),
     singleLine(gitOp('post-resolution-summary'), '     <!-- devflow:resolution-summary'),
-    singleLine(gitOp('post-wave-report'), '   <!-- devflow:wave-report'),
+    // …the third moved with post-wave-report's compose step.
+    singleLine(ref('tracker/github/post-wave-report.md'), '   <!-- devflow:wave-report'),
     // code.md: PR-body guidance table and D11 scrub directive (lines 93, 95, 99)
     singleLine(code, '| Related Issues (ISSUE_NUMBER provided) |'),
     singleLine(code, 'When `ISSUE_NUMBER` is provided, always include'),
     singleLine(code, '**D11 scrub (PR body is a GitHub-visible sink):**'),
-    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524)
-    singleLine(dynamicBuild, 'The Git agent deduplicates via marker'),
+    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524).
+    // The old anchor ("deduplicates via marker `<!-- devflow:wave-report …`") no
+    // longer exists: P2-S12 removed the caller-restated marker literal, because the
+    // operation owns the marker (GAP-20). Retargeted to the successor sentence —
+    // same line, same rule, same caller.
+    singleLine(dynamicBuild, 'deduplicates via its own marker'),
     singleLine(dynamicBuild, 'In WAVE mode, if no tracking-issue number'),
     // resolve.mds: Tracked field rules and phase diagram (lines 244, 354, 501, 510, 541, 619)
     singleLine(resolveMds, 'Set `Tracked` for FIX_SEPARATE and TECH_DEBT items'),
@@ -578,6 +671,20 @@ export function extractStatusLines(gitContent?: string): string {
     singleLine(resolveMds, '| gh/GitHub absent | manage-debt degrades'),
     singleLine(resolveMds, '| Issue | File:Line | Reason | Tracked |'),
   ]
+
+  // Both directions of the declared-reference set, in one place: `ref()` refuses a
+  // path this list does not declare, and this refuses to return while a declared
+  // path went unread. Without the second arm the retarget could be undone one
+  // sample at a time and the list would keep asserting a coverage that had gone.
+  if (readRefs.size !== STATUS_LINE_REFERENCE_FILES.length) {
+    const unread = STATUS_LINE_REFERENCE_FILES.filter(f => !readRefs.has(f))
+    throw new Error(
+      'extractStatusLines: declared generated reference(s) were never sampled: ' +
+      `${unread.join(', ')}\n` +
+      '  Either a sample was repointed away from the reference (the Phase-2 retarget is being\n' +
+      '  undone) or the entry is stale and should be removed from STATUS_LINE_REFERENCE_FILES.',
+    )
+  }
 
   return parts.join('\n') + '\n'
 }
