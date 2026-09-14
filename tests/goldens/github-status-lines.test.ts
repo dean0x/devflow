@@ -1,12 +1,17 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Post-regeneration measurements (commit 7, after conventions-commit and ref-handling fixes):
+ * Measurements after the Phase-2 golden regeneration (P2-S16):
  *
- *   tests/fixtures/golden/git-agent.md          65,677 ch / 992 L   (== dist/agents/git.md)
- *   src/assets/skills/git/SKILL.md               9,205 ch / 283 L
+ *   tests/fixtures/golden/git-agent.md          55,228 ch / 904 L   (== dist/agents/git.md)
+ *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           77,824 ch / 1,367 L
+ *   Total (all three)                           64,751 ch / 1,209 L
+ *
+ * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
+ * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
+ * preloaded set. They live on as BUDGET_LOADED_SET in tests/tracker/byte-budget.test.ts,
+ * which is a target the artifact must reach and therefore never follows it down.
  *
  * Pre-Phase-0 baseline at main@e726874:
  *   PRE_PHASE0_GIT_MD_BYTES = 59,376 (wc -c) / PRE_PHASE0_GIT_MD_CHARS = 58,903 (.length) / PRE_PHASE0_GIT_MD_LINES = 938 L
@@ -17,10 +22,14 @@
  * golden-regeneration commit. They are NOT floors and are NOT registered in
  * tests/fixtures/numeric-floors.json.
  *
- * github-status-lines.txt is frozen through Phase 3 and the --unfreeze refusal
- * guard below protects that fixture only. git-agent.md is what gets regenerated
- * (always a fixture-only commit via `npm run test:golden:update -- git-agent`).
- * Phase 2 re-baselines the SKILL_* constants in its T2 task.
+ * github-status-lines.txt is frozen and the --unfreeze refusal guard below
+ * protects that fixture only. The freeze was overridden exactly ONCE, on an
+ * explicit user authorisation dated 2026-09-14, for the Phase-2 contract/mechanics
+ * split: P2-S4 rewrote sentences the fixture sampled, so preserving it and making
+ * the split were mutually exclusive. That authorisation is spent — the fixture is
+ * frozen again from that commit, and Phase 3 inherits the freeze unchanged.
+ * git-agent.md is regenerated once in Phase 2 and once in Phase 3, each in its own
+ * fixture-only commit via `npm run test:golden:update -- git-agent`.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -41,8 +50,8 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). Updated after
 // D4 degradation clauses added to fetch-issue + fetch-issues-batch.
-export const GIT_MD_CHARS = 65_677
-export const GIT_MD_LINES = 992
+export const GIT_MD_CHARS = 55_228
+export const GIT_MD_LINES = 904
 // Phase 1 took this to 9_205 / 283 (the SKILL.md cross-reference to the Git agent
 // moved from src/assets/agents/git.md to the git.mds generator host). Phase 2's
 // P2-S7 cut re-baselines it: the D3 template moved to the generated
