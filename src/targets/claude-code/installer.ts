@@ -3,9 +3,11 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
-import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, type AgentSourceDirs } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
-import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
+import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
+import { expandVariants } from '../../core/mds-variants.js';
+import { sweepOrphanedReferences } from '../../core/reference-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -19,8 +21,17 @@ export interface ShadowSkip {
   reason: ShadowSkipReason;
 }
 
+/**
+ * Asset namespaces a registry-diff sweep can prune.
+ *
+ * `reference` names an entry of the generated `devflow:git` reference tree, whose
+ * registry key is a relative path (`tracker/github/setup-task.md`) rather than a bare
+ * asset name — see src/core/reference-sweep.ts.
+ */
+export type SweptAssetKind = 'skill' | 'command' | 'agent' | 'reference';
+
 export interface SweepFailure {
-  kind: 'skill' | 'command' | 'agent';
+  kind: SweptAssetKind;
   name: string;
   error: unknown;
 }
@@ -30,7 +41,7 @@ export interface SweepFailure {
  * name when an asset exists in multiple namespaces (e.g. both a command and an agent
  * named "git"). (F15) */
 export interface SweptOrphan {
-  kind: 'skill' | 'command' | 'agent';
+  kind: SweptAssetKind;
   name: string;
 }
 
@@ -38,10 +49,21 @@ export interface InstallReport {
   shadowedSkills: string[];
   shadowedRules: string[];
   skippedShadows: ShadowSkip[];
-  /** Registry names removed by orphan sweeps (skills, commands, agents). */
+  /** Registry names removed by orphan sweeps (skills, commands, agents, references). */
   sweptOrphans: SweptOrphan[];
   /** Per-item removal failures from orphan sweeps — isolates failures per PF-009. */
   sweepFailures: SweepFailure[];
+  /**
+   * Manifest-relative paths of the generated `devflow:git` references installed by the
+   * reference overlay, e.g. `tracker/github/setup-task.md`.
+   */
+  overlaidRefs: string[];
+  /**
+   * Overlay units left byte-unchanged because their replacement could not be built.
+   * The install still succeeds (PF-009); a unit named here is running on the files the
+   * previous install left, which is exactly what the summary has to say out loud.
+   */
+  overlayFailures: OverlayFailure[];
 }
 
 /** Discriminated outcome for a single rule installation. */
@@ -259,6 +281,322 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Generated skill-reference overlay (P2-S14)
+// ---------------------------------------------------------------------------
+
+/** The registry-declared skill whose references the overlay converges. */
+const OVERLAY_SKILL_NAME = 'git';
+
+/** Sub-path under the references root that the prune converges to the manifest. */
+const TRACKER_SUBTREE = 'tracker';
+
+/** Unit id reported for the flat, provider-independent document set. */
+const CROSS_CUTTING_UNIT_ID = '(cross-cutting)';
+
+/** One failed overlay unit — the unit's id and why it was left alone. */
+export interface OverlayFailure {
+  /**
+   * The unit that was not refreshed: a provider directory name (`github`) or
+   * {@link CROSS_CUTTING_UNIT_ID} for the flat document set.
+   */
+  provider: string;
+  /** Rendered cause, already stringified so the report is serialisable. */
+  error: string;
+}
+
+export interface ReferenceOverlayResult {
+  /** Manifest-relative paths successfully installed by this run. */
+  overlaidRefs: string[];
+  /** Units left byte-unchanged because building their replacement failed. */
+  overlayFailures: OverlayFailure[];
+  /** Result of converging `references/tracker/**` to the manifest. */
+  pruned: SweepResult;
+}
+
+/**
+ * Every reference file the build generates, as POSIX paths relative to
+ * `dist/skills/git/references/`.
+ *
+ * Derived from the build's own module registries (`VARIANT_MODULES`, which carries
+ * `TRACKER_GITHUB_OPS` and `GIT_CROSS_CUTTING_DOCS`) through the same `expandVariants`
+ * the build plan uses. Hand-listing the operations here would create a second roster
+ * that drifts silently the moment one is added — the bidirectional-registry rule
+ * `compliance-compose.ts` states for its token tables.
+ *
+ * Throws when the registry does not expand. That is a programming error in a
+ * compile-time constant, not an install-time degradation, so it is loud.
+ */
+export function generatedReferenceManifest(): readonly string[] {
+  const expanded = expandVariants();
+  if (!expanded.ok) {
+    throw new Error(
+      `Reference module registry does not expand (${expanded.error.kind}) — ` +
+      `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
+    );
+  }
+  return expanded.value.map(pair => pair.relPath);
+}
+
+/**
+ * One atomically-swapped overlay unit.
+ *
+ * D-OVERLAY-FLAT-UNIT: the isolation unit is a DIRECTORY for the nested provider trees
+ * (`tracker/{provider}/`) and the WHOLE FLAT SET for the provider-independent documents
+ * — not one unit per flat file.
+ *
+ * The flat documents land directly in `references/`, beside hand-authored files the
+ * overlay must never touch (`github-api.md`, `violations.md`, …), so there is no
+ * directory to rename and no `.tmp` sibling that could stand in for one. What the flat
+ * set therefore gets is the same DECISION rule as a provider directory — build every
+ * document under a staging tree first, and on any per-file failure abort the whole unit,
+ * leaving all previously installed flat documents exactly as they were — promoted by one
+ * `rename` per document. The promotion loop is the one place where a mid-flight I/O
+ * error could leave the flat set partly refreshed; that is a property of the shared
+ * directory, not a choice, and such a failure is reported like any other.
+ *
+ * Treating each flat file as its own unit was the alternative. It was rejected because
+ * three documents that are always generated together and always read together would
+ * then report three independent outcomes, and a reader of `overlayFailures` could not
+ * tell a broken build from a single unlucky file.
+ */
+interface OverlayUnit {
+  /** Reported on {@link OverlayFailure.provider}. */
+  id: string;
+  /** POSIX sub-path under the references root, or `''` for the flat set. */
+  subdir: string;
+  /** Manifest-relative paths this unit owns. */
+  files: string[];
+}
+
+/**
+ * Group a manifest into overlay units by the directory each entry lands in.
+ *
+ * Deterministic order — flat set first, then provider directories sorted by path — so a
+ * failure report and a loud throw are reproducible run to run.
+ */
+function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
+  const bySubdir = new Map<string, string[]>();
+  for (const relPath of manifest) {
+    const segments = relPath.split('/');
+    const subdir = segments.slice(0, -1).join('/');
+    const bucket = bySubdir.get(subdir);
+    if (bucket === undefined) bySubdir.set(subdir, [relPath]);
+    else bucket.push(relPath);
+  }
+  return [...bySubdir.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([subdir, files]) => ({
+      id: subdir === '' ? CROSS_CUTTING_UNIT_ID : subdir.split('/').slice(-1)[0],
+      subdir,
+      files,
+    }));
+}
+
+/** Resolve a POSIX manifest sub-path against a root, spelled for this filesystem. */
+function underRoot(root: string, posixSubPath: string): string {
+  return posixSubPath === '' ? root : path.join(root, ...posixSubPath.split('/'));
+}
+
+/** Staging sibling for a unit — a `.tmp` name that can never collide with a manifest entry. */
+function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
+  return unit.subdir === ''
+    ? path.join(referencesTarget, '.cross-cutting.tmp')
+    : `${underRoot(referencesTarget, unit.subdir)}.tmp`;
+}
+
+/**
+ * Build one unit's complete replacement tree under a `.tmp` sibling.
+ *
+ * Returns the staging directory on success, or the rendered cause when the unit must be
+ * abandoned. Throws — and only throws — when a manifest entry is ABSENT from the
+ * generated tree: that is a build artifact that was never produced, not an I/O
+ * degradation, and shipping an installer that silently omits the mechanics the agent is
+ * told to load would move the failure to every user's first spawn.
+ *
+ * Applies PF-011 (build under a `.tmp` sibling, pre-cleaning an orphan from a prior
+ * crashed run). Applies PF-009 for everything else: a copy that fails aborts this unit
+ * and no other.
+ */
+async function buildUnitStagingTree(
+  unit: OverlayUnit,
+  sourceRoot: string,
+  referencesTarget: string,
+  warn: (msg: string) => void,
+): Promise<{ ok: true; stagingDir: string } | { ok: false; error: string }> {
+  const stagingDir = stagingDirFor(referencesTarget, unit);
+  const sourceDir = underRoot(sourceRoot, unit.subdir);
+  const wanted = new Map(unit.files.map(relPath => [relPath.split('/').slice(-1)[0], relPath]));
+  const landed = new Set<string>();
+
+  const discard = async (): Promise<void> => {
+    await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+  };
+
+  try {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+    await fs.mkdir(stagingDir, { recursive: true });
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  } catch (err) {
+    await discard();
+    return { ok: false, error: String(err) };
+  }
+
+  for (const entry of entries) {
+    const relPath = unit.subdir === '' ? entry.name : `${unit.subdir}/${entry.name}`;
+
+    // Symlinks are skipped, never followed. copyDirectory follows them and preserves
+    // source modes, which is why the overlay does its own copying: a link planted in the
+    // generated tree would otherwise pull arbitrary bytes into an installed skill.
+    if (entry.isSymbolicLink()) {
+      warn(`reference overlay: skipping symlink entry "${relPath}" — symlinks are never followed`);
+      continue;
+    }
+    // A nested directory is another unit's business, and a source file the manifest does
+    // not name is not installed at all: the overlay converges to the manifest, it does
+    // not merge whatever happens to be lying in the generated tree.
+    if (!entry.isFile()) continue;
+    if (!wanted.has(entry.name)) continue;
+
+    try {
+      await fs.copyFile(path.join(sourceDir, entry.name), path.join(stagingDir, entry.name));
+      landed.add(entry.name);
+    } catch (err) {
+      await discard();
+      return { ok: false, error: String(err) };
+    }
+  }
+
+  for (const [basename, relPath] of wanted) {
+    if (landed.has(basename)) continue;
+    await discard();
+    throw new Error(
+      `Generated skill reference not found for declared reference "${relPath}": ` +
+      `${underRoot(sourceRoot, relPath)}. ` +
+      `Run \`npm run build:mds\` to regenerate dist/skills/git/references/ before install.`,
+    );
+  }
+
+  return { ok: true, stagingDir };
+}
+
+/**
+ * Promote a fully built staging tree into place.
+ *
+ * A provider directory is swapped whole — remove the old target, rename the staging tree
+ * over it — so the installed directory is either entirely the previous install or
+ * entirely the new one (DR-05, risk P2-g). The flat set is promoted one `rename` per
+ * document because its directory is shared with hand-authored references
+ * (D-OVERLAY-FLAT-UNIT).
+ */
+async function promoteUnitStagingTree(
+  unit: OverlayUnit,
+  referencesTarget: string,
+  stagingDir: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    if (unit.subdir === '') {
+      for (const relPath of unit.files) {
+        const basename = relPath.split('/').slice(-1)[0];
+        await fs.rename(path.join(stagingDir, basename), path.join(referencesTarget, basename));
+      }
+      await fs.rm(stagingDir, { recursive: true, force: true });
+      return { ok: true };
+    }
+
+    const target = underRoot(referencesTarget, unit.subdir);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.rm(target, { recursive: true, force: true });
+    await fs.rename(stagingDir, target);
+    return { ok: true };
+  } catch (err) {
+    await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Converge an installed `devflow:git` references directory onto the generated tree.
+ *
+ * Converge, not merge: every unit is rebuilt from the generated sources and swapped in
+ * atomically, and anything under `references/tracker/**` that the manifest does not name
+ * is then removed. A shadow that supplies its own `tracker/jira/comment.md` therefore
+ * does not keep it (AC-2.4c), and a provider directory the manifest stops listing is
+ * gone rather than left to rot (GAP-24). Hand-authored references outside the generated
+ * set are never pruned — they arrive with the skill copy and the prune is scoped to the
+ * `tracker/` subtree.
+ *
+ * Runs for a shadowed and a canonical install alike: a user who overrides the git skill
+ * must still receive the canonical GitHub mechanics the agent is told to load
+ * (AC-2.4a / UAC-28).
+ *
+ * @param opts.referencesTarget - `{claudeDir}/skills/devflow:git/references`.
+ * @param opts.sourceRoot - Generated tree; defaults to `compiledSkillRefsDir()`.
+ * @param opts.manifest - Manifest to converge to; defaults to the build registries.
+ *   Injectable so a provider set the GitHub-only build does not produce can be exercised.
+ * @param opts.warn - Receives non-fatal notices (skipped symlinks, mode normalisation).
+ *
+ * @throws when a manifest entry is absent from the generated tree — see
+ *   {@link buildUnitStagingTree}. Every other failure is reported, never thrown (PF-009).
+ */
+export async function overlayGeneratedReferences(opts: {
+  referencesTarget: string;
+  sourceRoot?: string;
+  manifest?: readonly string[];
+  warn?: (msg: string) => void;
+}): Promise<ReferenceOverlayResult> {
+  const sourceRoot = opts.sourceRoot ?? compiledSkillRefsDir();
+  const manifest = opts.manifest ?? generatedReferenceManifest();
+  const warn = opts.warn ?? (() => { /* notices are optional for callers with no logger */ });
+
+  const overlaidRefs: string[] = [];
+  const overlayFailures: OverlayFailure[] = [];
+
+  await fs.mkdir(opts.referencesTarget, { recursive: true });
+
+  for (const unit of planOverlayUnits(manifest)) {
+    const built = await buildUnitStagingTree(unit, sourceRoot, opts.referencesTarget, warn);
+    if (!built.ok) {
+      overlayFailures.push({ provider: unit.id, error: built.error });
+      continue;
+    }
+    const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);
+    if (!promoted.ok) {
+      overlayFailures.push({ provider: unit.id, error: promoted.error });
+      continue;
+    }
+    overlaidRefs.push(...unit.files);
+  }
+
+  // Converge the tracker subtree to the manifest. Keyed by relative path, because
+  // `tracker/{provider}/{op}.md` is what distinguishes two providers' identically named
+  // files — the reason mdEntryName cannot serve here.
+  const prefix = `${TRACKER_SUBTREE}/`;
+  const pruned = await sweepOrphanedReferences(
+    path.join(opts.referencesTarget, TRACKER_SUBTREE),
+    new Set(manifest.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
+  );
+
+  // D-OVERLAY-MODE-SCOPE: normalise the WHOLE references directory, not only the files
+  // this run installed. copyDirectory preserves source modes, so a hand-authored
+  // reference checked in with an odd mode installs with it; a reference is read-only
+  // instruction text and 0644 is what every one of them should be. Best-effort: a
+  // filesystem that does not honour mode bits must not fail an install (PF-009).
+  try {
+    await chmodRecursive(opts.referencesTarget, 0o644);
+  } catch (err) {
+    warn(`reference overlay: could not normalise reference file modes — ${String(err)}`);
+  }
+
+  return { overlaidRefs, overlayFailures, pruned };
+}
+
+// ---------------------------------------------------------------------------
 // Script composer
 // ---------------------------------------------------------------------------
 
@@ -366,6 +704,12 @@ export interface FileCopyOptions {
    * live build state.
    */
   agentSourceDirs?: AgentSourceDirs;
+  /**
+   * Receives non-fatal install notices that have no other reporting channel — today the
+   * reference overlay's skipped symlinks and mode-normalisation failures. Defaults to a
+   * no-op so callers with no logger are unaffected; `devflow init` passes its own.
+   */
+  warn?: (msg: string) => void;
 }
 
 /**
@@ -414,6 +758,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     rulesMap = new Map<string, string>(),
     isPartialInstall,
     spinner,
+    warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
 
   const report: InstallReport = {
@@ -422,6 +767,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     skippedShadows: [],
     sweptOrphans: [],
     sweepFailures: [],
+    overlaidRefs: [],
+    overlayFailures: [],
   };
 
   // Clean old Devflow files before installing
@@ -590,6 +937,20 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       await copyDirectory(skillSource, skillTarget);
     } else {
       await copyDirectory(skillSource, skillTarget);
+    }
+
+    // Converge the generated references onto the skill that was just installed. One call
+    // site downstream of all three branches above, so a shadowed devflow:git receives the
+    // canonical GitHub mechanics exactly as a canonical install does — AC-2.4a / UAC-28,
+    // which is a release blocker, not merely an acceptance criterion.
+    if (skillName === OVERLAY_SKILL_NAME) {
+      const overlay = await overlayGeneratedReferences({
+        referencesTarget: path.join(skillTarget, 'references'),
+        warn,
+      });
+      report.overlaidRefs.push(...overlay.overlaidRefs);
+      report.overlayFailures.push(...overlay.overlayFailures);
+      recordSweep(report, 'reference', overlay.pruned);
     }
   }
 

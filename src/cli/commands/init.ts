@@ -25,7 +25,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -159,6 +159,43 @@ export function formatSweepSummary(
       message:
         `Could not remove orphaned ${failure.kind} "${failure.name}" (${reason}) — ` +
         `it will keep loading in Claude Code until deleted manually`,
+    });
+  }
+
+  return lines;
+}
+
+/**
+ * Turn the reference-overlay half of an InstallReport into summary lines.
+ *
+ * The overlay rewrites files inside an installed skill directory the user may have
+ * shadowed, and a unit it could not rebuild is silently left running on whatever the
+ * previous install left behind. Neither outcome is visible from the filesystem at a
+ * glance, so both reach the summary — PF-015: a report field with no render site is not
+ * a report.
+ *
+ * Pure function — returns lines, logs nothing (applies ADR-013).
+ */
+export function formatOverlaySummary(
+  report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
+): SummaryLine[] {
+  const lines: SummaryLine[] = [];
+
+  if (report.overlaidRefs.length > 0) {
+    lines.push({
+      level: 'info',
+      message:
+        `Installed ${report.overlaidRefs.length} generated skill reference(s) for ` +
+        `${prefixSkillName('git')}`,
+    });
+  }
+
+  for (const failure of report.overlayFailures) {
+    lines.push({
+      level: 'warn',
+      message:
+        `Could not refresh the generated references for "${failure.provider}" ` +
+        `(${failure.error}) — the previously installed files were left unchanged`,
     });
   }
 
@@ -1310,6 +1347,7 @@ export const initCommand = new Command('init')
 
     // Install via file copy
     let installReport: InstallReport;
+    const installWarnings: string[] = [];
     try {
       installReport = await installViaFileCopy({
         plugins: pluginsToInstall,
@@ -1320,6 +1358,10 @@ export const initCommand = new Command('init')
         rulesMap,
         isPartialInstall: !!options.plugin,
         spinner: s,
+        // Non-fatal install notices with no other channel (skipped symlinks in the
+        // generated reference tree, mode-normalisation failures) reach the user rather
+        // than the void. Collected now, emitted after the spinner stops.
+        warn: (msg) => { installWarnings.push(msg); },
       });
     } catch (error) {
       s.stop('Installation failed');
@@ -1908,6 +1950,25 @@ export const initCommand = new Command('init')
       if (line.level === 'warn') p.log.warn(line.message);
       else p.log.info(line.message);
     }
+
+    // Reference-overlay reporting: the overlay rewrites files inside an installed skill
+    // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
+    for (const line of formatOverlaySummary(installReport)) {
+      switch (line.level) {
+        case 'info':
+          p.log.info(line.message);
+          break;
+        case 'warn':
+          p.log.warn(line.message);
+          break;
+        default: {
+          const _exhaustive: never = line.level;
+          void _exhaustive;
+          break;
+        }
+      }
+    }
+    for (const warning of installWarnings) p.log.warn(warning);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
