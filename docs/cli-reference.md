@@ -215,8 +215,8 @@ All 29 flags by kind and devflow default:
 | `prompt-caching-1h` | boolean | env `ENABLE_PROMPT_CACHING_1H` | `true` |
 | `show-turn-duration` | boolean | setting `showTurnDuration` | `true` |
 | `clear-context-on-plan` | boolean | setting `showClearContextOnPlanAccept` | `true` |
-| `disable-bundled-skills` | boolean | setting `disableBundledSkills` | `true` |
-| `pin-sonnet-4-6` | boolean | env `ANTHROPIC_DEFAULT_SONNET_MODEL` | `true`¹ |
+| `disable-bundled-skills` | boolean | setting `disableBundledSkills` | `false` |
+| `pin-sonnet-4-6` | boolean | env `ANTHROPIC_DEFAULT_SONNET_MODEL` | `false`¹ |
 | `max-concurrent-subagents` | number | env `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `40` (upstream: 20) |
 | `brief` | boolean | env `CLAUDE_CODE_BRIEF` | `false` |
 | `thinking-summaries` | boolean | setting `showThinkingSummaries` | `false` |

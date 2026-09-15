@@ -268,8 +268,8 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     kind: 'boolean',
     target: { type: 'setting', key: 'disableBundledSkills' },
     onPayload: true,
-    recommended: true,
-    defaultValue: true,
+    recommended: false,
+    defaultValue: false,
   },
   {
     id: 'pin-sonnet-4-6',
@@ -280,8 +280,8 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     kind: 'boolean',
     target: { type: 'env', key: 'ANTHROPIC_DEFAULT_SONNET_MODEL' },
     onPayload: 'claude-sonnet-4-6',
-    recommended: true,
-    defaultValue: true,
+    recommended: false,
+    defaultValue: false,
   },
   {
     // Devflow fan-outs routinely exceed the upstream default of 20.
