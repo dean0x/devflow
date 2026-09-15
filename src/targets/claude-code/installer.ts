@@ -1179,7 +1179,7 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
 function recordSweep(
   report: InstallReport,
   kind: SweptOrphan['kind'],
-  sweep: Awaited<ReturnType<typeof sweepOrphanedAssets>>,
+  sweep: SweepResult,
 ): void {
   report.sweptOrphans.push(...sweep.removed.map(name => ({ kind, name })));
   report.sweepFailures.push(...sweep.failed.map(f => ({ kind, name: f.name, error: f.error })));
