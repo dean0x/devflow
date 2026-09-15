@@ -558,10 +558,23 @@ describe('splitVariantSections', () => {
     return ['module prose, emitted nowhere', ...ops.map(op => `<!-- op: ${op} -->\n${bodyFor(op)}`)].join('\n');
   }
 
-  it('returns one document per op and drops the module-level prose', () => {
-    const sections = valueOf(splitVariantSections(body(TRACKER_GITHUB_OPS), TRACKER_GITHUB_OPS));
-    expect([...sections.keys()]).toEqual([...TRACKER_GITHUB_OPS]);
-    for (const [op, content] of sections) {
+  /**
+   * The caller's records, as the splitter takes them: one per operation. The
+   * build passes its planned destinations this way, which is what lets each
+   * destination come back with its content already attached.
+   */
+  function entries(ops: readonly string[]): ReadonlyArray<{ readonly op: string }> {
+    return ops.map(op => ({ op }));
+  }
+
+  it('returns one document per entry, in caller order, and drops the module-level prose', () => {
+    // The caller's own records come back carrying their section — the
+    // post-condition the old keyed return could only state in a comment.
+    const planned = TRACKER_GITHUB_OPS.map(op => ({ op, dest: `tracker/github/${op}.md` }));
+    const sections = valueOf(splitVariantSections(body(TRACKER_GITHUB_OPS), planned));
+    expect(sections.map(section => section.op)).toEqual([...TRACKER_GITHUB_OPS]);
+    for (const { op, dest, content } of sections) {
+      expect(dest, 'each entry keeps the fields its caller passed in').toBe(`tracker/github/${op}.md`);
       expect(content).toBe(`mechanics for ${op}\n`);
       expect(content, 'module-level prose must not be duplicated into every file').not.toContain('emitted nowhere');
       expect(content, 'the marker line is consumed, never shipped').not.toContain('<!-- op:');
@@ -570,13 +583,13 @@ describe('splitVariantSections', () => {
 
   it('known-bad probe: a section for an unregistered op is refused (forward direction)', () => {
     const withStray = `${body(TRACKER_GITHUB_OPS)}\n<!-- op: stray-op -->\nbody`;
-    const err = errorOf(splitVariantSections(withStray, TRACKER_GITHUB_OPS));
+    const err = errorOf(splitVariantSections(withStray, entries(TRACKER_GITHUB_OPS)));
     expect(err.kind).toBe('unknown-section');
   });
 
   it('known-bad probe: a registered op with no section is refused (reverse direction)', () => {
     const short = body(TRACKER_GITHUB_OPS.slice(0, 9));
-    const err = errorOf(splitVariantSections(short, TRACKER_GITHUB_OPS));
+    const err = errorOf(splitVariantSections(short, entries(TRACKER_GITHUB_OPS)));
     expect(err.kind).toBe('missing-section');
     if (err.kind !== 'missing-section') throw new Error('unexpected kind');
     expect(err.ops).toEqual(['ensure-pr-ready']);
@@ -586,7 +599,7 @@ describe('splitVariantSections', () => {
     // The arm neither direction above can see: omission is caught by parity,
     // emptiness compiles cleanly and emits a zero-byte reference.
     const withEmpty = body(TRACKER_GITHUB_OPS, op => (op === 'manage-debt' ? '   \n' : `mechanics for ${op}`));
-    const err = errorOf(splitVariantSections(withEmpty, TRACKER_GITHUB_OPS));
+    const err = errorOf(splitVariantSections(withEmpty, entries(TRACKER_GITHUB_OPS)));
     expect(err.kind).toBe('empty-section');
     if (err.kind !== 'empty-section') throw new Error('unexpected kind');
     expect(err.op).toBe('manage-debt');
@@ -594,8 +607,8 @@ describe('splitVariantSections', () => {
 
   it('known-bad probe: a repeated marker and a body with no markers are both refused', () => {
     const duplicated = `${body(TRACKER_GITHUB_OPS)}\n<!-- op: setup-task -->\nsecond copy`;
-    expect(errorOf(splitVariantSections(duplicated, TRACKER_GITHUB_OPS)).kind).toBe('duplicate-section');
-    expect(errorOf(splitVariantSections('no markers here', TRACKER_GITHUB_OPS)).kind).toBe('no-sections');
+    expect(errorOf(splitVariantSections(duplicated, entries(TRACKER_GITHUB_OPS))).kind).toBe('duplicate-section');
+    expect(errorOf(splitVariantSections('no markers here', entries(TRACKER_GITHUB_OPS))).kind).toBe('no-sections');
   });
 
   it('an indented or trailing-text marker is not a marker', () => {
@@ -605,7 +618,7 @@ describe('splitVariantSections', () => {
       '<!-- op: manage-debt -->',
       '  <!-- op: manage-debt --> see below',
     );
-    const err = errorOf(splitVariantSections(sneaky, TRACKER_GITHUB_OPS));
+    const err = errorOf(splitVariantSections(sneaky, entries(TRACKER_GITHUB_OPS)));
     expect(err.kind).toBe('missing-section');
   });
 });

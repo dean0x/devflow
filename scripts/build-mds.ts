@@ -718,6 +718,12 @@ interface PlannedOutput {
  * the one-file arm hands over its single `dest` (no unchecked index), and the
  * fan-out arm's `outputs` carry each dest beside the pair that fills it (no
  * defaulted pair list, no index correspondence to trust).
+ *
+ * The split keeps that pairing rather than breaking it: each destination is
+ * handed TO the splitter and comes back carrying its own content, so this
+ * function performs no lookup and asserts nothing about one. The alternative —
+ * a keyed result read back per op — is partial in the type however total it is
+ * in fact, which is what the non-null assertion here used to paper over.
  */
 function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): PlannedOutput[] {
   if (plan.variant !== "skill-refs") {
@@ -725,7 +731,10 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Plan
   }
 
   const rel = path.relative(ROOT, host.file);
-  const split = splitVariantSections(body, plan.outputs.map(o => o.pair.op));
+  const split = splitVariantSections(
+    body,
+    plan.outputs.map(({ dest, pair }) => ({ dest, op: pair.op })),
+  );
   if (!split.ok) {
     throw new Error(
       `${rel}: section split refused — ${JSON.stringify(split.error)}. Each operation's section ` +
@@ -733,7 +742,7 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Plan
     );
   }
 
-  return plan.outputs.map(({ dest, pair }) => ({ dest, content: split.value.get(pair.op)! }));
+  return split.value.map(({ dest, content }) => ({ dest, content }));
 }
 
 async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {

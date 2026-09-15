@@ -500,6 +500,26 @@ export type SectionSplitError =
   | { kind: 'missing-section'; ops: readonly string[] }
   | { kind: 'empty-section'; op: string };
 
+/** The minimum a caller's record must say for a section to be found for it. */
+export interface OperationNamed {
+  /** The operation whose section this record wants. */
+  readonly op: string;
+}
+
+/**
+ * A caller's own record, handed back with the section that belongs to it.
+ *
+ * The content travels WITH the record rather than in a lookup structure beside
+ * it, and that is what puts the splitter's post-condition in the type instead of
+ * in a comment: on success there is exactly one of these per record the caller
+ * passed in, in the caller's own order, and every one of them carries a
+ * `content`. A caller never has to ask "is there a section for this op?" — it
+ * reads a field off the record it already had. The old shape could not say that:
+ * `Map<string, string>` is both mutable and partial, so the only call site had to
+ * spend a non-null assertion claiming a guarantee that lived nowhere in the type.
+ */
+export type VariantSection<T extends OperationNamed> = T & { readonly content: string };
+
 /**
  * Split a reference module's compiled body into one document per operation.
  *
@@ -515,17 +535,26 @@ export type SectionSplitError =
  * reference, which reads downstream as "mechanics unavailable" with no build
  * signal at all (the GAP-44 shape — omission is caught, emptiness is not).
  *
+ * Total on success, and immutable: the caller gets back a readonly array of its
+ * OWN records, in its own order, each carrying its section. Nothing is looked up
+ * afterwards, so no consumer can be handed `undefined` for an operation the
+ * registry declared, and no consumer holds a handle it could write through.
+ *
  * @param body - The module's compiled output, steering block already stripped.
- * @param ops - The operations the registry says this module emits.
+ * @param entries - The caller's records, one per operation the registry says this
+ *   module emits, each naming its operation in `op`. Taking the caller's records
+ *   rather than a bare op list is what lets the result carry each operation's
+ *   destination back to it structurally, with no index correspondence to trust.
  */
-export function splitVariantSections(
+export function splitVariantSections<T extends OperationNamed>(
   body: string,
-  ops: readonly string[],
-): Result<Map<string, string>, SectionSplitError> {
+  entries: readonly T[],
+): Result<readonly VariantSection<T>[], SectionSplitError> {
+  const ops = entries.map(entry => entry.op);
   const lines = body.split('\n');
   const sections = new Map<string, string[]>();
   const expected = new Set(ops);
-  let current: string | null = null;
+  let current: string[] | null = null;
 
   for (const line of lines) {
     const match = VARIANT_SECTION_MARKER_RE.exec(line);
@@ -533,26 +562,38 @@ export function splitVariantSections(
       const op = match[1];
       if (!expected.has(op)) return Err({ kind: 'unknown-section', op, expected: ops });
       if (sections.has(op)) return Err({ kind: 'duplicate-section', op });
-      sections.set(op, []);
-      current = op;
+      // The buffer itself is what the scan carries forward, not the op name it is
+      // filed under, so appending a line is never a second partial lookup.
+      current = [];
+      sections.set(op, current);
       continue;
     }
     // Text before the first marker is module-level preamble and is dropped: it
     // belongs to no operation, so shipping it would duplicate it into every file.
     if (current === null) continue;
-    sections.get(current)!.push(line);
+    current.push(line);
   }
 
   if (sections.size === 0) return Err({ kind: 'no-sections', expected: ops });
 
-  const missing = ops.filter(op => !sections.has(op));
+  // Pair every entry with its collected section, recording the entries the body
+  // never covered. Parity is decided in full before any content is judged, so a
+  // body that is both short and empty-in-places still reports missing-section —
+  // the omission, which is the larger fact.
+  const paired: Array<{ readonly entry: T; readonly collected: readonly string[] }> = [];
+  const missing: string[] = [];
+  for (const entry of entries) {
+    const collected = sections.get(entry.op);
+    if (collected === undefined) missing.push(entry.op);
+    else paired.push({ entry, collected });
+  }
   if (missing.length > 0) return Err({ kind: 'missing-section', ops: missing });
 
-  const out = new Map<string, string>();
-  for (const op of ops) {
-    const trimmed = sections.get(op)!.join('\n').trim();
-    if (trimmed.length === 0) return Err({ kind: 'empty-section', op });
-    out.set(op, `${trimmed}\n`);
+  const out: VariantSection<T>[] = [];
+  for (const { entry, collected } of paired) {
+    const trimmed = collected.join('\n').trim();
+    if (trimmed.length === 0) return Err({ kind: 'empty-section', op: entry.op });
+    out.push({ ...entry, content: `${trimmed}\n` });
   }
   return Ok(out);
 }
