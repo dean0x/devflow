@@ -283,6 +283,13 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 // spaces deep inside a list item are not modelled. Every `## ` inside one of
 // those is itself indented, so it is not a column-0 `## ` line and could not
 // terminate a section under either the old rule or this one.
+//
+// Where the rules are probed: directly against this scanner in
+// tests/guards/fence-grammar.test.ts (one synthetic corpus per rule, each proven
+// red against the inverted rule), and end-to-end through the section extractor
+// in tests/guards/agent-source-resolver.test.ts. A rule with no probe can be
+// inverted with the whole suite still green (PF-018), so a rule added here is a
+// probe added there.
 
 const FENCE_MARKER_RE = /^ {0,3}(`{3,}|~{3,})/
 
@@ -299,22 +306,36 @@ export interface UnfencedLine {
 /** A `collectUnfencedH2` site: the heading starts at column 0, so `index` is its `#`. */
 export type UnfencedH2 = UnfencedLine
 
+/** The opening delimiter of a fence the text never closes. */
+export interface UnclosedFence {
+  /** 1-based line number of the opening delimiter. */
+  line: number
+  /** Offset of the delimiter's first character within `text`, in the units `String.slice` takes. */
+  index: number
+  /** The opening line, verbatim — its info string names the fence a fix must close. */
+  text: string
+}
+
+/** What one pass of the fence scanner saw. */
+interface FenceScan {
+  /** Accepted lines outside every fence, in document order. */
+  readonly sites: UnfencedLine[]
+  /** The fence still open when the text ran out, or null when every fence closed. */
+  readonly unclosed: UnclosedFence | null
+}
+
 /**
- * Named collector — the harness's ONE fence scanner. Returns every line of
- * `text` that sits outside every fenced code block and satisfies `accept`, in
- * document order.
- *
- * `accept` sees the raw line, so a caller expresses its own shape (a `## `
- * heading, a process-block terminator) while the fence rule stays here.
+ * The single pass both public collectors read. Private on purpose: callers ask
+ * either "which column-0 lines are structure?" or "does the text end inside a
+ * fence?", and answering both from one scan is what keeps the grammar in one
+ * place. A second scanner drifts from this one the moment a rule moves, and its
+ * probe stays green while the real rule has changed (PF-018).
  */
-export function collectUnfencedLines(
-  text: string,
-  accept: (line: string) => boolean,
-): UnfencedLine[] {
+function scanFences(text: string, accept: (line: string) => boolean): FenceScan {
   const sites: UnfencedLine[] = []
   const lines = text.split('\n')
   let offset = 0
-  let open: { char: string; length: number } | null = null
+  let open: { char: string; length: number; opener: UnclosedFence } | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -324,7 +345,11 @@ export function collectUnfencedLines(
         const run = marker[1]
         const info = line.slice(marker[0].length)
         if (run[0] !== '`' || !info.includes('`')) {
-          open = { char: run[0], length: run.length }
+          open = {
+            char: run[0],
+            length: run.length,
+            opener: { line: i + 1, index: offset, text: line },
+          }
         }
       } else if (accept(line)) {
         sites.push({ line: i + 1, index: offset, text: line })
@@ -340,7 +365,22 @@ export function collectUnfencedLines(
     offset += line.length + 1
   }
 
-  return sites
+  return { sites, unclosed: open === null ? null : open.opener }
+}
+
+/**
+ * Named collector — the harness's ONE fence scanner. Returns every line of
+ * `text` that sits outside every fenced code block and satisfies `accept`, in
+ * document order.
+ *
+ * `accept` sees the raw line, so a caller expresses its own shape (a `## `
+ * heading, a process-block terminator) while the fence rule stays here.
+ */
+export function collectUnfencedLines(
+  text: string,
+  accept: (line: string) => boolean,
+): UnfencedLine[] {
+  return scanFences(text, accept).sites
 }
 
 /**
@@ -354,6 +394,35 @@ export function collectUnfencedLines(
  */
 export function collectUnfencedH2(text: string): UnfencedH2[] {
   return collectUnfencedLines(text, line => line.startsWith('## '))
+}
+
+/**
+ * Named collector: the opening delimiter of a fence `text` never closes.
+ *
+ * "An unclosed fence runs to the end of the text" is the one rule of the grammar
+ * above whose blast radius is the whole document. Past an unclosed delimiter
+ * every column-0 `## ` is payload, so every union-mode section extraction runs to
+ * end of file, every absence assertion over the tail is satisfied for the wrong
+ * reason, and the fenced-`## ` non-vacuity floor counts UP as the corpus
+ * degrades — all three numbers a reader would check move the reassuring way
+ * (PF-018). The corpus-wide assertion that no shipped file is in that state
+ * lives in tests/guards/fence-grammar.test.ts.
+ *
+ * Returns at most one entry, which is a property of the grammar and not of this
+ * function: the scan carries a single open state, so the first delimiter able to
+ * close a fence closes it, and only the final unmatched opener can survive to end
+ * of text. The array shape is what callers aggregate across a corpus
+ * (`files.flatMap(...)`), and keeps the empty assertion spelled the way every
+ * other named collector here spells it.
+ *
+ * Deliberate non-goal (PF-064): a fence a writer forgot to close, which a later
+ * unrelated delimiter happens to close, is balanced under this grammar and is not
+ * reported. What is asserted is exactly what the rule states — the text does not
+ * end inside a fence.
+ */
+export function collectUnclosedFences(text: string): UnclosedFence[] {
+  const { unclosed } = scanFences(text, () => false)
+  return unclosed === null ? [] : [unclosed]
 }
 
 /**
