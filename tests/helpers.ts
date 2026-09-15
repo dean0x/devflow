@@ -250,6 +250,88 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
   return result
 }
 
+// ── Fenced-code-block awareness for `## ` section boundaries ─────────────────
+//
+// D-FENCE-AWARE-BOUNDARY (PF-063). A `## ` line at column 0 inside a fenced code
+// block is payload, not structure: `tracker/github/manage-debt.md`'s `## Items`
+// is the literal body of the successor tech-debt issue, and
+// `tracker/github/ensure-traceable-issue.md` carries six such lines across its
+// `gh issue create` heredoc and its D3 template fence. A terminator search that
+// reads them as headings ends the operation's section mid-fence — the bytes stay
+// on disk, containment-green, while every union-mode guard reading that section
+// examines an empty tail. PF-063's recorded remedy is to make the rule structural
+// and assert it; `collectUnfencedH2` is the structural half, shared by the
+// extractor below and by the per-op reference guard in tests/tracker/.
+//
+// Fence grammar — a deliberate CommonMark subset:
+//   open  — a line whose first non-space characters, after at most 3 leading
+//           spaces, are 3+ backticks or 3+ tildes (a backtick fence's info string
+//           may not itself contain a backtick);
+//   close — a later line with at most 3 leading spaces carrying the same marker
+//           character, a run at least as long as the opening one, and nothing
+//           after it but whitespace;
+//   an unclosed fence runs to the end of the text.
+//
+// Deliberate non-goals, written down rather than inferred from a green run
+// (PF-064): 4-space-indented code blocks, HTML blocks, and fences opened 4+
+// spaces deep inside a list item are not modelled. Every `## ` inside one of
+// those is itself indented, so it is not a column-0 `## ` line and could not
+// terminate a section under either the old rule or this one.
+
+const FENCE_MARKER_RE = /^ {0,3}(`{3,}|~{3,})/
+
+/** One column-0 `## ` heading line that sits outside every fenced code block. */
+export interface UnfencedH2 {
+  /** 1-based line number. */
+  line: number
+  /** Offset of the first `#` within `text`, in the same units `String.slice` takes. */
+  index: number
+  /** The heading line, verbatim. */
+  text: string
+}
+
+/**
+ * Named collector: every column-0 `## ` line in `text` that is NOT inside a
+ * fenced code block, in document order.
+ *
+ * This is the single owner of "is this `## ` structure or payload?" — the
+ * section extractor and the generated-reference structure guard must not
+ * re-derive it, or a probe can stay green after the real rule changes
+ * (ADR-024/PF-018).
+ */
+export function collectUnfencedH2(text: string): UnfencedH2[] {
+  const sites: UnfencedH2[] = []
+  const lines = text.split('\n')
+  let offset = 0
+  let open: { char: string; length: number } | null = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const marker = FENCE_MARKER_RE.exec(line)
+    if (open === null) {
+      if (marker !== null) {
+        const run = marker[1]
+        const info = line.slice(marker[0].length)
+        if (run[0] !== '`' || !info.includes('`')) {
+          open = { char: run[0], length: run.length }
+        }
+      } else if (line.startsWith('## ')) {
+        sites.push({ line: i + 1, index: offset, text: line })
+      }
+    } else if (
+      marker !== null &&
+      marker[1][0] === open.char &&
+      marker[1].length >= open.length &&
+      line.slice(marker[0].length).trim() === ''
+    ) {
+      open = null
+    }
+    offset += line.length + 1
+  }
+
+  return sites
+}
+
 // ── Corpus-spanning operation-section extractor ──────────────────────────────
 //
 // Two modes, explicit — no default. Either choice is silently wrong for one
@@ -267,6 +349,10 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 
 /**
  * Extract an ## Operation: section from a corpus.
+ *
+ * The section runs from the anchor to the next UNFENCED column-0 `## ` line, or
+ * to end of file (D-FENCE-AWARE-BOUNDARY / PF-063 — see `collectUnfencedH2`).
+ *
  * Throws when the anchor is absent from every file in the corpus.
  * Throws when mode is 'sole' and the anchor matches in more than one file
  * (naming both paths — that is the intent; the first match is not the authority).
@@ -282,10 +368,13 @@ export function extractOpSectionFromCorpus(
   for (const entry of corpus) {
     const start = entry.content.indexOf(marker)
     if (start === -1) continue
-    const nextSection = entry.content.indexOf('\n## ', start + marker.length)
-    const section = nextSection === -1
+    // Cut at the newline that PRECEDES the next unfenced heading, so the section
+    // carries no trailing blank line and the heading belongs to the next section.
+    const after = start + marker.length
+    const terminator = collectUnfencedH2(entry.content).find(h => h.index - 1 >= after)
+    const section = terminator === undefined
       ? entry.content.slice(start)
-      : entry.content.slice(start, nextSection)
+      : entry.content.slice(start, terminator.index - 1)
     matches.push({ path: entry.path, section })
   }
 

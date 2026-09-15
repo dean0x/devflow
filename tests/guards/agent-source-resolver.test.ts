@@ -228,6 +228,77 @@ describe('extractOpSectionFromCorpus union mode [DR-18]', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Guard: extractOpSectionFromCorpus — the section boundary is fence-aware (PF-063)
+// ---------------------------------------------------------------------------
+//
+// A column-0 `## ` line inside a fenced code block is payload, not structure:
+// in the shipped tree it is the body of a GitHub issue composed by a heredoc.
+// Reading it as a heading ends the section mid-fence and hands every union-mode
+// guard an empty tail while the bytes stay on disk, containment-green.
+//
+// Four synthetic corpora, one per rule of the fence grammar. The unfenced arm is
+// the control: it proves the boundary still fires where it must, so a fence rule
+// that swallowed every heading could not pass this block.
+
+describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware (PF-063)', () => {
+  const FILE = '/fake/refs/probe-op.md'
+
+  function section(content: string): string {
+    return extractOpSectionFromCorpus([{ path: FILE, content }], 'probe-op', { mode: 'sole' }).content
+  }
+
+  it('a `## ` line inside a backtick fence does not terminate the section', () => {
+    const content =
+      '## Operation: probe-op\n\n' +
+      '```bash\n' +
+      "printf '%s\\n' \"## Items\"\n" +
+      'gh issue close "$old_issue"\n' +
+      '```\n\n' +
+      'TAIL_MARKER\n'
+    const sec = section(content)
+    expect(sec, 'the fenced heading must not cut the section').toContain('gh issue close')
+    expect(sec, 'content after the closing fence must be returned').toContain('TAIL_MARKER')
+  })
+
+  it('a `## ` line outside any fence still terminates the section (control)', () => {
+    const content =
+      '## Operation: probe-op\n\nBODY_MARKER\n\n## Another Section\n\nAFTER_MARKER\n'
+    const sec = section(content)
+    expect(sec, 'the section must keep its own body').toContain('BODY_MARKER')
+    expect(
+      sec,
+      'an unfenced `## ` must still end the section — otherwise the boundary rule is gone, not fixed',
+    ).not.toContain('AFTER_MARKER')
+  })
+
+  it('a `~~~` fence behaves like a backtick fence, and a backtick run cannot close it', () => {
+    const content =
+      '## Operation: probe-op\n\n' +
+      '~~~markdown\n' +
+      '## Initial Request\n' +
+      '```\n' +                     // a backtick run must not close a tilde fence
+      '## Product Requirements\n' +
+      '~~~\n\n' +
+      'TAIL_MARKER\n'
+    const sec = section(content)
+    expect(sec, 'the tilde-fenced headings must not cut the section').toContain('## Product Requirements')
+    expect(sec, 'content after the tilde fence closes must be returned').toContain('TAIL_MARKER')
+  })
+
+  it('an unclosed fence runs to end of text, so nothing below it terminates the section', () => {
+    const content =
+      '## Operation: probe-op\n\n' +
+      '```bash\n' +
+      '## Items\n\n' +
+      '## Also Not A Heading\n' +
+      'TAIL_MARKER\n'
+    const sec = section(content)
+    expect(sec, 'an unclosed fence must swallow every later `## `').toContain('## Also Not A Heading')
+    expect(sec, 'the unclosed fence runs to end of text').toContain('TAIL_MARKER')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Guard: gitAgentSinkCorpus — walks references/ recursively (Phase 2 prep)
 // ---------------------------------------------------------------------------
 //

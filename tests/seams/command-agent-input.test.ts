@@ -613,12 +613,6 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 //
 // The consumer (plan.md) is excluded by construction: we search only the named
 // producer-op full sections from git.md, never the compiled command files.
-//
-// FILE-SCOPED SLICING (not extractOpSectionFromCorpus): the Output templates in
-// fetch-issue and fetch-issues-batch contain "## Issue #" headings that would
-// truncate the extracted section at the first \n## , cutting off the
-// <untrusted-issue-body> content. Per-op full-file slicing avoids truncation
-// (same pattern as AC-0.3 / Guard 10 in git-agent.test.ts).
 
 /**
  * Named collector — returns `{label} → {op}` for every (contract entry, named
@@ -626,10 +620,9 @@ describe('reverse: every required **Input:** value is passed by at least one cal
  * guard and by both probes, so they exercise the real logic rather than a
  * hand-written imitation.
  *
- * File-scoped slicing (not extractOpSectionFromCorpus): the Output templates in
- * fetch-issue and fetch-issues-batch contain "## Issue #" headings that would
- * truncate the extracted section at the first \n## , cutting off the
- * <untrusted-issue-body> content.
+ * It takes a git.md BODY, not a corpus: both known-bad probes drive it with a
+ * mutated copy of that body, and a corpus-shaped signature would push the mutation
+ * into the fixture instead of the input under test.
  */
 function collectMissingProducers(gitContent: string): string[] {
   function fileSlice(op: string): string {

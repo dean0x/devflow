@@ -193,6 +193,14 @@
       "occurrences": 1,
       "sourceFile": "tests/tracker/containment.test.ts",
       "description": "Minimum characters a generated tracker reference must carry. Registered as a FLOOR, not a ceiling: the assertion is `content.length < MIN_REFERENCE_CHARS` → problem, so raising it only makes the containment guard stricter, while LOWERING it is the weakening move — it re-admits the shape the constant exists to catch, a reference that kept its heading and lost its body. Its own JSDoc names it a floor."
+    },
+    {
+      "id": "min-fenced-h2",
+      "floor": 7,
+      "pattern": "const MIN_FENCED_H2 = 7;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/reference-structure.test.ts",
+      "description": "Column-0 `## ` lines the live generated reference tree must carry INSIDE a code fence, so the PF-063 structure guard's absence assertion is exercised against real fenced headings rather than a corpus that has none. Today: manage-debt.md's `## Items` (1) plus ensure-traceable-issue.md's heredoc and D3-template headings (6). Lowering it re-admits a corpus in which fence-awareness is proven only by the synthetic probes in tests/guards/agent-source-resolver.test.ts."
     }
   ],
   "ceilings": [

@@ -424,9 +424,10 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
     endLine: 232,
     rationale:
       'The D3 template heading moved into the ensure-traceable-issue reference DEMOTED to ' +
-      '`###`. extractOpSectionFromCorpus slices an op section at the next `\\n## `, so this ' +
-      'level-2 heading hid the rest of that reference from every union-mode guard — the ' +
-      'hazard T2a recorded and T2b was told to repair in the commit that touches this op. ' +
+      '`###`. extractOpSectionFromCorpus slices an op section at the next UNFENCED `\\n## `, ' +
+      'and this heading sits outside any fence, so at level 2 it would hide the rest of that ' +
+      'reference from every union-mode guard (PF-063). The prohibition is now structural and ' +
+      'asserted in tests/tracker/reference-structure.test.ts. ' +
       'The template body, its fence and its Rules bullets moved byte-identically.',
   },
 
@@ -494,9 +495,10 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
     endLine: 283,
     rationale:
       '`## Branch Name from Issue` moved into the setup-task reference DEMOTED to `###`. ' +
-      'extractOpSectionFromCorpus slices an op section to the next `\\n## `, so a second ' +
-      'level-2 heading inside a generated reference truncates every union-mode guard at ' +
-      'that point. The recipe itself moved byte-identically.',
+      'extractOpSectionFromCorpus slices an op section to the next UNFENCED `\\n## `, and this ' +
+      'heading sits outside any fence, so at level 2 it would truncate every union-mode guard ' +
+      'at that point (PF-063); the prohibition is asserted in reference-structure.test.ts. ' +
+      'The recipe itself moved byte-identically.',
   },
   {
     file: 'github-api.md',

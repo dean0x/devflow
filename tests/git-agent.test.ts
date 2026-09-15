@@ -446,8 +446,7 @@ function baselineCorpus(): CorpusEntry[] {
  *
  * Pins (PF-030, PF-058):
  *   (a) setup-task step 4b commits `.devflow/conventions.md` after branch creation — sole mode;
- *       git.md is the single authority. The section is truncated at `## Task Setup:` (inside the
- *       output code fence), but all three pinned literals sit in the process steps before the fence.
+ *       git.md is the single authority.
  *   (b) learn-conventions contains NO `commit --only` — the commit has moved to setup-task step 4b
  *       (ADR-003: end state only; the old **Commit (non-blocking):** block must not reappear).
  *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
@@ -483,10 +482,14 @@ function collectConventionsCommitPlacementViolations(
     return violations;
   }
 
-  // Helper: extract a sole-mode section; a missing op is a violation, not an unhandled throw.
-  function getSection(opName: string): string | null {
+  // Helper: extract a section; a missing op is a violation, not an unhandled throw.
+  function getSection(
+    corpus: CorpusEntry[],
+    opName: string,
+    mode: 'union' | 'sole',
+  ): string | null {
     try {
-      return extractOpSectionFromCorpus(contractCorpus, opName, { mode: 'sole' }).content;
+      return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
     } catch {
       violations.push(`operation '${opName}' not found in corpus — cannot verify placement`);
       return null;
@@ -495,7 +498,7 @@ function collectConventionsCommitPlacementViolations(
 
   // ── (a) setup-task ─────────────────────────────────────────────────────────
   // sole mode: git.md is the single authority for setup-task.
-  const setupTask = getSection('setup-task');
+  const setupTask = getSection(contractCorpus, 'setup-task', 'sole');
   if (setupTask !== null) {
     if (!setupTask.includes('commit --only -- .devflow/conventions.md')) {
       violations.push(
@@ -534,38 +537,19 @@ function collectConventionsCommitPlacementViolations(
   }
 
   // ── (b) learn-conventions ──────────────────────────────────────────────────
-  // File-scoped slicing (not extractOpSectionFromCorpus): the output block's
-  // ## Conventions Learned heading causes extractOpSectionFromCorpus to truncate
-  // before the post-output **Commit boundary:** area, which is where a misplaced
-  // commit --only would live. Slicing from ## Operation: learn-conventions to
-  // the next ## Operation: covers the full section including the post-output area.
-  // Sink-wide on purpose: this arm must still see the body after it moves.
-  {
-    const marker = '## Operation: learn-conventions';
-    const matchingSections: string[] = [];
-    for (const entry of sinkCorpus) {
-      const start = entry.content.indexOf(marker);
-      if (start === -1) continue;
-      const nextOp = entry.content.indexOf('\n## Operation:', start + marker.length);
-      matchingSections.push(nextOp === -1 ? entry.content.slice(start) : entry.content.slice(start, nextOp));
-    }
-    if (matchingSections.length === 0) {
-      violations.push("operation 'learn-conventions' not found in corpus — cannot verify placement");
-    } else {
-      const learnConventions = matchingSections.join('\n');
-      if (learnConventions.includes('commit --only')) {
-        violations.push(
-          'learn-conventions: contains "commit --only" — the conventions commit must not be inside ' +
-          'learn-conventions; it belongs in setup-task step 4b so it lands on the feature branch (PF-030)',
-        );
-      }
-    }
+  // Sink-wide on purpose: this arm is a NEGATIVE check, and a negative check
+  // narrowed to git.md goes blind the moment the body moves into a reference.
+  const learnConventions = getSection(sinkCorpus, 'learn-conventions', 'union');
+  if (learnConventions !== null && learnConventions.includes('commit --only')) {
+    violations.push(
+      'learn-conventions: contains "commit --only" — the conventions commit must not be inside ' +
+      'learn-conventions; it belongs in setup-task step 4b so it lands on the feature branch (PF-030)',
+    );
   }
 
   // ── (c) fetch-issues-batch ─────────────────────────────────────────────────
   // sole mode: git.md is the single authority.
-  // Both pins sit in the process steps before the ## Issues Batch output heading.
-  const fetchBatch = getSection('fetch-issues-batch');
+  const fetchBatch = getSection(contractCorpus, 'fetch-issues-batch', 'sole');
   if (fetchBatch !== null) {
     if (!fetchBatch.includes('NOT_FOUND ({refs})')) {
       violations.push(
@@ -583,9 +567,7 @@ function collectConventionsCommitPlacementViolations(
 
   // ── (d) fetch-issue ────────────────────────────────────────────────────────
   // sole mode: git.md is the single authority.
-  // Section is truncated at ## Issue #{number}: inside the output code fence,
-  // but step 1 (the strip step) is before the output block.
-  const fetchIssue = getSection('fetch-issue');
+  const fetchIssue = getSection(contractCorpus, 'fetch-issue', 'sole');
   if (fetchIssue !== null) {
     if (!fetchIssue.includes('Strip a leading `#`')) {
       violations.push(
@@ -733,13 +715,14 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('fetch-issues-batch: "## Issues Batch ({n} issues)" output header is present (AC-0.3)', () => {
-    // Whole-file scope on purpose. extractOpSectionFromCorpus ends a section at
-    // the next `\n## `, and this header is itself a `## ` line inside the op's
-    // Output template — so the extractor cuts the section immediately before it
-    // and an op-scoped assertion can never see it.
+    // Op-scoped: the header is a `## ` line inside this op's Output fence, and a
+    // fenced heading is payload rather than a section boundary (PF-063), so the
+    // assertion pins the header to the operation that renders it rather than to
+    // the file as a whole.
+    const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
     expect(
-      content,
-      'git.md: missing "## Issues Batch ({n} issues)" output header — plan.mds Gate 0 ' +
+      sec,
+      'fetch-issues-batch: missing "## Issues Batch ({n} issues)" output header — plan.mds Gate 0 ' +
       'parses the batch response by this heading',
     ).toContain('## Issues Batch ({n} issues)');
   });
@@ -1668,24 +1651,32 @@ describe('git agent — static content guards (PF-018)', () => {
   //   (b) <external-thread>: fetch-review-threads, post-resolution-summary, post-wave-report.
   //       Pre-existing on main (stabilisation assertion, named-set ensures no silent op drift).
   //
-  // FILE-SCOPED: extractOpSectionFromCorpus ends a section at the next \n## , which truncates
-  // ops whose Output template contains ## headings (e.g. fetch-issues-batch). Per-op slicing over
-  // the full file avoids truncation (AC-0.3 uses the same approach at tests/git-agent.test.ts:~161).
+  // FILE-SCOPED, and NOT because of section truncation: `opRegion` slices operation-to-operation,
+  // so the LAST operation's region runs to end of file and takes in the shared `## Principles` /
+  // `## Boundaries` trailer. `post-wave-report` is the last operation and carries no
+  // `<external-thread>` of its own — Principle 8 (git.md:887) is what puts it in set (b). Switching
+  // this arm to `extractOpSectionFromCorpus` narrows `post-wave-report` to its own section and the
+  // named-set assertion goes red, which is the finding rather than a reason to drop the op: the
+  // guard as written proves the marker is reachable from the operation's region, not that the
+  // operation's own Output block renders it.
 
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (file-scoped)', () => {
-    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+    const opNames = collectOpNames(content);
+    /** An operation's region: from its anchor to the next operation, or to end of file. */
+    const opRegion = (op: string) => {
+      const opStart = content.indexOf(`## Operation: ${op}`);
+      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
+      return nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
+    };
 
     // ── (a) Issue-body containment ────────────────────────────────────────────
     // Predicate: <untrusted-issue-body> ONLY.
     // Named set: ensures an unrelated op cannot satisfy the floor by accident.
     // Non-vacuity: on main's git.md, 0 ops have <untrusted-issue-body> → the floor-3 assertion below FAILS.
     const EXPECTED_ISSUE_BODY_OPS = ['setup-task', 'fetch-issue', 'fetch-issues-batch'];
-    const opsWithUntrustedIssueBody = opNames.filter(op => {
-      const opStart = content.indexOf(`## Operation: ${op}`);
-      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
-      const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
-      return slice.includes('<untrusted-issue-body>');
-    });
+    const opsWithUntrustedIssueBody = opNames.filter(
+      op => opRegion(op).includes('<untrusted-issue-body>'),
+    );
     for (const expectedOp of EXPECTED_ISSUE_BODY_OPS) {
       expect(
         opsWithUntrustedIssueBody,
@@ -1703,12 +1694,9 @@ describe('git agent — static content guards (PF-018)', () => {
     // These three ops pre-existed on main; the assertion existed there too — its non-vacuity
     // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
     const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
-    const opsWithExternalThread = opNames.filter(op => {
-      const opStart = content.indexOf(`## Operation: ${op}`);
-      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
-      const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
-      return slice.includes('<external-thread>');
-    });
+    const opsWithExternalThread = opNames.filter(
+      op => opRegion(op).includes('<external-thread>'),
+    );
     for (const expectedOp of EXPECTED_EXTERNAL_THREAD_OPS) {
       expect(
         opsWithExternalThread,
@@ -1723,13 +1711,10 @@ describe('git agent — static content guards (PF-018)', () => {
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
     for (const op of SUMMARY_OPS) {
-      const opStart = content.indexOf(`## Operation: ${op}`);
-      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
-      const slice = nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
       // {body} / {description} / {title} as MDS template placeholders (curly-brace form)
       // would echo remote origin content verbatim. Shell vars ($DEVFLOW_BODY) are safe.
       expect(
-        /\{body\}|\{description\}|\{title\}/.test(slice),
+        /\{body\}|\{description\}|\{title\}/.test(opRegion(op)),
         `${op}: must not interpolate remote body fields ({body}/{description}/{title}) in its Output template`,
       ).toBe(false);
     }
