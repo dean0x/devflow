@@ -54,14 +54,11 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // baselines: they move only in the same commit as the golden fixture.
 export const GIT_MD_CHARS = 55_776
 export const GIT_MD_LINES = 904
-// Phase 1 took this to 9_205 / 283 (the SKILL.md cross-reference to the Git agent
-// moved from src/assets/agents/git.md to the git.mds generator host). Phase 2's
-// P2-S7 cut re-baselines it: the D3 template moved to the generated
-// ensure-traceable-issue reference; the throttling, PR-comment and releases
-// recipes moved to references/github-api.md; the naming-conventions and
-// anti-patterns blocks collapsed into pointers. An equality baseline moves in the
-// SAME commit as the file it measures — never afterwards, and never to make a red
-// test green on its own.
+// SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
+// preloaded skill file the git-agent golden above cross-references. Like
+// GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
+// the same commit that edits SKILL.md's bytes — never afterwards, and never
+// to make a red test green on its own.
 export const SKILL_GIT_CHARS = 6_581
 export const SKILL_GIT_LINES = 213
 export const SKILL_WORKTREE_CHARS = 2_942

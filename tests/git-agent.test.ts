@@ -1193,9 +1193,9 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toBeGreaterThan(1);
 
     // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md is
-    // allowed only when KNOWN_GITHUB_API_INLINE_BODIES names it by the exact text
-    // INLINE_BODY_RE matched. The list is empty, so the corpus must hold no inline
-    // body at all. Declaring an exception rather than narrowing the scope back is
+    // allowed only when KNOWN_GITHUB_API_INLINE_BODIES names it by the exact text an
+    // INLINE_BODY_SHAPES entry matched. The list is empty, so the corpus must hold no
+    // inline body at all. Declaring an exception rather than narrowing the scope back is
     // what keeps a named exception from being a weakened guard (§14.6's release.md
     // precedent); narrowing the scope would have been.
     expect(
