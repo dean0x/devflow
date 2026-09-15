@@ -83,6 +83,24 @@ interface InlineBodyShape {
  * ref that is not the scrubber's output). The two `unscrubbed-*` entries are
  * strict: only the quoted scrubber variable passes, because `--body-file $X` with
  * any other value posts a file the scrubber never wrote.
+ *
+ * NOT COVERED, deliberately (PF-064 — an empty offender list proves the WEAKEST of
+ * the claims it stacks, so the matcher's edge has to be written down rather than
+ * inferred from a green run). `gh` accepts several spellings this table does not
+ * read as sinks, each verified absent from the whole scanned corpus at the time it
+ * was written:
+ *   - the `=` spellings — `--body=…`, `--body-file=…`, `--notes-file=…` (the shapes
+ *     require a space or a quote after the flag);
+ *   - a quoted API field — `-f 'body=…'`, `-F "body=@…"` (the shapes expect the
+ *     `body=` token unquoted);
+ *   - `gh api --input file.json`, which posts a whole JSON payload rather than a
+ *     named `body` field;
+ *   - provider-composed notes — `--generate-notes`, `--notes-from-tag` — which
+ *     publish text GitHub wrote, not a body devflow composed, so the scrub has no
+ *     input to run on.
+ * Each is a non-goal only while nothing ships it. The moment a recipe adopts one,
+ * it is a real bypass: add the shape here WITH its own row in the shape-table probe
+ * below, in the same commit as the recipe (ADR-025) — never a silent alternation.
  */
 const INLINE_BODY_SHAPES: readonly InlineBodyShape[] = [
   // `gh pr create … --body "…"`, `gh issue close … --comment "…"`,

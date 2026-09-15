@@ -99,8 +99,9 @@ Use these to find violations in review code:
 # Find hardcoded base branches
 grep -r 'BASE_BRANCH="main"' --include="*.sh"
 
-# Find a review that publishes on its own instead of writing the report
-grep -rn 'pulls/.*/comments' .devflow/docs/reviews/
+# Find review instructions that post their own comments instead of writing the report
+grep -rn 'gh pr comment' --include="*.md" --include="*.sh"
+grep -rn 'gh api .*/comments' --include="*.md" --include="*.sh"
 ```
 
 ---

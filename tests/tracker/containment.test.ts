@@ -265,7 +265,7 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       '`gh release create … --notes "$NOTES"` is an inline-body recipe in a file that is ' +
       'preloaded on every spawn, while create-release mandates --notes-file after a D11 ' +
       'scrub whose failure is a HARD fail. Rewritten as the --notes-file form; this is ' +
-      'the known-bad sample the widened INLINE_BODY_RE was proven red against.',
+      'the known-bad sample the widened inline-body scan was proven red against.',
   },
   {
     file: 'SKILL.md',

@@ -161,7 +161,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
   });
 
   it('the allowlist is still needed: the preamble really does carry the token set', () => {
-    // A stale allowlist is the failure mode the INLINE_BODY_RE exclusions taught —
+    // A stale allowlist is the failure mode the inline-body exclusion list taught —
     // an exemption nobody notices going out of date. If the map ever stops naming
     // the foreign tokens, this fails and the allowlist is deleted, not carried.
     for (const file of PROVIDER_MAP_ALLOWLIST.files) {
