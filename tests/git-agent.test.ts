@@ -34,6 +34,33 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
   return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
 }
 
+// ── Corpus memos ────────────────────────────────────────────────────────────
+//
+// `gitAgentSinkCorpus()` and `inlineBodyCorpus()` are pure functions of the
+// on-disk tree, and no guard in this file writes to that tree — so within a run
+// every call re-reads bytes that cannot have changed. Unmemoised they were built
+// 18× and 2× respectively, and the second one re-walks `skills/`, `dist/commands/`
+// and `rules/` on top of the sink corpus each time: ~700 redundant synchronous
+// reads for one file's worth of guards.
+//
+// The memo is at MODULE scope on purpose, not inside a `describe`: the fence-aware
+// collectors read the corpus from several different blocks, and a per-block memo
+// would just multiply the builds it was added to remove. The builders themselves
+// live in `tests/helpers.ts` and stay unmemoised there — other test files run in
+// their own worker and may want a fresh read (and both take an injectable `root`,
+// which a shared cache inside the helper would quietly ignore).
+//
+// Both accessors hand back the cached value itself. Every reader here is read-only
+// — `.map`, `.filter`, `for…of`, a spread into a fresh array — and a reader that
+// needs to mutate must copy first, as with any shared fixture.
+
+let sinkCorpusMemo: CorpusEntry[] | undefined;
+
+/** `gitAgentSinkCorpus()`, built once per module. */
+function cachedSinkCorpus(): CorpusEntry[] {
+  return (sinkCorpusMemo ??= gitAgentSinkCorpus());
+}
+
 // ── Inline-body (D11 bypass) scan ───────────────────────────────────────────
 //
 // A single-line, `--(body|notes)`-only regex reads a shell recipe the way a
@@ -237,7 +264,7 @@ function inlineBodyCorpus(): InlineBodyCorpus {
 
   const refsRoot = compiledSkillRefsDir();
   let generated = 0;
-  for (const entry of gitAgentSinkCorpus()) {
+  for (const entry of cachedSinkCorpus()) {
     if (entry.path.startsWith(refsRoot)) generated++;
     add(entry.path, entry.content);
   }
@@ -253,6 +280,13 @@ function inlineBodyCorpus(): InlineBodyCorpus {
   }
 
   return { corpus: [...byPath.values()], agents: agentSources.size, generated };
+}
+
+let inlineBodyCorpusMemo: InlineBodyCorpus | undefined;
+
+/** `inlineBodyCorpus()`, built once per module — see the corpus-memo note above. */
+function cachedInlineBodyCorpus(): InlineBodyCorpus {
+  return (inlineBodyCorpusMemo ??= inlineBodyCorpus());
 }
 
 /**
@@ -346,8 +380,73 @@ function collectGhRepoViewSites(corpus: CorpusEntry[]): string[] {
 
 // ── P2-S4 cross-cutting detector scan (GAP-03) ──────────────────────────────
 
-/** Provider-detector literals that must not survive in always-loaded text. */
-const PROVIDER_DETECTORS: readonly string[] = ['`gh`', 'gh ', 'X-RateLimit'];
+interface ProviderDetector {
+  /** Reported on every hit, so a failure names the shape, not just the line. */
+  readonly label: string;
+  readonly pattern: RegExp;
+  /** Why this shape is a provider detector — a row without one is a grep, not a rule. */
+  readonly justification: string;
+}
+
+/**
+ * Provider-detector shapes that must not survive in always-loaded text.
+ *
+ * A regex table with a justification per row — the shape `LOOP_MARKERS` /
+ * `PROBE_MARKERS` already use in `tests/guards/capability-hoist.test.ts`.
+ *
+ * Every row is WORD-BOUNDED, and that is the whole point of the table. Its
+ * predecessor was three SUBSTRINGS matched with `line.includes(d)`, and `'gh '` is
+ * a substring of `through `, `high `, `enough ` and `although `. Nothing in git.md
+ * happens to use one of those words today, so the `toEqual([])` below was green by
+ * luck rather than by the property it claims — and a generated reference already
+ * ships one ("… reaches GitHub through `$DEVFLOW_BODY`"). The first time prose like
+ * that lands in a cross-cutting section the guard goes red for a word that is not a
+ * provider detector at all, and the next reader narrows the guard instead of reading
+ * the hit (PF-064, in the false-positive direction).
+ *
+ * NOT COVERED, deliberately (PF-064 — the matcher's edge is written down rather than
+ * inferred from a green run). Each was checked absent from BOTH the live agent's
+ * cross-cutting text and the pre-split baseline at the time this table was written:
+ *   - the provider's NAME in prose (`GitHub`, `github.com`). Always-loaded text may
+ *     say which provider the tracker abstraction resolved to; what it may not carry
+ *     is that provider's command surface or its wire signals.
+ *   - the uppercase `GH` spelling, and `gh` with no following argument at end of line
+ *     (`… then run gh`) — no site spells either, so a row for them would be a shape
+ *     with no evidence behind it.
+ * Each is a non-goal only while nothing ships it. The moment a cross-cutting line
+ * adopts one, add the row here WITH its own row in the detector probe below, in the
+ * same commit (ADR-025).
+ */
+const PROVIDER_DETECTORS: readonly ProviderDetector[] = [
+  {
+    label: 'gh-code-span',
+    pattern: /`gh`/,
+    justification:
+      'The CLI named as a bare code span, the way the pre-split D4 degradation clause spelled it ' +
+      '("No remote / `gh` unauthenticated / no PR → …"). It carries no argument, so the ' +
+      'command-word row cannot see it — the two rows are disjoint by construction and the table ' +
+      'needs both.',
+  },
+  {
+    label: 'gh-command-word',
+    pattern: /\bgh(?=[ \t])/,
+    justification:
+      'The CLI invoked, or named, as its own word: `gh repo view --json visibility`, the elided ' +
+      '`&& gh …`, and the D1 legend row\'s "a bounded git/gh scan". The leading `\\b` is what ' +
+      'separates the command word from the four English words that merely contain `gh `; the ' +
+      'lookahead keeps the row to the FLAG-carrying form the substring `\'gh \'` was reaching for, ' +
+      'so a code span stays the row above\'s business.',
+  },
+  {
+    label: 'rate-limit-header',
+    pattern: /\bX-RateLimit/,
+    justification:
+      'GitHub\'s rate-limit response headers — the D4 SIGNAL P2-S4 moved into the resolved ' +
+      'provider\'s reference while the invariant stayed. Matched as a prefix so ' +
+      '`X-RateLimit-Remaining` and any sibling header are both read, `\\b`-bounded so a longer ' +
+      'token ending in `X` cannot open the match.',
+  },
+];
 
 /**
  * Named collector: the CROSS-CUTTING slices of the agent — everything outside a
@@ -379,15 +478,22 @@ function collectCrossCuttingSections(text: string): Array<{ label: string; body:
   return sections;
 }
 
-/** Named collector: `section:line` sites where a provider detector appears. */
+/**
+ * Named collector: `section [row]: line` sites where a provider detector appears.
+ *
+ * The matching row is named in the hit, for the same reason `INLINE_BODY_SHAPES`
+ * reports which shape caught an offender: a table whose failures cannot say which
+ * row fired cannot tell a live row from a dead one (PF-018).
+ */
 function collectProviderDetectors(
   sections: ReadonlyArray<{ label: string; body: string }>,
 ): string[] {
   const hits: string[] = [];
   for (const section of sections) {
     section.body.split('\n').forEach(line => {
-      if (PROVIDER_DETECTORS.some(d => line.includes(d))) {
-        hits.push(`${section.label}: ${line.trim().slice(0, 90)}`);
+      const detector = PROVIDER_DETECTORS.find(d => d.pattern.test(line));
+      if (detector) {
+        hits.push(`${section.label} [${detector.label}]: ${line.trim().slice(0, 90)}`);
       }
     });
   }
@@ -396,7 +502,7 @@ function collectProviderDetectors(
 
 /** git.md ∪ every generated reference, joined — mode 'union' at file scope [DR-18]. */
 function joinedSinkText(): string {
-  return gitAgentSinkCorpus().map(e => e.content).join('\n');
+  return cachedSinkCorpus().map(e => e.content).join('\n');
 }
 
 /** Read a generated reference; throws with a build hint rather than returning ''. */
@@ -665,7 +771,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // post-wave-report reference, and §14.3 classes `size_cap` as one of the two
     // genuine provider facts — so the cap travels with the mechanics and the pin
     // follows it (GAP-21). The floor literal is unchanged; only the corpus widened.
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'post-wave-report', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-wave-report', 'union');
     expect(
       sec,
       'post-wave-report: missing 60000-char cap',
@@ -677,7 +783,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // mechanics into compiled reference files under dist/skills/git/references/.
     // Floor must stay ≥ 60000 — reducing the threshold silently allows oversized
     // archives that exceed GitHub's comment limit.
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'manage-debt', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'manage-debt', 'union');
     expect(
       sec,
       'manage-debt: missing 60000-char archive threshold — must be pinned before Phase 2 moves the mechanics',
@@ -743,7 +849,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // only the corpus widened. The op's provider-neutral contract (the `#`-strip, the
     // ≤50 bound, TRUNCATED and NOT_FOUND) stays in git.md and is still pinned in
     // 'sole' mode by the assertions above and by arm (c) of the conventions collector.
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'fetch-issues-batch', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'fetch-issues-batch', 'union');
     expect(
       sec,
       'fetch-issues-batch: missing the single-GraphQL-query mechanic — a per-issue loop reintroduces ' +
@@ -773,7 +879,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // (GAP-21) and with every literal unchanged. 'sole' is not available here: the
   // anchor now matches in two corpus files by design, and 'sole' throws on that.
   it('learn-conventions: branch scan bound (head -50) is present', () => {
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing branch scan bound "head -50"',
@@ -781,7 +887,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: tag scan bound (head -20) is present', () => {
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing tag scan bound "head -20"',
@@ -789,7 +895,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: merged-PR scan bound (--limit 30) is present', () => {
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing merged-PR scan bound "--limit 30"',
@@ -797,7 +903,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('learn-conventions: rev-list --max-count=200 integration-branch bound is present', () => {
-    const sec = extractOpSection(gitAgentSinkCorpus(), 'learn-conventions', 'union');
+    const sec = extractOpSection(cachedSinkCorpus(), 'learn-conventions', 'union');
     expect(
       sec,
       'learn-conventions: missing "--max-count=200" rev-list bound for integration-branch candidate scoring',
@@ -950,6 +1056,53 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toBeGreaterThanOrEqual(6);
   });
 
+  it('P2-S4 known-bad probe: every detector row fires on its own shape, and `through ` on none', () => {
+    // Both directions, per ROW. The RED half is the usual H10 claim — a table is only
+    // as good as the shapes it can be SHOWN to express. The GREEN half is the half this
+    // guard was missing: its predecessor matched three substrings, and `'gh '` sits
+    // inside `through `, `high `, `enough ` and `although `, so the rule could fail on a
+    // line carrying no provider detector at all and the next reader would narrow the
+    // guard rather than read the hit (PF-064). Both halves drive the real collector.
+    const hits = (line: string): string[] =>
+      collectProviderDetectors([{ label: '(probe)', body: line }]);
+
+    const rowProbes: ReadonlyArray<{ label: string; line: string }> = [
+      {
+        label: 'gh-code-span',
+        line: '- No remote / `gh` unauthenticated / no PR → emit `TRACEABILITY: DEGRADED ({reason})`',
+      },
+      {
+        label: 'gh-command-word',
+        line: "3. Probe once: run gh pr view 12 --json state --jq '.state'",
+      },
+      {
+        label: 'rate-limit-header',
+        line: '- Before each iteration, read `X-RateLimit-Remaining` from the last response header',
+      },
+    ];
+    for (const { label, line } of rowProbes) {
+      expect(
+        hits(line),
+        `PROVIDER_DETECTORS names the row "${label}" but the collector does not fire on the shape ` +
+        'it exists for — a row that cannot be shown live is a row that can be deleted unnoticed',
+      ).toEqual([`(probe) [${label}]: ${line.trim().slice(0, 90)}`]);
+    }
+
+    // The opposite direction: English prose that merely CONTAINS `gh `. The first line
+    // is shipped text — `tracker/github/manage-debt.md` states the D11 chain this way —
+    // so the substring form was one relocation away from reporting it.
+    for (const benign of [
+      'Every body below reaches GitHub through `$DEVFLOW_BODY`, the file the D11 scrub wrote.',
+      'A high retry rate is enough to extend the window, although the batch bound still holds.',
+    ]) {
+      expect(
+        hits(benign),
+        'a word that merely contains `gh ` is not a provider detector; reporting it sends the ' +
+        'next reader to narrow the guard instead of to read the hit (PF-064)',
+      ).toEqual([]);
+    }
+  });
+
   it('P2-S4: each moved detector has exactly one home in the GitHub provider tree', () => {
     const providerFiles = walkFiles(
       path.join(ROOT, 'dist', 'skills', 'git', 'references', 'tracker'),
@@ -1009,7 +1162,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // references/publication-gate.md, which the two summary ops name. The section
     // must still EXIST somewhere a spawn can reach — that is what this pins; where
     // it may be loaded FROM is [DR-20](i) below.
-    const joined = gitAgentSinkCorpus().map(e => e.content).join('\n');
+    const joined = cachedSinkCorpus().map(e => e.content).join('\n');
     expect(
       joined,
       'git.md ∪ the generated references is missing the "## Publication gate (D10)" section — ' +
@@ -1121,7 +1274,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('D10 [DR-20](ii): `gh repo view` appears only in publication-gate.md and the two ops that name it', () => {
     expect(
-      collectGhRepoViewSites(gitAgentSinkCorpus()),
+      collectGhRepoViewSites(cachedSinkCorpus()),
       'D10 scope violation: the visibility probe escaped the publication gate and the two summary ' +
       'operations — every other site is an op deciding publication for itself',
     ).toEqual(['git.md:post-resolution-summary', 'git.md:post-review-summary', 'publication-gate.md']);
@@ -1129,7 +1282,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('D10 [DR-20](ii) known-bad probe: a seeded fourth probe site is reported by the same collector', () => {
     const seeded: CorpusEntry[] = [
-      ...gitAgentSinkCorpus(),
+      ...cachedSinkCorpus(),
       { path: '/synthetic/tracker/github/setup-task.md', content: "gh repo view --json visibility\n" },
     ];
     expect(
@@ -1176,7 +1329,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
     // (Phase 2+); unioning ensures the floor never silently drops below 8 [DR-18, AC-0.8].
-    const sinkCorpus = gitAgentSinkCorpus();
+    const sinkCorpus = cachedSinkCorpus();
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
 
     const postingOps: string[] = [];
@@ -1204,7 +1357,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // Ensures the named reference is never orphaned — every D11 reference must pair with an actual posting.
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — same rationale as forward guard [DR-18].
-    const sinkCorpus = gitAgentSinkCorpus();
+    const sinkCorpus = cachedSinkCorpus();
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
     expect(
       opNames.length,
@@ -1241,7 +1394,7 @@ describe('git agent — static content guards (PF-018)', () => {
     //     agent's own neighbourhood. A posting recipe in the review-methodology
     //     skill was a publication path outside both the D10 gate and the D11
     //     scrub, and nothing was looking at it.
-    const { corpus } = inlineBodyCorpus();
+    const { corpus } = cachedInlineBodyCorpus();
     const offenders = collectInlineBodyOffenders(corpus);
     expect(
       corpus.length,
@@ -1375,7 +1528,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: the scan reaches the whole installed prompt surface, not just the Git agent neighbourhood', () => {
-    const { corpus, agents, generated } = inlineBodyCorpus();
+    const { corpus, agents, generated } = cachedInlineBodyCorpus();
     // Provenance, not a total: a corpus floor met by the skills tree alone would
     // still claim to scan agents, commands and rules (PF-018).
     expect(
@@ -1776,7 +1929,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // extractOpSectionFromCorpus directly to assert the matchCount contract [DR-18].
     // Exact expectation: count how many sink-corpus files contain the anchor independently,
     // then assert matchCount equals that count (exact count, not an unfalsifiable >= 1).
-    const sinkCorpus = gitAgentSinkCorpus();
+    const sinkCorpus = cachedSinkCorpus();
     const expectedMatchCount = sinkCorpus.filter(
       e => e.content.includes('## Operation: post-review-summary'),
     ).length;
@@ -1801,7 +1954,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // An unbounded `indexOf('## Operation: fetch-issue')` matched
     // `fetch-issues-batch.md`'s own line-1 heading at offset 0, so every union lookup
     // for `fetch-issue` returned the sibling operation's entire mechanics file as well.
-    const sinkCorpus = gitAgentSinkCorpus();
+    const sinkCorpus = cachedSinkCorpus();
     const { content: sec, matchCount } = extractOpSectionFromCorpus(
       sinkCorpus, 'fetch-issue', { mode: 'union' },
     );
@@ -1884,7 +2037,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
     // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references (arm b).
-    const violations = collectConventionsCommitPlacementViolations(soleCorpus, gitAgentSinkCorpus());
+    const violations = collectConventionsCommitPlacementViolations(soleCorpus, cachedSinkCorpus());
     expect(
       violations,
       `conventions-commit placement: live guard found violations:\n${violations.map(v => `  • ${v}`).join('\n')}`,
