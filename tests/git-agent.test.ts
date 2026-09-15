@@ -1680,7 +1680,7 @@ describe('git agent — static content guards (PF-018)', () => {
     expect(
       opsWithUntrustedIssueBody.length,
       `containment (issue-body): expected >= 3 ops with <untrusted-issue-body>; found [${opsWithUntrustedIssueBody.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(3); // floor: containment-issue-body-floor (numeric-floors.json)
 
     // ── (b) External-thread containment ──────────────────────────────────────
     // Predicate: <external-thread> ONLY.
@@ -1700,7 +1700,7 @@ describe('git agent — static content guards (PF-018)', () => {
     expect(
       opsWithExternalThread.length,
       `containment (external-thread): expected >= 3 ops with <external-thread>; found [${opsWithExternalThread.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(3); // floor: containment-external-thread-floor (numeric-floors.json)
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];

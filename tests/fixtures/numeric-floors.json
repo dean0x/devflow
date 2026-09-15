@@ -133,18 +133,18 @@
     {
       "id": "containment-issue-body-floor",
       "floor": 3,
-      "pattern": "toBeGreaterThanOrEqual(3)",
-      "occurrences": 2,
+      "pattern": "toBeGreaterThanOrEqual(3); // floor: containment-issue-body-floor",
+      "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "AC-0.10 containment guard (issue-body): ops wrapping remote issue content in <untrusted-issue-body> — setup-task, fetch-issue, fetch-issues-batch (three ops added in commit 75f13e7). Split from the prior combined predicate to make this assertion non-vacuous on main."
+      "description": "AC-0.10 containment guard (issue-body): ops wrapping remote issue content in <untrusted-issue-body> — setup-task, fetch-issue, fetch-issues-batch (three ops added in commit 75f13e7). Split from the prior combined predicate to make this assertion non-vacuous on main (PF-018 mechanism 16). The pattern names this entry's id so it matches ONE site: the sibling containment-external-thread-floor pins the same value 3 in the same file, and a bare toBeGreaterThanOrEqual(3) at occurrences 2 was satisfied by the pair jointly — each entry's count met by the OTHER entry's assertion, with neither site individually accounted for. It also made probeForbiddenDirection's RED half demand that this file hold EXACTLY two such strings, so an unrelated third >= 3 assertion anywhere in it would have failed the probe for a reason that is not a regression. Floor value unchanged at 3; only the pinned text is narrower."
     },
     {
       "id": "containment-external-thread-floor",
       "floor": 3,
-      "pattern": "toBeGreaterThanOrEqual(3)",
-      "occurrences": 2,
+      "pattern": "toBeGreaterThanOrEqual(3); // floor: containment-external-thread-floor",
+      "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "AC-0.10 containment guard (external-thread): ops carrying <external-thread> for review thread bodies — fetch-review-threads, post-resolution-summary, post-wave-report (pre-existing on main, Principle 8 stabilisation)."
+      "description": "AC-0.10 containment guard (external-thread): ops carrying <external-thread> for review thread bodies — fetch-review-threads, post-resolution-summary, post-wave-report (pre-existing on main, Principle 8 stabilisation). Pattern narrowed to this entry's own site for the reason recorded on the sibling containment-issue-body-floor entry above: two entries sharing one pattern in one file have no per-entry accounting. Floor value unchanged at 3."
     },
     {
       "id": "generated-reference-manifest-size",
