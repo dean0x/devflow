@@ -78,6 +78,30 @@ const BUDGET_LOADED_SET = 77_824;
 /** AC-2.5 [DR-13(a)] — promoted from a handoff deliverable to an assertion. */
 const PREAMBLE_MAX_LINES = 40;
 
+/**
+ * EQUALITY BASELINE, not a budget — `src/assets/skills/git/references/github-api.md`.
+ *
+ * D-LOADED-SET-SCOPE excludes this file from the gate on purpose: it is loaded by
+ * `fetch-review-threads`, a NON-tracker op that loaded it long before the split, so
+ * it is not a cost the split introduces. ADR-025's amendment is what the exclusion
+ * owes in return — the excluded term goes in a RECORDED, non-gating row — and a
+ * recorded row with no anchor rots, which is exactly what happened here: the PR body
+ * and the feature KB both record 17,259 ch while the file on this branch measures
+ * 17,539, drifted 280 ch with nothing tracking it.
+ *
+ * So this is pinned with `toBe`, never `<=`. It is not a ceiling to stay under; it
+ * is the number the file IS. THE ONLY COMMIT THAT MAY CHANGE IT IS THE COMMIT THAT
+ * EDITS github-api.md's BYTES, and that commit re-pins it here in the same change —
+ * the treatment GIT_MD_CHARS gets in tests/goldens/github-status-lines.test.ts.
+ * Later work on this branch DOES edit that file (batches B20 and B23), so each of
+ * those is expected to land a new value here; a red equality pin means "re-measure
+ * and re-pin", never "relax the assertion".
+ *
+ * Measured, never hand-typed:
+ *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
+ */
+const GITHUB_API_MD_CHARS = 17_539;
+
 // ---------------------------------------------------------------------------
 // Fail-loud measurement
 // ---------------------------------------------------------------------------
@@ -129,6 +153,16 @@ const skillGit = measureRequired(
 const skillWorktree = measureRequired(
   'skills/worktree-support/SKILL.md',
   path.join(skillsDir(), 'worktree-support', 'SKILL.md'),
+);
+/**
+ * The gate's one written exclusion, measured at its SOURCE path rather than through
+ * resolveReference(): the pin below is on the bytes a commit edits, and a file that
+ * were ever shadowed by a generated copy would otherwise move the pin without anyone
+ * touching the hand-authored file. Recorded in the table, asserted only for equality.
+ */
+const githubApiMd = measureRequired(
+  'references/github-api.md  (excluded from the gate — pinned, not budgeted)',
+  path.join(skillsDir(), 'git', 'references', 'github-api.md'),
 );
 
 /** The always-preloaded set: what every Git spawn pays before it does anything. */
@@ -312,6 +346,31 @@ function oneSpawnLoad(op: string): number {
   return [...summedFor(op)].reduce((n, rel) => n + referenceChars(rel), 0);
 }
 
+/** The winning op of a `max over ops` term, and the quantity it measured. */
+interface OpMax {
+  readonly op: string;
+  readonly value: number;
+}
+
+/**
+ * `max over ops of measure(op)`, as the winning op and its value — the one reducer
+ * every `max over ops` term in this file goes through.
+ *
+ * `value` is deliberately unit-neutral: the three budget terms below measure
+ * characters, the recorded round-trip term measures Reads. An empty range, or one
+ * where nothing measures above zero, answers `(none)` / 0 — the same vacuous answer
+ * the three hand-written loops gave, so the non-vacuity floors that exist to catch
+ * it still catch it.
+ */
+function maxOver(ops: Iterable<string>, measure: (op: string) => number): OpMax {
+  let best: OpMax = { op: '(none)', value: 0 };
+  for (const op of ops) {
+    const value = measure(op);
+    if (value > best.value) best = { op, value };
+  }
+  return best;
+}
+
 /**
  * D-LOADED-SET-SCOPE — the `max over ops` term is taken over TRACKER_GITHUB_OPS,
  * not over every operation in the agent.
@@ -324,34 +383,19 @@ function oneSpawnLoad(op: string): number {
  * own. Non-tracker ops are RECORDED in the four-shape table below (so the number
  * stays visible and is never quietly dropped) but do not gate.
  */
-function worstCaseReferenceLoad(): { op: string; chars: number } {
-  let worst = { op: '(none)', chars: 0 };
-  for (const op of TRACKER_GITHUB_OPS) {
-    const chars = oneSpawnLoad(op);
-    if (chars > worst.chars) worst = { op, chars };
-  }
-  return worst;
+function worstCaseReferenceLoad(): OpMax {
+  return maxOver(TRACKER_GITHUB_OPS, oneSpawnLoad);
 }
 
 /** The same maximum over the ops the budget does NOT gate on — recorded, never asserted. */
-function worstCaseNonTrackerLoad(): { op: string; chars: number } {
-  let worst = { op: '(none)', chars: 0 };
-  for (const op of ALL_OPS) {
-    if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) continue;
-    const chars = oneSpawnLoad(op);
-    if (chars > worst.chars) worst = { op, chars };
-  }
-  return worst;
+function worstCaseNonTrackerLoad(): OpMax {
+  const nonTracker = ALL_OPS.filter(op => !(TRACKER_GITHUB_OPS as readonly string[]).includes(op));
+  return maxOver(nonTracker, oneSpawnLoad);
 }
 
 /** max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file. */
-function largestTrackerReference(): { op: string; chars: number } {
-  let largest = { op: '(none)', chars: 0 };
-  for (const op of TRACKER_GITHUB_OPS) {
-    const chars = referenceChars(trackerRefRel(op));
-    if (chars > largest.chars) largest = { op, chars };
-  }
-  return largest;
+function largestTrackerReference(): OpMax {
+  return maxOver(TRACKER_GITHUB_OPS, op => referenceChars(trackerRefRel(op)));
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +482,7 @@ describe('byte budget: four-shape table (recorded)', () => {
       },
       {
         shape: '2. per-op split, GitHub path (the worst-case formula)',
-        chars: PRELOADED + MCP_TERM + largest.chars + worst.chars,
+        chars: PRELOADED + MCP_TERM + largest.value + worst.value,
       },
       {
         shape: '3. per-provider single file (DISQUALIFIED: +31%–41%)',
@@ -446,7 +490,7 @@ describe('byte budget: four-shape table (recorded)', () => {
       },
       {
         shape: '4. per-op without _mcp.md (GitHub path — identical to 2 in Phase 2)',
-        chars: PRELOADED + largest.chars + worst.chars,
+        chars: PRELOADED + largest.value + worst.value,
       },
       {
         // RECORDED ONLY, never the gate [D-CROSS-CUTTING-ON-DEMAND]. What shape 2
@@ -455,20 +499,24 @@ describe('byte budget: four-shape table (recorded)', () => {
         // number is on the record and the classification is a decision someone
         // can re-open with the figure in front of them, not an omission.
         shape: '2b. shape 2 + cross-cutting glossary as if mandatory (RECORDED, not gated)',
-        chars: PRELOADED + MCP_TERM + largest.chars + worst.chars + crossCuttingOnDemand,
+        chars: PRELOADED + MCP_TERM + largest.value + worst.value + crossCuttingOnDemand,
       },
     ];
 
     const rows = [
-      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers].map(m => ({
+      // githubApiMd is the gate's written exclusion [D-LOADED-SET-SCOPE]. It is the
+      // whole of the NON-tracker row below, but that row is labelled by OP: the file
+      // it costs is named here so the excluded term is attributable to the bytes
+      // someone edits, and so its equality pin (GITHUB_API_MD_CHARS) has a visible row.
+      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, githubApiMd].map(m => ({
         row: m.label + (m.present ? '' : '  (absent — recorded as 0)'),
         chars: m.chars,
         bytes: m.bytes,
       })),
-      { row: `max_op tracker reference (${largest.op})`, chars: largest.chars, bytes: NaN },
-      { row: `worst-case one-spawn load, TRACKER ops (${worst.op})`, chars: worst.chars, bytes: NaN },
+      { row: `max_op tracker reference (${largest.op})`, chars: largest.value, bytes: NaN },
+      { row: `worst-case one-spawn load, TRACKER ops (${worst.op})`, chars: worst.value, bytes: NaN },
       // Recorded, not gated — D-LOADED-SET-SCOPE at worstCaseReferenceLoad().
-      { row: `worst-case one-spawn load, NON-tracker ops (${nonTracker.op})`, chars: nonTracker.chars, bytes: NaN },
+      { row: `worst-case one-spawn load, NON-tracker ops (${nonTracker.op})`, chars: nonTracker.value, bytes: NaN },
       { row: 'sum of all GitHub tracker references', chars: allTrackerRefs, bytes: NaN },
       // Recorded, not gated — D-CROSS-CUTTING-ON-DEMAND at MODEL_CROSS_CUTTING_ON_DEMAND.
       {
@@ -507,6 +555,79 @@ describe('byte budget: four-shape table (recorded)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1b. The round-trip term — RECORDED, not gated (#342)
+// ---------------------------------------------------------------------------
+//
+// Everything above this line is denominated in characters, and characters are not
+// the whole cost. Each `**Mechanics:**` pointer converts prompt bytes the spawn
+// already holds into a fresh, SEQUENTIAL `Read` — an extra tool round trip and an
+// extra inference turn, uncached, where the always-loaded half is a cache read under
+// `prompt-caching-1h`. PF-026 prices a shared prompt as lines × spawns-per-run; the
+// round trip is the term on the other side of that trade, and the budget models none
+// of it. For the smallest references the trade is thin: a few hundred characters
+// saved against a full extra turn.
+//
+// This is a MEASUREMENT-MODEL GAP recorded for #342 (the devflow-wide prompt diet),
+// NOT a gate. It deliberately sets no ceiling and no floor on the round-trip count:
+// the honest answer to a term the model omits is to print it (ADR-025's amendment —
+// record rather than raise a constant or widen a scan), not to invent a threshold
+// for it. It is also NOT licence to re-inline a reference to make the number
+// smaller; that reverses the split decision and spends the budget's headroom.
+
+/** Named collector: the lines that ARE `**Mechanics:**` pointers — one extra Read each. */
+function collectMechanicsPointerSites(content: string): string[] {
+  return content.split('\n').filter(line => line.startsWith('**Mechanics:**'));
+}
+
+describe('byte budget: the round-trip term (recorded)', () => {
+  it('records the Reads per spawn and the smallest references the character budget does not price', () => {
+    const sites = collectMechanicsPointerSites(GIT_AGENT.content);
+    // Reads per spawn is |summedFor(op)| — the SAME set the budget sums characters
+    // over, read for its cardinality instead of its size. One file named is one Read.
+    // Scoped to TRACKER ops for the same reason the gate is [D-LOADED-SET-SCOPE].
+    const worstReads = maxOver(TRACKER_GITHUB_OPS, op => summedFor(op).size);
+    const smallest = [...TRACKER_GITHUB_OPS]
+      .map(op => ({ op, chars: referenceChars(trackerRefRel(op)) }))
+      .sort((a, b) => a.chars - b.chars)
+      .slice(0, 3);
+
+    // Its own table, with its own unit column: these are Reads and sites, and printing
+    // them under the four-shape table's `chars` heading would read as characters.
+    console.table([
+      {
+        term: '`**Mechanics:**` pointer sites in the agent (1 extra sequential Read each)',
+        value: sites.length,
+        unit: 'sites',
+      },
+      {
+        term: `mechanics Reads added per spawn, max over TRACKER ops (${worstReads.op})`,
+        value: worstReads.value,
+        unit: 'Reads',
+      },
+      ...smallest.map((r, i) => ({
+        term: `smallest generated reference #${i + 1} (tracker/github/${r.op}.md)`,
+        value: r.chars,
+        unit: 'ch',
+      })),
+    ]);
+
+    // The only assertion here is a vacuity floor, not a budget: an unbuilt
+    // dist/skills/git/references/ makes referenceChars() answer 0 for everything, and
+    // three zeroes would print as a plausible-looking ranking (PF-018).
+    expect(
+      smallest[0].chars,
+      'the smallest generated reference measured 0 — the round-trip rows are vacuous. ' +
+      'Run `npm run build`.',
+    ).toBeGreaterThan(0);
+
+    // The pointer-site COUNT is printed and deliberately NOT asserted. It is a property
+    // of the agent's prose, already owned by the single-naming-line assertion below and
+    // by reference-structure.test.ts; a second authority on how many pointer sites the
+    // agent must have would fight them from a budget file, and a count is not a budget.
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. The budget gates
 // ---------------------------------------------------------------------------
 
@@ -541,7 +662,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     //         spawn )  [DR-12, scoped by D-LOADED-SET-SCOPE]
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
-    const total = PRELOADED + 0 + largest.chars + worst.chars;
+    const total = PRELOADED + 0 + largest.value + worst.value;
 
     // referenceChars() answers 0 for a file it cannot resolve, so an absent
     // dist/skills/git/references/ drives BOTH terms to 0 and this gate passes by
@@ -549,18 +670,18 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     // phase's headline claim. The non-vacuity floor belongs HERE, not in the
     // four-shape table's `it` (which deliberately tolerates absent rows).
     expect(
-      largest.chars,
+      largest.value,
       'no tracker mechanics file resolved — the budget summed nothing. Run `npm run build`.',
     ).toBeGreaterThan(0);
     expect(
-      worst.chars,
+      worst.value,
       'no one-spawn reference load resolved — the budget summed nothing. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
     expect(
       total,
-      `worst-case tracker spawn is ${total} ch (preloaded ${PRELOADED} + max_op ${largest.chars} ` +
-      `[${largest.op}] + worst one-spawn load ${worst.chars} [${worst.op}]), budget ` +
+      `worst-case tracker spawn is ${total} ch (preloaded ${PRELOADED} + max_op ${largest.value} ` +
+      `[${largest.op}] + worst one-spawn load ${worst.value} [${worst.op}]), budget ` +
       `${BUDGET_LOADED_SET} ch. The split only pays for itself while the always-loaded half ` +
       `stays smaller than the references it adds back; Do NOT raise BUDGET_LOADED_SET.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET);
@@ -775,6 +896,26 @@ describe('byte budget: written exclusions', () => {
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,
       ).toBe(false);
     }
+  });
+
+  it(`references/github-api.md is exactly ${GITHUB_API_MD_CHARS} ch (the excluded term's anchor)`, () => {
+    // The gate's exclusion of this file is correct (D-LOADED-SET-SCOPE), and this is
+    // what the exclusion owes in return: the excluded term gets a recorded row with an
+    // anchor, so it cannot drift untracked the way it already did once (+280 ch inside
+    // this branch, against 17,259 recorded in the PR body and the feature KB).
+    //
+    // EQUALITY, not a ceiling. When this goes red, the fix is to re-measure the file
+    // and re-pin GITHUB_API_MD_CHARS in the SAME commit that edited its bytes — never
+    // to relax the comparison, and never to re-pin it in a later commit, which is how
+    // an equality baseline stops being evidence of anything.
+    expect(
+      githubApiMd.chars,
+      `references/github-api.md is ${githubApiMd.chars} ch, pinned at ${GITHUB_API_MD_CHARS} ` +
+      `(drift ${githubApiMd.chars - GITHUB_API_MD_CHARS}). This file is EXCLUDED from ` +
+      `BUDGET_LOADED_SET, so nothing else notices it growing. If this commit edits ` +
+      `github-api.md, re-measure and re-pin GITHUB_API_MD_CHARS here; if it does not, the ` +
+      `file drifted and the change belongs in the commit that made it.`,
+    ).toBe(GITHUB_API_MD_CHARS);
   });
 });
 
