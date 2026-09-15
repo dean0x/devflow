@@ -43,18 +43,24 @@ git diff --name-only  # Only file names, no line numbers
 
 ## PR Comment Violations
 
+### Publishing from Inside a Review
+
 ```markdown
 # VIOLATION: Publishing from inside a review
+```
 
 A review that posts its own comments bypasses the repo-visibility gate and the
 comment-sink scrub that post-review-summary applies, and publishes findings that were
 never synthesized or deduplicated. Write the finding into the report instead.
 
+### Wrong Comment Scope
+
+```markdown
 # VIOLATION: Commenting on pre-existing issues
+```
 
 Category 3 findings belong to the summary report. A comment on a line the author did
 not touch reads as a request to fix unrelated code.
-```
 
 ---
 
