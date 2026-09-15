@@ -48,7 +48,7 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
 //       so the unit matched is the command, not the source line;
 //   (b) INLINE_BODY_SHAPES names each posting form separately, so an offender
 //       reports WHICH shape caught it and a probe can prove each arm live on its
-//       own (PF-018/ADR-024 — an unnamed alternation inside one regex cannot say
+//       own (PF-018/PF-064 — an unnamed alternation inside one regex cannot say
 //       which branch carried the match).
 
 /**
