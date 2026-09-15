@@ -46,6 +46,7 @@ import * as path from 'path';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { TRACKER_GITHUB_OPS, generatedReferenceManifest } from '../../src/core/mds-variants.js';
 import {
+  ROOT,
   collectUnfencedH2,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
@@ -101,6 +102,47 @@ function trackerOpRelPath(op: string): string {
  * heredoc/template headings in `ensure-traceable-issue.md`.
  */
 const MIN_FENCED_H2 = 7;
+
+/** Ratchet-manifest id of the floor on how many generated references must exist. */
+const MANIFEST_SIZE_FLOOR_ID = 'generated-reference-manifest-size';
+
+/** The fields of a `floors` entry this file reads. */
+interface FloorEntry {
+  id: string;
+  floor: number;
+}
+
+/**
+ * The registered floor on the SIZE of the generated-reference corpus.
+ *
+ * The corpus below is built by mapping `generatedReferenceManifest()`, so its size
+ * has to be checked against an authority OUTSIDE that call: any assertion phrased in
+ * terms of the manifest's own length is equally satisfied by 13 files and by none,
+ * and the emptiness it claims to catch is precisely the case it cannot see (PF-018).
+ *
+ * That authority is the ratchet manifest, read here rather than re-spelled as a
+ * literal. Only the site that `tests/fixtures/numeric-floors.json` names for this entry —
+ * `tests/installer/reference-overlay.test.ts` — is ratchet-protected, because
+ * tests/guards/numeric-floor-manifest.test.ts greps each entry's pattern in the
+ * sourceFile it records and nowhere else. A number copied into this file would sit
+ * outside that protection and could be walked down alone.
+ */
+function registeredManifestSizeFloor(): number {
+  const manifestPath = path.join(ROOT, 'tests', 'fixtures', 'numeric-floors.json');
+  const { floors } = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { floors: FloorEntry[] };
+  const entry = floors.find(f => f.id === MANIFEST_SIZE_FLOOR_ID);
+  expect(
+    entry,
+    `"${MANIFEST_SIZE_FLOOR_ID}" is not registered in tests/fixtures/numeric-floors.json — the ` +
+    'corpus-size assertion has no independent floor to read and would assert nothing (PF-018)',
+  ).toBeDefined();
+  expect(
+    entry!.floor,
+    `the registered floor (${entry!.floor}) must cover at least the ${TRACKER_GITHUB_OPS.length} ` +
+    'per-op references, or clearing it says nothing about the corpus being whole',
+  ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+  return entry!.floor;
+}
 
 // ---------------------------------------------------------------------------
 // Named collector — driven by the live guard AND by the known-bad probe
@@ -181,11 +223,15 @@ describe('PF-063 semantic probe: a fenced `## ` no longer hides a reference tail
 describe('generated references carry no unfenced `## ` below their own heading (PF-063)', () => {
   const refs = readGeneratedReferences();
 
-  it('the corpus is the whole declared manifest and every file has content', () => {
+  it('the corpus clears the registered manifest-size floor and every file has content', () => {
+    const floor = registeredManifestSizeFloor();
     expect(
       refs.length,
-      'the generated-reference manifest is empty — the structure scan below would pass vacuously',
-    ).toBe(generatedReferenceManifest().length);
+      `the generated-reference corpus holds ${refs.length} file(s), floor ${floor} ` +
+      `(${MANIFEST_SIZE_FLOOR_ID} in tests/fixtures/numeric-floors.json). An emptied or narrowed ` +
+      'manifest empties this scan, and the structure arm below then reports zero violations over ' +
+      'nothing (PF-018).',
+    ).toBeGreaterThanOrEqual(floor);
     expect(
       refs.map(r => r.relPath),
       'every tracker operation must contribute a per-op reference to the scan',
