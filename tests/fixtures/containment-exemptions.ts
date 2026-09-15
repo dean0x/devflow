@@ -550,4 +550,53 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'scrubber that every other release recipe in this file runs. redact-secrets.cjs takes ' +
       'any input path, so CHANGELOG.md is now its input and `$DEVFLOW_NOTES` is what ships.',
   },
+
+  // ── the unquoted expansions the move carried across verbatim (#339-resolve) ─
+  //
+  // security-06: a bare `$VAR` was a local habit in a skill reference; inside a
+  // generated reference it is shell an agent copies. Each is quoted in place and
+  // nothing else in the recipe moves, so the only baseline lines these rewrites
+  // cost are the ones that carried the unquoted expansion itself. The compose-step
+  // `&&` chaining landed in the same commit but owes nothing here — every line it
+  // touched was already exempted by #340/#341.
+  {
+    file: 'github-api.md',
+    startLine: 84,
+    endLine: 86,
+    rationale:
+      '#339-resolve. `echo $REPO_INFO` twice and `gh pr view $PR_NUMBER` once handed ' +
+      'unquoted expansions to word splitting and globbing in the inline-comment recipe. ' +
+      'Quoted in place as `"$REPO_INFO"` and `"$PR_NUMBER"`; the `cut` pipelines and the ' +
+      '`--json headRefOid` projection are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 176,
+    endLine: 176,
+    rationale:
+      '#339-resolve. The tech-debt size probe read `gh issue view $TECH_DEBT_ISSUE` ' +
+      'unquoted — the one variable in this recipe derived from `gh issue create` stdout. ' +
+      'Quoted to `"$TECH_DEBT_ISSUE"` in the same edit that made the successor number a ' +
+      'checked digit run, so the value is parsed at its source and quoted at its sink.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 179,
+    endLine: 179,
+    rationale:
+      '#339-resolve. `[ $body_length -gt $MAX_SIZE ]` splits on an empty or spaced operand ' +
+      'and reports a shell error instead of a comparison, so the archive branch it guards ' +
+      'would be skipped silently. Both operands quoted; the 60000-char threshold is ' +
+      'unchanged, and so is the branch body underneath it.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 209,
+    endLine: 209,
+    rationale:
+      '#339-resolve. `gh issue view $ISSUE` sits downstream of the command layer\'s ' +
+      'forward-the-token-verbatim rule, so what reaches it is attacker-influenceable text. ' +
+      'Quoted to `"$ISSUE"` where the line now lives, in fetch-issue\'s mechanics; the ' +
+      'criteria and dependency extraction below it moved byte-identically.',
+  },
 ];

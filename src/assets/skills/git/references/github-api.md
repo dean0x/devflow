@@ -107,12 +107,12 @@ fi
 ### Inline Comment with Commit SHA
 
 ```bash
-OWNER=$(echo $REPO_INFO | cut -d'/' -f1)
-REPO=$(echo $REPO_INFO | cut -d'/' -f2)
-HEAD_SHA=$(gh pr view $PR_NUMBER --json headRefOid -q '.headRefOid')
+OWNER=$(echo "$REPO_INFO" | cut -d'/' -f1)
+REPO=$(echo "$REPO_INFO" | cut -d'/' -f2)
+HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q '.headRefOid')
 
-printf '%s\n' "$COMMENT_BODY" > "$DEVFLOW_BODY_RAW"
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+printf '%s\n' "$COMMENT_BODY" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh api \
     -X POST \
@@ -208,8 +208,8 @@ ${changelog}"
     # D11: the notes reach GitHub through the SCRUBBED file, never as an inline string.
     # The composed notes are written to the RAW file here — the scrub is what produces
     # "$DEVFLOW_NOTES", so chaining with && is what stops a scrubber failure publishing.
-    printf '%s\n' "$changelog" > "$DEVFLOW_NOTES_RAW"
-    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    printf '%s\n' "$changelog" > "$DEVFLOW_NOTES_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
         "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" \
       && gh release create "v${version}" \
         --title "v${version}" \
@@ -255,7 +255,7 @@ generate_release_notes() {
 ### PR with HEREDOC Body
 
 ```bash
-cat > "$DEVFLOW_BODY_RAW" <<'EOF'
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Summary
 - Implement JWT-based authentication
 - Add login/logout endpoints
@@ -264,36 +264,40 @@ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 - [ ] Test login with valid credentials
 - [ ] Test token expiration
 EOF
-
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh pr create --title "Add user authentication" --body-file "$DEVFLOW_BODY"
 ```
 
+The heredoc is wrapped in `{ … }` so the compose is the chain's first link: a failed
+write must stop the post, not hand the scrubber whatever the RAW file last held.
+
 ### Draft PR for WIP
 
 ```bash
-printf '%s\n' "Work in progress, not ready for review" > "$DEVFLOW_BODY_RAW"
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+printf '%s\n' "Work in progress, not ready for review" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh pr create --draft --title "WIP: Feature X" --body-file "$DEVFLOW_BODY"
 ```
 
 ### PR Review
 
+Both posts reuse the one temp-file pair, so each composes its OWN content as the first
+link of its own chain — `$DEVFLOW_BODY` is the scrubber's output, not a shared mailbox.
+
 ```bash
-printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW"
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh pr review $PR_NUMBER --approve --body-file "$DEVFLOW_BODY"
 
-cat > "$DEVFLOW_BODY_RAW" <<'EOF'
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Requested Changes
 1. **Security**: Input validation missing in `handleLogin`
 2. **Performance**: N+1 query in user list endpoint
 EOF
-
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh pr review $PR_NUMBER --request-changes --body-file "$DEVFLOW_BODY"
 ```
@@ -582,8 +586,8 @@ fetch_review_threads() {
 ### Reply to a Review Thread
 
 ```bash
-printf '%s\n' "$REPLY_BODY" > "$DEVFLOW_BODY_RAW"
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+printf '%s\n' "$REPLY_BODY" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh api graphql -f query='
   mutation($threadId: ID!, $body: String!) {

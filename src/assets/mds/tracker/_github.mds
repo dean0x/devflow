@@ -95,7 +95,7 @@ gh issue view "$ISSUE_NUMBER" \
 ### Extract Issue Data
 
 ```bash
-BODY=$(gh issue view $ISSUE --json body -q '.body')
+BODY=$(gh issue view "$ISSUE" --json body -q '.body')
 
 # Extract acceptance criteria
 CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\s*-\s*\[' || true)
@@ -156,10 +156,12 @@ scrubber's output, not a shared mailbox, and posting it without composing into
 MAX_SIZE=60000
 
 post_scrubbed() {
-    # Compose → scrub → post, chained with && so a scrubber failure stops the post.
+    # Compose → scrub → post, chained with && from the FIRST link: the compose is
+    # inside the chain, so a failed write stops the post instead of letting the
+    # scrubber scrub — and the chain publish — whatever the RAW file last held.
     # Never a pipeline: a pipeline's exit status hides a scrubber crash (fail-open).
-    printf '%s\n' "$1" > "$DEVFLOW_BODY_RAW"
-    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    printf '%s\n' "$1" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
         "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
       && gh issue comment "$2" --body-file "$DEVFLOW_BODY"
 }
@@ -167,10 +169,10 @@ post_scrubbed() {
 add_tech_debt_item() {
     local new_item="$1"
     local current_body
-    current_body=$(gh issue view $TECH_DEBT_ISSUE --json body -q '.body')
+    current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body')
     local body_length=${#current_body}
 
-    if [ $body_length -gt $MAX_SIZE ]; then
+    if [ "$body_length" -gt "$MAX_SIZE" ]; then
         echo "Tech debt issue approaching size limit, archiving..."
         archive_tech_debt_issue
     fi
@@ -181,26 +183,34 @@ add_tech_debt_item() {
 archive_tech_debt_issue() {
     local old_issue=$TECH_DEBT_ISSUE
     local new_url
+    local new_number
 
     # The successor's body is a posted body: compose, scrub, and create only on a
     # clean scrubber exit. `gh issue create` prints the new issue's URL, so the
-    # number is its last path segment. One `&&` chain end to end — the archive
-    # comment names the real successor, and the close happens only after it lands.
+    # number is its last path segment — parsed command output, checked to be a digit
+    # run before it becomes the issue every later post targets. One `&&` chain end to
+    # end, compose included — the archive comment names the real successor, and the
+    # close happens only after it lands. A failure anywhere reports and stops without
+    # returning non-zero: TECH_DEBT_ISSUE still names the still-open predecessor, so
+    # the caller's item lands there rather than being dropped.
     printf '%s\n' "Continued from #${old_issue}
 
 ## Items
-" > "$DEVFLOW_BODY_RAW"
-    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
         "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
       && new_url=$(gh issue create \
         --title "Tech Debt Backlog" \
         --label "tech-debt" \
         --body-file "$DEVFLOW_BODY") \
-      && TECH_DEBT_ISSUE="${new_url##*/}" \
+      && new_number="${new_url##*/}" \
+      && [[ "$new_number" =~ ^[0-9]+$ ]] \
+      && TECH_DEBT_ISSUE="$new_number" \
       && post_scrubbed "## Archived
 This issue reached the size limit.
 **Continued in:** #${TECH_DEBT_ISSUE}" "$old_issue" \
-      && gh issue close "$old_issue"
+      && gh issue close "$old_issue" \
+      || echo "TRACEABILITY: DEGRADED (tech-debt archive failed for #${old_issue})"
 }
 ```
 @end
@@ -304,7 +314,7 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 ### Create Issue with Labels and Assignees
 
 ```bash
-cat > "$DEVFLOW_BODY_RAW" <<'EOF'
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Description
 Login fails when using SSO authentication.
 
@@ -316,8 +326,7 @@ Login fails when using SSO authentication.
 ## Expected Behavior
 User should be logged in successfully.
 EOF
-
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh issue create \
     --title "Bug: Login fails for SSO users" \
@@ -376,7 +385,7 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the open-PR lookup and the PR-link rendering of step 4b only. The surrounding steps and the publication sink stay with the operation.
+**Mechanics held here:** the whole of step 4b — the open-PR lookup, the issue-number resolution order, the `Closes #\{n\}` line it renders, and the scrub-then-edit that publishes the updated body. The operation's other steps stay with it.
 
 ### Process
 
