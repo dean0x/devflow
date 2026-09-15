@@ -4,7 +4,7 @@ import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
-import { getPackageRoot } from '../../core/paths.js';
+import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences } from '../../core/reference-sweep.js';
@@ -59,9 +59,10 @@ export interface InstallReport {
    */
   overlaidRefs: string[];
   /**
-   * Overlay units left byte-unchanged because their replacement could not be built.
-   * The install still succeeds (PF-009); a unit named here is running on the files the
-   * previous install left, which is exactly what the summary has to say out loud.
+   * Overlay units this run did not refresh, each carrying the state it was left in —
+   * see {@link OverlayFailureState}. The install still succeeds (PF-009); what a unit
+   * named here is now running on differs per state, which is exactly what the summary
+   * has to say out loud.
    */
   overlayFailures: OverlayFailure[];
 }
@@ -287,24 +288,89 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 /** Sub-path under the references root that the prune converges to the manifest. */
 const TRACKER_SUBTREE = 'tracker';
 
-/** Unit id reported for the flat, provider-independent document set. */
-const CROSS_CUTTING_UNIT_ID = '(cross-cutting)';
+/**
+ * Which document set an overlay unit covers.
+ *
+ * A discriminated union rather than a name string carrying a `'(cross-cutting)'`
+ * sentinel: the sentinel was a value a provider directory could in principle hold, and
+ * every reader had to re-derive "is this the flat set?" by comparing against a literal.
+ *
+ * The provider arm carries the module's `subdir` exactly as the registry
+ * (`VARIANT_MODULES` in src/core/mds-variants.ts) declares it — `tracker/github`, not
+ * its trailing segment. The trailing segment is not an identity: two modules whose
+ * subdirs end in the same segment are two units and would report under one name, which
+ * is a live concern the moment a second provider lands beside `tracker/github`.
+ */
+export type OverlayUnitRef =
+  | { readonly kind: 'provider'; readonly subdir: string }
+  | { readonly kind: 'cross-cutting' };
 
-/** One failed overlay unit — the unit's id and why it was left alone. */
-export interface OverlayFailure {
+/**
+ * What a failed overlay unit left on disk.
+ *
+ * Populated from what the run actually did, because a failure does not imply a no-op.
+ * One rendered sentence per arm (see `formatOverlaySummary` in src/cli/commands/init.ts):
+ * before the discriminant existed every failure printed "the previously installed files
+ * were left unchanged", which is true of exactly one arm below — a flat set caught
+ * mid-promotion is part new and part old, a unit whose displaced copy could not be put
+ * back has no live copy at all, and a unit that was never installed is absent rather
+ * than stale. The worse the state, the more the single sentence understated it.
+ */
+export type OverlayFailureState =
+  /** Nothing was modified, and the unit's previously installed files are still in place. */
+  | { readonly kind: 'installed-unchanged' }
   /**
-   * The unit that was not refreshed: a provider directory name (`github`) or
-   * {@link CROSS_CUTTING_UNIT_ID} for the flat document set.
+   * Nothing was modified because there was nothing to modify: no copy of this unit is
+   * installed, so the references it carries are absent from the skill the agent loads.
    */
-  provider: string;
+  | { readonly kind: 'not-installed'; readonly absent: readonly string[] }
+  /**
+   * The flat set was caught mid-promotion — the gap `D-OVERLAY-FLAT-UNIT` documents.
+   * `refreshed` documents carry this run's bytes, `stale` still carry the previous
+   * install's; there is no directory to swap back.
+   */
+  | {
+      readonly kind: 'partially-refreshed';
+      readonly refreshed: readonly string[];
+      readonly stale: readonly string[];
+    }
+  /**
+   * A provider directory was displaced to its `.old` sibling and could not be put back.
+   * Nothing lives at the installed path; `recoveryPath` holds the only copy, which is
+   * why this run's prune is skipped rather than converging over it.
+   */
+  | {
+      readonly kind: 'restore-failed';
+      readonly recoveryPath: string;
+      readonly restoreError: string;
+    };
+
+/** One overlay unit this run did not refresh — which unit, what it left, and why. */
+export interface OverlayFailure {
+  /** The unit that was not refreshed. */
+  readonly unit: OverlayUnitRef;
+  /** The state the unit's files were left in — the only claim a render site may make. */
+  readonly state: OverlayFailureState;
   /** Rendered cause, already stringified so the report is serialisable. */
-  error: string;
+  readonly error: string;
+}
+
+/**
+ * One spelling of a unit's name, for every message about it.
+ *
+ * Pure function — the installer owns the unit types, so it owns how they are named,
+ * rather than leaving each render site to invent its own wording (avoids PF-013).
+ */
+export function overlayUnitLabel(unit: OverlayUnitRef): string {
+  return unit.kind === 'provider'
+    ? `provider directory "${unit.subdir}"`
+    : 'the cross-cutting document set';
 }
 
 export interface ReferenceOverlayResult {
   /** Manifest-relative paths successfully installed by this run. */
   overlaidRefs: string[];
-  /** Units left byte-unchanged because building their replacement failed. */
+  /** Units this run did not refresh, each carrying the state it was left in. */
   overlayFailures: OverlayFailure[];
   /** Result of converging `references/tracker/**` to the manifest. */
   pruned: SweepResult;
@@ -325,20 +391,28 @@ export interface ReferenceOverlayResult {
  * leaving all previously installed flat documents exactly as they were — promoted by one
  * `rename` per document. The promotion loop is the one place where a mid-flight I/O
  * error could leave the flat set partly refreshed; that is a property of the shared
- * directory, not a choice, and such a failure is reported like any other.
+ * directory, not a choice, and the report says so rather than glossing it —
+ * {@link OverlayFailureState}'s `partially-refreshed` arm names which documents carry
+ * this run's bytes and which still carry the previous install's.
  *
  * Treating each flat file as its own unit was the alternative. It was rejected because
  * three documents that are always generated together and always read together would
  * then report three independent outcomes, and a reader of `overlayFailures` could not
  * tell a broken build from a single unlucky file.
  */
-export interface OverlayUnit {
-  /** Reported on {@link OverlayFailure.provider}. */
-  id: string;
-  /** POSIX sub-path under the references root, or `''` for the flat set. */
-  subdir: string;
+export type OverlayUnit = OverlayUnitRef & {
   /** Manifest-relative paths this unit owns. */
-  files: string[];
+  readonly files: readonly string[];
+};
+
+/** The identity half of a unit, as the failure report carries it. */
+function unitRef(unit: OverlayUnit): OverlayUnitRef {
+  return unit.kind === 'provider' ? { kind: 'provider', subdir: unit.subdir } : { kind: 'cross-cutting' };
+}
+
+/** POSIX sub-path a unit's files land in under a root — `''` for the flat set. */
+function unitSubdir(unit: OverlayUnit): string {
+  return unit.kind === 'provider' ? unit.subdir : '';
 }
 
 /**
@@ -346,6 +420,10 @@ export interface OverlayUnit {
  *
  * Deterministic order — flat set first, then provider directories sorted by path — so a
  * failure report and a loud throw are reproducible run to run.
+ *
+ * An empty directory part is the manifest's own spelling of "lands in the references
+ * root", so it selects the flat arm here and is never carried any further: past this
+ * point a unit says which kind it is.
  */
 function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   const bySubdir = new Map<string, string[]>();
@@ -358,11 +436,10 @@ function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   }
   return [...bySubdir.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([subdir, files]) => ({
-      id: subdir === '' ? CROSS_CUTTING_UNIT_ID : subdir.split('/').slice(-1)[0],
-      subdir,
-      files,
-    }));
+    .map(([subdir, files]): OverlayUnit =>
+      subdir === ''
+        ? { kind: 'cross-cutting', files }
+        : { kind: 'provider', subdir, files });
 }
 
 /** Resolve a POSIX manifest sub-path against a root, spelled for this filesystem. */
@@ -372,7 +449,7 @@ function underRoot(root: string, posixSubPath: string): string {
 
 /** Staging sibling for a unit — a `.tmp` name that can never collide with a manifest entry. */
 function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
-  return unit.subdir === ''
+  return unit.kind === 'cross-cutting'
     ? path.join(referencesTarget, '.cross-cutting.tmp')
     : `${underRoot(referencesTarget, unit.subdir)}.tmp`;
 }
@@ -397,7 +474,7 @@ async function buildUnitStagingTree(
   warn: (msg: string) => void,
 ): Promise<{ ok: true; stagingDir: string } | { ok: false; error: string }> {
   const stagingDir = stagingDirFor(referencesTarget, unit);
-  const sourceDir = underRoot(sourceRoot, unit.subdir);
+  const sourceDir = underRoot(sourceRoot, unitSubdir(unit));
   const wanted = new Map(unit.files.map(relPath => [relPath.split('/').slice(-1)[0], relPath]));
   const landed = new Set<string>();
 
@@ -421,7 +498,7 @@ async function buildUnitStagingTree(
   }
 
   for (const entry of entries) {
-    const relPath = unit.subdir === '' ? entry.name : `${unit.subdir}/${entry.name}`;
+    const relPath = unit.kind === 'cross-cutting' ? entry.name : `${unit.subdir}/${entry.name}`;
 
     // Symlinks are skipped, never followed. copyDirectory follows them and preserves
     // source modes, which is why the overlay does its own copying: a link planted in the
@@ -458,6 +535,32 @@ async function buildUnitStagingTree(
   return { ok: true, stagingDir };
 }
 
+/** Outcome of promoting one unit — a failure carries the state it left on disk. */
+export type UnitPromotion =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string; readonly state: OverlayFailureState };
+
+/**
+ * Put a displaced unit back, and say whether it actually went back.
+ *
+ * The restore used to be a bare `.catch(() => undefined)`, which made a failed recovery
+ * byte-indistinguishable from a successful one: the install then printed "the previously
+ * installed files were left unchanged" over a provider directory that no longer existed,
+ * and the backup holding the only copy was the next thing the run deleted. What this
+ * returns is what the failure state is built from.
+ */
+async function restoreDisplacedUnit(
+  backup: string,
+  target: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await fs.rename(backup, target);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /**
  * Promote a fully built staging tree into place.
  *
@@ -467,6 +570,11 @@ async function buildUnitStagingTree(
  * (DR-05, risk P2-g), and a rename that fails half-way restores the previous one rather
  * than leaving the provider empty. The flat set is promoted one `rename` per document
  * because its directory is shared with hand-authored references (D-OVERLAY-FLAT-UNIT).
+ *
+ * A failure reports the state it left rather than a state a failure is assumed to imply:
+ * `state` is advanced as the promotion passes each point of no return, so the catch
+ * describes the filesystem as it now is. That is the whole difference between a report a
+ * user can act on and one that names a recovery copy the same run went on to delete.
  *
  * Exported for the sake of ONE property that cannot be driven through
  * {@link overlayGeneratedReferences}: a promotion that fails AFTER the installed unit has
@@ -479,12 +587,22 @@ export async function promoteUnitStagingTree(
   unit: OverlayUnit,
   referencesTarget: string,
   stagingDir: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<UnitPromotion> {
+  let state: OverlayFailureState = { kind: 'installed-unchanged' };
   try {
-    if (unit.subdir === '') {
-      for (const relPath of unit.files) {
+    if (unit.kind === 'cross-cutting') {
+      for (const [index, relPath] of unit.files.entries()) {
         const basename = relPath.split('/').slice(-1)[0];
         await fs.rename(path.join(stagingDir, basename), path.join(referencesTarget, basename));
+        // Past the first rename the set is mixed, and there is no directory to swap back
+        // (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the
+        // rest still carry the previous install's. Recorded after each rename so a failure
+        // on the next one names both halves instead of claiming the set is untouched.
+        state = {
+          kind: 'partially-refreshed',
+          refreshed: unit.files.slice(0, index + 1),
+          stale: unit.files.slice(index + 1),
+        };
       }
       await fs.rm(stagingDir, { recursive: true, force: true });
       return { ok: true };
@@ -501,9 +619,11 @@ export async function promoteUnitStagingTree(
     // that claim true, so a failed promotion is recoverable rather than a silent
     // deletion (avoids PF-009: a reported failure must describe the state it left).
     //
-    // The `.old` sibling is pre-cleaned like the `.tmp` one, and a crash that strands
-    // either is converged away by the tracker-subtree prune below (both names end in
-    // neither `/` nor `.md`, so no manifest entry can collide with them).
+    // The `.old` sibling is pre-cleaned like the `.tmp` one. A crash that strands
+    // either is converged away by a later run's tracker-subtree prune (both names end
+    // in neither `/` nor `.md`, so no manifest entry can collide with them) — but the
+    // backup this run is still relying on is exempt from this run's prune, which is
+    // what `restore-failed` carries the recovery path for.
     const backup = `${target}.old`;
     await fs.rm(backup, { recursive: true, force: true });
 
@@ -512,14 +632,21 @@ export async function promoteUnitStagingTree(
       await fs.rename(target, backup);
       displaced = true;
     } catch (err) {
-      // Nothing installed yet — a first install has no unit to displace.
+      // Nothing installed yet — a first install has no unit to displace, so a failure
+      // from here on leaves the unit ABSENT rather than stale.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      state = { kind: 'not-installed', absent: unit.files };
     }
 
     try {
       await fs.rename(stagingDir, target);
     } catch (err) {
-      if (displaced) await fs.rename(backup, target).catch(() => undefined);
+      if (displaced) {
+        const restored = await restoreDisplacedUnit(backup, target);
+        if (!restored.ok) {
+          state = { kind: 'restore-failed', recoveryPath: backup, restoreError: restored.error };
+        }
+      }
       throw err;
     }
 
@@ -527,8 +654,98 @@ export async function promoteUnitStagingTree(
     return { ok: true };
   } catch (err) {
     await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
-    return { ok: false, error: String(err) };
+    return { ok: false, error: String(err), state };
   }
+}
+
+/**
+ * Which "nothing was modified" sentence is true for a unit whose build failed.
+ *
+ * A build failure touches nothing under the references root, so the unit is left in
+ * whatever state it was already in — and those are two different states with two
+ * different consequences. Falling back on a working previous install is a deferred
+ * refresh; having no copy at all ships an agent whose mechanics pointers resolve to
+ * nothing, which is the worse outcome and the one the single old sentence described
+ * most quietly.
+ *
+ * One `access` per file, on the failure path only; the loop is bounded by the unit's
+ * own manifest slice.
+ */
+async function classifyUntouchedUnit(
+  unit: OverlayUnit,
+  referencesTarget: string,
+): Promise<OverlayFailureState> {
+  const absent: string[] = [];
+  for (const relPath of unit.files) {
+    try {
+      await fs.access(underRoot(referencesTarget, relPath));
+    } catch {
+      absent.push(relPath);
+    }
+  }
+  return absent.length === unit.files.length
+    ? { kind: 'not-installed', absent }
+    : { kind: 'installed-unchanged' };
+}
+
+/**
+ * Converge the tracker subtree to the manifest — unless that would delete a recovery
+ * copy this same run just created.
+ *
+ * A promotion whose restore failed leaves the unit's ONLY surviving copy in its `.old`
+ * sibling, which sits inside the subtree this prune converges and which the manifest
+ * (rightly) does not name. Pruning it destroys the backup in the same run that reported
+ * it as the way back, so the path the warning names is gone before the user reads it.
+ *
+ * Of the three ways to stop that, this is the one that leaves the SUCCESSFUL path
+ * byte-identical — the same call, the same arguments, the same position in the run.
+ * Moving the prune ahead of the unit loop would also spare the backup, but it converges
+ * a tree the loop has not rebuilt yet: it reports removals the promotion would have made
+ * anyway, and it mutates the install before the one throw path that aborts it. Excluding
+ * `.old`/`.tmp` names from the walk would mean a new exclusion option on
+ * sweepOrphanedReferences, i.e. changing the shape of a module this concern does not own.
+ *
+ * The skip is not silent. The unswept subtree is reported through `failed` — the same
+ * channel that module uses for its own depth-bound breach — so nothing claims
+ * convergence over ground it did not cover (avoids PF-009, PF-015). Orphans under
+ * `tracker/` survive this install and the next one converges them.
+ */
+async function prunePreservingRecoveryCopies(
+  trackerRoot: string,
+  manifest: readonly string[],
+  overlayFailures: readonly OverlayFailure[],
+): Promise<SweepResult> {
+  const stranded: string[] = [];
+  for (const failure of overlayFailures) {
+    if (failure.state.kind !== 'restore-failed') continue;
+    if (!isContainedIn(trackerRoot, failure.state.recoveryPath)) continue;
+    stranded.push(failure.state.recoveryPath);
+  }
+
+  if (stranded.length > 0) {
+    return {
+      scanned: 0,
+      removed: [],
+      failed: [{
+        name: TRACKER_SUBTREE,
+        error: new Error(
+          `${TRACKER_SUBTREE}: the stale-reference prune was skipped — a promotion that ` +
+          `could not be rolled back left the only surviving copy of its references in ` +
+          `${stranded.join(', ')}, which this prune would delete in the same run that ` +
+          `named it as the way back. Orphaned references under ${TRACKER_SUBTREE}/ ` +
+          `survive this install; the next one converges them.`,
+        ),
+      }],
+    };
+  }
+
+  // Keyed by relative path, because `tracker/{provider}/{op}.md` is what distinguishes
+  // two providers' identically named files — the reason mdEntryName cannot serve here.
+  const prefix = `${TRACKER_SUBTREE}/`;
+  return sweepOrphanedReferences(
+    trackerRoot,
+    new Set(manifest.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
+  );
 }
 
 /**
@@ -545,6 +762,11 @@ export async function promoteUnitStagingTree(
  * Runs for a shadowed and a canonical install alike: a user who overrides the git skill
  * must still receive the canonical GitHub mechanics the agent is told to load
  * (AC-2.4a / UAC-28).
+ *
+ * The prune runs last and yields to one thing only — a recovery copy this run itself
+ * created and is still relying on (see {@link prunePreservingRecoveryCopies}). Every
+ * unit this run did not refresh reaches `overlayFailures` carrying the state it was
+ * actually left in, never a blanket claim that nothing changed.
  *
  * @param opts.referencesTarget - `{claudeDir}/skills/devflow:git/references`.
  * @param opts.sourceRoot - Generated tree; defaults to `compiledSkillRefsDir()`.
@@ -573,24 +795,25 @@ export async function overlayGeneratedReferences(opts: {
   for (const unit of planOverlayUnits(manifest)) {
     const built = await buildUnitStagingTree(unit, sourceRoot, opts.referencesTarget, warn);
     if (!built.ok) {
-      overlayFailures.push({ provider: unit.id, error: built.error });
+      overlayFailures.push({
+        unit: unitRef(unit),
+        state: await classifyUntouchedUnit(unit, opts.referencesTarget),
+        error: built.error,
+      });
       continue;
     }
     const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);
     if (!promoted.ok) {
-      overlayFailures.push({ provider: unit.id, error: promoted.error });
+      overlayFailures.push({ unit: unitRef(unit), state: promoted.state, error: promoted.error });
       continue;
     }
     overlaidRefs.push(...unit.files);
   }
 
-  // Converge the tracker subtree to the manifest. Keyed by relative path, because
-  // `tracker/{provider}/{op}.md` is what distinguishes two providers' identically named
-  // files — the reason mdEntryName cannot serve here.
-  const prefix = `${TRACKER_SUBTREE}/`;
-  const pruned = await sweepOrphanedReferences(
+  const pruned = await prunePreservingRecoveryCopies(
     path.join(opts.referencesTarget, TRACKER_SUBTREE),
-    new Set(manifest.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
+    manifest,
+    overlayFailures,
   );
 
   // D-OVERLAY-MODE-SCOPE: normalise the WHOLE references directory, not only the files

@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
+import { installViaFileCopy, composeScripts, overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -170,10 +170,12 @@ export function formatSweepSummary(
  * Turn the reference-overlay half of an InstallReport into summary lines.
  *
  * The overlay rewrites files inside an installed skill directory the user may have
- * shadowed, and a unit it could not rebuild is silently left running on whatever the
- * previous install left behind. Neither outcome is visible from the filesystem at a
- * glance, so both reach the summary — PF-015: a report field with no render site is not
- * a report.
+ * shadowed, and a unit it could not refresh is left in one of the states
+ * {@link OverlayFailureState} enumerates — running on the previous install, half
+ * replaced, absent, or recoverable only from a backup path. None of that is visible from
+ * the filesystem at a glance, so all of it reaches the summary — PF-015: a report field
+ * with no render site is not a report, and a render site that flattens four states into
+ * one sentence is the same defect one layer up.
  *
  * Pure function — returns lines, logs nothing (applies ADR-013).
  *
@@ -203,12 +205,53 @@ export function formatOverlaySummary(
     lines.push({
       level: 'warn',
       message:
-        `Could not refresh the generated references for "${failure.provider}" ` +
-        `(${failure.error}) — the previously installed files were left unchanged`,
+        `Could not refresh the generated references for ${overlayUnitLabel(failure.unit)} ` +
+        `(${failure.error}) — ${describeOverlayFailureState(failure.state)}`,
     });
   }
 
   return lines;
+}
+
+/**
+ * The half of an overlay warning that describes what is actually on disk.
+ *
+ * One sentence per state, each true of that state and of no other. The single sentence
+ * this replaced — "the previously installed files were left unchanged" — was true of the
+ * first arm only, and it was printed loudest over the arms it fitted worst: a set left
+ * half-refreshed, and a unit whose only surviving copy is a backup path the user now has
+ * to be told about.
+ *
+ * Exhaustive over {@link OverlayFailureState} — a new state added to the union without a
+ * sentence here is a compile error, not a state that silently prints nothing.
+ */
+function describeOverlayFailureState(state: OverlayFailureState): string {
+  switch (state.kind) {
+    case 'installed-unchanged':
+      return 'the previously installed files were left unchanged';
+    case 'not-installed':
+      return (
+        `nothing is installed in their place, so ${state.absent.length} reference(s) the ` +
+        `agent is told to load are absent: ${state.absent.join(', ')}`
+      );
+    case 'partially-refreshed':
+      return (
+        `${state.refreshed.length} of ${state.refreshed.length + state.stale.length} ` +
+        `document(s) had already been replaced, so the set is part new and part old — ` +
+        `still on the previous install: ${state.stale.join(', ') || 'none'}`
+      );
+    case 'restore-failed':
+      return (
+        `the displaced copy could NOT be put back (${state.restoreError}), so nothing is ` +
+        `installed there now — the only surviving copy is "${state.recoveryPath}", which ` +
+        `this run's stale-reference prune was skipped to preserve`
+      );
+    default: {
+      const _exhaustive: never = state;
+      void _exhaustive;
+      return 'the state it was left in is unknown';
+    }
+  }
 }
 
 /**

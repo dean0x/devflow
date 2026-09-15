@@ -20,7 +20,7 @@
  * did nothing at all would fail these tests, not pass them (avoids PF-018).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -29,6 +29,7 @@ import {
   installViaFileCopy,
   overlayGeneratedReferences,
   promoteUnitStagingTree,
+  type OverlayFailure,
   type OverlayUnit,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
@@ -370,6 +371,10 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   afterEach(async () => {
+    // The directory first: a 0o000 parent makes the file chmod below fail with EACCES,
+    // and then `rm -r` cannot list it either, which would fail the teardown rather than
+    // the test that revoked it.
+    await fs.chmod(abs(sourceRoot, 'tracker/jira'), 0o755).catch(() => undefined);
     await fs.chmod(abs(sourceRoot, 'tracker/jira/comment.md'), 0o644).catch(() => undefined);
     await fs.rm(sourceRoot, { recursive: true, force: true });
     await fs.rm(target, { recursive: true, force: true });
@@ -399,8 +404,16 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
 
     // 1. the failing unit is named, and the install still succeeds (no throw)
-    expect(second.overlayFailures.map(f => f.provider)).toEqual(['jira']);
+    expect(second.overlayFailures.map(f => f.unit)).toEqual([
+      { kind: 'provider', subdir: 'tracker/jira' },
+    ]);
     expect(second.overlayFailures[0].error.length).toBeGreaterThan(0);
+
+    // 1b. …and the state it reports is the one that is actually true here: this unit
+    // WAS installed, the build failed before anything was touched, so "left unchanged"
+    // is the honest sentence. The other arms of the union are proven separately — the
+    // point of the discriminant is that this one is a finding, not a default.
+    expect(second.overlayFailures[0].state).toEqual({ kind: 'installed-unchanged' });
 
     // 2. the pre-existing provider tree is byte-unchanged — never a partial promotion
     const jiraAfter = await Promise.all(
@@ -446,7 +459,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const unit: OverlayUnit = {
-      id: 'jira',
+      kind: 'provider',
       subdir: 'tracker/jira',
       files: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
     };
@@ -464,6 +477,11 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     expect(promoted.ok, 'promoting an absent staging tree must be reported, never silently ok').toBe(false);
 
+    // The restore SUCCEEDED here, which is the one case in which "left unchanged" is a
+    // true sentence — so that is the state reported. The probe below it drives the same
+    // window with a restore that fails, and must not reach this arm.
+    if (!promoted.ok) expect(promoted.state).toEqual({ kind: 'installed-unchanged' });
+
     // The property: the previously installed mechanics are still there, byte for byte.
     // This is precisely what formatOverlaySummary's warning line tells the user, so it
     // is what has to be true.
@@ -477,6 +495,172 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // …and the backup it used is not left parked beside the live references.
     const residue = (await walkTree(target)).filter(p => p.includes('.old') || p.includes('.tmp'));
     expect(residue, 'a failed promotion must leave neither backup nor staging residue').toEqual([]);
+  });
+
+  it('a unit with no installed copy reports not-installed, never "left unchanged"', async (ctx) => {
+    // Nothing is installed yet — `target` is a fresh mkdtemp root. Revoking read on the
+    // provider's SOURCE directory fails its build before anything is copied, which is the
+    // shape a `build:cli`-only tree produces for every unit at once.
+    const jiraSource = abs(sourceRoot, 'tracker/jira');
+    if (typeof process.getuid === 'function' && process.getuid() === 0) { ctx.skip(); return; }
+    await fs.chmod(jiraSource, 0o000);
+    const revoked = await fs.readdir(jiraSource).then(() => false).catch(() => true);
+    if (!revoked) { ctx.skip(); return; }
+
+    let result;
+    try {
+      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    } finally {
+      await fs.chmod(jiraSource, 0o755).catch(() => undefined);
+    }
+
+    // The distinction the single old sentence erased: this unit is not stale, it is ABSENT.
+    expect(result.overlayFailures).toHaveLength(1);
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    expect(result.overlayFailures[0].state).toEqual({
+      kind: 'not-installed',
+      absent: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+    });
+    for (const rel of ['tracker/jira/comment.md', 'tracker/jira/transition.md']) {
+      expect(await exists(abs(target, rel)), `${rel} must really be absent`).toBe(false);
+    }
+
+    // Positive half: every other unit installed normally, and no staging residue survives.
+    expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
+    expect(result.overlaidRefs).toContain('decision-markers.md');
+    expect((await walkTree(target)).filter(p => p.includes('.tmp'))).toEqual([]);
+
+    // …and the render site says "absent", not "unchanged".
+    const [line] = formatOverlaySummary({
+      overlaidRefs: result.overlaidRefs,
+      overlayFailures: result.overlayFailures,
+    }).filter(l => l.level === 'warn');
+    expect(line.message).toContain('tracker/jira');
+    expect(line.message).toContain('absent');
+    expect(line.message).not.toContain('left unchanged');
+  });
+
+  it('a flat-set promotion caught mid-flight reports which documents are new and which are stale', async () => {
+    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
+
+    // The cross-cutting documents — the unit with no directory to swap back.
+    const flat = wide.filter(p => !p.includes('/'));
+    expect(flat.length, 'a one-document flat set cannot be caught MID-flight').toBeGreaterThanOrEqual(2);
+
+    // A staging tree holding only the FIRST document: its rename lands, the next one
+    // finds nothing to rename. That is precisely the window D-OVERLAY-FLAT-UNIT
+    // documents, driven through the real promotion rather than described in a comment.
+    const staging = path.join(target, '.cross-cutting.tmp');
+    await fs.mkdir(staging, { recursive: true });
+    await fs.writeFile(path.join(staging, flat[0]), '# refreshed by this run\n', 'utf-8');
+
+    const unit: OverlayUnit = { kind: 'cross-cutting', files: flat };
+    const promoted = await promoteUnitStagingTree(unit, target, staging);
+
+    expect(promoted.ok, 'a rename over an absent document must be reported').toBe(false);
+    if (promoted.ok) return;
+    expect(promoted.state).toEqual({
+      kind: 'partially-refreshed',
+      refreshed: [flat[0]],
+      stale: flat.slice(1),
+    });
+
+    // The disk agrees with the report: one document is this run's, the rest are not.
+    expect(await fs.readFile(abs(target, flat[0]), 'utf-8')).toContain('refreshed by this run');
+    for (const rel of flat.slice(1)) {
+      const installed = await fs.readFile(abs(target, rel));
+      const generated = await fs.readFile(abs(sourceRoot, rel));
+      expect(installed.equals(generated), `${rel} must still be the previous install`).toBe(true);
+    }
+
+    const [line] = formatOverlaySummary({
+      overlaidRefs: [],
+      overlayFailures: [{ unit: { kind: 'cross-cutting' }, state: promoted.state, error: promoted.error }],
+    });
+    expect(line.message).toContain('part new and part old');
+    expect(line.message).not.toContain('left unchanged');
+  });
+
+  it('a restore that fails is reported as such, and its recovery copy survives the same run', async () => {
+    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
+
+    const live = abs(target, 'tracker/jira');
+    const backup = `${live}.old`;
+    const before = await fs.readFile(abs(target, 'tracker/jira/comment.md'));
+
+    // Two renames no filesystem can be coaxed into failing on demand, in this order: the
+    // staging rename (so the promotion fails AFTER displacing the unit) and the restore
+    // that follows it. Everything else runs for real — the displacement, the `.old`
+    // backup, the other two units, the prune. Same seam tests/manifest.test.ts uses for
+    // an un-provokable rename failure.
+    //
+    // Proof of RED: with the restore swallowed by `.catch(() => undefined)` the state is
+    // `installed-unchanged` and the prune then removes `tracker/jira.old` in this very
+    // run — the backup-survival and prune-report assertions below both fail.
+    const realRename = fs.rename.bind(fs);
+    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      const src = String(from);
+      if (src.endsWith('jira.tmp') || src.endsWith('jira.old')) {
+        throw new Error('EIO: simulated rename failure');
+      }
+      return realRename(from, to);
+    });
+
+    let result;
+    try {
+      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    // 1. the failure names the state it actually left: nothing live, a backup to recover from
+    expect(result.overlayFailures).toHaveLength(1);
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    const state = result.overlayFailures[0].state;
+    expect(state.kind).toBe('restore-failed');
+    if (state.kind !== 'restore-failed') return;
+    expect(state.recoveryPath).toBe(backup);
+    expect(state.restoreError).toContain('simulated rename failure');
+
+    // 2. the recovery copy the report names is still there when the run ends — byte for
+    //    byte — and the live path is empty, exactly as the state claims.
+    expect(await exists(backup), 'the prune must not delete the copy this run is relying on').toBe(true);
+    expect((await fs.readFile(path.join(backup, 'comment.md'))).equals(before)).toBe(true);
+    expect(await exists(live)).toBe(false);
+
+    // 3. the skipped prune is reported, not silent — nothing claims convergence over
+    //    ground it did not cover (PF-009, PF-015).
+    expect(result.pruned.removed).toEqual([]);
+    expect(result.pruned.failed).toHaveLength(1);
+    expect(result.pruned.failed[0].name).toBe('tracker');
+    expect(String(result.pruned.failed[0].error)).toContain(backup);
+
+    // 4. positive half: the units that could be promoted were
+    expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
+    expect(result.overlaidRefs).toContain('decision-markers.md');
+
+    // 5. and the user is told where the only copy is
+    const [line] = formatOverlaySummary({
+      overlaidRefs: result.overlaidRefs,
+      overlayFailures: result.overlayFailures,
+    }).filter(l => l.level === 'warn');
+    expect(line.message).toContain(backup);
+    expect(line.message).toContain('could NOT be put back');
+    expect(line.message).not.toContain('left unchanged');
+
+    // 6. known-bad probe — the exemption is load-bearing, not vacuously satisfied by a
+    //    backup the prune would have spared anyway: the SAME prune, over the same root
+    //    with the same manifest, takes `jira.old` with it. Destructive by design, and
+    //    last: it proves what the skipped prune would have done to the recovery copy.
+    const trackerPrefix = `${'tracker'}/`;
+    const unguarded = await sweepOrphanedReferences(
+      path.join(target, 'tracker'),
+      new Set(wide.filter(p => p.startsWith(trackerPrefix)).map(p => p.slice(trackerPrefix.length))),
+    );
+    expect(unguarded.removed).toContain('jira.old');
+    expect(await exists(backup), 'the unguarded prune deletes the only surviving copy').toBe(false);
   });
 
   it('an absent canonical GitHub reference fails loud with a build hint (AC-2.4b)', async () => {
@@ -510,7 +694,11 @@ describe('formatOverlaySummary render site (PF-015)', () => {
   it('reports installed references at info and failed units at warn', () => {
     const lines = formatOverlaySummary({
       overlaidRefs: ['tracker/github/setup-task.md', 'decision-markers.md'],
-      overlayFailures: [{ provider: 'jira', error: 'EACCES: permission denied' }],
+      overlayFailures: [{
+        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        state: { kind: 'installed-unchanged' },
+        error: 'EACCES: permission denied',
+      }],
     });
 
     const info = lines.filter(l => l.level === 'info');
@@ -518,12 +706,59 @@ describe('formatOverlaySummary render site (PF-015)', () => {
     expect(info).toHaveLength(1);
     expect(info[0].message).toContain('2');
     expect(warn).toHaveLength(1);
-    expect(warn[0].message).toContain('jira');
+    expect(warn[0].message).toContain('tracker/jira');
     expect(warn[0].message).toContain('EACCES: permission denied');
 
     // Exhaustive kinds: every emitted line carries a level the render site handles.
     expect(lines.every(l => l.level === 'info' || l.level === 'warn')).toBe(true);
     expect(lines).toHaveLength(info.length + warn.length);
+  });
+
+  /**
+   * One sentence per state, and no two the same. A discriminant whose arms all render
+   * identically is the defect this replaced wearing a type — so the assertion is that
+   * the four sentences are DISTINCT, not merely that each contains a keyword.
+   */
+  it('renders a different, state-specific sentence for every OverlayFailureState', () => {
+    const failures: OverlayFailure[] = [
+      {
+        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        state: { kind: 'installed-unchanged' },
+        error: 'EACCES',
+      },
+      {
+        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        state: { kind: 'not-installed', absent: ['tracker/jira/comment.md'] },
+        error: 'EACCES',
+      },
+      {
+        unit: { kind: 'cross-cutting' },
+        state: {
+          kind: 'partially-refreshed',
+          refreshed: ['decision-markers.md'],
+          stale: ['publication-gate.md'],
+        },
+        error: 'ENOENT',
+      },
+      {
+        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        state: { kind: 'restore-failed', recoveryPath: '/refs/tracker/jira.old', restoreError: 'EIO' },
+        error: 'ENOENT',
+      },
+    ];
+
+    const messages = formatOverlaySummary({ overlaidRefs: [], overlayFailures: failures })
+      .map(l => l.message);
+
+    expect(messages).toHaveLength(4);
+    expect(new Set(messages).size, 'two states rendering one sentence is the original defect').toBe(4);
+    expect(messages[0]).toContain('left unchanged');
+    expect(messages[1]).toContain('tracker/jira/comment.md');
+    expect(messages[2]).toContain('publication-gate.md');
+    expect(messages[2]).toContain('the cross-cutting document set');
+    expect(messages[3]).toContain('/refs/tracker/jira.old');
+    // Only the first state may make the claim every state used to make.
+    expect(messages.filter(m => m.includes('left unchanged'))).toHaveLength(1);
   });
 });
 
