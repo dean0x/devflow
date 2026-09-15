@@ -19,10 +19,13 @@ import {
   resolveAllAgents,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  statusLineRefReader,
   walkFiles,
+  STATUS_LINE_REFERENCE_FILES,
   type CorpusEntry,
 } from '../helpers.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
+import { MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js'
 
 // ---------------------------------------------------------------------------
 // Guard: resolveAllAgents ⊇ getAllAgentNames() (16 today)
@@ -299,6 +302,53 @@ describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware (PF-063)'
 })
 
 // ---------------------------------------------------------------------------
+// Guard: statusLineRefReader — the closed reference list refuses, both ways
+// ---------------------------------------------------------------------------
+//
+// `STATUS_LINE_REFERENCE_FILES` is a closed list with two enforcement arms: the
+// reader refuses a path the list does not declare, and `extractStatusLines`
+// refuses to return while a declared path went unread. The second arm fires on
+// every `npm test` through the extractor; the first fires NOWHERE in the shipped
+// corpus, because every call site inside the extractor passes a declared path.
+// Until this block, "the reader refuses an undeclared path" was a claim about
+// code nothing executed — the shape PF-018 names.
+//
+// These probes live here rather than beside the fixture in tests/goldens/
+// because that file is the golden ritual's fixture-only lane: it is rewritten
+// wholesale when the golden is regenerated, and a behavioural probe parked there
+// would be carried along by a commit that is supposed to touch fixtures only.
+// The refusal is resolver-adjacent contract, which is what this file holds.
+
+describe('statusLineRefReader: undeclared paths are refused (PF-018)', () => {
+  // A REAL generated reference that the list does not declare — so the refusal
+  // is proven to be about DECLARATION, not about the file being absent.
+  const UNDECLARED = 'tracker/github/fetch-issue.md'
+
+  it('RED: reading a real-but-undeclared reference throws naming the list', () => {
+    const reader = statusLineRefReader()
+    expect(
+      () => reader.read(UNDECLARED),
+      'a path outside STATUS_LINE_REFERENCE_FILES must be refused, not read',
+    ).toThrow(/STATUS_LINE_REFERENCE_FILES/)
+    expect(
+      reader.seen.size,
+      'a refused read must not be counted as sampled — the completeness arm reads this set',
+    ).toBe(0)
+  })
+
+  it('GREEN control: a declared reference is read and recorded', () => {
+    const declared = STATUS_LINE_REFERENCE_FILES[0]
+    const reader = statusLineRefReader()
+    const content = reader.read(declared)
+    expect(
+      content.length,
+      `declared reference '${declared}' must return content — a reader that refused everything would pass the RED probe alone`,
+    ).toBeGreaterThan(0)
+    expect([...reader.seen], 'a completed read must be recorded for the completeness arm').toEqual([declared])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Guard: gitAgentSinkCorpus — walks references/ recursively (Phase 2 prep)
 // ---------------------------------------------------------------------------
 //
@@ -376,10 +426,27 @@ describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)',
 })
 
 // ---------------------------------------------------------------------------
-// Guard: walkFiles — ENOENT and maxDepth behaviours
+// Guard: walkFiles — ENOENT, the per-call maxDepth scope, and the shared bound
 // ---------------------------------------------------------------------------
 
-describe('walkFiles: ENOENT and maxDepth behaviours', () => {
+/**
+ * Build `levels` nested directories under a fresh temp root and drop one `.md`
+ * file in the deepest one. Returns the root and that deepest directory.
+ *
+ * Named here rather than inlined in each probe so both the at-bound and
+ * past-bound cases walk trees built by the same code — a hand-built chain in one
+ * probe and a loop in the other is how two cases come to disagree about what
+ * "one level past the bound" means (PF-018).
+ */
+function makeDepthTree(levels: number): { root: string; deepest: string } {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'devflow-walkfiles-bound-'))
+  const deepest = path.join(root, ...Array.from({ length: levels }, (_, i) => `d${i + 1}`))
+  mkdirSync(deepest, { recursive: true })
+  writeFileSync(path.join(deepest, 'leaf.md'), '# leaf', 'utf8')
+  return { root, deepest }
+}
+
+describe('walkFiles: ENOENT, maxDepth scope, and the shared depth bound', () => {
   it('returns [] for a non-existent directory', () => {
     const missing = path.join(os.tmpdir(), 'devflow-walkfiles-nonexistent-' + Date.now())
     expect(walkFiles(missing, () => true)).toEqual([])
@@ -403,6 +470,46 @@ describe('walkFiles: ENOENT and maxDepth behaviours', () => {
       expect(filesDeep[0]).toMatch(/deep\.md$/)
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  // The bound is the shared one (MAX_REFERENCE_SWEEP_DEPTH), not a per-call
+  // scope: a walk that stopped there and returned anyway would hand a collector
+  // a corpus smaller than the tree it claims to cover, and every guard reading
+  // from it would pass over ground it never saw. Both cases derive their depth
+  // from the constant — a literal here would keep passing after the bound moves.
+
+  it('RED: descending one level past MAX_REFERENCE_SWEEP_DEPTH throws, naming the directory and the bound', () => {
+    const { root, deepest } = makeDepthTree(MAX_REFERENCE_SWEEP_DEPTH + 1)
+    try {
+      let message = ''
+      try {
+        walkFiles(root, f => f.endsWith('.md'))
+      } catch (e) {
+        message = String(e)
+      }
+      expect(
+        message,
+        'a breach of the shared bound must throw — a silent stop reports a corpus smaller than the tree',
+      ).toContain('exceeds the bound')
+      expect(message, 'the throw must name the directory the walk refused to enter').toContain(deepest)
+      expect(message, 'the throw must name the bound it enforced').toContain(String(MAX_REFERENCE_SWEEP_DEPTH))
+    } finally {
+      rmSync(root, { recursive: true })
+    }
+  })
+
+  it('GREEN control: a tree at exactly MAX_REFERENCE_SWEEP_DEPTH walks through', () => {
+    const { root } = makeDepthTree(MAX_REFERENCE_SWEEP_DEPTH)
+    try {
+      const files = walkFiles(root, f => f.endsWith('.md'))
+      expect(
+        files,
+        'the deepest permitted directory must still be walked — otherwise the bound is off by one, not enforced',
+      ).toHaveLength(1)
+      expect(files[0]).toMatch(/leaf\.md$/)
+    } finally {
+      rmSync(root, { recursive: true })
     }
   })
 })

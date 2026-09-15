@@ -752,8 +752,9 @@ export function loadGolden(name: string): string {
 /**
  * Generated skill references the status-line corpus samples.
  *
- * A closed list, not a convenience: `ref()` refuses a path that is not on it, and
- * the extractor refuses to return unless every entry was actually read. Together
+ * A closed list, not a convenience: `statusLineRefReader().read` refuses a path
+ * that is not on it, and the extractor refuses to return unless every entry was
+ * actually read (both arms probed in agent-source-resolver.test.ts). Together
  * those two arms mean a later edit cannot quietly repoint a reference-sourced
  * sample back at git.md and leave the list as decoration — the retarget would stop
  * being covered and the extractor would say so.
@@ -784,6 +785,59 @@ function isStatusLineReference(relPath: string): relPath is StatusLineReferenceF
   return STATUS_LINE_REFERENCE_FILES.some(declared => declared === relPath)
 }
 
+/** A declared-reference reader, plus the accounting of what it actually read. */
+export interface StatusLineRefReader {
+  /**
+   * Read a generated skill reference by its path relative to the references
+   * root. Fail-loud on both an undeclared path and an absent file: an extractor
+   * that silently sampled nothing would re-capture a shorter fixture and call it
+   * stable.
+   */
+  read(relPath: string): string
+  /** The declared paths `read` has returned. */
+  readonly seen: ReadonlySet<string>
+}
+
+/**
+ * Build the reader `extractStatusLines` samples generated references through.
+ *
+ * Module-level and exported for one reason: the refusal arm is the half of the
+ * closed list that nothing else can fire. Every call site inside the extractor
+ * passes a declared path, so a test that only ran the extractor would assert the
+ * list's ENFORCEMENT nowhere — "`ref()` refuses an undeclared path" would stay a
+ * claim about unexercised code (PF-018). The probe in
+ * tests/guards/agent-source-resolver.test.ts drives THIS function, not a copy of
+ * its membership test.
+ *
+ * `read` takes `string` and narrows through `isStatusLineReference`: the refusal
+ * is the gate that actually runs (tests/ is outside `tsc -p tsconfig.json`
+ * today, #337), reachable under the signature rather than dead beneath it.
+ */
+export function statusLineRefReader(): StatusLineRefReader {
+  const seen = new Set<string>()
+  return {
+    seen,
+    read(relPath: string): string {
+      if (!isStatusLineReference(relPath)) {
+        throw new Error(
+          `extractStatusLines: "${relPath}" is not in STATUS_LINE_REFERENCE_FILES — ` +
+          'add it there so the read is declared, or sample a file that is',
+        )
+      }
+      seen.add(relPath)
+      const abs = path.join(compiledSkillRefsDir(ROOT), ...relPath.split('/'))
+      try {
+        return readFileSync(abs, 'utf-8')
+      } catch {
+        throw new Error(
+          `extractStatusLines: generated reference "${relPath}" is absent at ${abs}\n` +
+          '  Run `npm run build` first — the status-line corpus samples the generated mechanics',
+        )
+      }
+    },
+  }
+}
+
 /**
  * Extract the status-line corpus that matches tests/fixtures/golden/github-status-lines.txt.
  *
@@ -803,47 +857,40 @@ export function extractStatusLines(gitContent?: string): string {
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
-  const readRefs = new Set<string>()
+  // One-entry corpus for `gitOp` below. The label is what a 'sole' conflict would
+  // name, and a one-entry corpus cannot conflict — but the extractor's contract
+  // takes a path and a caller-supplied baseline body has none on disk, so the
+  // file's own name is the honest label.
+  const gitCorpus: CorpusEntry[] = [{ path: 'git.md', content: git }]
 
-  /**
-   * Read a generated skill reference by its path relative to the references root.
-   * Fail-loud on both an unlisted path and an absent file: an extractor that
-   * silently sampled nothing would re-capture a shorter fixture and call it stable.
-   *
-   * Takes `string` and narrows: the refusal is the gate that actually runs (tests/
-   * is outside `tsc -p tsconfig.json` today, #337), and it is reachable under the
-   * signature rather than dead beneath it.
-   */
-  function ref(relPath: string): string {
-    if (!isStatusLineReference(relPath)) {
-      throw new Error(
-        `extractStatusLines: "${relPath}" is not in STATUS_LINE_REFERENCE_FILES — ` +
-        'add it there so the read is declared, or sample a file that is',
-      )
-    }
-    readRefs.add(relPath)
-    const abs = path.join(compiledSkillRefsDir(ROOT), ...relPath.split('/'))
-    try {
-      return readFileSync(abs, 'utf-8')
-    } catch {
-      throw new Error(
-        `extractStatusLines: generated reference "${relPath}" is absent at ${abs}\n` +
-        '  Run `npm run build` first — the status-line corpus samples the generated mechanics',
-      )
-    }
-  }
+  // Sampling runs through the module-level reader so the closed list's refusal
+  // arm is probed against this exact code rather than a copy (see
+  // `statusLineRefReader`).
+  const refs = statusLineRefReader()
+  const ref = (relPath: string): string => refs.read(relPath)
 
   /**
    * Extract the named operation section from git.md.
-   * Uses \n## Operation: as the boundary so output blocks that contain ## headings
-   * (e.g. fetch-issue's "## Issue #{number}:" in its template) are not truncated.
+   *
+   * Routed through the harness's one section extractor, so the boundary is the
+   * shared rule — line-bounded at the start, cut at the next UNFENCED column-0
+   * `## ` (D-FENCE-AWARE-BOUNDARY / PF-063). A `## ` line inside an Output
+   * template's fence is payload, which is what the hand-rolled slice this
+   * replaces used a `\n## Operation:` terminator to approximate: that terminator
+   * stopped only at a SIBLING operation, so the last operation's section ran past
+   * end of file into the shared `## Principles` trailer, and every operation's
+   * section silently carried any non-operation heading that followed it. That is
+   * the construct Guard 10 was rewritten to escape (667c497) — a region wider
+   * than the operation it claims to be — and every `between`/`singleLine` below
+   * inherited it from here. PF-057's class: a slicing rule that pins layout
+   * instead of the semantics the fixture is supposed to sample.
+   *
+   * 'sole' [DR-18]: git.md is the single authority for the sections sampled
+   * here. A second corpus file carrying the anchor would mean this call was
+   * pointed at the wrong corpus, and the throw is how that is reported.
    */
   function gitOp(opName: string): string {
-    const heading = `## Operation: ${opName}`
-    const start = git.indexOf(heading)
-    if (start === -1) throw new Error(`git.md: operation section not found: "${opName}"`)
-    const next = git.indexOf('\n## Operation:', start + heading.length)
-    return git.slice(start, next === -1 ? git.length : next)
+    return extractOpSectionFromCorpus(gitCorpus, opName, { mode: 'sole' }).content
   }
 
   /**
@@ -886,10 +933,13 @@ export function extractStatusLines(gitContent?: string): string {
     // setup-task output block (baseline lines 238-252)
     between(gitOp('setup-task'), '## Task Setup: {branch-name}', '- **Acceptance Criteria**: {criteria}'),
     // fetch-issue D4 + output block (baseline lines 268-290)
-    // Must use gitOp() to avoid ## truncation on "## Issue #{number}:" in the output template
+    // gitOp() scopes both anchors to this operation's own section; the
+    // "## Issue #{number}:" heading in its Output template is fenced, so it is
+    // payload and does not cut the section (PF-063).
     between(gitOp('fetch-issue'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '{type}/{number}-{slug}'),
     // fetch-issues-batch D4 + output block (baseline lines 314-339)
-    // Must use gitOp() to avoid ## truncation on "## Issues Batch" in the output template
+    // Same scoping as fetch-issue above; its "## Issues Batch ({n} issues)"
+    // heading is fenced too (PF-063).
     between(gitOp('fetch-issues-batch'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '- **Conflicts**: {conflicting requirements if any}'),
     // post-review-summary STUB output template (baseline lines 381-386)
     between(gitOp('post-review-summary'), '     {counts-by-severity table verbatim from local artifact', 'Cap body at 60000 characters'),
@@ -956,8 +1006,8 @@ export function extractStatusLines(gitContent?: string): string {
   // path this list does not declare, and this refuses to return while a declared
   // path went unread. Without the second arm the retarget could be undone one
   // sample at a time and the list would keep asserting a coverage that had gone.
-  if (readRefs.size !== STATUS_LINE_REFERENCE_FILES.length) {
-    const unread = STATUS_LINE_REFERENCE_FILES.filter(f => !readRefs.has(f))
+  if (refs.seen.size !== STATUS_LINE_REFERENCE_FILES.length) {
+    const unread = STATUS_LINE_REFERENCE_FILES.filter(f => !refs.seen.has(f))
     throw new Error(
       'extractStatusLines: declared generated reference(s) were never sampled: ' +
       `${unread.join(', ')}\n` +
