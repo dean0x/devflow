@@ -18,7 +18,7 @@ import * as path from 'path';
 import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
 import { TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
@@ -354,10 +354,19 @@ const PROVIDER_DETECTORS: readonly string[] = ['`gh`', 'gh ', 'X-RateLimit'];
  * `## Operation:` section. That is the text every spawn loads whatever provider it
  * resolved: the D4 block, the tracker preamble, the D11 section, the operations
  * table, the marker legend, `## Principles` and `## Boundaries`.
+ *
+ * The section starts come from `collectUnfencedH2` rather than a raw
+ * `/^## (.+)$/gm` split. A `## ` line inside an operation's fenced Output template
+ * is the literal text that operation PRINTS — not a slice of always-loaded agent
+ * text (PF-063). Splitting on the raw shape reported 21 "cross-cutting sections"
+ * for a file that has three, because 18 of them were Output-template headings
+ * lifted out of operation bodies: the exact opposite of what this docblock claims
+ * to scan, and a corpus that would report an operation's own `gh` line as a
+ * cross-cutting detector the moment one appeared under a fenced heading.
  */
 function collectCrossCuttingSections(text: string): Array<{ label: string; body: string }> {
   const sections: Array<{ label: string; body: string }> = [];
-  const starts = [...text.matchAll(/^## (.+)$/gm)].map(m => ({ heading: m[1], index: m.index! }));
+  const starts = collectUnfencedH2(text).map(h => ({ heading: h.text.slice(3), index: h.index }));
   const firstOp = starts.findIndex(s => s.heading.startsWith('Operation: '));
   const head = firstOp === -1 ? text : text.slice(0, starts[firstOp].index);
   sections.push({ label: '(header)', body: head });
@@ -869,15 +878,61 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('P2-S4: no provider detector literal survives in a cross-cutting section of git.md', () => {
     const sections = collectCrossCuttingSections(content);
+    // A NAMED set, not a bare count. `toBeGreaterThan(1)` was satisfied by 21
+    // "sections" of which 18 were fenced Output-template headings from inside
+    // operation bodies — a count cannot tell an honest corpus from that one, and the
+    // scan was simultaneously too wide (operation payload) and unable to say so. The
+    // real cross-cutting text is the header — D4, the tracker preamble, D11, the
+    // operations table, the marker legend all sit above the first operation — plus
+    // the two shared trailers (ADR-025: the narrower corpus is reclassified here,
+    // not accommodated by loosening the assertion).
     expect(
-      sections.length,
-      'no cross-cutting section was found — the scan would pass by reading nothing (PF-018)',
-    ).toBeGreaterThan(1);
+      sections.map(s => s.label),
+      'the cross-cutting slices changed shape: a new always-loaded `## ` section was added, or ' +
+      'one of the two shared trailers was renamed. Name it here — an unnamed section is text ' +
+      'every spawn loads that nothing scans (GAP-03, PF-018)',
+    ).toEqual(['(header)', 'Principles', 'Boundaries']);
     expect(
       collectProviderDetectors(sections),
       'provider detector(s) in always-loaded text. The invariant belongs here; the signal that ' +
       'triggers it belongs in the resolved provider\'s reference (GAP-03, P2-S4)',
     ).toEqual([]);
+  });
+
+  it('P2-S4 known-bad probe: a fenced `## ` is operation payload, the same heading unfenced is a section', () => {
+    // Both arms drive the real collector (PF-018). The fenced arm is the shape git.md
+    // actually ships — every operation closes with an Output template whose headings
+    // are the text the operation prints — and the unfenced arm is the control that
+    // stops "ignore every `## ` after the first operation" from passing as fence-aware.
+    const body = (fenced: boolean): string => [
+      '# Git Agent',
+      '',
+      '## Operations',
+      '',
+      '## Operation: seeded-op',
+      '',
+      '**Output:**',
+      '',
+      ...(fenced ? ['```markdown'] : []),
+      '## Task Setup: {branch-name}',
+      ...(fenced ? ['```'] : []),
+      '',
+      '## Principles',
+      '',
+      '1. Rate limit aware',
+      '',
+    ].join('\n');
+
+    expect(
+      collectCrossCuttingSections(body(true)).map(s => s.label),
+      'a `## ` inside a fenced Output template is the literal text the operation prints; ' +
+      'reading it as a cross-cutting section attributes an operation body to always-loaded text',
+    ).toEqual(['(header)', 'Principles']);
+    expect(
+      collectCrossCuttingSections(body(false)).map(s => s.label),
+      'the same heading UNFENCED is structure and must open a section — otherwise the collector ' +
+      'is blind to new always-loaded text rather than fence-aware',
+    ).toEqual(['(header)', 'Task Setup: {branch-name}', 'Principles']);
   });
 
   it('P2-S4 known-bad probe: the pre-split baseline carried these detectors cross-cutting', () => {
@@ -1737,6 +1792,69 @@ describe('git agent — static content guards (PF-018)', () => {
       `union matchCount for post-review-summary must be exactly ${expectedMatchCount} — computed independently from the corpus`,
     ).toBe(expectedMatchCount);
     expect(sec.length, 'union result content must be non-empty').toBeGreaterThan(0);
+  });
+
+  it('the `## Operation:` anchor is line-bounded: `fetch-issue` does not pull in `fetch-issues-batch`', () => {
+    // Read over the REAL sink corpus, not a fixture: the collision is a property of the
+    // shipped operation roster (`fetch-issue` is a prefix of `fetch-issues-batch`), so a
+    // synthetic pair would prove the extractor fixed without proving this corpus clean.
+    // An unbounded `indexOf('## Operation: fetch-issue')` matched
+    // `fetch-issues-batch.md`'s own line-1 heading at offset 0, so every union lookup
+    // for `fetch-issue` returned the sibling operation's entire mechanics file as well.
+    const sinkCorpus = gitAgentSinkCorpus();
+    const { content: sec, matchCount } = extractOpSectionFromCorpus(
+      sinkCorpus, 'fetch-issue', { mode: 'union' },
+    );
+    expect(
+      sec,
+      'the `fetch-issue` section carries `fetch-issues-batch`\'s heading — the anchor matched a ' +
+      'longer operation name as a prefix and swept in its whole file',
+    ).not.toContain('## Operation: fetch-issues-batch');
+    expect(
+      matchCount,
+      'expected exactly 2 `fetch-issue` sections (git.md + its generated reference); a third is ' +
+      'the prefix match on fetch-issues-batch.md returning',
+    ).toBe(2);
+    // Control: the longer name still resolves on its own, so the bound did not go too far.
+    const batch = extractOpSectionFromCorpus(sinkCorpus, 'fetch-issues-batch', { mode: 'union' });
+    expect(batch.matchCount, 'fetch-issues-batch must still resolve in both of its own files').toBe(2);
+    expect(batch.content).toContain('## Operation: fetch-issues-batch');
+  });
+
+  it('the `## Operation:` anchor is fence-aware at BOTH ends: a fenced heading is a sample, not a match', () => {
+    // The terminator has been fence-aware since PF-063; the start anchor was not, so a
+    // corpus file quoting an operation heading inside a fence — the shape
+    // ensure-traceable-issue's D3 template and manage-debt's successor body already use
+    // for their `## ` lines — counted as a second declaring file and made 'sole' mode
+    // throw "found in multiple files": a message that reads as a corpus-scope bug.
+    const authority: CorpusEntry = {
+      path: 'seed/authority.md',
+      content: ['## Operation: seeded-op', '', 'the real body', ''].join('\n'),
+    };
+    const sample = (fenced: boolean): CorpusEntry => ({
+      path: 'seed/sample.md',
+      content: [
+        '# Notes',
+        '',
+        'The heading this operation prints:',
+        '',
+        ...(fenced ? ['```markdown'] : []),
+        '## Operation: seeded-op',
+        ...(fenced ? ['```'] : []),
+        '',
+      ].join('\n'),
+    });
+
+    const fenced = extractOpSectionFromCorpus([authority, sample(true)], 'seeded-op', { mode: 'sole' });
+    expect(fenced.matchCount, 'a fenced heading is payload — one declaring file, not two').toBe(1);
+    expect(fenced.content, 'the sole match must be the declaring file\'s section').toContain('the real body');
+    // Known-bad control: unfenced, the same line IS a second declaration and must throw,
+    // naming both paths — otherwise the fence-awareness above is indistinguishable from
+    // an anchor that stopped matching that file at all.
+    expect(
+      () => extractOpSectionFromCorpus([authority, sample(false)], 'seeded-op', { mode: 'sole' }),
+      'an UNFENCED duplicate heading must still throw in `sole` mode',
+    ).toThrow(/multiple files/);
   });
 
   it('D11: forward guard rejects a posting op without Comment-sink scrub reference (known-bad, AC-0.8)', () => {

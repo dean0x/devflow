@@ -39,7 +39,7 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { resolveAgentSource, walkFiles, type CorpusEntry } from '../helpers.js';
+import { collectUnfencedLines, resolveAgentSource, walkFiles, type CorpusEntry } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Marker tables — NAMED lists, derived from the real corpus, never inline regexes
@@ -124,8 +124,9 @@ export const PROBE_MARKERS: readonly Marker[] = [
     label: 'list-by-filter',
     pattern: /gh issue list[^\n]*--(?:label|milestone)\b/i,
     justification:
-      'GAP-26\'s wave defect exactly: a per-round `list_by_filter` re-read. ADR-005 keeps its ' +
-      'page bound an API bound, which only holds while the call is made once per round.',
+      'GAP-26\'s wave defect exactly: a per-round re-read of the wave\'s issues. The wave states ' +
+      'that refresh as one `fetch-issues-batch` call per round, and ADR-005 keeps its page bound ' +
+      'an API bound — which only holds while the call is made once per round.',
   },
   {
     label: 'batch-fetch',
@@ -176,6 +177,12 @@ function trackerCorpus(): CorpusEntry[] {
 const PROCESS_OPEN = /^(?:\*\*Process:\*\*|### Process\b)/;
 /** Closes it: the next heading of any level, or the operation's Output template. */
 const PROCESS_CLOSE = /^(?:#{2,4} |\*\*Output:\*\*|---\s*$)/;
+/**
+ * `### Process` satisfies BOTH shapes — it opens its own block and closes the one
+ * above it. Classified into both sets rather than by an either/or, which is what the
+ * line-at-a-time scan this replaced did implicitly (it tested the opener first, then
+ * scanned for a closer from the following line).
+ */
 
 export interface ProcessBlock {
   readonly file: string;
@@ -184,15 +191,38 @@ export interface ProcessBlock {
   readonly lines: readonly string[];
 }
 
-/** Named collector: every `**Process:**` / `### Process` block in a corpus. */
+/**
+ * Named collector: every `**Process:**` / `### Process` block in a corpus.
+ *
+ * Both boundaries are resolved through `collectUnfencedLines` — the harness's one
+ * fence scanner (PF-063) — rather than by testing each raw line. A column-0
+ * `## `/`### `/`---` inside a fenced block is the literal text an operation prints,
+ * not the end of its Process block: `tracker/github/manage-debt.md` already ships
+ * a `## Items` inside a bash fence as the body of the successor tech-debt issue.
+ * Reading it as a terminator truncates the block there, and every line below it —
+ * loops and probes alike — leaves this guard's reach while the bytes stay on disk.
+ * No shipped block is closed by a fenced line today, so this is armed rather than
+ * hypothetical: the block count and every block's length are unchanged by the
+ * rerouting (ADR-025 — nothing to reclassify, and the guard is no longer one
+ * fenced heading away from going partly blind).
+ */
 export function collectProcessBlocks(corpus: CorpusEntry[]): ProcessBlock[] {
   const blocks: ProcessBlock[] = [];
   for (const entry of corpus) {
     const lines = entry.content.split('\n');
+    const opensAt = new Set<number>();
+    const closesAt = new Set<number>();
+    for (const site of collectUnfencedLines(
+      entry.content,
+      line => PROCESS_OPEN.test(line) || PROCESS_CLOSE.test(line),
+    )) {
+      if (PROCESS_OPEN.test(site.text)) opensAt.add(site.line);
+      if (PROCESS_CLOSE.test(site.text)) closesAt.add(site.line);
+    }
     for (let i = 0; i < lines.length; i++) {
-      if (!PROCESS_OPEN.test(lines[i])) continue;
+      if (!opensAt.has(i + 1)) continue;
       let end = i + 1;
-      while (end < lines.length && !PROCESS_CLOSE.test(lines[end])) end++;
+      while (end < lines.length && !closesAt.has(end + 1)) end++;
       blocks.push({
         file: entry.path,
         startLine: i + 1,
@@ -389,5 +419,45 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       },
     ];
     expect(collectCapabilityHoistViolations(collectProcessBlocks(seeded))).toEqual([]);
+  });
+
+  it('known-bad probe 4: a fenced `## ` does not close a process block; the same line unfenced does', () => {
+    // The block boundary is structural, not textual (PF-063). `manage-debt` composes a
+    // successor issue body containing a column-0 `## Items` inside a bash fence; when that
+    // line ends the block, every loop and probe BELOW it silently leaves the guard's reach.
+    // Both arms drive the same two collectors the live assertion uses.
+    const seeded = (fenced: boolean): CorpusEntry[] => [
+      {
+        path: 'seed/fenced-close.md',
+        content: [
+          '## Operation: seeded-fenced-close',
+          '',
+          '### Process',
+          '',
+          '1. Compose the successor issue body:',
+          '',
+          ...(fenced ? ['```bash'] : []),
+          '## Items',
+          ...(fenced ? ['```'] : []),
+          '',
+          'For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50):',
+          '',
+          "2. Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN",
+          '',
+        ].join('\n'),
+      },
+    ];
+
+    expect(
+      collectCapabilityHoistViolations(collectProcessBlocks(seeded(true))).map(v => v.probe),
+      'the fenced `## Items` is the successor issue\'s own body — the Process block runs past it, ' +
+      'and the unhoisted identity probe below the loop is a violation the guard must still see',
+    ).toEqual(['identify-current-user']);
+    expect(
+      collectCapabilityHoistViolations(collectProcessBlocks(seeded(false))),
+      'UNFENCED, the same line is a heading: the block ends there, the loop and the probe belong ' +
+      'to a different section, and there is nothing to report. A collector blind to fences ' +
+      'cannot tell these two corpora apart',
+    ).toEqual([]);
   });
 });
