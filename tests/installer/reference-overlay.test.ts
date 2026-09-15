@@ -350,6 +350,168 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       expect(stat.mode & 0o777, `${rel} must be normalised to 0644`).toBe(0o644);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Where a unit stages — process-unique, and inside the converged subtree
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every staging path one overlay run touched, observed at the filesystem boundary.
+   *
+   * `stagingDirFor` is internal and should stay internal, but WHERE it points is the whole
+   * property under test, so it is observed the way the filesystem sees it: the first thing
+   * a unit's build does to its staging path is `fs.rm(path, { recursive: true, force: true })`
+   * — the pre-clean — so every unit contributes its path here whatever happens afterwards.
+   * Same spy seam the restore probe below uses for `fs.rename`.
+   */
+  async function captureStagingPaths(run: () => Promise<unknown>): Promise<string[]> {
+    const realRm = fs.rm.bind(fs);
+    const seen: string[] = [];
+    const spy = vi.spyOn(fs, 'rm').mockImplementation(async (target_, options) => {
+      if (String(target_).endsWith('.tmp')) seen.push(String(target_));
+      return realRm(target_, options);
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return [...new Set(seen)];
+  }
+
+  it('stages every unit under a process-unique name inside the converged subtree', async () => {
+    await stageSource(sourceRoot, manifest);
+
+    const staged = await captureStagingPaths(() => overlayGeneratedReferences({
+      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
+    }));
+
+    expect(
+      staged.length,
+      'no staging path was observed — every assertion below would be vacuous (PF-018)',
+    ).toBeGreaterThanOrEqual(2);
+
+    const trackerRoot = path.join(target, 'tracker');
+    for (const staging of staged) {
+      // security-08. A fixed basename is what let two concurrent `devflow init` runs
+      // pre-clean each other's half-built tree and promote whatever survived.
+      expect(
+        path.basename(staging),
+        `${staging} must carry this process's id — a shared name is a shared staging tree`,
+      ).toContain(String(process.pid));
+      // reliability-08. Whatever a crash strands has to land where the prune will find it.
+      expect(
+        staging.startsWith(trackerRoot + path.sep),
+        `${staging} must stage under ${trackerRoot}, the only subtree this module converges`,
+      ).toBe(true);
+    }
+
+    // The flat set is the arm that used to stage at the un-converged references root, so
+    // its presence is what makes the loop above cover the case reliability-08 reported.
+    expect(
+      staged.some(p => path.basename(p).startsWith('.cross-cutting.')),
+      'the cross-cutting unit must be among the staged units',
+    ).toBe(true);
+  });
+
+  it('a cross-cutting staging tree stranded by a crashed run is pruned by the next overlay', async () => {
+    await stageSource(sourceRoot, manifest);
+
+    const staged = await captureStagingPaths(() => overlayGeneratedReferences({
+      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
+    }));
+    const flatStaging = staged.find(p => path.basename(p).startsWith('.cross-cutting.'));
+    expect(flatStaging, 'the flat set must stage somewhere for this probe to mean anything').toBeDefined();
+    if (flatStaging === undefined) return;
+
+    // The crash: an earlier run reached `mkdir` and one copied document, then died before
+    // promotion. Seeded beside the real staging path rather than at a location this test
+    // invented — that directory IS the property. A DIFFERENT token, because the next run's
+    // pre-clean only ever looks at its own name, so the prune is what has to reach it.
+    const stranded = path.join(path.dirname(flatStaging), '.cross-cutting.99999-crashedrun.tmp');
+    const someFlatDoc = manifest.find(p => !p.includes('/'));
+    expect(someFlatDoc, 'the manifest must carry a flat document').toBeDefined();
+    await fs.mkdir(stranded, { recursive: true });
+    await fs.writeFile(path.join(stranded, String(someFlatDoc)), '# half-written\n', 'utf-8');
+
+    const next = await overlayGeneratedReferences({
+      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
+    });
+
+    // Proof of RED: staged at `references/.cross-cutting.tmp` the stranded copy sits
+    // outside every convergence this module performs, so both assertions fail — the
+    // partial copy stays inside the installed skill and the prune never names it.
+    expect(
+      await exists(stranded),
+      'a partial copy of the cross-cutting documents must not survive inside the installed skill',
+    ).toBe(false);
+    expect(next.pruned.removed, 'and the prune is what removed it')
+      .toContain('.cross-cutting.99999-crashedrun.tmp');
+
+    // Positive half: the successful path is unchanged by where staging lives.
+    expect(next.overlayFailures).toEqual([]);
+    expect([...next.overlaidRefs].sort()).toEqual([...manifest].sort());
+  });
+
+  // -------------------------------------------------------------------------
+  // The chmod walk takes the same descent bound as every other walk over this tree
+  // -------------------------------------------------------------------------
+
+  const nestedDir = (levels: number): string =>
+    Array.from({ length: levels }, (_, i) => `d${i + 1}`).join('/');
+
+  /** A file the overlay does not own, `levels` directories under the references root. */
+  async function seedDeepReference(levels: number): Promise<string> {
+    const dir = abs(target, nestedDir(levels));
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'hand-authored.md');
+    await fs.writeFile(file, '# not ours\n', 'utf-8');
+    await fs.chmod(file, 0o600);
+    return file;
+  }
+
+  /** The overlay's mode-normalisation notices — the channel a breach is reported through. */
+  const modeWarnings = (): string[] => warnings.filter(w => w.includes('normalise'));
+
+  it('normalises the deepest directory the shared bound permits', async () => {
+    await stageSource(sourceRoot, manifest);
+    const file = await seedDeepReference(MAX_REFERENCE_SWEEP_DEPTH);
+
+    await overlayGeneratedReferences({
+      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
+    });
+
+    expect((await fs.stat(file)).mode & 0o777, 'the last in-bounds level must still be walked').toBe(0o644);
+    expect(modeWarnings(), 'an in-bounds tree must not report a breach').toEqual([]);
+  });
+
+  it('known-bad probe: a chmod descent past the bound is reported, not silently walked', async () => {
+    await stageSource(sourceRoot, manifest);
+    const tooDeep = abs(target, nestedDir(MAX_REFERENCE_SWEEP_DEPTH + 1));
+    const file = await seedDeepReference(MAX_REFERENCE_SWEEP_DEPTH + 1);
+
+    const result = await overlayGeneratedReferences({
+      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
+    });
+
+    // The walk genuinely stopped — the file past the bound keeps the mode it arrived with.
+    // (`Dirent.isDirectory()` is lstat-based, so no symlink loop can reach this state; the
+    // bound is here so the one unbounded walk over this tree stops holding the opposite
+    // position on a hazard its two siblings document.)
+    expect((await fs.stat(file)).mode & 0o777, 'a bounded walk must not reach past the bound').toBe(0o600);
+
+    // ...and the run says so, naming the directory and the bound, through the channel the
+    // overlay already renders for mode normalisation. A bound that returned quietly would
+    // leave this run indistinguishable from one that normalised the whole tree (PF-018).
+    const breach = modeWarnings();
+    expect(breach, 'a breached bound must be reported exactly once').toHaveLength(1);
+    expect(breach[0]).toContain(String(MAX_REFERENCE_SWEEP_DEPTH));
+    expect(breach[0]).toContain(tooDeep);
+
+    // Positive half: an install is not abandoned over one unwalked subtree (avoids PF-009).
+    expect(result.overlayFailures).toEqual([]);
+    expect([...result.overlaidRefs].sort()).toEqual([...manifest].sort());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -551,7 +713,10 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // A staging tree holding only the FIRST document: its rename lands, the next one
     // finds nothing to rename. That is precisely the window D-OVERLAY-FLAT-UNIT
     // documents, driven through the real promotion rather than described in a comment.
-    const staging = path.join(target, '.cross-cutting.tmp');
+    // Spelled where the overlay itself stages the flat set — under the converged subtree,
+    // with a per-run token — so this probe does not preserve a location nothing produces.
+    // The path is supplied to the promotion directly, so only its shape matters here.
+    const staging = path.join(target, 'tracker', `.cross-cutting.${process.pid}-midflight.tmp`);
     await fs.mkdir(staging, { recursive: true });
     await fs.writeFile(path.join(staging, flat[0]), '# refreshed by this run\n', 'utf-8');
 
@@ -600,9 +765,12 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // `installed-unchanged` and the prune then removes `tracker/jira.old` in this very
     // run — the backup-survival and prune-report assertions below both fail.
     const realRename = fs.rename.bind(fs);
+    // Matched on the unit's own name rather than a literal staging basename: the staging
+    // directory carries a per-process token (`jira.<pid>-<t36>.tmp`), so a spy keyed to a
+    // fixed `jira.tmp` would silently stop matching and let the promotion succeed.
+    const stagingOrBackup = /(^|[/\\])jira(\..+)?\.(tmp|old)$/;
     const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
-      const src = String(from);
-      if (src.endsWith('jira.tmp') || src.endsWith('jira.old')) {
+      if (stagingOrBackup.test(String(from))) {
         throw new Error('EIO: simulated rename failure');
       }
       return realRename(from, to);

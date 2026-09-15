@@ -7,7 +7,7 @@ import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiled
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
-import { sweepOrphanedReferences } from '../../core/reference-sweep.js';
+import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -267,14 +267,45 @@ export async function copyDirectory(src: string, dest: string): Promise<void> {
 }
 
 /**
- * Recursively chmod all files in a directory tree.
+ * Recursively chmod all files in a directory tree, bounded by the shared descent bound.
+ *
+ * `_depth` counts the walked root as 0 and a breach is `_depth > MAX_REFERENCE_SWEEP_DEPTH`
+ * — the same comparison every other walk over this same tree already makes
+ * (`sweepOrphanedReferences`, the build's `pruneOrphans`, the harness's `walkFiles`). The
+ * constant is imported, never re-spelled: one tree, one bound, and two walkers each
+ * carrying their own literal is precisely how a pair of them once came to disagree.
+ *
+ * The bound is CONSISTENCY, not an exploit closure. `Dirent.isDirectory()` is lstat-based,
+ * so a symlink-to-directory is a leaf to this walk and a symlink loop — the hazard the
+ * shared constant's own rationale cites — cannot be entered here in the first place. What
+ * the bound buys is that the one walk over `references/` holding no explicit upper bound
+ * stops holding the opposite position on a hazard its siblings document, in a codebase
+ * whose standing rule is that every loop has one.
+ *
+ * A breach THROWS rather than returning quietly. A walk that stopped early would leave an
+ * unnamed part of the tree on its source modes while the caller believed the whole tree
+ * was normalised — the same "converged over ground it never covered" claim the sweep's
+ * `failed` channel exists to prevent. The reference overlay — the walk this bound is for,
+ * and the only one that crosses a tree the installer does not own — turns the throw into a
+ * `warn(...)` line carrying the directory and the bound, through the channel it already
+ * has for mode normalisation (see {@link overlayGeneratedReferences}). The other caller,
+ * {@link composeScripts}, swallows it with the rest of its copy-and-chmod step; that tree
+ * is three levels of shipped assets, so a breach there means the package itself grew a
+ * shape no walk in this repo expects, and neither call site aborts an install over it.
  */
-export async function chmodRecursive(dir: string, mode: number): Promise<void> {
+export async function chmodRecursive(dir: string, mode: number, _depth = 0): Promise<void> {
+  if (_depth > MAX_REFERENCE_SWEEP_DEPTH) {
+    throw new Error(
+      `chmodRecursive: descent into ${dir} exceeds the bound of ` +
+      `${MAX_REFERENCE_SWEEP_DEPTH} levels — that subtree keeps the modes it arrived with.`,
+    );
+  }
+
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await chmodRecursive(fullPath, mode);
+      await chmodRecursive(fullPath, mode, _depth + 1);
     } else if (entry.isFile()) {
       await fs.chmod(fullPath, mode);
     }
@@ -383,8 +414,8 @@ export interface ReferenceOverlayResult {
  * (`tracker/{provider}/`) and the WHOLE FLAT SET for the provider-independent documents
  * — not one unit per flat file.
  *
- * The flat documents land directly in `references/`, beside hand-authored files the
- * overlay must never touch (`github-api.md`, `violations.md`, …), so there is no
+ * The flat documents land directly in `references/`, beside hand-authored files the overlay
+ * must never replace or delete (`github-api.md`, `violations.md`, …), so there is no
  * directory to rename and no `.tmp` sibling that could stand in for one. What the flat
  * set therefore gets is the same DECISION rule as a provider directory — build every
  * document under a staging tree first, and on any per-file failure abort the whole unit,
@@ -453,11 +484,62 @@ function underRoot(root: string, posixSubPath: string): string {
   return posixSubPath === '' ? root : path.join(root, ...posixSubPath.split('/'));
 }
 
-/** Staging sibling for a unit — a `.tmp` name that can never collide with a manifest entry. */
+/**
+ * Process-unique token every staging directory this run creates carries.
+ *
+ * `scripts/build-mds.ts` scopes its own staging path to the writing process for the same
+ * reason and in the same idiom (`tempPathFor`: `${dest}.${process.pid}.tmp`). A FIXED
+ * staging name was the one thing standing between two concurrent `devflow init` runs and a
+ * PARTIAL unit promoted into an installed skill: the first thing
+ * {@link buildUnitStagingTree} does to its staging path is
+ * `fs.rm(stagingDir, { recursive: true, force: true })`, so under one shared name each run
+ * deletes the other's half-built tree, and whichever reaches promotion second renames
+ * whatever happened to survive into place — defeating the per-unit atomic swap outright.
+ *
+ * The pid is what makes two live runs disjoint. The timestamp is what makes a REUSED pid
+ * disjoint from the run that crashed before it, so a tree stranded by that earlier run is
+ * never mistaken for this one's own and adopted mid-build.
+ *
+ * Fixed for the life of the process so {@link stagingDirFor} stays a pure function of the
+ * unit it is asked about: one path per unit, computed once and threaded from the build to
+ * whichever promotion half consumes it.
+ */
+const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
+
+/**
+ * Staging directory for a unit — process-unique, under the subtree the prune converges.
+ *
+ * Both properties are about a run that is not this one:
+ *
+ * 1. The basename carries {@link STAGING_TOKEN}, so a concurrent run's staging tree is
+ *    never the tree this one pre-cleans, builds into, or promotes.
+ * 2. Both names resolve under `tracker/`, the subtree
+ *    {@link prunePreservingRecoveryCopies} converges, so a staging tree stranded by a crash
+ *    between `mkdir` and promotion is removed by the next run's prune. It HAS to be the
+ *    prune that removes it, because (1) means no later run's pre-clean will ever look at
+ *    that name again. The flat set's staging directory used to sit at
+ *    `references/.cross-cutting.tmp`, outside that subtree and outside every other
+ *    convergence this module performs, where a stranded partial copy of the cross-cutting
+ *    documents would sit inside the installed skill indefinitely — and be mode-normalised
+ *    by {@link chmodRecursive} on every later install, that being the one part of the
+ *    overlay which does reach the whole references root.
+ *
+ * The provider arm inherits the property from its unit: the path is the unit's own
+ * installed location plus a suffix, so it is converged exactly when the unit is, and every
+ * provider subdir the reference-module registry declares is `tracker/{provider}`. The flat
+ * arm has no installed location to hang a suffix on — its documents ARE the references root
+ * — so it is placed under the converged subtree explicitly. The cost is that a manifest
+ * carrying flat entries alone would now create an empty `tracker/` on its way through; the
+ * registry never produces one, and an empty directory is not a partial install.
+ *
+ * Neither name can collide with a manifest entry, and the prune reaches both for the same
+ * reason it reaches the `.old` backups: every manifest entry under `tracker/` is
+ * `{provider}/{op}.md`, and neither name is a directory any manifest path descends into.
+ */
 function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
   return unit.kind === 'cross-cutting'
-    ? path.join(referencesTarget, '.cross-cutting.tmp')
-    : `${underRoot(referencesTarget, unit.subdir)}.tmp`;
+    ? path.join(referencesTarget, TRACKER_SUBTREE, `.cross-cutting.${STAGING_TOKEN}.tmp`)
+    : `${underRoot(referencesTarget, unit.subdir)}.${STAGING_TOKEN}.tmp`;
 }
 
 /**
@@ -579,8 +661,8 @@ type RecordPromotionState = (state: OverlayFailureState) => void;
  * Promote the flat cross-cutting set — one `rename` per document.
  *
  * There is no directory to swap. These documents land directly in `references/`, beside
- * hand-authored files the overlay must never touch, so the unit is promoted one `rename`
- * per document and a mid-flight failure leaves it part new and part old
+ * hand-authored files the overlay must never replace or delete, so the unit is promoted one
+ * `rename` per document and a mid-flight failure leaves it part new and part old
  * (D-OVERLAY-FLAT-UNIT, recorded on {@link OverlayUnit}). That is a weaker guarantee than
  * {@link promoteProviderUnit}'s whole-directory swap, which is why the recorded state
  * names which documents carry this run's bytes rather than claiming the set is untouched.
@@ -849,13 +931,19 @@ async function prunePreservingRecoveryCopies(
 /**
  * Converge an installed `devflow:git` references directory onto the generated tree.
  *
- * Converge, not merge: every unit is rebuilt from the generated sources and swapped in
- * atomically, and anything under `references/tracker/**` that the manifest does not name
- * is then removed. A shadow that supplies its own file under that subtree therefore does
- * not keep it (AC-2.4c), and a provider directory the manifest stops listing is
- * gone rather than left to rot (GAP-24). Hand-authored references outside the generated
- * set are never pruned — they arrive with the skill copy and the prune is scoped to the
- * `tracker/` subtree.
+ * Converge, not merge — for the `tracker/` subtree, which is the whole of what converges.
+ * Every unit is rebuilt from the generated sources and swapped in atomically, and anything
+ * under `references/tracker/**` that the manifest does not name is then removed: a shadow
+ * that supplies its own file under that subtree does not keep it (AC-2.4c), and a provider
+ * directory the manifest stops listing is gone rather than left to rot (GAP-24).
+ *
+ * The references ROOT is overlaid but never pruned, and that is where the guarantee stops.
+ * The flat cross-cutting documents land beside hand-authored references with no manifest of
+ * which names are hand-authored to prune against (D-OVERLAY-FLAT-UNIT), so a document
+ * retired from `GIT_CROSS_CUTTING_DOCS` keeps its installed copy until the skill directory
+ * is replaced — the one convergence this module does not deliver, and the scope
+ * CHANGELOG.md states for the shipped claim. A prunable flat root needs an allowlist of the
+ * hand-authored names, which is a Phase-3 candidate rather than a Phase-2 omission.
  *
  * Runs for a shadowed and a canonical install alike: a user who overrides the git skill
  * must still receive the canonical GitHub mechanics the agent is told to load
@@ -933,6 +1021,16 @@ export async function overlayGeneratedReferences(opts: {
   // reference checked in with an odd mode installs with it; a reference is read-only
   // instruction text and 0644 is what every one of them should be. Best-effort: a
   // filesystem that does not honour mode bits must not fail an install (PF-009).
+  //
+  // This is the one step that reaches a file the overlay does not own, and it is why the
+  // boundary is stated as "never replace or delete" rather than "never touch": the MODE of
+  // a hand-authored reference — and of whatever a shadowed skill supplied outside
+  // `tracker/` — is normalised here. ADR-024 corollary (b) permits exactly that, because
+  // the ownership guard protects deletion and not overwrite, so the code was compliant and
+  // it was the stated boundary that reached further than the implemented one.
+  //
+  // It is also the one walk that can breach chmodRecursive's descent bound. The catch is
+  // that breach's reporting channel, not just an I/O guard (see {@link chmodRecursive}).
   try {
     await chmodRecursive(opts.referencesTarget, 0o644);
   } catch (err) {
