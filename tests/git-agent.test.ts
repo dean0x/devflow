@@ -1651,23 +1651,17 @@ describe('git agent — static content guards (PF-018)', () => {
   //   (b) <external-thread>: fetch-review-threads, post-resolution-summary, post-wave-report.
   //       Pre-existing on main (stabilisation assertion, named-set ensures no silent op drift).
   //
-  // FILE-SCOPED, and NOT because of section truncation: `opRegion` slices operation-to-operation,
-  // so the LAST operation's region runs to end of file and takes in the shared `## Principles` /
-  // `## Boundaries` trailer. `post-wave-report` is the last operation and carries no
-  // `<external-thread>` of its own — Principle 8 (git.md:887) is what puts it in set (b). Switching
-  // this arm to `extractOpSectionFromCorpus` narrows `post-wave-report` to its own section and the
-  // named-set assertion goes red, which is the finding rather than a reason to drop the op: the
-  // guard as written proves the marker is reachable from the operation's region, not that the
-  // operation's own Output block renders it.
+  // OP-SCOPED: an op's slice is its OWN section, cut at the next unfenced `## ` heading, so the
+  // shared `## Principles` / `## Boundaries` trailer can never satisfy the predicate for the last
+  // operation in the file. Every listed op carries its containment marker itself:
+  // `fetch-review-threads` wraps the bodies it returns, while `post-resolution-summary` and
+  // `post-wave-report` each state the non-reproduction half of Principle 8 for the remote-derived
+  // artifact they post.
 
-  it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (file-scoped)', () => {
+  it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (op-scoped)', () => {
     const opNames = collectOpNames(content);
-    /** An operation's region: from its anchor to the next operation, or to end of file. */
-    const opRegion = (op: string) => {
-      const opStart = content.indexOf(`## Operation: ${op}`);
-      const nextOp = content.indexOf('\n## Operation: ', opStart + 1);
-      return nextOp === -1 ? content.slice(opStart) : content.slice(opStart, nextOp);
-    };
+    /** An operation's own section — cut at the next unfenced `## `, never a shared trailer. */
+    const opSection = (op: string) => extractOpSection(soleCorpus, op, 'sole');
 
     // ── (a) Issue-body containment ────────────────────────────────────────────
     // Predicate: <untrusted-issue-body> ONLY.
@@ -1675,7 +1669,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // Non-vacuity: on main's git.md, 0 ops have <untrusted-issue-body> → the floor-3 assertion below FAILS.
     const EXPECTED_ISSUE_BODY_OPS = ['setup-task', 'fetch-issue', 'fetch-issues-batch'];
     const opsWithUntrustedIssueBody = opNames.filter(
-      op => opRegion(op).includes('<untrusted-issue-body>'),
+      op => opSection(op).includes('<untrusted-issue-body>'),
     );
     for (const expectedOp of EXPECTED_ISSUE_BODY_OPS) {
       expect(
@@ -1695,7 +1689,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
     const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
     const opsWithExternalThread = opNames.filter(
-      op => opRegion(op).includes('<external-thread>'),
+      op => opSection(op).includes('<external-thread>'),
     );
     for (const expectedOp of EXPECTED_EXTERNAL_THREAD_OPS) {
       expect(
@@ -1714,7 +1708,7 @@ describe('git agent — static content guards (PF-018)', () => {
       // {body} / {description} / {title} as MDS template placeholders (curly-brace form)
       // would echo remote origin content verbatim. Shell vars ($DEVFLOW_BODY) are safe.
       expect(
-        /\{body\}|\{description\}|\{title\}/.test(opRegion(op)),
+        /\{body\}|\{description\}|\{title\}/.test(opSection(op)),
         `${op}: must not interpolate remote body fields ({body}/{description}/{title}) in its Output template`,
       ).toBe(false);
     }
