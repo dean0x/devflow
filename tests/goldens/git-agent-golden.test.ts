@@ -8,9 +8,9 @@
  * a single missed or doubled escape moves bytes and this assertion fails.
  *
  * A golden mismatch means the source is wrong, never the fixture (H2).
- * The fixture is regenerated exactly once per phase that moves text — Phase 2's
- * contract/mechanics split and once more in Phase 3 — each time in its own
- * fixture-only commit reviewed as a text diff, never alongside a behaviour change.
+ * The fixture is regenerated only by a change that moves the compiled agent's
+ * bytes, and always in its own fixture-only commit reviewed as a text diff —
+ * never alongside the behaviour change that made it move.
  * Never call test:golden:update in CI: a golden CI regenerates asserts nothing.
  *
  * Update ritual: npm run test:golden:update -- git-agent
@@ -26,14 +26,14 @@ import { loadGolden, resolveAgentSource } from '../helpers.js'
  * tests/goldens/github-status-lines.test.ts, and deliberately NOT registered in
  * tests/fixtures/numeric-floors.json (a floor would let the artifact grow).
  *
- * Derived from `stat -f %z tests/fixtures/golden/git-agent.md` → 55633 after the
- * P2-S16 regeneration (it was 66180 before the split moved ~9,400 characters of
- * GitHub mechanics into the generated references),
- * and re-derived from that same fixture below rather than measured a second
- * way (parallel re-derivation is how derived constants rot — PF-057).
- * It moves only in the same commit as the fixture itself.
+ * It pins `stat -f %z tests/fixtures/golden/git-agent.md`, and the assertion
+ * below re-derives it from that same fixture rather than measuring it a second
+ * way — parallel re-derivation is how derived constants rot (PF-057).
+ * It moves only in the fixture-only commit that regenerates the golden, and
+ * never on its own to clear a red assertion: a baseline edited to match what the
+ * artifact happens to be today pins nothing.
  */
-const GIT_AGENT_BYTES = 56_134
+const GIT_AGENT_BYTES = 56_185
 
 describe('golden: git agent source equality', () => {
   it('the resolved git agent is byte-equal to the golden fixture (AC-0.2)', () => {

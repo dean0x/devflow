@@ -58,7 +58,7 @@ For an operation that names one, file presence in the installed skill directory 
 
 ## Comment-sink scrub (D11)
 
-Applies **unconditionally** to every op that posts or edits a body to the tracker — never gated on visibility, config, or compliance mode.
+Applies **unconditionally** to every op that posts or edits a body to the tracker — a comment attached to a close is a posted body — never gated on visibility, config, or compliance mode.
 
 **Shell discipline — `&&` chains, never pipelines:**
 ```bash

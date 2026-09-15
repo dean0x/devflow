@@ -1,12 +1,12 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Measurements after the Phase-2 golden regeneration (P2-S16):
+ * Measurements pinned to the current git-agent.md golden:
  *
- *   tests/fixtures/golden/git-agent.md          55,727 ch / 904 L   (== dist/agents/git.md)
+ *   tests/fixtures/golden/git-agent.md          55,776 ch / 904 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           64,751 ch / 1,209 L
+ *   Total (all three)                           65,299 ch / 1,209 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
@@ -28,8 +28,10 @@
  * split: P2-S4 rewrote sentences the fixture sampled, so preserving it and making
  * the split were mutually exclusive. That authorisation is spent — the fixture is
  * frozen again from that commit, and Phase 3 inherits the freeze unchanged.
- * git-agent.md is regenerated once in Phase 2 and once in Phase 3, each in its own
- * fixture-only commit via `npm run test:golden:update -- git-agent`.
+ * git-agent.md carries no such freeze: any change that moves the compiled agent's
+ * bytes regenerates it in its own fixture-only commit via
+ * `npm run test:golden:update -- git-agent`, which re-sets GIT_MD_CHARS and
+ * GIT_MD_LINES in the same commit.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -50,7 +52,7 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 55_727
+export const GIT_MD_CHARS = 55_776
 export const GIT_MD_LINES = 904
 // Phase 1 took this to 9_205 / 283 (the SKILL.md cross-reference to the Git agent
 // moved from src/assets/agents/git.md to the git.mds generator host). Phase 2's
