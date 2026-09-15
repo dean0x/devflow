@@ -3,10 +3,10 @@
  *
  * Measurements pinned to the current git-agent.md golden:
  *
- *   tests/fixtures/golden/git-agent.md          55,896 ch / 905 L   (== dist/agents/git.md)
+ *   tests/fixtures/golden/git-agent.md          55,664 ch / 913 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           65,419 ch / 1,210 L
+ *   Total (all three)                           65,187 ch / 1,218 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
@@ -22,12 +22,14 @@
  * golden-regeneration commit. They are NOT floors and are NOT registered in
  * tests/fixtures/numeric-floors.json.
  *
- * github-status-lines.txt is frozen and the --unfreeze refusal guard below
- * protects that fixture only. The freeze was overridden exactly ONCE, on an
- * explicit user authorisation dated 2026-09-14, for the Phase-2 contract/mechanics
- * split: P2-S4 rewrote sentences the fixture sampled, so preserving it and making
- * the split were mutually exclusive. That authorisation is spent — the fixture is
- * frozen again from that commit, and Phase 3 inherits the freeze unchanged.
+ * github-status-lines.txt is frozen from this commit, and the --unfreeze refusal
+ * guard below protects that fixture only. Overriding the freeze takes an explicit,
+ * dated user authorisation naming the exact bytes it permits, and each such
+ * authorisation is spent by the single commit that uses it. The most recent one
+ * (2026-09-15) permitted one re-capture whose only change was the two
+ * `**Mechanics:**` pointer lines the resolve wave rewrote, at fixture lines 134
+ * and 161. Any further change to this fixture — in Phase 3 or after — requires a
+ * new explicit authorisation; none is outstanding.
  * git-agent.md carries no such freeze: any change that moves the compiled agent's
  * bytes regenerates it in its own fixture-only commit via
  * `npm run test:golden:update -- git-agent`, which re-sets GIT_MD_CHARS and
@@ -52,8 +54,8 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 55_896
-export const GIT_MD_LINES = 905
+export const GIT_MD_CHARS = 55_664
+export const GIT_MD_LINES = 913
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
 // GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
@@ -67,7 +69,7 @@ export const TOTAL_CHARS = GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS
 export const TOTAL_LINES = GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 17_709
+export const FIXTURE_BYTES = 17_527
 export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {

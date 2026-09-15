@@ -131,7 +131,7 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
 **Process:**
 
-**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+**Mechanics:** load this operation's provider reference.
 
 **Degradation (D4):** `gh` unauthenticated or absent, or GitHub API error → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without updating the backlog. Caller records the failure; `Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.
 
@@ -158,7 +158,7 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 
 **Process:**
 
-**Mechanics:** the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs.
+**Mechanics:** load this operation's provider reference.
 
 1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
 2. Collect commit list: `git log {last_tag}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and {n} more commits` note to signal truncation.
