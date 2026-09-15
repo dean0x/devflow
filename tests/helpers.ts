@@ -5,6 +5,7 @@ import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
+import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -553,20 +554,49 @@ export function extractOpSectionFromCorpus(
  * not a directory). Other errors (e.g. EACCES) propagate — they indicate a
  * genuine problem.
  *
- * Descent stops silently once the recursion reaches `maxDepth` levels below
- * the initial `dir` (default 8). No error is thrown when the cap is hit.
+ * DEPTH. Among the walks over the generated reference tree this is the third,
+ * after the build's prune and the installer's sweep, so it takes its bound from
+ * the same owner rather than re-spelling one: MAX_REFERENCE_SWEEP_DEPTH in
+ * src/core/reference-sweep.ts, on that module's convention — the walked root is
+ * depth 0, the bound is the deepest directory a walk may descend INTO, and
+ * `depth > bound` is the breach. Each walker carrying its own literal is how the
+ * first two came to disagree on both the number of levels and on what happens at
+ * the last one; the same bound governs the source asset trees walked here.
+ *
+ * A breach is loud here too, and for the harness's own reason: a walk that
+ * stopped at the bound and returned anyway would hand a collector a corpus
+ * smaller than the tree it claims to cover, and every guard reading from it
+ * would pass over ground it never saw. A test helper may throw, so it throws —
+ * the build throws on the same breach, the sweep reports it in `failed`, and
+ * none of the three passes it over.
+ *
+ * `maxDepth` is a per-call-site SCOPE, not a second bound: narrowing it (a
+ * caller that wants one flat level) stops descent silently, because stopping is
+ * what that caller asked for. It may only narrow — the shared bound is the
+ * ceiling and is checked first.
  *
  * @param dir - Absolute path of the directory to walk.
  * @param accept - Predicate applied to each file's absolute path.
- * @param maxDepth - Maximum recursion depth (default 8). Descent beyond this
- *   depth is silently skipped.
+ * @param maxDepth - Deliberate scope cap, at most MAX_REFERENCE_SWEEP_DEPTH
+ *   (the default). Directories below it are skipped silently.
+ * @throws If the walk reaches a directory deeper than MAX_REFERENCE_SWEEP_DEPTH.
  */
 export function walkFiles(
   dir: string,
   accept: (file: string) => boolean,
-  maxDepth = 8,
+  maxDepth: number = MAX_REFERENCE_SWEEP_DEPTH,
   _depth = 0,
 ): string[] {
+  if (_depth > MAX_REFERENCE_SWEEP_DEPTH) {
+    throw new Error(
+      `walkFiles: descent into ${dir} exceeds the bound of ` +
+      `${MAX_REFERENCE_SWEEP_DEPTH} levels — no tree the harness walks is this ` +
+      'deep, and a walk that stopped here would report a corpus smaller than the ' +
+      'tree it claims to cover.',
+    )
+  }
+  if (_depth > maxDepth) return []
+
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
@@ -579,9 +609,7 @@ export function walkFiles(
   for (const entry of entries) {
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (_depth < maxDepth) {
-        result.push(...walkFiles(absPath, accept, maxDepth, _depth + 1))
-      }
+      result.push(...walkFiles(absPath, accept, maxDepth, _depth + 1))
     } else if (accept(absPath)) {
       result.push(absPath)
     }
@@ -739,6 +767,23 @@ export const STATUS_LINE_REFERENCE_FILES = [
   'tracker/github/post-wave-report.md',
 ] as const
 
+/** A path `STATUS_LINE_REFERENCE_FILES` declares — derived, never re-spelled. */
+type StatusLineReferenceFile = (typeof STATUS_LINE_REFERENCE_FILES)[number]
+
+/**
+ * Narrow an arbitrary relative path to one the list declares.
+ *
+ * A type predicate rather than a membership test on an already-narrow parameter:
+ * typed as the union, `ref()`'s refusal could never fire under its own signature
+ * and needed a widening cast to be written at all — a check the compiler knew was
+ * vacuous, laundered past it. Here the check earns the narrow type instead of
+ * presupposing it, so the arm that refuses is the arm that produces the value the
+ * rest of `ref()` uses, and the cast is gone.
+ */
+function isStatusLineReference(relPath: string): relPath is StatusLineReferenceFile {
+  return STATUS_LINE_REFERENCE_FILES.some(declared => declared === relPath)
+}
+
 /**
  * Extract the status-line corpus that matches tests/fixtures/golden/github-status-lines.txt.
  *
@@ -764,9 +809,13 @@ export function extractStatusLines(gitContent?: string): string {
    * Read a generated skill reference by its path relative to the references root.
    * Fail-loud on both an unlisted path and an absent file: an extractor that
    * silently sampled nothing would re-capture a shorter fixture and call it stable.
+   *
+   * Takes `string` and narrows: the refusal is the gate that actually runs (tests/
+   * is outside `tsc -p tsconfig.json` today, #337), and it is reachable under the
+   * signature rather than dead beneath it.
    */
-  function ref(relPath: (typeof STATUS_LINE_REFERENCE_FILES)[number]): string {
-    if (!(STATUS_LINE_REFERENCE_FILES as readonly string[]).includes(relPath)) {
+  function ref(relPath: string): string {
+    if (!isStatusLineReference(relPath)) {
       throw new Error(
         `extractStatusLines: "${relPath}" is not in STATUS_LINE_REFERENCE_FILES — ` +
         'add it there so the read is declared, or sample a file that is',
