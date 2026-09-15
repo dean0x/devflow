@@ -3,12 +3,21 @@
  *
  * Two claims, both about the SHAPE of the Phase-2 refactor rather than its content:
  *
- *   1. `tests/git-agent.test.ts` still carries at least as many guards as it did.
- *      GAP-49: the AC used to pin "all 40 git-agent guards", a literal Phase 0 had
+ *   1. `tests/git-agent.test.ts` still carries at least as many RUNNING guards as it
+ *      did. GAP-49: the AC used to pin "all 40 git-agent guards", a literal Phase 0 had
  *      already invalidated. A count that may only RISE is the version of that claim
  *      that survives the next phase, so the number lives in
  *      `tests/fixtures/numeric-floors.json` — the one place in this repo where a
  *      number may be raised and may never be lowered.
+ *
+ *      A count alone cannot carry that claim. A count that accepts `it(` and
+ *      `it.<modifier>(` alike reads `it.skip(` and `it.todo(` as live guards, and does
+ *      not move at all for `describe.skip(` — the whole file silenced, the census still
+ *      green at 73. That is PF-064's anatomy: a matcher that cannot express every shape
+ *      the sink takes, over a predicate naming a proxy for the property rather than the
+ *      property, yielding PF-018's outcome — a green test that no longer exercises
+ *      anything. So the claim is carried by a PAIR: `countGuards` counts only
+ *      declarations that run, and `collectDisabledGuards` must come back empty.
  *
  *   2. Registry Guard 6 (`tests/registry-integrity.test.ts`) is green with the
  *      OPERATION names UNCHANGED. Guard 6 checks that spawn-fence `OPERATION:`
@@ -51,14 +60,96 @@ const GUARD_COUNT_FLOOR_ID = 'git-agent-guard-count';
 const COUNTED_FILE = 'tests/git-agent.test.ts';
 
 /**
- * Named collector: every `it(` / `it.<modifier>(` declaration in a test source.
+ * Named collector: every LIVE `it(` declaration in a test source.
+ *
+ * Bare `it(` only. No modifier spelling is live in the sense the floor claims:
+ * `it.skip(` and `it.todo(` never run, `it.fails(` is green precisely when its
+ * assertions fail, and `it.only(` leaves every other declaration in the file unrun.
+ * Counting those as guards would let the census read 73 over a file that guards
+ * nothing; `collectDisabledGuards` names each of them instead, so converting a guard
+ * shows up twice — as a count that fell, and as a spelling that was reported.
  *
  * Anchored to the start of a line so a `submit(` or an `it(` inside a template
  * string cannot inflate the count — an inflated census is a census that lets a real
  * guard be deleted without noticing.
  */
 export function countGuards(source: string): number {
-  return (source.match(/^[ \t]*it(?:\.\w+)?[ \t]*\(/gm) ?? []).length;
+  return (source.match(/^[ \t]*it[ \t]*\(/gm) ?? []).length;
+}
+
+/** One spelling that stops guards from running, and which guards it stops. */
+interface DisablingSpelling {
+  /** How it is written at the head of a declaration line. */
+  readonly spelling: string;
+  /** What stops running when it appears — the half a count of declarations cannot see. */
+  readonly silences: string;
+}
+
+/**
+ * Every spelling that makes a declaration guard nothing. Two families:
+ *
+ *   - DISABLING (`xit`, `it.skip`, `it.todo`, `it.fails`, `xdescribe`,
+ *     `describe.skip`, `describe.todo`) — the declaration does not run, or runs
+ *     inverted. The block-level half is the dangerous one: `tests/git-agent.test.ts`
+ *     holds all 73 guards inside a SINGLE top-level `describe(`, so inserting five
+ *     characters makes it `describe.skip(` and silences the whole file with the count
+ *     still reading 73.
+ *   - FOCUSING (`fit`, `it.only`, `fdescribe`, `describe.only`) — this declaration
+ *     runs and the rest do not. An ADDED `it.only(` is not itself counted, so the
+ *     count stays at exactly 73 while all 73 stop running: a floor on a count can
+ *     never catch it, in either direction.
+ *
+ * The table is the matcher: `DISABLING_PATTERN` is built from it, so a spelling added
+ * here is a spelling the collector sees, and the probe below drives every row.
+ *
+ * Non-goal: `it.skipIf` / `describe.skipIf` are deliberately absent. They ship
+ * legitimately elsewhere in this suite as platform gates (`IS_WIN32`), and the narrowed
+ * `countGuards` already refuses to count them, so converting a guard to one drops the
+ * count below the floor and fails red on its own.
+ */
+export const DISABLING_SPELLINGS: readonly DisablingSpelling[] = [
+  { spelling: 'xit', silences: 'this guard' },
+  { spelling: 'it.skip', silences: 'this guard' },
+  { spelling: 'it.todo', silences: 'this guard' },
+  { spelling: 'it.fails', silences: 'this guard — it is green when its assertions FAIL' },
+  { spelling: 'xdescribe', silences: 'every guard in the block' },
+  { spelling: 'describe.skip', silences: 'every guard in the block' },
+  { spelling: 'describe.todo', silences: 'every guard in the block' },
+  { spelling: 'fit', silences: 'every OTHER guard in the file' },
+  { spelling: 'it.only', silences: 'every OTHER guard in the file' },
+  { spelling: 'fdescribe', silences: 'every guard outside the block' },
+  { spelling: 'describe.only', silences: 'every guard outside the block' },
+];
+
+/** Escape a literal spelling for use inside a regular expression. */
+function escapeLiteral(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Longest first, so no spelling can be shadowed by a prefix of itself. */
+const DISABLING_PATTERN = [...DISABLING_SPELLINGS]
+  .map(entry => entry.spelling)
+  .sort((a, b) => b.length - a.length)
+  .map(escapeLiteral)
+  .join('|');
+
+/**
+ * Named collector: every site in `source` that stops a guard from running.
+ *
+ * Scanned line by line rather than with a `g` flag so each hit carries its line
+ * number: "the census is not what it claims" is only actionable if it names where.
+ * Line-anchored on the same terms as `countGuards` — the two collectors must agree
+ * about what a declaration looks like or the pair does not compose.
+ */
+export function collectDisabledGuards(source: string): string[] {
+  const declaration = new RegExp(`^[ \\t]*(${DISABLING_PATTERN})[ \\t]*\\(`);
+  const silences = new Map(DISABLING_SPELLINGS.map(entry => [entry.spelling, entry.silences]));
+  const found: string[] = [];
+  source.split('\n').forEach((line, index) => {
+    const match = declaration.exec(line);
+    if (match) found.push(`line ${index + 1}: ${match[1]}( — silences ${silences.get(match[1])}`);
+  });
+  return found;
 }
 
 describe('guard census: git-agent.test.ts guard count has not decreased (AC-2.6)', () => {
@@ -98,14 +189,73 @@ describe('guard census: git-agent.test.ts guard count has not decreased (AC-2.6)
     ).toBeGreaterThanOrEqual(73);
   });
 
+  it('no declaration in the counted file is disabled or focused', () => {
+    // The other half of the claim. A count of declarations is a census of the guard
+    // surface only while every declaration runs: `countGuards` names a proxy for the
+    // property, and this names the property (PF-064). Asserted empty, so the probe
+    // below is what keeps it from being an assertion that cannot fail (PF-018).
+    const disabled = collectDisabledGuards(source);
+    expect(
+      disabled,
+      `${COUNTED_FILE} carries ${disabled.length} spelling(s) that stop guards running:\n` +
+      `${disabled.join('\n')}\n` +
+      `Re-enable the guard, or delete it — deleting moves the count, and the count is ` +
+      `already guarded. Silencing is the move that leaves both numbers looking healthy.`,
+    ).toEqual([]);
+  });
+
+  it('every disabling spelling is seen by one collector and refused by the other', () => {
+    // Known-bad probe per ROW, not per family: the table is the matcher, so a spelling
+    // it names but the regex cannot express is exactly the hole this guard exists to
+    // close — a matcher is only as good as the shapes it can be shown to express (PF-064).
+    for (const { spelling } of DISABLING_SPELLINGS) {
+      const seeded = `describe('probe', () => {\n  ${spelling}('seeded', () => {});\n});\n`;
+      expect(
+        collectDisabledGuards(seeded),
+        `${spelling}( is in the roster but the collector does not see it`,
+      ).toHaveLength(1);
+      expect(
+        countGuards(seeded),
+        `${spelling}( must not be counted as a live guard`,
+      ).toBe(0);
+    }
+    // The opposite direction: a collector that reported everything would pass every
+    // assertion above and fail only on the real file.
+    expect(
+      collectDisabledGuards("  it('live', () => {});\n"),
+      'a live declaration must not be reported as disabled',
+    ).toEqual([]);
+  });
+
   it('the collector is non-vacuous and does not over-count', () => {
     expect(countGuards(source), 'the collector found no guards at all').toBeGreaterThan(0);
-    // Known-bad probe: a deleted guard must move the number the assertion reads.
-    const withOneRemoved = source.replace(/^[ \t]*it(?:\.\w+)?[ \t]*\(/m, '  xit(');
+    // Known-bad probe: a silenced guard must move the number the assertion reads.
+    // Seeded with `it.skip(` — the spelling a person reaching to quiet a failing guard
+    // actually types. Seeding `xit(` instead would exercise a shape no plausible count
+    // regex accepts, and so would prove nothing about the ones that can inflate it.
+    const withOneSkipped = source.replace(/^[ \t]*it[ \t]*\(/m, '  it.skip(');
+    expect(withOneSkipped, 'the skip probe must actually have seeded something').not.toBe(source);
     expect(
-      countGuards(withOneRemoved),
-      'removing one declaration must lower the count — otherwise the floor tracks nothing',
+      countGuards(withOneSkipped),
+      'skipping one declaration must lower the count — otherwise the floor tracks nothing',
     ).toBe(countGuards(source) - 1);
+    expect(
+      collectDisabledGuards(withOneSkipped),
+      'the skipped declaration must also be named, so the failure says which one',
+    ).toHaveLength(1);
+    // The block-level case is the one no count can reach: every guard in the file sits
+    // inside a single top-level `describe(`, so this silences all of them at once and
+    // the number does not move at all.
+    const withBlockSkipped = source.replace(/^[ \t]*describe[ \t]*\(/m, 'describe.skip(');
+    expect(withBlockSkipped, 'the block probe must actually have seeded something').not.toBe(source);
+    expect(
+      countGuards(withBlockSkipped),
+      'a skipped block must leave the count untouched — which is why the count is not the whole claim',
+    ).toBe(countGuards(source));
+    expect(
+      collectDisabledGuards(withBlockSkipped),
+      'a skipped block must be named by the collector that can see it',
+    ).toHaveLength(1);
     // …and shapes that only LOOK like declarations must not raise it.
     expect(countGuards('const x = submit(1)\nconst s = `it(`\n'), 'over-counting shapes').toBe(0);
   });
