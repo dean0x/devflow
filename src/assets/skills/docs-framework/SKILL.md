@@ -71,6 +71,8 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 └── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```
 
+`{ISSUE_ID}` in the `design/` path is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`.
+
 ---
 
 ## Naming Conventions
