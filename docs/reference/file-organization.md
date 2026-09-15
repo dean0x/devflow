@@ -102,7 +102,7 @@ devflow/
 │   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
 │   ├── seams/                        # Command→agent input contract
 │   ├── goldens/                      # Byte-equality against tests/fixtures/golden/
-│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, provider-scope, guard-census
+│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, guard-census
 │   ├── tracker/                      # Tracker contract/mechanics split — containment oracle, byte budget
 │   ├── dynamic/                      # Two-sided writer↔reader grammar seams
 │   ├── installer/                    # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
