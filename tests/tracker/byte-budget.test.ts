@@ -640,7 +640,7 @@ function collectTrackerNamingLines(content: string): string[] {
  *
  * Both directions of the bidirectional check and the known-bad probe below call
  * THIS — a probe that re-spells the comparison inline proves the expectation, not
- * the guard, and stays green while the real one is mis-scoped (ADR-024).
+ * the guard, and stays green while the real one is mis-scoped (PF-018).
  */
 export function collectMissingFrom(
   op: string,

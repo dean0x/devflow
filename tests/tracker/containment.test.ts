@@ -872,7 +872,7 @@ describe('containment: rewrite exemption list — justified [DR-17]', () => {
   it('known-bad probe: a token rationale is reported by the same length rule', () => {
     // Emptiness-only was satisfied by `rationale: 'x'` — a string that records a
     // keystroke, not a reason. The probe drives the SAME predicate over seeded
-    // entries so the floor is proven live rather than asserted about (ADR-024).
+    // entries so the floor is proven live rather than asserted about (PF-018).
     const seeded: readonly ContainmentExemption[] = [
       { file: 'probe.md', startLine: 1, endLine: 1, rationale: '' },
       { file: 'probe.md', startLine: 2, endLine: 2, rationale: 'x' },
@@ -1240,7 +1240,7 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
 // `tracker mechanics unavailable` degradation shipped as the normal path.
 //
 // The instruction is read out of the compiled agent rather than restated here —
-// restating it would let the two drift and still pass (ADR-024).
+// restating it would let the two drift and still pass (PF-018).
 
 /** The `{provider}` / `{op}` template the preamble's one load instruction composes. */
 const LOAD_INSTRUCTION_TEMPLATE = 'references/tracker/{provider}/{op}.md';
@@ -1305,7 +1305,7 @@ describe('containment: every generated GitHub reference is reachable on the gh p
     const reachable = new Set([
       ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
       // The 'named' module kind: reachable ⇔ the compiled agent spells the path
-      // out literally. Read out of the agent, never restated here (ADR-024).
+      // out literally. Read out of the agent, never restated here (PF-018).
       ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),

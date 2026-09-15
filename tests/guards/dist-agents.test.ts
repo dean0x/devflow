@@ -22,7 +22,7 @@
  * tracker/{provider}/{op}.md driven by a typed registry, not by a template.
  *
  * Every collector is a named function called by both the assertion and its
- * known-bad probe (ADR-024). No literal agent path appears in this file — the
+ * known-bad probe (PF-018). No literal agent path appears in this file — the
  * directories come from src/core/assets.ts (AC-0.7 / AC-1.10).
  */
 
@@ -370,7 +370,7 @@ interface ForbiddenConstruct {
   label: string
   /** Anchored matcher — the shape the construct actually takes in source. */
   pattern: RegExp
-  /** A realistic instance of the construct the collector must flag (ADR-024). */
+  /** A realistic instance of the construct the collector must flag (PF-018). */
   probe: string
   appliesTo: 'all' | 'mds'
 }

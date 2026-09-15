@@ -30,7 +30,7 @@ const PLAN_MD = requireDistFile('plan.md')
 const RESOLVE_MD = requireDistFile('resolve.md')
 const TICKETS_MD = requireDistFile('dynamic-tickets.md')
 
-// ── Named collectors (ADR-024) ───────────────────────────────────────────────
+// ── Named collectors (PF-018/PF-064) ─────────────────────────────────────────
 //
 // The token checks below are stated once, as functions, so the positive arm
 // ("both sides carry the grammar token") and the negative arm ("the retired
@@ -356,7 +356,7 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
   it('known-bad probe: a seeded second site is reported by the same collector', () => {
     // Both failure directions, driven through collectOffCountSites — the SAME
     // function the four pins above call, so a collector that stopped counting
-    // takes this probe red with the guards it backs (ADR-024).
+    // takes this probe red with the guards it backs (PF-018).
     for (const rendering of AC_2_10_RENDERINGS) {
       const [, firstSrc] = rendering.sources[0]
       const label = rendering.sources[0][0]

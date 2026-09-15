@@ -311,7 +311,7 @@ describe('resolveOutputDir (host variant)', () => {
 // reached by a concrete input, and no input reaches a kind outside the declared
 // set — and the two probes below prove those assertions can actually go red, in
 // both of the directions that matter: a declared kind nothing reaches, and a
-// corpus that stopped reaching one (PF-018, ADR-024).
+// corpus that stopped reaching one (PF-018).
 
 describe('Result error-union completeness', () => {
   const NAME_KINDS: ReadonlyArray<OutputNameError['kind']> = [
@@ -456,7 +456,7 @@ describe('expandVariants', () => {
     // module and to fan-out modules only — a `named` module's correctness comes from
     // splitVariantSections' bidirectional check, not from a count, and a floor there
     // would forbid the first cross-cutting document rather than prove anything.
-    const fanout = VARIANT_MODULES.filter(m => (m.kind ?? 'fanout') === 'fanout');
+    const fanout = VARIANT_MODULES.filter(m => m.kind === 'fanout');
     expect(fanout.length, 'there must be at least one fan-out module').toBeGreaterThan(0);
     for (const mod of fanout) {
       expect(mod.ops.length, `${mod.source} is below the fan-out floor`)
@@ -469,7 +469,7 @@ describe('expandVariants', () => {
     // The only way to dodge the floor is to declare `kind: 'named'`. This pins that
     // a provider mechanics module can never do so.
     for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
-      expect(mod.kind ?? 'fanout', `${mod.source} must be a fan-out module`).toBe('fanout');
+      expect(mod.kind, `${mod.source} must be a fan-out module`).toBe('fanout');
     }
   });
 
@@ -501,7 +501,7 @@ describe('expandVariants', () => {
     // The probe that matters most. Without it the function would happily return
     // a list whose parity assertions can never fail.
     const oneOp: VariantModule[] = [
-      { source: 'src/assets/mds/tracker/_solo.mds', subdir: 'tracker/solo', ops: ['setup-task'] },
+      { source: 'src/assets/mds/tracker/_solo.mds', subdir: 'tracker/solo', kind: 'fanout', ops: ['setup-task'] },
     ];
     const err = errorOf(expandVariants(oneOp));
     expect(err.kind).toBe('too-few-pairs');
@@ -513,26 +513,26 @@ describe('expandVariants', () => {
   it('known-bad probe: an empty registry and an op-less module are both refused', () => {
     expect(errorOf(expandVariants([])).kind).toBe('no-modules');
     expect(
-      errorOf(expandVariants([{ source: 'a.mds', subdir: 'tracker/x', ops: [] }])).kind,
+      errorOf(expandVariants([{ source: 'a.mds', subdir: 'tracker/x', kind: 'fanout', ops: [] }])).kind,
     ).toBe('empty-module');
   });
 
   it('known-bad probe: a traversal in an op name or a subdir cannot reach the destination', () => {
-    const base = { source: 'a.mds', subdir: 'tracker/github' };
+    const base = { source: 'a.mds', subdir: 'tracker/github', kind: 'fanout' as const };
     const hostileOps = [...TRACKER_GITHUB_OPS.slice(0, 9), '../../../etc/passwd'];
     const opErr = errorOf(expandVariants([{ ...base, ops: hostileOps }]));
     expect(opErr.kind).toBe('invalid-op-name');
 
     const dirErr = errorOf(
-      expandVariants([{ source: 'a.mds', subdir: 'tracker/../../..', ops: TRACKER_GITHUB_OPS }]),
+      expandVariants([{ source: 'a.mds', subdir: 'tracker/../../..', kind: 'fanout', ops: TRACKER_GITHUB_OPS }]),
     );
     expect(dirErr.kind).toBe('invalid-subdir-segment');
   });
 
   it('known-bad probe: two modules claiming one output file are refused', () => {
     const clashing: VariantModule[] = [
-      { source: 'a.mds', subdir: 'tracker/github', ops: TRACKER_GITHUB_OPS },
-      { source: 'b.mds', subdir: 'tracker/github', ops: TRACKER_GITHUB_OPS },
+      { source: 'a.mds', subdir: 'tracker/github', kind: 'fanout', ops: TRACKER_GITHUB_OPS },
+      { source: 'b.mds', subdir: 'tracker/github', kind: 'fanout', ops: TRACKER_GITHUB_OPS },
     ];
     const err = errorOf(expandVariants(clashing));
     expect(err.kind).toBe('duplicate-output');

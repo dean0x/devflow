@@ -297,7 +297,7 @@ export interface UnfencedH2 {
  * This is the single owner of "is this `## ` structure or payload?" — the
  * section extractor and the generated-reference structure guard must not
  * re-derive it, or a probe can stay green after the real rule changes
- * (ADR-024/PF-018).
+ * (PF-018).
  */
 export function collectUnfencedH2(text: string): UnfencedH2[] {
   const sites: UnfencedH2[] = []

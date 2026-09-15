@@ -160,7 +160,7 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
   /**
    * Named collector: reasons a version spec fails the exact-pin rule.
    * Used by the live assertion AND by the known-bad probe, so the probe cannot
-   * pass against a re-implementation of the rule (ADR-024).
+   * pass against a re-implementation of the rule (PF-018).
    */
   function collectPinViolations(spec: string | undefined): string[] {
     const violations: string[] = [];

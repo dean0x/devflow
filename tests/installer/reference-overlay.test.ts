@@ -457,7 +457,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // the installed unit has already been moved aside — the window a rm-then-rename
     // promotion cannot survive, because by then it has deleted the only copy. Driving
     // the real promotion step is what makes this a known-bad probe rather than a
-    // restatement of the implementation (ADR-024).
+    // restatement of the implementation (PF-018).
     const missingStaging = abs(target, 'tracker/jira') + '.tmp';
     expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
 

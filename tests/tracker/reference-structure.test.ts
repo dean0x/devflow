@@ -117,7 +117,7 @@ const MIN_FENCED_H2 = 7;
  *
  * Both this collector and the extractor's terminator search call
  * `collectUnfencedH2`, so a probe cannot stay green after the fence rule changes
- * (ADR-024/PF-018).
+ * (PF-018).
  */
 export function collectStrayUnfencedH2(refs: readonly GeneratedReference[]): string[] {
   const violations: string[] = [];
@@ -230,7 +230,7 @@ describe('generated references carry no unfenced `## ` below their own heading (
 // 3. Non-vacuity — the fence rule is exercised, and the collector has teeth
 // ---------------------------------------------------------------------------
 
-describe('reference-structure guard: non-vacuity (ADR-024/PF-018)', () => {
+describe('reference-structure guard: non-vacuity (PF-018)', () => {
   const refs = readGeneratedReferences();
 
   it('the live corpus really does contain fenced `## ` lines', () => {

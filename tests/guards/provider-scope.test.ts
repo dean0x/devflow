@@ -325,7 +325,7 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
  * Extracted from the assertion below so the guard and its known-bad probe share
  * one extractor. Inline, the negative `.not.toContain('tools')` was green whether
  * the key was truly absent or the extractor had stopped returning keys at all —
- * a regex typo would have read as a pass (ADR-024).
+ * a regex typo would have read as a pass (PF-018/PF-064).
  *
  * Only column-0 keys count: an indented `tools:` is a nested value, not a
  * declaration, and YAML list items never reach column 0.

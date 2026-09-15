@@ -288,7 +288,7 @@ export const TRACKER_GITHUB_OPS = [
  *   assertions range over that roster, which is exactly where GAP-42 bites: a
  *   roster short enough to enumerate by hand is satisfied by any implementation
  *   that returns something, so the floor is what stops a short one being
- *   introduced. This is the default; a module must opt OUT deliberately.
+ *   introduced.
  * 'named' — a fixed set of cross-cutting documents, each named individually at
  *   exactly one site in the agent (`references/decision-markers.md` and, later,
  *   `learn-conventions.md` / `publication-gate.md`). Nothing ranges over the set,
@@ -312,10 +312,13 @@ export interface VariantModule {
   readonly subdir: string;
   /**
    * Which floor and which naming discipline this module is held to.
-   * Omitted means 'fanout' — the strict answer, so a module cannot dodge the
-   * floor by forgetting a field.
+   * Required, not defaulted: `as const satisfies readonly VariantModule[]` on the
+   * registry below makes the compiler demand the answer at the declaration site,
+   * which is strictly stronger than defaulting an omission to the strict value —
+   * a module lands in the 'fanout' bucket because it says so, not because a
+   * field was forgotten.
    */
-  readonly kind?: VariantModuleKind;
+  readonly kind: VariantModuleKind;
   /** The names this module emits, one file each. */
   readonly ops: readonly string[];
 }
@@ -448,7 +451,7 @@ export function expandVariants(
       }
     }
 
-    if ((mod.kind ?? 'fanout') === 'fanout' && mod.ops.length < MIN_VARIANT_PAIRS) {
+    if (mod.kind === 'fanout' && mod.ops.length < MIN_VARIANT_PAIRS) {
       return Err({ kind: 'too-few-pairs', count: mod.ops.length, minimum: MIN_VARIANT_PAIRS });
     }
 
