@@ -100,7 +100,7 @@ const PREAMBLE_MAX_LINES = 40;
  * Measured, never hand-typed:
  *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
  */
-const GITHUB_API_MD_CHARS = 17_935;
+const GITHUB_API_MD_CHARS = 19_576;
 
 // ---------------------------------------------------------------------------
 // Fail-loud measurement

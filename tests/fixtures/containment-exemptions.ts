@@ -291,8 +291,10 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
     startLine: 24,
     endLine: 24,
     rationale:
-      'The `check_rate_limit` call site now honours the STOP: `check_rate_limit || exit 1`. ' +
-      'Leaving the bare call would have made the rewritten function advisory.',
+      'The `check_rate_limit` call site now honours the STOP: the loop runs only on a clean ' +
+      'check (`check_rate_limit && for issue in …`). Leaving the bare call would have made ' +
+      'the rewritten function advisory; the `|| exit 1` this first carried would have killed ' +
+      'the caller\'s shell instead of reporting, which is the overshoot #339-resolve removed.',
   },
   {
     file: 'github-api.md',
@@ -559,6 +561,10 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
   // cost are the ones that carried the unquoted expansion itself. The compose-step
   // `&&` chaining landed in the same commit but owes nothing here — every line it
   // touched was already exempted by #340/#341.
+  //
+  // The first four rows are security-06's own; the six after them finish the sweep
+  // over the sibling recipes the same file still carried, so the group is the whole
+  // set rather than the half one issue happened to name.
   {
     file: 'github-api.md',
     startLine: 84,
@@ -599,6 +605,66 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'Quoted to `"$ISSUE"` where the line now lives, in fetch-issue\'s mechanics; the ' +
       'criteria and dependency extraction below it moved byte-identically.',
   },
+  {
+    file: 'github-api.md',
+    startLine: 70,
+    endLine: 70,
+    rationale:
+      '#339-resolve. `gh issue view $ISSUE` in the Error Handling recipe kept the unquoted ' +
+      'expansion its fetch-issue sibling lost, so the same attacker-influenceable text still ' +
+      'reached word splitting one section away. Quoted to `"$ISSUE"`; the `--json body` ' +
+      'projection and the emptiness check under it are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 94,
+    endLine: 94,
+    rationale:
+      '#339-resolve. `-F line=$LINE_NUMBER` handed gh an unquoted operand inside the ' +
+      'inline-comment `&&` chain — the one line of that recipe the #340 rewrite left bare. ' +
+      'Quoted to `-F line="$LINE_NUMBER"`; the flag, the field name and the trailing ' +
+      'continuation backslash are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 107,
+    endLine: 107,
+    rationale:
+      '#339-resolve. `gh pr diff $PR_NUMBER --name-only` piped an unquoted expansion into ' +
+      'grep inside `is_line_in_diff`, the predicate that decides whether a comment may be ' +
+      'posted at all. Quoted to `"$PR_NUMBER"`; the `--name-only` projection and the ' +
+      'anchored grep are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 111,
+    endLine: 111,
+    rationale:
+      '#339-resolve. The line-level arm of that same predicate carried the identical ' +
+      'unquoted `gh pr diff $PR_NUMBER`. Quoted to `"$PR_NUMBER"` in the same edit as the ' +
+      'name-only arm above, so the two halves of one predicate cannot drift apart again; ' +
+      'the pipeline and both anchored greps are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 351,
+    endLine: 351,
+    rationale:
+      '#339-resolve. `gh pr view $PR --json title,body,state,author,reviews,commits` is the ' +
+      'batch-field-selection recipe an agent copies verbatim, and it read `$PR` unquoted. ' +
+      'Quoted to `"$PR"`; the field list is byte-unchanged, and the `### Query Violations` ' +
+      'examples are left as written — those exist in order to be wrong.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 421,
+    endLine: 421,
+    rationale:
+      '#339-resolve. `gh run watch $RUN_ID` took an unquoted expansion straight out of ' +
+      '`gh run list`\'s stdout — parsed command output at a sink, which is where PF-023 puts ' +
+      'the invariant. Quoted to `"$RUN_ID"`; the `gh workflow run` call and the `sleep 5` ' +
+      'above it are byte-unchanged.',
+  },
 
   // ── the batch projection a wave round reads (#339-resolve) ─────────────────
   //
@@ -618,5 +684,58 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'batch can see a ticket closed out of band instead of re-planning a closed one. ' +
       'Every other field on both lines is byte-unchanged, and the lines themselves moved ' +
       'to fetch-issues-batch\'s mechanics in P2-S6 before this widened them.',
+  },
+
+  // ── one D4 stop-and-report spelling in github-api.md (#339-resolve) ────────
+  //
+  // security-05 / reliability-04 / consistency-12: three sites answered one D4 rule
+  // three ways — `exit 1`, `return 1`, `break` — while two of the three probes pinned
+  // an optimistic `|| echo "100"` on failure and the third pinned nothing at all, which
+  // is the fail-open the STOP rule exists to refuse. Every probe is now read through a
+  // digit-run `case` before it is compared, and the convention is stated once in the
+  // head-of-file D4 note: inside a function, echo TRACEABILITY: DEGRADED and `return 1`;
+  // at top level, the echo IS the response and the call sits in the branch a healthy
+  // probe reaches. The baseline lines this costs are the two probe reads that carried
+  // the old fallback and the two SKILL.md lines whose destination fence was
+  // restructured around them.
+  {
+    file: 'SKILL.md',
+    startLine: 195,
+    endLine: 195,
+    rationale:
+      '#339-resolve. `REMAINING=$(gh api rate_limit --jq \'.resources.core.remaining\')` had ' +
+      'no fallback at all, so a failed probe left REMAINING empty, `[ "" -lt 10 ]` errored, ' +
+      'and the branch that exists to stop the fan-out was skipped. The read now pins the ' +
+      'empty string and a digit-run `case` degrades it to a STOP with its own reason.',
+  },
+  {
+    file: 'SKILL.md',
+    startLine: 197,
+    endLine: 197,
+    rationale:
+      '#339-resolve. The 1s inter-call throttle survives verbatim but is indented into the ' +
+      'branch a healthy probe reaches, beside the call it throttles — that is what makes the ' +
+      'top-level STOP structural rather than advisory, because a failed probe can no longer ' +
+      'fall through to the call. The instruction and its trailing comment are unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 14,
+    endLine: 14,
+    rationale:
+      '#339-resolve. `check_rate_limit`\'s `|| echo "100"` answered a failed probe with a ' +
+      'fabricated "plenty of quota", so the helper reported healthy in exactly the case where ' +
+      'it could not tell. The fallback now pins the empty string and the digit-run `case` ' +
+      'above the comparison returns 1 with a DEGRADED line, matching both siblings.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 463,
+    endLine: 463,
+    rationale:
+      '#339-resolve. `batch_api_calls` carried the same optimistic `|| echo "100"`, one loop ' +
+      'iteration away from deciding whether to keep fanning out. Same fallback and same ' +
+      'digit-run `case`, whose unreadable-probe arm sets the stop reason that the post-loop ' +
+      'THROTTLED report names alongside the count of items never attempted.',
   },
 ];

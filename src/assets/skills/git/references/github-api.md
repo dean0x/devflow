@@ -17,13 +17,30 @@ Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 > `THROTTLED ({n} not processed)`, emit `TRACEABILITY: DEGRADED (rate limited)`.
 > Never sleep out an active secondary limit — that extends GitHub's penalty window.**
 > The recipes below implement that rule; they do not compete with it.
+>
+> **One spelling for that STOP, in two contexts.** Inside a function: echo the
+> `TRACEABILITY: DEGRADED (…)` line to stderr, then `return 1` — never `exit`, which
+> kills the shell that called the helper. At top level: the echo IS the response, and
+> the calls live in the branch a healthy probe reaches, so a stop cannot fall through
+> to them. An unreadable probe is a stop too — `[ "" -lt 10 ]` is a shell error, and an
+> errored test skips the very branch that exists to stop us, so every probe below is
+> read through a digit-run `case` before it is compared.
 
 ### Standard Throttling
 
 ```bash
-REMAINING=$(gh api rate_limit --jq '.resources.core.remaining')
-if [ "$REMAINING" -lt 10 ]; then echo "TRACEABILITY: DEGRADED (rate limited)" >&2; exit 1; fi
-sleep 1  # Between each API call
+REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+case "$REMAINING" in
+    ''|*[!0-9]*)
+        echo "TRACEABILITY: DEGRADED (rate-limit probe failed)" >&2 ;;
+    *)
+        if [ "$REMAINING" -lt 10 ]; then
+            echo "TRACEABILITY: DEGRADED (rate limited)" >&2
+        else
+            gh api "$API_PATH"
+            sleep 1  # Between each API call
+        fi ;;
+esac
 ```
 
 ### Check Before Batch Operations
@@ -31,7 +48,13 @@ sleep 1  # Between each API call
 ```bash
 check_rate_limit() {
     local remaining
-    remaining=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
+    remaining=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+
+    case "$remaining" in
+        ''|*[!0-9]*)
+            echo "TRACEABILITY: DEGRADED (rate-limit probe failed)" >&2
+            return 1 ;;
+    esac
 
     if [ "$remaining" -lt 10 ]; then
         local reset_time
@@ -41,8 +64,8 @@ check_rate_limit() {
     fi
 }
 
-check_rate_limit || exit 1   # D4: STOP the fan-out; never wait it out
-for issue in $(seq 1 100); do
+# D4: STOP means the loop never starts — check_rate_limit has already reported.
+check_rate_limit && for issue in $(seq 1 100); do
     gh api repos/{owner}/{repo}/issues/${issue}
     sleep 1  # Throttle between calls
 done
@@ -87,7 +110,7 @@ make_api_call() {
 }
 
 # Validate responses before using
-BODY=$(gh issue view $ISSUE --json body -q '.body' 2>/dev/null)
+BODY=$(gh issue view "$ISSUE" --json body -q '.body' 2>/dev/null)
 if [ -z "$BODY" ]; then
     echo "Issue body empty or not found"
     exit 1
@@ -120,7 +143,7 @@ printf '%s\n' "$COMMENT_BODY" > "$DEVFLOW_BODY_RAW" \
     -F body=@"$DEVFLOW_BODY" \
     -f commit_id="$HEAD_SHA" \
     -f path="$FILE_PATH" \
-    -F line=$LINE_NUMBER \
+    -F line="$LINE_NUMBER" \
     -f side="RIGHT"
 
 sleep 1  # Rate limiting between comments
@@ -133,11 +156,11 @@ is_line_in_diff() {
     local file="$1"
     local line="$2"
 
-    if ! gh pr diff $PR_NUMBER --name-only | grep -q "^${file}$"; then
+    if ! gh pr diff "$PR_NUMBER" --name-only | grep -q "^${file}$"; then
         return 1
     fi
 
-    gh pr diff $PR_NUMBER -- "$file" | grep -n "^+" | cut -d: -f1 | grep -q "^${line}$"
+    gh pr diff "$PR_NUMBER" -- "$file" | grep -n "^+" | cut -d: -f1 | grep -q "^${line}$"
 }
 
 if is_line_in_diff "$FILE" "$LINE"; then
@@ -170,7 +193,11 @@ fi
 ```bash
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1  # Validate semver
 git tag -a "v${VERSION}" -m "Version ${VERSION}" && git push origin "v${VERSION}"
-gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_NOTES"
+
+printf '%s\n' "$NOTES" > "$DEVFLOW_NOTES_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" \
+  && gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_NOTES"
 ```
 
 Release notes are a GitHub-visible sink, so `$DEVFLOW_NOTES` is the SCRUBBED file the
@@ -290,7 +317,7 @@ link of its own chain — `$DEVFLOW_BODY` is the scrubber's output, not a shared
 printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW" \
   && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
-  && gh pr review $PR_NUMBER --approve --body-file "$DEVFLOW_BODY"
+  && gh pr review "$PR_NUMBER" --approve --body-file "$DEVFLOW_BODY"
 
 { cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Requested Changes
@@ -299,7 +326,7 @@ printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW" 
 EOF
 } && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
-  && gh pr review $PR_NUMBER --request-changes --body-file "$DEVFLOW_BODY"
+  && gh pr review "$PR_NUMBER" --request-changes --body-file "$DEVFLOW_BODY"
 ```
 
 ---
@@ -309,7 +336,7 @@ EOF
 ### Batch Field Selection
 
 ```bash
-gh pr view $PR --json title,body,state,author,reviews,commits
+gh pr view "$PR" --json title,body,state,author,reviews,commits
 ```
 
 ### GraphQL for Complex Queries
@@ -379,7 +406,7 @@ gh workflow run "deploy.yml" \
 
 sleep 5
 RUN_ID=$(gh run list --workflow "deploy.yml" --limit 1 --json databaseId -q '.[0].databaseId')
-gh run watch $RUN_ID
+gh run watch "$RUN_ID"
 ```
 
 ### Check Run Status
@@ -417,18 +444,23 @@ wait_for_checks() {
 ```bash
 batch_api_calls() {
     local results=()
+    local total=$# attempted=0 stop=""
 
     # Each positional argument is a gh-api path (e.g. "repos/owner/repo/issues/1").
     # Direct invocation — no eval; shell metacharacters in paths are not supported.
     for api_path in "$@"; do
-        REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
+        REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+
+        case "$REMAINING" in
+            ''|*[!0-9]*) stop="rate-limit probe failed"; break ;;
+        esac
 
         if [ "$REMAINING" -lt 10 ]; then
-            # D4: STOP; the caller reports THROTTLED ({n} not processed).
-            echo "TRACEABILITY: DEGRADED (rate limited)" >&2
+            stop="rate limited"
             break
         fi
 
+        attempted=$((attempted + 1))
         result=$(gh api "$api_path" 2>&1) || {
             echo "Failed: gh api $api_path" >&2
             continue
@@ -439,6 +471,14 @@ batch_api_calls() {
     done
 
     printf '%s\n' "${results[@]}"
+
+    # D4: what was collected is still printed, but a batch that stopped early must not
+    # read as a complete one — the remainder is named and the status is non-zero, so
+    # "the caller reports THROTTLED" is something the caller can actually detect.
+    if [ -n "$stop" ]; then
+        echo "TRACEABILITY: DEGRADED ($stop) — THROTTLED ($((total - attempted)) not processed)" >&2
+        return 1
+    fi
 }
 ```
 
