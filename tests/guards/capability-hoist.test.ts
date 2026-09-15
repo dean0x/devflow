@@ -179,9 +179,7 @@ const PROCESS_OPEN = /^(?:\*\*Process:\*\*|### Process\b)/;
 const PROCESS_CLOSE = /^(?:#{2,4} |\*\*Output:\*\*|---\s*$)/;
 /**
  * `### Process` satisfies BOTH shapes — it opens its own block and closes the one
- * above it. Classified into both sets rather than by an either/or, which is what the
- * line-at-a-time scan this replaced did implicitly (it tested the opener first, then
- * scanned for a closer from the following line).
+ * above it. Classified into both sets rather than by an either/or.
  */
 
 export interface ProcessBlock {

@@ -96,8 +96,12 @@ export interface BuildRun {
  * Run the real build script against an isolated fake root.
  * `cwd` stays at the repo root so module resolution is unchanged; the root the
  * build walks and writes comes from DEVFLOW_MDS_ROOT alone.
+ *
+ * Module-local: `buildCommittedTree` below is the sole caller in this file, and
+ * every other test file spawns the build through its own `runBuild` against its
+ * own fake root rather than importing this one.
  */
-export function runMdsBuild(fakeRoot: string): BuildRun {
+function runMdsBuild(fakeRoot: string): BuildRun {
   const result = spawnSync(TSX_BIN, [BUILD_MDS_SCRIPT], {
     cwd: ROOT,
     encoding: 'utf-8',
