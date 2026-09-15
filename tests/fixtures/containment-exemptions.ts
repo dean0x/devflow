@@ -599,4 +599,24 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'Quoted to `"$ISSUE"` where the line now lives, in fetch-issue\'s mechanics; the ' +
       'criteria and dependency extraction below it moved byte-identically.',
   },
+
+  // ── the batch projection a wave round reads (#339-resolve) ─────────────────
+  //
+  // performance-03's E1 follow-on: `fetch-issues-batch` is the op a wave round
+  // names to refresh its ticket set, but its per-issue selection projected no
+  // `state`, so a ticket closed out of band read exactly like an open one. The
+  // field is added to the selection where the selection lives — the generated
+  // mechanics — and rendered outside the `<untrusted-issue-body>` wrapper,
+  // because a tracker-computed enum is not remote prose.
+  {
+    file: 'git-agent.md',
+    startLine: 319,
+    endLine: 320,
+    rationale:
+      '#339-resolve. Both per-issue GraphQL alias lines WIDENED by one field: `state` now ' +
+      'sits between `title` and `body` in the selection, so a wave round refreshing the ' +
+      'batch can see a ticket closed out of band instead of re-planning a closed one. ' +
+      'Every other field on both lines is byte-unchanged, and the lines themselves moved ' +
+      'to fetch-issues-batch\'s mechanics in P2-S6 before this widened them.',
+  },
 ];

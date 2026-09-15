@@ -117,11 +117,12 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 2. Fetch all issues in a **single** GraphQL query using per-issue aliases (dynamically constructed for the resolved list); resolve owner/repo from the git remote context:
    ```
    gh api graphql -f query='query \{ repository(owner:"OWNER", name:"REPO") \{
-     i1: issue(number:N1) \{ number title body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
-     i2: issue(number:N2) \{ number title body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     i1: issue(number:N1) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     i2: issue(number:N2) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
      ...
    \}\}'
    ```
+2b. Render each issue's `state` (`OPEN` or `CLOSED`) as a `**State**: \{state\}` line of its own, between that issue's `### Issue #\{number\}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because `state` is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
 @end
 
 @define manage_debt():
@@ -169,15 +170,28 @@ post_scrubbed() {
 add_tech_debt_item() {
     local new_item="$1"
     local current_body
-    current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body')
+    # Items append to the BODY (Process step 6) — a comment would leave the body
+    # invariant, so the probe below could never fire and the archive successor would
+    # be unreachable. A failed read must stop: an empty body REPLACES the backlog.
+    current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body') || return 1
     local body_length=${#current_body}
 
     if [ "$body_length" -gt "$MAX_SIZE" ]; then
         echo "Tech debt issue approaching size limit, archiving..."
         archive_tech_debt_issue
+        # The successor is a different issue with a different body; if the archive
+        # degraded, TECH_DEBT_ISSUE still names the predecessor and this returns
+        # what the first read did.
+        current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body') || return 1
     fi
 
-    post_scrubbed "$new_item" "$TECH_DEBT_ISSUE"
+    # Same chain, same reason, as post_scrubbed — only the sink differs: `gh issue
+    # edit` replaces the whole body, so what is composed is the body just read plus
+    # the new item, under its trailing `## Items` heading.
+    printf '%s\n%s\n' "$current_body" "$new_item" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && gh issue edit "$TECH_DEBT_ISSUE" --body-file "$DEVFLOW_BODY"
 }
 
 archive_tech_debt_issue() {
