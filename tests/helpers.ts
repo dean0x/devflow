@@ -657,6 +657,24 @@ export function gitAgentSinkCorpus(root = ROOT): CorpusEntry[] {
   return corpus
 }
 
+// ── Tracker reference-naming collector ───────────────────────────────────────
+//
+// One collector for the AC-2.5/AC-2.7 single-naming-line claim, shared by the
+// containment and byte-budget suites so both assert over the same definition of
+// "names a reference path" (PF-018: a probe that re-implements the collector
+// proves the copy is live, not the guard).
+
+/**
+ * Named collector: lines of the compiled agent that name a `references/tracker/`
+ * path.
+ *
+ * Both suites drive this one function — the live assertion (exactly one such
+ * line, inside the preamble) and the known-bad probes that seed a second line.
+ */
+export function collectTrackerNamingLines(content: string): string[] {
+  return content.split('\n').filter(line => line.includes('references/tracker/'))
+}
+
 // ── Fence parsing helpers ─────────────────────────────────────────────────────
 //
 // These mirror registry-integrity.test.ts:449-456 verbatim (the repo's

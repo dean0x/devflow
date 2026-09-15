@@ -188,7 +188,7 @@ const ALLOWED_OUTPUT_DIRS = [
  *
  * Exported so guards assert the build's refusal text against the table itself
  * rather than against a retyped literal: adding a destination then rewrites both
- * the message and its assertion from one edit (ADR-024 — the expectation must
+ * the message and its assertion from one edit (PF-018 — the expectation must
  * come from the thing under test, not a copy of it).
  */
 export const ALLOWED_OUTPUT_DIR_NAMES: readonly string[] = ALLOWED_OUTPUT_DIRS.map(entry => entry.dir);

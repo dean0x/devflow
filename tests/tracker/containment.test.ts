@@ -42,7 +42,12 @@ import {
   expandVariants,
   generatedReferenceManifest,
 } from '../../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, walkFiles } from '../helpers.js';
+import {
+  ROOT,
+  collectTrackerNamingLines,
+  resolveAgentSource,
+  walkFiles,
+} from '../helpers.js';
 import {
   CONTAINMENT_EXEMPTIONS,
   type ContainmentExemption,
@@ -720,11 +725,6 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
 
 /** The `{provider}` / `{op}` template the preamble's one load instruction composes. */
 const LOAD_INSTRUCTION_TEMPLATE = 'references/tracker/{provider}/{op}.md';
-
-/** Named collector: lines of the compiled agent that name a `references/tracker/` path. */
-function collectTrackerNamingLines(content: string): string[] {
-  return content.split('\n').filter(line => line.includes('references/tracker/'));
-}
 
 /**
  * Named collector: the relative paths the load instruction can reach for a

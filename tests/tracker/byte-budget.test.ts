@@ -31,7 +31,7 @@ import * as path from 'path';
 
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
 import { TRACKER_GITHUB_OPS, MIN_VARIANT_PAIRS } from '../../src/core/mds-variants.js';
-import { resolveAgentSource } from '../helpers.js';
+import { collectTrackerNamingLines, resolveAgentSource } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Budget constants — every one carries its derivation. Never a bare number.
@@ -783,11 +783,6 @@ describe('byte budget: the provider-resolution preamble', () => {
     ).toBe(2);
   });
 });
-
-/** Named collector: lines naming a `references/tracker/` path. */
-function collectTrackerNamingLines(content: string): string[] {
-  return content.split('\n').filter(line => line.includes('references/tracker/'));
-}
 
 // ---------------------------------------------------------------------------
 // 4. Bidirectional structural check [DR-12]
