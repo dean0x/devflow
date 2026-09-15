@@ -405,6 +405,12 @@ export type OverlayUnit = OverlayUnitRef & {
   readonly files: readonly string[];
 };
 
+/** The provider-directory arm of {@link OverlayUnit}, for the code that swaps one whole. */
+type ProviderOverlayUnit = Extract<OverlayUnit, { kind: 'provider' }>;
+
+/** The flat cross-cutting arm of {@link OverlayUnit}, for the code that renames it document by document. */
+type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
+
 /** The identity half of a unit, as the failure report carries it. */
 function unitRef(unit: OverlayUnit): OverlayUnitRef {
   return unit.kind === 'provider' ? { kind: 'provider', subdir: unit.subdir } : { kind: 'cross-cutting' };
@@ -562,19 +568,121 @@ async function restoreDisplacedUnit(
 }
 
 /**
- * Promote a fully built staging tree into place.
+ * How a promotion half records what its last completed step left on disk.
  *
- * A provider directory is swapped whole — displace the installed unit to a `.old`
- * sibling, rename the staging tree into its place, then drop the backup — so the
- * installed directory is either entirely the previous install or entirely the new one
- * (DR-05, risk P2-g), and a rename that fails half-way restores the previous one rather
- * than leaving the provider empty. The flat set is promoted one `rename` per document
- * because its directory is shared with hand-authored references (D-OVERLAY-FLAT-UNIT).
+ * Called as the promotion passes each point of no return, never reconstructed afterwards
+ * — see {@link promoteUnitStagingTree}, which owns the recorded value and reports it.
+ */
+type RecordPromotionState = (state: OverlayFailureState) => void;
+
+/**
+ * Promote the flat cross-cutting set — one `rename` per document.
  *
- * A failure reports the state it left rather than a state a failure is assumed to imply:
- * `state` is advanced as the promotion passes each point of no return, so the catch
- * describes the filesystem as it now is. That is the whole difference between a report a
- * user can act on and one that names a recovery copy the same run went on to delete.
+ * There is no directory to swap. These documents land directly in `references/`, beside
+ * hand-authored files the overlay must never touch, so the unit is promoted one `rename`
+ * per document and a mid-flight failure leaves it part new and part old
+ * (D-OVERLAY-FLAT-UNIT, recorded on {@link OverlayUnit}). That is a weaker guarantee than
+ * {@link promoteProviderUnit}'s whole-directory swap, which is why the recorded state
+ * names which documents carry this run's bytes rather than claiming the set is untouched.
+ *
+ * Throws on the first failing rename; the caller reports the state recorded by then.
+ */
+async function promoteCrossCuttingUnit(
+  unit: CrossCuttingOverlayUnit,
+  referencesTarget: string,
+  stagingDir: string,
+  record: RecordPromotionState,
+): Promise<void> {
+  for (const [index, relPath] of unit.files.entries()) {
+    const basename = relPath.split('/').slice(-1)[0];
+    await fs.rename(path.join(stagingDir, basename), path.join(referencesTarget, basename));
+    // Past the first rename the set is mixed, and there is no directory to swap back
+    // (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the
+    // rest still carry the previous install's. Recorded after each rename so a failure
+    // on the next one names both halves instead of claiming the set is untouched.
+    record({
+      kind: 'partially-refreshed',
+      refreshed: unit.files.slice(0, index + 1),
+      stale: unit.files.slice(index + 1),
+    });
+  }
+  await fs.rm(stagingDir, { recursive: true, force: true });
+}
+
+/**
+ * Promote a provider directory — swapped whole, or not at all.
+ *
+ * Displace the installed unit to a `.old` sibling, rename the staging tree into its
+ * place, then drop the backup — so the installed directory is either entirely the
+ * previous install or entirely the new one (DR-05, risk P2-g), and a rename that fails
+ * half-way restores the previous one rather than leaving the provider empty.
+ *
+ * Throws once the state it left has been recorded; the caller reports it.
+ */
+async function promoteProviderUnit(
+  unit: ProviderOverlayUnit,
+  referencesTarget: string,
+  stagingDir: string,
+  record: RecordPromotionState,
+): Promise<void> {
+  const target = underRoot(referencesTarget, unit.subdir);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+
+  // Move the installed unit ASIDE, never delete it, before the staging tree takes
+  // its place. `rm(target)` then `rename(staging, target)` destroys the only copy
+  // first: a rename that then fails leaves the provider with NO mechanics at all,
+  // while the report — and the summary line init.ts renders from it — still claims
+  // the previously installed files were left unchanged. The backup is what makes
+  // that claim true, so a failed promotion is recoverable rather than a silent
+  // deletion (avoids PF-009: a reported failure must describe the state it left).
+  //
+  // The `.old` sibling is pre-cleaned like the `.tmp` one. A crash that strands
+  // either is converged away by a later run's tracker-subtree prune (both names end
+  // in neither `/` nor `.md`, so no manifest entry can collide with them) — but the
+  // backup this run is still relying on is exempt from this run's prune, which is
+  // what `restore-failed` carries the recovery path for.
+  const backup = `${target}.old`;
+  await fs.rm(backup, { recursive: true, force: true });
+
+  let displaced = false;
+  try {
+    await fs.rename(target, backup);
+    displaced = true;
+  } catch (err) {
+    // Nothing installed yet — a first install has no unit to displace, so a failure
+    // from here on leaves the unit ABSENT rather than stale.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    record({ kind: 'not-installed', absent: unit.files });
+  }
+
+  try {
+    await fs.rename(stagingDir, target);
+  } catch (err) {
+    if (displaced) {
+      const restored = await restoreDisplacedUnit(backup, target);
+      if (!restored.ok) {
+        record({ kind: 'restore-failed', recoveryPath: backup, restoreError: restored.error });
+      }
+    }
+    throw err;
+  }
+
+  await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/**
+ * Promote a fully built staging tree into place, dispatched on what kind of unit it is.
+ *
+ * The two kinds are promoted by two different strategies with two different guarantees,
+ * and each half states its own: {@link promoteProviderUnit} swaps a directory whole,
+ * {@link promoteCrossCuttingUnit} renames the flat set document by document.
+ *
+ * What they share is the failure shape. A failure reports the state it left rather than a
+ * state a failure is assumed to imply: `state` is advanced as the running half passes each
+ * point of no return, so the catch describes the filesystem as it now is. That is the whole
+ * difference between a report a user can act on and one that names a recovery copy the same
+ * run went on to delete. Discarding the staging tree is shared for the same reason — an
+ * abandoned unit leaves no `.tmp` residue, whichever half abandoned it.
  *
  * Exported for the sake of ONE property that cannot be driven through
  * {@link overlayGeneratedReferences}: a promotion that fails AFTER the installed unit has
@@ -589,68 +697,21 @@ export async function promoteUnitStagingTree(
   stagingDir: string,
 ): Promise<UnitPromotion> {
   let state: OverlayFailureState = { kind: 'installed-unchanged' };
+  const record: RecordPromotionState = next => { state = next; };
   try {
-    if (unit.kind === 'cross-cutting') {
-      for (const [index, relPath] of unit.files.entries()) {
-        const basename = relPath.split('/').slice(-1)[0];
-        await fs.rename(path.join(stagingDir, basename), path.join(referencesTarget, basename));
-        // Past the first rename the set is mixed, and there is no directory to swap back
-        // (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the
-        // rest still carry the previous install's. Recorded after each rename so a failure
-        // on the next one names both halves instead of claiming the set is untouched.
-        state = {
-          kind: 'partially-refreshed',
-          refreshed: unit.files.slice(0, index + 1),
-          stale: unit.files.slice(index + 1),
-        };
+    switch (unit.kind) {
+      case 'cross-cutting':
+        await promoteCrossCuttingUnit(unit, referencesTarget, stagingDir, record);
+        break;
+      case 'provider':
+        await promoteProviderUnit(unit, referencesTarget, stagingDir, record);
+        break;
+      default: {
+        const _exhaustive: never = unit;
+        void _exhaustive;
+        throw new Error('Unknown overlay unit kind');
       }
-      await fs.rm(stagingDir, { recursive: true, force: true });
-      return { ok: true };
     }
-
-    const target = underRoot(referencesTarget, unit.subdir);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-
-    // Move the installed unit ASIDE, never delete it, before the staging tree takes
-    // its place. `rm(target)` then `rename(staging, target)` destroys the only copy
-    // first: a rename that then fails leaves the provider with NO mechanics at all,
-    // while the report — and the summary line init.ts renders from it — still claims
-    // the previously installed files were left unchanged. The backup is what makes
-    // that claim true, so a failed promotion is recoverable rather than a silent
-    // deletion (avoids PF-009: a reported failure must describe the state it left).
-    //
-    // The `.old` sibling is pre-cleaned like the `.tmp` one. A crash that strands
-    // either is converged away by a later run's tracker-subtree prune (both names end
-    // in neither `/` nor `.md`, so no manifest entry can collide with them) — but the
-    // backup this run is still relying on is exempt from this run's prune, which is
-    // what `restore-failed` carries the recovery path for.
-    const backup = `${target}.old`;
-    await fs.rm(backup, { recursive: true, force: true });
-
-    let displaced = false;
-    try {
-      await fs.rename(target, backup);
-      displaced = true;
-    } catch (err) {
-      // Nothing installed yet — a first install has no unit to displace, so a failure
-      // from here on leaves the unit ABSENT rather than stale.
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      state = { kind: 'not-installed', absent: unit.files };
-    }
-
-    try {
-      await fs.rename(stagingDir, target);
-    } catch (err) {
-      if (displaced) {
-        const restored = await restoreDisplacedUnit(backup, target);
-        if (!restored.ok) {
-          state = { kind: 'restore-failed', recoveryPath: backup, restoreError: restored.error };
-        }
-      }
-      throw err;
-    }
-
-    await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
     return { ok: true };
   } catch (err) {
     await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
