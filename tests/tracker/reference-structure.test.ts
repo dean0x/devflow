@@ -44,8 +44,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
-import { generatedReferenceManifest } from '../../src/targets/claude-code/installer.js';
+import { TRACKER_GITHUB_OPS, generatedReferenceManifest } from '../../src/core/mds-variants.js';
 import {
   collectUnfencedH2,
   extractOpSectionFromCorpus,

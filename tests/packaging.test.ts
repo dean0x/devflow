@@ -33,7 +33,7 @@ import {
   MDS_REFERENCE_MODULES,
   MDS_PARTIALS,
 } from './fixtures/mds-manifest.js';
-import { generatedReferenceManifest } from '../src/targets/claude-code/installer.js';
+import { generatedReferenceManifest } from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 

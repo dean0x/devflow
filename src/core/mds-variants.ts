@@ -1,20 +1,26 @@
 /**
  * MDS host output validation and variant expansion.
  *
- * Pure module — zero I/O. All functions take plain strings and return Result
- * values; callers own every filesystem call and every process exit.
+ * Pure module — zero I/O. Every question a caller asks about a HOST is answered
+ * with a Result; callers own every filesystem call and every process exit.
  *
  * applies ADR-013: pure core-layer module, no build-script or adapter concerns.
- * avoids PF-014: no process.exit(); all fallible paths return Result. The
+ * The registries below are agent-neutral, so what is DERIVED from them is derived
+ * here rather than inside an install target — a target adapter computing a build
+ * fact, with tests importing that adapter to learn it, is the seam inverting.
+ * avoids PF-014: no process.exit(); every fallible path returns Result. The
  * exiting shell is scripts/build-mds.ts, which renders these errors into its
  * pre-existing messages.
  *
- * Scope guarantee: this module answers exactly four questions for an MDS host —
- *   1. Is the filename it will emit safe? (validateOutputName)
+ * Scope guarantee: this module answers exactly five questions —
+ *   1. Is the filename a host will emit safe? (validateOutputName)
  *   2. Is the directory it declares one the build may write into, and which host
  *      variant does that directory select? (resolveOutputDir)
  *   3. Which files does a reference module fan out into? (expandVariants)
  *   4. Which slice of its compiled body belongs to each? (splitVariantSections)
+ *   5. Which files does the shipped registry produce, flattened into the manifest
+ *      an installer converges to? (generatedReferenceManifest — the one answer
+ *      that asserts instead of returning a Result; see the function for why.)
  * It still performs no I/O and no iteration over the filesystem.
  *
  * The `-variants` in the filename stopped being a reservation in Phase 2: the
@@ -138,6 +144,22 @@ interface AllowedOutputDir {
 export const AGENTS_OUTPUT_DIR = 'dist/agents';
 
 /**
+ * The bare (unprefixed) skill that OWNS the generated references.
+ *
+ * One fact, three derivations: SKILL_REFS_OUTPUT_DIR below is composed from it,
+ * the installer decides which skill install triggers the reference overlay from
+ * it, and the init summary renders `prefixSkillName()` of it. Before it existed
+ * the answer was retyped at each of those three sites, so moving the references
+ * to another skill meant finding all three spellings and nothing failed if only
+ * two were found — the PF-013 shape, a hardcoded spelling that still resolves.
+ *
+ * Bare, not `devflow:`-prefixed: the build writes to `dist/skills/git/…` while
+ * the install target is `skills/devflow:git/`. prefixSkillName is what spans that
+ * gap, and it is applied at the install sites rather than baked in here.
+ */
+export const SKILL_REFS_SKILL_NAME = 'git';
+
+/**
  * Repo-relative destination for `skill-refs` hosts — the generated `devflow:git`
  * skill references.
  *
@@ -153,7 +175,7 @@ export const AGENTS_OUTPUT_DIR = 'dist/agents';
  * Exported because the build's orphan prune must name this directory even when
  * no reference module is planned — the same reason AGENTS_OUTPUT_DIR is exported.
  */
-export const SKILL_REFS_OUTPUT_DIR = 'dist/skills/git/references';
+export const SKILL_REFS_OUTPUT_DIR = `dist/skills/${SKILL_REFS_SKILL_NAME}/references`;
 
 const ALLOWED_OUTPUT_DIRS = [
   { dir: 'dist/commands', variant: 'commands' },
@@ -402,7 +424,7 @@ export interface VariantPair {
 
 export type VariantExpansionError =
   | { kind: 'no-modules' }
-  | { kind: 'too-few-pairs'; count: number; minimum: number }
+  | { kind: 'too-few-pairs'; module: string; count: number; minimum: number }
   | { kind: 'empty-module'; module: string }
   | { kind: 'invalid-subdir-segment'; module: string; subdir: string; segment: string }
   | { kind: 'invalid-op-name'; module: string; op: string; cause: OutputNameError }
@@ -452,7 +474,15 @@ export function expandVariants(
     }
 
     if (mod.kind === 'fanout' && mod.ops.length < MIN_VARIANT_PAIRS) {
-      return Err({ kind: 'too-few-pairs', count: mod.ops.length, minimum: MIN_VARIANT_PAIRS });
+      // `module` like every sibling arm: the floor is PER MODULE, so a bare count
+      // leaves a reader of the refusal with no way to tell which registry entry is
+      // short — the omission typescript-02 names.
+      return Err({
+        kind: 'too-few-pairs',
+        module: mod.source,
+        count: mod.ops.length,
+        minimum: MIN_VARIANT_PAIRS,
+      });
     }
 
     for (const op of mod.ops) {
@@ -473,6 +503,40 @@ export function expandVariants(
   }
 
   return Ok(pairs);
+}
+
+/**
+ * Every reference file the build generates, as POSIX paths relative to
+ * {@link SKILL_REFS_OUTPUT_DIR} — the manifest an installer converges to.
+ *
+ * Derived from the registry above (VARIANT_MODULES, which carries
+ * TRACKER_GITHUB_OPS and GIT_CROSS_CUTTING_DOCS) through the same expandVariants
+ * the build plan uses. Hand-listing the operations here would create a second
+ * roster that drifts silently the moment one is added — the bidirectional-registry
+ * rule compliance-compose.ts states for its token tables.
+ *
+ * Lives beside the registry it reads rather than in the Claude Code installer that
+ * consumes it: nothing about the answer is Claude-Code-specific, and the packaging
+ * and containment tests that read it are asking the BUILD what it emits, not
+ * asking an install target (applies ADR-013).
+ *
+ * Asserts where its siblings return a Result. The registry is a compile-time
+ * constant, so a refusal is a programming error rather than an install-time
+ * degradation: no caller could sensibly continue, and every caller would otherwise
+ * carry the same impossible branch. The full refusal is rendered and not just its
+ * `kind` — the payload is what names the offending module and op, and a payload
+ * nothing reads is a payload nothing maintains (avoids PF-041). Same rendering the
+ * build's own refusal sinks use (scripts/build-mds.ts).
+ */
+export function generatedReferenceManifest(): readonly string[] {
+  const expanded = expandVariants();
+  if (!expanded.ok) {
+    throw new Error(
+      `Reference module registry does not expand — ${JSON.stringify(expanded.error)}. ` +
+      `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
+    );
+  }
+  return expanded.value.map(pair => pair.relPath);
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, g
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { expandVariants } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences } from '../../core/reference-sweep.js';
 
 // ---------------------------------------------------------------------------
@@ -284,9 +284,6 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 // Generated skill-reference overlay (P2-S14)
 // ---------------------------------------------------------------------------
 
-/** The registry-declared skill whose references the overlay converges. */
-const OVERLAY_SKILL_NAME = 'git';
-
 /** Sub-path under the references root that the prune converges to the manifest. */
 const TRACKER_SUBTREE = 'tracker';
 
@@ -311,30 +308,6 @@ export interface ReferenceOverlayResult {
   overlayFailures: OverlayFailure[];
   /** Result of converging `references/tracker/**` to the manifest. */
   pruned: SweepResult;
-}
-
-/**
- * Every reference file the build generates, as POSIX paths relative to
- * `dist/skills/git/references/`.
- *
- * Derived from the build's own module registries (`VARIANT_MODULES`, which carries
- * `TRACKER_GITHUB_OPS` and `GIT_CROSS_CUTTING_DOCS`) through the same `expandVariants`
- * the build plan uses. Hand-listing the operations here would create a second roster
- * that drifts silently the moment one is added — the bidirectional-registry rule
- * `compliance-compose.ts` states for its token tables.
- *
- * Throws when the registry does not expand. That is a programming error in a
- * compile-time constant, not an install-time degradation, so it is loud.
- */
-export function generatedReferenceManifest(): readonly string[] {
-  const expanded = expandVariants();
-  if (!expanded.ok) {
-    throw new Error(
-      `Reference module registry does not expand (${expanded.error.kind}) — ` +
-      `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
-    );
-  }
-  return expanded.value.map(pair => pair.relPath);
 }
 
 /**
@@ -981,7 +954,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // site downstream of all three branches above, so a shadowed devflow:git receives the
     // canonical GitHub mechanics exactly as a canonical install does — AC-2.4a / UAC-28,
     // which is a release blocker, not merely an acceptance criterion.
-    if (skillName === OVERLAY_SKILL_NAME) {
+    if (skillName === SKILL_REFS_SKILL_NAME) {
       const overlay = await overlayGeneratedReferences({
         referencesTarget: path.join(skillTarget, 'references'),
         warn,

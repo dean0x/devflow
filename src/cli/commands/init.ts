@@ -38,6 +38,7 @@ import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.j
 import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT, proxyJsonExists } from '../../core/proxy-state.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
+import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
@@ -175,9 +176,17 @@ export function formatSweepSummary(
  * a report.
  *
  * Pure function — returns lines, logs nothing (applies ADR-013).
+ *
+ * @param skillName - Bare name of the skill hosting the generated references,
+ *   rendered `devflow:`-prefixed. Defaults to the core constant the build path and
+ *   the installer's overlay trigger both read, so the renderer is never a third
+ *   independent statement of which skill owns them — the divergence PF-013
+ *   describes, where changing the answer means finding every retyped spelling and
+ *   nothing fails if one is missed.
  */
 export function formatOverlaySummary(
   report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
+  skillName: string = SKILL_REFS_SKILL_NAME,
 ): SummaryLine[] {
   const lines: SummaryLine[] = [];
 
@@ -186,7 +195,7 @@ export function formatOverlaySummary(
       level: 'info',
       message:
         `Installed ${report.overlaidRefs.length} generated skill reference(s) for ` +
-        `${prefixSkillName('git')}`,
+        prefixSkillName(skillName),
     });
   }
 

@@ -40,8 +40,8 @@ import {
   MIN_VARIANT_PAIRS,
   VARIANT_MODULES,
   expandVariants,
+  generatedReferenceManifest,
 } from '../../src/core/mds-variants.js';
-import { generatedReferenceManifest } from '../../src/targets/claude-code/installer.js';
 import { ROOT, resolveAgentSource, walkFiles } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
