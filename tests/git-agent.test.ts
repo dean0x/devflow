@@ -1283,8 +1283,11 @@ describe('git agent — static content guards (PF-018)', () => {
       ['a pipe ends the command', 'gh pr diff "$PR_NUMBER" --name-only | grep -n "^src/a.ts$"'],
       ['-b names a branch, not a body', 'gh pr checkout 123 -b review/pr-123'],
       [
-        'a scrubbed body beside a --json flag',
-        'PR_NUMBER=$(gh pr create --title "x" --body-file "$DEVFLOW_BODY" --json number -q \'.number\')',
+        // The shipped manage-debt size check, verbatim: a `gh issue` verb, the bare
+        // word `body` twice, and no body ever leaves. `--json body` is the closest
+        // real text in the corpus to a sink, so it is the control worth keeping.
+        'a --json field named body is a read, not a post',
+        "current_body=$(gh issue view $TECH_DEBT_ISSUE --json body -q '.body')",
       ],
     ];
     const falsePositives = negatives
