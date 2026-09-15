@@ -220,9 +220,13 @@ ${changelog}"
 ### Release with Assets
 
 ```bash
-gh release create "v${VERSION}" \
+# CHANGELOG.md is the RAW input here: redact-secrets.cjs takes any input path, and
+# release notes publish like any other body, so the file that ships is the scrubbed one.
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    CHANGELOG.md "$DEVFLOW_NOTES" \
+  && gh release create "v${VERSION}" \
     --title "v${VERSION} - ${RELEASE_TITLE}" \
-    --notes-file CHANGELOG.md \
+    --notes-file "$DEVFLOW_NOTES" \
     ./dist/*.tar.gz ./dist/*.zip
 ```
 
@@ -455,7 +459,8 @@ if [ $? -ne 0 ]; then exit 1; fi
 
 ```bash
 # VIOLATION: Assumes success
-PR_NUMBER=$(gh pr create --title "..." --body-file "$DEVFLOW_BODY" --json number -q '.number')
+PR_URL=$(gh pr create --title "..." --body-file "$DEVFLOW_BODY")
+PR_NUMBER="${PR_URL##*/}"
 gh pr merge $PR_NUMBER
 
 # VIOLATION: Silent failure

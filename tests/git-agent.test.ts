@@ -15,8 +15,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
-import { skillsDir } from '../src/core/assets.js';
-import { ROOT, resolveAgentSource, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
+import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
+import { getAllAgentNames } from '../src/core/plugins.js';
+import { TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS } from '../src/core/mds-variants.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
@@ -34,14 +36,85 @@ function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' |
 
 // ── Inline-body (D11 bypass) scan ───────────────────────────────────────────
 //
-// Pattern and scope both widened by P2-S7. `[^`\n]*` keeps a match on one line,
-// so `--body-file` / `--notes-file` (hyphen, not space or quote) never match.
+// A single-line, `--(body|notes)`-only regex reads a shell recipe the way a
+// human skims it, not the way a shell parses it: a backslash-continued
+// `gh issue create \` … `--body "…"` is ONE command spread over five lines, and
+// a body attached to `gh issue close --comment` is a posted body like any other.
+// Both escaped the old pattern entirely (#341), so an empty exclusion list meant
+// "no offender the regex could see", never "no offender".
+//
+// Two changes make the scan see the corpus as the shell does:
+//   (a) joinContinuations() folds every `\`-newline into a space BEFORE matching,
+//       so the unit matched is the command, not the source line;
+//   (b) INLINE_BODY_SHAPES names each posting form separately, so an offender
+//       reports WHICH shape caught it and a probe can prove each arm live on its
+//       own (PF-018/ADR-024 — an unnamed alternation inside one regex cannot say
+//       which branch carried the match).
 
-const INLINE_BODY_RE = /gh (?:pr|issue|release) [a-z-]+[^`\n]*--(?:body|notes)[ "]|-f body=/g;
+/**
+ * Fold shell line-continuations so one command is one string.
+ *
+ * `\`-newline-indent → a single space: exactly what the shell does before it
+ * parses words, and the only reason a `--body` five lines below its `gh` verb is
+ * reachable by a single-line pattern at all.
+ */
+function joinContinuations(text: string): string {
+  return text.replace(/\\\n[ \t]*/g, ' ');
+}
+
+/**
+ * Bounds a match to ONE command: no backtick (a Markdown code span ends the
+ * shell context), no newline, and none of `|`, `;`, `&` (a pipe or a chain
+ * starts a new command). Without the last three, `gh pr diff … | grep -n` reads
+ * as a `gh` invocation carrying a `-n` flag.
+ */
+const IN_COMMAND = '[^`\\n|;&]*';
+
+interface InlineBodyShape {
+  /** Reported on every offender, so a failure names the form, not just the text. */
+  readonly name: string;
+  readonly re: RegExp;
+}
+
+/**
+ * The posting forms that reach a tracker with a body devflow composed.
+ *
+ * Every entry is a SINK shape (something is published) or a BYPASS shape (a file
+ * ref that is not the scrubber's output). The two `unscrubbed-*` entries are
+ * strict: only the quoted scrubber variable passes, because `--body-file $X` with
+ * any other value posts a file the scrubber never wrote.
+ */
+const INLINE_BODY_SHAPES: readonly InlineBodyShape[] = [
+  // `gh pr create … --body "…"`, `gh issue close … --comment "…"`,
+  // `gh release create … --notes "…"`. `[ "]` after the flag keeps `--body-file`
+  // and `--notes-file` (hyphen) out.
+  {
+    name: 'long-flag',
+    re: new RegExp(`gh (?:pr|issue|release) [a-z-]+${IN_COMMAND}--(?:body|notes|comment)[ "]`, 'g'),
+  },
+  // The short spellings of the same three flags. Verb-restricted to the
+  // body-carrying subcommands so `gh pr checkout 123 -b my-branch` — where `-b`
+  // names a branch, not a body — is not read as a sink.
+  {
+    name: 'short-flag',
+    re: new RegExp(
+      `gh (?:pr|issue|release) (?:create|comment|review|close|reopen|edit)\\b${IN_COMMAND}-[bnc] `,
+      'g',
+    ),
+  },
+  // `gh api … -f body=…` — the REST form. `-F body=@…` is the file-ref form and
+  // is judged by `unscrubbed-api-file` instead, so `@` is excluded here.
+  { name: 'api-field', re: /(?:^|[ \t])(?:-f|-F|--field|--raw-field) body=(?!@)/gm },
+  // A file ref that is not the scrubber's output. The trailing `[^\s`]` means a
+  // prose mention (`--body-file` inside a code span, followed by a backtick) is
+  // never a match — only a flag with a real argument is.
+  { name: 'unscrubbed-file', re: /--(?:body-file|notes-file) (?!"\$DEVFLOW_(?:BODY|NOTES)")[^\s`]/g },
+  { name: 'unscrubbed-api-file', re: /-F body=@(?!"\$DEVFLOW_BODY")[^\s`]/g },
+];
 
 /**
  * Declared inline-body exceptions in the hand-authored `references/github-api.md`,
- * each frozen by the exact text `INLINE_BODY_RE` matches. See
+ * each frozen by the exact text an `INLINE_BODY_SHAPES` entry matches. See
  * D-INLINE-BODY-EXCLUSIONS at the guard's call site.
  *
  * The list is EMPTY: every recipe in that file composes its body to
@@ -55,7 +128,21 @@ const KNOWN_GITHUB_API_INLINE_BODIES: readonly string[] = [];
 
 interface InlineBodyOffender {
   readonly file: string;
+  /** Which INLINE_BODY_SHAPES entry caught it. */
+  readonly shape: string;
   readonly match: string;
+}
+
+/** Every shape that fires on a text, after continuations are folded. */
+function matchInlineBodyShapes(text: string): { shape: string; match: string }[] {
+  const joined = joinContinuations(text);
+  const hits: { shape: string; match: string }[] = [];
+  for (const shape of INLINE_BODY_SHAPES) {
+    for (const match of joined.match(shape.re) ?? []) {
+      hits.push({ shape: shape.name, match });
+    }
+  }
+  return hits;
 }
 
 /**
@@ -83,31 +170,71 @@ function collectStaleExclusions(
 }
 
 /**
- * Named collector: every inline-body form in the files a Git spawn can read.
+ * Named collector: every inline-body form in a corpus.
  *
- * Scope — dist/agents/git.md ∪ dist/skills/git/references/** (both via
- * gitAgentSinkCorpus) ∪ the hand-authored src/assets/skills/git/SKILL.md and
- * src/assets/skills/git/references/*.md. The hand-authored half is what P2-S7
- * added: SKILL.md is preloaded on every spawn and was previously unscanned.
+ * Parameterised on the corpus so the live assertion, the shape probe and the
+ * baseline known-bad probe all drive the SAME predicate (PF-018) — the baseline
+ * probe in particular needs a second, permanently-known-bad corpus to run it over.
  */
-function collectInlineBodyOffenders(): { corpus: CorpusEntry[]; offenders: InlineBodyOffender[] } {
-  const corpus: CorpusEntry[] = [...gitAgentSinkCorpus()];
-  const gitSkillDir = path.join(skillsDir(), 'git');
-  corpus.push({
-    path: path.join(gitSkillDir, 'SKILL.md'),
-    content: readFileSync(path.join(gitSkillDir, 'SKILL.md'), 'utf-8'),
-  });
-  for (const file of walkFiles(path.join(gitSkillDir, 'references'), f => f.endsWith('.md'), 1)) {
-    corpus.push({ path: file, content: readFileSync(file, 'utf-8') });
-  }
-
+function collectInlineBodyOffenders(corpus: readonly CorpusEntry[]): InlineBodyOffender[] {
   const offenders: InlineBodyOffender[] = [];
   for (const entry of corpus) {
-    for (const match of entry.content.match(INLINE_BODY_RE) ?? []) {
-      offenders.push({ file: entry.path, match });
+    for (const hit of matchInlineBodyShapes(entry.content)) {
+      offenders.push({ file: entry.path, shape: hit.shape, match: hit.match });
     }
   }
-  return { corpus, offenders };
+  return offenders;
+}
+
+interface InlineBodyCorpus {
+  readonly corpus: CorpusEntry[];
+  /** Agents contributed, for provenance. */
+  readonly agents: number;
+  /** Generated skill references contributed, for provenance. */
+  readonly generated: number;
+}
+
+/**
+ * The whole installed prompt surface — every file a devflow session can put in
+ * front of a model that could teach it to post a body.
+ *
+ * Scope is the fix #341 asks for: the old scope (git.md ∪ the generated
+ * references ∪ skills/git/**) made the Git agent's own neighbourhood the only
+ * policed one, and a `gh api … -f body=` recipe in the review-methodology skill
+ * was a second publication path outside both the D10 gate and the D11 scrub with
+ * nothing looking at it. Agents, commands and rules ship the same way skills do,
+ * so they are scanned the same way.
+ *
+ * Deduped by path — skills/git/** arrives twice (once here, once inside
+ * gitAgentSinkCorpus) and a doubled file would double every offender.
+ */
+function inlineBodyCorpus(): InlineBodyCorpus {
+  const byPath = new Map<string, CorpusEntry>();
+  const add = (filePath: string, content: string): void => {
+    if (!byPath.has(filePath)) byPath.set(filePath, { path: filePath, content });
+  };
+
+  const agentSources = resolveAllAgents();
+  for (const source of agentSources.values()) add(source.path, source.content);
+
+  const refsRoot = compiledSkillRefsDir();
+  let generated = 0;
+  for (const entry of gitAgentSinkCorpus()) {
+    if (entry.path.startsWith(refsRoot)) generated++;
+    add(entry.path, entry.content);
+  }
+
+  for (const file of walkFiles(skillsDir(), f => f.endsWith('.md'))) {
+    add(file, readFileSync(file, 'utf-8'));
+  }
+  for (const file of walkFiles(commandsDir(), f => f.endsWith('.md'), 1)) {
+    add(file, readFileSync(file, 'utf-8'));
+  }
+  for (const file of walkFiles(rulesDir(), f => f.endsWith('.md'), 1)) {
+    add(file, readFileSync(file, 'utf-8'));
+  }
+
+  return { corpus: [...byPath.values()], agents: agentSources.size, generated };
 }
 
 /**
@@ -1050,14 +1177,16 @@ describe('git agent — static content guards (PF-018)', () => {
     // form anywhere in the scanned corpus, which is exactly how a new sink escapes D11
     // (PF-023).
     //
-    // P2-S7 widened this guard on both axes:
-    //   pattern — `release` joins `pr`/`issue`, and `--notes` joins `--body`, because
-    //     `gh release create … --notes "$NOTES"` is an inline-body form that the old
-    //     pattern could not see at all;
-    //   scope  — the hand-authored skill files join the compiled ones. The old scope
-    //     (git.md ∪ dist references) made SKILL.md a blind spot, and SKILL.md is
-    //     PRELOADED on every spawn, so it was the worst possible place to be blind.
-    const { corpus, offenders } = collectInlineBodyOffenders();
+    // #341 widened it again on both axes:
+    //   pattern — continuations are folded first and the forms are a named table
+    //     (INLINE_BODY_SHAPES), so a backslash-continued `gh issue create` and a
+    //     `--comment` attached to a close are sinks like any other;
+    //   scope  — every installed agent, command, rule and skill, not just the Git
+    //     agent's own neighbourhood. A posting recipe in the review-methodology
+    //     skill was a publication path outside both the D10 gate and the D11
+    //     scrub, and nothing was looking at it.
+    const { corpus } = inlineBodyCorpus();
+    const offenders = collectInlineBodyOffenders(corpus);
     expect(
       corpus.length,
       'inline-body scan corpus is empty — the guard would pass by scanning nothing',
@@ -1082,16 +1211,143 @@ describe('git agent — static content guards (PF-018)', () => {
       'declared github-api.md exclusion(s) no longer match anything — delete them from the list',
     ).toEqual([]);
 
-    // Non-vacuous: the pattern must match BOTH shapes it is guarding against — the
-    // pre-existing one and the arm P2-S7 added.
+    // Non-vacuous: the pattern must still match BOTH shapes P2-S7 guarded against —
+    // the pre-existing one and the release-notes arm — now reported by name.
     expect(
-      'gh pr create --title "x" --body "unscrubbed"'.match(INLINE_BODY_RE),
-      'bypass guard regex no longer matches a known-bad inline body form — the guard is inert',
-    ).not.toBeNull();
+      matchInlineBodyShapes('gh pr create --title "x" --body "unscrubbed"').map(h => h.shape),
+      'bypass guard no longer matches a known-bad inline body form — the guard is inert',
+    ).toEqual(['long-flag']);
     expect(
-      'gh release create v1 --notes "unscrubbed"'.match(INLINE_BODY_RE),
-      'bypass guard regex no longer matches an inline release-notes body — the new arm is inert',
-    ).not.toBeNull();
+      matchInlineBodyShapes('gh release create v1 --notes "unscrubbed"').map(h => h.shape),
+      'bypass guard no longer matches an inline release-notes body — that arm is inert',
+    ).toEqual(['long-flag']);
+  });
+
+  it('D11: shape table probe — each of the five inline-body shapes fires, and the scrubbed forms do not', () => {
+    // One arm per INLINE_BODY_SHAPES entry, each proven live on its own (PF-018):
+    // a five-way alternation inside one regex cannot say which branch carried a
+    // match, so a dead arm would be invisible behind the four that still work.
+    const positives: readonly (readonly [string, string, string])[] = [
+      ['long-flag', 'inline PR body', 'gh pr create --title "x" --body "unscrubbed"'],
+      [
+        'long-flag',
+        // The joiner is what makes this reachable: the `--body` sits four lines
+        // below its verb, which is how every real offender #341 found was written.
+        'backslash-continued issue body',
+        'gh issue create \\\n    --title "Bug" \\\n    --label "bug" \\\n    --body "$(cat <<\'EOF\'',
+      ],
+      ['long-flag', 'body attached to a close', 'gh issue close 12 --comment "## Archived'],
+      ['short-flag', 'short PR body flag', 'gh pr create --title "x" -b "unscrubbed"'],
+      ['api-field', 'REST body field', "gh api repos/o/r/pulls/1/comments -f body=\"$BODY\""],
+      ['unscrubbed-file', 'a file the scrubber never wrote', 'gh release create v1 --notes-file CHANGELOG.md'],
+      ['unscrubbed-api-file', 'a file ref the scrubber never wrote', 'gh api graphql -F body=@reply.txt'],
+    ];
+    const missed = positives
+      .filter(([shape, , text]) => !matchInlineBodyShapes(text).some(h => h.shape === shape))
+      .map(([shape, label]) => `${shape}: ${label}`);
+    expect(
+      missed,
+      `inline-body shape(s) that no longer fire on their own known-bad sample — the arm is ` +
+      `inert and the corpus is unpoliced for that form:\n  ${missed.join('\n  ')}`,
+    ).toEqual([]);
+
+    // GREEN controls. A collector that flagged everything would satisfy the arms
+    // above and still be useless; these are the forms the recipes are supposed to
+    // end up in, plus the two prose shapes that must never read as commands.
+    const negatives: readonly (readonly [string, string])[] = [
+      ['scrubbed body file', 'gh issue comment 12 --body-file "$DEVFLOW_BODY"'],
+      ['scrubbed api body file', 'gh api repos/o/r/pulls/1/comments -F body=@"$DEVFLOW_BODY"'],
+      ['scrubbed notes file', 'gh release create v1 --notes-file "$DEVFLOW_NOTES"'],
+      [
+        'the github-api.md head blockquote',
+        '> via `--body-file` / `-F body=@`, `$DEVFLOW_NOTES` via `--notes-file` — chained',
+      ],
+      ['a pipe ends the command', 'gh pr diff "$PR_NUMBER" --name-only | grep -n "^src/a.ts$"'],
+      ['-b names a branch, not a body', 'gh pr checkout 123 -b review/pr-123'],
+      [
+        'a scrubbed body beside a --json flag',
+        'PR_NUMBER=$(gh pr create --title "x" --body-file "$DEVFLOW_BODY" --json number -q \'.number\')',
+      ],
+    ];
+    const falsePositives = negatives
+      .flatMap(([label, text]) => matchInlineBodyShapes(text).map(h => `${label} → ${h.shape}: ${h.match}`));
+    expect(
+      falsePositives,
+      `scrubbed or prose form(s) reported as inline bodies — a guard that flags the correct ` +
+      `recipe teaches the next author to work around it:\n  ${falsePositives.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('D11: known-bad probe — the pre-split baseline is still full of inline bodies the same collector reports', () => {
+    // tests/fixtures/tracker/baseline/ holds the byte-exact pre-split files and is
+    // never regenerated, so it is a PERMANENT known-bad corpus: the widened shapes
+    // are proven against real text that really did post unscrubbed bodies, and the
+    // proof does not require un-landing the fix (H10).
+    const offenders = collectInlineBodyOffenders(baselineCorpus());
+    const texts = offenders.map(o => o.match);
+    // Double spaces are the joiner's signature: the space before a `\` survives and
+    // the fold adds its own, so a match spelled with single spaces would be a match
+    // against text the collector never produces.
+    const expected = [
+      'gh issue create  --title "Bug: Login fails for SSO users"  --label "bug,priority-high"  --assignee "username"  --body ',
+      'gh issue close $old_issue --comment ',
+      'gh issue create  --title "Tech Debt Backlog"  --label "tech-debt"  --body ',
+      ' -f body=',
+      '--notes-file C',
+    ];
+    const absent = expected.filter(text => !texts.includes(text));
+    expect(
+      absent,
+      `the widened shapes no longer see known-bad text in the pre-split baseline:\n  ${absent.join('\n  ')}`,
+    ).toEqual([]);
+
+    const byFile = (name: string): number =>
+      offenders.filter(o => path.basename(o.file) === name).length;
+    expect(
+      byFile('github-api.md'),
+      'the pre-split github-api.md posted many inline bodies — a collapse here means the ' +
+      'collector narrowed, not that the baseline changed (it is never regenerated)',
+    ).toBeGreaterThanOrEqual(17);
+    expect(
+      byFile('SKILL.md'),
+      'the pre-split git SKILL.md carried an inline-body recipe too — SKILL.md is preloaded ' +
+      'on every spawn, so it is the arm that matters most',
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('D11: the scan reaches the whole installed prompt surface, not just the Git agent neighbourhood', () => {
+    const { corpus, agents, generated } = inlineBodyCorpus();
+    // Provenance, not a total: a corpus floor met by the skills tree alone would
+    // still claim to scan agents, commands and rules (PF-018).
+    expect(
+      agents,
+      'every declared agent must be scanned — a missing one is a prompt nobody policed',
+    ).toBe(getAllAgentNames().length);
+    expect(
+      generated,
+      'the generated tracker references must be scanned — they hold the posting mechanics',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length + GIT_CROSS_CUTTING_DOCS.length);
+
+    // Sentinels rather than per-tree counts: a count would be a floor someone has to
+    // register and re-register every time a skill or command lands, and the property
+    // is reach, not size.
+    const paths = new Set(corpus.map(e => e.path));
+    const sentinels = [
+      path.join(ROOT, 'src', 'assets', 'agents', 'review.md'),
+      path.join(ROOT, 'dist', 'agents', 'git.md'),
+      path.join(skillsDir(), 'review-methodology', 'references', 'patterns.md'),
+      path.join(commandsDir(), 'release.md'),
+      path.join(rulesDir(), 'security.md'),
+    ];
+    const unreached = sentinels.filter(p => !paths.has(p));
+    expect(
+      unreached,
+      `these files are installed in front of a model and are not in the scan:\n  ${unreached.join('\n  ')}`,
+    ).toEqual([]);
+    expect(
+      corpus.length,
+      'the deduped corpus collapsed — the scan is far smaller than the installed surface',
+    ).toBeGreaterThan(200);
   });
 
   it('D11: known-bad probe — an undeclared offender is reported by the same forward collector', () => {
@@ -1100,8 +1356,8 @@ describe('git agent — static content guards (PF-018)', () => {
     // drive the SAME collector: a filter that stopped reporting extras takes this
     // probe red alongside the guard it backs.
     const seeded: InlineBodyOffender[] = [
-      { file: GITHUB_API_MD_PATH, match: 'gh pr create --title "x" --body ' },
-      { file: SIBLING_REFERENCE_MD_PATH, match: 'gh pr create --title "x" --body ' },
+      { file: GITHUB_API_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
+      { file: SIBLING_REFERENCE_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
     ];
     expect(
       collectUndeclaredOffenders(seeded, KNOWN_GITHUB_API_INLINE_BODIES),
@@ -1127,7 +1383,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // it is vacuous on the live inputs (PF-018). Seed the list instead and drive the
     // SAME collector, so the ratchet that forces a stale entry out is proven live.
     const offenders: InlineBodyOffender[] = [
-      { file: GITHUB_API_MD_PATH, match: '-f body=' },
+      { file: GITHUB_API_MD_PATH, shape: 'api-field', match: '-f body=' },
     ];
     expect(
       collectStaleExclusions(offenders, ['-f body=', 'gh pr create --title "gone" --body ']),

@@ -43,29 +43,17 @@ git diff --name-only  # Only file names, no line numbers
 
 ## PR Comment Violations
 
-### Commenting on Wrong Lines
+```markdown
+# VIOLATION: Publishing from inside a review
 
-```bash
-# VIOLATION: Commenting without checking if file is in diff
-gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
-    -f path="$FILE" \
-    -f line="$LINE"  # May fail if file not in PR
+A review that posts its own comments bypasses the repo-visibility gate and the
+comment-sink scrub that post-review-summary applies, and publishes findings that were
+never synthesized or deduplicated. Write the finding into the report instead.
 
-# VIOLATION: No rate limiting
-for issue in "${ISSUES[@]}"; do
-    create_pr_comment "$issue"  # Will hit API rate limits
-done
-```
-
-### Wrong Comment Scope
-
-```bash
 # VIOLATION: Commenting on pre-existing issues
-# Category 3 issues should NOT get PR comments
-create_pr_comment "file.ts" "456" "Pre-existing bug"  # Wrong!
 
-# VIOLATION: Missing severity indicator
-create_pr_comment "file.ts" "123" "This is a problem"  # No severity
+Category 3 findings belong to the summary report. A comment on a line the author did
+not touch reads as a request to fix unrelated code.
 ```
 
 ---
@@ -111,11 +99,8 @@ Use these to find violations in review code:
 # Find hardcoded base branches
 grep -r 'BASE_BRANCH="main"' --include="*.sh"
 
-# Find missing rate limiting
-grep -r 'gh api.*comments' --include="*.sh" | grep -v 'sleep'
-
-# Find missing severity classifications
-grep -r 'create_pr_comment' --include="*.sh" | grep -v 'CRITICAL\|HIGH\|MEDIUM\|LOW'
+# Find a review that publishes on its own instead of writing the report
+grep -rn 'pulls/.*/comments' .devflow/docs/reviews/
 ```
 
 ---

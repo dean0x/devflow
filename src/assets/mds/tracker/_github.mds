@@ -180,20 +180,27 @@ add_tech_debt_item() {
 
 archive_tech_debt_issue() {
     local old_issue=$TECH_DEBT_ISSUE
-    gh issue close $old_issue --comment "## Archived
-This issue reached the size limit.
-**Continued in:** (see linked issue)"
+    local new_url
 
-    TECH_DEBT_ISSUE=$(gh issue create \
-        --title "Tech Debt Backlog" \
-        --label "tech-debt" \
-        --body "Continued from #${old_issue}
+    # The successor's body is a posted body: compose, scrub, and create only on a
+    # clean scrubber exit. `gh issue create` prints the new issue's URL, so the
+    # number is its last path segment. One `&&` chain end to end — the archive
+    # comment names the real successor, and the close happens only after it lands.
+    printf '%s\n' "Continued from #${old_issue}
 
 ## Items
-" \
-        --json number -q '.number')
-
-    post_scrubbed "**Continued in:** #${TECH_DEBT_ISSUE}" "$old_issue"
+" > "$DEVFLOW_BODY_RAW"
+    node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && new_url=$(gh issue create \
+        --title "Tech Debt Backlog" \
+        --label "tech-debt" \
+        --body-file "$DEVFLOW_BODY") \
+      && TECH_DEBT_ISSUE="${new_url##*/}" \
+      && post_scrubbed "## Archived
+This issue reached the size limit.
+**Continued in:** #${TECH_DEBT_ISSUE}" "$old_issue" \
+      && gh issue close "$old_issue"
 }
 ```
 @end
@@ -297,11 +304,7 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 ### Create Issue with Labels and Assignees
 
 ```bash
-gh issue create \
-    --title "Bug: Login fails for SSO users" \
-    --label "bug,priority-high" \
-    --assignee "username" \
-    --body "$(cat <<'EOF'
+cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Description
 Login fails when using SSO authentication.
 
@@ -313,7 +316,14 @@ Login fails when using SSO authentication.
 ## Expected Behavior
 User should be logged in successfully.
 EOF
-)"
+
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh issue create \
+    --title "Bug: Login fails for SSO users" \
+    --label "bug,priority-high" \
+    --assignee "username" \
+    --body-file "$DEVFLOW_BODY"
 ```
 
 ### Traceability Issue Template (D3)

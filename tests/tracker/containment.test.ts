@@ -456,7 +456,7 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'Complete Release Flow posted release notes inline (`--notes "$changelog"`). It sits ' +
       'in the same file as the --notes-file recipe moved in from SKILL.md, so leaving it ' +
       'would have re-created the two-authorities defect one section apart. The multi-line ' +
-      'form is invisible to INLINE_BODY_RE, which is why it needed fixing by hand.',
+      'form was invisible to a single-line scan, which is why it needed fixing by hand.',
   },
 
   // ── skills/git/references/github-api.md → per-op tracker references (P2-S8) ─
@@ -478,8 +478,8 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'Tech-debt add: `gh issue comment … --body "$new_item"` became `--body-file ' +
       '"$DEVFLOW_BODY"` on the move. manage-debt is a D11 posting sink, and moving the ' +
       'inline form verbatim would have created a NEW D11 bypass inside the tracker ' +
-      'reference tree — the widened INLINE_BODY_RE freezes the pre-existing github-api.md ' +
-      'sites only, so a moved copy is a new offender by construction.',
+      'reference tree — the inline-body exclusion list freezes named github-api.md text ' +
+      'only, so a moved copy is a new offender by construction.',
   },
   {
     file: 'github-api.md',
@@ -615,6 +615,93 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'Rewritten to `-F body=@"$DEVFLOW_BODY"` after the scrub, which is exactly the ' +
       'file-ref form git.md\'s resolve-review-threads step 2 already mandates — the recipe ' +
       'and the operation that uses it now agree.',
+  },
+
+  // ── the sinks a single-line pattern could not see (#341) ───────────────────
+  //
+  // Three recipes whose bodies are attached to a `\`-continued command, so the
+  // flag sits four lines below its `gh` verb and no single-line scan reached it.
+  // Each is REWRITTEN in place into the same scrub-then-post chain #340 applied
+  // to this file's one-line recipes: compose to the RAW file, run
+  // redact-secrets.cjs, post the scrubbed file. The guard now folds continuations
+  // before matching, so the shape that hid them is gone as well (ADR-025 — the
+  // widening lands in the same commit as the content it catches).
+  {
+    file: 'github-api.md',
+    startLine: 149,
+    endLine: 149,
+    rationale:
+      '#341. `gh issue create \\` is now the second arm of the `&&` chain the scrub leads, ' +
+      'so it is indented two spaces — the same re-indentation, for the same reason, as the ' +
+      'create_release publish call exempted at :248.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 153,
+    endLine: 153,
+    rationale:
+      '#341. `--body "$(cat <<\'EOF\'` built the issue body inline from a command ' +
+      'substitution, which cannot be scrubbed at all. The heredoc now writes ' +
+      '`$DEVFLOW_BODY_RAW` and the create posts `--body-file "$DEVFLOW_BODY"`; the heredoc ' +
+      'content itself moved byte-identically.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 189,
+    endLine: 189,
+    rationale:
+      '#341. `gh issue close … --comment "## Archived` attached a posted body to a close. ' +
+      'The close now carries no body at all and the archive note goes through ' +
+      '`post_scrubbed`, the helper this same recipe already defines — a comment on a close ' +
+      'is published exactly like a comment on anything else.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 191,
+    endLine: 191,
+    rationale:
+      '#341. `**Continued in:** (see linked issue)` was a placeholder the recipe posted ' +
+      'BEFORE the successor existed, then followed with a second comment carrying the real ' +
+      'number. Ordering the chain create-then-comment lets one scrubbed archive comment ' +
+      'name the real successor, so the placeholder has nothing left to stand in for.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 193,
+    endLine: 193,
+    rationale:
+      '#341. The successor create is captured as `new_url=` rather than assigned straight ' +
+      'to `TECH_DEBT_ISSUE`, because the number is now derived from the URL `gh issue ' +
+      'create` prints. The `--title`/`--label` lines below it are byte-unchanged.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 196,
+    endLine: 200,
+    rationale:
+      '#341. The successor issue\'s body moved out of an inline `--body "…"` into ' +
+      '`$DEVFLOW_BODY_RAW`, so the create posts `--body-file "$DEVFLOW_BODY"` and the ' +
+      'closing `" \\` disappears with the inline string. `--json number -q \'.number\'` ' +
+      'went with it: `gh issue create` has no `--json` flag, so that arm could only ever ' +
+      'have produced an empty issue number. The `## Items` line inside the range is ' +
+      'unchanged and still contained.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 257,
+    endLine: 257,
+    rationale:
+      '#341. `gh release create` re-indented two spaces as the second arm of the scrub ' +
+      'chain, same shape as :149 and :248.',
+  },
+  {
+    file: 'github-api.md',
+    startLine: 259,
+    endLine: 259,
+    rationale:
+      '#341. `--notes-file CHANGELOG.md` published the working file directly, bypassing the ' +
+      'scrubber that every other release recipe in this file runs. redact-secrets.cjs takes ' +
+      'any input path, so CHANGELOG.md is now its input and `$DEVFLOW_NOTES` is what ships.',
   },
 ];
 

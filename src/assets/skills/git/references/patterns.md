@@ -242,17 +242,23 @@ Closes #{issue}
 
 ### Creating PR with HEREDOC
 
+A PR body publishes at repo visibility, so it is a posted body: the Git agent's
+`## Comment-sink scrub (D11)` section is the authority on what that requires.
+
 ```bash
-gh pr create \
-  --base main \
-  --title "feat(auth): add authentication middleware" \
-  --body "$(cat <<'EOF'
+cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Summary
 Implements JWT-based authentication...
 
 [Full description content]
 EOF
-)"
+
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr create \
+    --base main \
+    --title "feat(auth): add authentication middleware" \
+    --body-file "$DEVFLOW_BODY"
 ```
 
 ### Key Change Detection

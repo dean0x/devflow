@@ -88,14 +88,14 @@ describe('guard census: git-agent.test.ts guard count has not decreased (AC-2.6)
     expect(
       entry!.floor,
       'the manifest floor and the assertion below must be the same number',
-    ).toBe(68);
+    ).toBe(73);
     expect(
       count,
       `${COUNTED_FILE} declares ${count} guards, floor ${entry!.floor}. A guard that moved ` +
       `with its text is not a guard that was deleted — repoint the corpus and keep the assertion ` +
       `(GAP-21). If a guard genuinely became unsatisfiable, its SUCCESSOR is what keeps the count ` +
       `whole ([DR-20] replaced one D10 scope guard with four).`,
-    ).toBeGreaterThanOrEqual(68);
+    ).toBeGreaterThanOrEqual(73);
   });
 
   it('the collector is non-vacuous and does not over-count', () => {
