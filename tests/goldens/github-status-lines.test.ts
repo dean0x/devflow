@@ -37,7 +37,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'child_process'
+import { spawnSync, type SpawnSyncReturns } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
@@ -61,6 +61,32 @@ const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx')
 
 /** Newline count — the unit every `*_LINES` / `*_NEWLINES` baseline here is measured in. */
 const newlineCount = (source: string): number => (source.match(/\n/g) ?? []).length
+
+/**
+ * Runs `update-golden.ts github-status-lines --unfreeze` against a scratch
+ * `--out-dir`, hands the directory and the subprocess result to `fn`, and
+ * removes the directory afterward regardless of outcome.
+ *
+ * Shared by both --out-dir tests below so the mkdtemp/spawn/cleanup shape is
+ * defined once — a scratch dir the harness creates is a scratch dir the
+ * harness also always removes.
+ */
+function runUnfreezeToScratchDir<T>(
+  fn: (tmpDir: string, result: SpawnSyncReturns<string>) => T,
+): T {
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
+  try {
+    const result = spawnSync(
+      TSX_BIN,
+      ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 30_000, env: { ...process.env } },
+    )
+    if (result.error) throw result.error
+    return fn(tmpDir, result)
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
 
 // Pre-Phase-0 baseline at main@e726874 — informational, measured units.
 export const PRE_PHASE0_GIT_MD_BYTES = 59_376  // wc -c bytes
@@ -271,21 +297,7 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     // the source says today. A drifted source would fail the equality guard once
     // and then pass forever after (§3: "a CI job that regenerates a golden is a
     // golden that asserts nothing"; H2: a mismatch means the SOURCE is wrong).
-    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
-    try {
-      const result = spawnSync(
-        TSX_BIN,
-        ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
-        {
-          cwd: ROOT,
-          encoding: 'utf-8',
-          timeout: 30_000,
-          env: { ...process.env },
-        },
-      )
-
-      if (result.error) throw result.error
-
+    runUnfreezeToScratchDir((tmpDir, result) => {
       expect(
         result.status,
         `Expected exit 0 with --unfreeze but got ${result.status}\n` +
@@ -298,27 +310,16 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
       expect(written, 'regenerated content differs from the frozen fixture').toBe(
         loadGolden('github-status-lines.txt'),
       )
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true })
-    }
+    })
   })
 
   it('leaves the live fixture untouched when --out-dir is given (no self-regeneration)', () => {
     const before = loadGolden('github-status-lines.txt')
     const beforeMtime = statSync(GOLDEN_PATH).mtimeMs
 
-    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
-    try {
-      const result = spawnSync(
-        TSX_BIN,
-        ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
-        { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
-      )
-      if (result.error) throw result.error
+    runUnfreezeToScratchDir((_tmpDir, result) => {
       expect(result.status).toBe(0)
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true })
-    }
+    })
 
     expect(loadGolden('github-status-lines.txt'), 'frozen fixture content changed').toBe(before)
     expect(

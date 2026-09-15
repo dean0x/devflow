@@ -5,7 +5,7 @@
  *   - no pinned FLOOR may decrease   (`floors` in tests/fixtures/numeric-floors.json)
  *   - no pinned CEILING may increase (`ceilings` in the same file)
  *
- * Each entry records a number (e.g. host file count = 13, BUDGET_GIT_MD = 55_900)
+ * Each entry records a number (e.g. host file count = 13, BUDGET_GIT_MD = 55_750)
  * along with the exact assertion pattern that encodes it and the source file that
  * contains it.
  *

@@ -1173,8 +1173,8 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
 
 /**
  * Records the result of a single orphan-sweep run into the install report.
- * Extracted from the thrice-repeated inline block to keep each call-site a
- * one-liner and ensure the kind tag is always populated. (F14)
+ * Shared by every sweep-recording call site so each stays a one-liner and
+ * the kind tag is always populated. (F14)
  */
 function recordSweep(
   report: InstallReport,
