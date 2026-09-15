@@ -1553,7 +1553,10 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       // The second arm of the two-armed GitHub foreign-shape rule (AC-2.9). The
       // first arm (a well-shaped ref renders `#{n}`) is worthless on its own:
       // a one-armed grammar silently drops everything it does not recognise.
-      requiredPhrase: 'does not match github reference grammar',
+      // The phrase pins where adjudication actually happens — in the fetching
+      // operation's Output block — so a host cannot re-assert a producer-side
+      // rejection no operation performs (PF-024).
+      requiredPhrase: 'no producer-side grammar check',
       minBytes: 600,
     },
     {
@@ -1707,7 +1710,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
 
     expect(body.length, 'the seeded placeholder body must fall under the floor').toBeLessThan(600);
     expect(
-      body.includes('does not match github reference grammar'),
+      body.includes(TRACKER_DEFINES.find(d => d.name === 'issue_ref_grammar')!.requiredPhrase),
       'the seeded placeholder must not carry the required phrase',
     ).toBe(false);
   });

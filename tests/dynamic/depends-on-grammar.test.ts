@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, requireDistFile } from '../helpers.js'
+import { loadFile, requireDistFile, resolveAgentSource } from '../helpers.js'
 
 // -------------------------------------------------------------------------
 // Issue-reference vocabulary across the command layer (P2-S11, GAP-27 / GAP-47).
@@ -73,6 +73,47 @@ function collectSourcesMissing(sources: readonly NamedSource[], token: string): 
 /** Named collector: which of the named sources DO carry `token`. */
 function collectSourcesCarrying(sources: readonly NamedSource[], token: string): string[] {
   return sources.filter(([, src]) => collectTokenSites(src, token).length > 0).map(([label]) => label)
+}
+
+// ── Round-refresh collectors (security-02) ───────────────────────────────────
+//
+// The wave's per-round refresh names the Git agent capability it uses. Pinning
+// the NOUN proves only that the noun was written — `list_by_filter` was pinned
+// that way and named nothing the agent could run, so the round had no sanctioned
+// way to learn a ticket closed (PF-024, PF-064). The property is what matters:
+// the sentence names an operation the Git agent's roster actually carries. The
+// roster is read from the agent at test time, never copied here — a copy would
+// let this guard agree with a list the agent no longer has.
+
+/** The Git agent as the installer resolves it (dist-first) — what a spawn gets. */
+const GIT_AGENT = resolveAgentSource('git').content
+
+/** The sentence `_wave.mds` opens the per-round refresh with. */
+const ROUND_REFRESH_OPENER = "After the round's merges"
+
+/** A capability id deliberately absent from the roster, for the known-bad probe. */
+const NON_ROSTER_CAPABILITY = 'list-by-filter-capability'
+
+/** Named collector: the round-refresh paragraph, or '' when the opener has moved. */
+function roundRefreshParagraph(waveSource: string): string {
+  const at = waveSource.indexOf(ROUND_REFRESH_OPENER)
+  if (at === -1) return ''
+  const end = waveSource.indexOf('\n\n', at)
+  return end === -1 ? waveSource.slice(at) : waveSource.slice(at, end)
+}
+
+/** Named collector: the operation ids in the agent's `## Operations` table. */
+function collectRosterOperations(agentSource: string): string[] {
+  const start = agentSource.indexOf('\n## Operations\n')
+  if (start === -1) return []
+  const end = agentSource.indexOf('\n## ', start + 1)
+  const table = end === -1 ? agentSource.slice(start) : agentSource.slice(start, end)
+  return [...table.matchAll(/^\| `([a-z][a-z0-9-]*)` \|/gm)].map(m => m[1])
+}
+
+/** Named collector: which roster operations a passage names, as backticked ids. */
+function collectRosterOpsNamedIn(passage: string, roster: readonly string[]): string[] {
+  return roster.filter(op => passage.includes(`\`${op}\``))
 }
 
 const DEPENDS_ON_SIDES: readonly NamedSource[] = [
@@ -173,13 +214,45 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
     expect(WAVE).toContain('One batch call for the whole wave, never one call per ticket')
   })
 
-  it('per-round refresh is state-only, one call, via list_by_filter', () => {
-    expect(WAVE, 'the per-round refresh must name the capability it uses').toContain('`list_by_filter`')
+  it('per-round refresh is state-only, one call, and names an operation the agent has', () => {
+    const roster = collectRosterOperations(GIT_AGENT)
+    expect(
+      roster.length,
+      'the `## Operations` table did not parse — an unread roster makes the naming check below vacuous (PF-018)',
+    ).toBeGreaterThan(10)
+
+    const paragraph = roundRefreshParagraph(WAVE)
+    expect(paragraph, `the round-refresh paragraph must open with "${ROUND_REFRESH_OPENER}"`).not.toBe('')
+    expect(
+      collectRosterOpsNamedIn(paragraph, roster),
+      'the per-round refresh must name an operation the Git agent actually carries. A capability ' +
+      'noun absent from the roster proves only that the noun was written, not that any agent can ' +
+      'act on it — the round then improvises a fetch or stalls (PF-024, PF-064)',
+    ).not.toEqual([])
+
     expect(WAVE).toContain('**state only**')
     expect(
       WAVE,
       'the round cost must be stated as independent of ticket count — T calls per round is the GAP-26 exposure',
     ).toContain('**one** call regardless of how many tickets T the wave holds')
+  })
+
+  it('known-bad probe: a round-refresh naming a non-roster capability is reported by the same collector', () => {
+    const roster = collectRosterOperations(GIT_AGENT)
+    const real = roundRefreshParagraph(WAVE)
+    // Seed a COPY of the real paragraph — the committed file is never touched (H10) —
+    // and drive it through the identical call the assertion above makes.
+    const seeded = real.split('fetch-issues-batch').join(NON_ROSTER_CAPABILITY)
+    expect(seeded, 'the seed must actually change the paragraph').not.toBe(real)
+    expect(
+      collectRosterOpsNamedIn(seeded, roster),
+      'a refresh naming only a capability the agent does not have must come back empty — otherwise ' +
+      'the assertion above is green whatever the paragraph says',
+    ).toEqual([])
+    expect(
+      collectRosterOpsNamedIn(real, roster),
+      'and the same collector must name the real operation in the committed text',
+    ).toContain('fetch-issues-batch')
   })
 
   it('the bound is declared an API bound, not a fan-out cap (ADR-005)', () => {
