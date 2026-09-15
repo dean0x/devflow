@@ -21,7 +21,7 @@ Unified skill for safe git operations, atomic commits, honest PR descriptions, a
 
 ## When This Skill Activates
 
-Any `git` or `gh` operation: staging, commits, branches, pull requests, rebases, merge conflicts, PR comments, issues, releases.
+Any `git` or `gh` operation: staging, commits, branches, pull requests, rebases, issues, releases.
 
 ---
 
@@ -187,7 +187,7 @@ See `references/detection.md` for full `check_for_secrets()` function.
 
 > **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — at `X-RateLimit-Remaining` < 10 STOP the fan-out and report `THROTTLED` (D4); 1-2s between calls. Throttling, PR-comment rules and releases live in `references/github-api.md`.
 
-Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles) and is its single authority.
+Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles) and is its single authority; delete that file to re-learn.
 
 ---
 
