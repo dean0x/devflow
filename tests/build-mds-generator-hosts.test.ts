@@ -65,6 +65,7 @@ import {
   ALLOWED_OUTPUT_DIR_NAMES,
   SKILL_REFS_OUTPUT_DIR,
 } from '../src/core/mds-variants.js';
+import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx');
@@ -1373,12 +1374,12 @@ describe('dist/skills/git/references orphan prune', () => {
     });
   });
 
-  // MAX_PRUNE_DEPTH in scripts/build-mds.ts, mirrored here as the walk-bound
-  // test mirrors MAX_WALK_DEPTH: the bound is not exported, and asserting the
-  // message it names is what proves the descent stopped rather than silently
-  // truncating (avoids PF-018 — a filter that returns fewer results and a bound
-  // that fails are indistinguishable from the outside).
-  const PRUNE_DEPTH_BOUND = 8;
+  // The prune bound is MAX_REFERENCE_SWEEP_DEPTH, owned by src/core/reference-sweep.ts
+  // and shared by the build's prune and the installer's sweep of the same tree. The
+  // depths planted below are derived from it, so raising the bound moves the probe with
+  // it instead of leaving a mirrored literal to drift. The assertion is on the message
+  // the build throws, naming that bound: a descent that stopped and one that silently
+  // truncated are indistinguishable from the outside (avoids PF-018).
 
   /** `d1/d2/…/d{levels}/{name}` under the references tree, planted. */
   async function plantRefAtDepth(fakeRoot: string, levels: number, name: string): Promise<string> {
@@ -1388,12 +1389,12 @@ describe('dist/skills/git/references orphan prune', () => {
 
   it('a directory past the prune depth bound fails the build, naming the bound', async () => {
     await withReferenceTree(async fakeRoot => {
-      const tooDeep = await plantRefAtDepth(fakeRoot, PRUNE_DEPTH_BOUND + 1, 'deep.md');
+      const tooDeep = await plantRefAtDepth(fakeRoot, MAX_REFERENCE_SWEEP_DEPTH + 1, 'deep.md');
       expect(await readIfPresent(tooDeep), 'the orphan must exist before the build').not.toBeNull();
 
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
-      expect(run.combined).toContain(`prune descent exceeds ${PRUNE_DEPTH_BOUND} levels`);
+      expect(run.combined).toContain(`prune descent exceeds ${MAX_REFERENCE_SWEEP_DEPTH} levels`);
       expect(
         await readIfPresent(tooDeep),
         'the bound fails the build rather than descending — the file is left, not removed',
@@ -1403,7 +1404,7 @@ describe('dist/skills/git/references orphan prune', () => {
 
   it('non-vacuity: an orphan one level shallower is descended to and pruned', async () => {
     await withReferenceTree(async fakeRoot => {
-      const atBound = await plantRefAtDepth(fakeRoot, PRUNE_DEPTH_BOUND, 'deep.md');
+      const atBound = await plantRefAtDepth(fakeRoot, MAX_REFERENCE_SWEEP_DEPTH, 'deep.md');
       expect(await readIfPresent(atBound), 'the orphan must exist before the build').not.toBeNull();
 
       const run = runBuild(fakeRoot);
