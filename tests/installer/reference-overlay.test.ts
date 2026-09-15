@@ -680,6 +680,59 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide }),
     ).rejects.toThrow(/decision-markers\.md[\s\S]*npm run build:mds/);
   });
+
+  /**
+   * The `build:cli`-only tree, which is the one shape the per-entry throw above could
+   * never see: it is raised after a successful `readdir` of a unit's source directory,
+   * and when the whole generated root is absent no unit ever gets that far. Every unit
+   * then degrades to a reported failure and the install returns success with an agent
+   * whose mechanics pointers resolve to nothing.
+   */
+  it('an absent generated tree fails loud before anything is installed, naming the build step', async () => {
+    const absentRoot = path.join(sourceRoot, 'never-built');
+    expect(await exists(absentRoot), 'the probe needs a root that really is not there').toBe(false);
+
+    await expect(
+      overlayGeneratedReferences({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
+    ).rejects.toThrow(/npm run build:mds/);
+    await expect(
+      overlayGeneratedReferences({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
+    ).rejects.toThrow(absentRoot);
+
+    // The refusal is the whole outcome: no half-built references directory beside it.
+    expect(
+      (await walkTree(target)).filter(p => !p.endsWith('/')),
+      'a refused overlay must install nothing at all',
+    ).toEqual([]);
+
+    // Positive half: the SAME call over the staged tree installs the whole manifest, so
+    // the refusal is selected by the absent root and not by the arguments around it.
+    const healthy = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(healthy.overlayFailures).toEqual([]);
+    expect([...healthy.overlaidRefs].sort()).toEqual([...wide].sort());
+  });
+
+  it('known-bad probe: one absent unit directory under a present root is reported, never thrown', async () => {
+    // The boundary the whole-tree refusal must not cross. Hoisting that `stat` into the
+    // unit loop passes the probe above and fails this one: a single unbuilt provider
+    // would abort the entire install, which is the blast radius PF-009 exists to keep
+    // out of this path. The root is present here; exactly one unit's directory is not.
+    await fs.rm(abs(sourceRoot, 'tracker/jira'), { recursive: true });
+
+    const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+
+    expect(result.overlayFailures).toHaveLength(1);
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    expect(result.overlayFailures[0].state).toEqual({
+      kind: 'not-installed',
+      absent: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+    });
+
+    // …and every other unit installed: a degradation, not an abort.
+    expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
+    expect(result.overlaidRefs).toContain('decision-markers.md');
+    expect((await walkTree(target)).filter(p => p.includes('.tmp'))).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

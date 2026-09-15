@@ -689,6 +689,43 @@ async function classifyUntouchedUnit(
 }
 
 /**
+ * Refuse the whole overlay when the generated tree was never produced.
+ *
+ * The per-entry throw in {@link buildUnitStagingTree} cannot reach this case. It is
+ * raised after a successful `readdir` of a unit's source directory, so when the ROOT is
+ * absent — `npm run build:cli` alone, or a build interrupted before it emitted anything —
+ * no unit ever gets that far: each one degrades to a reported failure and the install
+ * returns success carrying an agent whose mechanics pointers resolve to nothing. That is
+ * the outcome the per-entry throw exists to prevent, arriving by the one route it does
+ * not cover — and the same root cause the agent resolver in `installViaFileCopy` already
+ * throws for, so the two build artifacts are no longer guarded at different strengths.
+ *
+ * Deliberately ONE `stat` before the unit loop rather than a check inside it (PF-009):
+ * the fan-out has no per-item failure isolation, so a per-unit refusal would let one
+ * unbuilt provider abort every other unit's install. A unit directory that is absent
+ * under a root that exists stays a per-unit report, exactly as today.
+ *
+ * Only ENOENT refuses. A root that cannot be stat'd for any other reason (EACCES on a
+ * parent, a filesystem in a bad way) is an I/O degradation, not a missing build
+ * artifact, and belongs to the per-unit reporting path like every other one.
+ */
+async function requireGeneratedTree(sourceRoot: string, manifest: readonly string[]): Promise<void> {
+  try {
+    await fs.stat(sourceRoot);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return;
+  }
+  throw new Error(
+    `Generated skill references not found: ${sourceRoot}. ` +
+    `The whole generated tree is absent, so none of the ${manifest.length} references the ` +
+    `devflow:git agent is instructed to load would be installed. ` +
+    `Run \`npm run build:mds\` to regenerate dist/skills/git/references/ before install ` +
+    `(\`npm run build:cli\` alone does not produce it).`,
+  );
+}
+
+/**
  * Converge the tracker subtree to the manifest — unless that would delete a recovery
  * copy this same run just created.
  *
@@ -774,8 +811,18 @@ async function prunePreservingRecoveryCopies(
  *   Injectable so a provider set the GitHub-only build does not produce can be exercised.
  * @param opts.warn - Receives non-fatal notices (skipped symlinks, mode normalisation).
  *
- * @throws when a manifest entry is absent from the generated tree — see
- *   {@link buildUnitStagingTree}. Every other failure is reported, never thrown (PF-009).
+ * @throws on three conditions, each of them a build artifact that was never produced
+ *   rather than an I/O degradation. Every other failure is reported, never thrown
+ *   (PF-009), and the three are ordered here as the function reaches them:
+ *   1. `opts.manifest` omitted AND the reference-module registry does not expand —
+ *      raised by {@link generatedReferenceManifest} while resolving the default. A
+ *      caller that passes its own manifest cannot reach this one.
+ *   2. `opts.sourceRoot` (default {@link compiledSkillRefsDir}) does not exist at all —
+ *      see {@link requireGeneratedTree}. Nothing is installed and nothing is reported;
+ *      the refusal is the whole outcome.
+ *   3. A manifest entry is absent from a source directory that does exist — see
+ *      {@link buildUnitStagingTree}. Raised mid-loop, so units planned before the
+ *      failing one may already have been promoted.
  */
 export async function overlayGeneratedReferences(opts: {
   referencesTarget: string;
@@ -789,6 +836,10 @@ export async function overlayGeneratedReferences(opts: {
 
   const overlaidRefs: string[] = [];
   const overlayFailures: OverlayFailure[] = [];
+
+  // Before the target is touched, so a refused overlay leaves the install exactly as it
+  // found it rather than a references directory it went on to abandon.
+  await requireGeneratedTree(sourceRoot, manifest);
 
   await fs.mkdir(opts.referencesTarget, { recursive: true });
 
