@@ -206,11 +206,11 @@
   "ceilings": [
     {
       "id": "budget-git-md",
-      "ceiling": 55900,
-      "pattern": "const BUDGET_GIT_MD = 55_900;",
+      "ceiling": 55750,
+      "pattern": "const BUDGET_GIT_MD = 55_750;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of dist/agents/git.md — preloaded on every Git spawn, so its size is a per-spawn cost. Derived as 65_677 baseline − 9_813 projected cut (see the constant's own JSDoc for the term-by-term formula). May be LOWERED as mechanics keep moving into references; may never be raised. §14.5: no threshold is lowered, and a budget raised to fit the artifact is not a budget."
+      "description": "Max characters of dist/agents/git.md — preloaded on every Git spawn, so its size is a per-spawn cost. Originally derived as 65_677 baseline − 9_813 projected cut and pinned at 55_900 (see the constant's own JSDoc for the term-by-term formula). LOWERED to 55_750 after the Mechanics-pointer condensing pass (measured 55_664, headroom 86) — a ceiling is a regression alarm that is re-derived only DOWNWARD after a pass that actually cut the artifact; lowering it re-pins this value and this pattern together in the same commit. May never be raised. §14.5: no threshold is lowered, and a budget raised to fit the artifact is not a budget."
     },
     {
       "id": "budget-skill-md",

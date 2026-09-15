@@ -38,14 +38,30 @@ import { resolveAgentSource } from '../helpers.js';
 // ---------------------------------------------------------------------------
 
 /**
- * 65_677 − 9_813 = 55_864; headroom 36.
+ * Design-time derivation: 65_677 − 9_813 = 55_864, pinned at 55_900 (headroom 36).
  * formula: baseline_ch − projected_cut; the baseline is the post-Phase-0
  * merge-commit capture of dist/agents/git.md (65_677 ch / 66_180 bytes).
  * projected cut: tracker mechanics −9_400 · learn-conventions body −3_300 ·
  * marker legend −1_400 (the D4 and D11 rows stay, E10) · D10 step-order −1_113 ·
  * add-back +5_400.
+ *
+ * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
+ * lowered after a condensing pass that actually cut the artifact, never raised to fit
+ * one that grew. A budget that rises to meet the artifact is a description, not a
+ * budget (§14.5).
+ *
+ * LOWERED 55_900 → 55_750 after the Mechanics-pointer condensing pass: B31 replaced
+ * the eleven per-op pointer sentences with `**Mechanics:** load this operation's
+ * provider reference.` (55_896 → 55_577 ch) and B32 landed back at 55_664. 55_750
+ * leaves 86 ch of headroom over that measurement — deliberately thin, so the next
+ * content addition to git.mds must fund itself with a cut elsewhere.
+ *
+ * Registered as a `ceilings` entry (`budget-git-md`) in
+ * tests/fixtures/numeric-floors.json. Lowering re-pins that entry's value AND its
+ * pattern in the same commit; that is the permitted direction for a ceiling, and the
+ * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 55_900;
+const BUDGET_GIT_MD = 55_750;
 
 /**
  * 9_204 − 2_604 = 6_600.
@@ -440,10 +456,25 @@ function preambleBlock(content: string): string {
 // 1. The four-shape table — RECORDED, not asserted pass/fail
 // ---------------------------------------------------------------------------
 //
-// The per-provider shape was disqualified at +31% to +41%, and per-op-without-
-// _mcp nets roughly −17% on a tracker spawn. Recording the computed rows is what
-// keeps that decision from being re-argued from memory; asserting them would
-// pin a ratio nobody intends to hold constant.
+// EVERY MARGIN QUOTED OFF THIS TABLE NAMES ITS DENOMINATOR. That is why two
+// percentage columns are printed: `vs shape 1` divides by the always-loaded
+// preloaded set, `vs shape 2` divides by the shipped per-op loaded set. A bare
+// "+31%" is unreproducible — it could be either, and the two differ by more than a
+// factor of two. (A previous revision of this comment said "+31% to +41%" and the
+// feature KB said "+3.3% → +8.0% → +30.3%"; neither named a denominator and neither
+// matched the rows.)
+//
+// The disqualifying comparison is shape 3 against SHAPE 2, because shape 2 is what
+// shipped. At HEAD bf4b3f9 the printed rows are shape 3 = 88,302 ch against shape 2
+// = 77,719 ch — +13.6% on the worst-case tracker spawn (and +35.5% vs shape 1's
+// 65,187 ch, against shape 2's own +19.2%). Read those off a run; do not quote these
+// figures forward — they move whenever git.md or a reference does.
+//
+// Shape 4 is identical to shape 2 in Phase 2 (MCP_TERM = 0, AC-2.7): the saving it
+// was projected to net exists only once an MCP-backed provider module does.
+//
+// Recording the computed rows is what keeps the shape decision from being re-argued
+// from memory; asserting them would pin a ratio nobody intends to hold constant.
 
 describe('byte budget: four-shape table (recorded)', () => {
   it('records every shape, with all three cross-cutting documents as named rows', () => {
@@ -475,17 +506,27 @@ describe('byte budget: four-shape table (recorded)', () => {
 
     const MCP_TERM = 0; // _mcp.md is not generated in Phase 2 and is 0 on the GitHub path (AC-2.7).
 
+    // The shipped shape, named once so it can serve as BOTH a row and a stated
+    // denominator: shape 3's disqualification is a margin over what shipped, not
+    // over the baseline, and a margin whose denominator is unnamed is not a figure
+    // a later reader can reproduce.
+    const perOpLoadedSet = PRELOADED + MCP_TERM + largest.value + worst.value;
+
     const shapes = [
       {
-        shape: '1. today’s monolith (pre-split preloaded set)',
+        // The denominator of the `vs shape 1` column, so its label has to say what it
+        // actually measures. It WAS the monolith at T1, when PRELOADED measured the
+        // frozen BUDGET_LOADED_SET (77_824); every mechanics move since has shrunk it,
+        // so today it is the always-loaded preloaded set, not the pre-split one.
+        shape: '1. baseline — today’s always-loaded preloaded set (was the monolith at T1: 77_824)',
         chars: PRELOADED,
       },
       {
         shape: '2. per-op split, GitHub path (the worst-case formula)',
-        chars: PRELOADED + MCP_TERM + largest.value + worst.value,
+        chars: perOpLoadedSet,
       },
       {
-        shape: '3. per-provider single file (DISQUALIFIED: +31%–41%)',
+        shape: '3. per-provider single file (DISQUALIFIED — margin over shape 2, see both % columns)',
         chars: PRELOADED + allTrackerRefs,
       },
       {
@@ -499,7 +540,7 @@ describe('byte budget: four-shape table (recorded)', () => {
         // number is on the record and the classification is a decision someone
         // can re-open with the figure in front of them, not an omission.
         shape: '2b. shape 2 + cross-cutting glossary as if mandatory (RECORDED, not gated)',
-        chars: PRELOADED + MCP_TERM + largest.value + worst.value + crossCuttingOnDemand,
+        chars: perOpLoadedSet + crossCuttingOnDemand,
       },
     ];
 
@@ -529,9 +570,13 @@ describe('byte budget: four-shape table (recorded)', () => {
     // Recorded, not asserted: printed so a reviewer reads the numbers the split
     // is being judged on rather than re-deriving them.
     console.table(rows);
+    // Both denominators, each named in its own column header: a percentage lifted
+    // from this table always carries the basis it was computed against.
     console.table(shapes.map(s => ({
       ...s,
-      'vs monolith': `${(((s.chars - PRELOADED) / PRELOADED) * 100).toFixed(1)}%`,
+      'vs shape 1 (preloaded set)': `${(((s.chars - PRELOADED) / PRELOADED) * 100).toFixed(1)}%`,
+      'vs shape 2 (per-op loaded set)':
+        `${(((s.chars - perOpLoadedSet) / perOpLoadedSet) * 100).toFixed(1)}%`,
     })));
 
     // Structural sanity only — the table must actually have measured something.
