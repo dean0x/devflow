@@ -28,15 +28,14 @@ import * as path from 'path';
 import {
   installViaFileCopy,
   overlayGeneratedReferences,
-  generatedReferenceManifest,
   promoteUnitStagingTree,
   type OverlayUnit,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
 import { formatOverlaySummary } from '../../src/cli/commands/init.js';
-import { sweepOrphanedReferences } from '../../src/core/reference-sweep.js';
+import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { expandVariants } from '../../src/core/mds-variants.js';
+import { expandVariants, generatedReferenceManifest } from '../../src/core/mds-variants.js';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -573,5 +572,49 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
   it('an absent root is a no-op, not an error (avoids PF-009)', async () => {
     const result = await sweepOrphanedReferences(path.join(root, 'nope'), new Set(['a.md']));
     expect(result).toEqual({ scanned: 0, removed: [], failed: [] });
+  });
+
+  // The descent bound is shared with the build's prune (scripts/build-mds.ts) and is
+  // breached at `depth > MAX_REFERENCE_SWEEP_DEPTH`, counting the swept root as depth 0.
+  // The pair below is a known-bad probe and its in-bounds twin: the same orphan beside
+  // the same manifest path, one directory apart. A bound that returned quietly would
+  // hand back a result indistinguishable from the converged one (avoids PF-018).
+  const nested = (levels: number): string =>
+    Array.from({ length: levels }, (_, i) => `d${i + 1}`).join('/');
+
+  async function seedNested(levels: number): Promise<{ known: string; orphan: string }> {
+    const dir = nested(levels);
+    await fs.mkdir(path.join(root, dir), { recursive: true });
+    await fs.writeFile(path.join(root, dir, 'keep.md'), 'keep\n', 'utf-8');
+    await fs.writeFile(path.join(root, dir, 'smuggled.md'), 'drop\n', 'utf-8');
+    return { known: `${dir}/keep.md`, orphan: `${dir}/smuggled.md` };
+  }
+
+  it('sweeps the deepest directory the shared bound permits', async () => {
+    const { known, orphan } = await seedNested(MAX_REFERENCE_SWEEP_DEPTH);
+
+    const result = await sweepOrphanedReferences(root, new Set([known]));
+
+    expect(result.removed).toEqual([orphan]);
+    expect(result.failed).toEqual([]);
+    expect(await exists(path.join(root, orphan))).toBe(false);
+    expect(await exists(path.join(root, known))).toBe(true);
+  });
+
+  it('known-bad probe: a descent past the bound is reported in failed, not silently truncated', async () => {
+    const tooDeep = nested(MAX_REFERENCE_SWEEP_DEPTH + 1);
+    const { known, orphan } = await seedNested(MAX_REFERENCE_SWEEP_DEPTH + 1);
+
+    const result = await sweepOrphanedReferences(root, new Set([known]));
+
+    // The subtree genuinely was not swept — the orphan under it survives...
+    expect(result.removed).toEqual([]);
+    expect(await exists(path.join(root, orphan))).toBe(true);
+    // ...and the sweep says so, naming the unvisited directory and the bound it hit,
+    // through the same channel the installer already renders (report.sweepFailures).
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].name).toBe(tooDeep);
+    expect(String(result.failed[0].error)).toContain(tooDeep);
+    expect(String(result.failed[0].error)).toContain(String(MAX_REFERENCE_SWEEP_DEPTH));
   });
 });

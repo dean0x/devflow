@@ -78,11 +78,14 @@
  *
  * Prune: after a clean build, every `.md` in dist/agents/ that no host emitted is
  * deleted (pruneOrphanAgents), and the same sweep runs recursively over
- * dist/skills/git/references/ (pruneOrphanReferences). That directory is gitignored and outranks
- * src/assets/agents/ in both the installer's resolve and loadShippedDefaults's
- * merge, so a file left there is installed in preference to the audited source on
- * every `devflow init`. The parity check in build.test.ts catches the same orphan
- * in CI, a commit later; this removes it on the machine that ran the build.
+ * dist/skills/git/references/ (pruneOrphanReferences). dist/agents/ is gitignored
+ * and outranks src/assets/agents/ in both the installer's resolve and
+ * loadShippedDefaults's merge, so a file left there is installed in preference to
+ * the audited source on every `devflow init`; the references tree is gitignored
+ * too and is overlaid wholesale onto the installed skill, so a file left there
+ * installs as if the build still produced it. The parity check in build.test.ts
+ * catches the same orphan in CI, a commit later; this removes it on the machine
+ * that ran the build.
  *
  * Usage: npm run build:mds
  */
@@ -105,6 +108,7 @@ import {
   type VariantModule,
   type VariantPair,
 } from "../src/core/mds-variants.js";
+import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -836,21 +840,26 @@ function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
  *
  * The descent is bounded like walkMds's, and for the same reason: an unbounded
  * recursion over a directory the build itself owns would spin on a symlink loop
- * instead of failing. MAX_PRUNE_DEPTH is generous — the deepest planned output
- * sits at `tracker/{provider}/{op}.md`, two levels down.
+ * instead of failing. The bound is MAX_REFERENCE_SWEEP_DEPTH, owned by
+ * src/core/reference-sweep.ts and shared with the installer's sweep of the same
+ * generated reference tree, so the two walkers cannot drift apart on how deep
+ * the tree may be or on which `depth` is the breach. It is generous — the
+ * deepest planned output sits at `tracker/{provider}/{op}.md`, two levels down.
+ * Here the breach throws, because a generated tree that deep is a build bug and
+ * dist/ is the build's own to fail; the installer's sweep reports it through its
+ * own failure channel instead. Neither passes it over.
  */
-const MAX_PRUNE_DEPTH = 8;
-
 function pruneOrphans(
   dirAbs: string,
   claimed: ReadonlySet<string>,
   recursive: boolean,
   depth = 0,
 ): string[] {
-  if (depth > MAX_PRUNE_DEPTH) {
+  if (depth > MAX_REFERENCE_SWEEP_DEPTH) {
     throw new Error(
-      `${path.relative(ROOT, dirAbs) || dirAbs}: prune descent exceeds ${MAX_PRUNE_DEPTH} levels — ` +
-      `a generated output tree should never be this deep.`,
+      `${path.relative(ROOT, dirAbs) || dirAbs}: prune descent exceeds ` +
+      `${MAX_REFERENCE_SWEEP_DEPTH} levels — a generated output tree should ` +
+      `never be this deep.`,
     );
   }
 
