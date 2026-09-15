@@ -45,6 +45,22 @@ import { loadGolden, extractStatusLines } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
+const SKILL_GIT_PATH = path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md')
+const SKILL_WORKTREE_PATH = path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md')
+
+/**
+ * The repo's own tsx, never `npx tsx`.
+ *
+ * `npx` re-resolves the binary on every spawn and, on a cold cache, fetches it
+ * from the registry — a network round-trip inside a 10-30s subprocess timeout.
+ * That makes reachability of the npm registry an unstated precondition of four
+ * guards whose subject is a local script. Same spelling as tests/helpers.ts and
+ * tests/build-mds.test.ts.
+ */
+const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx')
+
+/** Newline count — the unit every `*_LINES` / `*_NEWLINES` baseline here is measured in. */
+const newlineCount = (source: string): number => (source.match(/\n/g) ?? []).length
 
 // Pre-Phase-0 baseline at main@e726874 — informational, measured units.
 export const PRE_PHASE0_GIT_MD_BYTES = 59_376  // wc -c bytes
@@ -65,8 +81,20 @@ export const SKILL_GIT_CHARS = 6_581
 export const SKILL_GIT_LINES = 213
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92
-export const TOTAL_CHARS = GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS
-export const TOTAL_LINES = GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES
+/**
+ * The preloaded set's total size across the three files above — pinned literals,
+ * not a sum of the constants.
+ *
+ * `TOTAL_CHARS = GIT_MD_CHARS + …` asserted against `GIT_MD_CHARS + …` restates
+ * its own definition: it holds for every state of the tree, including one where
+ * all three parts drifted, so it pinned nothing (PF-018). The guard below MEASURES
+ * the three files and compares the measurement to these literals, which makes them
+ * equality baselines like every other constant in this file — re-set in the same
+ * golden-regeneration commit that moves the parts, never on their own to clear a
+ * red assertion.
+ */
+export const TOTAL_CHARS = 65_187
+export const TOTAL_LINES = 1_218
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 17_527
@@ -115,9 +143,8 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 
   it(`fixture has ${FIXTURE_NEWLINES} newlines (line baseline)`, () => {
     const golden = loadGolden('github-status-lines.txt')
-    const count = (golden.match(/\n/g) ?? []).length
     expect(
-      count,
+      newlineCount(golden),
       `Fixture newline count changed — the fixture is frozen through Phase 3 (AC-0.9)`,
     ).toBe(FIXTURE_NEWLINES)
   })
@@ -135,7 +162,7 @@ describe('git.md golden-dimension baselines', () => {
   it(`git-agent.md golden has ${GIT_MD_LINES} newlines`, () => {
     const golden = loadGolden('git-agent.md')
     expect(
-      (golden.match(/\n/g) ?? []).length,
+      newlineCount(golden),
       `git-agent.md newline count changed — update GIT_MD_LINES and regenerate the golden`,
     ).toBe(GIT_MD_LINES)
   })
@@ -148,24 +175,36 @@ describe('git.md golden-dimension baselines', () => {
     ).toBe(GIT_MD_CHARS)
   })
 
-  it('TOTAL_* constants are sums of their parts', () => {
-    expect(TOTAL_CHARS, 'TOTAL_CHARS must equal GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS').toBe(GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS)
-    expect(TOTAL_LINES, 'TOTAL_LINES must equal GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES').toBe(GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES)
+  it(`the three preloaded files measure ${TOTAL_CHARS} chars / ${TOTAL_LINES} lines`, () => {
+    const gitMd = loadGolden('git-agent.md')
+    const skillGit = readFileSync(SKILL_GIT_PATH, 'utf-8')
+    const skillWorktree = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
+
+    expect(
+      gitMd.length + skillGit.length + skillWorktree.length,
+      `Preloaded-set char total changed — re-measure the three files and move TOTAL_CHARS ` +
+      `in the same commit as the change that moved them.`,
+    ).toBe(TOTAL_CHARS)
+
+    expect(
+      newlineCount(gitMd) + newlineCount(skillGit) + newlineCount(skillWorktree),
+      `Preloaded-set line total changed — re-measure the three files and move TOTAL_LINES ` +
+      `in the same commit as the change that moved them.`,
+    ).toBe(TOTAL_LINES)
   })
 })
 
 describe('skill live-file baselines (Phase-0)', () => {
   it(`skills/git/SKILL.md has ${SKILL_GIT_LINES} lines`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
-    const lines = content.split('\n').length - 1
+    const content = readFileSync(SKILL_GIT_PATH, 'utf-8')
     expect(
-      lines,
+      newlineCount(content),
       `skills/git/SKILL.md line count changed from baseline (${SKILL_GIT_LINES}) — update SKILL_GIT_LINES`,
     ).toBe(SKILL_GIT_LINES)
   })
 
   it(`skills/git/SKILL.md has ${SKILL_GIT_CHARS} chars`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
+    const content = readFileSync(SKILL_GIT_PATH, 'utf-8')
     expect(
       content.length,
       `skills/git/SKILL.md char count changed from baseline (${SKILL_GIT_CHARS}) — update SKILL_GIT_CHARS`,
@@ -173,16 +212,15 @@ describe('skill live-file baselines (Phase-0)', () => {
   })
 
   it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_LINES} lines`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
-    const lines = content.split('\n').length - 1
+    const content = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
     expect(
-      lines,
+      newlineCount(content),
       `skills/worktree-support/SKILL.md line count changed from baseline (${SKILL_WORKTREE_LINES}) — update SKILL_WORKTREE_LINES`,
     ).toBe(SKILL_WORKTREE_LINES)
   })
 
   it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_CHARS} chars`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
+    const content = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
     expect(
       content.length,
       `skills/worktree-support/SKILL.md char count changed from baseline (${SKILL_WORKTREE_CHARS}) — update SKILL_WORKTREE_CHARS`,
@@ -201,8 +239,8 @@ describe('skill live-file baselines (Phase-0)', () => {
 describe('test:golden:update — frozen-target refusal [DR-03]', () => {
   it('refuses github-status-lines without --unfreeze (subprocess guard)', () => {
     const result = spawnSync(
-      'npx',
-      ['tsx', 'scripts/update-golden.ts', 'github-status-lines'],
+      TSX_BIN,
+      ['scripts/update-golden.ts', 'github-status-lines'],
       {
         cwd: ROOT,
         encoding: 'utf-8',
@@ -236,8 +274,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
     try {
       const result = spawnSync(
-        'npx',
-        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        TSX_BIN,
+        ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
         {
           cwd: ROOT,
           encoding: 'utf-8',
@@ -272,8 +310,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
     try {
       const result = spawnSync(
-        'npx',
-        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+        TSX_BIN,
+        ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
         { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
       )
       if (result.error) throw result.error
@@ -292,8 +330,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
 
   it('exits non-zero with usage when no target is given (subprocess guard)', () => {
     const result = spawnSync(
-      'npx',
-      ['tsx', 'scripts/update-golden.ts'],
+      TSX_BIN,
+      ['scripts/update-golden.ts'],
       {
         cwd: ROOT,
         encoding: 'utf-8',
