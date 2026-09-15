@@ -94,6 +94,10 @@ function joinContinuations(text: string): string {
  * shell context), no newline, and none of `|`, `;`, `&` (a pipe or a chain
  * starts a new command). Without the last three, `gh pr diff … | grep -n` reads
  * as a `gh` invocation carrying a `-n` flag.
+ *
+ * The three are excluded unconditionally — this class carries no quoting state, so it
+ * cuts inside a quoted argument too. What that costs is the last NOT COVERED bullet on
+ * `INLINE_BODY_SHAPES` below.
  */
 const IN_COMMAND = '[^`\\n|;&]*';
 
@@ -124,7 +128,15 @@ interface InlineBodyShape {
  *     named `body` field;
  *   - provider-composed notes — `--generate-notes`, `--notes-from-tag` — which
  *     publish text GitHub wrote, not a body devflow composed, so the scrub has no
- *     input to run on.
+ *     input to run on;
+ *   - a body flag sitting behind a QUOTED `&`, `|` or `;`. `IN_COMMAND` above excludes
+ *     those three characters with no quoting state, so it cuts inside a quoted argument
+ *     as readily as between two commands: `gh issue create --title "A & B" --body "x"`
+ *     ends at the `&` and matches no shape at all. The remedy is not another row but a
+ *     quote-aware bound — one that tracks open quotes across a folded continuation —
+ *     and no title, label or notes string in the corpus needs one. False-NEGATIVE
+ *     direction: a body posted that way is NOT reported, and this bullet is all that
+ *     stands between that and a silent bypass.
  * Each is a non-goal only while nothing ships it. The moment a recipe adopts one,
  * it is a real bypass: add the shape here WITH its own row in the shape-table probe
  * below, in the same commit as the recipe (ADR-025) — never a silent alternation.
@@ -1043,8 +1055,13 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('P2-S4 known-bad probe: the pre-split baseline carried these detectors cross-cutting', () => {
     // Permanent RED evidence (H10): the same collector over the byte-exact pre-split
-    // file, which had the `gh` and X-RateLimit literals in D4, D11, Principles and
-    // Boundaries. Seven sites — the number the split had to reach zero from.
+    // file, which had the `gh` and X-RateLimit literals in D4, D11, the D1 legend row,
+    // Principles and Boundaries. Eight sites — six in the pre-operations header, one in
+    // Principles, one in Boundaries — the number the split had to reach zero from. The
+    // assertion is a FLOOR under that census, not an equality on it: the claim being
+    // proven is that the collector still recognises pre-split detectors, and pinning the
+    // exact eight would tie a probe about the collector to a per-row table that may
+    // legitimately gain a row.
     const baseline = readFileSync(
       path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
       'utf-8',
@@ -1649,6 +1666,18 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('GAP-25: the learn-conventions branch bound is stated exactly once', () => {
+    // NOT COVERED, deliberately (PF-064 — the corpus half of the stack is written down
+    // rather than inferred from a green count). `gitAuthorityCorpus()` is the AUTHORED
+    // preload surface only, so it cannot see `dist/skills/git/references/`, where the
+    // OPERATIVE bound now lives in its command spelling
+    // (`learn-conventions.md:22`, `… | head -50`). Widening the corpus is refused under
+    // ADR-025: the property here is "one authority within the text a spawn preloads",
+    // and a joined corpus would only prove that the literal exists somewhere while
+    // losing the scope that makes the count mean anything. The moved spelling is not
+    // unpinned by that refusal — `learn-conventions: branch scan bound (head -50) is
+    // present` reads it union-mode over the sink corpus. What no guard asserts is that
+    // the two spellings agree on the NUMBER; a prose `≤50 branches` beside a `head -80`
+    // is the shape that would survive both.
     const hits = collectLiteralOccurrences(gitAuthorityCorpus(), '≤50 branches');
     expect(
       hits,

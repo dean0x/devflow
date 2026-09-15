@@ -21,11 +21,48 @@ import * as path from 'path';
 import { ROOT, walkFiles } from '../helpers.js';
 
 /**
- * An unquoted heredoc delimiter: `<<` (optionally `<<-`) followed directly by an
- * uppercase word. The quoted forms `<<'EOF'` and `<<"EOF"` do not match, and neither
- * does the here-string `<<<`.
+ * An unquoted heredoc delimiter, in the shell's own grammar: `<<` or `<<-`, optional
+ * blanks, then a delimiter word whose first character is neither a quote nor a
+ * backslash.
+ *
+ * Case is irrelevant to the shell, so it is irrelevant here — `<<eof` and `<<Body`
+ * expand every `$VAR` in their bodies exactly as `<<EOF` does — and the blanks are
+ * part of the grammar too: `run-hook` opens with the spaced form (`: << 'CMDBLOCK'`),
+ * so a recipe is one dropped pair of quotes away from a spelling a delimiter-adjacent
+ * pattern cannot see at all.
+ *
+ * Quoting is what turns expansion off, and any of the three spellings does it:
+ * `<<'EOF'`, `<<"EOF"`, `<<\EOF`. Hence the `(?!['"\\])` lookahead — the safe forms are
+ * excluded by the quote character itself, not by a word class that happens to omit it.
+ *
+ * The here-string `<<<` is excluded in both directions: `(?!<)` stops a match opening
+ * on the first two of the three `<`, and `(?<!<)` stops one opening on the last two.
+ * Without the pair, `read -r line <<< value` — a bare word after `<<<`, where no
+ * delimiter exists at all — would be reported as an unquoted heredoc.
+ *
+ * NOT COVERED, deliberately (PF-064 — a guard that certifies by finding NOTHING proves
+ * only the weakest reading of what it stacks, so the matcher's edge is written down
+ * rather than inferred from a green run). Each was checked absent from `src/assets/`
+ * when this was written:
+ *   - a delimiter formed by an expansion — `<<$VAR`, `<<${NAME}`. The word is unquoted,
+ *     so the body IS expanded; the delimiter is simply not a literal a word class can
+ *     name. False-NEGATIVE direction.
+ *   - a delimiter quoted or escaped after its FIRST character — `<<EO\F`, `<<EOF'x'`.
+ *     The shell quotes the WHOLE delimiter when any part of the word is quoted, so
+ *     these are safe and would still be reported. False-POSITIVE direction: read the
+ *     hit and justify an exclusion below; never narrow the pattern back.
+ *   - a delimiter separated from its `<<` by a line continuation (`<<\` + newline +
+ *     `EOF`). The shell joins those lines before it parses the redirection; this scan
+ *     is line-by-line and sees two halves.
+ *   - a delimiter that starts with a digit (`<<9EOF`). Admitting `[0-9]` as a first
+ *     character would make the now-accepted blanks read a left-shift expression
+ *     (`x << 2`) as a heredoc; nothing in the corpus spells either, and a false
+ *     negative on a delimiter nobody writes is the cheaper of the two.
+ * Each is a non-goal only while nothing ships it. The moment a recipe adopts one,
+ * widen the pattern WITH its own row in the probe below, in the same commit as the
+ * recipe (ADR-025) — never a quiet alternation.
  */
-const UNQUOTED_HEREDOC_RE = /<<-?[A-Z][A-Z0-9_]*/;
+const UNQUOTED_HEREDOC_RE = /(?<!<)<<(?!<)-?[ \t]*(?!['"\\])[A-Za-z_][A-Za-z0-9_]*/;
 
 /** Files worth scanning: prompt assets and the shell hooks, not binaries. */
 const SCANNED_EXTENSIONS: readonly string[] = ['.md', '.mds', '.sh', '.bash'];
@@ -103,12 +140,44 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
     ).toEqual([]);
   });
 
-  it('known-bad probe: the pattern sees the shape it guards against, and not the safe ones', () => {
-    expect(UNQUOTED_HEREDOC_RE.test("PROMPT=$(cat <<EOF")).toBe(true);
-    expect(UNQUOTED_HEREDOC_RE.test('git commit -m "$(cat <<-MSG')).toBe(true);
-    expect(UNQUOTED_HEREDOC_RE.test("git commit -m \"$(cat <<'EOF'")).toBe(false);
-    expect(UNQUOTED_HEREDOC_RE.test('cat <<"EOF"')).toBe(false);
-    expect(UNQUOTED_HEREDOC_RE.test('read -r line <<< "$value"')).toBe(false);
+  it('known-bad probe: every spelling the pattern claims to read fires, and the safe ones do not', () => {
+    // Labelled rows in BOTH directions, one per spelling. A bare list of `toBe(true)`
+    // calls cannot say WHICH spelling stopped matching when someone narrows the
+    // pattern, and the RED half alone would be satisfied by a pattern that flagged
+    // every line in the corpus (PF-018).
+    const expands: ReadonlyArray<readonly [string, string]> = [
+      ['uppercase', 'PROMPT=$(cat <<EOF'],
+      ['tab-stripping `<<-`', 'git commit -m "$(cat <<-MSG'],
+      ['lowercase', 'cat <<eof'],
+      ['mixed case', 'cat <<Body'],
+      ['underscore-led', 'cat <<_private'],
+      ['blanks before the delimiter', ': << EOF'],
+      ['blanks after `<<-`', 'cat <<-\tEOF'],
+    ];
+    const missed = expands.filter(([, text]) => !UNQUOTED_HEREDOC_RE.test(text)).map(([l]) => l);
+    expect(
+      missed,
+      'unquoted heredoc spelling(s) the pattern no longer reads — a body written that way ' +
+      `expands every $VAR, backtick and $(…) in it and nothing reports it:\n  ${missed.join('\n  ')}`,
+    ).toEqual([]);
+
+    // GREEN controls: the quoted forms the recipes are supposed to end up in, plus the
+    // two here-string shapes that carry no delimiter at all.
+    const inert: ReadonlyArray<readonly [string, string]> = [
+      ['single-quoted', "git commit -m \"$(cat <<'EOF'"],
+      ['double-quoted', 'cat <<"EOF"'],
+      ['backslash-escaped', 'cat <<\\EOF'],
+      ['quoted after blanks — the shape `run-hook` opens with', ": << 'CMDBLOCK'"],
+      ['quoted after `<<-`', "cat <<-'EOF'"],
+      ['here-string, quoted word', 'read -r line <<< "$value"'],
+      ['here-string, bare word', 'read -r line <<< value'],
+    ];
+    const flagged = inert.filter(([, text]) => UNQUOTED_HEREDOC_RE.test(text)).map(([l]) => l);
+    expect(
+      flagged,
+      'safe form(s) reported as unquoted — a pattern that flags the compliant shapes grows ' +
+      `the exclusion list below until neither means anything:\n  ${flagged.join('\n  ')}`,
+    ).toEqual([]);
   });
 
   it('known-bad probe: a seeded unquoted heredoc is reported by the same collector', () => {
