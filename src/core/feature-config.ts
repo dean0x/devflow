@@ -1,23 +1,70 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { getFeatureConfigPath } from './project-paths.js';
+import { parseTrackerId, type TrackerProvider } from './tracker.js';
 
 export type ReviewPublication = 'auto' | 'full' | 'off';
+
+/**
+ * The parsed per-repo tracker override — THREE states, because the Git agent's
+ * resolution order needs all three and no two of them mean the same thing
+ * (P3a-S13, OD-9, [DR-26]).
+ *
+ *   absent  — no override. The agent corroborates against the repo's ref grammar
+ *             and then falls through to `features.tracker.provider` in the
+ *             manifest. This is NOT the same as `github`: a chosen `github`
+ *             short-circuits corroboration, absence requests it.
+ *   valid   — a registered provider id, byte-exact.
+ *   invalid — the key is set to something outside the registry. Carries the raw
+ *             value so `TRACEABILITY: DEGRADED (unknown tracker provider)` can
+ *             name it (§14.2). Distinct from `absent` precisely so that reason is
+ *             reachable; the MANIFEST value's malformed case self-heals silently
+ *             instead ([DR-26]) and the two must not be conflated.
+ */
+export type TrackerConfigOverride =
+  | { kind: 'absent' }
+  | { kind: 'valid'; provider: TrackerProvider }
+  | { kind: 'invalid'; raw: string };
 
 export interface FeatureConfig {
   memory: boolean;
   learning: boolean;
   knowledge: boolean;
   reviewPublication: ReviewPublication;
+  /**
+   * The per-repo tracker provider override, as the RAW string the config file
+   * holds. Absent (`undefined`) means no override — and the key is then omitted
+   * from the written JSON, never written as `null` or as a default provider.
+   *
+   * Deliberately raw and deliberately unvalidated HERE, unlike every sibling
+   * field: `updateFeature` is a read-modify-write over the whole config, so the
+   * value must survive a round trip byte-for-byte or an unrelated `devflow
+   * knowledge --disable` would silently erase a user's edit — including a
+   * misspelled one, whose erasure would also erase the DEGRADED that reports it.
+   * Repair is forbidden for this value (§14.9-6: reject, never repair), and a
+   * field that coerced on read could not preserve it.
+   *
+   * NEVER consume this field directly — parse it with {@link parseTrackerOverride},
+   * which routes through the same `parseTrackerId` the CLI boundary uses so there
+   * is ONE authority on what a provider token may be (PF-023).
+   */
+  tracker?: string;
 }
 
 /**
  * The keys of FeatureConfig whose value type is boolean.
  * Used to restrict updateFeature / isFeatureEnabled to boolean-typed fields only —
- * reviewPublication must not be togglable as a boolean.
+ * neither reviewPublication nor the per-repo tracker override must be togglable
+ * as a boolean.
+ *
+ * The `-?` is load-bearing, not tidying: a mapped type over an OPTIONAL property
+ * yields `K | undefined`, so the moment `tracker?: string` joined the interface a
+ * bare mapping resolved to `'memory' | 'learning' | 'knowledge' | undefined` and
+ * `updateFeature`'s computed index stopped compiling. Stripping the modifier
+ * keeps the union to real keys, and any future optional field inherits the fix.
  */
 export type BooleanFeature = {
-  [K in keyof FeatureConfig]: FeatureConfig[K] extends boolean ? K : never;
+  [K in keyof FeatureConfig]-?: FeatureConfig[K] extends boolean ? K : never;
 }[keyof FeatureConfig];
 
 export const DEFAULT_CONFIG: FeatureConfig = {
@@ -29,6 +76,36 @@ export const DEFAULT_CONFIG: FeatureConfig = {
 
 export function getConfigPath(projectRoot: string): string {
   return getFeatureConfigPath(projectRoot);
+}
+
+/**
+ * Parse the per-repo tracker override from the raw config value.
+ *
+ * Pure. Delegates membership to `parseTrackerId` rather than re-spelling a
+ * closed-domain ternary the way `reviewPublication` does: `reviewPublication`
+ * self-heals any invalid value to `'auto'`, which is correct for a publication
+ * mode and wrong for a provider — a repaired provider is the laundering path
+ * GAP-10 names, and §14.2 gives the invalid case its own DEGRADED reason, which
+ * only exists if the parse REFUSES instead of healing.
+ *
+ * An empty string reads as absent: `"tracker": ""` is an unset key with a
+ * character in it, not an attempt to name a provider.
+ *
+ * A non-string JSON value (`42`, `true`, `null`, an array, an object) is
+ * `invalid`, not `absent` — a present-but-wrong-typed value means the file was
+ * edited, and reporting it as absent would make the whole class silent.
+ */
+export function parseTrackerOverride(raw: unknown): TrackerConfigOverride {
+  if (raw === undefined || raw === '') return { kind: 'absent' };
+  // `unknown`, not `string | undefined`, even though the field is typed: this is
+  // a boundary parse over hand-edited JSON, and a signature that promised a
+  // string would make the wrong-type arm unreachable to the compiler while it
+  // stays entirely reachable to a user with a text editor.
+  if (typeof raw !== 'string') {
+    return { kind: 'invalid', raw: JSON.stringify(raw) ?? String(raw) };
+  }
+  const parsed = parseTrackerId(raw);
+  return parsed.ok ? { kind: 'valid', provider: parsed.value } : { kind: 'invalid', raw };
 }
 
 /**
@@ -59,11 +136,23 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
   const reviewPublication: ReviewPublication =
     rp === 'auto' || rp === 'full' || rp === 'off' ? rp : 'auto';
 
+  // The per-repo tracker override is carried through VERBATIM, never coerced.
+  // Two reasons, and the second is the one a reader is likely to miss:
+  //   (a) repair is forbidden for a provider value (§14.9-6), so there is no
+  //       healed value to fall back to the way reviewPublication has 'auto';
+  //   (b) coerceConfig feeds updateFeature's read-modify-write, so a value
+  //       dropped here is a value DELETED from the file on the next unrelated
+  //       toggle — erasing both the user's edit and the DEGRADED that reports it.
+  // A non-string is dropped rather than stringified: JSON.stringify would then
+  // write back a quoted `"42"` that reads as a deliberate string next time.
+  const tracker = typeof p.tracker === 'string' && p.tracker !== '' ? p.tracker : undefined;
+
   return {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
     learning,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
     reviewPublication,
+    ...(tracker === undefined ? {} : { tracker }),
   };
 }
 
