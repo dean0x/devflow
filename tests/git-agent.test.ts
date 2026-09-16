@@ -17,7 +17,24 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
-import { TRACKER_GITHUB_OPS, GIT_CROSS_CUTTING_DOCS } from '../src/core/mds-variants.js';
+import {
+  TRACKER_GITHUB_OPS,
+  GIT_CROSS_CUTTING_DOCS,
+  VARIANT_MODULES,
+} from '../src/core/mds-variants.js';
+
+/**
+ * How many corpus files declare a `## Operation:` section for a TRACKER op:
+ * git.md itself, plus one generated mechanics file per registered provider.
+ *
+ * Derived from the registry rather than typed, because the number moves with a
+ * provider and not with anything a reader of this file would think to check. A
+ * literal here was correct while GitHub was the only provider and became wrong
+ * the moment a second one registered — with a message ("expected exactly 2")
+ * that reads as a regression in the extractor rather than as a new provider.
+ */
+const TRACKER_OP_DECLARING_FILES =
+  1 + VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/')).length;
 import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
@@ -1994,12 +2011,16 @@ describe('git agent — static content guards (PF-018)', () => {
     ).not.toContain('## Operation: fetch-issues-batch');
     expect(
       matchCount,
-      'expected exactly 2 `fetch-issue` sections (git.md + its generated reference); a third is ' +
-      'the prefix match on fetch-issues-batch.md returning',
-    ).toBe(2);
+      `expected exactly ${TRACKER_OP_DECLARING_FILES} \`fetch-issue\` sections (git.md plus one ` +
+      `generated mechanics file per registered provider); one more than that is the prefix match ` +
+      `on fetch-issues-batch.md returning`,
+    ).toBe(TRACKER_OP_DECLARING_FILES);
     // Control: the longer name still resolves on its own, so the bound did not go too far.
     const batch = extractOpSectionFromCorpus(sinkCorpus, 'fetch-issues-batch', { mode: 'union' });
-    expect(batch.matchCount, 'fetch-issues-batch must still resolve in both of its own files').toBe(2);
+    expect(
+      batch.matchCount,
+      'fetch-issues-batch must still resolve in each of its own declaring files',
+    ).toBe(TRACKER_OP_DECLARING_FILES);
     expect(batch.content).toContain('## Operation: fetch-issues-batch');
   });
 

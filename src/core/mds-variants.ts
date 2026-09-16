@@ -103,8 +103,8 @@ export function validateOutputName(name: string): Result<string, OutputNameError
  * not stylistic. The underscore is MANDATORY here and FORBIDDEN there, because it
  * is what tells a reader of the references tree which entries are providers:
  * `tracker/_mcp.md` sits beside the provider DIRECTORIES `tracker/github/` and
- * (from 3b) `tracker/jira/`, and `tracker/mcp.md` would read as a fourth
- * provider. Relaxing the shared rule instead would have admitted `_anything.md`
+ * `tracker/jira/`, and `tracker/mcp.md` would read as a third provider.
+ * Relaxing the shared rule instead would have admitted `_anything.md`
  * as a command or an agent basename too — a widening across all three build
  * destinations to buy a property only this one needs (ADR-025: classify the case,
  * never blanket-widen).
@@ -314,7 +314,7 @@ export function resolveOutputDir(
  * structurally identical to the single-arm conditional AC-1.2 forbids, so
  * expandVariants refuses a pair list below MIN_VARIANT_PAIRS.
  */
-export const TRACKER_GITHUB_OPS = [
+export const TRACKER_OPS = [
   'setup-task',
   'fetch-issue',
   'fetch-issues-batch',
@@ -326,6 +326,30 @@ export const TRACKER_GITHUB_OPS = [
   'post-wave-report',
   'ensure-pr-ready',
 ] as const;
+
+/**
+ * The GitHub provider's operation set — the SAME list, under the name that reads
+ * correctly at a GitHub-scoped call site.
+ *
+ * An alias, not a copy, and both names are load-bearing:
+ *
+ *   - {@link TRACKER_OPS} is the ROSTER. Every provider row in VARIANT_MODULES
+ *     reads it, which is what makes AC-3.8's file-set parity a compile-time
+ *     property instead of an assertion two hand-listed arrays have to keep
+ *     agreeing on.
+ *   - `TRACKER_GITHUB_OPS` is a PROVIDER SCOPE. Several guards genuinely mean
+ *     "the ops of the GitHub path" rather than "the roster" — the byte budget's
+ *     GitHub-scoped loaded-set row (D-LOADED-SET-SCOPE), the re-scoped AC-2.7
+ *     arm that proves no github op file names the tool-call contract, and the
+ *     containment oracle's github corpus. Reading the roster's name at those
+ *     sites would say something subtly different from what they check.
+ *
+ * The two sets are identical today and identity is asserted by `toBe` at the
+ * registration sites, so this is one list with two readings rather than a
+ * synonym nobody maintains. If a provider ever needs an op the others do not,
+ * this alias is where that divergence becomes visible.
+ */
+export const TRACKER_GITHUB_OPS = TRACKER_OPS;
 
 /**
  * How a module's emitted filenames are decided — and therefore whether the
@@ -411,9 +435,14 @@ export const GIT_CROSS_CUTTING_DOCS = [
  * the build rather than guessed at: the emitted filenames come from the op list,
  * not from the module's own basename, so there is nothing to fall back to.
  *
- * Phase 2 is GitHub-only. `_jira.mds` / `_linear.mds` and the MCP module are
- * Phase 3 and are deliberately absent — an entry here with no module on disk
- * would be an artifact with no reachable consumer (ADR-003).
+ * Every provider row reads the ONE shared {@link TRACKER_OPS} roster, so the two
+ * providers below emit the same file set by construction. `_linear.mds` is Phase
+ * 3c and is deliberately absent — an entry here with no module on disk would be
+ * an artifact with no reachable consumer (ADR-003).
+ *
+ * Registering a provider whose `subdir` is one of MCP_BACKED_PROVIDER_SUBDIRS is
+ * also what opens the generation gate on the tool-call contract; see
+ * {@link mcpContractIsGenerated}. There is no second edit and no flag.
  */
 export const VARIANT_MODULES = [
   {
@@ -421,6 +450,12 @@ export const VARIANT_MODULES = [
     subdir: 'tracker/github',
     kind: 'fanout',
     ops: TRACKER_GITHUB_OPS,
+  },
+  {
+    source: 'src/assets/mds/tracker/_jira.mds',
+    subdir: 'tracker/jira',
+    kind: 'fanout',
+    ops: TRACKER_OPS,
   },
   {
     source: 'src/assets/mds/git/_references.mds',
@@ -454,18 +489,19 @@ export const MCP_BACKED_PROVIDER_SUBDIRS = ['tracker/jira', 'tracker/linear'] as
 /**
  * The provider-independent tool-call contract document.
  *
- * AUTHORED in Phase 3a, GENERATED only once {@link mcpContractIsGenerated} is
- * true, and the split is load-bearing in both directions:
+ * GENERATED only while {@link mcpContractIsGenerated} is true — that is, only
+ * while a provider that reaches its tracker through a tool call is registered.
+ * The gate is not a phase marker; it is the answer to "does anyone load this?",
+ * and it stays answerable in both directions:
  *
- *   - It must be authored now, because its first runtime consumer is a provider
- *     mechanics file landing later in the SAME phase, and prefix-shippability
- *     clause (iii) is read per phase (decision D-D). A contract authored after
- *     its consumers is a contract the consumers were written without.
- *   - It must not be generated now, because Phase 2's AC-2.7 guard asserts its
- *     absence after a GitHub-only build, and every GitHub user would otherwise be
- *     billed for a reference nothing they can reach ever loads (GAP-02). The
- *     byte-budget formula carries it as a term that is 0 on the GitHub path for
- *     exactly this reason.
+ *   - Open, as it is with `tracker/jira` registered: the provider's per-operation
+ *     mechanics NAME this document, so it must exist or ten references point at a
+ *     file the install does not carry.
+ *   - Shut, as it is for a registry with GitHub alone: no reachable consumer
+ *     exists, and generating it anyway would bill every GitHub user for a
+ *     reference nothing they can reach ever loads (GAP-02). The byte-budget
+ *     formula carries it as a term that is 0 on the GitHub path for exactly that
+ *     reason, and the re-scoped AC-2.7 arm proves no github op file names it.
  *
  * It lands at the `tracker/` ROOT rather than inside a provider directory: it is
  * provider-independent, and a copy per provider is the duplication it exists to
@@ -528,6 +564,33 @@ export function resolveVariantModules(
  * added to the gate is added here by construction.
  */
 export const GATED_REFERENCE_MODULE_SOURCES: readonly string[] = [MCP_CONTRACT_MODULE.source];
+
+/**
+ * The gated reference modules this registry does NOT generate — the build's
+ * "deferred" bucket, as a derived set.
+ *
+ * ONE authority for a question two callers ask. `scripts/build-mds.ts` asks it
+ * per walked file to decide whether to defer or compile; the packaging and
+ * printed-count guards ask it for the whole registry to know what the build must
+ * have reported. Both spelled the predicate inline while there was exactly one
+ * gated module and exactly one answer, which is how a roster and the code that
+ * produces it come to disagree the first time the answer changes.
+ *
+ * With `tracker/jira` registered the set is EMPTY, and that is the honest reading
+ * rather than a missing roster: the one gated module has a consumer, so nothing
+ * is held back. The guards therefore assert the build printed zero deferred
+ * modules, and prove the predicate still has teeth by asking it about a registry
+ * with the provider removed.
+ *
+ * @param modules - Registry to measure (defaults to VARIANT_MODULES). Injectable
+ *   so the non-empty arm is provable without unregistering a shipped provider.
+ */
+export function deferredReferenceModuleSources(
+  modules: readonly VariantModule[] = VARIANT_MODULES,
+): readonly string[] {
+  const active = new Set(resolveVariantModules(modules).map(mod => mod.source));
+  return GATED_REFERENCE_MODULE_SOURCES.filter(source => !active.has(source));
+}
 
 /**
  * The floor a FAN-OUT module's pair list must clear.
@@ -646,9 +709,10 @@ export function expandVariants(
  * Every reference file the build generates, as POSIX paths relative to
  * {@link SKILL_REFS_OUTPUT_DIR} — the manifest an installer converges to.
  *
- * Derived from the registry above (VARIANT_MODULES, which carries
- * TRACKER_GITHUB_OPS and GIT_CROSS_CUTTING_DOCS) through the same expandVariants
- * the build plan uses. Hand-listing the operations here would create a second
+ * Derived from the resolved registry above (VARIANT_MODULES plus the gated
+ * contract module, carrying TRACKER_OPS once per provider and
+ * GIT_CROSS_CUTTING_DOCS) through the same expandVariants the build plan uses.
+ * Hand-listing the operations here would create a second
  * roster that drifts silently the moment one is added — the bidirectional-registry
  * rule compliance-compose.ts states for its token tables.
  *

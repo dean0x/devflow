@@ -103,7 +103,7 @@ import {
   SKILL_REFS_OUTPUT_DIR,
   VARIANT_MODULES,
   resolveVariantModules,
-  GATED_REFERENCE_MODULE_SOURCES,
+  deferredReferenceModuleSources,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
@@ -420,7 +420,10 @@ function discoverHosts(): DiscoveryResult {
   const deferred: string[] = [];
   // The registry as it stands for THIS build, gates applied. Resolved once so
   // every host is measured against the same answer.
-  const activeModules = resolveVariantModules();
+  // The gated modules this registry does not generate, from the one owner that
+  // answers that question (src/core/mds-variants.ts). Computed once so every
+  // walked file is measured against the same answer.
+  const gatedShut = new Set(deferredReferenceModuleSources());
   let totalCount = 0;
   for (const file of walkMds(ROOT)) {
     totalCount++;
@@ -430,7 +433,7 @@ function discoverHosts(): DiscoveryResult {
     // it here rather than in the plan pass keeps HostPlan's arms describing only
     // hosts that will be written, so no downstream dispatch grows a "planned but
     // not emitted" case it would have to carry forever.
-    if (GATED_REFERENCE_MODULE_SOURCES.includes(rel) && !activeModules.some(m => m.source === rel)) {
+    if (gatedShut.has(rel)) {
       deferred.push(rel);
       continue;
     }

@@ -21,19 +21,21 @@
  *      `<bytes>` verification [DR-06]. Asserted against the SOURCE `.mds`.
  *   2. BYPASS — the bypass regex is RED on real bypass shapes, proven inline.
  *   3. FORWARD — every posting mechanic that spells a body argument names all
- *      four clauses. Its live corpus is EMPTY at this boundary and the emptiness
- *      is ASSERTED rather than tolerated, so nobody reads a green run as
- *      evidence about provider files that do not exist yet.
+ *      four clauses, and no file in the sink class posts an ungated body. The
+ *      corpus is LIVE: a provider mechanics tree exists, so this arm is now
+ *      evidence about shipped files rather than about the collector alone.
  *   4. PROBES — the forward collector is driven by seeded mechanics that omit
- *      exactly one clause each, so an inert collector fails here rather than in
- *      the phase that first has a subject.
+ *      exactly one clause each, so an inert collector is reported here rather
+ *      than passing over a real corpus.
  *
  * SCOPE [E2]: the contract clauses are asserted against
- * `src/assets/mds/tracker/_mcp.mds`, NEVER against
- * `dist/skills/git/references/tracker/_mcp.md` — that file does not exist at this
- * boundary, because generation is keyed on a provider that needs it being
- * registered (P3a-S12, hazard H7). A guard reading the generated path would be
- * reading nothing and reporting success.
+ * `src/assets/mds/tracker/_mcp.mds`, the SOURCE, and not against the generated
+ * `dist/skills/git/references/tracker/_mcp.md`. The source is the authority in
+ * both gate states — the generated file exists only while a provider needs it,
+ * and a guard about the contract's WORDING must not go quiet when the gate shuts.
+ * An arm below asserts the generated copy carries the same clauses while it
+ * exists, which is a different claim (the build emits what was authored) and is
+ * kept separate for that reason.
  *
  * MDS ESCAPE ASYMMETRY: in an `.mds` source a brace in PROSE is written `\{`, and
  * raw inside a column-0 fence. The same literal therefore has two spellings in
@@ -125,9 +127,11 @@ const CONTRACT_CLAUSES: readonly ContractClause[] = [
     id: 'byte verification [DR-06]',
     literal: '<bytes>',
     why:
-      'a Bash result is truncated by the harness from the TAIL, so the framing line survives and ' +
-      'a bare "no framing line ⇒ do not post" gate passes while the body is partial — a guard ' +
-      'that appears to work while failing',
+      'a Bash result is truncated by the harness with the HEAD and TAIL preserved and the MIDDLE ' +
+      'elided, so the body arrives intact at both ends with a hole between them: a bare "no ' +
+      'framing line ⇒ do not post" gate passes on it, and so would an eyeball. The byte count is ' +
+      'the only thing that can see the hole (docs/reference/platform-assumptions.md records the ' +
+      'shape and the limit)',
   },
 ];
 
@@ -190,16 +194,27 @@ describe('tool-call contract: the source module states every D11 clause [E2]', (
       .toBeGreaterThanOrEqual(5);
   });
 
-  it('the clause literals are asserted against the SOURCE, and the generated file is absent [E2]', () => {
-    // The scope claim, made mechanical: if the generated file ever exists at this
-    // boundary the gate has been opened and this guard's whole premise changed.
-    expect(mcpContractIsGenerated(), 'the generation gate must still be shut at this boundary')
-      .toBe(false);
+  it('the clauses are pinned against the SOURCE, and the generated copy carries them too [E2]', () => {
+    // Two separate claims, kept separate. The SOURCE is the authority in either
+    // gate state — that is what [E2] is about, and it is why the clause table above
+    // reads the `.mds`. What the generated copy owes, while the gate is open, is
+    // that the build emitted what was authored; a compile step that dropped a
+    // clause would leave every shipped posting mechanic pointing at a contract
+    // missing the rule it invokes.
     expect(
-      existsSync(path.join(compiledSkillRefsDir(), 'tracker', '_mcp.md')),
-      'the generated contract exists — re-read [E2]: these clauses are pinned against the source ' +
-      'precisely because the generated file does not exist yet',
-    ).toBe(false);
+      mcpContractIsGenerated(),
+      'the gate is open on this tree — a registered provider needs the contract',
+    ).toBe(true);
+    const generated = path.join(compiledSkillRefsDir(), 'tracker', '_mcp.md');
+    expect(
+      existsSync(generated),
+      `${generated} is absent while the gate is open — run \`npm run build\``,
+    ).toBe(true);
+    expect(
+      collectMissingClauses(readFileSync(generated, 'utf-8')),
+      'the generated contract is missing clause(s) the source states — the compile step dropped ' +
+      'them, and every posting mechanic that names this file invokes a rule it no longer contains',
+    ).toEqual([]);
   });
 
   it('unescapeMds normalises the prose spelling, and only the brace escapes', () => {
@@ -285,6 +300,23 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     }
   });
 
+  it('no file in the live sink class posts an ungated body', () => {
+    // The bypass regex, applied to the corpus rather than only to seeds. Until a
+    // provider mechanics tree existed there was nothing to apply it to; now there
+    // is, and a control that only ever runs against its own known-bad samples is
+    // a control nobody is subject to (PF-027).
+    const corpus = postingMechanicCorpus();
+    expect(corpus.length, 'empty sink class — run `npm run build`').toBeGreaterThan(0);
+    const sites = collectBypassSites(corpus);
+    expect(
+      sites,
+      'a body-shaped argument in the sink class is assigned something other than the gated ' +
+      'placeholder. The ONLY accepted right-hand side is `{SCRUBBED_BODY}`, because the bytes ' +
+      'behind it are obtainable only from behind a framing line the scrubber alone can ' +
+      `produce:\n  ${sites.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
   it('a near-miss placeholder is still a bypass', () => {
     // The failure mode a substring check would miss: a plausible-looking
     // placeholder that is not the one the script produces.
@@ -303,7 +335,15 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     // then fails on the `T` that follows — inert against every actual tool name.
     // The leading `\b` stays, so `my_add_comment_helper` is still matched on its
     // own token and an arbitrary substring is not.
-    const POSTING_VERBS = /\b(?:create[_-]?comment|add[_-]?comment|post[_-]?comment|update[_-]?description|edit[_-]?comment)/i;
+    //
+    // A SPACE is admitted in the separator class alongside `_` and `-`, because
+    // the contract's own rule is to select by capability DESCRIPTION rather than
+    // by tool name — so a compliant mechanics file writes *add comment*, not
+    // `addComment`. With only `[_-]?` this predicate matched every tool name and
+    // no capability description, i.e. it was inert against exactly the corpus the
+    // contract mandates. The conjunction with `RAW\b` on the SAME line is what
+    // keeps the widening from reporting ordinary prose about adding comments.
+    const POSTING_VERBS = /\b(?:create[_\- ]?comment|add[_\- ]?comment|post[_\- ]?comment|update[_\- ]?description|edit[_\- ]?comment)/i;
     // TRAILING boundary only. `\bRAW\b` cannot match `$DEVFLOW_BODY_RAW`: the
     // underscore before `RAW` is a word character, so there is no word boundary
     // there — and the variable the raw body actually travels in is exactly that
@@ -319,9 +359,15 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
       }
     }
     expect(offenders, `posting verb sharing a line with RAW:\n  ${offenders.join('\n  ')}`).toEqual([]);
-    // Known-bad, inline: the predicate has teeth even while the corpus is empty,
-    // and it is driven over both spellings of the raw reference.
-    for (const line of ['create_comment(body: $DEVFLOW_BODY_RAW)', 'addCommentToJiraIssue(body: "$RAW")']) {
+    // Known-bad, inline: driven over the tool-name spelling, the capability
+    // spelling the contract actually mandates, and both spellings of the raw
+    // reference.
+    for (const line of [
+      'create_comment(body: $DEVFLOW_BODY_RAW)',
+      'addCommentToJiraIssue(body: "$RAW")',
+      'Post through the *add comment* capability with $DEVFLOW_BODY_RAW.',
+      'Fall back to the *update description* capability reading $RAW directly.',
+    ]) {
       expect(POSTING_VERBS.test(line) && RAW_REF.test(line), `"${line}" must be caught`).toBe(true);
     }
     // …and does NOT fire on a gated line that never mentions the raw body.
@@ -336,11 +382,13 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
 /**
  * The generated mechanics of every provider whose sink is a tool call.
  *
- * EMPTY AT THIS BOUNDARY, and that is asserted below rather than tolerated: the
- * provider modules land in the next two subtasks, so a green forward arm here is
- * evidence about the COLLECTOR and about nothing else. §8.9's [E2] scope note
- * says exactly this — the posting-mechanic arms first run where provider files
- * exist.
+ * LIVE from Phase 3b: a provider mechanics tree exists, so every arm below is
+ * evidence about shipped files. The emptiness assertion that stood here while the
+ * tree did not exist is gone, deliberately and in the commit that gave the arm a
+ * subject — it was written to go red at exactly this moment and its message said
+ * so. Providers are read from MCP_BACKED_PROVIDER_SUBDIRS rather than listed, so
+ * a provider added later joins this corpus by construction; a sub-directory that
+ * does not exist yet contributes nothing and the non-vacuity arm reports it.
  */
 function postingMechanicCorpus(): CorpusEntry[] {
   const corpus: CorpusEntry[] = [];
@@ -380,16 +428,24 @@ export function collectUngatedPostingMechanics(corpus: readonly CorpusEntry[]): 
 }
 
 describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]', () => {
-  it('★ the live corpus is EMPTY at this boundary — declared, not assumed', () => {
-    // PF-018's shape, stated out loud: this arm cannot be read as evidence about
-    // provider mechanics until provider mechanics exist. When 3b lands, this
-    // assertion is what goes red and forces the arm below to be read for real.
+  it('★ the live corpus is non-empty, and holds at least one real posting mechanic', () => {
+    // PF-018, in the direction that matters now that a subject exists: every arm
+    // below is an empty-difference assertion, and an empty corpus satisfies all of
+    // them. So the corpus is asserted to be populated AND to contain a file that
+    // actually spells the gated placeholder — a tree of read-only mechanics would
+    // clear the first check and leave the forward arm proving nothing.
     const corpus = postingMechanicCorpus();
     expect(
-      corpus.map(e => e.path),
-      'a provider mechanics tree exists. The forward arm below is now LIVE — re-read it, and ' +
-      'delete this emptiness assertion in the same commit that adds the provider.',
-    ).toEqual([]);
+      corpus.length,
+      'no provider mechanics file was read — run `npm run build`; a posting-mechanic guard over ' +
+      'zero posting mechanics reports success about nothing',
+    ).toBeGreaterThan(0);
+    const posting = corpus.filter(e => unescapeMds(e.content).includes('{SCRUBBED_BODY}'));
+    expect(
+      posting.map(e => e.path),
+      'the corpus holds no file that spells the gated body placeholder, so every clause arm below ' +
+      'is skipped by its own scope filter',
+    ).not.toEqual([]);
   });
 
   it('no posting mechanic in the live corpus is ungated', () => {

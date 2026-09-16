@@ -148,11 +148,11 @@
     },
     {
       "id": "generated-reference-manifest-size",
-      "floor": 13,
-      "pattern": "toBeGreaterThanOrEqual(13)",
+      "floor": 24,
+      "pattern": "toBeGreaterThanOrEqual(24)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "P2-S14 overlay: the generated reference manifest (10 GitHub ops + 3 cross-cutting documents). Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists."
+      "description": "P2-S14 overlay: the generated reference manifest. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. RAISED 13 -> 24 in the Phase-3 3b commit that registers the Jira provider: 10 GitHub ops + 10 Jira ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 3 cross-cutting documents + the tool-call contract, whose generation gate the Jira registration opens. A floor may only rise, and here it rises by a whole provider at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -164,19 +164,19 @@
     },
     {
       "id": "packed-reference-manifest-size",
-      "floor": 13,
-      "pattern": "toBeGreaterThanOrEqual(13)",
+      "floor": 24,
+      "pattern": "toBeGreaterThanOrEqual(24)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
-      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed."
+      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. RAISED 13 -> 24 alongside generated-reference-manifest-size in the 3b commit that registers the Jira provider — the two pin the same manifest at its two sinks (install and tarball) and must move together, or a provider could ship un-packed."
     },
     {
       "id": "capability-hoist-block-floor",
-      "floor": 29,
-      "pattern": "toBeGreaterThanOrEqual(29)",
+      "floor": 39,
+      "pattern": "toBeGreaterThanOrEqual(39)",
       "occurrences": 1,
       "sourceFile": "tests/guards/capability-hoist.test.ts",
-      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof."
+      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof. RAISED 29 -> 39 in the Phase-3 3b commit that adds the Jira provider: ten more per-op references, each with its own process block. A provider adds its whole roster at once, so the floor moves by a provider rather than by a file."
     },
     {
       "id": "git-agent-guard-count",

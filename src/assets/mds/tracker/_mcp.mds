@@ -19,10 +19,18 @@ in this module's filename and nowhere a reader of the artifact can see it:
 transport is an implementation fact, and leaking it into text an agent reproduces
 puts it in front of a user who cannot act on it.
 
-LOAD CHAIN, STRICTLY ONE-DIRECTIONAL: the agent preamble names this file, this
-file names nothing back, and a per-operation mechanics file may INVOKE a rule
-here but never restate its substance. On any conflict between a per-operation
-file and this contract, THIS CONTRACT WINS.
+LOAD CHAIN, STRICTLY ONE-DIRECTIONAL: a per-operation mechanics file of a
+tool-call provider NAMES this file, this file names nothing back, and that file
+may INVOKE a rule here but never restate its substance. On any conflict between a
+per-operation file and this contract, THIS CONTRACT WINS.
+
+The namer is the per-operation file and NOT the agent preamble, deliberately. The
+preamble states exactly one line that composes a `references/tracker/` path
+(PF-023's single convergence point, asserted as exactly one), so a second naming
+line there would be a second place a provider path is built; and the operations
+that need this contract are exactly the ones whose provider reaches its tracker
+through a tool call, which is a fact the per-operation file already knows and the
+always-loaded preamble would have to re-derive.
 
 Headings below the first are `###` by grammar, not by taste: a column-0 `## `
 line outside a fence terminates this file's section for every guard that reads it
@@ -114,12 +122,13 @@ PRECEDING Bash result.** Then, in order:
 2. **Verify `<bytes>`.** Before posting, confirm the received body's byte length
    equals the `<bytes>` field of the `D11-OK` line. On mismatch **DO NOT POST**
    and emit `TRACEABILITY: DEGRADED (redaction unavailable)`.
-   *Why this is not belt-and-braces:* a Bash result is truncated by the harness at
-   a host-configured limit, plausibly below a provider's own body cap. Truncation
-   removes the TAIL, so the framing line survives and a bare "no framing line ⇒
-   do not post" gate passes while the body is partial — a guard that appears to
-   work while failing. There is also no sanctioned repair: chunking is forbidden
-   below, so a truncated body has nowhere to go but unposted.
+   *Why this is not belt-and-braces:* a Bash result is truncated at a
+   host-configured limit, plausibly below a provider's own cap, and truncation
+   keeps the HEAD and the TAIL and elides the MIDDLE. So the body arrives intact
+   at both ends with a hole between them: a bare "no framing line ⇒ do not post"
+   gate passes on it, and so would an eyeball. Only the byte count sees the hole.
+   Nor is there a sanctioned repair — chunking is forbidden below, so a truncated
+   body has nowhere to go but unposted.
 3. **Echo `SCRUB: N […]`** from the `D11-OK` line into the operation's output. It
    never contains secret bytes.
 4. **When N > 0, also emit this line, unwrapped:**

@@ -102,10 +102,20 @@ export const TRACKER_PARTIAL_ADOPTERS = [
 export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
- * Reference modules: .mds sources under src/assets/mds/ that fan out into MANY
- * output files instead of one. Two today:
+ * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
+ * each fanning out into MANY output files instead of one. Four today:
  *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
- *     (kind 'fanout' — one file per entry of TRACKER_GITHUB_OPS)
+ *     (kind 'fanout' — one file per entry of TRACKER_OPS)
+ *   src/assets/mds/tracker/_jira.mds    → dist/skills/git/references/tracker/jira/*.md
+ *     (kind 'fanout' — the same TRACKER_OPS roster, which is what makes file-set
+ *      parity across providers a compile-time property)
+ *   src/assets/mds/tracker/_mcp.mds     → dist/skills/git/references/tracker/_mcp.md
+ *     (kind 'contract' — GENERATION IS GATED on a provider that reaches its
+ *      tracker through a tool call being registered. `tracker/jira` is such a
+ *      provider, so the gate is open and this module compiles like any other. See
+ *      MCP_CONTRACT_MODULE / mcpContractIsGenerated in src/core/mds-variants.ts,
+ *      and DEFERRED_REFERENCE_MODULE_SOURCES below for the roster of what the gate
+ *      currently holds back.)
  *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
  *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
  *
@@ -117,38 +127,14 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  * rather than one set with an exception.
  *
  * The emitted file set itself is not restated here: it is derived from
- * TRACKER_GITHUB_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there
- * is one roster, not a production copy and a test copy that can drift.
+ * TRACKER_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there is
+ * one roster, not a production copy and a test copy that can drift.
  */
 export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_github.mds',
-  'src/assets/mds/git/_references.mds',
-] as const;
-
-/**
- * Reference modules that are AUTHORED and SHIPPED but whose generation is gated
- * shut on this tree — one today:
- *   src/assets/mds/tracker/_mcp.mds  → dist/skills/git/references/tracker/_mcp.md
- *     (kind 'contract', emitted only while a provider that needs it is registered;
- *      see MCP_CONTRACT_MODULE and mcpContractIsGenerated in
- *      src/core/mds-variants.ts)
- *
- * A THIRD roster rather than a member of MDS_REFERENCE_MODULES, because the two
- * are counted by different assertions and confusing them would break one of them:
- *
- *   - The build DISCOVERS these and reports them as deferred, so they are NOT in
- *     ALL_DISCOVERED_HOSTS and the printed host count does not move. Folding them
- *     in would have demanded a host count the build correctly declines to print.
- *   - The tarball SHIPS them — 3b compiles this source, and a consumer inspecting
- *     an installed package should see what the generated tree will come from — so
- *     they DO count toward the shipped-.mds total.
- *
- * When a gate opens, the entry moves from this roster to MDS_REFERENCE_MODULES in
- * the same commit that registers the provider: the shipped total is unchanged and
- * the discovered-host count rises by one, which is exactly what happened.
- */
-export const MDS_DEFERRED_REFERENCE_MODULES = [
+  'src/assets/mds/tracker/_jira.mds',
   'src/assets/mds/tracker/_mcp.mds',
+  'src/assets/mds/git/_references.mds',
 ] as const;
 
 /**

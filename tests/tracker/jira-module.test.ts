@@ -1,0 +1,841 @@
+/**
+ * Jira provider mechanics — the module, its literals, and its call budget (P3b).
+ *
+ * WHAT THIS FILE OWNS, AND WHAT IT DELIBERATELY DOES NOT
+ * ------------------------------------------------------
+ * Phase 3b is the first commit in which the tracker references tree holds TWO
+ * providers, so it is the first commit in which parity is a property rather than
+ * an aspiration. Three claims live here and nowhere else:
+ *
+ *   1. PARITY — file-set and define-set parity between `_github.mds` and
+ *      `_jira.mds`, in BOTH directions, with every define non-empty (AC-3.8's
+ *      two-provider half). File-set parity is STRUCTURAL: both registry rows read
+ *      the same exported `TRACKER_OPS`, so a divergence is a compile error rather
+ *      than a test failure. Define-set parity is asserted, because a define is a
+ *      name inside a module body that no type sees.
+ *   2. PROVIDER LITERALS — `32767` present; `60000` and `X-RateLimit-Remaining`
+ *      absent; `Retry-After` present (AC-3.13). Jira has no pre-emptive remaining
+ *      count, so a module that names one has copied GitHub's backpressure model
+ *      into a provider that cannot support it.
+ *   3. MECHANICS PROPERTIES — the single-query batch [DR-08], the aggregate call
+ *      budget [DR-09], the first-line namespaced marker (AC-3.14), the never-
+ *      `COMPLETE` rule (AC-3.4), and the no-HTTP-fallback negative (AC-3.18).
+ *
+ * NOT here: the cross-provider three-column parity scan (`providers.length === 3`)
+ * and `tests/provider-literals.test.ts` are 3c's, per §8.11 — with two providers
+ * the third column does not exist and a scaffold for it would assert nothing. The
+ * two-sided shape below is what 3c extends, and it is written so extending it is
+ * adding a row to PROVIDERS rather than rewriting the loops.
+ *
+ * CORPUS, AND WHY BOTH SIDES ARE READ
+ * -----------------------------------
+ * Some claims are about the SOURCE module (`_jira.mds`) and some about the
+ * GENERATED files (`dist/skills/git/references/tracker/jira/*.md`). They are not
+ * interchangeable: a define name exists only in the source, and the `## Operation:`
+ * anchor grammar is a property of the generated file. Every claim below names which
+ * side it reads, and every dist read is fail-loud with a build hint (R3).
+ */
+
+import { describe, it, expect } from 'vitest';
+import { existsSync, readFileSync } from 'fs';
+import * as path from 'path';
+
+import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import {
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MIN_VARIANT_PAIRS,
+  TRACKER_OPS,
+  VARIANT_MODULES,
+  generatedReferenceManifest,
+  mcpContractIsGenerated,
+} from '../../src/core/mds-variants.js';
+import { ROOT } from '../helpers.js';
+
+// ---------------------------------------------------------------------------
+// Sources and generated files
+// ---------------------------------------------------------------------------
+
+/** The two provider mechanics modules, addressed by the registry, never by guess. */
+const GITHUB_MODULE = 'src/assets/mds/tracker/_github.mds';
+const JIRA_MODULE = 'src/assets/mds/tracker/_jira.mds';
+
+/** The provider sub-directory `_jira.mds` is registered against. */
+const JIRA_SUBDIR = 'tracker/jira';
+
+function readSource(relPath: string): string {
+  const abs = path.join(ROOT, relPath);
+  if (!existsSync(abs)) {
+    throw new Error(
+      `${relPath} is absent. The Jira mechanics module is authored in P3b-S1; without it every ` +
+      `parity assertion below would compare one provider against nothing.`,
+    );
+  }
+  return readFileSync(abs, 'utf-8');
+}
+
+/**
+ * A generated reference, read fail-loud.
+ *
+ * Never ENOENT-tolerant: `referenceChars`-style tolerance is what lets a literal
+ * guard pass by measuring an absent file, and every literal below is the only
+ * statement of a provider fact.
+ */
+function readGenerated(relPath: string): string {
+  const abs = path.join(compiledSkillRefsDir(), ...relPath.split('/'));
+  if (!existsSync(abs)) {
+    throw new Error(
+      `${relPath} is absent at ${abs} — run \`npm run build\` first (this guard reads compiled ` +
+      `reference files and cannot be skipped)`,
+    );
+  }
+  return readFileSync(abs, 'utf-8');
+}
+
+function jiraRel(op: string): string {
+  return `${JIRA_SUBDIR}/${op}.md`;
+}
+
+/**
+ * MDS prose escapes collapsed, so one literal has one spelling.
+ *
+ * `_jira.mds` writes `\{` in prose and a raw `{` inside a column-0 fence, so a
+ * source-side assertion on `{SCRUBBED_BODY}` would pass or fail on where the
+ * author put the sentence. Same narrow rule as the bypass guard's own
+ * `unescapeMds` — only the brace pair, so the module's other backslashes are not
+ * rewritten into text that appears in no artifact.
+ */
+function unescapeMds(source: string): string {
+  return source.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
+}
+
+// ---------------------------------------------------------------------------
+// 1. Registration — the gate this module opens, and the roster it shares
+// ---------------------------------------------------------------------------
+
+describe('jira module: registration and the contract gate it opens', () => {
+  it('is registered against tracker/jira and shares the op roster with GitHub', () => {
+    const jira = VARIANT_MODULES.find(m => m.source === JIRA_MODULE);
+    expect(
+      jira,
+      `${JIRA_MODULE} is not in VARIANT_MODULES. An unregistered reference module is refused by ` +
+      `the build with a message naming the registry — the emitted filenames come from the op ` +
+      `roster, so there is nothing to fall back to.`,
+    ).toBeDefined();
+    expect(jira!.subdir, 'the provider sub-directory decides the gate').toBe(JIRA_SUBDIR);
+    expect(jira!.kind, 'a provider module fans out one file per op').toBe('fanout');
+    // STRUCTURAL file-set parity: both rows read the SAME exported roster, so a
+    // provider cannot acquire or lose an op without moving every provider with it.
+    // Asserted by identity, not by set equality — set equality over two hand-listed
+    // rosters is the drift this arrangement removes.
+    const github = VARIANT_MODULES.find(m => m.source === GITHUB_MODULE)!;
+    expect(
+      jira!.ops,
+      'both provider rows must read one roster — file-set parity is then a compile-time property',
+    ).toBe(github.ops);
+    expect(jira!.ops, 'and that roster is TRACKER_OPS').toBe(TRACKER_OPS);
+  });
+
+  it('opening the gate generates the tool-call contract, and the manifest carries it', () => {
+    // The gate is keyed on a registered module landing in an MCP-backed sub-directory
+    // (mcpContractIsGenerated). 3b opens it by registering `_jira.mds` and by nothing
+    // else — there is no flag, no frontmatter key and no second edit.
+    expect(
+      (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(JIRA_SUBDIR),
+      'tracker/jira must be one of the gated sub-directories, or registering this module opens ' +
+      'nothing and the contract stays ungenerated while its consumers name it',
+    ).toBe(true);
+    expect(
+      mcpContractIsGenerated(),
+      'the shipped registry must now OPEN the contract gate — the Jira mechanics name the ' +
+      'tool-call contract, so a shut gate ships ten references pointing at a file nobody has',
+    ).toBe(true);
+    expect(generatedReferenceManifest()).toContain('tracker/_mcp.md');
+    for (const op of TRACKER_OPS) {
+      expect(generatedReferenceManifest(), `${jiraRel(op)} must be in the install manifest`)
+        .toContain(jiraRel(op));
+    }
+  });
+
+  it('the roster is long enough for the parity assertions below to discriminate', () => {
+    expect(
+      TRACKER_OPS.length,
+      `only ${TRACKER_OPS.length} op(s) — a roster short enough to enumerate by hand is ` +
+      `satisfied by any implementation that returns something (GAP-42)`,
+    ).toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. Define-set parity — both directions, every define non-empty
+// ---------------------------------------------------------------------------
+
+/**
+ * Named collector: the `@define NAME():` names a reference module declares.
+ *
+ * Anchored at column 0 because a `@define` inside a fence is sample text, and
+ * bounded to the identifier charset the build's own parser accepts.
+ */
+export function collectDefineNames(source: string): string[] {
+  return [...source.matchAll(/^@define ([A-Za-z_][A-Za-z0-9_]*)\(\):/gm)].map(m => m[1]);
+}
+
+/**
+ * Named collector: each define's body, keyed by name.
+ *
+ * A body runs from the line after its `@define` to the matching column-0 `@end`.
+ * Returned so emptiness is a property of the body rather than of the file.
+ */
+export function collectDefineBodies(source: string): Map<string, string> {
+  const bodies = new Map<string, string>();
+  const lines = source.split('\n');
+  let current: string | null = null;
+  let buffer: string[] = [];
+  for (const line of lines) {
+    const open = /^@define ([A-Za-z_][A-Za-z0-9_]*)\(\):/.exec(line);
+    if (open !== null) {
+      current = open[1];
+      buffer = [];
+      continue;
+    }
+    if (line === '@end' && current !== null) {
+      bodies.set(current, buffer.join('\n'));
+      current = null;
+      continue;
+    }
+    if (current !== null) buffer.push(line);
+  }
+  return bodies;
+}
+
+/**
+ * The floor a define's body must clear, shared with the generated-reference floor.
+ *
+ * Read from the containment suite's constant rather than re-spelled: the two
+ * measure the same thing one step apart — a define that kept its heading and lost
+ * its body compiles into exactly the reference that floor exists to catch.
+ */
+const MIN_DEFINE_CHARS = 80;
+
+describe('jira module: define-set parity with GitHub, both directions (AC-3.8)', () => {
+  const githubSource = readSource(GITHUB_MODULE);
+  const jiraSource = readSource(JIRA_MODULE);
+
+  /**
+   * The two providers as a list, so 3c adds Linear as a row rather than as a
+   * rewrite. §8.11's three-column scan replaces the length assertion below with
+   * `providers.length === 3`; nothing else about the shape changes.
+   */
+  const PROVIDERS: ReadonlyArray<{ readonly name: string; readonly source: string }> = [
+    { name: 'github', source: githubSource },
+    { name: 'jira', source: jiraSource },
+  ];
+
+  it('the scan really holds two providers', () => {
+    expect(
+      PROVIDERS.length,
+      'a one-provider parity scan is vacuous by construction (GAP-42) — it is satisfied by any ' +
+      'module at all, which is why Phase 2 asserted only the structural property',
+    ).toBe(2);
+    for (const provider of PROVIDERS) {
+      expect(provider.source.length, `${provider.name}: empty module source`).toBeGreaterThan(0);
+    }
+  });
+
+  it('every GitHub define has a same-named Jira define (direction 1)', () => {
+    const jiraNames = new Set(collectDefineNames(jiraSource));
+    const missing = collectDefineNames(githubSource).filter(name => !jiraNames.has(name));
+    expect(
+      missing,
+      `define(s) GitHub declares and Jira does not. The two modules emit the same file set, so a ` +
+      `missing define is an op whose Jira reference is a heading with no mechanics — which reads ` +
+      `downstream as \`tracker mechanics unavailable\` shipped as the normal path:\n  ` +
+      missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('every Jira define has a same-named GitHub define (direction 2)', () => {
+    const githubNames = new Set(collectDefineNames(githubSource));
+    const extra = collectDefineNames(jiraSource).filter(name => !githubNames.has(name));
+    expect(
+      extra,
+      `define(s) Jira declares that GitHub does not. A provider-only define is either a section ` +
+      `marker nobody emits or an operation one provider invented — both are the asymmetry ` +
+      `file-set parity exists to forbid:\n  ${extra.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the define roster matches the op roster, so parity is over the real subject', () => {
+    // Without this, both directions above are satisfiable by two modules that agree
+    // on a define set unrelated to the ops they are registered for.
+    for (const provider of PROVIDERS) {
+      const names = collectDefineNames(provider.source);
+      expect(
+        names.length,
+        `${provider.name}: ${names.length} define(s) for ${TRACKER_OPS.length} op(s)`,
+      ).toBe(TRACKER_OPS.length);
+      // The build's own mapping: `setup-task` ⇒ `setup_task()`. Asserted rather than
+      // assumed, because the section markers and the defines are matched by the author.
+      const expected = TRACKER_OPS.map(op => op.replace(/-/g, '_'));
+      expect(
+        [...names].sort(),
+        `${provider.name}: the define names must be the op roster with hyphens as underscores`,
+      ).toEqual([...expected].sort());
+    }
+  });
+
+  it('every define in both modules has a non-empty body', () => {
+    const thin: string[] = [];
+    for (const provider of PROVIDERS) {
+      const bodies = collectDefineBodies(provider.source);
+      for (const name of collectDefineNames(provider.source)) {
+        const body = bodies.get(name) ?? '';
+        if (body.trim().length < MIN_DEFINE_CHARS) {
+          thin.push(`${provider.name}/${name}: ${body.trim().length} ch, floor ${MIN_DEFINE_CHARS}`);
+        }
+      }
+    }
+    expect(
+      thin,
+      `define(s) below the body floor. AC-3.8 pairs parity with non-emptiness for one reason: two ` +
+      `modules can agree perfectly on a set of empty defines:\n  ${thin.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collectors report a dropped and an emptied define', () => {
+    // Drives both collectors over seeded modules. Without it, the empty-difference
+    // assertions above are equally green for collectors that return nothing (PF-018).
+    const dropped = jiraSource.replace(/^@define fetch_issue\(\):/m, '@define fetch_issue_renamed():');
+    expect(dropped, 'the seed must actually change the source').not.toBe(jiraSource);
+    const githubNames = new Set(collectDefineNames(githubSource));
+    expect(
+      collectDefineNames(dropped).filter(n => !githubNames.has(n)),
+      'a renamed define must be reported by direction 2',
+    ).toEqual(['fetch_issue_renamed']);
+    expect(
+      collectDefineNames(githubSource).filter(n => !new Set(collectDefineNames(dropped)).has(n)),
+      'and by direction 1',
+    ).toEqual(['fetch_issue']);
+
+    const emptied = jiraSource.replace(
+      /^@define manage_debt\(\):[\s\S]*?^@end$/m,
+      '@define manage_debt():\n## Operation: manage-debt\n@end',
+    );
+    expect(emptied, 'the emptying seed must change the source').not.toBe(jiraSource);
+    const body = collectDefineBodies(emptied).get('manage_debt') ?? '';
+    expect(
+      body.trim().length,
+      'an emptied define must fall below the body floor, or the non-emptiness arm is inert',
+    ).toBeLessThan(MIN_DEFINE_CHARS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Generated-file shape — one file per op, anchored on line 1
+// ---------------------------------------------------------------------------
+
+describe('jira module: the generated per-op references', () => {
+  it('every op has a generated Jira reference opening with its own anchor on line 1', () => {
+    // The anchor is what `extractOpSectionFromCorpus` keys on. A Jira reference
+    // titled anything else is invisible to every union-mode sink guard the moment
+    // its mechanics matter.
+    for (const op of TRACKER_OPS) {
+      const content = readGenerated(jiraRel(op));
+      expect(
+        content.split('\n')[0],
+        `${jiraRel(op)}: line 1 must be this op's anchor`,
+      ).toBe(`## Operation: ${op}`);
+      expect(content.length, `${jiraRel(op)} is thin`).toBeGreaterThanOrEqual(MIN_DEFINE_CHARS);
+    }
+  });
+
+  it('every generated Jira reference says which provider and op it is loaded for', () => {
+    // The GitHub references carry this sentence and the Git agent relies on it: the
+    // single load instruction composes a path, and the file it lands on has to
+    // confirm it is the right one before its steps interleave with the agent's.
+    for (const op of TRACKER_OPS) {
+      expect(
+        readGenerated(jiraRel(op)),
+        `${jiraRel(op)}: no load-condition sentence`,
+      ).toContain(`the resolved tracker provider is \`jira\` and the operation is \`${op}\``);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Provider literals (AC-3.13)
+// ---------------------------------------------------------------------------
+
+/**
+ * One pinned provider literal, with the reason it is a provider fact.
+ *
+ * `present: false` entries are the interesting half: they are GitHub's signals,
+ * and a Jira module naming one has copied a backpressure model the provider does
+ * not implement. Jira publishes no remaining-request count, so a pre-emptive rung
+ * keyed on one would never fire and the reactive rung would look redundant.
+ */
+interface ProviderLiteral {
+  readonly literal: string;
+  readonly present: boolean;
+  readonly why: string;
+}
+
+const JIRA_LITERALS: readonly ProviderLiteral[] = [
+  {
+    literal: '32767',
+    present: true,
+    why: 'Jira\'s comment body cap. The truncation floor derives from it, so an absent cap means ' +
+      'the preservation order has no bound to preserve against',
+  },
+  {
+    literal: 'Retry-After',
+    present: true,
+    why: 'Jira\'s only backpressure signal, and it is reactive: honoured verbatim, never ' +
+      'shortened, STOP on 429',
+  },
+  {
+    literal: '60000',
+    present: false,
+    why: 'GitHub\'s cap. §14.2 resolves GAP-13 by rendering the 60k sentence VERBATIM on the ' +
+      'GitHub path and each other provider\'s own cap elsewhere — one number per provider',
+  },
+  {
+    literal: 'X-RateLimit-Remaining',
+    present: false,
+    why: 'a pre-emptive remaining count Jira does not publish. A module naming it states a rung ' +
+      'that can never engage, which reads as coverage and is none',
+  },
+];
+
+/** Named collector: pinned literals whose presence in a text is wrong. */
+export function collectLiteralViolations(
+  label: string,
+  text: string,
+  literals: readonly ProviderLiteral[],
+): string[] {
+  return literals
+    .filter(entry => text.includes(entry.literal) !== entry.present)
+    .map(entry => `${label}: ${entry.present ? 'missing' : 'forbidden'} "${entry.literal}" — ${entry.why}`);
+}
+
+describe('jira module: provider literals (AC-3.13)', () => {
+  const jiraSource = readSource(JIRA_MODULE);
+
+  it('32767 and Retry-After are present; 60000 and X-RateLimit-Remaining are absent', () => {
+    expect(
+      collectLiteralViolations(JIRA_MODULE, jiraSource, JIRA_LITERALS),
+      'provider literal violation(s) in the Jira module source',
+    ).toEqual([]);
+  });
+
+  it('the same pins hold on the generated tree, not only on the source', () => {
+    // A source-only pin is satisfied by a literal inside module-level prose, which
+    // is emitted nowhere. The generated files are what a spawn reads.
+    const generated = TRACKER_OPS.map(op => readGenerated(jiraRel(op))).join('\n');
+    expect(
+      collectLiteralViolations('tracker/jira/**', generated, JIRA_LITERALS),
+      'provider literal violation(s) across the generated Jira references',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a swapped literal in both directions', () => {
+    expect(
+      collectLiteralViolations('seed', 'cap 60000 and Retry-After honoured', JIRA_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'a GitHub cap smuggled in, and the Jira cap dropped, must both be reported',
+    ).toEqual([
+      'seed: missing "32767" — Jira\'s comment body cap. The truncation floor derives from it, so an absent cap means the preservation order has no bound to preserve against',
+      'seed: forbidden "60000"',
+    ].map(v => v.split(' — ')[0]));
+    expect(
+      collectLiteralViolations('seed', 'cap 32767; X-RateLimit-Remaining < 10 stops the fan-out', JIRA_LITERALS)
+        .map(v => v.split(': ')[1].split(' — ')[0]),
+    ).toEqual(['missing "Retry-After"', 'forbidden "X-RateLimit-Remaining"']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. [DR-08] The batch is ONE query — no per-item fetch verb
+// ---------------------------------------------------------------------------
+
+/**
+ * Shapes that betray a per-item fetch inside `fetch-issues-batch`.
+ *
+ * Two classes, and both are needed. A TOOL-NAME verb (`getJiraIssue`, `get_issue`)
+ * is what an author reaches for when writing against a server's catalogue; a
+ * CAPABILITY name (`fetch by key`) is what an author reaches for when writing
+ * against this repo's own capability-first doctrine. §14.4's [DR-08] row names
+ * both — "`getJiraIssue`, `get_issue`, or any single-key fetch capability" — and a
+ * guard covering only the first would be inert against the module this repo's own
+ * rules steer an author towards writing.
+ *
+ * `fetch-issue` — the single-issue OPERATION's own name — is in the table for the
+ * same reason, and it is the shape that actually caught something: "request the
+ * same projection `fetch-issue` requests" was a harmless cross-reference in the
+ * first draft, but "call `fetch-issue` for each key" is the per-item loop written
+ * in devflow's own vocabulary, and no regex can tell those two apart. The batch
+ * reference therefore names the sibling op by DESCRIPTION rather than by name,
+ * which costs one word and leaves the guard unambiguous.
+ */
+const PER_ITEM_FETCH_SHAPES: readonly RegExp[] = [
+  /\bget[_-]?jira[_-]?issue\b/i,
+  /\bget[_-]?issue\b/i,
+  /\bfetch[_-]?issue\b/i,
+  /\bfetch by key\b/i,
+];
+
+/** Named collector: per-item fetch shapes in a batch reference. */
+export function collectPerItemFetchVerbs(text: string): string[] {
+  const found: string[] = [];
+  for (const [i, line] of text.split('\n').entries()) {
+    for (const shape of PER_ITEM_FETCH_SHAPES) {
+      const match = shape.exec(line);
+      if (match !== null) found.push(`${i + 1}: ${match[0]}`);
+    }
+  }
+  return found;
+}
+
+describe('jira module: fetch-issues-batch is one query [DR-08]', () => {
+  const batch = readGenerated(jiraRel('fetch-issues-batch'));
+
+  it('states the single filtered query, its bound, and the truncation report', () => {
+    expect(batch, 'the batch must be ONE filtered query keyed on the resolved list')
+      .toContain('key in (');
+    expect(batch, 'a query with no result bound is an unbounded read').toContain('maxResults');
+    expect(batch, 'the ≤50 bound §14.4 fixes for every provider').toContain('≤50');
+    expect(batch, 'over the bound the remainder is reported, never silently dropped')
+      .toContain('TRUNCATED ({n} not processed)');
+  });
+
+  it('names no per-item fetch verb and no single-key fetch capability', () => {
+    expect(
+      collectPerItemFetchVerbs(batch),
+      'a per-item fetch inside the batch reference re-grows on Jira the exact N+1 Phase 2 removed ' +
+      'from GitHub. AC-3.8\'s parity scan cannot see the difference between one query and fifty — ' +
+      'it asserts the file exists and is non-empty — which is why this negative exists [DR-08]',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a seeded per-item batch', () => {
+    // Mechanic (b): the seeded fixture §8.12 row 25 asks for, driven through the
+    // collector the live assertion uses. Both classes are seeded, because a
+    // collector covering one would pass this probe while inert against the other.
+    const seededToolName = [
+      '## Operation: fetch-issues-batch',
+      '2. For each key in the resolved list, call getJiraIssue(issueKey) and collect the result.',
+    ].join('\n');
+    expect(
+      collectPerItemFetchVerbs(seededToolName).map(v => v.split(': ')[1]),
+      'a tool-name per-item fetch must be reported',
+    ).toContain('getJiraIssue');
+
+    const seededCapability = [
+      '## Operation: fetch-issues-batch',
+      '2. Resolve each entry through the *fetch by key* capability, one call per issue.',
+    ].join('\n');
+    expect(
+      collectPerItemFetchVerbs(seededCapability).length,
+      'a capability-phrased per-item fetch must be reported too — it is the shape this repo\'s ' +
+      'own capability-first doctrine steers an author towards',
+    ).toBeGreaterThan(0);
+
+    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty (PF-018)').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. [DR-09] The per-op aggregate call budget, as a tested literal
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-op aggregate marker-call budget, pinned as a PRODUCT rather than as a
+ * number [DR-09].
+ *
+ * Under GitHub one issue's marker check is one call. Under Jira it is a paged
+ * comment listing filtered client-side, and rung 3 is the default landing rung —
+ * so `backlink-shipped-issues`' ≤50 loop multiplies by the page bound and the
+ * op-level cost is the product. Pinning only the total would let the page bound
+ * double while the factors silently absorbed it; pinning only the factors would
+ * let the product go unstated, which is the figure a reviewer needs.
+ */
+const AGGREGATE_BUDGET = {
+  items: '≤50',
+  pages: '≤2',
+  product: '≤100',
+} as const;
+
+describe('jira module: the per-op aggregate call budget [DR-09]', () => {
+  const backlink = readGenerated(jiraRel('backlink-shipped-issues'));
+
+  it('backlink-shipped-issues states both factors AND the product', () => {
+    expect(backlink, 'the per-op item bound').toContain(AGGREGATE_BUDGET.items);
+    expect(backlink, 'the page bound on a paged marker scan').toContain(AGGREGATE_BUDGET.pages);
+    expect(
+      backlink,
+      `the PRODUCT must be stated. ${AGGREGATE_BUDGET.items} items × ${AGGREGATE_BUDGET.pages} ` +
+      `pages is an aggregate cost no per-call bound expresses, and it is the number that decides ` +
+      `whether the op fits inside a provider's rate budget at all`,
+    ).toContain(AGGREGATE_BUDGET.product);
+    expect(
+      backlink,
+      'exceeding the budget is reported, never silently truncated',
+    ).toContain('TRUNCATED ({n} not processed)');
+  });
+
+  it('the product is arithmetically what the factors say', () => {
+    // The pin is only worth having while the three literals agree. A page bound
+    // raised from ≤2 to ≤4 with the product left at ≤100 is the drift this catches.
+    const num = (s: string): number => Number(s.replace('≤', ''));
+    expect(
+      num(AGGREGATE_BUDGET.items) * num(AGGREGATE_BUDGET.pages),
+      'the stated product must equal the product of the stated factors',
+    ).toBe(num(AGGREGATE_BUDGET.product));
+  });
+
+  it('prefers the hoisted single-pass shape over the per-item ladder', () => {
+    // [DR-09]'s structural half: where the provider allows it, one bounded filtered
+    // read over the resolved keys replaces the per-item marker scan entirely. The
+    // budget is the ceiling for the path that cannot be hoisted, not a licence.
+    expect(
+      backlink,
+      'the reference must state the hoisted alternative — a budget with no cheaper path beside ' +
+      'it reads as an endorsement of the expensive one',
+    ).toContain('hoist');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. (AC-3.14) find_marker: identity capability, first-line predicate, namespaces
+// ---------------------------------------------------------------------------
+
+/**
+ * The three comment kinds and their marker namespaces (§14.4 `marker_format`).
+ *
+ * Namespaced per kind because a single global marker makes the three kinds
+ * MUTUALLY SUPPRESS: a shipped-version back-link would satisfy the wave report's
+ * dedup predicate and the wave report would never post (GAP-20).
+ */
+const MARKER_NAMESPACES: ReadonlyArray<{ readonly kind: string; readonly op: string }> = [
+  { kind: 'devflow:shipped', op: 'backlink-shipped-issues' },
+  { kind: 'devflow:wave', op: 'post-wave-report' },
+  { kind: 'devflow:traceability', op: 'ensure-traceable-issue' },
+];
+
+describe('jira module: marker dedup (AC-3.14, GAP-20)', () => {
+  it('each comment kind carries its own namespace, in the op that posts it', () => {
+    for (const { kind, op } of MARKER_NAMESPACES) {
+      expect(
+        readGenerated(jiraRel(op)),
+        `${jiraRel(op)}: must own the ${kind} marker namespace`,
+      ).toContain(kind);
+    }
+    expect(MARKER_NAMESPACES.length, 'the namespace table is empty (PF-018)').toBe(3);
+  });
+
+  it('no marker namespace leaks into an op that does not own it', () => {
+    // The mutual-suppression failure, stated as a negative: if two ops name one
+    // namespace, one of them is deduplicating against the other's comments.
+    const leaks: string[] = [];
+    for (const { kind, op } of MARKER_NAMESPACES) {
+      for (const other of TRACKER_OPS) {
+        if (other === op) continue;
+        if (readGenerated(jiraRel(other)).includes(kind)) leaks.push(`${jiraRel(other)}: ${kind}`);
+      }
+    }
+    expect(
+      leaks,
+      `a marker namespace named outside its owning operation. The operation owns the marker and ` +
+      `callers pass inputs only; a second namer is the caller-restated literal that already ` +
+      `diverged once and produced duplicate comments:\n  ${leaks.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the marker predicate names the identity capability AND binds to the first line', () => {
+    const backlink = readGenerated(jiraRel('backlink-shipped-issues'));
+    expect(
+      backlink,
+      'the dedup predicate must name the capability it filters authors by — an unfiltered marker ' +
+      'scan lets a third party suppress the post by quoting the marker',
+    ).toContain('identify current user');
+    expect(
+      backlink,
+      'and it must bind the marker to the comment\'s FIRST line: a marker at line 5 of a ' +
+      'third-party comment is quoted prose, not a devflow post',
+    ).toMatch(/first[- ]line/i);
+  });
+
+  it('a marker below the first line does not suppress — stated, not implied', () => {
+    // AC-3.14's own wording. The rule has to be written down: an author reading
+    // "check for the marker" writes a substring search, and a substring search is
+    // exactly what makes a quoted marker suppressive.
+    const backlink = readGenerated(jiraRel('backlink-shipped-issues'));
+    expect(
+      backlink,
+      'the reference must state that a marker anywhere but line 1 does NOT suppress',
+    ).toMatch(/does not suppress|never suppress/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. (AC-3.4) SHIPPED_ISSUES under jira never yields COMPLETE
+// ---------------------------------------------------------------------------
+
+describe('jira module: a dropped or unresolvable ref never reports COMPLETE (AC-3.4)', () => {
+  it('backlink-shipped-issues instantiates the ref pre-flight with the anchored grammar', () => {
+    const backlink = readGenerated(jiraRel('backlink-shipped-issues'));
+    expect(
+      backlink,
+      'the anchored per-provider grammar, never an alternation without anchors (§14.1)',
+    ).toContain('^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$');
+    expect(
+      backlink,
+      'every ref dropped by the pre-flight ⇒ the aggregate reason [DR-04(c)]',
+    ).toContain('TRACEABILITY: DEGRADED (no parseable refs for provider {p})');
+    expect(
+      backlink,
+      'AC-3.4: `PROJ-1 PROJ-2` is not digits-only, so the always-loaded entry gate drops every ' +
+      'entry. The status must then never be COMPLETE — a green COMPLETE over zero processed ' +
+      'issues is the report a release believes',
+    ).toContain('never report the status as `COMPLETE`');
+  });
+
+  it('gather-release-evidence cannot report COMPLETE either — closing refs are unsupported', () => {
+    const evidence = readGenerated(jiraRel('gather-release-evidence'));
+    expect(
+      evidence,
+      '§14.4 fixes closing_refs_for_commit as unsupported on Jira; the cell is DEGRADED, not blank',
+    ).toContain('TRACEABILITY: DEGRADED (unsupported by jira)');
+    expect(
+      evidence,
+      'an enrichment that could not resolve its closing refs is PARTIAL, never COMPLETE',
+    ).toContain('never report the status as `COMPLETE`');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. (AC-3.18, §14.9-2) No HTTP fallback anywhere in the Jira mechanics
+// ---------------------------------------------------------------------------
+
+/**
+ * The transports a Jira mechanics file may never reach for.
+ *
+ * GAP-19's highest-value bypass: a tool that is absent is a capability that is
+ * absent, and improvising an HTTP call around it bypasses BOTH the D11 scrub gate
+ * and the no-credential-read rule in one move.
+ */
+const FORBIDDEN_TRANSPORTS: readonly RegExp[] = [
+  /\bcurl\b/i,
+  /\bwget\b/i,
+  /Authorization:/,
+  /\bgh (?:issue|api|pr|release)\b/,
+  /\$\{?(?:JIRA|ATLASSIAN)_[A-Z_]*(?:TOKEN|KEY|SECRET|PASSWORD)/,
+];
+
+/** Named collector: forbidden transport shapes, as `{line}: {text}`. */
+export function collectForbiddenTransports(text: string): string[] {
+  const found: string[] = [];
+  for (const [i, line] of text.split('\n').entries()) {
+    for (const shape of FORBIDDEN_TRANSPORTS) {
+      if (shape.test(line)) found.push(`${i + 1}: ${line.trim().slice(0, 90)}`);
+    }
+  }
+  return found;
+}
+
+describe('jira module: tool calls only — no HTTP, no CLI, no credential read (AC-3.18)', () => {
+  it('no generated Jira reference constructs a request or names a credential', () => {
+    const offenders: string[] = [];
+    for (const op of TRACKER_OPS) {
+      for (const site of collectForbiddenTransports(readGenerated(jiraRel(op)))) {
+        offenders.push(`${jiraRel(op)}:${site}`);
+      }
+    }
+    expect(
+      offenders,
+      `a Jira mechanics file reaches the tracker other than through a tool call. §14.9-2 is ` +
+      `absolute: never construct an HTTP request, never run a command-line client, never read a ` +
+      `tracker credential from the environment:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports each forbidden transport', () => {
+    for (const seeded of [
+      'curl -H "Authorization: Bearer $JIRA_API_TOKEN" https://site/rest/api/3/issue',
+      'wget -qO- https://site/rest/api/3/search',
+      'gh issue comment 12 --body-file "$DEVFLOW_BODY"',
+      'export TOKEN=$JIRA_API_TOKEN',
+    ]) {
+      expect(
+        collectForbiddenTransports(seeded).length,
+        `"${seeded}" must be reported`,
+      ).toBeGreaterThan(0);
+    }
+    // …and the legitimate neighbour it sits beside: the scrubber invocation, which
+    // is a node call on a local script and not a transport.
+    expect(
+      collectForbiddenTransports(
+        'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"',
+      ),
+      'the scrub invocation must not be reported — it is the gate, not a transport',
+    ).toEqual([]);
+    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty (PF-018)').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. JQL safety, the rendering rules, and the contract invocation
+// ---------------------------------------------------------------------------
+
+describe('jira module: query safety and the cross-cutting rules it invokes', () => {
+  const jiraSource = unescapeMds(readSource(JIRA_MODULE));
+
+  it('structured filter arguments are preferred and a built query is value-quoted only', () => {
+    expect(jiraSource, 'structured filter arguments first (§14.9-10)')
+      .toContain('structured filter argument');
+    expect(
+      jiraSource,
+      'a value may only ever reach a query as a quoted string literal — never in field, ' +
+      'operator or ordering position, which is where a quote break becomes a different query',
+    ).toContain('quoted string literal');
+    expect(jiraSource, 'escape order is part of the rule: backslash first, then quote')
+      .toContain('Escape `\\` first and then `"`');
+    expect(
+      jiraSource,
+      'and anything still carrying a metacharacter after escaping is DROPPED, never repaired',
+    ).toMatch(/drop|reject/i);
+  });
+
+  it('render_collapsed_block degrades to a pointer sentence, with the preservation order', () => {
+    const traceable = readGenerated(jiraRel('ensure-traceable-issue'));
+    expect(
+      traceable,
+      'the document format has no comment node and no collapsed-block analogue, so the collapsed ' +
+      'artifact comment becomes a pointer sentence rather than a silently flattened dump',
+    ).toContain('pointer sentence');
+    expect(
+      traceable,
+      'and the preservation order says WHICH bytes survive a truncation: the marker, then the ' +
+      'status lines, then the pointer — the untrusted middle is what gets cut',
+    ).toContain('32767');
+  });
+
+  it('every posting mechanic invokes the tool-call contract by name, never restates it', () => {
+    // The load chain is one-directional: a per-op file may INVOKE a rule in the
+    // contract and never restate its substance. Naming the file is the invocation.
+    const namers: string[] = [];
+    for (const op of TRACKER_OPS) {
+      const content = readGenerated(jiraRel(op));
+      if (!content.includes('{SCRUBBED_BODY}')) continue;
+      namers.push(jiraRel(op));
+      expect(
+        content,
+        `${jiraRel(op)}: a posting mechanic must name the contract that governs it`,
+      ).toContain('references/tracker/_mcp.md');
+    }
+    expect(
+      namers.length,
+      'no Jira reference spells the gated body placeholder — either no op posts (and AC-3.5\'s ' +
+      'forward arm has no subject) or the placeholder is spelled some other way',
+    ).toBeGreaterThan(0);
+  });
+});

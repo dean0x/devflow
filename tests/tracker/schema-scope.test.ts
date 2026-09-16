@@ -36,7 +36,7 @@ import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 
 import { agentsDir, commandsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
+import { TRACKER_GITHUB_OPS, VARIANT_MODULES } from '../../src/core/mds-variants.js';
 import {
   ROOT,
   TRACKER_SCHEMA_SECTIONS,
@@ -423,6 +423,46 @@ export function collectForbiddenIo(corpus: readonly CorpusEntry[]): string[] {
   return sites;
 }
 
+/**
+ * D-AC318-CONTRACT-SCOPE — the ONE generated file that NAMES a forbidden transport,
+ * because naming it is how it forbids it.
+ *
+ * `tracker/_mcp.md`'s no-HTTP-fallback clause is the single statement of GAP-19's
+ * control: *"NEVER construct an HTTP request, NEVER run `curl` or `wget`, NEVER
+ * read a tracker credential from the environment."* The words are the prohibition.
+ * Scanning for the words alone therefore makes the rule its own first violation —
+ * the same trap `capability-hoist`'s LOOP_MARKERS records, where an unanchored
+ * `per commit` marker reported the batch-first fix as an unhoisted probe.
+ *
+ * Why an exclusion and not a cleverer pattern. A line-scoped "a NEVER on this line
+ * means it is a prohibition" predicate breaks on wrapping — the clause's `NEVER`
+ * and its `curl` sit on different physical lines already — and pinning where a
+ * sentence happens to wrap is PF-057's class of mistake. So the case is classified
+ * instead (ADR-025), and the exclusion pays for itself three ways:
+ *
+ *   1. It is named by PATH, not by pattern, so no other file is admitted.
+ *   2. Only the two RULES that appear in the prohibition are admitted, so an
+ *      `Authorization:` header or a token-env read inside that same file is still
+ *      reported — a real fabricated call cannot hide behind the exclusion.
+ *   3. It is asserted in BOTH directions: the excluded file must produce exactly
+ *      these rules and no others, so an exclusion that outlives its subject goes
+ *      red rather than silently widening. `tests/guards/mcp-sink-bypass.test.ts`
+ *      independently REQUIRES those literals to be present, which is the strongest
+ *      justification an exclusion can have: deleting the text fails another guard.
+ */
+const CONTRACT_IO_EXCLUSION = {
+  /** Suffix of the generated contract's path, as gitAgentSinkCorpus labels it. */
+  pathSuffix: `${path.sep}tracker${path.sep}_mcp.md`,
+  /** The only rules this file may trip — the two transports its clause forbids. */
+  rules: ['curl', 'wget'] as const,
+} as const;
+
+/** Is this reported site the contract document tripping one of its own prohibitions? */
+function isContractProhibition(site: string): boolean {
+  if (!site.includes(CONTRACT_IO_EXCLUSION.pathSuffix)) return false;
+  return CONTRACT_IO_EXCLUSION.rules.some(rule => site.includes(`: ${rule} — `));
+}
+
 describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surface', () => {
   it('git.md ∪ generated references carry none of the four', () => {
     // The highest-value bypass of BOTH controls at once (GAP-19): a tool that is
@@ -430,10 +470,50 @@ describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surf
     // scrub gate and reads a credential on the way.
     const corpus = gitAgentSinkCorpus();
     expect(corpus.length, 'empty corpus — run `npm run build`').toBeGreaterThan(1);
+    const sites = collectForbiddenIo(corpus);
     expect(
-      collectForbiddenIo(corpus),
+      sites.filter(site => !isContractProhibition(site)),
       'forbidden transport or credential read in always-loadable text (§14.9-2)',
     ).toEqual([]);
+  });
+
+  it('the generated exclusion is exactly the contract\'s own prohibition — both directions', () => {
+    // What D-AC318-CONTRACT-SCOPE owes in return. Forward: every site the
+    // exclusion swallows comes from that one file and one of those two rules.
+    // Reverse: that file really does trip both, so the exclusion has a live
+    // subject and cannot outlive the clause it was written for.
+    const sites = collectForbiddenIo(gitAgentSinkCorpus());
+    const excluded = sites.filter(isContractProhibition);
+    expect(
+      excluded.length,
+      'the contract document trips none of its own prohibitions — either the no-HTTP-fallback ' +
+      'clause was reworded away (tests/guards/mcp-sink-bypass.test.ts owns that claim and will ' +
+      'say so) or the generated file is absent. Either way this exclusion now describes nothing ' +
+      'and must be deleted rather than carried',
+    ).toBeGreaterThan(0);
+    expect(
+      [...new Set(excluded.map(site => site.split(': ')[1].split(' — ')[0]))].sort(),
+      'the exclusion admits exactly the two transports the clause names; anything else in that ' +
+      'file is a fabricated call hiding behind a prohibition',
+    ).toEqual([...CONTRACT_IO_EXCLUSION.rules].sort());
+    expect(
+      [...new Set(excluded.map(site => site.split(':')[0]))],
+      'the exclusion is scoped to ONE file, by path',
+    ).toHaveLength(1);
+  });
+
+  it('known-bad probe: the exclusion does not admit a real call in the same file', () => {
+    // The half that makes the exclusion narrow rather than a file-level pass.
+    const seeded = [
+      `/x/tracker/_mcp.md:9: curl — \`curl\` or \`wget\` are forbidden`,
+      `/x/tracker/_mcp.md:40: Authorization header — headers: { "Authorization": "Bearer $T" }`,
+      `/x/tracker/_mcp.md:41: token env read — export H="Bearer $TRACKER_API_TOKEN"`,
+      `/x/tracker/jira/comment.md:12: curl — curl -X POST https://site/rest/api/3/issue`,
+    ].map(site => site.replace(/\//g, path.sep));
+    expect(
+      seeded.filter(site => !isContractProhibition(site)).map(site => site.split(': ')[1].split(' — ')[0]),
+      'only the two named transports, and only in the contract file, may be excluded',
+    ).toEqual(['Authorization header', 'token env read', 'curl']);
   });
 
   it('the one hand-authored exclusion is named, and is the ONLY one', () => {
@@ -540,7 +620,114 @@ const LIVE_REASONS: readonly string[] = [
   // phase. A deferral that is not real hides a row from BOTH arms.
   'foreign issue reference {ref}',
   'no tracking issue for this run',
+  // ── Live from Phase 3b: the tool-call contract and the first provider
+  // mechanics tree. Each row moved here in the commit that authored its emitting
+  // site, which is the discipline DEFERRED_REASONS' comment describes.
+  //
+  // `no tracker tool for {capability}` is emitted by the contract document itself
+  // — the one file that states the capability-unavailable rule, so the reason
+  // belongs to it rather than to any provider. The other five are provider
+  // mechanics: the dedup ladder's bottom rung, the ref pre-flight's per-ref and
+  // aggregate arms, the site shape gate, and the transition exact-match rule.
+  'no tracker tool for {capability}',
+  'unsupported by {provider}',
+  'dedup unavailable — duplicate possible',
+  'issue reference "{ref}" does not match {provider} reference grammar',
+  'no parseable refs for provider {p}',
+  'unusable site',
+  'unsupported transition',
 ];
+
+/**
+ * The provider tokens a `{provider}` placeholder may be instantiated with —
+ * derived from the registry's own provider rows, never listed.
+ *
+ * §14.2 states the canonical reason as a TEMPLATE (`unsupported by {provider}`)
+ * and §14.4 fixes the per-provider CELL as the instantiated form (`unsupported by
+ * jira`). Both spellings are correct and they are different strings, so a registry
+ * that admitted only one of them would either report every shipped provider file
+ * as unregistered or force a provider's own mechanics to name a placeholder
+ * instead of itself.
+ *
+ * Deriving the token list from VARIANT_MODULES rather than listing it is what
+ * makes 3c's provider free: registering `tracker/linear` admits
+ * `unsupported by linear` with no registry edit, and a provider that is NOT
+ * registered is still refused.
+ */
+function registeredProviderTokens(): string[] {
+  return VARIANT_MODULES
+    .map(mod => mod.subdir)
+    .filter(subdir => subdir.startsWith('tracker/'))
+    .map(subdir => subdir.slice('tracker/'.length));
+}
+
+/**
+ * The capability names a `{capability}` placeholder may be instantiated with —
+ * read out of the tool-call contract's own table, never listed here.
+ *
+ * `no tracker tool for {capability}` is stated as a template by the contract and
+ * emitted INSTANTIATED by a provider's mechanics (`no tracker tool for fetch by
+ * key`), for the same reason the provider placeholder is: a mechanics file that
+ * degraded on a named capability and then reported a placeholder would tell the
+ * user nothing they can act on.
+ *
+ * The contract's capability table is the authority for that vocabulary — it is
+ * where the rows are defined, and where the "select by capability DESCRIPTION,
+ * never by tool name" rule lives — so the admitted set is parsed from it. That
+ * keeps the vocabulary CLOSED: a provider degrading on a capability the contract
+ * does not define is reported, which is exactly the GAP-13 shape (a reason nobody
+ * can grep for) one level down.
+ *
+ * Read from the SOURCE module rather than the generated copy: the generated file
+ * exists only while the gate is open, and a guard about the reason vocabulary must
+ * not go quiet in the other gate state.
+ */
+function contractCapabilityNames(): string[] {
+  const source = path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_mcp.mds');
+  const rows = readFileSync(source, 'utf-8')
+    .split('\n')
+    .filter(line => /^\| /.test(line))
+    .map(line => line.split('|')[1]?.trim() ?? '')
+    .filter(cell => cell !== '' && cell !== 'Capability' && !/^-+$/.test(cell));
+  if (rows.length === 0) {
+    throw new Error(
+      `no capability rows parsed from ${source} — the contract's capability table is the ` +
+      `authority for the {capability} vocabulary, and an empty set would admit every spelling`,
+    );
+  }
+  return rows;
+}
+
+/**
+ * Named collector: a canonical reason and every instantiation of it this tree
+ * admits.
+ *
+ * Two placeholders, two closed token sets, both DERIVED: `{provider}` from the
+ * module registry's provider rows, `{capability}` from the contract's capability
+ * table. A reason with neither placeholder instantiates to itself, so callers need
+ * no branch. Both registry arms and the deferral mirror go through this one
+ * function, so a template rule cannot hold in one direction and not the other.
+ *
+ * `{ref}` and `{p}` are deliberately NOT instantiated: those placeholders are
+ * emitted verbatim by the mechanics — the value is runtime data with no closed
+ * domain, so a template is the only spelling that can be pinned.
+ */
+export function reasonSpellings(reason: string): string[] {
+  let spellings = [reason];
+  if (reason.includes('{provider}')) {
+    spellings = spellings.flatMap(text => [
+      text,
+      ...registeredProviderTokens().map(token => text.replace('{provider}', token)),
+    ]);
+  }
+  if (reason.includes('{capability}')) {
+    spellings = spellings.flatMap(text => [
+      text,
+      ...contractCapabilityNames().map(name => text.replace('{capability}', name)),
+    ]);
+  }
+  return [...new Set(spellings)];
+}
 
 /**
  * DEGRADED reasons the shipped tree emits that §14.2's table does not list.
@@ -565,21 +752,23 @@ const PRE_PHASE3_REASONS: readonly string[] = [
 ];
 
 /**
- * §14.2 rows owned by a per-provider mechanics file — 3b (Jira) and 3c (Linear).
+ * §14.2 rows with no emitting site yet.
  *
- * Listed, not omitted: the partition assertion below makes this the ONLY way a
- * row may be outside the forward arm, so a reason cannot be forgotten. Each entry
- * moves into LIVE_REASONS in the commit that authors its emitting site.
+ * EMPTY from Phase 3b: the tool-call contract and the first provider mechanics
+ * tree between them gave every remaining row an emitter, so each one moved into
+ * LIVE_REASONS in the commit that authored its site — which is the discipline this
+ * list exists to enforce rather than a state it has to stay in.
+ *
+ * Kept as a declared half rather than deleted, because the partition assertion
+ * below is what makes this the ONLY way a row may sit outside the forward arm: a
+ * row deleted from both halves shrinks the registry silently. An empty half makes
+ * the mirror arm range over nothing, so that arm carries its own known-bad probe.
+ *
+ * 3c adds no row here. Linear's reasons are the same canonical rows, and its
+ * `unsupported by linear` spelling is admitted by `reasonSpellings` the moment its
+ * provider is registered.
  */
-const DEFERRED_REASONS: readonly string[] = [
-  'no tracker tool for {capability}',
-  'unsupported by {provider}',
-  'dedup unavailable — duplicate possible',
-  'issue reference "{ref}" does not match {provider} reference grammar',
-  'no parseable refs for provider {p}',
-  'unusable site',
-  'unsupported transition',
-];
+const DEFERRED_REASONS: readonly string[] = [];
 
 /** §14.2's canonical table: every non-`(none)` reason, live or deferred. */
 const CANONICAL_REASONS: readonly string[] = [...LIVE_REASONS, ...DEFERRED_REASONS];
@@ -606,9 +795,24 @@ const PHASE3_STATUS_LINES: readonly string[] = [
   'SCRUB: N [type:count,…]',
 ];
 
-/** Named collector: every `DEGRADED (…)` reason spelled in a text. */
+/**
+ * Named collector: every `DEGRADED (…)` reason spelled in a text.
+ *
+ * Whitespace runs are collapsed to one space, because a reason is a ONE-LINE
+ * status string and the prose that states it is hard-wrapped. `_mcp.md`'s
+ * capability clause wraps mid-reason, so the raw capture was
+ * `"no\ntracker tool for {capability}"` — a string matching no registry entry and
+ * describing no defect. Normalising here rather than reflowing the source is the
+ * choice PF-057 argues for: the alternative pins where a sentence happens to
+ * break, and the next reflow re-breaks it somewhere else.
+ *
+ * Deliberately NOT a general unescape or trim-only: the collapse is what makes a
+ * wrapped reason and an inline one the same string, which is the property both
+ * registry arms compare on.
+ */
 export function collectDegradedReasons(text: string): string[] {
-  return [...text.matchAll(/DEGRADED \(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)].map(m => m[1]);
+  return [...text.matchAll(/DEGRADED \(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)]
+    .map(m => m[1].replace(/\s+/g, ' ').trim());
 }
 
 describe('[DR-04] DEGRADED literal registry: forward direction', () => {
@@ -623,6 +827,36 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       CANONICAL_REASONS.length,
       '§14.2 fixes eighteen non-`(none)` reasons; a shorter table is a narrowed registry',
     ).toBeGreaterThanOrEqual(18);
+    // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
+    // instantiated, only with tokens the registry carries, and a reason without the
+    // placeholder still matches itself and nothing else.
+    expect(
+      reasonSpellings('unsupported by {provider}'),
+      'the template and each registered provider\'s cell, and nothing else',
+    ).toEqual(['unsupported by {provider}', 'unsupported by github', 'unsupported by jira']);
+    expect(
+      reasonSpellings('redaction unavailable'),
+      'a reason with no provider placeholder must instantiate to itself alone',
+    ).toEqual(['redaction unavailable']);
+    expect(
+      reasonSpellings('unsupported by {provider}'),
+      'an unregistered provider must NOT be admitted — that is the point of deriving the tokens',
+    ).not.toContain('unsupported by asana');
+    // The capability vocabulary is closed the same way, against the contract's own
+    // table. Both a real row and a fabricated one are checked, so the derivation is
+    // proven to discriminate rather than merely to return something.
+    const capabilitySpellings = reasonSpellings('no tracker tool for {capability}');
+    expect(
+      capabilitySpellings,
+      'the contract defines this capability, so a provider may degrade on it by name',
+    ).toContain('no tracker tool for fetch by key');
+    expect(
+      capabilitySpellings,
+      'a capability the contract does not define must NOT be admitted — an ungreppable reason is ' +
+      'GAP-13 one level down',
+    ).not.toContain('no tracker tool for frobnicate');
+    expect(capabilitySpellings[0], 'the template itself is always the first spelling')
+      .toBe('no tracker tool for {capability}');
     expect(
       PRE_PHASE3_REASONS.length,
       'the pre-Phase-3 list is empty — the reverse arm would then be silently stricter than the ' +
@@ -637,7 +871,9 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
   it('every LIVE reason is emitted by at least one named site', () => {
     const corpus = [...gitAgentSinkCorpus(), ...commandCorpus()];
     const haystack = corpus.map(e => e.content).join('\n');
-    const unemitted = LIVE_REASONS.filter(r => !haystack.includes(`DEGRADED (${r})`));
+    const unemitted = LIVE_REASONS.filter(
+      reason => !reasonSpellings(reason).some(spelling => haystack.includes(`DEGRADED (${spelling})`)),
+    );
     expect(
       unemitted,
       `reason(s) in the canonical table that NO site emits. A registry entry with no emitter is a ` +
@@ -650,12 +886,31 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     // The mirror. A "deferred" row that IS already emitted means the list is stale
     // and the forward arm is narrower than the tree can support.
     const haystack = [...gitAgentSinkCorpus(), ...commandCorpus()].map(e => e.content).join('\n');
-    const alreadyLive = DEFERRED_REASONS.filter(r => haystack.includes(`DEGRADED (${r})`));
+    /** The mirror predicate, named so the probe below drives the live one. */
+    const alreadyEmitted = (reasons: readonly string[]): string[] => reasons.filter(
+      reason => reasonSpellings(reason).some(spelling => haystack.includes(`DEGRADED (${spelling})`)),
+    );
+
+    const alreadyLive = alreadyEmitted(DEFERRED_REASONS);
     expect(
       alreadyLive,
       `reason(s) listed as deferred that already have an emitting site. Move them to ` +
       `LIVE_REASONS in this commit — a deferral that is not real hides the row from both arms:\n  ` +
       alreadyLive.join('\n  '),
+    ).toEqual([]);
+
+    // The deferred half is empty on this tree, so the assertion above ranges over
+    // nothing. Drive the SAME predicate over a seeded deferred row that IS emitted:
+    // without this, a mirror arm that had stopped working would read identically.
+    const seededStale = LIVE_REASONS[0];
+    expect(
+      alreadyEmitted([seededStale]),
+      'the mirror predicate must report a reason that is genuinely emitted — otherwise an empty ' +
+      'deferred half and a broken predicate are the same green (PF-064)',
+    ).toEqual([seededStale]);
+    expect(
+      alreadyEmitted(['a reason no site emits — seeded probe']),
+      'and must not report one that is not',
     ).toEqual([]);
   });
 
@@ -683,7 +938,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       for (const reason of collectDegradedReasons(entry.content)) {
         // `{reason}` is the D4 contract's own placeholder, not a reason.
         if (reason === '{reason}' || reason === '\\{reason\\}') continue;
-        if (CANONICAL_REASONS.includes(reason)) continue;
+        if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
         if (PRE_PHASE3_REASONS.includes(reason)) continue;
         unregistered.push(`${entry.path}: "${reason}"`);
       }

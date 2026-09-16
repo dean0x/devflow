@@ -27,6 +27,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'fs';
 import * as path from 'path';
 
 import {
@@ -449,11 +450,21 @@ describe('Result error-union completeness', () => {
 // that parity over it discriminates (GAP-42).
 
 describe('expandVariants', () => {
-  it('expands the shipped registry into one pair per (module, op)', () => {
+  it('expands the RESOLVED registry into one pair per (module, op)', () => {
+    // expandVariants defaults to resolveVariantModules(), so the shipped expansion
+    // is the declared registry PLUS whatever the gates open. Counting only
+    // VARIANT_MODULES was right while every gate was shut and understates the
+    // expansion by exactly the gated module the moment one opens — the shape of an
+    // assertion that describes a phase rather than a mechanism.
     const pairs = valueOf(expandVariants());
-    const expected = VARIANT_MODULES.reduce((n, m) => n + m.ops.length, 0);
+    const resolved = resolveVariantModules();
+    const expected = resolved.reduce((n, m) => n + m.ops.length, 0);
     expect(pairs).toHaveLength(expected);
-    expect(pairs.map(p => p.op)).toEqual([...TRACKER_GITHUB_OPS, ...GIT_CROSS_CUTTING_DOCS]);
+    expect(
+      pairs.map(p => p.op),
+      'the op sequence is the resolved registry read in order — every provider contributes the ' +
+      'whole shared roster, and the gated contract contributes its single basename last',
+    ).toEqual(resolved.flatMap(m => [...m.ops]));
   });
 
   it('every FAN-OUT module clears the minimum — a short roster makes parity vacuous', () => {
@@ -481,7 +492,10 @@ describe('expandVariants', () => {
   });
 
   it('emits a POSIX-spelled relative path per pair — nested or flat per its module', () => {
-    const bySource = new Map(VARIANT_MODULES.map(m => [m.source as string, m]));
+    // Keyed off the RESOLVED registry: expandVariants expands what the gates
+    // leave standing, so a lookup built from the declared list alone reports the
+    // gated module as "unregistered" the moment its gate opens.
+    const bySource = new Map(resolveVariantModules().map(m => [m.source as string, m]));
     const pairs = valueOf(expandVariants());
     for (const pair of pairs) {
       const mod = bySource.get(pair.module);
@@ -644,14 +658,26 @@ describe('VARIANT_MODULES (shipped registry)', () => {
     }
   });
 
-  it('carries no Jira or Linear provider — Phase 2 is GitHub-only', () => {
+  it('carries exactly the provider directories whose modules exist', () => {
     // ADR-003 clause (iii): a registry entry with no module on disk would be an
-    // artifact with no reachable consumer. Scoped to the provider subdirectories:
-    // the cross-cutting module is provider-independent and lands flat.
+    // artifact with no reachable consumer, and the converse — a module on disk with
+    // no row — is a file the build refuses. Asserted as a set equality over the
+    // provider subdirectories, both directions, rather than as a count: a provider
+    // renamed and another added in one commit stays green against a count.
+    //
+    // Scoped to the provider subdirectories; the cross-cutting module is
+    // provider-independent and lands flat.
     const providerSubdirs = VARIANT_MODULES
       .map(m => m.subdir as string)
       .filter(subdir => subdir.startsWith('tracker/'));
-    expect(providerSubdirs).toEqual(['tracker/github']);
+    expect(providerSubdirs).toEqual(['tracker/github', 'tracker/jira']);
+    for (const subdir of providerSubdirs) {
+      const mod = VARIANT_MODULES.find(m => m.subdir === subdir)!;
+      expect(
+        existsSync(path.join(ROOT, mod.source)),
+        `${mod.source} is registered for ${subdir} but is not on disk`,
+      ).toBe(true);
+    }
   });
 });
 
@@ -686,18 +712,37 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     ops: TRACKER_GITHUB_OPS,
   };
 
-  it('the gate is CLOSED for the shipped registry (GitHub-only)', () => {
+  /** The shipped registry with every tool-call provider removed — the shut arm. */
+  const CLI_ONLY_REGISTRY: readonly VariantModule[] = VARIANT_MODULES.filter(
+    mod => !(MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(mod.subdir),
+  );
+
+  it('the gate is OPEN for the shipped registry — a provider that needs it is registered', () => {
     expect(
       mcpContractIsGenerated(VARIANT_MODULES),
-      'no registered provider needs the tool-call contract yet, so generating it would ship a ' +
-      'reference with no reachable consumer (ADR-003) and turn AC-2.7 red (H7)',
-    ).toBe(false);
+      'a registered provider reaches its tracker through a tool call and its mechanics NAME the ' +
+      'contract, so the contract must be generated or ten references point at a file the install ' +
+      'does not carry',
+    ).toBe(true);
   });
 
-  it('the gate OPENS when such a provider is registered — the arm 3b turns on', () => {
+  it('the gate is SHUT for a registry with no such provider — the arm that keeps it a gate', () => {
+    // Both arms are asserted against INJECTED registries rather than against a
+    // phase: the shut arm is what stops the gate becoming a constant `true`, and
+    // without it a GitHub-only install would silently start carrying a reference
+    // nothing it can reach ever loads (GAP-02, AC-2.7 re-scoped).
     expect(
-      mcpContractIsGenerated([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]),
-      'this is the whole mechanism: 3b adds its provider module and the contract starts being ' +
+      CLI_ONLY_REGISTRY.length,
+      'the CLI-only probe registry must still hold a provider, or it proves nothing',
+    ).toBeGreaterThan(0);
+    expect(
+      CLI_ONLY_REGISTRY.length,
+      'and it must actually differ from the shipped registry',
+    ).toBeLessThan(VARIANT_MODULES.length);
+    expect(mcpContractIsGenerated(CLI_ONLY_REGISTRY)).toBe(false);
+    expect(
+      mcpContractIsGenerated([...CLI_ONLY_REGISTRY, SYNTHETIC_MCP_PROVIDER]),
+      'this is the whole mechanism: registering the provider module starts the contract being ' +
       'generated, with no second edit anywhere',
     ).toBe(true);
   });
@@ -717,13 +762,20 @@ describe('the tool-call contract module is gated on a provider that needs it', (
   });
 
   it('resolveVariantModules appends the contract module only when the gate is open', () => {
-    expect(resolveVariantModules(VARIANT_MODULES)).toEqual([...VARIANT_MODULES]);
-    const opened = resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]);
+    expect(
+      resolveVariantModules(CLI_ONLY_REGISTRY),
+      'a shut gate appends nothing at all',
+    ).toEqual([...CLI_ONLY_REGISTRY]);
+    const opened = resolveVariantModules([...CLI_ONLY_REGISTRY, SYNTHETIC_MCP_PROVIDER]);
     expect(opened).toContain(MCP_CONTRACT_MODULE);
     expect(
       opened.length,
       'exactly one module is appended — a duplicated append would make two hosts claim one file',
-    ).toBe(VARIANT_MODULES.length + 2);
+    ).toBe(CLI_ONLY_REGISTRY.length + 2);
+    // And on the shipped registry, which already opens the gate: appended once.
+    expect(
+      resolveVariantModules(VARIANT_MODULES).filter(m => m.source === MCP_CONTRACT_MODULE.source),
+    ).toHaveLength(1);
   });
 
   it('the appended module is idempotent: resolving twice appends once', () => {
@@ -735,21 +787,20 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     ).toHaveLength(1);
   });
 
-  it('the generated manifest is unchanged today and gains exactly the contract file later', () => {
-    const closed = generatedReferenceManifest();
+  it('the manifest carries the contract file exactly while the gate is open', () => {
     expect(
-      closed,
-      'the shipped manifest must not name the contract file — the installer converges to this list ' +
-      'and would install a reference nothing loads',
-    ).not.toContain('tracker/_mcp.md');
-
-    const opened = expandVariants(resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]));
-    expect(opened.ok, `expansion must succeed: ${JSON.stringify(opened)}`).toBe(true);
-    expect(
-      opened.ok && opened.value.map(p => p.relPath),
+      generatedReferenceManifest(),
       'the contract lands at the tracker/ ROOT, beside the provider directories rather than inside ' +
       'one: it is provider-independent, and a copy per provider is the duplication it removes',
     ).toContain('tracker/_mcp.md');
+
+    const shut = expandVariants(resolveVariantModules(CLI_ONLY_REGISTRY));
+    expect(shut.ok, `expansion must succeed: ${JSON.stringify(shut)}`).toBe(true);
+    expect(
+      shut.ok && shut.value.map(p => p.relPath),
+      'and a registry with no tool-call provider must NOT name it — the installer converges to ' +
+      'this list, so a name here is a file installed for everyone',
+    ).not.toContain('tracker/_mcp.md');
   });
 
   it('★ the emitted filename is provable NOW, not discovered in 3b', () => {

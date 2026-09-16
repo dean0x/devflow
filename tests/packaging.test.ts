@@ -31,10 +31,12 @@ import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
-  MDS_DEFERRED_REFERENCE_MODULES,
   MDS_PARTIALS,
 } from './fixtures/mds-manifest.js';
-import { generatedReferenceManifest } from '../src/core/mds-variants.js';
+import {
+  GATED_REFERENCE_MODULE_SOURCES,
+  generatedReferenceManifest,
+} from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -507,7 +509,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    */
   const EXPECTED_SHIPPED_MDS =
     MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
-    MDS_REFERENCE_MODULES.length + MDS_DEFERRED_REFERENCE_MODULES.length;
+    MDS_REFERENCE_MODULES.length;
 
   it(`tarball ships all ${EXPECTED_SHIPPED_MDS} src/assets/**/*.mds generator sources (D-A(a))`, () => {
     const files = getPackFiles();
@@ -522,8 +524,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
       `(${MDS_COMMAND_HOSTS.length} command hosts + ${MDS_PARTIALS.length} partials + ` +
       `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
-      `module(s) + ${MDS_DEFERRED_REFERENCE_MODULES.length} deferred reference module(s)), ` +
-      `got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
+      `module(s)), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
     ).toBe(EXPECTED_SHIPPED_MDS);
 
@@ -536,20 +537,21 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     for (const source of MDS_REFERENCE_MODULES) {
       expect(shippedMds, `${source} must ship`).toContain(source);
     }
-    // A DEFERRED module ships even though this build generates nothing from it:
-    // the next phase compiles this exact source, and a source excluded from the
-    // tarball would be a source the published package cannot build from. It is
-    // also the one class the `files[]`-wholesale behaviour could silently drop
-    // without any generated-file assertion noticing, since it generates none.
-    for (const source of MDS_DEFERRED_REFERENCE_MODULES) {
+    // A GATED module ships whether or not this build generates anything from it.
+    // Its gate is a property of the registry, not of the tarball: a published
+    // package whose registry later opens the gate must be able to compile the
+    // source, and this is the one class the `files[]`-wholesale behaviour could
+    // silently drop without any generated-file assertion noticing, because in the
+    // shut state it generates none.
+    for (const source of GATED_REFERENCE_MODULE_SOURCES) {
       expect(
         shippedMds,
-        `${source} is authored and gated, not absent — it must still ship`,
+        `${source} is gate-controlled, not optional — it must ship in either gate state`,
       ).toContain(source);
     }
     expect(
-      MDS_DEFERRED_REFERENCE_MODULES.length,
-      'the deferred roster is empty — the loop above asserts nothing (PF-064: an absence-based ' +
+      GATED_REFERENCE_MODULE_SOURCES.length,
+      'the gated roster is empty — the loop above asserts nothing (PF-064: an absence-based ' +
       'roster needs a presence arm)',
     ).toBeGreaterThan(0);
   });
@@ -588,7 +590,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(13);
+    ).toBeGreaterThanOrEqual(24);
 
     expect(
       collectMissingPackedReferences(files, manifest),

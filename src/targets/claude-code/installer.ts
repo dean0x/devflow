@@ -334,7 +334,7 @@ const TRACKER_SUBTREE = 'tracker';
  */
 export type OverlayUnitRef =
   | { readonly kind: 'provider'; readonly subdir: string }
-  | { readonly kind: 'cross-cutting' };
+  | { readonly kind: 'cross-cutting'; readonly dir: string };
 
 /**
  * What a failed overlay unit left on disk.
@@ -393,9 +393,10 @@ export interface OverlayFailure {
  * rather than leaving each render site to invent its own wording (avoids PF-013).
  */
 export function overlayUnitLabel(unit: OverlayUnitRef): string {
-  return unit.kind === 'provider'
-    ? `provider directory "${unit.subdir}"`
-    : 'the cross-cutting document set';
+  if (unit.kind === 'provider') return `provider directory "${unit.subdir}"`;
+  return unit.dir === ''
+    ? 'the cross-cutting document set'
+    : `the cross-cutting document set in "${unit.dir}"`;
 }
 
 export interface ReferenceOverlayResult {
@@ -414,10 +415,13 @@ export interface ReferenceOverlayResult {
  * (`tracker/{provider}/`) and the WHOLE FLAT SET for the provider-independent documents
  * — not one unit per flat file.
  *
- * The flat documents land directly in `references/`, beside hand-authored files the overlay
- * must never replace or delete (`github-api.md`, `violations.md`, …), so there is no
- * directory to rename and no `.tmp` sibling that could stand in for one. What the flat
- * set therefore gets is the same DECISION rule as a provider directory — build every
+ * A flat set's documents land beside entries the overlay must never replace or delete —
+ * the references root holds hand-authored files (`github-api.md`, `violations.md`, …) and
+ * `tracker/` holds the provider directories — so there is no directory to rename and no
+ * `.tmp` sibling that could stand in for one. Which directory a flat set lands in is
+ * therefore part of the unit (`dir`, `''` for the references root), because it is the one
+ * thing that differs between them. What the flat set gets is the same DECISION rule as a
+ * provider directory — build every
  * document under a staging tree first, and on any per-file failure abort the whole unit,
  * leaving all previously installed flat documents exactly as they were — promoted by one
  * `rename` per document. The promotion loop is the one place where a mid-flight I/O
@@ -427,9 +431,11 @@ export interface ReferenceOverlayResult {
  * this run's bytes and which still carry the previous install's.
  *
  * Treating each flat file as its own unit was the alternative. It was rejected because
- * three documents that are always generated together and always read together would
- * then report three independent outcomes, and a reader of `overlayFailures` could not
- * tell a broken build from a single unlucky file.
+ * documents that are always generated together and always read together would then report
+ * independent outcomes, and a reader of `overlayFailures` could not tell a broken build
+ * from a single unlucky file. Grouping by DIRECTORY keeps that property while giving each
+ * shared directory its own outcome: the cross-cutting glossary failing says nothing about
+ * the tool-call contract, and neither says anything about a provider.
  */
 export type OverlayUnit = OverlayUnitRef & {
   /** Manifest-relative paths this unit owns. */
@@ -444,23 +450,50 @@ type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
 
 /** The identity half of a unit, as the failure report carries it. */
 function unitRef(unit: OverlayUnit): OverlayUnitRef {
-  return unit.kind === 'provider' ? { kind: 'provider', subdir: unit.subdir } : { kind: 'cross-cutting' };
+  return unit.kind === 'provider'
+    ? { kind: 'provider', subdir: unit.subdir }
+    : { kind: 'cross-cutting', dir: unit.dir };
 }
 
-/** POSIX sub-path a unit's files land in under a root — `''` for the flat set. */
+/** POSIX sub-path a unit's files land in under a root — `''` for the references root. */
 function unitSubdir(unit: OverlayUnit): string {
-  return unit.kind === 'provider' ? unit.subdir : '';
+  return unit.kind === 'provider' ? unit.subdir : unit.dir;
+}
+
+/**
+ * Is this directory part a PROVIDER directory — a swappable directory of its own?
+ *
+ * `D-OVERLAY-PROVIDER-SHAPE`. Exactly `tracker/{provider}`, which is the only shape the
+ * reference-module registry emits a directory for, and the only shape whose whole
+ * directory may be renamed into place.
+ *
+ * The distinction is load-bearing rather than cosmetic, and it is what the previous
+ * "any non-empty directory part is a provider" rule got wrong the first time the
+ * manifest carried a file directly under `tracker/`. That entry bucketed to the
+ * directory part `tracker`, which was then treated as a provider directory — so the
+ * unit's atomic swap was a rename of `tracker/` ITSELF, over a directory whose other
+ * entries are every provider's mechanics. Its staging sibling (`tracker.{token}.tmp`)
+ * also sat OUTSIDE the subtree the prune converges, which is what
+ * {@link stagingDirFor}'s second property exists to guarantee.
+ */
+function isProviderSubdir(subdir: string): boolean {
+  const segments = subdir.split('/');
+  return segments.length === 2 && segments[0] === TRACKER_SUBTREE && segments[1] !== '';
 }
 
 /**
  * Group a manifest into overlay units by the directory each entry lands in.
  *
- * Deterministic order — flat set first, then provider directories sorted by path — so a
- * failure report and a loud throw are reproducible run to run.
+ * Deterministic order — sorted by directory part — so a failure report and a loud throw
+ * are reproducible run to run.
  *
- * An empty directory part is the manifest's own spelling of "lands in the references
- * root", so it selects the flat arm here and is never carried any further: past this
- * point a unit says which kind it is.
+ * Two kinds, decided by the SHAPE of the directory part ({@link isProviderSubdir}):
+ * a `tracker/{provider}` directory is a provider unit and is swapped whole, and every
+ * other directory holds a FLAT SET — documents that land beside entries this overlay
+ * must never replace or delete, promoted one rename at a time. The references root is
+ * one such directory (beside the hand-authored references) and `tracker/` is another
+ * (beside the provider directories); both take the flat arm, which is why that arm
+ * carries the directory it lands in rather than assuming the root.
  */
 function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   const bySubdir = new Map<string, string[]>();
@@ -474,9 +507,9 @@ function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   return [...bySubdir.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([subdir, files]): OverlayUnit =>
-      subdir === ''
-        ? { kind: 'cross-cutting', files }
-        : { kind: 'provider', subdir, files });
+      isProviderSubdir(subdir)
+        ? { kind: 'provider', subdir, files }
+        : { kind: 'cross-cutting', dir: subdir, files });
 }
 
 /** Resolve a POSIX manifest sub-path against a root, spelled for this filesystem. */
@@ -526,20 +559,30 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  *
  * The provider arm inherits the property from its unit: the path is the unit's own
  * installed location plus a suffix, so it is converged exactly when the unit is, and every
- * provider subdir the reference-module registry declares is `tracker/{provider}`. The flat
- * arm has no installed location to hang a suffix on — its documents ARE the references root
- * — so it is placed under the converged subtree explicitly. The cost is that a manifest
- * carrying flat entries alone would now create an empty `tracker/` on its way through; the
- * registry never produces one, and an empty directory is not a partial install.
+ * provider subdir the reference-module registry declares is `tracker/{provider}`. A flat
+ * arm has no installed location to hang a suffix on — its documents ARE the directory —
+ * so it is placed under the converged subtree explicitly, under a name carrying its own
+ * directory slug so two flat sets cannot share one staging path. The cost is that a
+ * manifest carrying flat entries alone would create an empty `tracker/` on its way
+ * through; the registry never produces one, and an empty directory is not a partial
+ * install.
  *
- * Neither name can collide with a manifest entry, and the prune reaches both for the same
- * reason it reaches the `.old` backups: every manifest entry under `tracker/` is
- * `{provider}/{op}.md`, and neither name is a directory any manifest path descends into.
+ * No staging name can collide with a manifest entry, and the prune reaches them all for
+ * the same reason it reaches the `.old` backups: every staging basename begins with a dot
+ * and ends `.tmp`, and no manifest path under `tracker/` descends into such a directory.
  */
 function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
-  return unit.kind === 'cross-cutting'
-    ? path.join(referencesTarget, TRACKER_SUBTREE, `.cross-cutting.${STAGING_TOKEN}.tmp`)
-    : `${underRoot(referencesTarget, unit.subdir)}.${STAGING_TOKEN}.tmp`;
+  if (unit.kind === 'provider') {
+    return `${underRoot(referencesTarget, unit.subdir)}.${STAGING_TOKEN}.tmp`;
+  }
+  // One staging name per flat DIRECTORY. A name keyed only on the kind was unique
+  // while exactly one flat set existed; with a second (the tool-call contract, which
+  // lands in `tracker/` beside the provider directories) both units would pre-clean,
+  // build into and promote from the SAME path — each deleting the other's half-built
+  // tree, which is precisely the collision STAGING_TOKEN exists to prevent between
+  // runs, reproduced within one.
+  const slug = unit.dir === '' ? 'root' : unit.dir.split('/').join('-');
+  return path.join(referencesTarget, TRACKER_SUBTREE, `.cross-cutting.${slug}.${STAGING_TOKEN}.tmp`);
 }
 
 /**
@@ -586,7 +629,7 @@ async function buildUnitStagingTree(
   }
 
   for (const entry of entries) {
-    const relPath = unit.kind === 'cross-cutting' ? entry.name : `${unit.subdir}/${entry.name}`;
+    const relPath = unitSubdir(unit) === '' ? entry.name : `${unitSubdir(unit)}/${entry.name}`;
 
     // Symlinks are skipped, never followed. copyDirectory follows them and preserves
     // source modes, which is why the overlay does its own copying: a link planted in the
@@ -675,9 +718,10 @@ async function promoteCrossCuttingUnit(
   stagingDir: string,
   record: RecordPromotionState,
 ): Promise<void> {
+  const destDir = underRoot(referencesTarget, unit.dir);
   for (const [index, relPath] of unit.files.entries()) {
     const basename = relPath.split('/').slice(-1)[0];
-    await fs.rename(path.join(stagingDir, basename), path.join(referencesTarget, basename));
+    await fs.rename(path.join(stagingDir, basename), path.join(destDir, basename));
     // Past the first rename the set is mixed, and there is no directory to swap back
     // (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the
     // rest still carry the previous install's. Recorded after each rename so a failure

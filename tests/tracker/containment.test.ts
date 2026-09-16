@@ -677,6 +677,16 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
       providers.length,
       'no provider reference was read — the negative arm would be vacuous',
     ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+    // Provenance, not just a count: the corpus walks `tracker/`, so it must reach
+    // EVERY registered provider's directory and the contract beside them. A count
+    // alone is met by one provider's files twice over.
+    for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
+      expect(
+        providers.some(entry => entry.label.startsWith(`${mod.subdir}/`)),
+        `the shared-literal negative arm never read ${mod.subdir}/ — a provider mechanics tree ` +
+        `outside this corpus is a tree that may restate a single-authority sentence freely`,
+      ).toBe(true);
+    }
 
     const restatements: string[] = [];
     for (const entry of SHARED_LITERAL_REGISTRY) {
@@ -736,6 +746,57 @@ function reachablePaths(template: string, provider: string, ops: readonly string
 }
 
 /**
+ * Every path the ONE templated load instruction can reach, across every provider
+ * the registry carries.
+ *
+ * The template is `{provider}`-parameterised, so reachability is too: the
+ * instruction the preamble states can compose a path for any provider named in the
+ * preamble's own static map, and the build emits a directory per registered
+ * provider module. Instantiating for `github` alone was correct while GitHub was
+ * the only provider and became a claim about a phase rather than about the
+ * instruction the moment a second one registered.
+ *
+ * The provider tokens come from the module registry — the same place the emitted
+ * directories come from — so the two halves of the both-directions check below
+ * cannot disagree about which providers exist. What keeps that from being a
+ * tautology is the OTHER half: the instruction itself is read out of the compiled
+ * agent (the arm above asserts there is exactly one such line and that it carries
+ * both placeholders), so a preamble that dropped a provider from its map, or
+ * hard-coded one, still fails.
+ */
+function providerReachablePaths(template: string): string[] {
+  return VARIANT_MODULES
+    .filter(mod => mod.subdir.startsWith('tracker/'))
+    .flatMap(mod => reachablePaths(template, mod.subdir.slice('tracker/'.length), mod.ops));
+}
+
+/**
+ * The tool-call CONTRACT document's own reachability rule — a third kind, matching
+ * its third module kind.
+ *
+ * A `fanout` file is reachable by instantiating the template; a `named` document is
+ * reachable because the agent spells its path; the contract is reachable because
+ * its DECLARED CONSUMERS name it — the per-operation mechanics of the providers
+ * that reach their tracker through a tool call. That is not a weaker rule than the
+ * other two, it is the same rule applied to the file's actual naming site: the
+ * contract is deliberately NOT named from the always-loaded preamble (which would
+ * be a second `references/tracker/` naming line, and the single-naming-line
+ * assertion above forbids exactly that) and is deliberately NOT named from any
+ * github op file (AC-3.12 — a CLI provider must not load a document about a
+ * transport it never uses).
+ *
+ * Reads the generated tree rather than a list: "some shipped mechanics file names
+ * it" is the property, and a hand-listed namer would drift from the files.
+ */
+function contractIsNamedByAConsumer(): boolean {
+  const contract = 'tracker/_mcp.md';
+  if (!generatedReferenceManifest().includes(contract)) return false;
+  return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
+    .filter(file => path.basename(file) !== '_mcp.md')
+    .some(file => requireFile('generated reference', file).includes(contract));
+}
+
+/**
  * Named collector: every literal `references/<name>.md` the compiled agent spells
  * out, as a manifest-relative path.
  *
@@ -779,12 +840,16 @@ describe('containment: every generated GitHub reference is reachable on the gh p
     // in neither "is it named" nor "is it emitted". A cross-cutting document that
     // lost its one naming line was exactly as invisible here as an orphan file.
     const reachable = new Set([
-      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      // The 'fanout' module kind, for every registered provider: reachable ⇔
+      // instantiating the preamble's single templated instruction yields the path.
+      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
       // The 'named' module kind: reachable ⇔ the compiled agent spells the path
       // out literally. Read out of the agent, never restated here (PF-018).
       ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
+      // The 'contract' module kind: reachable ⇔ a shipped consumer names it.
+      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
     ]);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
@@ -817,10 +882,26 @@ describe('containment: every generated GitHub reference is reachable on the gh p
   it('the reachability check is non-vacuous on both sides', () => {
     expect(TRACKER_GITHUB_OPS.length, 'empty op roster').toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
     expect(GIT_CROSS_CUTTING_DOCS.length, 'empty cross-cutting roster').toBeGreaterThan(0);
+    const providers = VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/'));
+    expect(providers.length, 'no provider module registered').toBeGreaterThan(0);
+    expect(
+      providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE).length,
+      'the template reached no provider path — the per-provider arm is inert',
+    ).toBe(providers.reduce((n, mod) => n + mod.ops.length, 0));
     expect(
       walkFiles(REFS_DIR, f => f.endsWith('.md')).length,
       'no generated reference files at all — run `npm run build`',
-    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length + GIT_CROSS_CUTTING_DOCS.length);
+    ).toBeGreaterThanOrEqual(
+      providers.reduce((n, mod) => n + mod.ops.length, 0) + GIT_CROSS_CUTTING_DOCS.length,
+    );
+    // The contract's own rule, asserted rather than assumed: it is in the manifest
+    // AND some shipped mechanics file names it. Either half alone would let an
+    // unreachable contract ship (ADR-003) or a named one go missing.
+    expect(
+      contractIsNamedByAConsumer(),
+      'the tool-call contract is in the manifest but no provider mechanics file names it — it ' +
+      'would be installed on every machine of every user of that provider and read by nothing',
+    ).toBe(generatedReferenceManifest().includes('tracker/_mcp.md'));
   });
 
   it('known-bad probe: an emitted file outside the registry is reported as unreachable', () => {
@@ -854,10 +935,11 @@ describe('containment: every generated GitHub reference is reachable on the gh p
 
     // …and the same set difference the live check computes now reports it.
     const reachable = new Set([
-      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
       ...[...namedInStripped].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
+      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
     ]);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
   });

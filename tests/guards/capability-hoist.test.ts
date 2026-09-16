@@ -312,7 +312,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
     expect(
       blocks.length,
       'too few process blocks to be scanning both git.md and the generated references',
-    ).toBeGreaterThanOrEqual(29);
+    ).toBeGreaterThanOrEqual(39);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);
