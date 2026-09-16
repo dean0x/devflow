@@ -30,7 +30,13 @@ import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS, MIN_VARIANT_PAIRS } from '../../src/core/mds-variants.js';
+import {
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MIN_VARIANT_PAIRS,
+  TRACKER_GITHUB_OPS,
+  TRACKER_OPS,
+  VARIANT_MODULES,
+} from '../../src/core/mds-variants.js';
 import { collectTrackerNamingLines, resolveAgentSource } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -188,6 +194,53 @@ const BUDGET_LOADED_SET = 77_824;
 const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_MD);
 
 /**
+ * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
+ *
+ * WHY A SECOND ROW AND NOT A RAISED FIRST ONE. `BUDGET_LOADED_SET_P3` above answers
+ * "what does a tracker spawn cost on the GitHub path?", and the answer is unchanged
+ * by this phase: no github operation file names the tool-call contract (the
+ * re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts PROVES that rather
+ * than assuming it), so `MCP_TERM` stays 0 by construction and the GitHub row keeps
+ * its 113 ch of headroom. Folding a provider that DOES load the contract into that
+ * number would have billed every GitHub user for bytes they never receive — the
+ * exact defect GAP-02 recorded — and would have done it by raising a ratcheted
+ * ceiling, which §14.5 forbids outright.
+ *
+ * So the cost of a provider is priced per provider. Each MCP-backed provider gets
+ * its own row and its own ceiling; none of them can move the GitHub one, and the
+ * GitHub one cannot absorb theirs.
+ *
+ * MEASURED, term by term, on this tree:
+ *     dist/agents/git.md                             58_776
+ *   + skills/git/SKILL.md                             6_581
+ *   + skills/worktree-support/SKILL.md                2_942
+ *   = the always-preloaded set                       68_299
+ *   + references/tracker/_mcp.md                      6_402   ← 0 on the GitHub path
+ *   + max_op references/tracker/jira/{op}.md          6_087   (backlink-shipped-issues)
+ *   + max over jira ops of the one-spawn load         7_821   (setup-task: its own
+ *                                                              mechanics + learn-conventions.md)
+ *   =                                                88_609
+ *
+ * Pinned at 88_660 — 51 ch of headroom, tighter than Phase 2's 86 and the Phase-3
+ * git.md ceiling's 94, so the next addition to the contract or to a Jira mechanics
+ * file must fund itself with a cut rather than reach for slack. It is deliberately
+ * NOT re-derived upward from a later measurement: this gate already went red once
+ * during authoring — a 197 ch rewrite of the contract's truncation clause — and the
+ * response was to condense the clause back to 47 ch of growth, which is the
+ * response the message below prescribes.
+ *
+ * A NEW registered `ceilings` entry (`budget-loaded-set-jira`), not a computed
+ * value: unlike the GitHub row — which moves only by the git.md revision and is
+ * therefore derivable from one already-ratcheted number — this row's growth is
+ * mostly content that has no earlier measurement to be derived from. It may be
+ * LOWERED after a pass that actually cuts the contract or the mechanics, and never
+ * raised. Trimming `references/tracker/_mcp.md` is the honest first move: it is
+ * contract prose, it is the single largest term this row adds, and a pass over it
+ * is cheaper than another ceiling.
+ */
+const BUDGET_LOADED_SET_JIRA = 88_660;
+
+/**
  * AC-2.5 [DR-13(a)] — promoted from a handoff deliverable to an assertion.
  *
  * KEPT AT 40 THROUGH PHASE 3, and deliberately so. §14.10 [DR-13] proposed
@@ -318,6 +371,25 @@ function referenceChars(rel: string): number {
 function trackerRefRel(op: string): string {
   return `tracker/github/${op}.md`;
 }
+
+/**
+ * The tracker providers whose mechanics reach the tracker through a TOOL CALL, and
+ * therefore load `references/tracker/_mcp.md` on every spawn.
+ *
+ * Read from the registry rather than listed: a provider registered later is priced
+ * by construction, and the non-vacuity arm reports one whose directory is missing.
+ */
+const MCP_BACKED_PROVIDERS: readonly string[] = VARIANT_MODULES
+  .filter(mod => (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(mod.subdir))
+  .map(mod => mod.subdir.slice('tracker/'.length));
+
+/** The generated per-op mechanics file for a named provider. */
+function providerRefRel(provider: string, op: string): string {
+  return `tracker/${provider}/${op}.md`;
+}
+
+/** The tool-call contract — a per-spawn cost for every MCP-backed provider, 0 elsewhere. */
+const MCP_CONTRACT_REL = 'tracker/_mcp.md';
 
 // ---------------------------------------------------------------------------
 // The compiled agent, sectioned by operation
@@ -462,6 +534,20 @@ function summedFor(op: string): Set<string> {
   return summed;
 }
 
+/**
+ * The file set a PROVIDER spawn sums for an operation.
+ *
+ * The same shape as `summedFor` above, with that provider's own mechanics
+ * substituted for GitHub's. The contract document is deliberately NOT included
+ * here: §14.10's formula carries it as its own term, once per SPAWN rather than
+ * once per operation, and adding it in both places would double-count it.
+ */
+function summedForProvider(provider: string, op: string): Set<string> {
+  const summed = new Set<string>(MODEL_CROSS_CUTTING_REFS[op] ?? []);
+  summed.add(providerRefRel(provider, op));
+  return summed;
+}
+
 const ALL_OPS = [...SECTIONS.keys()];
 
 /** The sum of every reference file an op's load instructions can name in one spawn. */
@@ -519,6 +605,36 @@ function worstCaseNonTrackerLoad(): OpMax {
 /** max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file. */
 function largestTrackerReference(): OpMax {
   return maxOver(TRACKER_GITHUB_OPS, op => referenceChars(trackerRefRel(op)));
+}
+
+/**
+ * The same two `max over ops` terms, scoped to one PROVIDER.
+ *
+ * D-LOADED-SET-PER-PROVIDER. Each MCP-backed provider is priced on its own row
+ * rather than folded into the GitHub one, because the terms genuinely differ: its
+ * mechanics files are different bytes, and it loads the tool-call contract that
+ * the GitHub path is billed 0 for. A single row over the union would charge every
+ * GitHub user for the most expensive provider's mechanics — GAP-02's defect, moved
+ * from a file to an arithmetic.
+ *
+ * Scoped to TRACKER_OPS for the same reason the GitHub row is scoped to it
+ * (D-LOADED-SET-SCOPE): the question is what a TRACKER spawn costs.
+ */
+function largestProviderReference(provider: string): OpMax {
+  return maxOver(TRACKER_OPS, op => referenceChars(providerRefRel(provider, op)));
+}
+
+function worstCaseProviderLoad(provider: string): OpMax {
+  return maxOver(TRACKER_OPS, op =>
+    [...summedForProvider(provider, op)].reduce((n, rel) => n + referenceChars(rel), 0));
+}
+
+/** The whole loaded-set formula for one MCP-backed provider, as §14.10 states it. */
+function providerLoadedSet(provider: string): number {
+  return PRELOADED
+    + referenceChars(MCP_CONTRACT_REL)
+    + largestProviderReference(provider).value
+    + worstCaseProviderLoad(provider).value;
 }
 
 // ---------------------------------------------------------------------------
@@ -611,7 +727,14 @@ describe('byte budget: four-shape table (recorded)', () => {
       (n, rel) => n + referenceChars(rel), 0,
     );
 
-    const MCP_TERM = 0; // _mcp.md is not generated in Phase 2 and is 0 on the GitHub path (AC-2.7).
+    // `_mcp.md` IS generated on this tree — a provider that needs it is registered —
+    // and is still billed at 0 HERE, because this row is the GitHub path and no
+    // github operation file names it. That is proven rather than assumed: the
+    // re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts asserts no
+    // `tracker/github/{op}.md` contains the string. A provider that DOES load it is
+    // priced on its own row (BUDGET_LOADED_SET_JIRA), so this term cannot drift into
+    // charging every GitHub user for bytes they never receive (GAP-02).
+    const MCP_TERM = 0;
 
     // The shipped shape, named once so it can serve as BOTH a row and a stated
     // denominator: shape 3's disqualification is a margin over what shipped, not
@@ -639,6 +762,13 @@ describe('byte budget: four-shape table (recorded)', () => {
         shape: '4. per-op without _mcp.md (GitHub path — identical to 2 in Phase 2)',
         chars: PRELOADED + largest.value + worst.value,
       },
+      // One row per MCP-backed provider — the shapes the GitHub rows deliberately do
+      // not describe. Printed beside shape 2 so the comparison a reviewer actually
+      // needs (what does the second provider cost?) is on the same table.
+      ...MCP_BACKED_PROVIDERS.map(provider => ({
+        shape: `2-${provider}. per-op split, ${provider} path (loads the tool-call contract)`,
+        chars: providerLoadedSet(provider),
+      })),
       {
         // RECORDED ONLY, never the gate [D-CROSS-CUTTING-ON-DEMAND]. What shape 2
         // would cost if the cross-cutting glossary were treated as a mandatory
@@ -665,6 +795,26 @@ describe('byte budget: four-shape table (recorded)', () => {
       // Recorded, not gated — D-LOADED-SET-SCOPE at worstCaseReferenceLoad().
       { row: `worst-case one-spawn load, NON-tracker ops (${nonTracker.op})`, chars: nonTracker.value, bytes: NaN },
       { row: 'sum of all GitHub tracker references', chars: allTrackerRefs, bytes: NaN },
+      // The contract document's own size, recorded as a row rather than only as a
+      // term: it is the single largest thing a provider row adds, so a trimming pass
+      // is judged against this number.
+      {
+        row: `references/${MCP_CONTRACT_REL}  (0 on the GitHub path, per-spawn elsewhere)`,
+        chars: referenceChars(MCP_CONTRACT_REL),
+        bytes: NaN,
+      },
+      ...MCP_BACKED_PROVIDERS.flatMap(provider => [
+        {
+          row: `max_op ${provider} reference (${largestProviderReference(provider).op})`,
+          chars: largestProviderReference(provider).value,
+          bytes: NaN,
+        },
+        {
+          row: `worst-case one-spawn load, ${provider} ops (${worstCaseProviderLoad(provider).op})`,
+          chars: worstCaseProviderLoad(provider).value,
+          bytes: NaN,
+        },
+      ]),
       // Recorded, not gated — D-CROSS-CUTTING-ON-DEMAND at MODEL_CROSS_CUTTING_ON_DEMAND.
       {
         row: `cross-cutting glossary named in the always-loaded part (${MODEL_CROSS_CUTTING_ON_DEMAND.join(', ')})`,
@@ -686,7 +836,19 @@ describe('byte budget: four-shape table (recorded)', () => {
     })));
 
     // Structural sanity only — the table must actually have measured something.
-    expect(shapes).toHaveLength(5);
+    // Five fixed shapes plus one per MCP-backed provider, derived so a provider
+    // registered later cannot be silently dropped from the record.
+    expect(shapes).toHaveLength(5 + MCP_BACKED_PROVIDERS.length);
+    expect(
+      MCP_BACKED_PROVIDERS.length,
+      'no MCP-backed provider is registered, so every provider row and the contract term below ' +
+      'are vacuous — the table would print the GitHub path twice',
+    ).toBeGreaterThan(0);
+    expect(
+      referenceChars(MCP_CONTRACT_REL),
+      'the tool-call contract measured 0 — a provider row that omits its largest term understates ' +
+      'the per-spawn cost of every provider that loads it',
+    ).toBeGreaterThan(0);
     expect(PRELOADED, 'the preloaded set measured 0 — the table is vacuous').toBeGreaterThan(0);
     expect(allTrackerRefs, 'no tracker reference measured — the table is vacuous').toBeGreaterThan(0);
     expect(
@@ -879,6 +1041,107 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       `literal: it is computed from BUDGET_GIT_MD_P3, so raising it means raising a ratcheted ` +
       `ceiling and saying what the extra bytes bought.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET_P3);
+  });
+
+  it('the worst-case Jira tracker spawn <= BUDGET_LOADED_SET_JIRA', () => {
+    // worst = preloaded set
+    //       + chars(tracker/_mcp.md)                 /* per-spawn, this provider loads it */
+    //       + max_op chars(tracker/jira/{op}.md)
+    //       + max over TRACKER ops of ( sum of every reference that op can name in one
+    //         spawn )  [DR-12, scoped by D-LOADED-SET-SCOPE]
+    const provider = 'jira';
+    expect(
+      MCP_BACKED_PROVIDERS,
+      'the Jira provider must be registered, or this gate measures an absent tree',
+    ).toContain(provider);
+
+    const largest = largestProviderReference(provider);
+    const worst = worstCaseProviderLoad(provider);
+    const contract = referenceChars(MCP_CONTRACT_REL);
+    const total = providerLoadedSet(provider);
+
+    // referenceChars() answers 0 for a file it cannot resolve, so an absent
+    // dist/skills/git/references/ drives every term to 0 and this gate passes by
+    // measuring nothing — the PF-018 shape, in the gate whose green is this
+    // subtask's headline claim.
+    expect(
+      contract,
+      'the tool-call contract did not resolve — the provider row omits its own largest term. ' +
+      'Run `npm run build`.',
+    ).toBeGreaterThan(0);
+    expect(
+      largest.value,
+      `no ${provider} mechanics file resolved — the budget summed nothing. Run \`npm run build\`.`,
+    ).toBeGreaterThan(0);
+    expect(
+      worst.value,
+      'no one-spawn reference load resolved — the budget summed nothing. Run `npm run build`.',
+    ).toBeGreaterThan(0);
+
+    expect(
+      total,
+      `worst-case ${provider} tracker spawn is ${total} ch (preloaded ${PRELOADED} + contract ` +
+      `${contract} + max_op ${largest.value} [${largest.op}] + worst one-spawn load ${worst.value} ` +
+      `[${worst.op}]), budget ${BUDGET_LOADED_SET_JIRA} ch. Do NOT raise ` +
+      `BUDGET_LOADED_SET_JIRA — §14.5: a ceiling is re-derived DOWNWARD or not at all. The ` +
+      `honest first move is trimming references/${MCP_CONTRACT_REL}, this row's largest single ` +
+      `addition and pure contract prose; the second is condensing the ${provider} mechanics. ` +
+      `Neither is "give the provider more room".`,
+    ).toBeLessThanOrEqual(BUDGET_LOADED_SET_JIRA);
+  });
+
+  it('the Jira ceiling is a re-derivation of the GitHub one, not a free number', () => {
+    // The same discipline BUDGET_GIT_MD_P3 is held to. A provider row that could be
+    // set to anything would price nothing, so the delta over the GitHub ceiling is
+    // held to what the provider actually adds: the contract, plus the difference
+    // between the two providers' per-op terms. Anything beyond that is a term
+    // nobody declared.
+    const provider = 'jira';
+    const delta = BUDGET_LOADED_SET_JIRA - BUDGET_LOADED_SET_P3;
+    expect(
+      delta,
+      'a provider that loads the tool-call contract cannot cost LESS than the GitHub path, whose ' +
+      'contract term is 0 — a smaller ceiling here would mean one of the terms is missing',
+    ).toBeGreaterThan(0);
+
+    const declared = referenceChars(MCP_CONTRACT_REL)
+      + (largestProviderReference(provider).value - largestTrackerReference().value)
+      + (worstCaseProviderLoad(provider).value - worstCaseReferenceLoad().value);
+    expect(
+      delta,
+      `the Jira ceiling sits ${delta} ch above the GitHub one, but the terms this provider adds ` +
+      `account for only ${declared} ch (the contract, plus the difference between the two ` +
+      `providers' max_op and worst-one-spawn terms). The excess is headroom nobody derived.`,
+    ).toBeLessThanOrEqual(declared);
+    expect(
+      BUDGET_LOADED_SET_JIRA,
+      'and the ceiling must still be above the measurement it was derived from',
+    ).toBeGreaterThanOrEqual(providerLoadedSet(provider));
+  });
+
+  it('every MCP-backed provider has a ceiling, and no provider is priced on the GitHub row', () => {
+    // The arm that keeps the per-provider model honest as providers are added: a
+    // provider with generated mechanics and no registered ceiling would be a cost
+    // nothing gates, and 3c adds exactly that shape. It is a list membership check,
+    // not a count, so the message names the provider that is missing one.
+    const PRICED_PROVIDERS: Readonly<Record<string, number>> = { jira: BUDGET_LOADED_SET_JIRA };
+    for (const provider of MCP_BACKED_PROVIDERS) {
+      expect(
+        PRICED_PROVIDERS[provider],
+        `provider "${provider}" has generated mechanics but no loaded-set ceiling. Add a ` +
+        `BUDGET_LOADED_SET_${provider.toUpperCase()} constant with its derivation, register it in ` +
+        `tests/fixtures/numeric-floors.json, and add it here — never fold it into the GitHub row, ` +
+        `which prices a path that does not load the tool-call contract.`,
+      ).toBeDefined();
+    }
+    // …and the GitHub row is unaffected by any of them: its contract term is 0.
+    for (const op of TRACKER_GITHUB_OPS) {
+      expect(
+        readFileSync(resolveReference(trackerRefRel(op))!, 'utf-8').includes(MCP_CONTRACT_REL),
+        `tracker/github/${op}.md names the tool-call contract, so the GitHub row's 0 contract ` +
+        `term is wrong by ${referenceChars(MCP_CONTRACT_REL)} ch`,
+      ).toBe(false);
+    }
   });
 });
 
