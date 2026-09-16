@@ -9,6 +9,7 @@ import {
   sanitizeFlagsRecord,
 } from './flags.js';
 import { normalizeComplianceFeature, type ComplianceFeatureState } from './compliance.js';
+import { normalizeTrackerFeature, type TrackerFeatureState } from './tracker.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
@@ -69,6 +70,16 @@ export interface ManifestData {
      * Disable keeps frameworks so re-enable restores the prior selection.
      */
     compliance: ComplianceFeatureState;
+    /**
+     * Issue tracker provider selection (enum github|jira|linear, default github).
+     * Absent in pre-tracker manifests — readManifest self-heals to
+     * {provider:'github'} via normalizeTrackerFeature.
+     *
+     * NEVER add `tracker` to the hard-null validation set below: a pre-tracker
+     * manifest — i.e. EVERY existing install — would then read as "no prior
+     * install" and lose the user's seeded state on the next re-init.
+     */
+    tracker: TrackerFeatureState;
   };
   installedAt: string;
   updatedAt: string;
@@ -139,6 +150,7 @@ function parseManifestFlags(
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
  * - features.proxy absent → false
  * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
+ * - features.tracker absent/malformed → {provider:'github'}
  *
  * D39: heal-write failure returns the migrated in-memory manifest (not null).
  * The on-disk format remains unhealed; next read triggers another attempt.
@@ -227,6 +239,12 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
         compliance: normalizeComplianceFeature(features.compliance),
+        // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
+        // Deliberately NOT in the hard-null set above — see the field's doc comment.
+        // Healing here is silent and emits no DEGRADED: that is the correct
+        // ADR-014 behaviour, and a different condition from a per-repo config
+        // value outside the domain (which does emit `unknown tracker provider`).
+        tracker: normalizeTrackerFeature(features.tracker),
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

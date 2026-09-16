@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   resolveSeedFeatures,
   resolveSeedFlags,
@@ -13,6 +16,7 @@ import {
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { FLAG_REGISTRY, readViewMode, type ClaudeCodeFlag, type FlagsRecord } from '../src/core/flags.js';
 import { type ManifestData } from '../src/core/manifest.js';
+import { type TrackerProvider } from '../src/core/tracker.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -78,6 +82,7 @@ describe('resolveSeedFeatures', () => {
       rules: false,
       proxy: false,
       compliance: { enabled: false, frameworks: [] },
+      tracker: { provider: 'github' },
     });
   });
 
@@ -732,6 +737,140 @@ describe('compliance seeding', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
     const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
+  });
+});
+
+// ── tracker seeding ───────────────────────────────────────────────────────────
+
+describe('tracker seeding', () => {
+  /** Manifest fixture with an explicit tracker field. */
+  function makeTrackerManifest(tracker: { provider: TrackerProvider }): ManifestData {
+    return makeManifest({
+      features: {
+        ...makeManifest().features,
+        tracker,
+      },
+    });
+  }
+
+  it('FEATURE_DEFAULTS.tracker is {provider:"github"} — the silent default for every existing install', () => {
+    expect(FEATURE_DEFAULTS.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('fresh install (null manifest) → tracker defaults to github', () => {
+    const result = resolveSeedFeatures(null, null);
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('manifest.features.tracker=jira → seeded as jira (manifest-group, not config-gated)', () => {
+    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'jira' }), null);
+    expect(result.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('projectConfig has no effect on tracker (manifest-gated, not config-gated)', () => {
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(null, config);
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('populated manifest wins over projectConfig', () => {
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'linear' }), config);
+    expect(result.tracker).toEqual({ provider: 'linear' });
+  });
+
+  it('the tracker seed is a defensive copy, never a reference to FEATURE_DEFAULTS.tracker', () => {
+    // Without the spread, `manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker`
+    // hands back the module-level default BY REFERENCE and a downstream mutation
+    // corrupts it process-wide.
+    const result = resolveSeedFeatures(null, null);
+    expect(result.tracker).not.toBe(FEATURE_DEFAULTS.tracker);
+    result.tracker.provider = 'jira';
+    expect(FEATURE_DEFAULTS.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('the tracker seed is a defensive copy, never a reference to the manifest value', () => {
+    const manifest = makeTrackerManifest({ provider: 'jira' });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.tracker).not.toBe(manifest.features.tracker);
+  });
+
+  it('--reset (null seedManifest) → tracker falls back to github (AC-3.20 / EC-62)', () => {
+    const manifest = makeTrackerManifest({ provider: 'linear' });
+    const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('--no-reset preserves the existing manifest provider', () => {
+    const manifest = makeTrackerManifest({ provider: 'jira' });
+    const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('applyCliToggles: --tracker jira overrides the seed', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'github' } };
+    const result = applyCliToggles(seed, { tracker: { provider: 'jira' } });
+    expect(result.tracker).toEqual({ provider: 'jira' });
+    // Other fields untouched
+    expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
+    expect(result.compliance).toEqual(FEATURE_DEFAULTS.compliance);
+  });
+
+  it('applyCliToggles: --tracker github is the off switch (decision D-E, no --no-tracker)', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'linear' } };
+    const result = applyCliToggles(seed, { tracker: { provider: 'github' } });
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('applyCliToggles: undefined tracker toggle → seed tracker unchanged', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'jira' } };
+    const result = applyCliToggles(seed, {});
+    expect(result.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('resolveInitSeed: tracker included in the features result', () => {
+    const seed = resolveInitSeed(makeTrackerManifest({ provider: 'linear' }), null, '{}', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'linear' });
+  });
+});
+
+// ── init.ts tracker lifecycle call sites ──────────────────────────────────────
+//
+// [DR-22] / [DR-10] / P3a-S15: the attempt counter, the presence sentinel and the
+// stale-conventions rename each have exactly ONE owner in src/core/tracker.ts,
+// and `devflow init` calls each exactly once. These are source-level assertions
+// because init.ts's Commander `.action()` body is not unit-reachable; they go red
+// if someone inlines an `fs.rm`, duplicates a call, or drops one.
+
+describe('init.ts tracker lifecycle call sites', () => {
+  const INIT_SOURCE = path.join(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+    'src', 'cli', 'commands', 'init.ts',
+  );
+
+  it('calls rearmTrackerInference exactly once and never inlines the removal [DR-22]', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/\.tracker\.attempts/);
+  });
+
+  it('converges the sentinel through applyTrackerSentinel exactly once [DR-10]', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/applyTrackerSentinel\(/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/\.tracker\.enabled/);
+  });
+
+  it('invokes the provider-change rename transition exactly once (P3a-S15)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/renameStaleTrackerConventions\(/g) ?? []).length).toBe(1);
+  });
+
+  it('gates both wizard paths on the one shared shouldRunTrackerStep predicate', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // Two call sites — Recommended and Advanced — and no second predicate.
+    expect((source.match(/shouldRunTrackerStep\(\{/g) ?? []).length).toBe(2);
   });
 });
 
