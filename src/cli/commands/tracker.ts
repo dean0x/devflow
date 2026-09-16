@@ -9,8 +9,9 @@
  *
  * Applies ADR-013: CLI-layer module; the provider domain, the strict parser and
  *   the ~/.devflow file lifecycle all live in src/core/tracker.ts.
- * Applies ADR-001: tracker is manifest-group (like proxy and compliance), not
- *   .devflow/config.json-gated — the selection is machine-wide, not per-repo.
+ * The manifest is the source of truth for the selected provider: tracker is a
+ *   manifest-group feature like proxy and compliance, not
+ *   .devflow/config.json-gated, so the selection is machine-wide, not per-repo.
  * Avoids PF-015: --set converges the sentinel in BOTH directions, so flipping
  *   back to github removes what flipping away wrote.
  * Avoids PF-009: a failed rename/rearm/sentinel step warns, it never aborts.
