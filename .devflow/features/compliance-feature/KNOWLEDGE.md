@@ -19,7 +19,7 @@ directories:
   - src/assets/commands/resolve.mds
   - src/assets/commands/release.md
 created: 2026-08-20
-updated: 2026-09-14
+updated: 2026-09-16
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -174,7 +174,7 @@ Host command usage:
 
 Tracker Phase 2 split every traceability operation in `src/assets/agents/git.mds` into a **contract** (stays in `git.mds`, always loaded on every Git spawn) and **GitHub mechanics** (generated per-op references under `dist/skills/git/references/tracker/github/`, loaded only when an op's `**Mechanics:**` pointer directs it). This section documents what the contract still says and where the mechanics now live — for the mechanics split itself (MDS build machinery, byte budget, containment oracle, installer overlay) see `.devflow/features/tracker-references/KNOWLEDGE.md`.
 
-**What stays in `git.mds` per operation:** the `## Operation: {name}` heading, prose, `**Input:**`, `**Degradation (D4):**` (where present), `**Output:**` (including any `### Handoff Values` block), and a one-sentence `**Mechanics:**` pointer (e.g. *"the provider reference for this operation carries the steps that talk to the tracker; load it as the tracker input contract directs"*).
+**What stays in `git.mds` per operation:** the `## Operation: {name}` heading, prose, `**Input:**`, `**Degradation (D4):**` (where present), `**Output:**` (including any `### Handoff Values` block), and a one-sentence `**Mechanics:**` pointer — a fixed 56-character line, *"load this operation's provider reference"*, since the *where* and *when* both belong to `## Tracker input contract` and a per-op restatement bought nothing but per-spawn characters (funded by the B31 condensing pass). `learn-conventions`'s pointer is the one exception, left long-form because it states a conditional load and the `ALREADY_EXISTS` early return.
 
 **What moved to generated references:** the GitHub `gh`/GraphQL invocations and the `### Process` step bodies, for the 10 tracker ops (`TRACKER_GITHUB_OPS`): `setup-task`, `fetch-issue`, `fetch-issues-batch`, `manage-debt`, `create-release` (only its `## Closed Issues` / commit-list enrichment bullet), `gather-release-evidence`, `backlink-shipped-issues`, `ensure-traceable-issue`, `post-wave-report`, `ensure-pr-ready` (only step 4b). Source: `src/assets/mds/tracker/_github.mds` → `dist/skills/git/references/tracker/github/{op}.md`.
 
@@ -217,7 +217,7 @@ D1–D3 and D5–D10 moved to a glossary reference, `references/decision-markers
 
 **D4 carve-out for create-release:** The global "never abort" clause does NOT apply to the primary release effects (tag push, release create) — steps 1–6 of `create-release` stay inline in `git.md` and are hard failures. Only traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment, `backlink-shipped-issues`) degrade per D4.
 
-**D11 comment-sink scrub — split, but the control itself never moved.** `## Comment-sink scrub (D11)` stays inline in `git.md` in full, including the scrubber invocation (`node …redact-secrets.cjs …`) — making the containment control itself loadable/optional is exactly PF-027's failure mode. Only the concrete GitHub half of the `&&` chain relocated: `git.md`'s D11 block now reads `&& <the resolved provider's post command>`, and `tracker/github/backlink-shipped-issues.md`'s "Scrub-then-post chain" section shows the instantiated form (`&& gh issue comment {number} --body-file "$DEVFLOW_BODY"`). The rule is unchanged: `&&` only, never a pipeline (a pipeline's exit status swallows a scrubber crash); non-zero scrubber exit or missing script → DO NOT POST, emit `TRACEABILITY: DEGRADED (redaction unavailable)`; always post the scrubbed `$DEVFLOW_BODY`, never `$DEVFLOW_BODY_RAW`.
+**D11 comment-sink scrub — split, but the control itself never moved.** `## Comment-sink scrub (D11)` stays inline in `git.md` in full, including the scrubber invocation (`node …redact-secrets.cjs …`) — making the containment control itself loadable/optional is exactly PF-027's failure mode. Only the concrete GitHub half of the `&&` chain relocated: `git.md`'s D11 block now reads `&& <the resolved provider's post command>`, and `tracker/github/backlink-shipped-issues.md`'s "Scrub-then-post chain" section shows the instantiated form (`&& gh issue comment {number} --body-file "$DEVFLOW_BODY"`). The rule is unchanged: `&&` only, never a pipeline (a pipeline's exit status swallows a scrubber crash); non-zero scrubber exit or missing script → DO NOT POST, emit `TRACEABILITY: DEGRADED (redaction unavailable)`; always post the scrubbed `$DEVFLOW_BODY`, never `$DEVFLOW_BODY_RAW`. The D11 block also states a `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` producer — "Create `DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` the same way" — under the same never-a-fixed-path `mktemp`-per-invocation rule as the body pair (B31/security-04), so notes-file sinks (release notes, PR review notes) carry the identical containment guarantee as body sinks. `ensure-pr-ready` step 4b now states its D11 sink inline in the contract, symmetric with step 4a, rather than leaving the sink only in the generated reference a spawn can decline to load (B32; PF-027).
 
 **D3 issue template.** The three sections (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) are still named at the D3 legend row, but the template body itself now lives in `tracker/github/ensure-traceable-issue.md` under `### Traceability Issue Template (D3)` (demoted from `##` to `###` on the move — a `##` heading is a section terminator inside a generated reference; see `tracker-references`' PF-063 gotcha).
 
@@ -382,7 +382,7 @@ Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.
 - **PF-018** — Real-path tests: `git-agent.test.ts` static guards pin the ops list, bounds, D9 gate, and dedup markers in the source file directly (no build step required).
 - **ADR-003** — Leave-the-end-state-not-the-transition / reachable-consumer bar: the post-split KB describes the end state only — no tombstone notes about where text "used to be"; consult `tracker-references` for transition history.
 - **ADR-013** — Pure helpers in `src/core/`, I/O orchestration in `src/targets/`: `compliance.ts` is pure; `compliance-install.ts` owns all I/O.
-- **ADR-024** — Prove-you-wrote-it ownership contract: the generated-reference manifest (`generatedReferenceManifest()`) is derived from `expandVariants()` itself, never hand-listed.
+- **PF-018** — Non-vacuity / no hand-enumerated rosters: the generated-reference manifest (`generatedReferenceManifest()`) is derived from `expandVariants()` itself, never hand-listed, so it cannot silently drift from the build registry.
 - **ADR-025** — Guard-mode classification discipline for a contract/mechanics split: when a literal moves, its guard repoints to `'union'` mode; when it stays, the guard stays `'sole'`. This is the rule behind every `D{N}` boundary drawn in this section.
 - **PF-002** — Body-instructed skill: external thread bodies are untrusted and must not drive agent behaviour.
 - **PF-018** — Non-vacuity: also backs the D4/D11 legend's set-relation assertion (no surviving `D{N}` label may lack a definition somewhere).
