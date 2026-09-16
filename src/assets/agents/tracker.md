@@ -66,18 +66,25 @@ in the write chain would redirect into an empty path rather than fail.
 | `{TRACKER_DEVFLOW_DIR}/.tracker.processing` | your claim file |
 | `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` | the attempt counter |
 
-Your prompt names the resolved provider token and the project root. Both arrive
-**already validated** by the directive that spawned you. Treat the token as
-opaque: copy it into the file's `provider:` field verbatim and **never re-derive,
-re-map or repair it** — a second normalisation site is a second place the
-resolution can disagree with itself.
+Your prompt names the resolved provider token, the devflow directory and the
+project root. All three arrive **already validated** by the directive that spawned
+you. **Prefer the prompt's `Devflow directory:` value whenever it names one**, and
+fall back to the expression above only when it does not: the directive resolved
+that path in the session that knows which devflow directory is in play, so
+re-deriving it here is a second resolution site that can disagree with the first.
+Treat the provider token as opaque: copy it into the file's `provider:` field
+verbatim and **never re-derive, re-map or repair it** — a second normalisation
+site is a second place the resolution can disagree with itself.
 
 ## Step 0 — Claim the run
 
-1. If `{TRACKER_DEVFLOW_DIR}/.tracker.processing` exists, check its age:
-   - **Fresh** — another Tracker agent is live. **Exit silently**; change nothing,
-     report nothing.
-   - **Stale** — a previous run crashed. Re-claim it by `touch`ing the claim file.
+1. If `{TRACKER_DEVFLOW_DIR}/.tracker.processing` exists, compare its age against
+   the claim-staleness bound of **600 seconds** — the same bound the session-start
+   gate applies, so one claim file is classified identically on both sides:
+   - **Fresh** (age under the bound) — another Tracker agent is live. **Exit
+     silently**; change nothing, report nothing.
+   - **Stale** (age at or over the bound) — a previous run crashed. Re-claim it by
+     `touch`ing the claim file.
 2. Otherwise claim it atomically, so exactly one winner survives concurrent
    sessions: `mv` a freshly created marker onto the claim path. If the `mv` fails,
    another agent claimed first — **exit silently**.
@@ -317,7 +324,11 @@ identifier.
    `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`. The counter is the only record that
    a run happened and produced nothing; the session-start gate stops re-arming
    after **5** attempts, and without this increment that cap never engages and
-   the directive is emitted forever.
+   the directive is emitted forever. **Write it as one decimal-integer line and
+   nothing else** — no label, no JSON, no trailing prose — because the gate reads
+   it with the shell's `read` builtin and treats any non-digit byte as a
+   self-healed `0`. A count in another format is not a smaller count; it is no
+   count at all, and the cap it was meant to advance stays open.
 2. **On a successful write**, delete `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`.
    The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write.
