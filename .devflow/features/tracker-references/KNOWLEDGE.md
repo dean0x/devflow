@@ -5,7 +5,7 @@ description: "Use when modifying src/assets/agents/git.mds, adding or changing a
 category: architecture
 directories: [src/assets/agents/git.mds, src/assets/mds/tracker, src/assets/mds/git, src/core/mds-variants.ts, src/core/reference-sweep.ts, src/targets/claude-code/installer.ts, src/assets/commands/_partials/_tracker.mds, src/assets/skills/git, src/assets/skills/review-methodology, tests/tracker, tests/fixtures/tracker/baseline, tests/installer, tests/guards/capability-hoist.test.ts, tests/guards/provider-scope.test.ts, tests/guards/guard-census.test.ts]
 created: 2026-09-14
-updated: 2026-09-16
+updated: 2026-09-17
 ---
 
 # Tracker References
@@ -14,7 +14,7 @@ updated: 2026-09-16
 
 Tracker Phase 2 (issue #324, tracking #321) splits `src/assets/agents/git.mds` — the always-loaded, per-spawn-billed Git agent prompt (PF-026) — into a **provider-independent contract** that stays in `git.mds` and **per-provider mechanics** that compile into generated skill references, loaded only by the operations that need them. The split is GitHub-only; Jira/Linear land in Phase 3 with the resolution substrate already reserved. This is the internal-refactor half of the tracker initiative: **zero user-visible behaviour change** — every GitHub-rendered artifact (`Tracked = #{n}`, `Depends on: #{n}`, issue filenames) is byte-identical to before the split.
 
-**Status — NOT landed.** Phase 2 is open as **PR #339**. `origin/main` is `33b730e` and contains none of this work. The branch is merely *aligned with* `main` by merge commit `10ea0d5`, which pulled that `33b730e` in — `33b730e` is PR **#338**, a different PR that did land. Read "landed" strictly (PF-010: merged to `main`); until #339 merges, do not treat Phase 2 as shipped or skip the merge.
+**Status — landed.** Phase 2 is on `main` as squash commit `ecfc141` (PR #339, issue #324). Every measurement and baseline in this file is stated against that tree. The provider dimension built on top of it — selection, the background Tracker agent, hook Section 3, `--emit` and the reader-side preamble — is owned by `.devflow/features/tracker-feature/KNOWLEDGE.md`, which also carries the Jira (3b) and Linear (3c) slots.
 
 The system has five moving parts that must be understood together: (1) the contract left in `git.mds` plus a ≤40-line provider-resolution preamble that is the *single* place a provider token is resolved; (2) the MDS build machinery (`VARIANT_MODULES`, `expandVariants`, `splitVariantSections`) that fans reference modules out into per-op files; (3) the byte-budget guard that makes the split's payoff a tested property, not an assumption; (4) the containment oracle that proves no text was silently paraphrased or dropped during the move; (5) the installer's converge-not-merge overlay that gets the generated files into a user's `~/.claude/skills/devflow:git/references/` tree atomically. `feature-knowledge-system` owns the general MDS build pipeline (generator hosts, `output-dir:`); this KB owns the tracker-specific consumer of that pipeline.
 
@@ -207,6 +207,7 @@ What Phase 2 deliberately reserves without implementing:
 - PF-058: containment is four separate obligations — the per-op Principle-8 marker-neutralisation pointer restored to `setup-task`/`fetch-issue` is this pitfall's direct fix; the record explains why the global principle alone once proved insufficient for exactly these two ops
 - PF-060: prose-only instructions are not guards — every prohibition in this feature (no `tracker-{provider}.md` filename, no `~/.claude` literal, no `<!-- devflow:` restatement) is backed by a mechanical negative guard, not just a written rule
 - PF-063: byte-identical relocation is not semantics-preserving across a grammar boundary — the direct cause of the `###`-heading-depth rule for generated references; resolved by the fence-aware section-boundary rule (mechanics owned by `test-harness`), applied here to the two remaining `###`-demotion exemptions
+- `.devflow/features/tracker-feature/KNOWLEDGE.md` — the provider dimension layered on this split: how a provider is selected (`manifest.features.tracker`, `devflow tracker`, `--tracker`), how `~/.devflow/tracker.md` conventions are inferred, the generation gate that turns `_mcp.md` on, and the reader-side resolution order and mismatch guard
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — the general MDS build pipeline (generator hosts, `output-dir:`, `skill-refs` variant) this feature's build side extends
 - `.devflow/features/test-harness/KNOWLEDGE.md` — `extractOpSectionFromCorpus`, `collectUnfencedH2`, `gitAgentSinkCorpus`, goldens lifecycle, `walkFiles`, the general guard conventions this feature's tests follow, and the Guard 10 follow-up / fence-aware boundary mechanics referenced throughout this file's Gotchas
 - `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — `_tracker.mds`'s adoption sites among the command-layer partials, `DIST_FILES` vs `ALL_HOSTS`
