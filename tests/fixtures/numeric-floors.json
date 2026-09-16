@@ -84,11 +84,11 @@
     },
     {
       "id": "agent-roster-count",
-      "floor": 16,
-      "pattern": "toBe(16)",
+      "floor": 17,
+      "pattern": "toBe(17)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07)"
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). RAISED 16 -> 17 in the Phase-3 3a-2 commit that registers the hook-spawned Tracker agent; a floor may only rise."
     },
     {
       "id": "seam-op-section-map",

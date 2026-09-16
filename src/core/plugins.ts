@@ -60,7 +60,26 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    agents: ['learning'],
+    /**
+     * Hook-spawned agents live here, and `commands: []` above is why that works.
+     *
+     * Guard 5 reverse (registry-integrity.test.ts, "declared agents are spawned")
+     * skips a plugin whose commands spawn nothing — `if (spawned.size === 0)
+     * continue` — and this plugin ships no commands at all. So `learning` and
+     * `tracker`, which are spawned by a SessionStart directive rather than by any
+     * command, satisfy the reverse check STRUCTURALLY.
+     *
+     * Recorded because the alternative looks equivalent and is not: adding either
+     * name to an exemption list would make the guard pass by being told to ignore
+     * them, which is the vacuous-guard trap this repo polices everywhere else. If
+     * this plugin ever gains a command, the right fix is a new commands-less
+     * plugin for the hook-spawned agents — never an exemption.
+     *
+     * Neither agent may gain a `_roster.mds` row: that file is asserted
+     * set-equal, both directions, against the `agentType` values present in
+     * dist/commands/, and a hook-spawned agent appears in none of them.
+     */
+    agents: ['learning', 'tracker'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },

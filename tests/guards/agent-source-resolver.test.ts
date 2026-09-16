@@ -28,10 +28,10 @@ import { getAllAgentNames } from '../../src/core/plugins.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js'
 
 // ---------------------------------------------------------------------------
-// Guard: resolveAllAgents ⊇ getAllAgentNames() (16 today)
+// Guard: resolveAllAgents ⊇ getAllAgentNames() (17 today)
 // ---------------------------------------------------------------------------
 
-describe('resolveAllAgents ⊇ getAllAgentNames() (16 agents, AC-0.7)', () => {
+describe('resolveAllAgents ⊇ getAllAgentNames() (17 agents, AC-0.7)', () => {
   it('resolveAllAgents() returns at least all plugin-declared agent names', () => {
     const resolved = [...resolveAllAgents().keys()]
     const declared = getAllAgentNames()
@@ -41,14 +41,14 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (16 agents, AC-0.7)', () => {
     )
   })
 
-  it('resolved agent count is 16 (non-vacuous floor, GAP-07)', () => {
+  it('resolved agent count is 17 (non-vacuous floor, GAP-07)', () => {
     // If this fails, a new agent was added without updating the expected count.
     // Update the expected value AND ensure the new agent has a source file.
     const resolved = resolveAllAgents()
     expect(
       resolved.size,
-      `Expected 16 agents but found ${resolved.size} — update this test if an agent was added or removed`,
-    ).toBe(16)
+      `Expected 17 agents but found ${resolved.size} — update this test if an agent was added or removed`,
+    ).toBe(17)
   })
 
   it('every resolved agent has non-empty content', () => {
@@ -118,11 +118,11 @@ describe('resolveAgentSource: dist-preferred, src-fallback', () => {
     ).toThrow(/Run `npm run build`/)
   })
 
-  it('resolveAllAgents(tmpRoot) covers all 16 registry names', () => {
+  it('resolveAllAgents(tmpRoot) covers all 17 registry names', () => {
     const resolved = resolveAllAgents(tmpRoot)
     const declared = getAllAgentNames()
     expect([...resolved.keys()]).toEqual(expect.arrayContaining(declared))
-    // Use declared.length (not literal 16) so this site does not duplicate the
+    // Use declared.length (not literal 17) so this site does not duplicate the
     // numeric-floor-manifest pin in the real-tree suite (DR-27a, occurrences: 1).
     expect(resolved.size, 'resolveAllAgents(tmpRoot) must resolve all registry agents').toBe(declared.length)
   })

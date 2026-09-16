@@ -675,6 +675,94 @@ export function collectTrackerNamingLines(content: string): string[] {
   return content.split('\n').filter(line => line.includes('references/tracker/'))
 }
 
+// ── ~/.devflow/tracker.md schema parsers (§14.3) ──────────────────────────────
+//
+// The schema has a WRITER (the Tracker agent's embedded template, 3a-2) and a
+// READER (the Git-agent preamble, 3a-4) — conflict C12. The two-sided equality
+// test between them cannot catch drift in its own oracle, so the heading list
+// and the parsers live here, once, and every suite binds to these.
+
+/** Info string of the fence inside the Tracker agent that holds the template. */
+export const TRACKER_TEMPLATE_FENCE_TAG = 'tracker-md-template'
+
+/**
+ * The `~/.devflow/tracker.md` section headings, in order, verbatim from §14.3.
+ *
+ * `## Project` carries two values (site and key) and is therefore ONE heading
+ * with two validator rows — §14.3's table splits the rows, not the section.
+ * `learned:` is deliberately absent from the frontmatter set below: it has no
+ * stated consumer, and an unread key is residue (ADR-003 clause iii).
+ */
+export const TRACKER_SCHEMA_SECTIONS: readonly string[] = [
+  '## Project',
+  '## Issue Types',
+  '## Required Fields',
+  '## Iteration Policy',
+  '## Transitions',
+  '## Assignee',
+  '## Tech Debt',
+  '## Wave Filter',
+  '## Reference Rendering',
+  '## Dedup Strategy',
+  '### Substitutions',
+]
+
+/** Frontmatter keys of the written file (§14.3). */
+export const TRACKER_SCHEMA_FRONTMATTER_KEYS: readonly string[] = ['provider', 'inferred-from']
+
+/**
+ * Named collector: the tagged template fence's inner text, or null.
+ *
+ * Addressed by its info string rather than by position — "the first fence"
+ * silently re-points at whatever fence an edit happens to put first.
+ */
+export function collectTrackerTemplate(content: string): string | null {
+  const re = new RegExp('```' + TRACKER_TEMPLATE_FENCE_TAG + '\\n([\\s\\S]*?)```', 'm')
+  return re.exec(content)?.[1] ?? null
+}
+
+/** Named collector: `##`/`###` headings inside the template, in document order. */
+export function collectTrackerTemplateHeadings(template: string): string[] {
+  return template
+    .split('\n')
+    .filter(l => /^#{2,3} \S/.test(l))
+    .map(l => l.trim())
+}
+
+/** One row of the agent's schema/validator table. */
+export interface TrackerSchemaRow {
+  readonly section: string
+  readonly scope: string
+  readonly absent: string
+  readonly validator: string
+}
+
+/**
+ * Named collector: rows of the schema/validator table, one per value-bearing
+ * schema field.
+ *
+ * Splits on UNESCAPED pipes only, so a validator cell may spell an alternation
+ * (`enum: \`none\` \| \`self\``) without the row parsing as six cells. The
+ * hostile-value suite drives the `validator` cells this returns, so the table in
+ * the agent is the single authority for what a value must look like — a second
+ * copy of the shapes inside the test would prove the copy, not the agent
+ * (PF-018).
+ */
+export function collectTrackerSchemaRows(content: string): TrackerSchemaRow[] {
+  const rows: TrackerSchemaRow[] = []
+  for (const line of content.split('\n')) {
+    if (!line.startsWith('| `## ')) continue
+    const cells = line
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split(/(?<!\\)\|/)
+      .map(c => c.trim())
+    if (cells.length !== 4) continue
+    rows.push({ section: cells[0], scope: cells[1], absent: cells[2], validator: cells[3] })
+  }
+  return rows
+}
+
 // ── Fence parsing helpers ─────────────────────────────────────────────────────
 //
 // These mirror registry-integrity.test.ts:449-456 verbatim (the repo's
