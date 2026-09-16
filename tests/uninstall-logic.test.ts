@@ -417,6 +417,29 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
     expect(result.some(s => s.includes('learning.json'))).toBe(true);
   });
+
+  // === tracker classification (OD-15) ===
+
+  it('lists tracker.md — it is USER CONTENT, hand-editable and inferred once', async () => {
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(1);
+    expect(result.some(s => s.includes('tracker.md'))).toBe(true);
+  });
+
+  it('does NOT list the tracker install artifacts (claim file, counter, sentinel)', async () => {
+    // @D8 disjointness: these three are removed by every artifacts-only pass, so
+    // naming them in the confirm prompt would make the prompt a lie.
+    await fs.writeFile(path.join(tmpDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, '.tracker.enabled'), '', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -870,6 +893,11 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // agent-models.json is an install artifact (stale keys silently re-apply to
     // renamed/deleted agents on reinstall — AC-P1-F4), NOT user-authored content.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    // The three tracker artifacts: the Tracker agent's claim file, its attempt
+    // counter, and the provider presence sentinel. All install artifacts.
+    await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
 
     // ── User-authored files (must survive) ───────────────────────────────────
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
@@ -879,13 +907,18 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+    // tracker.md is USER CONTENT (OD-15) — it must survive an artifacts-only pass.
+    await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
     // ── Equality assertion: only user-authored entries may remain ─────────────
     const remaining = new Set(await fs.readdir(devflowDir));
     // Install artifacts must be gone (including agent-models.json — reclassified as artifact)
-    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json']) {
+    for (const artifact of [
+      'manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json',
+      '.tracker.processing', '.tracker.attempts', '.tracker.enabled',
+    ]) {
       expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
     }
     // Exact equality: nothing but user-authored state remains, and every enumerated
@@ -900,6 +933,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
       'preference-profile.md',
       'learning.json',
       'hud.json',
+      'tracker.md',
     ]));
   });
 
@@ -921,12 +955,20 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // and it must NOT appear in the before/after enumeration.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+    // tracker.md is USER CONTENT (OD-15); the three .tracker.* files beside it are
+    // install artifacts, present here to prove the artifact pass takes them and
+    // leaves tracker.md — the @D8 disjointness invariant at its newest boundary.
+    await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
 
     const before = await enumerateUserDevFlowContent(devflowDir);
     // Non-vacuity: the enumeration found every USER-AUTHORED category on disk.
-    // Count is 5: skill shadows, rule shadows, preference-profile.md, learning.json, hud.json.
-    // agent-models.json is absent from the count — it is an artifact, not user content.
-    expect(before.length).toBe(5);
+    // Count is 6: skill shadows, rule shadows, preference-profile.md, learning.json,
+    // hud.json, tracker.md. agent-models.json and the three .tracker.* files are
+    // absent from the count — they are artifacts, not user content.
+    expect(before.length).toBe(6);
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
@@ -968,6 +1010,18 @@ describe('installArtifactPaths (A4)', () => {
     const entry = entries.find(e => e.relPath === 'logs');
     expect(entry).toBeDefined();
     expect(entry?.isDir).toBe(true);
+  });
+
+  it('includes the three tracker artifacts, and NOT tracker.md itself', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    for (const relPath of ['.tracker.processing', '.tracker.attempts', '.tracker.enabled']) {
+      const entry = entries.find(e => e.relPath === relPath);
+      expect(entry, `${relPath} must be an install artifact`).toBeDefined();
+      expect(entry?.isDir).toBeFalsy();
+    }
+    // tracker.md is USER CONTENT (OD-15) — an entry here would delete the user's
+    // inferred conventions on every decline/cancel/--keep-docs path.
+    expect(entries.find(e => e.relPath === 'tracker.md')).toBeUndefined();
   });
 
   it('includes costs as a directory artifact', () => {

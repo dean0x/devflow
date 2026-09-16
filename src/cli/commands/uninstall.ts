@@ -209,6 +209,7 @@ export function resolveDevflowDirCleanup(opts: {
  *   devflowDir/skills/              — skill shadow overrides (user-maintained)
  *   devflowDir/rules/               — rule shadow overrides (user-maintained)
  *   devflowDir/preference-profile.md — dynamic-plan preference profile
+ *   devflowDir/tracker.md            — inferred issue-tracker conventions (OD-15)
  *   devflowDir/learning.json         — global learning agent tuning config
  *   devflowDir/hud.json              — HUD enable/disable preference and display config
  *
@@ -247,6 +248,28 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
   try {
     await fs.access(path.join(devflowDir, 'preference-profile.md'));
     items.push('preference-profile.md');
+  } catch { /* absent */ }
+
+  // tracker.md — the inferred, hand-editable issue-tracker conventions file.
+  //
+  // USER CONTENT (OD-15), classified the same way as preference-profile.md above
+  // rather than as an install artifact like agent-models.json, because it is
+  // inferred ONCE per machine and then hand-editable: absence is the trigger that
+  // re-runs inference, so deleting it on every decline/cancel/--keep-docs path
+  // would silently discard work the user may have corrected by hand.
+  //
+  // REVERSAL CONDITION, recorded: this classification is CONDITIONAL on the
+  // provider-mismatch guard shipping. agent-models.json was reclassified to an
+  // artifact precisely because stale overrides re-apply *silently*; "silently" is
+  // the load-bearing word. A stale tracker.md whose frontmatter provider
+  // disagrees with the resolved provider produces
+  // `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and no tracker
+  // call — that is what removes the silence. If that guard is ever dropped,
+  // reclassify tracker.md to an install artifact IN THE SAME CHANGE, otherwise a
+  // silently-authoritative stale file survives uninstall.
+  try {
+    await fs.access(path.join(devflowDir, 'tracker.md'));
+    items.push('tracker.md (issue tracker conventions)');
   } catch { /* absent */ }
 
   // learning.json — global learning agent tuning config
@@ -295,6 +318,14 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPat
     { relPath: 'proxy-routing.json' },
     { relPath: 'proxy.pid' },
     { relPath: '.proxy-spawn.lock', isDir: true },
+    // tracker runtime artifacts — the Tracker agent's atomic claim file, its
+    // inference attempt counter, and the provider presence sentinel the
+    // SessionStart hook stats. All three are machine state with no user-authored
+    // content, so they go on this list; `tracker.md` beside them is USER CONTENT
+    // (OD-15) and is deliberately NOT here (@D8: the two lists stay disjoint).
+    { relPath: '.tracker.processing' },
+    { relPath: '.tracker.attempts' },
+    { relPath: '.tracker.enabled' },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
@@ -317,8 +348,8 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPat
  * @D8 Nothing enumerated by enumerateUserDevFlowContent may appear in this list.
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
- * User-authored state (skill/rule shadows, preference-profile.md, learning.json,
- * hud.json) is removed only by the confirmed full-dir rm.
+ * User-authored state (skill/rule shadows, preference-profile.md, tracker.md,
+ * learning.json, hud.json) is removed only by the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
  * belongs in this list, not in enumerateUserDevFlowContent.
