@@ -10,10 +10,11 @@ import { describe, it, expect } from 'vitest';
 // NOTE: Intentional sync I/O throughout. This test file only reads static fixture files
 // from the local repo during test discovery — no async I/O benefit, and sync keeps every
 // test function synchronous (simpler assertions, no `await` boilerplate).
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import * as path from 'path';
 import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource } from './helpers.js';
+import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -86,26 +87,32 @@ function extractRelativeSkillRefs(content: string): string[] {
 }
 
 /**
- * Collect all markdown files in a skill's reference directories (references/ and
- * frameworks/**), returning entries with filePath and displayPath relative to skillBasePath.
+ * Collect all markdown files in a skill's reference directories (references/**
+ * and frameworks/**), returning entries with filePath and displayPath relative
+ * to skillBasePath.
  *
- * Scans both the flat references/ dir and the nested frameworks/{id}/ subdirectories
- * so that compliance-style per-framework reference/fragment files are included.
+ * The references/ walk is RECURSIVE (AC-2.12). The generated tracker mechanics
+ * are addressed skill-relatively as `references/tracker/{provider}/{op}.md`, so a
+ * flat readdirSync would return zero entries at that depth and every guard built
+ * on this collector would be vacuous from birth — passing while scanning nothing
+ * (PF-018). Recursion lands in the same commit that creates the nested layout,
+ * not after it.
+ *
+ * displayPath is always the POSIX path relative to skillBasePath, so a nested
+ * entry names its own depth in the failure message.
  */
 function collectSkillRefFiles(
   skillBasePath: string,
 ): { filePath: string; displayPath: string }[] {
   const results: { filePath: string; displayPath: string }[] = [];
 
-  // Traditional flat references/ directory
+  // references/ — walked recursively (walkFiles is ENOENT-tolerant and sorted).
   const refsDir = path.join(skillBasePath, 'references');
-  if (existsSync(refsDir)) {
-    for (const file of readdirSync(refsDir).filter(f => f.endsWith('.md'))) {
-      results.push({
-        filePath: path.join(refsDir, file),
-        displayPath: `references/${file}`,
-      });
-    }
+  for (const filePath of walkFiles(refsDir, f => f.endsWith('.md'))) {
+    results.push({
+      filePath,
+      displayPath: `references/${path.relative(refsDir, filePath).split(path.sep).join('/')}`,
+    });
   }
 
   // Nested frameworks/{id}/ directories (compliance-style per-framework files)
@@ -971,3 +978,85 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// AC-2.12: collectSkillRefFiles walks references/ recursively
+// ---------------------------------------------------------------------------
+//
+// Every Format-8 / Format-11 guard above reads its corpus from
+// collectSkillRefFiles. The generated tracker mechanics are addressed
+// skill-relatively as `references/tracker/{provider}/{op}.md`, so with a flat
+// reader those guards would scan zero files at that depth and pass while
+// checking nothing (PF-018).
+//
+// The live src/assets/skills/ tree has no nested references/ file today — the
+// nested layout is produced by the build and installed by the overlay — so the
+// depth arm is proven against a seeded tree rather than borrowed from the
+// frameworks/{id}/ entries. Leaning on those would be the combined-predicate
+// anti-pattern: one arm satisfying a floor the other arm never touches.
+
+describe('AC-2.12: collectSkillRefFiles walks references/ recursively', () => {
+  /** A temp skill directory shaped like the installed layout the overlay writes. */
+  function withNestedSkill(fn: (base: string) => void): void {
+    const base = mkdtempSync(path.join(tmpdir(), 'devflow-skill-refs-'));
+    try {
+      const flat = path.join(base, 'references');
+      const nested = path.join(flat, 'tracker', 'github');
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(path.join(flat, 'github-api.md'), '# flat reference\n', 'utf-8');
+      // The known-bad sample: a nested reference naming a skill that does not exist.
+      writeFileSync(path.join(nested, 'setup-task.md'), 'see devflow:not-a-real-skill\n', 'utf-8');
+      fn(base);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }
+
+  it('collects a nested references/tracker/{provider}/{op}.md and names its depth', () => {
+    withNestedSkill(base => {
+      const entries = collectSkillRefFiles(base);
+      const display = entries.map(e => e.displayPath).sort();
+      expect(display).toEqual([
+        'references/github-api.md',
+        'references/tracker/github/setup-task.md',
+      ]);
+    });
+  });
+
+  it('known-bad probe: the pre-recursion flat reader would have missed the nested file', () => {
+    // The probe that gives the recursion its meaning — it shows the difference
+    // between the two readers on the same tree, rather than asserting that the
+    // new one happens to return something.
+    withNestedSkill(base => {
+      const flatOnly = readdirSync(path.join(base, 'references')).filter(f => f.endsWith('.md'));
+      expect(flatOnly, 'a flat read sees only the top-level file').toEqual(['github-api.md']);
+
+      const nestedCount = collectSkillRefFiles(base)
+        .filter(e => e.displayPath.split('/').length > 2).length;
+      expect(nestedCount, 'the recursive collector must reach the nested file').toBeGreaterThan(0);
+    });
+  });
+
+  it('known-bad probe: a violating nested reference is visible to the devflow:NAME scan', () => {
+    // End-to-end on the real detection path: the collector feeds the same
+    // extract + filter the Format-8 guard uses, so a bad ref at depth is caught.
+    withNestedSkill(base => {
+      const canonical = new Set([...getAllSkillNames(), 'compliance']);
+      const offenders: string[] = [];
+      for (const { filePath, displayPath } of collectSkillRefFiles(base)) {
+        for (const ref of filterNonSkillRefs(extractPrefixedRefs(readFileSync(filePath, 'utf-8')))) {
+          if (!canonical.has(ref)) offenders.push(`${displayPath}: devflow:${ref}`);
+        }
+      }
+      expect(offenders).toEqual(['references/tracker/github/setup-task.md: devflow:not-a-real-skill']);
+    });
+  });
+
+  it('the collector is non-empty over the real skill corpus (it is live where it is used)', () => {
+    const skillsRoot = path.join(ROOT, 'src', 'assets', 'skills');
+    const entries = readdirSync(skillsRoot)
+      .flatMap(d => collectSkillRefFiles(path.join(skillsRoot, d)));
+    expect(entries.length, 'no reference file collected — every guard built on this is vacuous')
+      .toBeGreaterThan(0);
+  });
+});

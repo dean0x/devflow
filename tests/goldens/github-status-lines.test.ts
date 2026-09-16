@@ -1,12 +1,17 @@
 /**
  * Golden fixture guard: tests/fixtures/golden/github-status-lines.txt (AC-0.2, AC-0.9).
  *
- * Post-regeneration measurements (commit 7, after conventions-commit and ref-handling fixes):
+ * Measurements pinned to the current git-agent.md golden:
  *
- *   tests/fixtures/golden/git-agent.md          65,677 ch / 992 L   (== dist/agents/git.md)
- *   src/assets/skills/git/SKILL.md               9,205 ch / 283 L
+ *   tests/fixtures/golden/git-agent.md          55,664 ch / 913 L   (== dist/agents/git.md)
+ *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           77,824 ch / 1,367 L
+ *   Total (all three)                           65,187 ch / 1,218 L
+ *
+ * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
+ * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
+ * preloaded set. They live on as BUDGET_LOADED_SET in tests/tracker/byte-budget.test.ts,
+ * which is a target the artifact must reach and therefore never follows it down.
  *
  * Pre-Phase-0 baseline at main@e726874:
  *   PRE_PHASE0_GIT_MD_BYTES = 59,376 (wc -c) / PRE_PHASE0_GIT_MD_CHARS = 58,903 (.length) / PRE_PHASE0_GIT_MD_LINES = 938 L
@@ -17,14 +22,22 @@
  * golden-regeneration commit. They are NOT floors and are NOT registered in
  * tests/fixtures/numeric-floors.json.
  *
- * github-status-lines.txt is frozen through Phase 3 and the --unfreeze refusal
- * guard below protects that fixture only. git-agent.md is what gets regenerated
- * (always a fixture-only commit via `npm run test:golden:update -- git-agent`).
- * Phase 2 re-baselines the SKILL_* constants in its T2 task.
+ * github-status-lines.txt is frozen from this commit, and the --unfreeze refusal
+ * guard below protects that fixture only. Overriding the freeze takes an explicit,
+ * dated user authorisation naming the exact bytes it permits, and each such
+ * authorisation is spent by the single commit that uses it. The most recent one
+ * (2026-09-15) permitted one re-capture whose only change was the two
+ * `**Mechanics:**` pointer lines the resolve wave rewrote, at fixture lines 134
+ * and 161. Any further change to this fixture — in Phase 3 or after — requires a
+ * new explicit authorisation; none is outstanding.
+ * git-agent.md carries no such freeze: any change that moves the compiled agent's
+ * bytes regenerates it in its own fixture-only commit via
+ * `npm run test:golden:update -- git-agent`, which re-sets GIT_MD_CHARS and
+ * GIT_MD_LINES in the same commit.
  */
 
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'child_process'
+import { spawnSync, type SpawnSyncReturns } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
@@ -32,6 +45,48 @@ import { loadGolden, extractStatusLines } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const GOLDEN_PATH = path.join(ROOT, 'tests', 'fixtures', 'golden', 'github-status-lines.txt')
+const SKILL_GIT_PATH = path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md')
+const SKILL_WORKTREE_PATH = path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md')
+
+/**
+ * The repo's own tsx, never `npx tsx`.
+ *
+ * `npx` re-resolves the binary on every spawn and, on a cold cache, fetches it
+ * from the registry — a network round-trip inside a 10-30s subprocess timeout.
+ * That makes reachability of the npm registry an unstated precondition of four
+ * guards whose subject is a local script. Same spelling as tests/helpers.ts and
+ * tests/build-mds.test.ts.
+ */
+const TSX_BIN = path.join(ROOT, 'node_modules', '.bin', 'tsx')
+
+/** Newline count — the unit every `*_LINES` / `*_NEWLINES` baseline here is measured in. */
+const newlineCount = (source: string): number => (source.match(/\n/g) ?? []).length
+
+/**
+ * Runs `update-golden.ts github-status-lines --unfreeze` against a scratch
+ * `--out-dir`, hands the directory and the subprocess result to `fn`, and
+ * removes the directory afterward regardless of outcome.
+ *
+ * Shared by both --out-dir tests below so the mkdtemp/spawn/cleanup shape is
+ * defined once — a scratch dir the harness creates is a scratch dir the
+ * harness also always removes.
+ */
+function runUnfreezeToScratchDir<T>(
+  fn: (tmpDir: string, result: SpawnSyncReturns<string>) => T,
+): T {
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
+  try {
+    const result = spawnSync(
+      TSX_BIN,
+      ['scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 30_000, env: { ...process.env } },
+    )
+    if (result.error) throw result.error
+    return fn(tmpDir, result)
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
 
 // Pre-Phase-0 baseline at main@e726874 — informational, measured units.
 export const PRE_PHASE0_GIT_MD_BYTES = 59_376  // wc -c bytes
@@ -39,23 +94,37 @@ export const PRE_PHASE0_GIT_MD_CHARS = 58_903  // JS .length (UTF-16 code units)
 export const PRE_PHASE0_GIT_MD_LINES = 938
 
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
-// byte-budget.test.ts can import them without re-deriving (C6). Updated after
-// D4 degradation clauses added to fetch-issue + fetch-issues-batch.
-export const GIT_MD_CHARS = 65_677
-export const GIT_MD_LINES = 992
-// +1 char in Phase 1: the SKILL.md cross-reference to the Git agent moved from
-// src/assets/agents/git.md (deleted) to src/assets/agents/git.mds (the generator
-// host). An equality baseline moves in the SAME commit as the file it measures.
-export const SKILL_GIT_CHARS = 9_205
-export const SKILL_GIT_LINES = 283
+// byte-budget.test.ts can import them without re-deriving (C6). These are equality
+// baselines: they move only in the same commit as the golden fixture.
+export const GIT_MD_CHARS = 55_664
+export const GIT_MD_LINES = 913
+// SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
+// preloaded skill file the git-agent golden above cross-references. Like
+// GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
+// the same commit that edits SKILL.md's bytes — never afterwards, and never
+// to make a red test green on its own.
+export const SKILL_GIT_CHARS = 6_581
+export const SKILL_GIT_LINES = 213
 export const SKILL_WORKTREE_CHARS = 2_942
 export const SKILL_WORKTREE_LINES = 92
-export const TOTAL_CHARS = GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS
-export const TOTAL_LINES = GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES
+/**
+ * The preloaded set's total size across the three files above — pinned literals,
+ * not a sum of the constants.
+ *
+ * `TOTAL_CHARS = GIT_MD_CHARS + …` asserted against `GIT_MD_CHARS + …` restates
+ * its own definition: it holds for every state of the tree, including one where
+ * all three parts drifted, so it pinned nothing (PF-018). The guard below MEASURES
+ * the three files and compares the measurement to these literals, which makes them
+ * equality baselines like every other constant in this file — re-set in the same
+ * golden-regeneration commit that moves the parts, never on their own to clear a
+ * red assertion.
+ */
+export const TOTAL_CHARS = 65_187
+export const TOTAL_LINES = 1_218
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 17_914
-export const FIXTURE_NEWLINES = 246
+export const FIXTURE_BYTES = 17_527
+export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {
@@ -100,9 +169,8 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 
   it(`fixture has ${FIXTURE_NEWLINES} newlines (line baseline)`, () => {
     const golden = loadGolden('github-status-lines.txt')
-    const count = (golden.match(/\n/g) ?? []).length
     expect(
-      count,
+      newlineCount(golden),
       `Fixture newline count changed — the fixture is frozen through Phase 3 (AC-0.9)`,
     ).toBe(FIXTURE_NEWLINES)
   })
@@ -120,7 +188,7 @@ describe('git.md golden-dimension baselines', () => {
   it(`git-agent.md golden has ${GIT_MD_LINES} newlines`, () => {
     const golden = loadGolden('git-agent.md')
     expect(
-      (golden.match(/\n/g) ?? []).length,
+      newlineCount(golden),
       `git-agent.md newline count changed — update GIT_MD_LINES and regenerate the golden`,
     ).toBe(GIT_MD_LINES)
   })
@@ -133,24 +201,36 @@ describe('git.md golden-dimension baselines', () => {
     ).toBe(GIT_MD_CHARS)
   })
 
-  it('TOTAL_* constants are sums of their parts', () => {
-    expect(TOTAL_CHARS, 'TOTAL_CHARS must equal GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS').toBe(GIT_MD_CHARS + SKILL_GIT_CHARS + SKILL_WORKTREE_CHARS)
-    expect(TOTAL_LINES, 'TOTAL_LINES must equal GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES').toBe(GIT_MD_LINES + SKILL_GIT_LINES + SKILL_WORKTREE_LINES)
+  it(`the three preloaded files measure ${TOTAL_CHARS} chars / ${TOTAL_LINES} lines`, () => {
+    const gitMd = loadGolden('git-agent.md')
+    const skillGit = readFileSync(SKILL_GIT_PATH, 'utf-8')
+    const skillWorktree = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
+
+    expect(
+      gitMd.length + skillGit.length + skillWorktree.length,
+      `Preloaded-set char total changed — re-measure the three files and move TOTAL_CHARS ` +
+      `in the same commit as the change that moved them.`,
+    ).toBe(TOTAL_CHARS)
+
+    expect(
+      newlineCount(gitMd) + newlineCount(skillGit) + newlineCount(skillWorktree),
+      `Preloaded-set line total changed — re-measure the three files and move TOTAL_LINES ` +
+      `in the same commit as the change that moved them.`,
+    ).toBe(TOTAL_LINES)
   })
 })
 
 describe('skill live-file baselines (Phase-0)', () => {
   it(`skills/git/SKILL.md has ${SKILL_GIT_LINES} lines`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
-    const lines = content.split('\n').length - 1
+    const content = readFileSync(SKILL_GIT_PATH, 'utf-8')
     expect(
-      lines,
+      newlineCount(content),
       `skills/git/SKILL.md line count changed from baseline (${SKILL_GIT_LINES}) — update SKILL_GIT_LINES`,
     ).toBe(SKILL_GIT_LINES)
   })
 
   it(`skills/git/SKILL.md has ${SKILL_GIT_CHARS} chars`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'SKILL.md'), 'utf-8')
+    const content = readFileSync(SKILL_GIT_PATH, 'utf-8')
     expect(
       content.length,
       `skills/git/SKILL.md char count changed from baseline (${SKILL_GIT_CHARS}) — update SKILL_GIT_CHARS`,
@@ -158,16 +238,15 @@ describe('skill live-file baselines (Phase-0)', () => {
   })
 
   it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_LINES} lines`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
-    const lines = content.split('\n').length - 1
+    const content = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
     expect(
-      lines,
+      newlineCount(content),
       `skills/worktree-support/SKILL.md line count changed from baseline (${SKILL_WORKTREE_LINES}) — update SKILL_WORKTREE_LINES`,
     ).toBe(SKILL_WORKTREE_LINES)
   })
 
   it(`skills/worktree-support/SKILL.md has ${SKILL_WORKTREE_CHARS} chars`, () => {
-    const content = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support', 'SKILL.md'), 'utf-8')
+    const content = readFileSync(SKILL_WORKTREE_PATH, 'utf-8')
     expect(
       content.length,
       `skills/worktree-support/SKILL.md char count changed from baseline (${SKILL_WORKTREE_CHARS}) — update SKILL_WORKTREE_CHARS`,
@@ -186,8 +265,8 @@ describe('skill live-file baselines (Phase-0)', () => {
 describe('test:golden:update — frozen-target refusal [DR-03]', () => {
   it('refuses github-status-lines without --unfreeze (subprocess guard)', () => {
     const result = spawnSync(
-      'npx',
-      ['tsx', 'scripts/update-golden.ts', 'github-status-lines'],
+      TSX_BIN,
+      ['scripts/update-golden.ts', 'github-status-lines'],
       {
         cwd: ROOT,
         encoding: 'utf-8',
@@ -218,21 +297,7 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     // the source says today. A drifted source would fail the equality guard once
     // and then pass forever after (§3: "a CI job that regenerates a golden is a
     // golden that asserts nothing"; H2: a mismatch means the SOURCE is wrong).
-    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
-    try {
-      const result = spawnSync(
-        'npx',
-        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
-        {
-          cwd: ROOT,
-          encoding: 'utf-8',
-          timeout: 30_000,
-          env: { ...process.env },
-        },
-      )
-
-      if (result.error) throw result.error
-
+    runUnfreezeToScratchDir((tmpDir, result) => {
       expect(
         result.status,
         `Expected exit 0 with --unfreeze but got ${result.status}\n` +
@@ -245,27 +310,16 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
       expect(written, 'regenerated content differs from the frozen fixture').toBe(
         loadGolden('github-status-lines.txt'),
       )
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true })
-    }
+    })
   })
 
   it('leaves the live fixture untouched when --out-dir is given (no self-regeneration)', () => {
     const before = loadGolden('github-status-lines.txt')
     const beforeMtime = statSync(GOLDEN_PATH).mtimeMs
 
-    const tmpDir = mkdtempSync(path.join(tmpdir(), 'devflow-golden-'))
-    try {
-      const result = spawnSync(
-        'npx',
-        ['tsx', 'scripts/update-golden.ts', 'github-status-lines', '--unfreeze', '--out-dir', tmpDir],
-        { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
-      )
-      if (result.error) throw result.error
+    runUnfreezeToScratchDir((_tmpDir, result) => {
       expect(result.status).toBe(0)
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true })
-    }
+    })
 
     expect(loadGolden('github-status-lines.txt'), 'frozen fixture content changed').toBe(before)
     expect(
@@ -277,8 +331,8 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
 
   it('exits non-zero with usage when no target is given (subprocess guard)', () => {
     const result = spawnSync(
-      'npx',
-      ['tsx', 'scripts/update-golden.ts'],
+      TSX_BIN,
+      ['scripts/update-golden.ts'],
       {
         cwd: ROOT,
         encoding: 'utf-8',

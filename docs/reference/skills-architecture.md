@@ -209,6 +209,8 @@ src/assets/skills/skill-name/
 
 **Target metrics**: SKILL.md ~120-150 lines, code examples 15-25% of content, ~5KB token cost per activation.
 
+**Generated references.** A skill's `references/` directory can also receive files the build emits. `devflow:git` is the one skill that does: `npm run build:mds` compiles the `.mds` reference modules in `src/assets/mds/` into `dist/skills/git/references/**`, and `devflow init` overlays that tree onto the installed skill directory. Generated files are never written into `src/`, and the overlay converges rather than merges — a file under `references/tracker/**` that the build manifest does not name is removed on the next install, so a shadowed skill cannot substitute its own mechanics. Hand-authored references beside them (`github-api.md`, `patterns.md`, …) are never touched by the overlay.
+
 ## Glob Pattern Activation Schema
 
 Skills can declare file patterns for context-aware activation:

@@ -45,6 +45,17 @@ interface RetiredEntry {
   phase: string;
   removedFrom: string;
   justification: string;
+  /**
+   * Corpus path prefixes this literal is retired FROM, spelled as the corpus spells
+   * them (`dist/commands/`, `src/assets/skills/git/`, …). Absent means the whole
+   * corpus.
+   *
+   * Phase 2 needed this: `gh issue` is RETIRED from the command layer and
+   * LEGITIMATE in `git.md` and its generated references — those files are the
+   * mechanics. A denylist without scopes could only express the weaker of the two
+   * rules, and the weaker one is the one that forbids nothing where it matters.
+   */
+  scope?: readonly string[];
 }
 
 const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
@@ -113,6 +124,76 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'to dist/agents/git.md, which the installer prefers over the src tree. Restated as the ' +
       'hand-authored vs generator-host split.',
   },
+
+  // -------------------------------------------------------------------------
+  // Phase-2 denylist (AC-2.8, §14.9). Four scoped literals plus §14.2's retired
+  // DEGRADED synonyms. The denylist grows by the phase's retired literals; it is
+  // never a new grep and never emptied.
+  // -------------------------------------------------------------------------
+  {
+    literal: 'gh issue',
+    phase: '2',
+    removedFrom: 'src/assets/commands/**.mds (the command layer)',
+    scope: ['dist/commands/'],
+    justification:
+      'A command that names a provider CLI has re-composed provider mechanics at the caller — the ' +
+      '~30-sink shape GAP-10 names. The literal stays LEGITIMATE in git.md and in the generated ' +
+      'references, which is why this entry is scoped to the compiled command layer. Strictly ' +
+      'stronger than build-mds.test.ts\'s prose-only rule, which permits it inside a Git spawn fence.',
+  },
+  {
+    literal: 'sleep 60',
+    phase: '2',
+    removedFrom: 'src/assets/skills/git/SKILL.md:196, references/github-api.md:20 and :467',
+    scope: ['src/assets/skills/git/', 'dist/agents/git.md', 'dist/skills/git/references/'],
+    justification:
+      'GAP-25. Sleeping out an active secondary rate limit extends the provider\'s penalty window, ' +
+      'which is why D4 says STOP. Three sites held it and all three were rewritten in P2-S7/P2-S8; ' +
+      'scoped to the files a Git spawn preloads or can load, because an unrelated example elsewhere ' +
+      'is not a second rate-limit policy in the agent\'s context.',
+  },
+  {
+    literal: '<!-- devflow:',
+    phase: '2',
+    removedFrom: 'src/assets/commands/dynamic-build.mds and code-review.mds',
+    scope: ['dist/commands/'],
+    justification:
+      'GAP-20: the operation owns the marker; a caller restating the literal already diverged once ' +
+      'and produced duplicate comments. Scoped to the compiled commands because the marker must ' +
+      'keep living in git.md and in the generated post-wave-report reference — the rule is ' +
+      'relocated, not deleted.',
+  },
+  {
+    literal: '{issue}',
+    phase: '2',
+    removedFrom: 'src/assets/skills/docs-framework/SKILL.md:45, :106, :144',
+    scope: ['src/assets/skills/docs-framework/SKILL.md'],
+    justification:
+      'P2-S11 replaced the GitHub-bound placeholder with the provider-neutral {ISSUE_ID}. Scoped to ' +
+      'the one file: `{issue}` is an ordinary template token elsewhere and a repo-wide entry would ' +
+      'be a grep rather than a rule.',
+  },
+
+  // §14.2's retired DEGRADED synonyms. Unscoped — a DEGRADED reason is user-visible
+  // wherever it is written, and the canonical table admits exactly one spelling per
+  // condition (GAP-13: thirteen reasons with three synonyms for one condition is how
+  // a caller ends up matching on a string no op emits).
+  ...([
+    ['provider mechanics unavailable', 'superseded by `tracker mechanics unavailable`'],
+    ['provider {x} not installed', 'names an installation state the agent cannot observe'],
+    ['no MCP tool for', '"MCP" is transport and stays out of user-facing text'],
+    ['no tool available for', 'superseded by `no tracker tool for {capability}`'],
+    ['no jira tools in session', 'session-scoped phrasing of a capability fact'],
+    ['jira tools unavailable', 'same condition, third spelling'],
+    ['tracker not reachable', 'conflates an unconfigured tracker with an unreachable one'],
+    ['interactive setup required', 'no question step exists — the phrasing promises a prompt that never comes'],
+    ['delete .devflow/tracker.md and re-learn', 'superseded; the file is never the remedy'],
+  ] as const).map(([literal, why]): RetiredEntry => ({
+    literal,
+    phase: '2',
+    removedFrom: '§14.2 canonical DEGRADED reason table (retired synonym)',
+    justification: `Retired DEGRADED synonym — ${why}. The canonical table admits one reason per condition.`,
+  })),
 ];
 
 // ---------------------------------------------------------------------------
@@ -154,6 +235,10 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
   addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh', '']);
   addDir(path.join(ROOT, 'dist', 'commands'), 'dist/commands', ['.md']);
   addDir(path.join(ROOT, 'dist', 'agents'), 'dist/agents', ['.md']);
+  // Phase 2 generates a third build output. Without it the scoped `sleep 60` entry
+  // would be retired from a tree nothing scanned — the GAP-25 contradiction could
+  // move into a generated reference and stay green.
+  addDir(path.join(ROOT, 'dist', 'skills'), 'dist/skills', ['.md']);
   addDir(path.join(ROOT, 'docs'), 'docs', ['.md']);
 
   // Root-level prose. Read individually rather than by walking ROOT, which would
@@ -182,6 +267,7 @@ function collectRetiredLiteralViolations(
   const violations: string[] = [];
   for (const { relPath, content } of corpus) {
     for (const entry of RETIRED_LITERALS) {
+      if (entry.scope && !entry.scope.some(prefix => relPath.startsWith(prefix))) continue;
       if (content.includes(entry.literal)) {
         violations.push(
           `${relPath}: contains retired literal "${entry.literal}" (phase ${entry.phase}; removed from ${entry.removedFrom})`,
@@ -206,7 +292,51 @@ describe('retired-wording guard — denylist of retired literals (P0-S22, GAP-32
       expect(entry.literal.length, `entry literal must be non-empty`).toBeGreaterThan(0);
       expect(entry.justification.length, `entry "${entry.literal}" must carry a justification`).toBeGreaterThan(0);
       expect(entry.removedFrom.length, `entry "${entry.literal}" must record removedFrom`).toBeGreaterThan(0);
+      if (entry.scope) {
+        expect(entry.scope.length, `entry "${entry.literal}" has an empty scope — omit the field instead`)
+          .toBeGreaterThan(0);
+      }
     }
+  });
+
+  it('every scoped entry names a scope the corpus actually reaches (no silently dead scope)', () => {
+    // A scope that matches no corpus path silences its entry completely and leaves
+    // a denylist row that forbids nothing — the same failure as an exemption nobody
+    // notices going stale. Checked against the real corpus, not the literal strings.
+    const paths = buildCorpus().map(e => e.relPath);
+    expect(paths.length, 'empty corpus').toBeGreaterThan(0);
+    const dead: string[] = [];
+    for (const entry of RETIRED_LITERALS) {
+      if (!entry.scope) continue;
+      for (const prefix of entry.scope) {
+        if (!paths.some(p => p.startsWith(prefix))) dead.push(`"${entry.literal}" → ${prefix}`);
+      }
+    }
+    expect(
+      dead,
+      `scope prefix(es) matching no corpus file — the entry is retired from a tree nothing scans:\n  ` +
+      dead.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a scope confines its entry to the named tree (mechanic 2)', () => {
+    const scoped = RETIRED_LITERALS.find(e => e.scope !== undefined);
+    expect(scoped, 'at least one entry must be scoped, or the scope arm is untested').toBeDefined();
+    const prefix = scoped!.scope![0];
+    const inside = collectRetiredLiteralViolations([
+      { relPath: `${prefix}probe.md`, content: `seeded ${scoped!.literal} here\n` },
+    ]);
+    const outside = collectRetiredLiteralViolations([
+      { relPath: 'docs/probe.md', content: `seeded ${scoped!.literal} here\n` },
+    ]);
+    expect(
+      inside.length,
+      `the collector must flag "${scoped!.literal}" inside ${prefix}`,
+    ).toBeGreaterThan(0);
+    expect(
+      outside.filter(v => v.includes(scoped!.literal)),
+      `the collector must NOT flag "${scoped!.literal}" outside its scope — that is what the scope is for`,
+    ).toEqual([]);
   });
 
   it('no retired literal appears in the shipping assets, the compiled output, or the repo docs', () => {

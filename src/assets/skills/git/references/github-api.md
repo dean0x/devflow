@@ -2,27 +2,70 @@
 
 Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 
+> **D11 is the authority on every body these recipes post: compose it to the RAW
+> file, scrub with `redact-secrets.cjs`, and post the SCRUBBED one — `$DEVFLOW_BODY`
+> via `--body-file` / `-F body=@`, `$DEVFLOW_NOTES` via `--notes-file` — chained
+> with `&&` so a non-zero scrubber exit means DO NOT POST.** The recipes below
+> implement that rule; they do not compete with it: an inline `--body "…"` cannot
+> be scrubbed at all.
+
 ---
 
 ## Rate Limit Handling
+
+> **D4 is the authority on what happens at the limit: STOP the fan-out, report
+> `THROTTLED ({n} not processed)`, emit `TRACEABILITY: DEGRADED (rate limited)`.
+> Never sleep out an active secondary limit — that extends GitHub's penalty window.**
+> The recipes below implement that rule; they do not compete with it.
+>
+> **One spelling for that STOP, in two contexts.** Inside a function: echo the
+> `TRACEABILITY: DEGRADED (…)` line to stderr, then `return 1` — never `exit`, which
+> kills the shell that called the helper. At top level: the echo IS the response, and
+> the calls live in the branch a healthy probe reaches, so a stop cannot fall through
+> to them. An unreadable probe is a stop too — `[ "" -lt 10 ]` is a shell error, and an
+> errored test skips the very branch that exists to stop us, so every probe below is
+> read through a digit-run `case` before it is compared.
+
+### Standard Throttling
+
+```bash
+REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+case "$REMAINING" in
+    ''|*[!0-9]*)
+        echo "TRACEABILITY: DEGRADED (rate-limit probe failed)" >&2 ;;
+    *)
+        if [ "$REMAINING" -lt 10 ]; then
+            echo "TRACEABILITY: DEGRADED (rate limited)" >&2
+        else
+            gh api "$API_PATH"
+            sleep 1  # Between each API call
+        fi ;;
+esac
+```
 
 ### Check Before Batch Operations
 
 ```bash
 check_rate_limit() {
     local remaining
-    remaining=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
+    remaining=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+
+    case "$remaining" in
+        ''|*[!0-9]*)
+            echo "TRACEABILITY: DEGRADED (rate-limit probe failed)" >&2
+            return 1 ;;
+    esac
 
     if [ "$remaining" -lt 10 ]; then
         local reset_time
         reset_time=$(gh api rate_limit --jq '.resources.core.reset')
-        echo "Rate limit low ($remaining remaining), waiting..."
-        sleep 60
+        echo "TRACEABILITY: DEGRADED (rate limited) — resets at $reset_time" >&2
+        return 1
     fi
 }
 
-check_rate_limit
-for issue in $(seq 1 100); do
+# D4: STOP means the loop never starts — check_rate_limit has already reported.
+check_rate_limit && for issue in $(seq 1 100); do
     gh api repos/{owner}/{repo}/issues/${issue}
     sleep 1  # Throttle between calls
 done
@@ -67,7 +110,7 @@ make_api_call() {
 }
 
 # Validate responses before using
-BODY=$(gh issue view $ISSUE --json body -q '.body' 2>/dev/null)
+BODY=$(gh issue view "$ISSUE" --json body -q '.body' 2>/dev/null)
 if [ -z "$BODY" ]; then
     echo "Issue body empty or not found"
     exit 1
@@ -78,20 +121,29 @@ fi
 
 ## PR Comments
 
+### Comment Rules
+
+- Only lines in the PR diff can receive inline comments
+- Deduplicate before posting (same file + line = keep one)
+- Always include a suggested fix; every comment carries the `<!-- devflow:* -->` marker, and the visible devflow footer (*Posted by [devflow](https://github.com/dean0x/devflow)*) is appended only on summary comments (see src/assets/agents/git.mds)
+
 ### Inline Comment with Commit SHA
 
 ```bash
-OWNER=$(echo $REPO_INFO | cut -d'/' -f1)
-REPO=$(echo $REPO_INFO | cut -d'/' -f2)
-HEAD_SHA=$(gh pr view $PR_NUMBER --json headRefOid -q '.headRefOid')
+OWNER=$(echo "$REPO_INFO" | cut -d'/' -f1)
+REPO=$(echo "$REPO_INFO" | cut -d'/' -f2)
+HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q '.headRefOid')
 
-gh api \
+printf '%s\n' "$COMMENT_BODY" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh api \
     -X POST \
     "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments" \
-    -f body="$COMMENT_BODY" \
+    -F body=@"$DEVFLOW_BODY" \
     -f commit_id="$HEAD_SHA" \
     -f path="$FILE_PATH" \
-    -F line=$LINE_NUMBER \
+    -F line="$LINE_NUMBER" \
     -f side="RIGHT"
 
 sleep 1  # Rate limiting between comments
@@ -104,11 +156,11 @@ is_line_in_diff() {
     local file="$1"
     local line="$2"
 
-    if ! gh pr diff $PR_NUMBER --name-only | grep -q "^${file}$"; then
+    if ! gh pr diff "$PR_NUMBER" --name-only | grep -q "^${file}$"; then
         return 1
     fi
 
-    gh pr diff $PR_NUMBER -- "$file" | grep -n "^+" | cut -d: -f1 | grep -q "^${line}$"
+    gh pr diff "$PR_NUMBER" -- "$file" | grep -n "^+" | cut -d: -f1 | grep -q "^${line}$"
 }
 
 if is_line_in_diff "$FILE" "$LINE"; then
@@ -134,90 +186,25 @@ fi
 
 ---
 
-## Issue Operations
-
-### Fetch Issue with All Details
-
-```bash
-gh issue view "$ISSUE_NUMBER" \
-    --json number,title,body,state,labels,assignees,milestone,author,createdAt,comments
-```
-
-### Create Issue with Labels and Assignees
-
-```bash
-gh issue create \
-    --title "Bug: Login fails for SSO users" \
-    --label "bug,priority-high" \
-    --assignee "username" \
-    --body "$(cat <<'EOF'
-## Description
-Login fails when using SSO authentication.
-
-## Steps to Reproduce
-1. Click "Login with SSO"
-2. Enter credentials
-3. Observe error
-
-## Expected Behavior
-User should be logged in successfully.
-EOF
-)"
-```
-
-### Tech Debt Issue Management
-
-```bash
-MAX_SIZE=60000
-
-add_tech_debt_item() {
-    local new_item="$1"
-    local current_body
-    current_body=$(gh issue view $TECH_DEBT_ISSUE --json body -q '.body')
-    local body_length=${#current_body}
-
-    if [ $body_length -gt $MAX_SIZE ]; then
-        echo "Tech debt issue approaching size limit, archiving..."
-        archive_tech_debt_issue
-    fi
-
-    gh issue comment $TECH_DEBT_ISSUE --body "$new_item"
-}
-
-archive_tech_debt_issue() {
-    local old_issue=$TECH_DEBT_ISSUE
-    gh issue close $old_issue --comment "## Archived
-This issue reached the size limit.
-**Continued in:** (see linked issue)"
-
-    TECH_DEBT_ISSUE=$(gh issue create \
-        --title "Tech Debt Backlog" \
-        --label "tech-debt" \
-        --body "Continued from #${old_issue}
-
-## Items
-" \
-        --json number -q '.number')
-
-    gh issue comment $old_issue --body "**Continued in:** #${TECH_DEBT_ISSUE}"
-}
-```
-
-### Extract Issue Data
-
-```bash
-BODY=$(gh issue view $ISSUE --json body -q '.body')
-
-# Extract acceptance criteria
-CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\s*-\s*\[' || true)
-
-# Extract dependencies
-DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -oE '#[0-9]+' || true)
-```
-
----
-
 ## Release Operations
+
+### Releases
+
+```bash
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1  # Validate semver
+git tag -a "v${VERSION}" -m "Version ${VERSION}" && git push origin "v${VERSION}"
+
+printf '%s\n' "$NOTES" > "$DEVFLOW_NOTES_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" \
+  && gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "$DEVFLOW_NOTES"
+```
+
+Release notes are a GitHub-visible sink, so `$DEVFLOW_NOTES` is the SCRUBBED file the
+D11 chain produced — never `$DEVFLOW_NOTES_RAW`, and never an inline `--notes` string,
+which cannot be scrubbed at all. The notes pair is named separately from the body pair
+because `create-release` composes notes while a body may already be staged in the same
+spawn; posting `$DEVFLOW_BODY` here would publish that unrelated body as the release.
 
 ### Version Validation
 
@@ -245,18 +232,28 @@ create_release() {
 ${changelog}"
     git push origin "v${version}"
 
-    gh release create "v${version}" \
+    # D11: the notes reach GitHub through the SCRUBBED file, never as an inline string.
+    # The composed notes are written to the RAW file here — the scrub is what produces
+    # "$DEVFLOW_NOTES", so chaining with && is what stops a scrubber failure publishing.
+    printf '%s\n' "$changelog" > "$DEVFLOW_NOTES_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" \
+      && gh release create "v${version}" \
         --title "v${version}" \
-        --notes "$changelog"
+        --notes-file "$DEVFLOW_NOTES"
 }
 ```
 
 ### Release with Assets
 
 ```bash
-gh release create "v${VERSION}" \
+# CHANGELOG.md is the RAW input here: redact-secrets.cjs takes any input path, and
+# release notes publish like any other body, so the file that ships is the scrubbed one.
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    CHANGELOG.md "$DEVFLOW_NOTES" \
+  && gh release create "v${VERSION}" \
     --title "v${VERSION} - ${RELEASE_TITLE}" \
-    --notes-file CHANGELOG.md \
+    --notes-file "$DEVFLOW_NOTES" \
     ./dist/*.tar.gz ./dist/*.zip
 ```
 
@@ -280,37 +277,12 @@ generate_release_notes() {
 
 ---
 
-## Branch Name from Issue
-
-```bash
-generate_branch_name() {
-    local issue_number="$1"
-    local title="$2"
-    local labels="$3"
-
-    local branch_type="feature"
-    case "$labels" in
-        *bug*|*fix*) branch_type="fix" ;;
-        *documentation*|*docs*) branch_type="docs" ;;
-        *refactor*) branch_type="refactor" ;;
-        *chore*|*maintenance*) branch_type="chore" ;;
-    esac
-
-    local slug
-    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-40)
-
-    echo "${branch_type}/${issue_number}-${slug}"
-}
-```
-
----
-
 ## PR Operations
 
 ### PR with HEREDOC Body
 
 ```bash
-gh pr create --title "Add user authentication" --body "$(cat <<'EOF'
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Summary
 - Implement JWT-based authentication
 - Add login/logout endpoints
@@ -319,26 +291,42 @@ gh pr create --title "Add user authentication" --body "$(cat <<'EOF'
 - [ ] Test login with valid credentials
 - [ ] Test token expiration
 EOF
-)"
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr create --title "Add user authentication" --body-file "$DEVFLOW_BODY"
 ```
+
+The heredoc is wrapped in `{ … }` so the compose is the chain's first link: a failed
+write must stop the post, not hand the scrubber whatever the RAW file last held.
 
 ### Draft PR for WIP
 
 ```bash
-gh pr create --draft --title "WIP: Feature X" --body "Work in progress, not ready for review"
+printf '%s\n' "Work in progress, not ready for review" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr create --draft --title "WIP: Feature X" --body-file "$DEVFLOW_BODY"
 ```
 
 ### PR Review
 
-```bash
-gh pr review $PR_NUMBER --approve --body "LGTM! Tested locally and all checks pass."
+Both posts reuse the one temp-file pair, so each composes its OWN content as the first
+link of its own chain — `$DEVFLOW_BODY` is the scrubber's output, not a shared mailbox.
 
-gh pr review $PR_NUMBER --request-changes --body "$(cat <<'EOF'
+```bash
+printf '%s\n' "LGTM! Tested locally and all checks pass." > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr review "$PR_NUMBER" --approve --body-file "$DEVFLOW_BODY"
+
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
 ## Requested Changes
 1. **Security**: Input validation missing in `handleLogin`
 2. **Performance**: N+1 query in user list endpoint
 EOF
-)"
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh pr review "$PR_NUMBER" --request-changes --body-file "$DEVFLOW_BODY"
 ```
 
 ---
@@ -348,7 +336,7 @@ EOF
 ### Batch Field Selection
 
 ```bash
-gh pr view $PR --json title,body,state,author,reviews,commits
+gh pr view "$PR" --json title,body,state,author,reviews,commits
 ```
 
 ### GraphQL for Complex Queries
@@ -418,7 +406,7 @@ gh workflow run "deploy.yml" \
 
 sleep 5
 RUN_ID=$(gh run list --workflow "deploy.yml" --limit 1 --json databaseId -q '.[0].databaseId')
-gh run watch $RUN_ID
+gh run watch "$RUN_ID"
 ```
 
 ### Check Run Status
@@ -456,17 +444,23 @@ wait_for_checks() {
 ```bash
 batch_api_calls() {
     local results=()
+    local total=$# attempted=0 stop=""
 
     # Each positional argument is a gh-api path (e.g. "repos/owner/repo/issues/1").
     # Direct invocation — no eval; shell metacharacters in paths are not supported.
     for api_path in "$@"; do
-        REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "100")
+        REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+
+        case "$REMAINING" in
+            ''|*[!0-9]*) stop="rate-limit probe failed"; break ;;
+        esac
 
         if [ "$REMAINING" -lt 10 ]; then
-            echo "Rate limit low, waiting 60s..." >&2
-            sleep 60
+            stop="rate limited"
+            break
         fi
 
+        attempted=$((attempted + 1))
         result=$(gh api "$api_path" 2>&1) || {
             echo "Failed: gh api $api_path" >&2
             continue
@@ -477,6 +471,14 @@ batch_api_calls() {
     done
 
     printf '%s\n' "${results[@]}"
+
+    # D4: what was collected is still printed, but a batch that stopped early must not
+    # read as a complete one — the remainder is named and the status is non-zero, so
+    # "the caller reports THROTTLED" is something the caller can actually detect.
+    if [ -n "$stop" ]; then
+        echo "TRACEABILITY: DEGRADED ($stop) — THROTTLED ($((total - attempted)) not processed)" >&2
+        return 1
+    fi
 }
 ```
 
@@ -501,7 +503,8 @@ if [ $? -ne 0 ]; then exit 1; fi
 
 ```bash
 # VIOLATION: Assumes success
-PR_NUMBER=$(gh pr create --title "..." --body "..." --json number -q '.number')
+PR_URL=$(gh pr create --title "..." --body-file "$DEVFLOW_BODY")
+PR_NUMBER="${PR_URL##*/}"
 gh pr merge $PR_NUMBER
 
 # VIOLATION: Silent failure
@@ -538,18 +541,18 @@ gh api repos/{owner}/{repo}/issues --jq '.[].number'
 gh api -X POST "repos/.../pulls/${PR}/comments" -f path="unchanged_file.ts" -F line=50
 
 # VIOLATION: Missing commit_id
-gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Comment" -f path="file.ts"
+gh api -X POST "repos/.../pulls/${PR}/comments" -F body=@"$DEVFLOW_BODY" -f path="file.ts"
 
 # VIOLATION: No rate limiting between comments
 for file in "${FILES[@]}"; do
-    gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Issue" -f path="$file"
+    gh api -X POST "repos/.../pulls/${PR}/comments" -F body=@"$DEVFLOW_BODY" -f path="$file"
 done
 
 # VIOLATION: Non-semver version
 gh release create "version-1.2" --title "Release"
 
 # VIOLATION: Non-draft for WIP
-gh pr create --title "WIP: Feature" --body "Not ready yet"
+gh pr create --title "WIP: Feature" --body-file "$DEVFLOW_BODY"
 ```
 
 ---
@@ -623,7 +626,10 @@ fetch_review_threads() {
 ### Reply to a Review Thread
 
 ```bash
-gh api graphql -f query='
+printf '%s\n' "$REPLY_BODY" > "$DEVFLOW_BODY_RAW" \
+  && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh api graphql -f query='
   mutation($threadId: ID!, $body: String!) {
     addPullRequestReviewThreadReply(input: {
       pullRequestReviewThreadId: $threadId
@@ -635,7 +641,7 @@ gh api graphql -f query='
       }
     }
   }
-' -f threadId="$THREAD_ID" -f body="$REPLY_BODY"
+' -f threadId="$THREAD_ID" -F body=@"$DEVFLOW_BODY"
 ```
 
 ### Resolve a Review Thread

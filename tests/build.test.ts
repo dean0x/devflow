@@ -115,7 +115,7 @@ describe('agent frontmatter compliance contract', () => {
   /**
    * Named collector: the frontmatter `skills:` list of each agent, keyed by agent name.
    * Called by the guard AND by both probes below, so a probe can never pass by
-   * re-implementing the parser it is meant to prove (ADR-024).
+   * re-implementing the parser it is meant to prove (PF-018).
    */
   function collectFrontmatterSkills(
     sources: ReadonlyMap<string, { content: string }>,

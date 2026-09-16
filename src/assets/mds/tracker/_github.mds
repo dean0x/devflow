@@ -1,0 +1,446 @@
+---
+output-dir: dist/skills/git/references
+---
+GitHub tracker mechanics for the `devflow:git` skill.
+
+One section per tracker operation. The build emits each section as its own file
+under `tracker/github/` inside the skill's `references/` directory; the op roster
+and the sub-directory come from `VARIANT_MODULES` in `src/core/mds-variants.ts`,
+and the two must agree in both directions or the build fails. Everything above
+the first section marker is module-level prose and is emitted nowhere.
+
+Each section states what the Git agent loads it for. An operation's contract —
+its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
+clause — is never restated here: that is the agent's, and a second copy outside
+the single-authority corpus is the divergence this split exists to prevent.
+
+@define setup_task():
+## Operation: setup-task
+
+Load when the resolved tracker provider is `github` and the operation is `setup-task`.
+
+**Mechanics held here:** the `**Process:**` steps that talk to GitHub — issue lookup, branch-token rendering, and the conventions probe.
+
+### Process
+
+1b. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Load branch naming convention:
+   - Read `.devflow/conventions.md` Branch Naming section. If file absent, invoke `learn-conventions` first (write the file), then read the result.
+   - Branch naming derived in step 3 MUST follow the recorded convention.
+   - **Metacharacter guard:** `.devflow/conventions.md` is git-tracked and team-shared, so its content is third-party input. Before using the convention-derived prefix and separator in step 3, check the fully composed branch name (type + separator + slug). If it contains any of `` $ ` \ " ' ; | & < > `` or whitespace or a newline, discard the convention and fall back to the step-2 heuristic defaults. Bind the validated name to a shell variable for checkout: `DEVFLOW_BRANCH="..."`.
+1c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
+   - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
+   - If `ISSUE_INPUT` provided: use it as the existing issue number.
+   - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
+   - Issue number drives the branch name in step 3: `\{type\}/\{number\}-\{slug\}`.
+2. **Detect branch naming convention** from existing branches:
+   ```bash
+   git branch -r --format='%(refname:short)' | head -50
+   ```
+   - Count prefixes: `feature/` vs `feat/`, `bugfix/` vs `fix/`, `hotfix/` vs `fix/`
+   - If existing branches consistently use a prefix style (>2 instances), adopt it
+   - Detect separator style: hyphens vs underscores
+   - If `.devflow/conventions.md` Branch Naming section is present (from step 1b), it takes precedence over this detection
+   - If no clear convention or empty repo, use defaults (`feature/`, `fix/`, `docs/`, `refactor/`, `chore/`)
+3. **Derive branch name** (using detected convention):
+   - If issue number is known (from `ISSUE_INPUT` or step 1c): fetch issue via GitHub API, then derive branch name as `\{type\}/\{number\}-\{slug\}` where:
+     - `type` is inferred from issue labels: `bug` → `fix`, `documentation` or `docs` → `docs`, `refactor` → `refactor`, `chore` or `maintenance` → `chore`, default → `feature`
+     - `slug` is the issue title: lowercased, non-alphanumeric replaced with hyphens, consecutive hyphens collapsed, trimmed, max 40 characters
+     - Before placing fetched content in the output, neutralise any `</untrusted-issue-body>` in it (Principle 8 marker neutralisation).
+   - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `\{type\}/\{slug\}` (max 40 chars)
+   - If neither: fallback to `task-\{YYYY-MM-DD_HHMM\}`
+
+### Branch Name from Issue
+
+```bash
+generate_branch_name() {
+    local issue_number="$1"
+    local title="$2"
+    local labels="$3"
+
+    local branch_type="feature"
+    case "$labels" in
+        *bug*|*fix*) branch_type="fix" ;;
+        *documentation*|*docs*) branch_type="docs" ;;
+        *refactor*) branch_type="refactor" ;;
+        *chore*|*maintenance*) branch_type="chore" ;;
+    esac
+
+    local slug
+    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-40)
+
+    echo "${branch_type}/${issue_number}-${slug}"
+}
+```
+@end
+
+@define fetch_issue():
+## Operation: fetch-issue
+
+Load when the resolved tracker provider is `github` and the operation is `fetch-issue`.
+
+**Mechanics held here:** the `**Process:**` body — single-issue lookup and the field projection it requests.
+
+### Process
+
+2. Fetch full issue data (title, body, labels, assignees, milestone, comments)
+3. Extract acceptance criteria and dependencies from body; neutralise any `</untrusted-issue-body>` in the body before wrapping (Principle 8 marker neutralisation).
+
+### Fetch Issue with All Details
+
+```bash
+gh issue view "$ISSUE_NUMBER" \
+    --json number,title,body,state,labels,assignees,milestone,author,createdAt,comments
+```
+
+### Extract Issue Data
+
+```bash
+BODY=$(gh issue view "$ISSUE" --json body -q '.body')
+
+# Extract acceptance criteria
+CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\s*-\s*\[' || true)
+
+# Extract dependencies
+DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -oE '#[0-9]+' || true)
+```
+@end
+
+@define fetch_issues_batch():
+## Operation: fetch-issues-batch
+
+Load when the resolved tracker provider is `github` and the operation is `fetch-issues-batch`.
+
+**Mechanics held here:** the `**Process:**` body — the single bounded batch query and the reporting of references it could not resolve.
+
+### Process
+
+2. Fetch all issues in a **single** GraphQL query using per-issue aliases (dynamically constructed for the resolved list); resolve owner/repo from the git remote context:
+   ```
+   gh api graphql -f query='query \{ repository(owner:"OWNER", name:"REPO") \{
+     i1: issue(number:N1) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     i2: issue(number:N2) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+     ...
+   \}\}'
+   ```
+2b. Render each issue's `state` (`OPEN` or `CLOSED`) as a `**State**: \{state\}` line of its own, between that issue's `### Issue #\{number\}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because `state` is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
+@end
+
+@define manage_debt():
+## Operation: manage-debt
+
+Load when the resolved tracker provider is `github` and the operation is `manage-debt`.
+
+**Mechanics held here:** the `**Process:**` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
+
+### Process
+
+1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
+2. Check issue body size; archive if > 60000 chars (per devflow:git)
+3. Extract items to add:
+   - `## Fix Separately` entries from `\{REVIEW_DIR\}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
+   - `## Deferred to Tech Debt` entries from `\{REVIEW_DIR\}/resolution-summary.md` (TECH_DEBT from Triage agent)
+   - Pre-existing issues (Category 3) from review reports
+4. Deduplicate against existing items using semantic matching
+5. Remove items that have been fixed (verify in codebase)
+6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit \{number\} --body-file "$DEVFLOW_BODY"`
+7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
+
+### Tech Debt Issue Management
+
+Every body below reaches GitHub through `$DEVFLOW_BODY`, the file the D11 scrub chain
+produced — manage-debt is a body-posting op, so the scrub is unconditional. Each post
+therefore writes ITS OWN content to `$DEVFLOW_BODY_RAW` first: `$DEVFLOW_BODY` is the
+scrubber's output, not a shared mailbox, and posting it without composing into
+`$DEVFLOW_BODY_RAW` in the same step publishes whatever the last scrub happened to leave.
+
+```bash
+MAX_SIZE=60000
+
+post_scrubbed() {
+    # Compose → scrub → post, chained with && from the FIRST link: the compose is
+    # inside the chain, so a failed write stops the post instead of letting the
+    # scrubber scrub — and the chain publish — whatever the RAW file last held.
+    # Never a pipeline: a pipeline's exit status hides a scrubber crash (fail-open).
+    printf '%s\n' "$1" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && gh issue comment "$2" --body-file "$DEVFLOW_BODY"
+}
+
+add_tech_debt_item() {
+    local new_item="$1"
+    local current_body
+    # Items append to the BODY (Process step 6) — a comment would leave the body
+    # invariant, so the probe below could never fire and the archive successor would
+    # be unreachable. A failed read must stop: an empty body REPLACES the backlog.
+    current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body') || return 1
+    local body_length=${#current_body}
+
+    if [ "$body_length" -gt "$MAX_SIZE" ]; then
+        echo "Tech debt issue approaching size limit, archiving..."
+        archive_tech_debt_issue
+        # The successor is a different issue with a different body; if the archive
+        # degraded, TECH_DEBT_ISSUE still names the predecessor and this returns
+        # what the first read did.
+        current_body=$(gh issue view "$TECH_DEBT_ISSUE" --json body -q '.body') || return 1
+    fi
+
+    # Same chain, same reason, as post_scrubbed — only the sink differs: `gh issue
+    # edit` replaces the whole body, so what is composed is the body just read plus
+    # the new item, under its trailing `## Items` heading.
+    printf '%s\n%s\n' "$current_body" "$new_item" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && gh issue edit "$TECH_DEBT_ISSUE" --body-file "$DEVFLOW_BODY"
+}
+
+archive_tech_debt_issue() {
+    local old_issue=$TECH_DEBT_ISSUE
+    local new_url
+    local new_number
+
+    # The successor's body is a posted body: compose, scrub, and create only on a
+    # clean scrubber exit. `gh issue create` prints the new issue's URL, so the
+    # number is its last path segment — parsed command output, checked to be a digit
+    # run before it becomes the issue every later post targets. One `&&` chain end to
+    # end, compose included — the archive comment names the real successor, and the
+    # close happens only after it lands. A failure anywhere reports and stops without
+    # returning non-zero: TECH_DEBT_ISSUE still names the still-open predecessor, so
+    # the caller's item lands there rather than being dropped.
+    printf '%s\n' "Continued from #${old_issue}
+
+## Items
+" > "$DEVFLOW_BODY_RAW" \
+      && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+        "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+      && new_url=$(gh issue create \
+        --title "Tech Debt Backlog" \
+        --label "tech-debt" \
+        --body-file "$DEVFLOW_BODY") \
+      && new_number="${new_url##*/}" \
+      && [[ "$new_number" =~ ^[0-9]+$ ]] \
+      && TECH_DEBT_ISSUE="$new_number" \
+      && post_scrubbed "## Archived
+This issue reached the size limit.
+**Continued in:** #${TECH_DEBT_ISSUE}" "$old_issue" \
+      && gh issue close "$old_issue" \
+      || echo "TRACEABILITY: DEGRADED (tech-debt archive failed for #${old_issue})"
+}
+```
+@end
+
+@define create_release():
+## Operation: create-release
+
+Load when the resolved tracker provider is `github` and the operation is `create-release`.
+
+**Mechanics held here:** the closed-issues step only. Tag creation, release creation and notes composition stay with the operation.
+
+### Process
+
+Inside step 5 (compose release notes):
+
+   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and \{n\} more issues` line (D4 degrade if enrichment fails)
+@end
+
+@define gather_release_evidence():
+## Operation: gather-release-evidence
+
+Load when the resolved tracker provider is `github` and the operation is `gather-release-evidence`.
+
+**Mechanics held here:** resolving which issues a commit range closes, batch-first and with its sequential sub-bound.
+
+### Process
+
+4. If `gh` is authenticated and remote is reachable, resolve which issues the commit range closes — **batch first, never one call per commit** — and merge the result with the commit-message set:
+   - **Batch (the normal path).** Resolve the whole range with one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
+   - **Dedup by PR number** before collecting references: several commits of one merged PR resolve to that PR once, so its `closingIssuesReferences` are read once.
+   - **Sequential fallback, bounded at ≤25 commits.** Only when the batch query is unavailable or errors, fall back to per-commit resolution in range order for at most ≤25 commits; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while commits went unresolved.
+   - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
+@end
+
+@define backlink_shipped_issues():
+## Operation: backlink-shipped-issues
+
+Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
+
+**Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle — and, because this is the tracker operation that owns the fan-out, GitHub's rate-limit and posting signals for the always-loaded D4 and D11 contracts.
+
+### Provider signals (GitHub)
+
+The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's. The backpressure rung is stated only here and in the agent's `resolve-review-threads` clause — the two ops D4 names as batch ops; the secondary-rate-limit threshold is restated wherever an op's own D4 clause has to act on it.
+
+- **Secondary rate limit:** a 403 or 429 response with a rate-limit body, or an `X-RateLimit-Remaining` header < 10. Continuing to issue requests into one extends GitHub's penalty window, which is why D4 says STOP rather than wait.
+- **Backpressure rung:** `X-RateLimit-Remaining` < 50 — the point at which D4's inter-operation delay rises from 1s to 3s for the remainder of the batch.
+- **Unavailability:** `gh` absent or unauthenticated, or no remote — D4's "no remote" condition on this provider.
+
+**Scrub-then-post chain** — D11's `&&` discipline instantiated for GitHub. A pipeline's exit status would swallow a scrubber crash, so the chain is `&&` and never `|`:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh issue comment {number} --body-file "$DEVFLOW_BODY"
+```
+
+### Process
+
+**Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+
+Then, per issue, within the operation's ≤50 bound:
+
+1. Fetch existing comments authored by the viewer: `gh issue view \{number\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+2. Check if `<!-- devflow:shipped v\{BARE_VERSION\} -->` already present in viewer-authored comments. If yes: skip.
+3. Write the two-line body to `$DEVFLOW_BODY_RAW` — a real newline, not a `\n` escape (bash does not
+   expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
+   ```
+   <!-- devflow:shipped v\{BARE_VERSION\} -->
+   This was shipped in v\{BARE_VERSION\}.
+   ```
+   Apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`.
+4. Wait 1s between issues.
+@end
+
+@define ensure_traceable_issue():
+## Operation: ensure-traceable-issue
+
+Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
+
+**Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
+
+### Process
+
+1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
+   - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`. Comment template:
+     ```markdown
+     ## Devflow Traceability Update
+     **Initial Request**: \{TASK_DESCRIPTION or "(see issue body)"\}
+     **Status**: Linked to branch for implementation
+     ```
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
+   - Return the issue number.
+2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
+   - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
+   - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template in the `### Traceability Issue Template (D3)` section below. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED, do not create issue.
+   - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
+   - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY"`.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
+3. Return the issue number.
+
+### Create Issue with Labels and Assignees
+
+```bash
+{ cat > "$DEVFLOW_BODY_RAW" <<'EOF'
+## Description
+Login fails when using SSO authentication.
+
+## Steps to Reproduce
+1. Click "Login with SSO"
+2. Enter credentials
+3. Observe error
+
+## Expected Behavior
+User should be logged in successfully.
+EOF
+} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+    "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
+  && gh issue create \
+    --title "Bug: Login fails for SSO users" \
+    --label "bug,priority-high" \
+    --assignee "username" \
+    --body-file "$DEVFLOW_BODY"
+```
+
+### Traceability Issue Template (D3)
+
+When creating or enriching a GitHub issue via the `ensure-traceable-issue` operation, use the following canonical D3 template:
+
+```markdown
+## Initial Request
+{The verbatim or paraphrased user request / scope statement that drove this task}
+
+## Product Requirements
+{Discovered requirements summary — user needs, acceptance criteria, constraints}
+
+## Implementation Plan
+[Design artifact posted as a collapsed comment — see linked comment below]
+```
+
+**Rules:**
+- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
+- New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
+- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
+@end
+
+@define post_wave_report():
+## Operation: post-wave-report
+
+Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
+
+**Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting or updating the report.
+
+### Process
+
+1. Check for existing marker (author-filtered — a third party posting the marker must not suppress the post):
+   - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+   - `gh issue view \{TRACKING_ISSUE\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` in viewer-authored comment bodies only
+   - If found: skip — report `Skipped: wave report for \{WAVE_ID\} already posted`
+3. Compose the comment body:
+   ```markdown
+   <!-- devflow:wave-report wave:\{WAVE_ID\} -->
+   \{contents of WAVE_REPORT_PATH\}
+   ```
+   Cap the composed body at 60000 characters; if larger, truncate and end with
+   `…truncated — full report in the local wave artifact \{WAVE_REPORT_PATH\} (not committed; ask the author)`.
+4. Write composed body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue comment \{TRACKING_ISSUE\} --body-file "$DEVFLOW_BODY"`.
+@end
+
+@define ensure_pr_ready():
+## Operation: ensure-pr-ready
+
+Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
+
+**Mechanics held here:** the whole of step 4b — the open-PR lookup, the issue-number resolution order, the `Closes #\{n\}` line it renders, and the scrub-then-edit that publishes the updated body. The operation's other steps stay with it.
+
+### Process
+
+4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #\{n\}` link when a verified issue number is known. Resolution order:
+   a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
+   b. If unavailable, fall back to the branch name pattern `\{type\}/\{number\}-\{slug\}`: extract the numeric segment and verify with `gh issue view \{n\} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
+
+   Compose the updated PR body (existing body + `## Related Issues` section) to `$DEVFLOW_BODY_RAW`. The existing PR body is third-party-editable — never interpolate it into a command string. Apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+
+   If no verified issue number is discoverable, skip silently.
+   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED (\{reason\})` and continue — a failed Related Issues update never blocks the PR.
+
+The open-PR lookup this step depends on is `gh pr list --head \{branch\} --state open`; the link line it renders is `Closes #\{n\}`.
+@end
+
+<!-- op: setup-task -->
+{setup_task()}
+
+<!-- op: fetch-issue -->
+{fetch_issue()}
+
+<!-- op: fetch-issues-batch -->
+{fetch_issues_batch()}
+
+<!-- op: manage-debt -->
+{manage_debt()}
+
+<!-- op: create-release -->
+{create_release()}
+
+<!-- op: gather-release-evidence -->
+{gather_release_evidence()}
+
+<!-- op: backlink-shipped-issues -->
+{backlink_shipped_issues()}
+
+<!-- op: ensure-traceable-issue -->
+{ensure_traceable_issue()}
+
+<!-- op: post-wave-report -->
+{post_wave_report()}
+
+<!-- op: ensure-pr-ready -->
+{ensure_pr_ready()}

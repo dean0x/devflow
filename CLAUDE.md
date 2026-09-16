@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/`; most install directly, and `.mds` sources compile via `npm run build:mds` — command hosts to `dist/commands/`, agent generator hosts to `dist/agents/`.
+Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/`; most install directly, and `.mds` sources compile via `npm run build:mds` — command hosts to `dist/commands/`, agent generator hosts to `dist/agents/`, and reference modules in `src/assets/mds/` to `dist/skills/git/references/`.
 
 | Plugin | Purpose |
 |--------|---------|
@@ -89,6 +89,7 @@ devflow/
 │       ├── agents/         # 16 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       ├── rules/          # 13 rules (flat .md files)
 │       ├── commands/       # MDS command sources (hosts + partials in _partials/; 1 static .md)
+│       ├── mds/            # MDS reference modules (tracker/_github.mds, git/_references.mds → dist/skills/git/references/)
 │       └── scripts/hooks/  # Capture + memory + learning + ambient + proxy hooks (capture-prompt, capture-turn, capture-question, queue-append, memory-worker, background-memory-update [Stop-hook worker], learning-lock, session-start-memory, session-start-context, session-start-orchestrator, pre-compact-memory, preamble, ensure-proxy [SessionStart+UserPromptSubmit, registered/removed by addProxyHooks/removeProxyHooks], git-marker [sourced git-repo helper], get-mtime, hook-bootstrap, hook-log-init)
 │           └── assets/     # Static prose assets shipped with hooks (orchestrator-charter.md)
 ├── scripts/                # Dev tooling (build-mds.ts, bump-version.ts, update-golden.ts)
@@ -96,11 +97,15 @@ devflow/
 │   ├── helpers.ts          # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
 │   ├── seams/              # Command→agent input contract
 │   ├── goldens/            # Byte-equality against tests/fixtures/golden/
-│   ├── guards/             # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, extended-references
+│   ├── guards/             # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, guard-census
+│   ├── tracker/            # Tracker contract/mechanics split — containment oracle, byte budget
+│   ├── dynamic/            # Two-sided writer↔reader grammar seams
+│   ├── installer/          # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
 │   ├── integration/        # Real claude / tarball installs
 │   └── fixtures/
-│       ├── golden/         # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen through Phase 3)
-│       └── numeric-floors.json  # Hand-registered floor manifest — floors raise, never lower
+│       ├── golden/         # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen)
+│       ├── tracker/baseline/  # Byte copies of the pre-split tree — never regenerated
+│       └── numeric-floors.json  # Hand-registered ratchet manifest — floors raise, never lower; ceilings lower, never raise
 ├── docs/reference/         # Detailed reference documentation
 ├── .devflow/               # Per-project runtime data — local by default; EXCEPTION: features/ knowledge bases (index.md + {slug}/KNOWLEDGE.md) are tracked & shared via git (ensure-root-gitignore writes the carve-out)
 │   ├── docs/               # Project docs (reviews, design)
@@ -115,7 +120,7 @@ devflow/
 
 **Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/devflow:*/` (namespaced), Rules → `~/.claude/rules/devflow/` (flat, plugin-scoped), Scripts → `~/.devflow/scripts/`
 
-Compiled commands (`dist/commands/*.md` — output of `npm run build:mds`) are the deployed command artifacts installed under `~/.claude/commands/devflow/`. Compiled agents (`dist/agents/*.md`, from the same build) are the deployed artifacts for agents authored as MDS generator hosts; the installer resolves each declared agent dist-first with a `src/assets/agents/` fallback, and fails loudly naming both paths when neither has it.
+Compiled commands (`dist/commands/*.md` — output of `npm run build:mds`) are the deployed command artifacts installed under `~/.claude/commands/devflow/`. Compiled agents (`dist/agents/*.md`, from the same build) are the deployed artifacts for agents authored as MDS generator hosts; the installer resolves each declared agent dist-first with a `src/assets/agents/` fallback, and fails loudly naming both paths when neither has it. Generated skill references (`dist/skills/git/references/**`, the third destination of the same build) are the per-operation tracker mechanics and the cross-cutting documents the Git agent names; the installer overlays them onto the installed `devflow:git` skill directory.
 
 ## Development Loop
 
@@ -124,12 +129,14 @@ Compiled commands (`dist/commands/*.md` — output of `npm run build:mds`) are t
 vim src/assets/commands/code-review.mds     # Commands (MDS sources; .md for static commands)
 vim src/assets/agents/code.md              # Agents (hand-authored)
 vim src/assets/agents/git.mds              # Agents (MDS generator host → dist/agents/git.md)
+vim src/assets/mds/tracker/_github.mds      # Reference modules (→ dist/skills/git/references/)
 vim src/assets/skills/security/SKILL.md     # Skills
 vim src/assets/rules/security.md            # Rules
 
 # 2. Build
 # Skills, rules, and hand-authored agents: no build step — edits take effect on next install
-# Commands (.mds sources) → dist/commands/; agent generator hosts (.mds) → dist/agents/
+# Commands (.mds sources) → dist/commands/; agent generator hosts (.mds) → dist/agents/;
+# reference modules (src/assets/mds/**.mds) → dist/skills/git/references/
 npm run build:mds
 # Full build (TypeScript + MDS):
 npm run build
@@ -142,7 +149,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (compile every MDS host: command hosts in `src/assets/commands/` → `dist/commands/`, agent generator hosts in `src/assets/agents/` → `dist/agents/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`)
+**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (compile every MDS host: command hosts in `src/assets/commands/` → `dist/commands/`, agent generator hosts in `src/assets/agents/` → `dist/agents/`, reference modules in `src/assets/mds/` → `dist/skills/git/references/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`)
 
 The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rather than counted, and the build's own printed counts are asserted against it.
 
@@ -287,7 +294,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 ### Build System
 - `src/assets/` is the single source of truth, and **generated files never live in `src/`** — every compiled artifact lands under `dist/`
 - Skill and rule edits take effect on the next `node dist/cli.js init` with no rebuild required. Agents are mixed: a hand-authored `src/assets/agents/{name}.md` installs directly, while an MDS generator host `src/assets/agents/{name}.mds` must be compiled to `dist/agents/{name}.md` first (`npm run build:mds`). Both agent readers take their order from one owner, `agentSourceDirs()` in `src/core/assets.ts` (`dist/agents/`, then `src/assets/agents/`): the installer resolves each declared agent against that list, copies the first hit, and throws naming both paths and the build step when neither has it, while `loadShippedDefaults()` walks the same list first-wins and warns through `onWarning` when a registry-declared agent has no shipped default in either. The compiled artifact wins for a generated agent and nothing changes for the rest
-- Command sources (`.mds` and `.md` files in `src/assets/commands/`) compile to `dist/commands/` via `npm run build:mds`; run this after editing any `.mds` file
+- Command sources (`.mds` and `.md` files in `src/assets/commands/`) compile to `dist/commands/` via `npm run build:mds`; reference modules in `src/assets/mds/` compile to `dist/skills/git/references/` in the same run — one file per (module, operation) pair, named from the registry in `src/core/mds-variants.ts`; run this after editing any `.mds` file
 - Plugins are registry entries in DEVFLOW_PLUGINS (`src/core/plugins.ts`) — `skills`, `agents`, `rules`, and `commands` arrays declare what each plugin owns
 - Rules are flat `.md` files (no subdirectory nesting) in `src/assets/rules/{name}.md`; the installer validates against the registry
 

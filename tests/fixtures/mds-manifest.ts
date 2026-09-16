@@ -56,7 +56,7 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 11 partials in src/assets/commands/_partials/. A partial declares no
+ * The 12 partials in src/assets/commands/_partials/. A partial declares no
  * `output-dir:`, so the build skips it — it is imported by hosts instead.
  * The `_` prefix is the partial convention (and is refused by validateOutputName,
  * so a partial can never become an output filename by accident).
@@ -72,7 +72,26 @@ export const MDS_PARTIALS = [
   '_publication',
   '_roster',
   '_ticket_template',
+  '_tracker',
   '_wave',
+] as const;
+
+/**
+ * The hosts that adopt `_partials/_tracker.mds` (P2-S9). Named as a set, not a
+ * count, for the same reason as every other roster here: a count stays green when
+ * one adopter is dropped and another added in the same commit.
+ *
+ * These are the five commands that either parse issue references out of
+ * `$ARGUMENTS` or read a Git-agent Output block — the two things the partial's
+ * defines govern. A sixth command that starts doing either must join this list
+ * rather than restate the rule inline, which is the divergence P2-S9 removed.
+ */
+export const TRACKER_PARTIAL_ADOPTERS = [
+  'debug',
+  'dynamic-build',
+  'dynamic-plan',
+  'implement',
+  'plan',
 ] as const;
 
 /**
@@ -81,6 +100,30 @@ export const MDS_PARTIALS = [
  * src/assets/agents/git.mds → dist/agents/git.md.
  */
 export const MDS_GENERATOR_HOSTS = ['git'] as const;
+
+/**
+ * Reference modules: .mds sources under src/assets/mds/ that fan out into MANY
+ * output files instead of one. Two today:
+ *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
+ *     (kind 'fanout' — one file per entry of TRACKER_GITHUB_OPS)
+ *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
+ *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
+ *
+ * Named by repo-relative source path, not by basename, and deliberately NOT part
+ * of ALL_MDS_HOSTS: that roster exists because each of its entries becomes an
+ * output FILENAME, and a reference module's filenames come from its operation
+ * registry in src/core/mds-variants.ts. `_github` would not even pass
+ * validateOutputName — which is the point, and why the two sets are separate
+ * rather than one set with an exception.
+ *
+ * The emitted file set itself is not restated here: it is derived from
+ * TRACKER_GITHUB_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there
+ * is one roster, not a production copy and a test copy that can drift.
+ */
+export const MDS_REFERENCE_MODULES = [
+  'src/assets/mds/tracker/_github.mds',
+  'src/assets/mds/git/_references.mds',
+] as const;
 
 /**
  * Hand-authored files copied verbatim into dist/commands/. release.md inlines its
@@ -97,8 +140,22 @@ export const DIST_COMMAND_FILES: readonly string[] = [
   ...HAND_AUTHORED_COMMAND_FILES,
 ];
 
-/** Total hosts the build discovers and compiles: command hosts + generator hosts. */
+/**
+ * Every host basename that becomes an output FILENAME: command hosts + generator
+ * hosts. Reference modules are excluded by construction — see
+ * MDS_REFERENCE_MODULES.
+ */
 export const ALL_MDS_HOSTS: readonly string[] = [
   ...MDS_COMMAND_HOSTS,
   ...MDS_GENERATOR_HOSTS,
+];
+
+/**
+ * Total hosts the build DISCOVERS — everything declaring `output-dir:`, which is
+ * the number the build prints as "N host(s) to compile:".
+ */
+export const ALL_DISCOVERED_HOSTS: readonly string[] = [
+  ...MDS_COMMAND_HOSTS,
+  ...MDS_GENERATOR_HOSTS,
+  ...MDS_REFERENCE_MODULES,
 ];

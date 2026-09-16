@@ -6,7 +6,7 @@ Each ticket in a wave MUST use this structure. The wave scheduler agents read th
 ---
 
 **Wave:** N
-**Depends on:** #issue-number, #issue-number (or "none")
+**Depends on:** \{ISSUE_REF\}, \{ISSUE_REF\} (or "none")
 
 ---
 
@@ -53,7 +53,7 @@ When used with `/devflow:dynamic-plan`, open questions are collected into `DECIS
 
 ---
 
-**Note for wave scheduler:** The `Depends on:` field lists GitHub issue numbers this ticket must wait for. The `Wave: N` label is a human-readable hint; actual ordering is determined by reading the `Depends on` relationships. An agent reads all wave issues and reasons about the ready set — no topological sort algorithm is used.
+**Note for wave scheduler — `Depends on:` cardinality and grammar:** the field lists **zero or more** provider-canonical issue references this ticket must wait for, comma-separated, or the literal `none`. Each entry is one `\{ISSUE_REF\}`; under `github` an `\{ISSUE_REF\}` is `#`-prefixed, so a two-dependency ticket renders `Depends on: #\{n\}, #\{n\}`. Write the reference exactly as the tracker renders it — never a bare number, never a URL, never a title. The `Wave: N` label is a human-readable hint; actual ordering is determined by reading the `Depends on` relationships. An agent reads all wave issues and reasons about the ready set — no topological sort algorithm is used.
 @end
 
 @export ticket_body_template

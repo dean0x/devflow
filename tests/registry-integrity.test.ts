@@ -101,7 +101,7 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
    * Both are sources, so both must be claimed by a plugin.
    *
    * Used by the orphan assertion AND by the known-bad probe below, so the probe
-   * exercises the real collector rather than a shadow re-implementation (ADR-024).
+   * exercises the real collector rather than a shadow re-implementation (PF-018).
    */
   function collectAgentSourceNames(entries: readonly string[]): string[] {
     return entries

@@ -16,7 +16,7 @@
  * command never ships. Errors are reported with the mds::* code, message, and
  * source span for quick diagnosis.
  *
- * Two host kinds. The destination allowlist in src/core/mds-variants.ts tags each
+ * Three host kinds. The destination allowlist in src/core/mds-variants.ts tags each
  * directory with the host variant it selects, and resolveOutputDir hands that tag
  * back with the resolved path — so this script dispatches on a discriminant it
  * was given, never on a destination it re-derived:
@@ -40,11 +40,22 @@
  *     host — the shape every hand-authored agent has — silently loses its whole
  *     frontmatter and ships headerless with the build reporting success.
  *
- * Both strips run AFTER compileFile: the compiler emits a frontmatter block at
+ *   - Reference modules (`output-dir: dist/skills/git/references`, variant
+ *     `skill-refs`) carry ONE leading steering block and fan out: the stripped
+ *     body is a concatenation of per-operation sections, each introduced by a
+ *     `<!-- op: NAME -->` line, and the build writes one file per section to
+ *     `{output-dir}/{subdir}/{op}.md`. The op roster and the subdir come from the
+ *     VARIANT_MODULES registry in src/core/mds-variants.ts, never from the
+ *     module's basename — so `output-name:` is refused here, and a module absent
+ *     from the registry is refused rather than guessed at. The split is
+ *     bidirectional: a section for an unregistered op and a registered op with no
+ *     section both fail the build, as does a section with an empty body.
+ *
+ * All three strips run AFTER compileFile: the compiler emits a frontmatter block at
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
  * compilation unchanged and is removed from the compiled bytes.
  *
- * Dest safety: `output-dir` must resolve to one of the two allowlisted
+ * Dest safety: `output-dir` must resolve to one of the three allowlisted
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
  * non-canonical spelling, or a path that escapes the repo root is refused rather
  * than silently writing to an unexpected location. The emitted filename is
@@ -66,11 +77,15 @@
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
  *
  * Prune: after a clean build, every `.md` in dist/agents/ that no host emitted is
- * deleted (pruneOrphanAgents). That directory is gitignored and outranks
- * src/assets/agents/ in both the installer's resolve and loadShippedDefaults's
- * merge, so a file left there is installed in preference to the audited source on
- * every `devflow init`. The parity check in build.test.ts catches the same orphan
- * in CI, a commit later; this removes it on the machine that ran the build.
+ * deleted (pruneOrphanAgents), and the same sweep runs recursively over
+ * dist/skills/git/references/ (pruneOrphanReferences). dist/agents/ is gitignored
+ * and outranks src/assets/agents/ in both the installer's resolve and
+ * loadShippedDefaults's merge, so a file left there is installed in preference to
+ * the audited source on every `devflow init`; the references tree is gitignored
+ * too and is overlaid wholesale onto the installed skill, so a file left there
+ * installs as if the build still produced it. The parity check in build.test.ts
+ * catches the same orphan in CI, a commit later; this removes it on the machine
+ * that ran the build.
  *
  * Usage: npm run build:mds
  */
@@ -82,11 +97,18 @@ import { init, compileFile, isMdsError } from "@mdscript/mds";
 import {
   validateOutputName,
   resolveOutputDir,
+  expandVariants,
+  splitVariantSections,
   AGENTS_OUTPUT_DIR,
+  SKILL_REFS_OUTPUT_DIR,
+  VARIANT_MODULES,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
+  type VariantModule,
+  type VariantPair,
 } from "../src/core/mds-variants.js";
+import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -320,6 +342,44 @@ function stripGeneratorFrontmatter(compiled: string, sourcePath: string): string
   return promoted;
 }
 
+/**
+ * Strip the leading steering block from a compiled reference-module output.
+ *
+ * A reference module's block 1 steers the build exactly as a generator host's
+ * does, but what it must leave behind is the opposite shape: a skill reference
+ * ships as plain markdown with NO frontmatter, because it is read as prose by an
+ * agent that already has its own header.
+ *
+ * Both ends are verified, for the same reason stripGeneratorFrontmatter verifies
+ * both (PF-061):
+ *   - PRE: a leading block must exist — discovery found `output-dir:` in exactly
+ *     this block, so its absence means the compiler moved bytes it emits verbatim.
+ *   - POST: a SECOND block must NOT be what the slice exposes. An author copying
+ *     the generator-host shape writes two blocks out of habit; without this check
+ *     the second block ships as the opening lines of every emitted reference and
+ *     an agent reads `output-dir:` as content.
+ */
+function stripReferenceFrontmatter(compiled: string, sourcePath: string): string {
+  const rel = path.relative(ROOT, sourcePath);
+  const match = LEADING_BLOCK_RE.exec(compiled);
+  if (!match) {
+    throw new Error(
+      `${rel}: reference module output has no leading frontmatter block to strip`,
+    );
+  }
+
+  const body = compiled.slice(match[0].length);
+  if (/^---\r?\n/.test(body)) {
+    throw new Error(
+      `${rel}: reference module output has a SECOND frontmatter block — a reference module ` +
+      `declares exactly ONE leading block (the build's steering block), and everything after it ` +
+      `ships as plain markdown. A second block would be emitted as the opening lines of every ` +
+      `generated reference.`,
+    );
+  }
+  return body;
+}
+
 interface DiscoveryResult {
   hosts: HostEntry[];
   /** Total .mds files seen, including partials (files without output-dir:). */
@@ -458,6 +518,8 @@ function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath:
   switch (variant) {
     case "agents":
       return stripGeneratorFrontmatter(compiled, sourcePath);
+    case "skill-refs":
+      return stripReferenceFrontmatter(compiled, sourcePath);
     case "commands":
       return stripBuildKeys(compiled);
     default: {
@@ -469,13 +531,138 @@ function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath:
   }
 }
 
-/** Where a host will write, and how its compiled frontmatter will be treated. */
-interface HostPlan {
-  variant: HostVariant;
-  /** Resolved absolute destination directory. */
-  outAbs: string;
-  /** Resolved absolute destination file. */
-  dest: string;
+/** One file a reference module will emit: where it goes, and what it carries. */
+interface PlannedReference {
+  /** Resolved absolute destination. */
+  readonly dest: string;
+  /** The (module, op) pair whose section becomes this file's content. */
+  readonly pair: VariantPair;
+}
+
+/**
+ * Where a host will write, and how its compiled frontmatter will be treated.
+ *
+ * Discriminated on `variant`, because the two planning strategies do not produce
+ * the same shape: a one-file host has exactly one destination and no operation,
+ * while a `skill-refs` module has one destination PER operation and each is
+ * meaningless without the pair that fills it. A single flat record would have to
+ * express that as an optional field and an index-alignment convention, which the
+ * compiler cannot enforce — so materializeOutputs would compensate at runtime for
+ * a shape that should never have typechecked.
+ *
+ * The pairing is structural here: `PlannedReference` carries its dest and its
+ * pair in one object, so there is no parallel-array correspondence to maintain,
+ * and no arm can be read for a field the other arm owns. Callers that want the
+ * uniform "every file this host claims" view — the plan pass's claims loop, the
+ * contested filter, the prune's claimed set — go through destsOf().
+ */
+type HostPlan =
+  | {
+      readonly variant: Exclude<HostVariant, "skill-refs">;
+      /** Resolved absolute destination directory. */
+      readonly outAbs: string;
+      /** The single file this host emits, resolved absolute. */
+      readonly dest: string;
+    }
+  | {
+      readonly variant: "skill-refs";
+      /** Resolved absolute destination directory. */
+      readonly outAbs: string;
+      /** One entry per registered operation, in registry order. */
+      readonly outputs: readonly PlannedReference[];
+    };
+
+/**
+ * Every file a plan claims, whichever arm it is.
+ *
+ * The plan pass's contested-destination check is the one place that must see all
+ * three variants alike: a fanned-out file left outside it is a file two hosts
+ * could claim with nothing to notice. Deriving the uniform view here — rather
+ * than storing it on both arms — keeps the fan-out destinations inseparable from
+ * the pairs that fill them.
+ */
+function destsOf(plan: HostPlan): readonly string[] {
+  return plan.variant === "skill-refs" ? plan.outputs.map(o => o.dest) : [plan.dest];
+}
+
+/** The reference module registered for this host's source path, or null. */
+function referenceModuleFor(host: HostEntry): VariantModule | null {
+  const rel = path.relative(ROOT, host.file).split(path.sep).join("/");
+  return VARIANT_MODULES.find(m => m.source === rel) ?? null;
+}
+
+/**
+ * Plan a one-file host: the `commands` and `agents` variants, which emit exactly
+ * one artifact named after the source (or after its `output-name:`).
+ */
+function planSingleFile(
+  host: HostEntry,
+  rel: string,
+  variant: Exclude<HostVariant, "skill-refs">,
+  outAbs: string,
+): HostPlan {
+  // Filename safety: the name that will be emitted is validated before it is
+  // joined onto the destination, so no host can write outside outAbs.
+  const declaredName = host.outputName ?? host.basename;
+  const nameResult = validateOutputName(declaredName);
+  if (!nameResult.ok) {
+    throw outputNameRefusal(rel, declaredName, nameResult.error);
+  }
+
+  return { variant, outAbs, dest: path.join(outAbs, `${nameResult.value}.md`) };
+}
+
+/**
+ * Plan a reference module: the `skill-refs` variant, which fans one source out
+ * into one artifact per registered operation.
+ *
+ * A separate function from planSingleFile because it is a separate strategy, not
+ * a branch of one: its names come from a registry rather than from the source,
+ * it has two refusals the one-file path has no analogue for, and it produces a
+ * different plan arm. Inlining it beside the single-file path made one function
+ * carry two return shapes and every reader pay for both.
+ */
+function planReferenceModule(host: HostEntry, rel: string, outAbs: string): HostPlan {
+  // A reference module's emitted names come from the op registry, never from
+  // its own basename — `_github` would not even pass validateOutputName. So
+  // output-name: has nothing to name here and is refused rather than ignored:
+  // a key that is read on two variants and silently dropped on the third is
+  // exactly the authoring trap the empty-value refusal above exists to avoid.
+  if (host.outputName !== null) {
+    throw new Error(
+      `${rel}: output-name: is not valid on a reference module — the emitted filenames come ` +
+      `from the module's operation registry in src/core/mds-variants.ts. Remove the key.`,
+    );
+  }
+
+  const mod = referenceModuleFor(host);
+  if (mod === null) {
+    throw new Error(
+      `${rel}: declares output-dir '${SKILL_REFS_OUTPUT_DIR}' but is not registered in ` +
+      `VARIANT_MODULES (src/core/mds-variants.ts). A reference module's outputs come from that ` +
+      `registry; there is no basename fallback. Add the module, or change its output-dir.`,
+    );
+  }
+
+  const expansion = expandVariants([mod]);
+  if (!expansion.ok) {
+    throw new Error(`${rel}: variant expansion refused — ${JSON.stringify(expansion.error)}`);
+  }
+
+  const outputs = expansion.value.map(pair => ({
+    dest: path.resolve(outAbs, ...pair.relPath.split("/")),
+    pair,
+  }));
+  // Belt-and-braces containment: every segment was validated by
+  // validateOutputName, so this cannot fire — which is why it is an assertion
+  // rather than a diagnosis. A path that escapes outAbs must never be written.
+  for (const { dest } of outputs) {
+    if (!dest.startsWith(outAbs + path.sep)) {
+      throw new Error(`${rel}: expanded destination '${dest}' escapes '${outAbs}'`);
+    }
+  }
+
+  return { variant: "skill-refs", outAbs, outputs };
 }
 
 /**
@@ -486,6 +673,11 @@ interface HostPlan {
  * hosts, and detecting it after a write has happened is too late to prevent the
  * overwrite it describes. Every refusal is thrown so main() aggregates it and
  * exits once.
+ *
+ * Dispatch only: the variant travels with the resolved destination, and each
+ * variant's strategy owns its own refusals and its own plan arm. The `never`
+ * default is the same friction stripFrontmatterFor imposes — a fourth variant
+ * cannot silently inherit a strategy written for another.
  */
 function planHost(host: HostEntry): HostPlan {
   const rel = path.relative(ROOT, host.file);
@@ -498,44 +690,101 @@ function planHost(host: HostEntry): HostPlan {
   }
   const { variant, abs: outAbs } = dirResult.value;
 
-  // Filename safety: the name that will be emitted is validated before it is
-  // joined onto the destination, so no host can write outside outAbs.
-  const declaredName = host.outputName ?? host.basename;
-  const nameResult = validateOutputName(declaredName);
-  if (!nameResult.ok) {
-    throw outputNameRefusal(rel, declaredName, nameResult.error);
+  switch (variant) {
+    case "skill-refs":
+      return planReferenceModule(host, rel, outAbs);
+    case "commands":
+    case "agents":
+      return planSingleFile(host, rel, variant, outAbs);
+    default: {
+      const unhandled: never = variant;
+      throw new Error(`${rel}: unhandled host variant '${String(unhandled)}'`);
+    }
+  }
+}
+
+/** One file the build is about to write: where it goes and what it holds. */
+interface PlannedOutput {
+  dest: string;
+  content: string;
+}
+
+/**
+ * Turn a host's stripped compiled body into the file(s) it emits.
+ *
+ * For the one-file variants the body IS the artifact. For a reference module the
+ * body is a concatenation of per-operation sections, split by the pure core
+ * splitter — so the build never parses the module itself and the bidirectional
+ * op-set check (every registered op has a section; every section is registered)
+ * lives in one testable place.
+ *
+ * The plan's discriminant does the work that three runtime compensations used to:
+ * the one-file arm hands over its single `dest` (no unchecked index), and the
+ * fan-out arm's `outputs` carry each dest beside the pair that fills it (no
+ * defaulted pair list, no index correspondence to trust).
+ *
+ * The split keeps that pairing rather than breaking it: each destination is
+ * handed TO the splitter and comes back carrying its own content, so this
+ * function performs no lookup and asserts nothing about one. The alternative —
+ * a keyed result read back per op — is partial in the type however total it is
+ * in fact, which is what the non-null assertion here used to paper over.
+ */
+function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): PlannedOutput[] {
+  if (plan.variant !== "skill-refs") {
+    return [{ dest: plan.dest, content: body }];
   }
 
-  return { variant, outAbs, dest: path.join(outAbs, `${nameResult.value}.md`) };
+  const rel = path.relative(ROOT, host.file);
+  const split = splitVariantSections(
+    body,
+    plan.outputs.map(({ dest, pair }) => ({ dest, op: pair.op })),
+  );
+  if (!split.ok) {
+    throw new Error(
+      `${rel}: section split refused — ${JSON.stringify(split.error)}. Each operation's section ` +
+      `is introduced by a '<!-- op: NAME -->' line and must carry a non-empty body.`,
+    );
+  }
+
+  return split.value.map(({ dest, content }) => ({ dest, content }));
 }
 
 async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {
-  const { variant, outAbs, dest } = plan;
+  const { variant, outAbs } = plan;
 
   // Auto-create only the final destination leaf.
   fs.mkdirSync(outAbs, { recursive: true });
 
   const result = await compileFile(host.file);
-  // Generator hosts shed their whole steering block; command hosts shed only the
-  // output-dir: key so every other byte of their frontmatter is preserved.
+  // Generator hosts shed their whole steering block; reference modules shed it
+  // too and must expose no second block; command hosts shed only the build-owned
+  // keys so every other byte of their frontmatter is preserved.
   const cleaned = stripFrontmatterFor(variant, result.output, host.file);
+  const outputs = materializeOutputs(host, plan, cleaned);
 
   // Atomic write: write to a temp file then rename into place so concurrent
   // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
   // observe a missing file between the old and new content. (avoids PF-011)
   // Clean up the .tmp on rename failure so no orphan is left behind.
-  const tmp = tempPathFor(dest);
-  fs.writeFileSync(tmp, cleaned, "utf-8");
-  try {
-    fs.renameSync(tmp, dest);
-  } catch (e) {
-    fs.rmSync(tmp, { force: true });
-    throw e;
+  for (const { dest, content } of outputs) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const tmp = tempPathFor(dest);
+    fs.writeFileSync(tmp, content, "utf-8");
+    try {
+      fs.renameSync(tmp, dest);
+    } catch (e) {
+      fs.rmSync(tmp, { force: true });
+      throw e;
+    }
   }
+
+  const destLabel = outputs.length === 1
+    ? path.relative(ROOT, outputs[0].dest)
+    : `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`;
 
   return {
     source: path.relative(ROOT, host.file),
-    dest: path.relative(ROOT, dest),
+    dest: destLabel,
     warnings: result.warnings,
   };
 }
@@ -562,13 +811,63 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  * @returns Repo-relative paths removed.
  */
 function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
-  const agentsAbs = path.resolve(ROOT, AGENTS_OUTPUT_DIR);
+  return pruneOrphans(path.resolve(ROOT, AGENTS_OUTPUT_DIR), claimed, false);
+}
+
+/**
+ * Delete every `.md` under dist/skills/git/references/ that no reference module
+ * emitted.
+ *
+ * Same hazard as dist/agents/, one directory over: the tree is gitignored and is
+ * what the installer overlays into the user's skill directory, so a file left
+ * behind — a renamed op's old output, a provider directory that left the
+ * registry — is installed as if the build still produced it. Recursion is not
+ * optional here: the tree is nested `tracker/{provider}/{op}.md`, and a flat
+ * sweep would leave every orphan exactly where the orphans live.
+ */
+function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, SKILL_REFS_OUTPUT_DIR), claimed, true);
+}
+
+/**
+ * Shared prune: remove the `.md` files under `dirAbs` that this build did not
+ * write.
+ *
+ * Only `.md` is considered: a concurrent build's `<dest>.<pid>.tmp` staging file
+ * lives in these directories and deleting it would fail that build's rename.
+ * Empty directories are left in place — removing them races the same concurrent
+ * build's mkdir, and an empty directory installs nothing.
+ *
+ * The descent is bounded like walkMds's, and for the same reason: an unbounded
+ * recursion over a directory the build itself owns would spin on a symlink loop
+ * instead of failing. The bound is MAX_REFERENCE_SWEEP_DEPTH, owned by
+ * src/core/reference-sweep.ts and shared with the installer's sweep of the same
+ * generated reference tree, so the two walkers cannot drift apart on how deep
+ * the tree may be or on which `depth` is the breach. It is generous — the
+ * deepest planned output sits at `tracker/{provider}/{op}.md`, two levels down.
+ * Here the breach throws, because a generated tree that deep is a build bug and
+ * dist/ is the build's own to fail; the installer's sweep reports it through its
+ * own failure channel instead. Neither passes it over.
+ */
+function pruneOrphans(
+  dirAbs: string,
+  claimed: ReadonlySet<string>,
+  recursive: boolean,
+  depth = 0,
+): string[] {
+  if (depth > MAX_REFERENCE_SWEEP_DEPTH) {
+    throw new Error(
+      `${path.relative(ROOT, dirAbs) || dirAbs}: prune descent exceeds ` +
+      `${MAX_REFERENCE_SWEEP_DEPTH} levels — a generated output tree should ` +
+      `never be this deep.`,
+    );
+  }
 
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(agentsAbs, { withFileTypes: true });
+    entries = fs.readdirSync(dirAbs, { withFileTypes: true });
   } catch (err) {
-    // Absent until a generator host exists — nothing to prune, not a failure.
+    // Absent until the first host of this kind exists — nothing to prune.
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return [];
     throw err;
@@ -576,8 +875,12 @@ function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
 
   const pruned: string[] = [];
   for (const entry of entries) {
+    const full = path.join(dirAbs, entry.name);
+    if (entry.isDirectory()) {
+      if (recursive) pruned.push(...pruneOrphans(full, claimed, recursive, depth + 1));
+      continue;
+    }
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    const full = path.join(agentsAbs, entry.name);
     if (claimed.has(full)) continue;
     fs.rmSync(full, { force: true });
     pruned.push(path.relative(ROOT, full));
@@ -631,11 +934,13 @@ async function main(): Promise<void> {
   for (const host of hosts) {
     try {
       const plan = planHost(host);
-      const claimants = claims.get(plan.dest);
-      if (claimants === undefined) {
-        claims.set(plan.dest, [host]);
-      } else {
-        claimants.push(host);
+      for (const dest of destsOf(plan)) {
+        const claimants = claims.get(dest);
+        if (claimants === undefined) {
+          claims.set(dest, [host]);
+        } else {
+          claimants.push(host);
+        }
       }
       planned.push({ host, plan });
     } catch (err) {
@@ -660,7 +965,7 @@ async function main(): Promise<void> {
   }
 
   for (const { host, plan } of planned) {
-    if (contested.has(plan.dest)) continue;
+    if (destsOf(plan).some(dest => contested.has(dest))) continue;
     try {
       const outcome = await compileHost(host, plan);
       outcomes.push(outcome);
@@ -692,9 +997,13 @@ async function main(): Promise<void> {
   }
 
   // Every planned host was written (a refusal would have exited above), so the
-  // claimed set is complete and anything else in dist/agents/ is stale.
-  for (const rel of pruneOrphanAgents(new Set(planned.map(p => p.plan.dest)))) {
+  // claimed set is complete and anything else in these trees is stale.
+  const claimedDests = new Set(planned.flatMap(p => destsOf(p.plan)));
+  for (const rel of pruneOrphanAgents(claimedDests)) {
     console.log(`  pruned:   ${rel} (no generator host)`);
+  }
+  for (const rel of pruneOrphanReferences(claimedDests)) {
+    console.log(`  pruned:   ${rel} (no reference module)`);
   }
 
   // Copy 1 hand-authored command file verbatim into dist/commands/

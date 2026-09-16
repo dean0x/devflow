@@ -95,7 +95,7 @@ For detailed implementation:
 | Reference | Content |
 |-----------|---------|
 | `references/report-template.md` | Full report template with all sections |
-| `references/patterns.md` | Diff commands (lines 29–113) and PR comment API integration (lines 117–181) |
+| `references/patterns.md` | Diff commands, report file naming, and where PR publication happens |
 | `references/violations.md` | Review process anti-patterns and violations |
 
 ---
