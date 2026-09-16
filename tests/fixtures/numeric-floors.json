@@ -210,7 +210,15 @@
       "pattern": "const BUDGET_GIT_MD = 55_750;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of dist/agents/git.md — preloaded on every Git spawn, so its size is a per-spawn cost. Originally derived as 65_677 baseline − 9_813 projected cut and pinned at 55_900 (see the constant's own JSDoc for the term-by-term formula). LOWERED to 55_750 after the Mechanics-pointer condensing pass (measured 55_664, headroom 86) — a ceiling is a regression alarm that is re-derived only DOWNWARD after a pass that actually cut the artifact; lowering it re-pins this value and this pattern together in the same commit. May never be raised. §14.5: no threshold is lowered, and a budget raised to fit the artifact is not a budget."
+      "description": "PHASE-2 BASE, no longer the live gate — budget-git-md-p3 below is. Max characters of dist/agents/git.md at the Phase-2 boundary: derived as 65_677 baseline − 9_813 projected cut, pinned at 55_900, then LOWERED to 55_750 after the Mechanics-pointer condensing pass (measured 55_664, headroom 86). Kept registered because the Phase-3 ceiling is COMPUTED from it (BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + BUDGET_GIT_MD_P3 − BUDGET_GIT_MD), so lowering this value would silently lower the Phase-3 loaded-set gate too. Still may never be raised. §14.5: no threshold is lowered, and a budget raised to fit the artifact is not a budget."
+    },
+    {
+      "id": "budget-git-md-p3",
+      "ceiling": 58870,
+      "pattern": "const BUDGET_GIT_MD_P3 = 58_870;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "Max characters of dist/agents/git.md for PHASE 3 [DR-13(b)] — the live git.md gate. A NEW entry, not a raise of budget-git-md: a ceiling may only be re-derived downward, so the Phase-2 value stays pinned and this one is derived from it as 55_750 + 3_120 (measured 58_776, headroom 94 — the same deliberate thinness), where 3_120 is the MEASURED growth of the preamble block. The 3_000 is itemised clause by clause in the constant's own JSDoc: the four-step provider resolution order, ref-grammar corroboration with its prohibition on reading the remote, the project-key chain, the provider-mismatch guard, four DEGRADED arms and the input-contract section list, less the retired Phase-2 scope sentence and two de-duplicated rules. [DR-13(c)]'s _resolution.md escape was measured and rejected: moving text into a per-op-summed reference is NET ZERO on the loaded-set gate, and the only classification that would reduce it treats a containment control as an optional load (PF-027). The revision is spendable on the preamble ONLY, and mechanically so: the portion of git.md outside the preamble is byte-identical across this change (52_279 ch), and a companion gate holds that portion to the UNRAISED BUDGET_GIT_MD minus PREAMBLE_CHARS_P2, so growth in an operation section still goes red against Phase 2's number. This is the ONLY new literal — BUDGET_LOADED_SET_P3 is computed from it, so both Phase-3 gates ratchet on this one number. May be LOWERED, never raised."
     },
     {
       "id": "budget-skill-md",
@@ -226,7 +234,7 @@
       "pattern": "const BUDGET_LOADED_SET = 77_824;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case tracker spawn (git.md + git SKILL.md + worktree-support SKILL.md), pinned to the PRE-SPLIT measurement. The split only pays for itself while the always-loaded half stays smaller than the monolith it replaced, so this is the one number the artifact must reach rather than define. Deliberately a frozen historical literal, never recomputed from the tree. May be LOWERED, never raised."
+      "description": "PHASE-0 BASE of the live loaded-set gate. Max characters of the worst-case tracker spawn (git.md + git SKILL.md + worktree-support SKILL.md), pinned to the PRE-SPLIT measurement — the one number the artifact must reach rather than define. Phase 3's gate is BUDGET_LOADED_SET_P3, which is COMPUTED as this value plus the git.md revision and nothing else, so it carries no literal of its own and is not registered separately: raising it requires raising budget-git-md-p3, which is. This value stays frozen and may be LOWERED, never raised; lowering it lowers the Phase-3 gate with it."
     },
     {
       "id": "preamble-max-lines",

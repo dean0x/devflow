@@ -60,8 +60,80 @@ import { collectTrackerNamingLines, resolveAgentSource } from '../helpers.js';
  * tests/fixtures/numeric-floors.json. Lowering re-pins that entry's value AND its
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
+ *
+ * PHASE 3: no longer the live gate — BUDGET_GIT_MD_P3 below is, and this value is
+ * the DECLARED BASE it is re-derived from. Kept for that reason rather than out of
+ * sentiment: the Phase-3 ceiling is meaningless without the number it moved from,
+ * and a reviewer reads the delta rather than a fresh figure. Recorded in the
+ * four-shape table as the Phase-2 row.
  */
 const BUDGET_GIT_MD = 55_750;
+
+/**
+ * THE PHASE-3 git.md CEILING [DR-13(b)] — the gate, with BUDGET_GIT_MD above as
+ * its declared base.
+ *
+ * 55_750 + 3_120 = 58_870, measured 58_776 (headroom 94 — the same deliberate
+ * thinness Phase 2 chose, so the next content addition must again fund itself).
+ * The 3_120 is the MEASURED growth of the preamble block, not an estimate: the
+ * portion of git.md OUTSIDE the preamble is byte-identical across this change
+ * (52_279 ch before and after), which is why the companion gate below can keep
+ * holding that portion to the UNRAISED Phase-2 number.
+ *
+ * WHAT THE 3_000 BUYS, line by line. Phase 2's preamble resolved the provider
+ * MANIFEST-ONLY and read no configuration file; Phase 3 makes the slot real, and
+ * every clause below is a control with no mechanical backstop anywhere else:
+ *   + the four-step resolution order (per-repo key → ref grammar → manifest → github)
+ *   + ref-grammar corroboration, INCLUDING the explicit prohibition on reading the
+ *     remote or the PR host — the rule that would otherwise disable the feature for
+ *     every user it targets (OD-9's corrected condition)
+ *   + the project-key resolution chain and its shape gate
+ *   + the provider-mismatch guard (P3a-S14) — the precondition for preserving the
+ *     configuration file across an uninstall (OD-15's reversal condition)
+ *   + the unreadable-file arm, the `# UNRESOLVED:` sentinel arm, the
+ *     `tracker not configured` arm and the `ambiguous issue reference` arm
+ *   + the `## Tracker input contract` section list and its absent⇒default rule
+ *   − the retired `**Phase scope:** manifest-only` sentence
+ *   − one statement each of the mechanics-absent rule and the provider-neutral
+ *     value, which Phase 2 stated three times and twice respectively
+ *
+ * WHY A NEW CONSTANT AND NOT A RAISED ONE. A ceiling may only be re-derived
+ * DOWNWARD (§14.5), so BUDGET_GIT_MD is not touched: it stays as the Phase-2
+ * measurement AND as the base this value is computed from, which is what keeps it
+ * load-bearing rather than a tombstone. The escape §14.10 offers instead of a new
+ * number — [DR-13(c)]'s `references/tracker/_resolution.md` — was measured and
+ * REJECTED, and the arithmetic is recorded here because it is not obvious:
+ * moving text into a per-op-summed reference is NET ZERO on the loaded-set gate
+ * (git.md loses the bytes, `worst` gains them), and the only classification that
+ * would have reduced it — a cross-cutting reference RECORDED but not gated — is
+ * the one classification these clauses cannot honestly take. A mismatch guard
+ * that decides whether a tracker call happens is a containment control, and
+ * PF-027 is precisely the rule that a containment control is never a file the
+ * spawn might not have loaded.
+ *
+ * Registered as a NEW `ceilings` entry (`budget-git-md-p3`). It is the ONLY new
+ * literal: the loaded-set companion below is COMPUTED from this number, so both
+ * gates ratchet on one registered value.
+ *
+ * WHAT STOPS THIS BEING A BLANK CHEQUE. The revision is spendable ONLY on the
+ * preamble, and that is mechanical rather than a promise: PREAMBLE_CHARS_P2 below
+ * lets the non-preamble portion of git.md be gated against the UNRAISED
+ * BUDGET_GIT_MD, so growth anywhere else in the file is still measured against
+ * Phase 2's number with Phase 2's 86 ch of headroom.
+ */
+const BUDGET_GIT_MD_P3 = 58_870;
+
+/**
+ * The provider-resolution preamble's size at the PHASE-2 boundary, measured on
+ * the compiled agent at commit e66ef30: 3_385 ch / 29 lines.
+ *
+ * A historical measurement, in the same class as BUDGET_LOADED_SET's Phase-0
+ * capture: it exists so `BUDGET_GIT_MD − PREAMBLE_CHARS_P2` is a real allowance
+ * for everything OUTSIDE the preamble, rather than a number someone chose. That
+ * subtraction is what turns the Phase-3 revision from "git.md may be bigger" into
+ * "the preamble may be bigger, and nothing else may be".
+ */
+const PREAMBLE_CHARS_P2 = 3_385;
 
 /**
  * 9_204 − 2_604 = 6_600.
@@ -91,7 +163,42 @@ const BUDGET_SKILL_MD = 6_600;
  */
 const BUDGET_LOADED_SET = 77_824;
 
-/** AC-2.5 [DR-13(a)] — promoted from a handoff deliverable to an assertion. */
+/**
+ * THE PHASE-3 loaded-set ceiling — DERIVED, never typed.
+ *
+ * `BUDGET_LOADED_SET` is `PRELOADED` as it stood at Phase 0, and `PRELOADED`
+ * CONTAINS git.md. So the moment the git.md component is re-derived upward, the
+ * loaded-set total has been re-derived by the same delta whether or not anyone
+ * writes it down — §14.10's Phase-3 row revises "only the git.md component",
+ * which fixes the OTHER components (SKILL.md, worktree-support) and cannot
+ * arithmetically leave the sum alone. Phase 2 left 105 ch of headroom here, so
+ * the term was always going to bind first; the plan's own byte-budget row
+ * anticipated the git.md gate going red and did not carry the consequence
+ * through to this one.
+ *
+ * Computed rather than pinned, and that is the whole safeguard: this ceiling can
+ * rise by EXACTLY the git.md revision and by nothing else. Every other term —
+ * both SKILL.md components, `max_op`, `worst`, the zero `_mcp.md` term — stays
+ * pinned to its Phase-0 measurement, so growth anywhere outside the preamble is
+ * still red, and there is no second literal anyone could walk up on its own.
+ *
+ * NOT registered in the ratchet manifest, because there is no literal to grep:
+ * `budget-git-md-p3` is the one registered number and it governs both gates.
+ */
+const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_MD);
+
+/**
+ * AC-2.5 [DR-13(a)] — promoted from a handoff deliverable to an assertion.
+ *
+ * KEPT AT 40 THROUGH PHASE 3, and deliberately so. §14.10 [DR-13] proposed
+ * raising it to 70 for "the honest number for P3a-S13 + P3a-S14's additions" —
+ * the re-derivation says that estimate was wrong in the safe direction: the
+ * Phase-3 preamble measures 34 lines against this ceiling of 40. A `<= 70`
+ * assertion would therefore be strictly WEAKER than the one already in place,
+ * bought nothing, and cost the one bound that limits how much always-loaded
+ * prose the next phase may add. A ceiling is re-derived downward or not at all,
+ * and 40 already holds.
+ */
 const PREAMBLE_MAX_LINES = 40;
 
 /**
@@ -676,16 +783,56 @@ describe('byte budget: the round-trip term (recorded)', () => {
 // ---------------------------------------------------------------------------
 
 describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
-  it('chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
+  it('chars(dist/agents/git.md) <= BUDGET_GIT_MD_P3', () => {
     // The always-loaded half of the split. The only legitimate way back under this
     // line is to move text out of the agent — never to raise the constant.
     expect(
       gitMd.chars,
-      `dist/agents/git.md is ${gitMd.chars} ch, budget ${BUDGET_GIT_MD} ch ` +
-      `(over by ${gitMd.chars - BUDGET_GIT_MD}). Move the mechanics into the operation's ` +
-      `generated reference. Do NOT raise BUDGET_GIT_MD — §14.5: no threshold is lowered, and a ` +
+      `dist/agents/git.md is ${gitMd.chars} ch, budget ${BUDGET_GIT_MD_P3} ch ` +
+      `(over by ${gitMd.chars - BUDGET_GIT_MD_P3}). Move the mechanics into the operation's ` +
+      `generated reference. Do NOT raise BUDGET_GIT_MD_P3 — §14.5: no threshold is lowered, and a ` +
       `budget raised to meet the artifact measures nothing.`,
-    ).toBeLessThanOrEqual(BUDGET_GIT_MD);
+    ).toBeLessThanOrEqual(BUDGET_GIT_MD_P3);
+  });
+
+  it('★ everything OUTSIDE the preamble still fits the UNRAISED Phase-2 budget', () => {
+    // This is what makes the Phase-3 revision honest rather than a blank cheque.
+    // The revision was granted for the provider-resolution preamble; this asserts
+    // it can be SPENT nowhere else. The allowance is the Phase-2 ceiling minus the
+    // Phase-2 preamble measurement — neither number raised — so a future commit
+    // that grows an operation section and reaches for BUDGET_GIT_MD_P3's headroom
+    // goes red here while the file-level gate still passes.
+    const preambleChars = preambleBlock(GIT_AGENT.content).length;
+    const nonPreamble = gitMd.chars - preambleChars;
+    const allowance = BUDGET_GIT_MD - PREAMBLE_CHARS_P2;
+    expect(
+      preambleChars,
+      'the preamble measured 0 ch — the split below would attribute the whole file to the ' +
+      'non-preamble term and pass for the wrong reason',
+    ).toBeGreaterThan(PREAMBLE_CHARS_P2);
+    expect(
+      nonPreamble,
+      `git.md outside the preamble is ${nonPreamble} ch against the unraised Phase-2 allowance of ` +
+      `${allowance} ch (BUDGET_GIT_MD ${BUDGET_GIT_MD} − PREAMBLE_CHARS_P2 ${PREAMBLE_CHARS_P2}), ` +
+      `over by ${nonPreamble - allowance}. The Phase-3 revision is for the preamble ONLY. Text ` +
+      `added to an operation section must still fund itself, exactly as it had to in Phase 2.`,
+    ).toBeLessThanOrEqual(allowance);
+  });
+
+  it('the Phase-3 ceiling is a re-derivation of the Phase-2 one, not a free number', () => {
+    const delta = BUDGET_GIT_MD_P3 - BUDGET_GIT_MD;
+    expect(delta, 'the Phase-3 ceiling may not sit below the Phase-2 one').toBeGreaterThan(0);
+    expect(
+      delta,
+      `the Phase-3 revision is ${delta} ch and must not exceed the preamble it bought ` +
+      `(${preambleBlock(GIT_AGENT.content).length} ch). A revision larger than the block it was ` +
+      `granted for is a revision spent somewhere it was not granted.`,
+    ).toBeLessThanOrEqual(preambleBlock(GIT_AGENT.content).length);
+    expect(
+      BUDGET_LOADED_SET_P3 - BUDGET_LOADED_SET,
+      'the loaded-set ceiling must move by EXACTLY the git.md revision — any other delta means a ' +
+      'second term was relaxed without saying so',
+    ).toBe(delta);
   });
 
   it('chars(skills/git/SKILL.md) <= BUDGET_SKILL_MD', () => {
@@ -698,7 +845,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     ).toBeLessThanOrEqual(BUDGET_SKILL_MD);
   });
 
-  it('the worst-case tracker spawn <= BUDGET_LOADED_SET', () => {
+  it('the worst-case tracker spawn <= BUDGET_LOADED_SET_P3', () => {
     // worst = preloaded set
     //       + 0                                    /* _mcp.md, GitHub path */
     //       + max_op chars(tracker/github/{op}.md)
@@ -726,9 +873,12 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       total,
       `worst-case tracker spawn is ${total} ch (preloaded ${PRELOADED} + max_op ${largest.value} ` +
       `[${largest.op}] + worst one-spawn load ${worst.value} [${worst.op}]), budget ` +
-      `${BUDGET_LOADED_SET} ch. The split only pays for itself while the always-loaded half ` +
-      `stays smaller than the references it adds back; Do NOT raise BUDGET_LOADED_SET.`,
-    ).toBeLessThanOrEqual(BUDGET_LOADED_SET);
+      `${BUDGET_LOADED_SET_P3} ch (= the Phase-0 ${BUDGET_LOADED_SET} plus the git.md revision, ` +
+      `and nothing else). The split only pays for itself while the always-loaded half stays ` +
+      `smaller than the references it adds back. Do NOT raise BUDGET_LOADED_SET_P3 — it is not a ` +
+      `literal: it is computed from BUDGET_GIT_MD_P3, so raising it means raising a ratcheted ` +
+      `ceiling and saying what the extra bytes bought.`,
+    ).toBeLessThanOrEqual(BUDGET_LOADED_SET_P3);
   });
 });
 

@@ -34,9 +34,11 @@ The orchestrator provides:
 
 Resolve the tracker provider **once per spawn, before any operation** — never per op, never inside a loop.
 
+- **Resolution order, exactly this, first hit wins:** (1) the `tracker` key in the project's `.devflow/config.json` — authoritative when present; (2) **repo ref-grammar corroboration**; (3) `~/.devflow/manifest.json` key `features.tracker.provider`; (4) `github`.
 - **Normalise `TRACKER_PROVIDER`:** trim → strip one pair of surrounding quotes → if any character falls outside `[A-Za-z]`, REJECT → ASCII-lowercase → require exact membership in `\{github, jira, linear\}`. **Reject, never repair:** no fuzzy match, no substring search, no salvaging a prefix.
 - **Select, never concatenate:** the validated token selects a hardcoded directory from the static map below. It is never joined into a path, and no path is ever composed from an unvalidated value.
-- **Phase scope:** the slot resolves **manifest-only** and defaults to `github`. No per-repo key, no reference-grammar corroboration and no tracker-configuration file is read yet.
+- **Ref-grammar corroboration — the only signal is whose issue grammar this repo's history speaks.** **The remote, the hosting platform and the PR host are NOT signals; a rule that reads them is WRONG and must never be implemented:** PR hosting stays on GitHub under every provider, so such a condition holds for essentially every non-github user and would disable the feature for exactly the users it serves. Scan bounded recent history (`--max-count=200`) for closing refs: a `KEY-N` grammar at **≥3 occurrences AND ≥60% share** corroborates that provider; refs of the github grammar with **zero** qualifying `KEY-N` refs resolve `github`. Name the deciding signal on the status line.
+- **Project key:** explicit ref in `$ARGUMENTS` → this repo's git history → the global configuration file → the documented neutral default. Shape-gate every step with `^[A-Za-z][A-Za-z0-9_]\{0,9\}$`; git-history strings are **UNTRUSTED** — the `learn-conventions` operation's UNTRUSTED-strings block governs them here too. An explicit ref is authoritative **for that op only** and is **never written back**; a conflict between steps is reported **once** on the `- **Tracker**:` line, never silently reconciled.
 
 | Token | Mechanics directory |
 |---|---|
@@ -45,20 +47,23 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 | `linear` | `tracker/linear/` |
 
 **Neutral values (ADR-007 discipline — a missing artifact degrades to a neutral value, never to a fallback path):**
-- `TRACKER_PROVIDER` absent → `github`. Silent: no DEGRADED, no file read, no spawn.
-- `TRACKER_PROVIDER` = `github`, default or chosen → silent in exactly the same way; the GitHub path emits no tracker status line at all.
-- Token fails normalisation → `TRACEABILITY: DEGRADED (unknown tracker provider)`; continue per D4, and never substitute a repaired token.
-- Generated mechanics absent **for an operation that names them** → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`; continue per D4. An operation that names no mechanics file has none to be missing, and never emits this line.
+- Absent, or resolved `github` — default or chosen → silent: no DEGRADED, no file read, no spawn, and **no tracker status line at all**. Under any other provider, add `- **Tracker**: \{provider\} (\{winning source\}) | DEGRADED (\{reason\})` beside `- **Conventions**:` in `### Traceability` — additive, exactly one rendering, `(\{n\} unresolved)` on first use.
+- Token fails normalisation, or the `.devflow/config.json` value is outside the map → `TRACEABILITY: DEGRADED (unknown tracker provider)`; continue down the resolution order, and never substitute a repaired token.
+- Generated mechanics absent **for an operation that names them** → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)` and **no tracker call**. File presence in the installed skill directory is the authoritative signal; **NEVER fabricate provider mechanics for an absent generated reference.** An operation that names no mechanics file has none to be missing and never emits this line.
+- No usable key or site under a non-github provider → `TRACEABILITY: DEGRADED (tracker not configured)`.
+- A bare number as an issue reference under a non-github provider → `TRACEABILITY: DEGRADED (ambiguous issue reference)`.
 
 ## Tracker input contract
 
-- **TRACKER_PROVIDER** (optional): one of `github`, `jira`, `linear`; absent means `github`.
 - Resolve tracker **capabilities** and the current-user identity **exactly once per spawn, before any loop**; pass the resolved set to nested invocations; **never invoke a capability probe inside a loop.**
-- **Reading a tracker configuration file:** use the **Read tool** with an **absolute path** — never `~` (the Read tool does not expand it; only Bash does), and never `cat`/`head`/`tail` (a shell rewrite can substitute a truncated view for the real bytes). Bound: ≤120 lines / ≤8,000 characters; over the bound, read it **fully anyway** and emit `TRACEABILITY: DEGRADED (tracker.md exceeds size bound)` — never a partial read, which is indistinguishable from a missing section.
-- **Load the mechanics:** an operation whose section carries a `**Mechanics:**` pointer reads the `devflow:git` skill's `references/tracker/\{provider\}/\{op\}.md` for the resolved provider — the single load instruction; no other line composes a path from the provider token. **An operation with no `**Mechanics:**` pointer loads nothing and degrades nothing:** its steps are stated inline in full, so a missing file is not a condition it can be in.
+- **Reading the tracker configuration file:** use the **Read tool** with an **absolute path** — never `~` (the Read tool does not expand it; only Bash does), and never `cat`/`head`/`tail` (a shell rewrite can substitute a truncated view for the real bytes). Bound: ≤120 lines / ≤8,000 characters; over the bound, read it **fully anyway** and emit `TRACEABILITY: DEGRADED (tracker.md exceeds size bound)` — never a partial read, which is indistinguishable from a missing section.
+- **Frontmatter `provider:` ≠ the resolved provider → `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and NO tracker call.** This is the reader-side invariant covering every path init cannot see — uninstall then reinstall, a hand edit, a dotfile-repo sync — and it is why the file is preserved as user content on uninstall instead of swept as an install artifact: a stale file is safe to keep only because it can no longer be silently authoritative.
+- Present but unparseable, truncated, or frontmatter not at offset 0 → `TRACEABILITY: DEGRADED (tracker configuration unreadable)` **and resolve `github`**: a present file signals intent, so it must not be silent, and must not block.
+- **The sections this contract reads, and what an absent one means:** absent ⇒ that section's documented neutral default, never DEGRADED; a consumed section holding `# UNRESOLVED:` ⇒ `TRACEABILITY: DEGRADED (tracker.md required fields incomplete — edit ~/.devflow/tracker.md)`, and the sentinel is **never shape-validated as a value**. Absent and sentinel are **different outcomes** — a default is safe exactly where the field was never needed, and unsafe where the writer looked and could not tell.
+  `## Project` (site, key) · `## Issue Types` · `## Required Fields` · `## Iteration Policy` · `## Transitions` · `## Assignee` · `## Tech Debt` · `## Wave Filter` · `## Reference Rendering` · `## Dedup Strategy` · `### Substitutions`
+- Every value is shape-gated **at the sink, regardless of provenance** — a value from the configuration file gets the same gate as one from a tracker response. The file is hand-editable and machine-wide, so its content is third-party input.
+- **Load the mechanics:** an operation whose section carries a `**Mechanics:**` pointer reads the `devflow:git` skill's `references/tracker/\{provider\}/\{op\}.md` for the resolved provider — the single load instruction; no other line composes a path from the provider token. An operation with no `**Mechanics:**` pointer states its steps inline in full.
 - **Merged step order:** a loaded reference's steps carry this operation's own step numbers and interleave with the steps stated here — execute the merged list in numeric order (`1. 2. 3. 5.` here plus `4.` there are one sequence).
-
-For an operation that names one, file presence in the installed skill directory is the authoritative signal: if that generated reference is absent, degrade as above. **NEVER fabricate provider mechanics for an absent generated reference.**
 
 ## Comment-sink scrub (D11)
 
