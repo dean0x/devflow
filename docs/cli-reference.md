@@ -26,6 +26,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
 | `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
+| `--tracker <id>` | Issue tracker provider: `github`, `jira`, or `linear` (default: `github`). Suppresses the tracker wizard question on both init paths. There is no `--no-tracker` — `--tracker github` is the off switch |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -115,6 +116,55 @@ npx devflow-kit compliance --set ""                    # Clear all active framew
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
 The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory. SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments — only the selected frameworks appear in the installed artifacts. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough).
+
+## Issue Tracker
+
+Select which issue tracker devflow's traceability speaks to. `github` is the default and needs no configuration.
+
+```bash
+npx devflow-kit tracker --status            # Show the provider and the learned conventions file
+npx devflow-kit tracker --set jira          # Select the issue tracker provider
+npx devflow-kit tracker --set github        # Turn the rest off (there is no --no-tracker)
+npx devflow-kit tracker                     # No flag: print usage and the valid provider IDs
+```
+
+Valid provider IDs: `github`, `jira`, `linear`. The ID is matched **exactly** — `JIRA`, `jira ` and `jira-cloud` are rejected with an error rather than repaired, so a typo never silently selects a tracker you did not name. `--status` wins when both flags are passed.
+
+The selection is stored in `~/.devflow/manifest.json` under `features.tracker.provider` and is **machine-wide**, not per-project. A malformed value in that file is self-healed to `github` silently on read.
+
+### When the wizard asks
+
+`devflow init` asks for a provider only when the question can be answered interactively:
+
+| Invocation | Asks? |
+|---|---|
+| `--advanced` (TTY) | Yes, always |
+| Interactive run where you chose Recommended at the Setup-mode prompt | Yes |
+| `--recommended` flag | No — applies the seeded value silently |
+| Non-TTY / piped | No |
+| Any run passing `--tracker <id>` | No — the flag is honoured on both paths |
+
+`--reset` collapses the provider back to `github`.
+
+### Learned conventions
+
+On a non-`github` provider, a background agent runs once at a session start and writes `~/.devflow/tracker.md` — the project key, issue types, required fields, workflow transitions, assignee policy and reference rendering it could establish, with a `# UNRESOLVED:` line for anything it could not. It is written **once or not at all**, mode `0600`, and it is never overwritten: to re-learn, delete it.
+
+`~/.devflow/tracker.md` is **per-developer, not team-shared.** It lives in your home directory, not the repository, so every teammate on the same Jira or Linear repo gets their own — and it is treated as **your content** on `devflow uninstall`: an artifacts-only sweep keeps it. If its frontmatter `provider:` no longer matches the resolved provider, devflow reports `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and makes no tracker call, rather than acting on stale conventions. Changing the provider moves the old file aside as `tracker.md.{previous}.bak`.
+
+A single repository can override the provider with a `tracker` key in its `.devflow/config.json`. That file is local-only, so the **per-repo override is also per-developer, not team-shared** — each teammate sets it themselves, or relies on the repository's own issue-reference grammar, which resolves the provider without any configuration at all.
+
+### The inference attempt cap
+
+Background inference is capped at **5** attempts per machine, counted in `~/.devflow/.tracker.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever. Two commands reset the counter and give inference another five tries:
+
+| Command | Re-arms? |
+|---|---|
+| `devflow init` (any run, any path) | Yes |
+| `devflow tracker --set <id>` | Yes |
+| `devflow tracker --status` | **No** — `--status` is a read-only inspection and changes nothing |
+
+Deleting `~/.devflow/.tracker.attempts` by hand has the same effect.
 
 ## Rules
 
