@@ -122,7 +122,7 @@ The compliance skill and compliance rule are feature-owned (not plugin-scoped); 
 Select which issue tracker devflow's traceability speaks to. `github` is the default and needs no configuration.
 
 ```bash
-npx devflow-kit tracker --status            # Show the provider and the learned conventions file
+npx devflow-kit tracker --status            # Show the provider and conventions; re-arms inference
 npx devflow-kit tracker --set jira          # Select the issue tracker provider
 npx devflow-kit tracker --set github        # Turn the rest off (there is no --no-tracker)
 npx devflow-kit tracker                     # No flag: print usage and the valid provider IDs
@@ -156,13 +156,13 @@ A single repository can override the provider with a `tracker` key in its `.devf
 
 ### The inference attempt cap
 
-Background inference is capped at **5** attempts per machine, counted in `~/.devflow/.tracker.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever. Two commands reset the counter and give inference another five tries:
+Background inference is capped at **5** attempts per machine, counted in `~/.devflow/.tracker.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever. Every `devflow init` run and both `devflow tracker` subcommands reset the counter and give inference another five tries:
 
 | Command | Re-arms? |
 |---|---|
 | `devflow init` (any run, any path) | Yes |
 | `devflow tracker --set <id>` | Yes |
-| `devflow tracker --status` | **No** — `--status` is a read-only inspection and changes nothing |
+| `devflow tracker --status` | Yes — asking why nothing is being learned is what hands back another five tries |
 
 Deleting `~/.devflow/.tracker.attempts` by hand has the same effect.
 

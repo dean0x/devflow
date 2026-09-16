@@ -225,6 +225,17 @@ export const trackerCommand = new Command('tracker')
         ].join('\n'),
         'Tracker Status',
       );
+
+      // [D-F] Inspecting the status re-arms the attempt counter. --status is
+      // the command a capped user reaches for to find out why nothing is being
+      // learned, so it is the command that has to hand back another five
+      // tries; the alternative leaves the only escape a hand deletion of an
+      // undocumented dotfile. Non-fatal exactly as on the --set path
+      // (avoids PF-009): a failed re-arm warns, it never aborts the report the
+      // user asked for.
+      const statusRearm = await rearmTrackerInference(devflowDir);
+      if (!statusRearm.ok) p.log.warn(statusRearm.error);
+
       return;
     }
 
@@ -247,8 +258,8 @@ export const trackerCommand = new Command('tracker')
     // no manifest change was needed to persist this one.
     await syncManifestFeature(devflowDir, 'tracker', resolved.nextState);
 
-    // [DR-22] The documented re-arm path: a selection change resets the attempt
-    // counter so a previously-capped inference gets another five tries.
+    // [DR-22] The second documented re-arm path (D-F): a selection change
+    // resets the attempt counter so a capped inference gets another five tries.
     const rearm = await rearmTrackerInference(devflowDir);
     if (!rearm.ok) p.log.warn(rearm.error);
 
