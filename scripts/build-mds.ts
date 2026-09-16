@@ -619,8 +619,8 @@ function planSingleFile(
  * A separate function from planSingleFile because it is a separate strategy, not
  * a branch of one: its names come from a registry rather than from the source,
  * it has two refusals the one-file path has no analogue for, and it produces a
- * different plan arm. Inlining it beside the single-file path made one function
- * carry two return shapes and every reader pay for both.
+ * different plan arm. Inlined beside the single-file path, one function would
+ * carry two return shapes and every reader would pay for both.
  */
 function planReferenceModule(host: HostEntry, rel: string, outAbs: string): HostPlan {
   // A reference module's emitted names come from the op registry, never from
@@ -718,7 +718,7 @@ interface PlannedOutput {
  * op-set check (every registered op has a section; every section is registered)
  * lives in one testable place.
  *
- * The plan's discriminant does the work that three runtime compensations used to:
+ * The plan's discriminant does the work, so no runtime compensation is needed:
  * the one-file arm hands over its single `dest` (no unchecked index), and the
  * fan-out arm's `outputs` carry each dest beside the pair that fills it (no
  * defaulted pair list, no index correspondence to trust).
@@ -727,7 +727,7 @@ interface PlannedOutput {
  * handed TO the splitter and comes back carrying its own content, so this
  * function performs no lookup and asserts nothing about one. The alternative —
  * a keyed result read back per op — is partial in the type however total it is
- * in fact, which is what the non-null assertion here used to paper over.
+ * in fact, and would need a non-null assertion to paper over the gap.
  */
 function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): PlannedOutput[] {
   if (plan.variant !== "skill-refs") {

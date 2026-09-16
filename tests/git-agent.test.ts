@@ -968,8 +968,8 @@ describe('git agent — static content guards (PF-018)', () => {
   // rate-limit SIGNALS out of the always-loaded D4 block and into the resolved
   // provider's reference (GAP-03); the thresholds themselves are unchanged, so the
   // literals below are untouched and only the corpus widened — mode 'union' over
-  // git.md ∪ the generated references. Scanning git.md alone after the split would
-  // pin a number that is no longer stated there.
+  // git.md ∪ the generated references. Scanning git.md alone would pin a number
+  // that is not stated there.
   it('D4: X-RateLimit-Remaining < 10 is the full-STOP threshold', () => {
     expect(
       joinedSinkText(),

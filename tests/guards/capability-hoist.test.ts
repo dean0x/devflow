@@ -201,8 +201,8 @@ export interface ProcessBlock {
  * loops and probes alike — leaves this guard's reach while the bytes stay on disk.
  * No shipped block is closed by a fenced line today, so this is armed rather than
  * hypothetical: the block count and every block's length are unchanged by the
- * rerouting (ADR-025 — nothing to reclassify, and the guard is no longer one
- * fenced heading away from going partly blind).
+ * rerouting (ADR-025 — nothing to reclassify; the guard is not one fenced
+ * heading away from going partly blind).
  */
 export function collectProcessBlocks(corpus: CorpusEntry[]): ProcessBlock[] {
   const blocks: ProcessBlock[] = [];

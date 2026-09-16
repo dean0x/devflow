@@ -186,7 +186,7 @@ throws with a build hint. `dist/skills/git/references/` has an analogous accesso
 the allowlist table rather than re-spelling the path — the installer's reference overlay
 (owned by the `tracker-references` and `installer-shadowing` KBs) is that directory's
 consumer, the way `agentSourceDirs()`'s installer loop consumes `dist/agents/`. `npm run
-build:cli` alone no longer produces installable agents or references — `npm run build:mds`
+build:cli` alone produces no installable agents or references — `npm run build:mds`
 (or the combined `npm run build`) is required.
 
 ## Constraints
@@ -365,7 +365,7 @@ this same byte-compare recurses into `dist/skills/` too (`hashDistSubtree` bound
 - ADR-024 (named collectors + known-bad probes) — `tests/build-mds-generator-hosts.test.ts`, `tests/mds-variants.test.ts`, and `tests/guards/dist-agents.test.ts` all follow this pattern (e.g. `collectAgentParity`, `collectEscapedBraceLeaks`, `collectForbiddenConstructs`, each with a paired known-bad probe).
 - PF-011 (delete-then-write ENOENT window) — avoided by the temp-file + `renameSync` write pattern used for every output of all three host variants.
 - PF-014 (no `process.exit` in core) — `mds-variants.ts` returns `Result`; only `build-mds.ts` exits.
-- PF-018 (non-vacuous guards) — `dist-agents.test.ts` deliberately avoids Guard 4's `catch { return }` skip-on-missing-build shape; the `MAX_WALK_DEPTH` bound throws rather than silently truncating for the same reason. `ALLOWED_OUTPUT_DIR_NAMES`'s own doc comment in `mds-variants.ts` now cites this pitfall too (moved off ADR-024, its earlier citation) — a guard's refusal-message expectation must come from the table under test, not a retyped copy of it (resolve B37).
+- PF-018 (non-vacuous guards) — `dist-agents.test.ts` deliberately avoids Guard 4's `catch { return }` skip-on-missing-build shape; the `MAX_WALK_DEPTH` bound throws rather than silently truncating for the same reason. `ALLOWED_OUTPUT_DIR_NAMES`'s doc comment in `mds-variants.ts` cites this pitfall for the same reason — a guard's refusal-message expectation must come from the table under test, not a retyped copy of it.
 - PF-024 (escaped-brace leakage into dist) — guarded by `collectEscapedBraceLeaks` in `dist-agents.test.ts`.
 - PF-035 (skim hook — use Read) — applies to this session's tool hygiene when reading `.mds`/`.ts` sources for verification.
 - PF-055 (real-root build repairs stale dist/ under parallel readers) — every build in the MDS test suite is scoped to `DEVFLOW_MDS_ROOT`, verified by `collectSpawnScoping`.

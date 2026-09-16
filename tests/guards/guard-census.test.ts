@@ -4,9 +4,9 @@
  * Two claims, both about the SHAPE of the Phase-2 refactor rather than its content:
  *
  *   1. `tests/git-agent.test.ts` still carries at least as many RUNNING guards as it
- *      did. GAP-49: the AC used to pin "all 40 git-agent guards", a literal Phase 0 had
- *      already invalidated. A count that may only RISE is the version of that claim
- *      that survives the next phase, so the number lives in
+ *      did. GAP-49: a pinned literal ("all 40 git-agent guards") is invalidated by the
+ *      first phase that adds one. A count that may only RISE is the version of that
+ *      claim that survives the next phase, so the number lives in
  *      `tests/fixtures/numeric-floors.json` — the one place in this repo where a
  *      number may be raised and may never be lowered.
  *

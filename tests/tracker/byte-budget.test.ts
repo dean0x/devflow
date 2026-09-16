@@ -515,10 +515,9 @@ describe('byte budget: four-shape table (recorded)', () => {
     const shapes = [
       {
         // The denominator of the `vs shape 1` column, so its label has to say what it
-        // actually measures. It WAS the monolith at T1, when PRELOADED measured the
-        // frozen BUDGET_LOADED_SET (77_824); every mechanics move since has shrunk it,
-        // so today it is the always-loaded preloaded set, not the pre-split one.
-        shape: '1. baseline — today’s always-loaded preloaded set (was the monolith at T1: 77_824)',
+        // actually measures: the always-loaded preloaded set as it stands on this tree,
+        // not the frozen pre-split BUDGET_LOADED_SET (77_824), which is the ceiling row.
+        shape: '1. baseline — the always-loaded preloaded set',
         chars: PRELOADED,
       },
       {

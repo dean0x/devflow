@@ -216,11 +216,11 @@ export function formatOverlaySummary(
 /**
  * The half of an overlay warning that describes what is actually on disk.
  *
- * One sentence per state, each true of that state and of no other. The single sentence
- * this replaced — "the previously installed files were left unchanged" — was true of the
- * first arm only, and it was printed loudest over the arms it fitted worst: a set left
- * half-refreshed, and a unit whose only surviving copy is a backup path the user now has
- * to be told about.
+ * One sentence per state, each true of that state and of no other. A single shared
+ * sentence — "the previously installed files were left unchanged" — is true of the first
+ * arm only, and would read loudest over the arms it fits worst: a set left
+ * half-refreshed, and a unit whose only surviving copy is a backup path the user has to
+ * be told about.
  *
  * Exhaustive over {@link OverlayFailureState} — a new state added to the union without a
  * sentence here is a compile error, not a state that silently prints nothing.

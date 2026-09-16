@@ -406,8 +406,8 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       ).toBe(true);
     }
 
-    // The flat set is the arm that used to stage at the un-converged references root, so
-    // its presence is what makes the loop above cover the case reliability-08 reported.
+    // The flat set is the arm with no installed directory to hang a staging suffix on, so
+    // its presence is what makes the loop above a check rather than a formality.
     expect(
       staged.some(p => path.basename(p).startsWith('.cross-cutting.')),
       'the cross-cutting unit must be among the staged units',
@@ -676,7 +676,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       await fs.chmod(jiraSource, 0o755).catch(() => undefined);
     }
 
-    // The distinction the single old sentence erased: this unit is not stale, it is ABSENT.
+    // The distinction the state must carry: this unit is not stale, it is ABSENT.
     expect(result.overlayFailures).toHaveLength(1);
     expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
     expect(result.overlayFailures[0].state).toEqual({
@@ -978,7 +978,7 @@ describe('formatOverlaySummary render site (PF-015)', () => {
     expect(messages[2]).toContain('publication-gate.md');
     expect(messages[2]).toContain('the cross-cutting document set');
     expect(messages[3]).toContain('/refs/tracker/jira.old');
-    // Only the first state may make the claim every state used to make.
+    // Only the installed-unchanged state may make the 'left unchanged' claim.
     expect(messages.filter(m => m.includes('left unchanged'))).toHaveLength(1);
   });
 });

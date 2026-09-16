@@ -272,8 +272,8 @@ export async function copyDirectory(src: string, dest: string): Promise<void> {
  * `_depth` counts the walked root as 0 and a breach is `_depth > MAX_REFERENCE_SWEEP_DEPTH`
  * — the same comparison every other walk over this same tree already makes
  * (`sweepOrphanedReferences`, the build's `pruneOrphans`, the harness's `walkFiles`). The
- * constant is imported, never re-spelled: one tree, one bound, and two walkers each
- * carrying their own literal is precisely how a pair of them once came to disagree.
+ * constant is imported, never re-spelled: one tree, one bound — two walkers each
+ * carrying their own literal is how a pair of them comes to disagree.
  *
  * The bound is CONSISTENCY, not an exploit closure. `Dirent.isDirectory()` is lstat-based,
  * so a symlink-to-directory is a leaf to this walk and a symlink loop — the hazard the
@@ -323,8 +323,8 @@ const TRACKER_SUBTREE = 'tracker';
  * Which document set an overlay unit covers.
  *
  * A discriminated union rather than a name string carrying a `'(cross-cutting)'`
- * sentinel: the sentinel was a value a provider directory could in principle hold, and
- * every reader had to re-derive "is this the flat set?" by comparing against a literal.
+ * sentinel: a sentinel is a value a provider directory could in principle hold, and
+ * every reader would have to re-derive "is this the flat set?" by comparing against a literal.
  *
  * The provider arm carries the module's `subdir` exactly as the registry
  * (`VARIANT_MODULES` in src/core/mds-variants.ts) declares it — `tracker/github`, not
@@ -341,11 +341,11 @@ export type OverlayUnitRef =
  *
  * Populated from what the run actually did, because a failure does not imply a no-op.
  * One rendered sentence per arm (see `formatOverlaySummary` in src/cli/commands/init.ts):
- * before the discriminant existed every failure printed "the previously installed files
- * were left unchanged", which is true of exactly one arm below — a flat set caught
- * mid-promotion is part new and part old, a unit whose displaced copy could not be put
- * back has no live copy at all, and a unit that was never installed is absent rather
- * than stale. The worse the state, the more the single sentence understated it.
+ * a single shared sentence — "the previously installed files were left unchanged" — is
+ * true of exactly one arm below. A flat set caught mid-promotion is part new and part
+ * old, a unit whose displaced copy could not be put back has no live copy at all, and a
+ * unit that was never installed is absent rather than stale; the worse the state, the
+ * more a shared sentence would understate it.
  */
 export type OverlayFailureState =
   /** Nothing was modified, and the unit's previously installed files are still in place. */
@@ -517,12 +517,12 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  *    {@link prunePreservingRecoveryCopies} converges, so a staging tree stranded by a crash
  *    between `mkdir` and promotion is removed by the next run's prune. It HAS to be the
  *    prune that removes it, because (1) means no later run's pre-clean will ever look at
- *    that name again. The flat set's staging directory used to sit at
- *    `references/.cross-cutting.tmp`, outside that subtree and outside every other
- *    convergence this module performs, where a stranded partial copy of the cross-cutting
- *    documents would sit inside the installed skill indefinitely — and be mode-normalised
- *    by {@link chmodRecursive} on every later install, that being the one part of the
- *    overlay which does reach the whole references root.
+ *    that name again. A staging directory at the references root instead (say
+ *    `references/.cross-cutting.tmp`) would sit outside that subtree and outside every
+ *    other convergence this module performs, so a stranded partial copy of the
+ *    cross-cutting documents would sit inside the installed skill indefinitely — and be
+ *    mode-normalised by {@link chmodRecursive} on every later install, that being the one
+ *    part of the overlay which does reach the whole references root.
  *
  * The provider arm inherits the property from its unit: the path is the unit's own
  * installed location plus a suffix, so it is converged exactly when the unit is, and every
@@ -631,11 +631,11 @@ export type UnitPromotion =
 /**
  * Put a displaced unit back, and say whether it actually went back.
  *
- * The restore used to be a bare `.catch(() => undefined)`, which made a failed recovery
- * byte-indistinguishable from a successful one: the install then printed "the previously
- * installed files were left unchanged" over a provider directory that no longer existed,
- * and the backup holding the only copy was the next thing the run deleted. What this
- * returns is what the failure state is built from.
+ * A swallowed rename error would make a failed recovery indistinguishable from a
+ * successful one: the install would report the previously installed files as unchanged
+ * over a provider directory that no longer exists, and the prune would then delete the
+ * backup holding the only copy. What this returns is what the failure state is built
+ * from.
  */
 async function restoreDisplacedUnit(
   backup: string,
@@ -808,7 +808,7 @@ export async function promoteUnitStagingTree(
  * whatever state it was already in — and those are two different states with two
  * different consequences. Falling back on a working previous install is a deferred
  * refresh; having no copy at all ships an agent whose mechanics pointers resolve to
- * nothing, which is the worse outcome and the one the single old sentence described
+ * nothing, which is the worse outcome and the one a shared sentence would describe
  * most quietly.
  *
  * One `access` per file, on the failure path only; the loop is bounded by the unit's
@@ -841,7 +841,7 @@ async function classifyUntouchedUnit(
  * returns success carrying an agent whose mechanics pointers resolve to nothing. That is
  * the outcome the per-entry throw exists to prevent, arriving by the one route it does
  * not cover — and the same root cause the agent resolver in `installViaFileCopy` already
- * throws for, so the two build artifacts are no longer guarded at different strengths.
+ * throws for, so the two build artifacts are guarded at the same strength.
  *
  * Deliberately ONE `stat` before the unit loop rather than a check inside it (PF-009):
  * the fan-out has no per-item failure isolation, so a per-unit refusal would let one
@@ -1025,9 +1025,8 @@ export async function overlayGeneratedReferences(opts: {
   // This is the one step that reaches a file the overlay does not own, and it is why the
   // boundary is stated as "never replace or delete" rather than "never touch": the MODE of
   // a hand-authored reference — and of whatever a shadowed skill supplied outside
-  // `tracker/` — is normalised here. ADR-024 corollary (b) permits exactly that, because
-  // the ownership guard protects deletion and not overwrite, so the code was compliant and
-  // it was the stated boundary that reached further than the implemented one.
+  // `tracker/` — is normalised here. ADR-024 corollary (b) permits exactly that: the
+  // ownership guard protects deletion, not overwrite.
   //
   // It is also the one walk that can breach chmodRecursive's descent bound. The catch is
   // that breach's reporting channel, not just an I/O guard (see {@link chmodRecursive}).

@@ -23,9 +23,8 @@
  *      that asserts instead of returning a Result; see the function for why.)
  * It still performs no I/O and no iteration over the filesystem.
  *
- * The `-variants` in the filename stopped being a reservation in Phase 2: the
- * variant-expansion entry point promised by DR-16 (PR #334) now lives here, next
- * to the validation it depends on.
+ * The `-variants` in the filename names the variant-expansion entry point below
+ * (DR-16), which lives next to the validation it depends on.
  */
 
 import * as path from 'path';
@@ -148,10 +147,10 @@ export const AGENTS_OUTPUT_DIR = 'dist/agents';
  *
  * One fact, three derivations: SKILL_REFS_OUTPUT_DIR below is composed from it,
  * the installer decides which skill install triggers the reference overlay from
- * it, and the init summary renders `prefixSkillName()` of it. Before it existed
- * the answer was retyped at each of those three sites, so moving the references
- * to another skill meant finding all three spellings and nothing failed if only
- * two were found — the PF-013 shape, a hardcoded spelling that still resolves.
+ * it, and the init summary renders `prefixSkillName()` of it. Retyped at each of
+ * those three sites, moving the references to another skill would mean finding
+ * all three spellings with nothing failing if only two were found — the PF-013
+ * shape, a hardcoded spelling that still resolves.
  *
  * Bare, not `devflow:`-prefixed: the build writes to `dist/skills/git/…` while
  * the install target is `skills/devflow:git/`. prefixSkillName is what spans that
@@ -346,18 +345,6 @@ export interface VariantModule {
 }
 
 /**
- * Every reference module the build knows about — a closed registry, read the
- * same way ALLOWED_OUTPUT_DIRS is read.
- *
- * A `skill-refs` host whose source path is absent from this table is refused by
- * the build rather than guessed at: the emitted filenames come from the op list,
- * not from the module's own basename, so there is nothing to fall back to.
- *
- * Phase 2 is GitHub-only. `_jira.mds` / `_linear.mds` and the MCP module are
- * Phase 3 and are deliberately absent — an entry here with no module on disk
- * would be an artifact with no reachable consumer (ADR-003).
- */
-/**
  * The cross-cutting `devflow:git` reference documents — provider-independent, so
  * they land at the root of the references directory rather than under
  * `tracker/{provider}/`.
@@ -383,6 +370,18 @@ export const GIT_CROSS_CUTTING_DOCS = [
   'publication-gate',
 ] as const;
 
+/**
+ * Every reference module the build knows about — a closed registry, read the
+ * same way ALLOWED_OUTPUT_DIRS is read.
+ *
+ * A `skill-refs` host whose source path is absent from this table is refused by
+ * the build rather than guessed at: the emitted filenames come from the op list,
+ * not from the module's own basename, so there is nothing to fall back to.
+ *
+ * Phase 2 is GitHub-only. `_jira.mds` / `_linear.mds` and the MCP module are
+ * Phase 3 and are deliberately absent — an entry here with no module on disk
+ * would be an artifact with no reachable consumer (ADR-003).
+ */
 export const VARIANT_MODULES = [
   {
     source: 'src/assets/mds/tracker/_github.mds',
@@ -578,9 +577,9 @@ export interface OperationNamed {
  * in a comment: on success there is exactly one of these per record the caller
  * passed in, in the caller's own order, and every one of them carries a
  * `content`. A caller never has to ask "is there a section for this op?" — it
- * reads a field off the record it already had. The old shape could not say that:
- * `Map<string, string>` is both mutable and partial, so the only call site had to
- * spend a non-null assertion claiming a guarantee that lived nowhere in the type.
+ * reads a field off the record it already had. A `Map<string, string>` could not
+ * say that: it is both mutable and partial, so a call site would have to spend a
+ * non-null assertion claiming a guarantee that lives nowhere in the type.
  */
 export type VariantSection<T extends OperationNamed> = T & { readonly content: string };
 

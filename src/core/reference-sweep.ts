@@ -23,7 +23,7 @@ import type { SweepResult } from './orphan-sweep.js';
 /**
  * Descent bound for every walk over the generated reference tree — this sweep and the
  * build's own prune, which imports it (`pruneOrphans` in scripts/build-mds.ts). One
- * tree, one bound: two walkers each carrying their own literal is how the two came to
+ * tree, one bound: two walkers each carrying their own literal is how they come to
  * disagree on both the number of levels and what happens at the last one.
  *
  * `depth` counts the walked root as 0 and the bound is the deepest directory a walk may

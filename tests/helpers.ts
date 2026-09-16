@@ -798,10 +798,10 @@ type StatusLineReferenceFile = (typeof STATUS_LINE_REFERENCE_FILES)[number]
  *
  * A type predicate rather than a membership test on an already-narrow parameter:
  * typed as the union, `ref()`'s refusal could never fire under its own signature
- * and needed a widening cast to be written at all — a check the compiler knew was
- * vacuous, laundered past it. Here the check earns the narrow type instead of
+ * and would need a widening cast to be written at all — a check the compiler knows
+ * is vacuous, laundered past it. Here the check earns the narrow type instead of
  * presupposing it, so the arm that refuses is the arm that produces the value the
- * rest of `ref()` uses, and the cast is gone.
+ * rest of `ref()` uses.
  */
 function isStatusLineReference(relPath: string): relPath is StatusLineReferenceFile {
   return STATUS_LINE_REFERENCE_FILES.some(declared => declared === relPath)
