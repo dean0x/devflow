@@ -126,6 +126,32 @@ export const MDS_REFERENCE_MODULES = [
 ] as const;
 
 /**
+ * Reference modules that are AUTHORED and SHIPPED but whose generation is gated
+ * shut on this tree — one today:
+ *   src/assets/mds/tracker/_mcp.mds  → dist/skills/git/references/tracker/_mcp.md
+ *     (kind 'contract', emitted only while a provider that needs it is registered;
+ *      see MCP_CONTRACT_MODULE and mcpContractIsGenerated in
+ *      src/core/mds-variants.ts)
+ *
+ * A THIRD roster rather than a member of MDS_REFERENCE_MODULES, because the two
+ * are counted by different assertions and confusing them would break one of them:
+ *
+ *   - The build DISCOVERS these and reports them as deferred, so they are NOT in
+ *     ALL_DISCOVERED_HOSTS and the printed host count does not move. Folding them
+ *     in would have demanded a host count the build correctly declines to print.
+ *   - The tarball SHIPS them — 3b compiles this source, and a consumer inspecting
+ *     an installed package should see what the generated tree will come from — so
+ *     they DO count toward the shipped-.mds total.
+ *
+ * When a gate opens, the entry moves from this roster to MDS_REFERENCE_MODULES in
+ * the same commit that registers the provider: the shipped total is unchanged and
+ * the discovered-host count rises by one, which is exactly what happened.
+ */
+export const MDS_DEFERRED_REFERENCE_MODULES = [
+  'src/assets/mds/tracker/_mcp.mds',
+] as const;
+
+/**
  * Hand-authored files copied verbatim into dist/commands/. release.md inlines its
  * own COMPLIANCE gate and is not MDS-compiled; the divergence is permanent (SG-13).
  */

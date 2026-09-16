@@ -40,6 +40,13 @@ import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   MIN_VARIANT_PAIRS,
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MCP_CONTRACT_MODULE,
+  mcpContractIsGenerated,
+  resolveVariantModules,
+  generatedReferenceManifest,
+  validateContractOutputName,
+  type VariantModule,
   type OutputNameError,
   type OutputDirError,
   type HostVariant,
@@ -645,5 +652,164 @@ describe('VARIANT_MODULES (shipped registry)', () => {
       .map(m => m.subdir as string)
       .filter(subdir => subdir.startsWith('tracker/'));
     expect(providerSubdirs).toEqual(['tracker/github']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. The tool-call contract module's generation gate (P3a-S12, hazard H7, C5)
+// ---------------------------------------------------------------------------
+//
+// `src/assets/mds/tracker/_mcp.mds` is AUTHORED in Phase 3a and GENERATED only
+// once a provider whose mechanics need it is registered. The two are separate
+// events on purpose:
+//
+//   - Authoring it in 3a is required: its first runtime consumer is a Jira per-op
+//     mechanics file that lands in 3b, and prefix-shippability clause (iii) is
+//     read PER PHASE (decision D-D), so a contract with no consumer until later
+//     in the same phase is fine.
+//   - Generating it in 3a is NOT: Phase 2's own AC-2.7 guard asserts the file's
+//     absence after a GitHub-only build, and every GitHub user would otherwise be
+//     billed for a reference nothing they can reach ever loads (GAP-02).
+//
+// So the gate has to be DERIVED, not declared: a boolean on the module would be a
+// flag someone flips, while "is a provider that needs it registered?" is a fact
+// about the registry that 3b makes true by adding its own module and nothing else.
+// A registry-derived gate also means the arm is provable NOW, against an injected
+// registry, rather than discovered when 3b turns it on.
+
+describe('the tool-call contract module is gated on a provider that needs it', () => {
+  /** A synthetic provider module shaped exactly like the one 3b will register. */
+  const SYNTHETIC_MCP_PROVIDER: VariantModule = {
+    source: 'src/assets/mds/tracker/_synthetic.mds',
+    subdir: MCP_BACKED_PROVIDER_SUBDIRS[0],
+    kind: 'fanout',
+    ops: TRACKER_GITHUB_OPS,
+  };
+
+  it('the gate is CLOSED for the shipped registry (GitHub-only)', () => {
+    expect(
+      mcpContractIsGenerated(VARIANT_MODULES),
+      'no registered provider needs the tool-call contract yet, so generating it would ship a ' +
+      'reference with no reachable consumer (ADR-003) and turn AC-2.7 red (H7)',
+    ).toBe(false);
+  });
+
+  it('the gate OPENS when such a provider is registered — the arm 3b turns on', () => {
+    expect(
+      mcpContractIsGenerated([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]),
+      'this is the whole mechanism: 3b adds its provider module and the contract starts being ' +
+      'generated, with no second edit anywhere',
+    ).toBe(true);
+  });
+
+  it('every subdir in the gate list is a tracker provider directory, and github is NOT one', () => {
+    // A gate keyed on "any tracker module exists" would already be open, since
+    // _github.mds is registered. Naming the subdirs that NEED the contract is what
+    // keeps it closed today and makes it open for the right reason later.
+    expect(MCP_BACKED_PROVIDER_SUBDIRS.length, 'the gate list must be non-empty').toBeGreaterThan(0);
+    for (const subdir of MCP_BACKED_PROVIDER_SUBDIRS) {
+      expect(subdir, `"${subdir}" must be a tracker provider subdir`).toMatch(/^tracker\/[a-z]+$/);
+    }
+    expect(
+      MCP_BACKED_PROVIDER_SUBDIRS as readonly string[],
+      'github reaches its tracker through a CLI, so it must never open this gate',
+    ).not.toContain('tracker/github');
+  });
+
+  it('resolveVariantModules appends the contract module only when the gate is open', () => {
+    expect(resolveVariantModules(VARIANT_MODULES)).toEqual([...VARIANT_MODULES]);
+    const opened = resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]);
+    expect(opened).toContain(MCP_CONTRACT_MODULE);
+    expect(
+      opened.length,
+      'exactly one module is appended — a duplicated append would make two hosts claim one file',
+    ).toBe(VARIANT_MODULES.length + 2);
+  });
+
+  it('the appended module is idempotent: resolving twice appends once', () => {
+    const once = resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]);
+    const twice = resolveVariantModules(once);
+    expect(
+      twice.filter(m => m.source === MCP_CONTRACT_MODULE.source),
+      'two rows for one source is expandVariants\' duplicate-output refusal, at build time',
+    ).toHaveLength(1);
+  });
+
+  it('the generated manifest is unchanged today and gains exactly the contract file later', () => {
+    const closed = generatedReferenceManifest();
+    expect(
+      closed,
+      'the shipped manifest must not name the contract file — the installer converges to this list ' +
+      'and would install a reference nothing loads',
+    ).not.toContain('tracker/_mcp.md');
+
+    const opened = expandVariants(resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]));
+    expect(opened.ok, `expansion must succeed: ${JSON.stringify(opened)}`).toBe(true);
+    expect(
+      opened.ok && opened.value.map(p => p.relPath),
+      'the contract lands at the tracker/ ROOT, beside the provider directories rather than inside ' +
+      'one: it is provider-independent, and a copy per provider is the duplication it removes',
+    ).toContain('tracker/_mcp.md');
+  });
+
+  it('★ the emitted filename is provable NOW, not discovered in 3b', () => {
+    // The landmine this arm exists to defuse: `_mcp` fails validateOutputName's
+    // leading-character rule, so a registry row alone would have expanded fine
+    // today (the row is absent) and refused with `invalid-op-name` the moment 3b
+    // opened the gate — a build break planted one subtask ahead.
+    expect(validateOutputName('_mcp').ok, 'the general name rule still refuses a leading underscore')
+      .toBe(false);
+    const expansion = expandVariants([MCP_CONTRACT_MODULE]);
+    expect(
+      expansion.ok,
+      `the contract module must expand: ${JSON.stringify(expansion.ok ? null : expansion.error)}`,
+    ).toBe(true);
+  });
+});
+
+describe('validateContractOutputName — the narrow underscore allowance', () => {
+  it('accepts exactly one leading underscore over an otherwise valid name', () => {
+    expect(validateContractOutputName('_mcp')).toEqual({ ok: true, value: '_mcp' });
+    expect(validateContractOutputName('_resolution')).toEqual({ ok: true, value: '_resolution' });
+  });
+
+  it('requires the underscore — a bare name is refused by the CONTRACT rule', () => {
+    // The two rules are not one rule with a relaxed charset: a contract document
+    // must be distinguishable at a glance from the provider DIRECTORIES beside it
+    // (`tracker/github/`, and later `tracker/jira/`), or `tracker/mcp.md` reads as
+    // a fourth provider. So the prefix is mandatory here and forbidden there.
+    expect(validateContractOutputName('mcp').ok).toBe(false);
+  });
+
+  it('inherits every other refusal from validateOutputName', () => {
+    const REFUSED: ReadonlyArray<readonly [string, OutputNameError['kind']]> = [
+      ['_', 'empty'],
+      ['_..', 'dot-segment'],
+      ['_a/b', 'path-separator'],
+      ['_A', 'invalid-charset'],
+      ['__double', 'invalid-charset'],
+      ['_' + 'a'.repeat(200), 'invalid-charset'],
+    ];
+    expect(REFUSED.length, 'the refusal corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    for (const [name, kind] of REFUSED) {
+      const result = validateContractOutputName(name);
+      expect(result.ok, `"${name}" must be refused`).toBe(false);
+      expect(!result.ok && result.error.kind, `"${name}" must be refused as ${kind}`).toBe(kind);
+      // `empty` is the one variant of OutputNameError that carries no `name` —
+      // there is nothing to name. Every other refusal must report the value AS
+      // WRITTEN, not the underscore-stripped remainder a reader never typed.
+      if (kind !== 'empty') {
+        expect(
+          !result.ok && (result.error as { name: string }).name,
+          'the refusal must name the value AS WRITTEN, not the underscore-stripped remainder',
+        ).toBe(name);
+      }
+    }
+  });
+
+  it('a traversal cannot be smuggled in behind the allowance', () => {
+    for (const hostile of ['_../etc/passwd', '_./x', '_a\\b']) {
+      expect(validateContractOutputName(hostile).ok, `"${hostile}" must be refused`).toBe(false);
+    }
   });
 });

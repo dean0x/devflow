@@ -95,6 +95,32 @@ export function validateOutputName(name: string): Result<string, OutputNameError
   return Ok(name);
 }
 
+/**
+ * Validate the emitted basename of a CONTRACT document: one leading underscore,
+ * then the ordinary name rule.
+ *
+ * A SECOND function rather than a relaxed OUTPUT_NAME_RE, and the distinction is
+ * not stylistic. The underscore is MANDATORY here and FORBIDDEN there, because it
+ * is what tells a reader of the references tree which entries are providers:
+ * `tracker/_mcp.md` sits beside the provider DIRECTORIES `tracker/github/` and
+ * (from 3b) `tracker/jira/`, and `tracker/mcp.md` would read as a fourth
+ * provider. Relaxing the shared rule instead would have admitted `_anything.md`
+ * as a command or an agent basename too — a widening across all three build
+ * destinations to buy a property only this one needs (ADR-025: classify the case,
+ * never blanket-widen).
+ *
+ * Every other guarantee is inherited by delegation, so the dot-segment,
+ * separator, charset and length refusals cannot drift apart from their originals.
+ * The refusal reports the name AS WRITTEN — a reader of the build's error needs
+ * the string they typed, not its underscore-stripped remainder.
+ */
+export function validateContractOutputName(name: string): Result<string, OutputNameError> {
+  if (!name.startsWith('_')) return Err({ kind: 'invalid-charset', name });
+  const inner = validateOutputName(name.slice(1));
+  if (inner.ok) return Ok(name);
+  return Err(inner.error.kind === 'empty' ? { kind: 'empty' } : { ...inner.error, name });
+}
+
 // ---------------------------------------------------------------------------
 // Output directory allowlist
 // ---------------------------------------------------------------------------
@@ -317,8 +343,15 @@ export const TRACKER_GITHUB_OPS = [
  *   forbid the first such document from existing. What proves these correct is
  *   splitVariantSections' bidirectional check plus the byte-budget's
  *   formula ↔ nameable-set comparison, neither of which depends on a count.
+ * 'contract' — a single cross-cutting CONTRACT document whose emitted basename
+ *   carries a leading underscore, marking it as not-a-provider in a directory
+ *   whose other entries are providers (validateContractOutputName). Like 'named'
+ *   it is exempt from the pair floor, and for the same reason: nothing ranges over
+ *   it. It is a third kind rather than a flag on 'named' because the NAME RULE
+ *   differs, and a kind is what makes the compiler demand the answer at the
+ *   declaration site.
  */
-export type VariantModuleKind = 'fanout' | 'named';
+export type VariantModuleKind = 'fanout' | 'named' | 'contract';
 
 /** One `.mds` module that fans out into one reference file per registered name. */
 export interface VariantModule {
@@ -397,6 +430,105 @@ export const VARIANT_MODULES = [
   },
 ] as const satisfies readonly VariantModule[];
 
+// ---------------------------------------------------------------------------
+// The tool-call contract module, and the gate on its generation
+// (P3a-S12, hazard H7, conflict C5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The tracker provider destinations whose mechanics reach the tracker through a
+ * TOOL CALL rather than through a CLI — the condition the contract document's
+ * generation is keyed on.
+ *
+ * `tracker/github` is deliberately absent: GitHub's mechanics are `gh` commands,
+ * and a gate keyed on "any tracker module is registered" would already be open.
+ *
+ * Spelled as DESTINATIONS rather than provider names so the gate is a fact about
+ * the registry: a provider module is registered with the subdir its files land
+ * in, so opening the gate and shipping the provider are the same edit. A boolean
+ * field on VariantModule would have been a flag someone has to remember to flip,
+ * which is the same class of defect as a floor nobody raises.
+ */
+export const MCP_BACKED_PROVIDER_SUBDIRS = ['tracker/jira', 'tracker/linear'] as const;
+
+/**
+ * The provider-independent tool-call contract document.
+ *
+ * AUTHORED in Phase 3a, GENERATED only once {@link mcpContractIsGenerated} is
+ * true, and the split is load-bearing in both directions:
+ *
+ *   - It must be authored now, because its first runtime consumer is a provider
+ *     mechanics file landing later in the SAME phase, and prefix-shippability
+ *     clause (iii) is read per phase (decision D-D). A contract authored after
+ *     its consumers is a contract the consumers were written without.
+ *   - It must not be generated now, because Phase 2's AC-2.7 guard asserts its
+ *     absence after a GitHub-only build, and every GitHub user would otherwise be
+ *     billed for a reference nothing they can reach ever loads (GAP-02). The
+ *     byte-budget formula carries it as a term that is 0 on the GitHub path for
+ *     exactly this reason.
+ *
+ * It lands at the `tracker/` ROOT rather than inside a provider directory: it is
+ * provider-independent, and a copy per provider is the duplication it exists to
+ * remove. The `_` prefix is what distinguishes it from the provider directories
+ * beside it (validateContractOutputName).
+ */
+export const MCP_CONTRACT_MODULE = {
+  source: 'src/assets/mds/tracker/_mcp.mds',
+  subdir: 'tracker',
+  kind: 'contract',
+  ops: ['_mcp'],
+} as const satisfies VariantModule;
+
+/**
+ * Does this registry contain a provider that needs the tool-call contract?
+ *
+ * The whole gate, in one derived predicate: 3b registers its provider module and
+ * the contract starts being generated, with no second edit anywhere and no
+ * declaration to keep in step.
+ */
+export function mcpContractIsGenerated(
+  modules: readonly VariantModule[] = VARIANT_MODULES,
+): boolean {
+  const gated: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
+  return modules.some(mod => gated.includes(mod.subdir));
+}
+
+/**
+ * The registry the build actually expands: {@link VARIANT_MODULES} plus the
+ * contract module when, and only when, the gate is open.
+ *
+ * Idempotent — resolving an already-resolved list appends nothing. Without that,
+ * a caller that resolved twice would hand expandVariants two rows for one source
+ * and get a `duplicate-output` refusal describing a bug it could not locate.
+ *
+ * @param modules - Registry to resolve (defaults to VARIANT_MODULES). Injectable
+ *   so both sides of the gate are provable without a module on disk — which is
+ *   the only way to assert the OPEN arm before 3b exists.
+ */
+export function resolveVariantModules(
+  modules: readonly VariantModule[] = VARIANT_MODULES,
+): readonly VariantModule[] {
+  if (!mcpContractIsGenerated(modules)) return modules;
+  if (modules.some(mod => mod.source === MCP_CONTRACT_MODULE.source)) return modules;
+  return [...modules, MCP_CONTRACT_MODULE];
+}
+
+/**
+ * Every reference-module source whose GENERATION is conditional — the sources
+ * {@link resolveVariantModules} may or may not include.
+ *
+ * The build reads this to tell the two reasons a module is absent from the
+ * resolved registry apart: an UNREGISTERED reference module is an authoring
+ * mistake and is refused with a message naming the registry, while one listed
+ * here is authored-but-gated and is reported as deferred. Without the
+ * distinction the gated case would take the refusal path and no gated module
+ * could ever exist.
+ *
+ * Derived from the gate's own subject, not hand-listed beside it: a second module
+ * added to the gate is added here by construction.
+ */
+export const GATED_REFERENCE_MODULE_SOURCES: readonly string[] = [MCP_CONTRACT_MODULE.source];
+
 /**
  * The floor a FAN-OUT module's pair list must clear.
  *
@@ -446,7 +578,7 @@ export type VariantExpansionError =
  *   so the refusal branches are provable without inventing a module on disk.
  */
 export function expandVariants(
-  modules: readonly VariantModule[] = VARIANT_MODULES,
+  modules: readonly VariantModule[] = resolveVariantModules(),
 ): Result<VariantPair[], VariantExpansionError> {
   if (modules.length === 0) return Err({ kind: 'no-modules' });
 
@@ -485,7 +617,13 @@ export function expandVariants(
     }
 
     for (const op of mod.ops) {
-      const nameResult = validateOutputName(op);
+      // A 'contract' module's basename carries a mandatory leading underscore;
+      // every other kind's is refused one. Dispatching on the kind keeps ONE name
+      // rule per kind, rather than one relaxed rule that both kinds share and
+      // neither is fully described by.
+      const nameResult = mod.kind === 'contract'
+        ? validateContractOutputName(op)
+        : validateOutputName(op);
       if (!nameResult.ok) {
         return Err({ kind: 'invalid-op-name', module: mod.source, op, cause: nameResult.error });
       }
@@ -553,8 +691,16 @@ export function generatedReferenceManifest(): readonly string[] {
  * No `g`/`y` flag on the shared object — callers construct their own scanner
  * rather than inherit a lastIndex (the same rule LEADING_BLOCK_RE follows in
  * scripts/build-mds.ts).
+ *
+ * The optional leading `_` mirrors validateContractOutputName, and widening the
+ * capture here costs nothing: this regex is NOT a containment gate. It recognises
+ * a plumbing comment inside a source file, and the name it captures is then
+ * checked against the caller's own registry (`unknown-section`), so a marker
+ * naming something unregistered is refused whatever its spelling. The gate on
+ * what may become a PATH is validateOutputName / validateContractOutputName,
+ * which run over the registry, not over the file.
  */
-export const VARIANT_SECTION_MARKER_RE = /^<!-- op: ([a-z0-9][a-z0-9._-]{0,63}) -->[ \t]*$/;
+export const VARIANT_SECTION_MARKER_RE = /^<!-- op: (_?[a-z0-9][a-z0-9._-]{0,63}) -->[ \t]*$/;
 
 export type SectionSplitError =
   | { kind: 'no-sections'; expected: readonly string[] }

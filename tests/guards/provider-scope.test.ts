@@ -8,8 +8,8 @@
  *   2. No `mcp__` / vendor tool literal, and no user-facing "MCP", in anything a
  *      Git spawn can load.
  *   3. The Git agent declares no `tools:` frontmatter key.
- *   4. `_mcp.md` does not exist after a GitHub-only build and is named from no
- *      generated GitHub mechanics file.
+ *   4. `_mcp.md` is generated ONLY behind its registry gate (AC-2.7 re-scoped in
+ *      3a-4, hazard H7) and is named from no generated GitHub mechanics file.
  *
  * SCOPE, and why it is a scope rather than a cleverer regex
  * --------------------------------------------------------
@@ -31,7 +31,15 @@ import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
 import { agentsDir, commandsDir, compiledAgentsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
+import {
+  TRACKER_GITHUB_OPS,
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MCP_CONTRACT_MODULE,
+  VARIANT_MODULES,
+  generatedReferenceManifest,
+  mcpContractIsGenerated,
+  resolveVariantModules,
+} from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
@@ -367,17 +375,58 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
 });
 
 // ---------------------------------------------------------------------------
-// 4. AC-2.7 — `_mcp.md` is not generated in Phase 2 and is named from nowhere
+// 4. AC-2.7, RE-SCOPED in 3a-4 (hazard H7, decision D-D)
 // ---------------------------------------------------------------------------
+//
+// Phase 2's form was *"no `_mcp.md` exists after a GitHub-only build"*, and it
+// would have failed the instant Phase 3 authored the module — which is why the
+// re-scope is a named step (P3a-S12) rather than a discovery. The re-scoped form:
+//
+//     `_mcp.md` is GENERATED ONLY when a provider that needs it is registered,
+//     and is never NAMED from any github op file.
+//
+// The absence is still asserted, and still for AC-2.7's original reason (a
+// GitHub user must not be billed for a reference nothing they can reach loads,
+// GAP-02). What changed is what the absence is EVIDENCE OF: it used to mean the
+// contract had not been written, and now means the gate is shut. Those are
+// different claims and a bare `not.exists` cannot tell them apart, so the arms
+// below pin all three facts — the source is authored, the gate is shut, and the
+// gate opens for the right registry (PF-064: an absence guard needs a presence
+// arm).
 
-describe('provider-scope: no _mcp.md after a GitHub-only build (AC-2.7, D-D)', () => {
-  it('references/tracker/_mcp.md does not exist', () => {
-    const mcp = path.join(REFS_DIR, 'tracker', '_mcp.md');
+describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-scoped, H7, D-D)', () => {
+  const MCP_REL = path.join('tracker', '_mcp.md');
+
+  it('the contract module IS authored — the absence below is a gate, not missing work', () => {
+    const source = path.join(ROOT, MCP_CONTRACT_MODULE.source);
+    expect(
+      existsSync(source),
+      `${MCP_CONTRACT_MODULE.source} is absent. AC-2.7's re-scoped form asserts a GATE; with no ` +
+      `module on disk it would instead be asserting that 3a-4 never happened.`,
+    ).toBe(true);
+    expect(
+      readFileSync(source, 'utf-8').length,
+      'the contract module is empty — a zero-byte contract passes every absence assertion',
+    ).toBeGreaterThan(0);
+  });
+
+  it('references/tracker/_mcp.md is NOT generated on this tree (the gate is shut)', () => {
+    expect(
+      mcpContractIsGenerated(),
+      'the shipped registry must not open the gate: no registered provider reaches its tracker ' +
+      'through a tool call yet, so generating the contract would bill every GitHub user for a ' +
+      'reference nothing they can reach loads (GAP-02)',
+    ).toBe(false);
+    const mcp = path.join(REFS_DIR, MCP_REL);
     expect(
       existsSync(mcp),
-      `${mcp} exists. Clause (iii) is read PER PHASE: no MCP-backed provider module exists in ` +
-      `Phase 2, so the file would have no reachable consumer (ADR-003). It lands in 3a.`,
+      `${mcp} exists while the gate is shut — the build emitted a file the registry did not ask ` +
+      `for. Clause (iii) is read PER PHASE (D-D), but that licenses AUTHORING it, not shipping it.`,
     ).toBe(false);
+    expect(
+      generatedReferenceManifest(),
+      'the installer converges to this manifest, so a name here is a file installed for everyone',
+    ).not.toContain('tracker/_mcp.md');
     // Non-vacuity: the directory it would live in IS present and populated, so the
     // absence above is an absence and not a missing build.
     expect(
@@ -387,7 +436,30 @@ describe('provider-scope: no _mcp.md after a GitHub-only build (AC-2.7, D-D)', (
     ).toBe(true);
   });
 
+  it('presence arm: the gate OPENS for a registry carrying such a provider', () => {
+    // Without this the absence above is satisfied by a gate welded shut, and the
+    // whole mechanism would be discovered broken in 3b rather than here.
+    const withProvider = [
+      ...VARIANT_MODULES,
+      {
+        source: 'src/assets/mds/tracker/_probe.mds',
+        subdir: MCP_BACKED_PROVIDER_SUBDIRS[0],
+        kind: 'fanout' as const,
+        ops: TRACKER_GITHUB_OPS,
+      },
+    ];
+    expect(mcpContractIsGenerated(withProvider)).toBe(true);
+    expect(
+      resolveVariantModules(withProvider).map(m => m.source),
+      'opening the gate must add the contract module and nothing else',
+    ).toContain(MCP_CONTRACT_MODULE.source);
+  });
+
   it("no generated GitHub mechanics file names '_mcp.md'", () => {
+    // The second half of the re-scoped form, and the half that does NOT relax:
+    // a github op naming the tool-call contract would make a CLI provider load a
+    // document about a transport it never uses, and would hand it the DEGRADED
+    // vocabulary of capabilities it has no analogue for.
     const named: string[] = [];
     for (const op of TRACKER_GITHUB_OPS) {
       const file = path.join(REFS_DIR, 'tracker', 'github', `${op}.md`);
@@ -397,5 +469,26 @@ describe('provider-scope: no _mcp.md after a GitHub-only build (AC-2.7, D-D)', (
     expect(named, `ops naming _mcp.md: ${named.join(', ')}`).toEqual([]);
     expect(TRACKER_GITHUB_OPS.length, 'the op roster is empty — the loop above ran zero times')
       .toBeGreaterThan(0);
+  });
+
+  it('the contract module is INSIDE the scanned corpus, so its wording is governed', () => {
+    // The module names no provider and no transport, and that is only meaningful
+    // while the scan can see it: an exemption was deliberately NOT taken here
+    // (ADR-025 — classify the case, and this case did not need widening), so the
+    // guard must prove the file is in scope rather than out of it.
+    const corpus = scanCorpus();
+    const scanned = corpus.map(e => e.path);
+    expect(
+      scanned,
+      'the contract module must be scanned by the provider and vendor collectors — an unscanned ' +
+      'file is an exemption nobody wrote down',
+    ).toContain('src/assets/mds/tracker/_mcp.mds');
+    const entry = corpus.find(e => e.path === 'src/assets/mds/tracker/_mcp.mds')!;
+    expect(collectForeignProviderLiterals([entry]), 'the contract is provider-independent').toEqual([]);
+    expect(
+      collectVendorTokens([entry]),
+      'the contract states its rules in terms of CAPABILITIES, not transport: no vendor tool ' +
+      'literal and no transport acronym, so no allowlist entry is needed for it',
+    ).toEqual([]);
   });
 });
