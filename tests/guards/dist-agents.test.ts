@@ -14,12 +14,15 @@
  *   (c) no `.md` shadowing an `.mds` host: two sources for one agent means the
  *       dist-preferred resolver silently picks a winner.
  *
- * AC-1.2 additionally pins what Phase 1 did NOT build: no variant expansion, no
- * conditionals, no per-provider file naming. Phase 2 introduces those; a guard
- * that proves their absence now is what makes their arrival a deliberate change.
+ * AC-1.2 additionally pins constructs that must not appear. Phase 1 wrote it as
+ * "nothing Phase 2 will add"; Phase 2 narrowed it deliberately — variant
+ * expansion and the (module, op) dispatch arrived and are named in
+ * LEGALISED_IN_PHASE2 — while conditional arms and provider-templated FILE
+ * naming stay forbidden in every phase, because the generated tree is
+ * tracker/{provider}/{op}.md driven by a typed registry, not by a template.
  *
  * Every collector is a named function called by both the assertion and its
- * known-bad probe (ADR-024). No literal agent path appears in this file — the
+ * known-bad probe (PF-018). No literal agent path appears in this file — the
  * directories come from src/core/assets.ts (AC-0.7 / AC-1.10).
  */
 
@@ -367,7 +370,7 @@ interface ForbiddenConstruct {
   label: string
   /** Anchored matcher — the shape the construct actually takes in source. */
   pattern: RegExp
-  /** A realistic instance of the construct the collector must flag (ADR-024). */
+  /** A realistic instance of the construct the collector must flag (PF-018). */
   probe: string
   appliesTo: 'all' | 'mds'
 }
@@ -403,25 +406,45 @@ function collectForbiddenConstructs(
   return violations
 }
 
-const FORBIDDEN_PHASE2_CONSTRUCTS: ReadonlyArray<ForbiddenConstruct> = [
+/**
+ * Legalised in Phase 2, recorded so the narrowing is visible rather than silent.
+ *
+ * `expandVariants(` and the `(module, op)` dispatch signature were forbidden
+ * because Phase 1 built no expansion; Phase 2's whole subject is that expansion,
+ * and both now live in src/core/mds-variants.ts and scripts/build-mds.ts — the
+ * two files this guard's corpus deliberately includes. Keeping them forbidden
+ * would mean the guard failing on the mechanism it was written to await, which
+ * is not a narrowing anyone can act on.
+ *
+ * What did NOT become legal, and stays in the table below: `@if` (Phase 2 ships
+ * no conditional arms at all — the single-arm form AC-1.2 was written against
+ * remains forbidden outright), the `tracker-<provider>.md` filename token
+ * (§14.5: it appears NOWHERE — the generated tree is `tracker/{provider}/{op}.md`
+ * and the flat per-provider file shape was disqualified), the `{provider}.md`
+ * templated output name, a `variants:` YAML key (the roster is a typed registry,
+ * not frontmatter), and `@import`/`@define` inside a compiled AGENT host — the
+ * Git agent is prose, and a directive there would mean its body had become a
+ * template.
+ */
+const LEGALISED_IN_PHASE2: readonly string[] = ['expandVariants(', '(module, op)']
+
+const FORBIDDEN_CONSTRUCTS: ReadonlyArray<ForbiddenConstruct> = [
   // A conditional directive, not the letters 'if' after an '@'.
   { label: '@if', pattern: /@if\b/, probe: '@if provider == "github"\n', appliesTo: 'all' },
   // A frontmatter/YAML key at line start, not the word in a sentence.
   { label: 'variants:', pattern: /^[ \t]*variants:/m, probe: 'variants:\n  - github\n', appliesTo: 'all' },
-  // A call (or a declaration), not a mention of the future expander.
-  { label: 'expandVariants(', pattern: /\bexpandVariants\s*\(/, probe: 'const out = expandVariants(host)\n', appliesTo: 'all' },
-  // The Phase-2 (module, op) dispatch signature, whitespace-tolerant.
-  { label: '(module, op)', pattern: /\(\s*module\s*,\s*op\s*\)/, probe: 'dispatch(module, op)\n', appliesTo: 'all' },
   // A per-provider tracker FILE, not the adjective 'tracker-agnostic'.
   { label: 'tracker-<provider>.md', pattern: /\btracker-[a-z0-9-]+\.mds?\b/, probe: 'see tracker-github.md for the mapping\n', appliesTo: 'all' },
   // A templated output filename.
   { label: '{provider}.md', pattern: /\{provider\}\.mds?\b/, probe: 'output-name: tracker-{provider}.md\n', appliesTo: 'all' },
-  // MDS directives — unanchored on purpose: anywhere in a host is Phase 2.
+  // MDS directives — unanchored on purpose: anywhere in an AGENT host is a
+  // templated agent body. Reference modules under src/assets/mds/ use @define by
+  // design and are not in this corpus.
   { label: '@import', pattern: /@import\b/, probe: '@import "./_partials/_tracker.mds"\n', appliesTo: 'mds' },
   { label: '@define', pattern: /@define\b/, probe: '@define providerBlock()\n', appliesTo: 'mds' },
 ]
 
-describe('AC-1.2: no variant expansion, conditionals, or provider templating in Phase 1', () => {
+describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated file naming', () => {
   function buildScopeCorpus(): Array<{ name: string; content: string }> {
     const hosts = agentSourceNames(agentsDir(), '.mds')
     const corpus = hosts.map(name => ({
@@ -445,22 +468,23 @@ describe('AC-1.2: no variant expansion, conditionals, or provider templating in 
       expect(entry.content.length, `${entry.name} is empty — guard would be vacuous`).toBeGreaterThan(0)
     }
 
-    const violations = collectForbiddenConstructs(corpus, FORBIDDEN_PHASE2_CONSTRUCTS)
+    const violations = collectForbiddenConstructs(corpus, FORBIDDEN_CONSTRUCTS)
     expect(
       violations,
-      `Phase-2 constructs found in the Phase-1 tree:\n  ${violations.join('\n  ')}\n` +
-      `Phase 1 is plumbing only — variant expansion and provider templating land in Phase 2.`,
+      `Forbidden construct(s) found:\n  ${violations.join('\n  ')}\n` +
+      `Conditional arms and provider-templated file naming are out of scope in every phase;\n` +
+      `the generated tree is tracker/{provider}/{op}.md, driven by a typed registry.`,
     ).toHaveLength(0)
   })
 
   it('known-bad probe: each forbidden construct is detected by the same collector', () => {
     // Every entry carries the instance that must trip it, so anchoring a pattern
     // without keeping it able to catch its own construct is a red test.
-    for (const entry of FORBIDDEN_PHASE2_CONSTRUCTS) {
+    for (const entry of FORBIDDEN_CONSTRUCTS) {
       const name = entry.appliesTo === 'mds' ? 'seeded.mds' : 'seeded.ts'
       const violations = collectForbiddenConstructs(
         [{ name, content: entry.probe }],
-        FORBIDDEN_PHASE2_CONSTRUCTS,
+        FORBIDDEN_CONSTRUCTS,
       )
       expect(
         violations.some(v => v.includes(entry.label)),
@@ -469,20 +493,36 @@ describe('AC-1.2: no variant expansion, conditionals, or provider templating in 
     }
   })
 
-  it('known-bad probe: prose naming a Phase-2 construct is not itself a violation', () => {
+  it('the Phase-2 narrowing is explicit: the legalised constructs are named, and gone from the table', () => {
+    // A deliberate narrowing must be readable as one. Without this, the two
+    // entries could have been deleted in a hurry and nobody could tell a removal
+    // from a rewording (ADR-003 — leave the end state, and say what changed).
+    expect(LEGALISED_IN_PHASE2.length, 'the narrowing must name what it legalised').toBeGreaterThan(0)
+    for (const label of LEGALISED_IN_PHASE2) {
+      expect(
+        FORBIDDEN_CONSTRUCTS.map(c => c.label),
+        `'${label}' is legal in Phase 2 and must not also be forbidden`,
+      ).not.toContain(label)
+    }
+    // And the fence is still load-bearing after the narrowing, not an empty shell.
+    expect(FORBIDDEN_CONSTRUCTS.length, 'fence must still forbid something').toBeGreaterThanOrEqual(6)
+    expect(FORBIDDEN_CONSTRUCTS.map(c => c.label)).toContain('tracker-<provider>.md')
+    expect(FORBIDDEN_CONSTRUCTS.map(c => c.label)).toContain('@if')
+  })
+
+  it('known-bad probe: prose naming a forbidden construct is not itself a violation', () => {
     // The other half of the anchoring contract. The corpus contains the two build
-    // files this guard is about, so a docblock that describes what Phase 2 adds
-    // must stay legal — otherwise the guard taxes its own documentation, and the
-    // next author words around it instead of writing what they mean.
+    // files this guard is about, so a docblock that describes the mechanism must
+    // stay legal — otherwise the guard taxes its own documentation, and the next
+    // author words around it instead of writing what they mean.
     const prose = [
-      ' * The variants: key is a Phase-2 concept; no Phase-1 host declares one.',
-      ' * Output naming stays tracker-agnostic until Phase 2.',
-      ' * A future expander (expandVariants) will fan one host out per provider.',
-      ' * The module and op arguments arrive with the Phase-2 dispatch.',
+      ' * No host declares a variants: key — the roster is a typed registry.',
+      ' * Output naming stays tracker-agnostic: no per-provider filename token.',
+      ' * A conditional arm would be written with an if directive; none exists.',
     ].join('\n')
 
     expect(
-      collectForbiddenConstructs([{ name: 'seeded.ts', content: prose }], FORBIDDEN_PHASE2_CONSTRUCTS),
+      collectForbiddenConstructs([{ name: 'seeded.ts', content: prose }], FORBIDDEN_CONSTRUCTS),
       'anchored patterns must not fire on prose that merely names the construct',
     ).toHaveLength(0)
   })
@@ -492,7 +532,7 @@ describe('AC-1.2: no variant expansion, conditionals, or provider templating in 
     // a .ts file and must not be flagged there.
     const violations = collectForbiddenConstructs(
       [{ name: 'seeded.ts', content: 'import x from "y" // @import\n' }],
-      FORBIDDEN_PHASE2_CONSTRUCTS,
+      FORBIDDEN_CONSTRUCTS,
     )
     expect(violations.filter(v => v.includes('@import'))).toHaveLength(0)
   })

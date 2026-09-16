@@ -4,7 +4,8 @@ import * as path from 'path'
 import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
-import { agentSourceDirs } from '../src/core/assets.js'
+import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
+import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -95,8 +96,12 @@ export interface BuildRun {
  * Run the real build script against an isolated fake root.
  * `cwd` stays at the repo root so module resolution is unchanged; the root the
  * build walks and writes comes from DEVFLOW_MDS_ROOT alone.
+ *
+ * Module-local: `buildCommittedTree` below is the sole caller in this file, and
+ * every other test file spawns the build through its own `runBuild` against its
+ * own fake root rather than importing this one.
  */
-export function runMdsBuild(fakeRoot: string): BuildRun {
+function runMdsBuild(fakeRoot: string): BuildRun {
   const result = spawnSync(TSX_BIN, [BUILD_MDS_SCRIPT], {
     cwd: ROOT,
     encoding: 'utf-8',
@@ -109,7 +114,11 @@ export function runMdsBuild(fakeRoot: string): BuildRun {
 
 /** Copy the two directories the walk discovers hosts in into a fake root. */
 export async function copyCommittedSources(fakeRoot: string): Promise<void> {
-  for (const sub of ['commands', 'agents']) {
+  // 'mds' carries the reference modules (src/assets/mds/tracker/*.mds). Omitting
+  // it would leave the copied tree one host short of the committed one, so the
+  // build's printed census and the dist/-staleness compare would both assert
+  // about a corpus the real build does not have.
+  for (const sub of ['commands', 'agents', 'mds']) {
     await fsp.cp(
       path.join(ROOT, 'src', 'assets', sub),
       path.join(fakeRoot, 'src', 'assets', sub),
@@ -246,6 +255,211 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
   return result
 }
 
+// ── Fenced-code-block awareness for column-0 section boundaries ──────────────
+//
+// D-FENCE-AWARE-BOUNDARY (PF-063). A `## ` line at column 0 inside a fenced code
+// block is payload, not structure: `tracker/github/manage-debt.md`'s `## Items`
+// is the literal body of the successor tech-debt issue, and
+// `tracker/github/ensure-traceable-issue.md` carries six such lines across its
+// `gh issue create` heredoc and its D3 template fence. A terminator search that
+// reads them as headings ends the operation's section mid-fence — the bytes stay
+// on disk, containment-green, while every union-mode guard reading that section
+// examines an empty tail. PF-063's recorded remedy is to make the rule structural
+// and assert it; `collectUnfencedLines` is the structural half — the ONE fence
+// scanner every "is this column-0 line structure or payload?" question routes
+// through. Its callers: `collectUnfencedH2` (below) for `## ` section
+// boundaries, shared by the extractor and by the per-op reference guard in
+// tests/tracker/; and `capability-hoist`'s process-block terminator, which
+// closes on `## `/`### `/`**Output:**`/`---` and had re-derived the rule locally.
+// A collector that re-derives it drifts the moment the rule moves, and its probe
+// stays green while the real rule has changed (PF-018).
+//
+// Fence grammar — a deliberate CommonMark subset:
+//   open  — a line whose first non-space characters, after at most 3 leading
+//           spaces, are 3+ backticks or 3+ tildes (a backtick fence's info string
+//           may not itself contain a backtick);
+//   close — a later line with at most 3 leading spaces carrying the same marker
+//           character, a run at least as long as the opening one, and nothing
+//           after it but whitespace;
+//   an unclosed fence runs to the end of the text.
+//
+// Deliberate non-goals, written down rather than inferred from a green run
+// (PF-064): 4-space-indented code blocks, HTML blocks, and fences opened 4+
+// spaces deep inside a list item are not modelled. Every `## ` inside one of
+// those is itself indented, so it is not a column-0 `## ` line and could not
+// terminate a section under either the old rule or this one.
+//
+// Where the rules are probed: directly against this scanner in
+// tests/guards/fence-grammar.test.ts (one synthetic corpus per rule, each proven
+// red against the inverted rule), and end-to-end through the section extractor
+// in tests/guards/agent-source-resolver.test.ts. A rule with no probe can be
+// inverted with the whole suite still green (PF-018), so a rule added here is a
+// probe added there.
+
+const FENCE_MARKER_RE = /^ {0,3}(`{3,}|~{3,})/
+
+/** One line that sits outside every fenced code block. */
+export interface UnfencedLine {
+  /** 1-based line number. */
+  line: number
+  /** Offset of the line's first character within `text`, in the units `String.slice` takes. */
+  index: number
+  /** The line, verbatim. */
+  text: string
+}
+
+/** A `collectUnfencedH2` site: the heading starts at column 0, so `index` is its `#`. */
+export type UnfencedH2 = UnfencedLine
+
+/** The opening delimiter of a fence the text never closes. */
+export interface UnclosedFence {
+  /** 1-based line number of the opening delimiter. */
+  line: number
+  /** Offset of the delimiter's first character within `text`, in the units `String.slice` takes. */
+  index: number
+  /** The opening line, verbatim — its info string names the fence a fix must close. */
+  text: string
+}
+
+/** What one pass of the fence scanner saw. */
+interface FenceScan {
+  /** Accepted lines outside every fence, in document order. */
+  readonly sites: UnfencedLine[]
+  /** The fence still open when the text ran out, or null when every fence closed. */
+  readonly unclosed: UnclosedFence | null
+}
+
+/**
+ * The single pass both public collectors read. Private on purpose: callers ask
+ * either "which column-0 lines are structure?" or "does the text end inside a
+ * fence?", and answering both from one scan is what keeps the grammar in one
+ * place. A second scanner drifts from this one the moment a rule moves, and its
+ * probe stays green while the real rule has changed (PF-018).
+ */
+function scanFences(text: string, accept: (line: string) => boolean): FenceScan {
+  const sites: UnfencedLine[] = []
+  const lines = text.split('\n')
+  let offset = 0
+  let open: { char: string; length: number; opener: UnclosedFence } | null = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const marker = FENCE_MARKER_RE.exec(line)
+    if (open === null) {
+      if (marker !== null) {
+        const run = marker[1]
+        const info = line.slice(marker[0].length)
+        if (run[0] !== '`' || !info.includes('`')) {
+          open = {
+            char: run[0],
+            length: run.length,
+            opener: { line: i + 1, index: offset, text: line },
+          }
+        }
+      } else if (accept(line)) {
+        sites.push({ line: i + 1, index: offset, text: line })
+      }
+    } else if (
+      marker !== null &&
+      marker[1][0] === open.char &&
+      marker[1].length >= open.length &&
+      line.slice(marker[0].length).trim() === ''
+    ) {
+      open = null
+    }
+    offset += line.length + 1
+  }
+
+  return { sites, unclosed: open === null ? null : open.opener }
+}
+
+/**
+ * Named collector — the harness's ONE fence scanner. Returns every line of
+ * `text` that sits outside every fenced code block and satisfies `accept`, in
+ * document order.
+ *
+ * `accept` sees the raw line, so a caller expresses its own shape (a `## `
+ * heading, a process-block terminator) while the fence rule stays here.
+ */
+export function collectUnfencedLines(
+  text: string,
+  accept: (line: string) => boolean,
+): UnfencedLine[] {
+  return scanFences(text, accept).sites
+}
+
+/**
+ * Named collector: every column-0 `## ` line in `text` that is NOT inside a
+ * fenced code block, in document order.
+ *
+ * This is the single owner of "is this `## ` structure or payload?" — the
+ * section extractor and the generated-reference structure guard must not
+ * re-derive it, or a probe can stay green after the real rule changes
+ * (PF-018).
+ */
+export function collectUnfencedH2(text: string): UnfencedH2[] {
+  return collectUnfencedLines(text, line => line.startsWith('## '))
+}
+
+/**
+ * Named collector: the opening delimiter of a fence `text` never closes.
+ *
+ * "An unclosed fence runs to the end of the text" is the one rule of the grammar
+ * above whose blast radius is the whole document. Past an unclosed delimiter
+ * every column-0 `## ` is payload, so every union-mode section extraction runs to
+ * end of file, every absence assertion over the tail is satisfied for the wrong
+ * reason, and the fenced-`## ` non-vacuity floor counts UP as the corpus
+ * degrades — all three numbers a reader would check move the reassuring way
+ * (PF-018). The corpus-wide assertion that no shipped file is in that state
+ * lives in tests/guards/fence-grammar.test.ts.
+ *
+ * Returns at most one entry, which is a property of the grammar and not of this
+ * function: the scan carries a single open state, so the first delimiter able to
+ * close a fence closes it, and only the final unmatched opener can survive to end
+ * of text. The array shape is what callers aggregate across a corpus
+ * (`files.flatMap(...)`), and keeps the empty assertion spelled the way every
+ * other named collector here spells it.
+ *
+ * Deliberate non-goal (PF-064): a fence a writer forgot to close, which a later
+ * unrelated delimiter happens to close, is balanced under this grammar and is not
+ * reported. What is asserted is exactly what the rule states — the text does not
+ * end inside a fence.
+ */
+export function collectUnclosedFences(text: string): UnclosedFence[] {
+  const { unclosed } = scanFences(text, () => false)
+  return unclosed === null ? [] : [unclosed]
+}
+
+/**
+ * Bounded memo over `collectUnfencedH2`, keyed by the exact document text.
+ *
+ * The extractor below needs one whole-document fence scan per corpus file, but
+ * it is called once per (op, file) PAIR — 18 operations over a ~24-file sink
+ * corpus re-parsed every file 18 times to answer a question whose answer is a
+ * property of the file alone. The memo is keyed on content rather than on the
+ * `CorpusEntry` object because the corpus builders return fresh objects on
+ * every call, so an identity-keyed cache would never hit.
+ *
+ * The capacity bound is deliberate: an unbounded module-level cache in a
+ * long-running vitest worker retains every document the suite ever extracted
+ * from. FIFO eviction (Map preserves insertion order) over a limit comfortably
+ * above the largest real corpus keeps the steady state a pure hit.
+ */
+const UNFENCED_H2_MEMO_LIMIT = 64
+const unfencedH2Memo = new Map<string, readonly UnfencedH2[]>()
+
+function unfencedH2Index(text: string): readonly UnfencedH2[] {
+  const cached = unfencedH2Memo.get(text)
+  if (cached !== undefined) return cached
+  const sites = collectUnfencedH2(text)
+  if (unfencedH2Memo.size >= UNFENCED_H2_MEMO_LIMIT) {
+    const oldest = unfencedH2Memo.keys().next()
+    if (oldest.done !== true) unfencedH2Memo.delete(oldest.value)
+  }
+  unfencedH2Memo.set(text, sites)
+  return sites
+}
+
 // ── Corpus-spanning operation-section extractor ──────────────────────────────
 //
 // Two modes, explicit — no default. Either choice is silently wrong for one
@@ -263,6 +477,27 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 
 /**
  * Extract an ## Operation: section from a corpus.
+ *
+ * Both ends of the section come from the SAME unfenced-heading index, so the
+ * anchor is line-bounded and fence-aware by construction: the section runs from
+ * the operation's own UNFENCED column-0 `## ` line to the next one, or to end of
+ * file (D-FENCE-AWARE-BOUNDARY / PF-063 — see `collectUnfencedH2`).
+ *
+ * Both properties fix a real defect the earlier `indexOf(marker)` start had,
+ * where only the terminator was fence-aware:
+ *
+ *   line-bounded — `## Operation: fetch-issue` prefix-matched
+ *     `fetch-issues-batch.md`'s own line-1 heading, so every union lookup for
+ *     `fetch-issue` silently concatenated the sibling operation's whole
+ *     mechanics file (matchCount 3 over a corpus holding 2 `fetch-issue`
+ *     sections). Every guard reading that section was over-broad by
+ *     construction, whatever it happened to assert.
+ *
+ *   fence-aware — a `## Operation:` line quoted inside a fenced sample is
+ *     payload, exactly as the terminator already treated it. While the start was
+ *     fence-blind, such a sample made 'sole' mode throw "found in multiple
+ *     files", which reads as a corpus-scope bug rather than as a fenced sample.
+ *
  * Throws when the anchor is absent from every file in the corpus.
  * Throws when mode is 'sole' and the anchor matches in more than one file
  * (naming both paths — that is the intent; the first match is not the authority).
@@ -276,12 +511,17 @@ export function extractOpSectionFromCorpus(
   const matches: Array<{ path: string; section: string }> = []
 
   for (const entry of corpus) {
-    const start = entry.content.indexOf(marker)
-    if (start === -1) continue
-    const nextSection = entry.content.indexOf('\n## ', start + marker.length)
-    const section = nextSection === -1
-      ? entry.content.slice(start)
-      : entry.content.slice(start, nextSection)
+    const headings = unfencedH2Index(entry.content)
+    // `trimEnd` so the anchor must be the whole heading line: trailing whitespace
+    // is invisible in a diff, a sibling operation's name is not.
+    const at = headings.findIndex(h => h.text.trimEnd() === marker)
+    if (at === -1) continue
+    // Cut at the newline that PRECEDES the next unfenced heading, so the section
+    // carries no trailing blank line and the heading belongs to the next section.
+    const terminator = headings[at + 1]
+    const section = terminator === undefined
+      ? entry.content.slice(headings[at].index)
+      : entry.content.slice(headings[at].index, terminator.index - 1)
     matches.push({ path: entry.path, section })
   }
 
@@ -318,20 +558,49 @@ export function extractOpSectionFromCorpus(
  * not a directory). Other errors (e.g. EACCES) propagate — they indicate a
  * genuine problem.
  *
- * Descent stops silently once the recursion reaches `maxDepth` levels below
- * the initial `dir` (default 8). No error is thrown when the cap is hit.
+ * DEPTH. Among the walks over the generated reference tree this is the third,
+ * after the build's prune and the installer's sweep, so it takes its bound from
+ * the same owner rather than re-spelling one: MAX_REFERENCE_SWEEP_DEPTH in
+ * src/core/reference-sweep.ts, on that module's convention — the walked root is
+ * depth 0, the bound is the deepest directory a walk may descend INTO, and
+ * `depth > bound` is the breach. Each walker carrying its own literal is how the
+ * first two came to disagree on both the number of levels and on what happens at
+ * the last one; the same bound governs the source asset trees walked here.
+ *
+ * A breach is loud here too, and for the harness's own reason: a walk that
+ * stopped at the bound and returned anyway would hand a collector a corpus
+ * smaller than the tree it claims to cover, and every guard reading from it
+ * would pass over ground it never saw. A test helper may throw, so it throws —
+ * the build throws on the same breach, the sweep reports it in `failed`, and
+ * none of the three passes it over.
+ *
+ * `maxDepth` is a per-call-site SCOPE, not a second bound: narrowing it (a
+ * caller that wants one flat level) stops descent silently, because stopping is
+ * what that caller asked for. It may only narrow — the shared bound is the
+ * ceiling and is checked first.
  *
  * @param dir - Absolute path of the directory to walk.
  * @param accept - Predicate applied to each file's absolute path.
- * @param maxDepth - Maximum recursion depth (default 8). Descent beyond this
- *   depth is silently skipped.
+ * @param maxDepth - Deliberate scope cap, at most MAX_REFERENCE_SWEEP_DEPTH
+ *   (the default). Directories below it are skipped silently.
+ * @throws If the walk reaches a directory deeper than MAX_REFERENCE_SWEEP_DEPTH.
  */
 export function walkFiles(
   dir: string,
   accept: (file: string) => boolean,
-  maxDepth = 8,
+  maxDepth: number = MAX_REFERENCE_SWEEP_DEPTH,
   _depth = 0,
 ): string[] {
+  if (_depth > MAX_REFERENCE_SWEEP_DEPTH) {
+    throw new Error(
+      `walkFiles: descent into ${dir} exceeds the bound of ` +
+      `${MAX_REFERENCE_SWEEP_DEPTH} levels — no tree the harness walks is this ` +
+      'deep, and a walk that stopped here would report a corpus smaller than the ' +
+      'tree it claims to cover.',
+    )
+  }
+  if (_depth > maxDepth) return []
+
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
@@ -344,9 +613,7 @@ export function walkFiles(
   for (const entry of entries) {
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (_depth < maxDepth) {
-        result.push(...walkFiles(absPath, accept, maxDepth, _depth + 1))
-      }
+      result.push(...walkFiles(absPath, accept, maxDepth, _depth + 1))
     } else if (accept(absPath)) {
       result.push(absPath)
     }
@@ -388,6 +655,24 @@ export function gitAgentSinkCorpus(root = ROOT): CorpusEntry[] {
   }
 
   return corpus
+}
+
+// ── Tracker reference-naming collector ───────────────────────────────────────
+//
+// One collector for the AC-2.5/AC-2.7 single-naming-line claim, shared by the
+// containment and byte-budget suites so both assert over the same definition of
+// "names a reference path" (PF-018: a probe that re-implements the collector
+// proves the copy is live, not the guard).
+
+/**
+ * Named collector: lines of the compiled agent that name a `references/tracker/`
+ * path.
+ *
+ * Both suites drive this one function — the live assertion (exactly one such
+ * line, inside the preamble) and the known-bad probes that seed a second line.
+ */
+export function collectTrackerNamingLines(content: string): string[] {
+  return content.split('\n').filter(line => line.includes('references/tracker/'))
 }
 
 // ── Fence parsing helpers ─────────────────────────────────────────────────────
@@ -452,6 +737,128 @@ export function loadGolden(name: string): string {
 // rather than a hard-coded line number. Adding or removing lines above a sampled
 // section does not break the extractor. Must remain in sync with
 // tests/fixtures/golden/github-status-lines.txt (AC-0.9).
+//
+// PHASE-2 RETARGET — what changed and why the fixture moved with it.
+// ---------------------------------------------------------------------------
+// Phase 2 split the Git agent's GitHub mechanics out of dist/agents/git.md into
+// generated skill references. Nine of the 24 git-side samples were sampling the
+// text that moved. Of those, seven are recoverable by naming the file the text
+// moved to; two STRADDLE the retained/moved boundary — their start anchor moved
+// and their end anchor stayed — and no concatenation of the two files contains
+// the original bytes as a contiguous substring.
+//
+// `D-STRADDLE-SPLIT`: the two straddling samples (manage-debt, learn-conventions)
+// are SPLIT into two samples each — the moved half read from the reference, the
+// retained half read from git.md — rather than being repointed to one side. Both
+// halves were sampled before the split and both are still sampled after it; the
+// alternative (repoint the start anchor and keep the end anchor on git.md) cannot
+// be expressed by `between()`, which slices ONE string, and dropping either half
+// would silently shrink the fixture's coverage of that operation.
+//
+// The fixture was therefore re-captured ONCE, under an explicit user
+// authorisation dated 2026-09-14, in its own fixture-only commit. That
+// authorisation is spent: it covers this retarget and nothing after it.
+//
+// PROOF OBLIGATION AFTER THE RE-CAPTURE. The Phase-0 faithfulness gate ran the
+// rewritten extractor over the `b6928e5` snapshot and required the old fixture
+// back byte-for-byte. That gate cannot be re-run across a deliberate re-capture —
+// the old bytes are the ones the retarget changes. The standing proof is the
+// DERIVATION test in tests/goldens/github-status-lines.test.ts: the `--unfreeze
+// --out-dir` case re-derives the whole fixture from the live tree on every run
+// and compares it byte-for-byte, and the inputs it derives from are themselves
+// frozen (git.md by the git-agent.md golden; the generated references by the
+// containment oracle's 101bda7 baselines). A FUTURE extractor rewrite inherits
+// the Phase-0 obligation unchanged, with the baseline tree being the re-capture
+// commit rather than b6928e5.
+
+/**
+ * Generated skill references the status-line corpus samples.
+ *
+ * A closed list, not a convenience: `statusLineRefReader().read` refuses a path
+ * that is not on it, and the extractor refuses to return unless every entry was
+ * actually read (both arms probed in agent-source-resolver.test.ts). Together
+ * those two arms mean a later edit cannot quietly repoint a reference-sourced
+ * sample back at git.md and leave the list as decoration — the retarget would stop
+ * being covered and the extractor would say so.
+ */
+export const STATUS_LINE_REFERENCE_FILES = [
+  'learn-conventions.md',
+  'publication-gate.md',
+  'tracker/github/backlink-shipped-issues.md',
+  'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/manage-debt.md',
+  'tracker/github/post-wave-report.md',
+] as const
+
+/** A path `STATUS_LINE_REFERENCE_FILES` declares — derived, never re-spelled. */
+type StatusLineReferenceFile = (typeof STATUS_LINE_REFERENCE_FILES)[number]
+
+/**
+ * Narrow an arbitrary relative path to one the list declares.
+ *
+ * A type predicate rather than a membership test on an already-narrow parameter:
+ * typed as the union, `ref()`'s refusal could never fire under its own signature
+ * and would need a widening cast to be written at all — a check the compiler knows
+ * is vacuous, laundered past it. Here the check earns the narrow type instead of
+ * presupposing it, so the arm that refuses is the arm that produces the value the
+ * rest of `ref()` uses.
+ */
+function isStatusLineReference(relPath: string): relPath is StatusLineReferenceFile {
+  return STATUS_LINE_REFERENCE_FILES.some(declared => declared === relPath)
+}
+
+/** A declared-reference reader, plus the accounting of what it actually read. */
+export interface StatusLineRefReader {
+  /**
+   * Read a generated skill reference by its path relative to the references
+   * root. Fail-loud on both an undeclared path and an absent file: an extractor
+   * that silently sampled nothing would re-capture a shorter fixture and call it
+   * stable.
+   */
+  read(relPath: string): string
+  /** The declared paths `read` has returned. */
+  readonly seen: ReadonlySet<string>
+}
+
+/**
+ * Build the reader `extractStatusLines` samples generated references through.
+ *
+ * Module-level and exported for one reason: the refusal arm is the half of the
+ * closed list that nothing else can fire. Every call site inside the extractor
+ * passes a declared path, so a test that only ran the extractor would assert the
+ * list's ENFORCEMENT nowhere — "`ref()` refuses an undeclared path" would stay a
+ * claim about unexercised code (PF-018). The probe in
+ * tests/guards/agent-source-resolver.test.ts drives THIS function, not a copy of
+ * its membership test.
+ *
+ * `read` takes `string` and narrows through `isStatusLineReference`: the refusal
+ * is the gate that actually runs (tests/ is outside `tsc -p tsconfig.json`
+ * today, #337), reachable under the signature rather than dead beneath it.
+ */
+export function statusLineRefReader(): StatusLineRefReader {
+  const seen = new Set<string>()
+  return {
+    seen,
+    read(relPath: string): string {
+      if (!isStatusLineReference(relPath)) {
+        throw new Error(
+          `extractStatusLines: "${relPath}" is not in STATUS_LINE_REFERENCE_FILES — ` +
+          'add it there so the read is declared, or sample a file that is',
+        )
+      }
+      seen.add(relPath)
+      const abs = path.join(compiledSkillRefsDir(ROOT), ...relPath.split('/'))
+      try {
+        return readFileSync(abs, 'utf-8')
+      } catch {
+        throw new Error(
+          `extractStatusLines: generated reference "${relPath}" is absent at ${abs}\n` +
+          '  Run `npm run build` first — the status-line corpus samples the generated mechanics',
+        )
+      }
+    },
+  }
+}
 
 /**
  * Extract the status-line corpus that matches tests/fixtures/golden/github-status-lines.txt.
@@ -462,7 +869,9 @@ export function loadGolden(name: string): string {
  *
  * Reads through the dist-preferred resolver. The resolver's dist-preferred/src-fallback
  * choice is byte-neutral for this extractor because Phase 1's byte-equality gate requires
- * dist/agents/git.md to equal the source it is generated from.
+ * dist/agents/git.md to equal the source it is generated from. Generated references are
+ * addressed through `compiledSkillRefsDir()` — never through a hard-coded `dist/` string,
+ * which would put a second definition of the build's output directory in the harness.
  */
 export function extractStatusLines(gitContent?: string): string {
   const git = gitContent ?? resolveAgentSource('git').content
@@ -470,17 +879,40 @@ export function extractStatusLines(gitContent?: string): string {
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
+  // One-entry corpus for `gitOp` below. The label is what a 'sole' conflict would
+  // name, and a one-entry corpus cannot conflict — but the extractor's contract
+  // takes a path and a caller-supplied baseline body has none on disk, so the
+  // file's own name is the honest label.
+  const gitCorpus: CorpusEntry[] = [{ path: 'git.md', content: git }]
+
+  // Sampling runs through the module-level reader so the closed list's refusal
+  // arm is probed against this exact code rather than a copy (see
+  // `statusLineRefReader`).
+  const refs = statusLineRefReader()
+  const ref = (relPath: string): string => refs.read(relPath)
+
   /**
    * Extract the named operation section from git.md.
-   * Uses \n## Operation: as the boundary so output blocks that contain ## headings
-   * (e.g. fetch-issue's "## Issue #{number}:" in its template) are not truncated.
+   *
+   * Routed through the harness's one section extractor, so the boundary is the
+   * shared rule — line-bounded at the start, cut at the next UNFENCED column-0
+   * `## ` (D-FENCE-AWARE-BOUNDARY / PF-063). A `## ` line inside an Output
+   * template's fence is payload, which is what the hand-rolled slice this
+   * replaces used a `\n## Operation:` terminator to approximate: that terminator
+   * stopped only at a SIBLING operation, so the last operation's section ran past
+   * end of file into the shared `## Principles` trailer, and every operation's
+   * section silently carried any non-operation heading that followed it. That is
+   * the construct Guard 10 was rewritten to escape (667c497) — a region wider
+   * than the operation it claims to be — and every `between`/`singleLine` below
+   * inherited it from here. PF-057's class: a slicing rule that pins layout
+   * instead of the semantics the fixture is supposed to sample.
+   *
+   * 'sole' [DR-18]: git.md is the single authority for the sections sampled
+   * here. A second corpus file carrying the anchor would mean this call was
+   * pointed at the wrong corpus, and the throw is how that is reported.
    */
   function gitOp(opName: string): string {
-    const heading = `## Operation: ${opName}`
-    const start = git.indexOf(heading)
-    if (start === -1) throw new Error(`git.md: operation section not found: "${opName}"`)
-    const next = git.indexOf('\n## Operation:', start + heading.length)
-    return git.slice(start, next === -1 ? git.length : next)
+    return extractOpSectionFromCorpus(gitCorpus, opName, { mode: 'sole' }).content
   }
 
   /**
@@ -511,8 +943,9 @@ export function extractStatusLines(gitContent?: string): string {
     between(git, '**Degradation contract (D4):**', 'raise the inter-operation delay from 1s to 3s for the remainder of the batch.'),
     // blank separator line within the D10 section (baseline line 33)
     '',
-    // D10 step 2 (baseline line 36)
-    singleLine(git, '2. Resolve `REVIEW_PUBLICATION` input:'),
+    // D10 step 2 — MOVED whole: the `## Publication gate (D10)` section is now
+    // references/publication-gate.md, named from the two summary ops (P2-S5 cut 2).
+    singleLine(ref('publication-gate.md'), '2. Resolve `REVIEW_PUBLICATION` input:'),
     // D11 Comment-sink scrub rules (baseline lines 54-57)
     between(git, '- Non-zero scrubber exit OR script missing → **DO NOT POST**', '- **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**'),
     // ensure-pr-ready output template (baseline lines 140-149)
@@ -522,23 +955,34 @@ export function extractStatusLines(gitContent?: string): string {
     // setup-task output block (baseline lines 238-252)
     between(gitOp('setup-task'), '## Task Setup: {branch-name}', '- **Acceptance Criteria**: {criteria}'),
     // fetch-issue D4 + output block (baseline lines 268-290)
-    // Must use gitOp() to avoid ## truncation on "## Issue #{number}:" in the output template
+    // gitOp() scopes both anchors to this operation's own section; the
+    // "## Issue #{number}:" heading in its Output template is fenced, so it is
+    // payload and does not cut the section (PF-063).
     between(gitOp('fetch-issue'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '{type}/{number}-{slug}'),
     // fetch-issues-batch D4 + output block (baseline lines 314-339)
-    // Must use gitOp() to avoid ## truncation on "## Issues Batch" in the output template
+    // Same scoping as fetch-issue above; its "## Issues Batch ({n} issues)"
+    // heading is fenced too (PF-063).
     between(gitOp('fetch-issues-batch'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '- **Conflicts**: {conflicting requirements if any}'),
     // post-review-summary STUB output template (baseline lines 381-386)
     between(gitOp('post-review-summary'), '     {counts-by-severity table verbatim from local artifact', 'Cap body at 60000 characters'),
-    // manage-debt process + D4 (baseline lines 411-420)
-    between(gitOp('manage-debt'), '3. Extract items to add:', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
+    // manage-debt — STRADDLES, split per D-STRADDLE-SPLIT. The process steps moved
+    // to the provider reference; the D4 clause they degrade into stayed in git.md,
+    // and both halves are still sampled.
+    between(ref('tracker/github/manage-debt.md'), '3. Extract items to add:', '7. Return the backlog issue number for Tracked field backfill in resolution-summary.md'),
+    between(gitOp('manage-debt'), '**Process:**', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
     // check-ci-status input + process (baseline lines 441-451): leading and trailing blank lines
     '\n' + between(gitOp('check-ci-status'), '**Input:** `PR_NUMBER`', '6. List failing/pending checks with names') + '\n',
     // create-release process steps (baseline lines 479-485)
     between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
     // gather-release-evidence input + process (baseline lines 507-518)
     between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', '**Output:**'),
-    // learn-conventions version-names + degradation + output opener (baseline lines 582-594): leading blank
-    '\n' + between(gitOp('learn-conventions'), '   ## Version Names', '**Output:**\n```markdown'),
+    // learn-conventions — STRADDLES, split per D-STRADDLE-SPLIT. The bounded scan,
+    // the file template and the post-composition verification moved to
+    // references/learn-conventions.md (P2-S5 cut 1, loaded only when
+    // .devflow/conventions.md is absent); the D4 clause and the Output template
+    // stayed in git.md. Leading blank preserved on the first half.
+    '\n' + between(ref('learn-conventions.md'), '   ## Version Names', 'If no matches are found, write the file.'),
+    between(gitOp('learn-conventions'), '**Degradation (D4):** If `gh` unauthenticated or remote unreachable', '**Output:**\n```markdown'),
     // fetch-review-threads process + output header (baseline lines 625-644)
     between(gitOp('fetch-review-threads'), '3. Apply devflow-authored exclusion predicate', '### External Thread Records'),
     // resolve-review-threads reply loop (baseline lines 694-704): trailing blank
@@ -547,24 +991,29 @@ export function extractStatusLines(gitContent?: string): string {
     between(gitOp('post-resolution-summary'), '     Full summary withheld (public repository).', '     {counts-by-severity table verbatim from local artifact') + '\n',
     // check-merge-readiness PR + CI fetch steps (baseline lines 785-787)
     between(gitOp('check-merge-readiness'), '2. Fetch PR review decision:', '3. Fetch CI status (same logic as `check-ci-status`)'),
-    // backlink-shipped-issues per-issue steps (baseline lines 834-842)
-    between(gitOp('backlink-shipped-issues'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
-    // ensure-traceable-issue plan-artifact + create steps (baseline lines 877-881)
-    between(gitOp('ensure-traceable-issue'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
-    // post-wave-report dedup check + compose steps (baseline lines 917-920)
-    between(gitOp('post-wave-report'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
+    // backlink-shipped-issues per-issue steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/backlink-shipped-issues.md'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
+    // ensure-traceable-issue plan-artifact + create steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/ensure-traceable-issue.md'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
+    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6)
+    between(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
     // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
     // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
     // that also reference these markers within the same operation section.
     singleLine(gitOp('post-review-summary'), '     <!-- devflow:review-summary'),
     singleLine(gitOp('post-resolution-summary'), '     <!-- devflow:resolution-summary'),
-    singleLine(gitOp('post-wave-report'), '   <!-- devflow:wave-report'),
+    // …the third moved with post-wave-report's compose step.
+    singleLine(ref('tracker/github/post-wave-report.md'), '   <!-- devflow:wave-report'),
     // code.md: PR-body guidance table and D11 scrub directive (lines 93, 95, 99)
     singleLine(code, '| Related Issues (ISSUE_NUMBER provided) |'),
     singleLine(code, 'When `ISSUE_NUMBER` is provided, always include'),
     singleLine(code, '**D11 scrub (PR body is a GitHub-visible sink):**'),
-    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524)
-    singleLine(dynamicBuild, 'The Git agent deduplicates via marker'),
+    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524).
+    // The old anchor ("deduplicates via marker `<!-- devflow:wave-report …`") no
+    // longer exists: P2-S12 removed the caller-restated marker literal, because the
+    // operation owns the marker (GAP-20). Retargeted to the successor sentence —
+    // same line, same rule, same caller.
+    singleLine(dynamicBuild, 'deduplicates via its own marker'),
     singleLine(dynamicBuild, 'In WAVE mode, if no tracking-issue number'),
     // resolve.mds: Tracked field rules and phase diagram (lines 244, 354, 501, 510, 541, 619)
     singleLine(resolveMds, 'Set `Tracked` for FIX_SEPARATE and TECH_DEBT items'),
@@ -574,6 +1023,20 @@ export function extractStatusLines(gitContent?: string): string {
     singleLine(resolveMds, '| gh/GitHub absent | manage-debt degrades'),
     singleLine(resolveMds, '| Issue | File:Line | Reason | Tracked |'),
   ]
+
+  // Both directions of the declared-reference set, in one place: `ref()` refuses a
+  // path this list does not declare, and this refuses to return while a declared
+  // path went unread. Without the second arm the retarget could be undone one
+  // sample at a time and the list would keep asserting a coverage that had gone.
+  if (refs.seen.size !== STATUS_LINE_REFERENCE_FILES.length) {
+    const unread = STATUS_LINE_REFERENCE_FILES.filter(f => !refs.seen.has(f))
+    throw new Error(
+      'extractStatusLines: declared generated reference(s) were never sampled: ' +
+      `${unread.join(', ')}\n` +
+      '  Either a sample was repointed away from the reference (the Phase-2 retarget is being\n' +
+      '  undone) or the entry is stale and should be removed from STATUS_LINE_REFERENCE_FILES.',
+    )
+  }
 
   return parts.join('\n') + '\n'
 }

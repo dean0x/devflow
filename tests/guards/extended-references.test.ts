@@ -20,6 +20,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import * as path from 'path';
 
+import { collectUnfencedH2 } from '../helpers.js';
+
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills');
 
@@ -66,11 +68,14 @@ function getExtRefSection(content: string): string | null {
   const anchor = '## Extended References';
   const start = content.indexOf(anchor);
   if (start === -1) return null;
-  // Section ends at next ## heading or end of file.
-  const nextSection = content.indexOf('\n## ', start + anchor.length);
-  return nextSection === -1
+  // Section ends at the next UNFENCED `## ` heading, or end of file. A `## ` line
+  // inside a fenced sample is payload, not structure (PF-063) — the boundary rule
+  // is owned by collectUnfencedH2 so this guard and the op-section extractor
+  // cannot drift apart.
+  const terminator = collectUnfencedH2(content).find(h => h.index - 1 >= start + anchor.length);
+  return terminator === undefined
     ? content.slice(start)
-    : content.slice(start, nextSection);
+    : content.slice(start, terminator.index - 1);
 }
 
 // ---------------------------------------------------------------------------

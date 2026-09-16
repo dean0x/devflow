@@ -9,6 +9,7 @@ output-dir: dist/commands
 @import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_pass, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
+@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 {authoring_preamble()}
 
@@ -70,9 +71,11 @@ When ambiguous, ask the user before authoring: "Is this a single ticket or a wav
 
 Check for (in priority order):
 - A plan document passed as input (path or inline)
-- A GitHub issue body (fetched via the Git agent using `OPERATION: fetch-issue`)
+- An issue body (fetched via the Git agent using `OPERATION: fetch-issue`)
 - The current working context (recent `/devflow:dynamic-plan` output)
 - An in-context task description
+
+{issue_capture_contract()}
 
 Extract or note:
 - Implementation plan (for Code agent prompt and Evaluate agent)
@@ -83,11 +86,15 @@ If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never re
 **5. Resolve tracking-issue number (optional)**
 
 Check, in priority order:
-- An explicit issue number or GitHub issue URL in the user's input (e.g., `#42`, `42`, or `https://github.com/…/issues/42`)
+- An explicit candidate issue reference or issue URL in the user's input (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
 - The tracking-issue reference in the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets` at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`)
 - Otherwise: none
 
+{issue_ref_grammar()}
+
 If a number is found, record it as the command-level `ISSUE_NUMBER` and pass it as `issueNumber: <number>` when invoking the workflow (the Code agent threads it through as `ISSUE_NUMBER`). If none is found, pass nothing — `ISSUE_NUMBER` defaults to `"(none)"` in the workflow script.
+
+Pass the `ISSUE_PR_LINK` captured above the same way, as `issuePrLink: <rendered line>` — never re-derive it from `ISSUE_NUMBER`. If no `### Handoff Values` block supplied one, pass nothing: `ISSUE_PR_LINK` defaults to `"(none)"` and the Code agent composes `## Related Issues` from `ISSUE_NUMBER` instead.
 
 ---
 
@@ -110,6 +117,7 @@ const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
+const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code composes from ISSUE_NUMBER
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
@@ -133,6 +141,7 @@ Relevant architectural decisions (apply devflow:apply-decisions algorithm):
 ${DECISIONS_CONTEXT}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 
 When you build or run tests to verify your work, use your "Long-running commands" discipline (background-Bash + Monitor poll) for anything that may run silent >120s, and prefer package-scoped commands.
 
@@ -155,6 +164,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
       await agent(`Fix the validation failures on branch ${BRANCH}:
 ${validation.details}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -197,6 +207,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
       await agent(`Fix the alignment issues identified by the Evaluate agent panel on branch ${BRANCH}:
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Code" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -214,6 +225,7 @@ Cover: functionality, API contracts, performance. Report: PASS or FAIL per scena
       await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Code" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -326,6 +338,7 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
       chunkResults.push({ chunk, result: r });
@@ -375,6 +388,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
       await agent(`Fix the final validation failures on branch ${BRANCH}:
 ${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
+ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -487,7 +501,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER });
+      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
       if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
         await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
@@ -519,7 +533,7 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    WAVE_ID: \{WAVE_ID\}
    WORKTREE_PATH: \{integration worktree root, when the wave ran in a linked worktree; omit if cwd\}"
    ```
-   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` — skips if already present. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
+   The Git agent deduplicates via its own marker — it skips if a report for this `WAVE_ID` is already posted. The marker's format belongs to the operation; this caller passes `WAVE_ID` and never restates the literal. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
 
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
 3. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.

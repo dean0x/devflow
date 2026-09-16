@@ -6,7 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
+import { installViaFileCopy, composeScripts, overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -25,7 +25,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -38,6 +38,7 @@ import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.j
 import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT, proxyJsonExists } from '../../core/proxy-state.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
+import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
@@ -163,6 +164,94 @@ export function formatSweepSummary(
   }
 
   return lines;
+}
+
+/**
+ * Turn the reference-overlay half of an InstallReport into summary lines.
+ *
+ * The overlay rewrites files inside an installed skill directory the user may have
+ * shadowed, and a unit it could not refresh is left in one of the states
+ * {@link OverlayFailureState} enumerates — running on the previous install, half
+ * replaced, absent, or recoverable only from a backup path. None of that is visible from
+ * the filesystem at a glance, so all of it reaches the summary — PF-015: a report field
+ * with no render site is not a report, and a render site that flattens four states into
+ * one sentence is the same defect one layer up.
+ *
+ * Pure function — returns lines, logs nothing (applies ADR-013).
+ *
+ * @param skillName - Bare name of the skill hosting the generated references,
+ *   rendered `devflow:`-prefixed. Defaults to the core constant the build path and
+ *   the installer's overlay trigger both read, so the renderer is never a third
+ *   independent statement of which skill owns them — the divergence PF-013
+ *   describes, where changing the answer means finding every retyped spelling and
+ *   nothing fails if one is missed.
+ */
+export function formatOverlaySummary(
+  report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
+  skillName: string = SKILL_REFS_SKILL_NAME,
+): SummaryLine[] {
+  const lines: SummaryLine[] = [];
+
+  if (report.overlaidRefs.length > 0) {
+    lines.push({
+      level: 'info',
+      message:
+        `Installed ${report.overlaidRefs.length} generated skill reference(s) for ` +
+        prefixSkillName(skillName),
+    });
+  }
+
+  for (const failure of report.overlayFailures) {
+    lines.push({
+      level: 'warn',
+      message:
+        `Could not refresh the generated references for ${overlayUnitLabel(failure.unit)} ` +
+        `(${failure.error}) — ${describeOverlayFailureState(failure.state)}`,
+    });
+  }
+
+  return lines;
+}
+
+/**
+ * The half of an overlay warning that describes what is actually on disk.
+ *
+ * One sentence per state, each true of that state and of no other. A single shared
+ * sentence — "the previously installed files were left unchanged" — is true of the first
+ * arm only, and would read loudest over the arms it fits worst: a set left
+ * half-refreshed, and a unit whose only surviving copy is a backup path the user has to
+ * be told about.
+ *
+ * Exhaustive over {@link OverlayFailureState} — a new state added to the union without a
+ * sentence here is a compile error, not a state that silently prints nothing.
+ */
+function describeOverlayFailureState(state: OverlayFailureState): string {
+  switch (state.kind) {
+    case 'installed-unchanged':
+      return 'the previously installed files were left unchanged';
+    case 'not-installed':
+      return (
+        `nothing is installed in their place, so ${state.absent.length} reference(s) the ` +
+        `agent is told to load are absent: ${state.absent.join(', ')}`
+      );
+    case 'partially-refreshed':
+      return (
+        `${state.refreshed.length} of ${state.refreshed.length + state.stale.length} ` +
+        `document(s) had already been replaced, so the set is part new and part old — ` +
+        `still on the previous install: ${state.stale.join(', ') || 'none'}`
+      );
+    case 'restore-failed':
+      return (
+        `the displaced copy could NOT be put back (${state.restoreError}), so nothing is ` +
+        `installed there now — the only surviving copy is "${state.recoveryPath}", which ` +
+        `this run's stale-reference prune was skipped to preserve`
+      );
+    default: {
+      const _exhaustive: never = state;
+      void _exhaustive;
+      return 'the state it was left in is unknown';
+    }
+  }
 }
 
 /**
@@ -1310,6 +1399,7 @@ export const initCommand = new Command('init')
 
     // Install via file copy
     let installReport: InstallReport;
+    const installWarnings: string[] = [];
     try {
       installReport = await installViaFileCopy({
         plugins: pluginsToInstall,
@@ -1320,6 +1410,10 @@ export const initCommand = new Command('init')
         rulesMap,
         isPartialInstall: !!options.plugin,
         spinner: s,
+        // Non-fatal install notices with no other channel (skipped symlinks in the
+        // generated reference tree, mode-normalisation failures) reach the user rather
+        // than the void. Collected now, emitted after the spinner stops.
+        warn: (msg) => { installWarnings.push(msg); },
       });
     } catch (error) {
       s.stop('Installation failed');
@@ -1908,6 +2002,25 @@ export const initCommand = new Command('init')
       if (line.level === 'warn') p.log.warn(line.message);
       else p.log.info(line.message);
     }
+
+    // Reference-overlay reporting: the overlay rewrites files inside an installed skill
+    // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
+    for (const line of formatOverlaySummary(installReport)) {
+      switch (line.level) {
+        case 'info':
+          p.log.info(line.message);
+          break;
+        case 'warn':
+          p.log.warn(line.message);
+          break;
+        default: {
+          const _exhaustive: never = line.level;
+          void _exhaustive;
+          break;
+        }
+      }
+    }
+    for (const warning of installWarnings) p.log.warn(warning);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));

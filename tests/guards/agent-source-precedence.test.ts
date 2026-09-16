@@ -12,7 +12,7 @@
  * strings, so a site that spells the policy least-preferred-first still compiles
  * and silently inverts the answer. Only a cross-consumer agreement assertion
  * catches that, and only a reversed-list probe proves the assertion is not
- * order-blind (ADR-024).
+ * order-blind (PF-018).
  *
  * PF-043: every fixture is derived from the real agent files rather than
  * hand-authored, so the tree the assertions run against is a shape the runtime
@@ -178,7 +178,7 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
   });
 
   it('known-bad probe: a reversed list flips BOTH consumers, and is detected', async () => {
-    // ADR-024 — if the assertion above were order-blind it would also pass here.
+    // PF-018 — if the assertion above were order-blind it would also pass here.
     const reversed: AgentSourceDirs = [srcDir, distDir];
     const installed = await installAll(tmpRoot, reversed);
     const defaults = await loadShippedDefaults(reversed);

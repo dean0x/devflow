@@ -330,7 +330,7 @@ In multi-worktree mode, report results per worktree.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
-| Review comment already posted | Git agent matches `<!-- devflow:review-summary cycle:\{N\} ts:\{REVIEW_TIMESTAMP\}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment |
+| Review comment already posted | Git agent matches its own marker on the `\{cycle, timestamp\}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |

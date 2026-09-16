@@ -41,6 +41,7 @@ import {
   DYNAMIC_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_PARTIALS,
+  TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
 import {
@@ -49,6 +50,7 @@ import {
   cleanupCommittedTree,
   collectSpawnScoping,
   requireDistFiles,
+  gitAgentSinkCorpus,
 } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -176,11 +178,11 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ holds exactly the manifest\'s 11 partials (both directions)', async () => {
+  it('commands/_partials/ holds exactly the manifest\'s 12 partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(11);
+    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(12);
   });
 
   it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
@@ -904,8 +906,37 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('run-unique scratch file');
   });
 
-  it('C9: no unauthorized GitHub side-effects doctrine', () => {
-    expect(compiled).toContain('No unauthorized GitHub side-effects');
+  it('C9: no unauthorized side-effects doctrine — stated provider-neutrally (P2-S12, GAP-41)', () => {
+    // Invariant #6 is a SAFETY rule, not prose. Bound to one vendor it stops
+    // applying the moment a second tracker exists — a real regression, which is
+    // why the disposition here is guard-with-test rather than documentation.
+    expect(
+      compiled,
+      'the invariant must forbid side-effects on whatever tracker is resolved',
+    ).toContain('No unauthorized tracker or remote side-effects');
+    expect(compiled).toContain('issues/PRs on the tracker');
+    expect(
+      compiled,
+      'the rule must say it is not vendor-scoped, or a later reader re-narrows it',
+    ).toContain('This applies to whatever tracker is resolved, not to one vendor');
+    // Non-vacuous against the exact pre-neutralisation literal.
+    expect(
+      compiled,
+      'the GitHub-bound wording must be gone, not merely accompanied by the neutral one',
+    ).not.toContain('No unauthorized GitHub side-effects');
+    // The rule's FORCE must survive the rewording — a neutral sentence that
+    // dropped "NEVER" would pass a wording check and forbid nothing.
+    expect(compiled).toContain('Sub-agents NEVER create issues/PRs on the tracker');
+    expect(compiled).toContain('beyond the ticket-authorized branch');
+  });
+
+  it('C9b: the sandbox note does not read as gh-only (P2-S12)', () => {
+    // `gh` stays named — it is the concrete CLI an author would reach for, and
+    // naming it is what makes the denial legible. What changed is the scope:
+    // the denial is over any tracker CLI, not over one binary.
+    expect(compiled).toContain('NO filesystem / Node.js / CLI access');
+    expect(compiled).toContain('no tracker CLI of any kind, `gh` included');
+    expect(compiled).not.toContain('NO filesystem / Node.js / `gh` CLI access');
   });
 
   it('C10: post-wave-report Git spawn survived the dynamic-wave removal', () => {
@@ -920,8 +951,12 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('skip this step entirely in SINGLE mode');
     // DEGRADED-visibility literal when no tracking issue was resolved
     expect(compiled).toContain('TRACEABILITY: DEGRADED (no tracking issue for this run)');
-    // Dedup marker — verified present in the current compiled artifact
-    expect(compiled).toContain('<!-- devflow:wave-report wave:');
+    // The dedup marker literal is NOT pinned here any more. GAP-20: the operation
+    // owns the marker format; a caller that restates it has already diverged once
+    // and produced duplicate comments. The caller now says only that the Git agent
+    // deduplicates via its own marker, and the marker literal is pinned where it
+    // lives — see the `<!-- devflow:` negative guard in §23 below.
+    expect(compiled).toContain('deduplicates via its own marker');
   });
 
   it('meta.phases matches every phase("…") call site', () => {
@@ -1420,6 +1455,265 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       `compliance_gate guard is vacuous: expected hostsScanned === 6, got ${hostsScanned}`,
     ).toBe(6);
   });
+
+  // GAP-31: the compliance gate must still resolve BEFORE its first consumer in
+  // every importer. P2-S9 inserts issue-grammar text into five of the same six
+  // hosts; an insertion above the gate would leave COMPLIANCE_SKILL_INSTALLED
+  // read before it is set, which no other assertion in this file would notice
+  // (they all check presence, never order).
+  it('the compliance gate resolves before its first consumer in all 6 importers (GAP-31)', async () => {
+    const COMPLIANCE_GATE_IMPORTERS = [
+      'bug-analysis',
+      'code-review',
+      'dynamic-build',
+      'implement',
+      'plan',
+      'resolve',
+    ] as const;
+
+    // Named collector — shared by the live guard and the known-bad probe below.
+    //
+    // Non-consumer mentions, excluded with a reason each:
+    //   **Produces:** / **Requires:**  — the phase-ordering DAG, not a read of the
+    //                                    value (PF-039; the seam test excludes the
+    //                                    same two literals as a set)
+    //   a heading line                 — names the step, does not read the variable
+    function collectGateOrderViolations(basename: string, content: string): string[] {
+      const GATE = 'Resolve `COMPLIANCE_SKILL_INSTALLED` once per run';
+      const lines = content.split('\n');
+      const gateLine = lines.findIndex(l => l.includes(GATE));
+      if (gateLine === -1) return [`${basename}: gate resolution sentence absent`];
+
+      const out: string[] = [];
+      for (let i = 0; i < gateLine; i++) {
+        const line = lines[i];
+        if (!line.includes('COMPLIANCE_SKILL_INSTALLED')) continue;
+        if (line.startsWith('**Produces:**') || line.startsWith('**Requires:**')) continue;
+        if (line.startsWith('#')) continue;
+        out.push(
+          `${basename}:${i + 1}: reads COMPLIANCE_SKILL_INSTALLED before the gate resolves it ` +
+          `at line ${gateLine + 1} — "${line.trim().slice(0, 80)}"`,
+        );
+      }
+      return out;
+    }
+
+    const violations: string[] = [];
+    let hostsScanned = 0;
+
+    for (const basename of COMPLIANCE_GATE_IMPORTERS) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
+      hostsScanned++;
+      violations.push(...collectGateOrderViolations(`${basename}.md`, content));
+    }
+
+    expect(
+      violations,
+      `compliance-gate ordering violations (GAP-31):\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+
+    // Known-bad probe (mechanic 2, H10): the same collector over a seeded corpus
+    // where a consumer line sits above the gate.
+    const seeded = [
+      '**Produces:** COMPLIANCE_SKILL_INSTALLED',
+      'COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}',
+      '**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** …',
+    ].join('\n');
+    expect(
+      collectGateOrderViolations('probe.md', seeded),
+      'the ordering collector must fire on a consumer line seeded above the gate',
+    ).toHaveLength(1);
+    expect(
+      hostsScanned,
+      `compliance-gate ordering guard is vacuous: expected 6 hosts, got ${hostsScanned}`,
+    ).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §22  _partials/_tracker.mds adoption + per-define non-emptiness (P2-S9)
+//
+// Mirrors the P0-S22 compliance_gate adoption guard above: a named set of
+// adopters (TRACKER_PARTIAL_ADOPTERS), a required literal per define, and a
+// hostsScanned non-vacuity floor.
+//
+// Why a required PHRASE and a minimum SIZE per define, and not just presence of
+// the call site: an exported define with a placeholder body compiles cleanly.
+// `mds::undefined_var` catches a define that was never written; nothing catches
+// a define that was written empty (GAP-44). The phrase pins what the define is
+// FOR; the size floor pins that the body was not hollowed out around the phrase.
+// ---------------------------------------------------------------------------
+
+describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
+  // One required phrase per define. Each is the sentence the define exists to
+  // state, so deleting the rule and keeping the heading fails here.
+  const TRACKER_DEFINES: Array<{ name: string; requiredPhrase: string; minBytes: number }> = [
+    {
+      name: 'issue_ref_grammar',
+      // The second arm of the two-armed GitHub foreign-shape rule (AC-2.9). The
+      // first arm (a well-shaped ref renders `#{n}`) is worthless on its own:
+      // a one-armed grammar silently drops everything it does not recognise.
+      // The phrase pins where adjudication actually happens — in the fetching
+      // operation's Output block — so a host cannot re-assert a producer-side
+      // rejection no operation performs (PF-024).
+      requiredPhrase: 'no producer-side grammar check',
+      minBytes: 600,
+    },
+    {
+      name: 'issue_capture_contract',
+      // The producer literal git.md emits under `### Handoff Values`. If the
+      // capture list stops naming it, the Code agent's `Closes #{n}` rule has no
+      // input and dies silently — the GAP-15 defect P2-S10 exists to close.
+      requiredPhrase: '- **PR link line**:',
+      minBytes: 600,
+    },
+  ];
+
+  it('every adopting host carries both defines\' expanded bodies (AC-2.9)', async () => {
+    const violations: string[] = [];
+    let hostsScanned = 0;
+
+    for (const basename of TRACKER_PARTIAL_ADOPTERS) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
+      hostsScanned++;
+      for (const { name, requiredPhrase } of TRACKER_DEFINES) {
+        if (!content.includes(requiredPhrase)) {
+          violations.push(`${basename}.md: ${name}() body missing — "${requiredPhrase}" not found`);
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `_tracker.mds adoption violations:\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+    // Known-bad sample: a host that @imports the partial but never calls either
+    // define compiles fine and lands here with both phrases missing.
+    expect(
+      hostsScanned,
+      `_tracker adoption guard is vacuous: expected ${TRACKER_PARTIAL_ADOPTERS.length} hosts, got ${hostsScanned}`,
+    ).toBe(5);
+  });
+
+  /** Named collector: the `@define <name>():` / `@export <name>` names in a partial source. */
+  function collectTrackerDeclarations(source: string): { defines: string[]; exports: string[] } {
+    return {
+      defines: [...source.matchAll(/^@define ([A-Za-z_][A-Za-z0-9_]*)\(\):/gm)].map(m => m[1]),
+      exports: [...source.matchAll(/^@export ([A-Za-z_][A-Za-z0-9_]*)\s*$/gm)].map(m => m[1]),
+    };
+  }
+
+  it('_tracker.mds declares exactly these two defines and exports both (AC-2.9)', async () => {
+    // The per-define guards below range over TRACKER_DEFINES, so they are silent
+    // about a THIRD define: one added to the partial and exported would expand
+    // into all five adopting hosts — 5× its bytes on every spawn of those
+    // commands — with nothing here to notice. The reverse arm matters equally: a
+    // define left unexported compiles, and its call site fails only at build time
+    // in whichever host happens to call it.
+    const source = await fs.readFile(path.join(PARTIALS_DIR, '_tracker.mds'), 'utf-8');
+    const { defines, exports } = collectTrackerDeclarations(source);
+    const expected = TRACKER_DEFINES.map(d => d.name).sort();
+
+    expect(
+      [...defines].sort(),
+      `_tracker.mds defines [${defines.join(', ')}]; this guard knows [${expected.join(', ')}]. ` +
+      'A define this file does not model is expanded into every adopting host unchecked.',
+    ).toEqual(expected);
+    expect(
+      [...exports].sort(),
+      `_tracker.mds exports [${exports.join(', ')}] — every define must be exported and nothing else`,
+    ).toEqual(expected);
+  });
+
+  it('known-bad probe: a seeded third define/export is reported by the same collector', () => {
+    const seeded = [
+      '@define issue_ref_grammar():',
+      'body',
+      '@end',
+      '',
+      '@define issue_capture_contract():',
+      'body',
+      '@end',
+      '',
+      '@define smuggled_partial():',
+      'body',
+      '@end',
+      '',
+      '@export issue_ref_grammar',
+      '@export issue_capture_contract',
+      '@export smuggled_partial',
+      '',
+    ].join('\n');
+
+    const { defines, exports } = collectTrackerDeclarations(seeded);
+    expect(
+      defines,
+      'the collector must see the seeded third define — otherwise the equality above is ' +
+      'green because nothing was ever parsed (PF-018)',
+    ).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
+    expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
+    expect(
+      [...defines].sort(),
+      'and the seeded set must NOT equal the modelled two — the probe would be inert otherwise',
+    ).not.toEqual(TRACKER_DEFINES.map(d => d.name).sort());
+  });
+
+  it('each define has a non-empty body — required phrase plus a size floor (GAP-44)', async () => {
+    const source = await fs.readFile(
+      path.join(PARTIALS_DIR, '_tracker.mds'),
+      'utf-8',
+    );
+
+    /** Slice one `@define name():` … `@end` body out of the partial source. */
+    function defineBody(name: string): string {
+      const open = source.indexOf(`@define ${name}():`);
+      if (open === -1) return '';
+      const bodyStart = source.indexOf('\n', open) + 1;
+      const end = source.indexOf('\n@end', bodyStart);
+      return end === -1 ? '' : source.slice(bodyStart, end);
+    }
+
+    for (const { name, requiredPhrase, minBytes } of TRACKER_DEFINES) {
+      const body = defineBody(name);
+      expect(body, `${name}() must exist in _tracker.mds`).not.toBe('');
+      expect(
+        body.includes(requiredPhrase),
+        `${name}() body must state "${requiredPhrase}" — a define can be exported with a placeholder body and still compile`,
+      ).toBe(true);
+      expect(
+        body.length,
+        `${name}() body is ${body.length} bytes — below the ${minBytes}-byte floor, which is the shape a hollowed-out define takes`,
+      ).toBeGreaterThanOrEqual(minBytes);
+      // The Note: device (the partial's shape, per _publication.mds) pre-empts a
+      // misreading; losing it is how a two-armed rule quietly becomes one-armed.
+      expect(
+        body,
+        `${name}() must keep its "Note:" paragraph — the shape _publication.mds establishes`,
+      ).toContain('\nNote:');
+    }
+  });
+
+  it('known-bad probe: a hollowed-out define body is reported by the same slicer', () => {
+    const seeded = [
+      '@define issue_ref_grammar():',
+      '**Issue-reference grammar:** TODO',
+      '@end',
+      '',
+      '@export issue_ref_grammar',
+      '',
+    ].join('\n');
+
+    const open = seeded.indexOf('@define issue_ref_grammar():');
+    const bodyStart = seeded.indexOf('\n', open) + 1;
+    const end = seeded.indexOf('\n@end', bodyStart);
+    const body = seeded.slice(bodyStart, end);
+
+    expect(body.length, 'the seeded placeholder body must fall under the floor').toBeLessThan(600);
+    expect(
+      body.includes(TRACKER_DEFINES.find(d => d.name === 'issue_ref_grammar')!.requiredPhrase),
+      'the seeded placeholder must not carry the required phrase',
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1585,5 +1879,102 @@ describe('this file never spawns a build against the real repo root', () => {
     expect(collectSpawnScoping(scopedSite)).toEqual({ total: 1, unscoped: [] });
     expect(collectSpawnScoping(`${unscopedSite}\n${scopedSite}`).unscoped).toHaveLength(1);
     expect(collectSpawnScoping('no spawns here').total).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §23  Dedup-marker ownership — no `<!-- devflow:` literal in any dist command
+//      (P2-S12, GAP-20)
+//
+// The OPERATION owns its marker format; callers pass inputs only (§14.3,
+// `marker_format`). A command that restates the literal is a second authority on
+// a string whose two copies must match exactly for dedup to work — and they
+// already diverged once, producing duplicate comments.
+//
+// Deployed-behaviour guard -> DIST_FILES scope (§14.5), non-vacuity
+// distFilesScanned === 14. The marker literals themselves are asserted to still
+// exist in the Git agent's sink corpus, so this reads as a RELOCATION and not as
+// a deletion: if both halves went missing, the first assertion would pass
+// vacuously and nothing would dedup at all.
+// ---------------------------------------------------------------------------
+
+describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (P2-S12, GAP-20)', () => {
+  /** Named collector — shared by the live guard and the seeded probe. */
+  function collectMarkerLiterals(filename: string, content: string): string[] {
+    const out: string[] = [];
+    const re = /<!-- devflow:/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      out.push(`${filename}: restates a dedup marker at char ${m.index}`);
+    }
+    return out;
+  }
+
+  it('no dist command restates a `<!-- devflow:` marker literal', async () => {
+    const distFiles = (await fs.readdir(BUILT_COMMANDS)).filter(f => f.endsWith('.md'));
+    expect(
+      distFiles.length,
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
+    ).toBe(14);
+
+    const violations: string[] = [];
+    let distFilesScanned = 0;
+    for (const filename of DIST_FILES) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, filename), 'utf-8');
+      distFilesScanned++;
+      violations.push(...collectMarkerLiterals(filename, content));
+    }
+
+    expect(
+      violations,
+      `dedup-marker literals restated in commands (GAP-20 — the operation owns the marker):\n${violations.join('\n')}`,
+    ).toHaveLength(0);
+    expect(
+      distFilesScanned,
+      `marker guard is vacuous: expected 14 files scanned, got ${distFilesScanned}`,
+    ).toBe(14);
+  });
+
+  it('known-bad probe: the same collector flags a seeded restatement in a temp copy', async () => {
+    // Mechanic 2 (H10): a temp copy of a real dist command with the retired
+    // sentence put back — never the committed tree.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-marker-probe-'));
+    try {
+      const real = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+      const seededPath = path.join(tmp, 'dynamic-build.md');
+      await fs.writeFile(
+        seededPath,
+        real + '\n   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:{WAVE_ID} -->`.\n',
+        'utf-8',
+      );
+      const seeded = await fs.readFile(seededPath, 'utf-8');
+      expect(
+        collectMarkerLiterals('dynamic-build.md', seeded),
+        'the collector must fire on a seeded restatement',
+      ).toHaveLength(1);
+      // …and must clear the unseeded original, or it is flagging something else.
+      expect(collectMarkerLiterals('dynamic-build.md', real)).toHaveLength(0);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('the marker literals still live in the Git agent sink — relocated, not deleted', () => {
+    // Guard 5's markers, read through the shared resolver + the generated
+    // references the mechanics moved into (GAP-21: guard classes move with the
+    // text). Without this arm, deleting dedup everywhere would turn the guard
+    // above green.
+    const joined = gitAgentSinkCorpus().map(e => e.content).join('\n');
+    expect(joined.length, 'the sink corpus must be non-empty').toBeGreaterThan(10000);
+    for (const marker of [
+      '<!-- devflow:review-summary',
+      '<!-- devflow:resolution-summary',
+      '<!-- devflow:wave-report',
+    ]) {
+      expect(
+        joined,
+        `${marker} must still be owned by the Git agent — the caller stopped restating it, the operation did not stop emitting it`,
+      ).toContain(marker);
+    }
   });
 });

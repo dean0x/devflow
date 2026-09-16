@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Debug Command
 
@@ -43,7 +44,9 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 **Produces:** HYPOTHESES, BUG_CONTEXT
 **Requires:** DECISIONS_CONTEXT
 
-If `$ARGUMENTS` starts with `#`, fetch the issue:
+If `$ARGUMENTS` opens with a candidate issue reference, fetch the issue:
+
+{issue_ref_grammar()}
 
 ```
 Agent(subagent_type="Git"):
@@ -52,7 +55,9 @@ ISSUE_INPUT: {issue reference}
 Return issue title, body, labels, and any linked error logs."
 ```
 
-If the Git agent returns only a TRACEABILITY: DEGRADED line and no issue content, report that line verbatim to the user and use AskUserQuestion to request the bug description before generating any hypotheses — do not fabricate a description from the issue number alone.
+{issue_capture_contract()}
+
+If the Git agent returns only a TRACEABILITY: DEGRADED line and no issue content, report that line verbatim to the user and use AskUserQuestion to request the bug description before generating any hypotheses — do not fabricate a description from the raw candidate token alone.
 
 Analyze the bug description (from arguments or issue) and identify 3-5 plausible hypotheses. Each hypothesis must be:
 - **Specific**: Points to a concrete mechanism (not "something is wrong")

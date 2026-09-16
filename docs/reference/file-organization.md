@@ -62,6 +62,9 @@ devflow/
 │       │   ├── *.mds                 # MDS command hosts (compiled to dist/commands/ by build:mds)
 │       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
+│       ├── mds/                      # MDS reference modules (compiled to dist/skills/git/references/ by build:mds)
+│       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
+│       │   └── git/_references.mds     # Cross-cutting documents the Git agent names
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
@@ -92,18 +95,22 @@ devflow/
 │               ├── project-paths.cjs   # Project slug + path resolution
 │               └── safe-path.cjs       # Path safety validation
 ├── scripts/                          # Dev tooling
-│   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md
+│   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script
 │   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
 ├── tests/                            # Test harness
 │   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
 │   ├── seams/                        # Command→agent input contract
 │   ├── goldens/                      # Byte-equality against tests/fixtures/golden/
-│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, extended-references
+│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, guard-census
+│   ├── tracker/                      # Tracker contract/mechanics split — containment oracle, byte budget
+│   ├── dynamic/                      # Two-sided writer↔reader grammar seams
+│   ├── installer/                    # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
 │   ├── integration/                  # Real claude / tarball installs
 │   └── fixtures/
-│       ├── golden/                   # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen through Phase 3)
-│       └── numeric-floors.json       # Hand-registered floor manifest — floors raise, never lower
+│       ├── golden/                   # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen)
+│       ├── tracker/baseline/         # Byte copies of the pre-split tree — never regenerated
+│       └── numeric-floors.json       # Hand-registered ratchet manifest — floors raise, never lower; ceilings lower, never raise
 ├── docs/
 │   └── reference/                    # Extracted reference docs
 ```
@@ -139,7 +146,7 @@ The `commands` array lists slash-command names (e.g., `'/implement'`). The insta
 
 ## Asset Distribution
 
-Assets live once in `src/assets/` and install to the user's `~/.claude/` — no duplication in the repo. Two host kinds pass through a build first, both compiled by `npm run build:mds`: `.mds` command hosts to `dist/commands/`, and `.mds` agent generator hosts to `dist/agents/`. Everything else installs straight from its source file.
+Assets live once in `src/assets/` and install to the user's `~/.claude/` — no duplication in the repo. Three host kinds pass through a build first, all compiled by `npm run build:mds`: `.mds` command hosts to `dist/commands/`, `.mds` agent generator hosts to `dist/agents/`, and `.mds` reference modules to `dist/skills/git/references/`. Everything else installs straight from its source file.
 
 | Asset type | Source | Install path | Build step |
 |------------|--------|--------------|-----------|
@@ -148,11 +155,12 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
+| Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, and compiled agents) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 

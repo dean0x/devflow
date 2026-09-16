@@ -162,21 +162,85 @@ function forwardViolationsFor(section: string, keys: Set<string>): string[] {
 // Searching DIST_FILES for them found only the consumer (plan.md's own capture line)
 // and called it the producer; that was the defect.
 //
-// ISSUE_ID and ISSUE_URL are excluded: neither name appears in git.md's Output templates
-// (no URL field is emitted; the issue id is embedded in the heading, not separately
-// labelled). Including them violated ADR-003 (no artifact without a reachable producer);
-// they were removed from the plan capture list in c7bff85.
+// ISSUE_URL stays excluded: no URL field is emitted by any Output template, so
+// listing it would violate ADR-003 (no artifact without a reachable producer).
+// ISSUE_ID was excluded for the same reason in c7bff85 and is BACK from Phase 2:
+// the `### Handoff Values` block T2b added to setup-task and fetch-issue emits it
+// under its own label, so it now has a producer. Same for ISSUE_PR_LINK and
+// ISSUE_BRANCH_TOKEN — the two values GAP-15 found consumed with no producer.
 //
-// From Phase 2 onward this runs against the compiled _tracker.mds define.
-const ISSUE_CAPTURE_CONTRACT: Array<{ label: string; producerPattern: string }> = [
-  // The issue body is wrapped in <untrusted-issue-body> in both fetch-issue and
-  // fetch-issues-batch Output templates (Principle 8 containment, commit 75f13e7).
-  { label: 'ISSUE_CONTENT', producerPattern: '<untrusted-issue-body>' },
-  // "### Acceptance Criteria" heading in fetch-issue; "**Acceptance Criteria**:" in batch.
-  { label: 'ACCEPTANCE_CRITERIA', producerPattern: 'Acceptance Criteria' },
+// From Phase 2 onward this list is the compiled _tracker.mds issue_capture_contract()
+// define restated for the collector; both sides are asserted to name the same keys
+// by the `_tracker.mds define names the same keys` test below.
+//
+// PER-OP, not over a concatenation. The earlier form glued the fetch-issue and
+// fetch-issues-batch slices together and searched the join, so a key produced by
+// ONE of them read as produced by "the issue-fetching ops" — which is how the
+// three Handoff Values passed while `fetch-issues-batch` emitted none of them.
+// Each entry therefore names the operation(s) the partial says produce it, and
+// each is checked in each of those operations separately.
+const ISSUE_CAPTURE_CONTRACT: Array<{
+  label: string
+  producerPattern: string
+  /** Every op whose Output template must carry `producerPattern`. */
+  producerOps: readonly string[]
+}> = [
+  // The issue body is wrapped in <untrusted-issue-body> by every issue-bearing op
+  // (Principle 8 containment, commit 75f13e7).
+  {
+    label: 'ISSUE_CONTENT',
+    producerPattern: '<untrusted-issue-body>',
+    producerOps: ['setup-task', 'fetch-issue', 'fetch-issues-batch'],
+  },
+  // "### Acceptance Criteria" heading in fetch-issue; "**Acceptance Criteria**:"
+  // in the batch template and in setup-task's fetched-issue block.
+  {
+    label: 'ACCEPTANCE_CRITERIA',
+    producerPattern: 'Acceptance Criteria',
+    producerOps: ['setup-task', 'fetch-issue', 'fetch-issues-batch'],
+  },
   // "## Issue #{number}:" heading in fetch-issue; "### Issue #{number1}:" in batch.
-  { label: 'ISSUE_REF', producerPattern: '## Issue #' },
+  // setup-task reports the number under "### Issue (if fetched)" and is NOT a
+  // producer of the rendered-reference heading.
+  {
+    label: 'ISSUE_REF',
+    producerPattern: '## Issue #',
+    producerOps: ['fetch-issue', 'fetch-issues-batch'],
+  },
+  // The three `### Handoff Values` producers (P2-S10, written in T2b). Each is
+  // matched on its full labelled prefix, not on the bare name: a prose mention of
+  // "the branch token" elsewhere in the section must not satisfy the check.
+  //
+  // SINGLE-ISSUE OPS ONLY. A batch answers for many issues at once, so there is no
+  // one PR link line and no one branch token to render; issue_capture_contract()
+  // states that scope, and this roster is the mechanical half of it. Listing
+  // fetch-issues-batch here would demand a block the batch has no well-defined
+  // value for; omitting the scope sentence from the partial would leave the batch
+  // flows capturing three values nothing emits (GAP-15's shape).
+  {
+    label: 'ISSUE_ID',
+    producerPattern: '- **Issue ID**:',
+    producerOps: ['setup-task', 'fetch-issue'],
+  },
+  {
+    label: 'ISSUE_PR_LINK',
+    producerPattern: '- **PR link line**:',
+    producerOps: ['setup-task', 'fetch-issue'],
+  },
+  {
+    label: 'ISSUE_BRANCH_TOKEN',
+    producerPattern: '- **Branch token**:',
+    producerOps: ['setup-task', 'fetch-issue'],
+  },
 ]
+
+/** Every op named as a producer by at least one contract entry. */
+const ISSUE_PRODUCER_OPS: readonly string[] = [
+  ...new Set(ISSUE_CAPTURE_CONTRACT.flatMap(e => e.producerOps)),
+]
+
+/** The keys Direction 3 checks, as a set — used by the _tracker.mds parity test. */
+const ISSUE_CAPTURE_LABELS = ISSUE_CAPTURE_CONTRACT.map(e => e.label)
 
 // ── Build state shared across all directions (beforeAll) ─────────────────────
 
@@ -251,6 +315,13 @@ beforeAll(() => {
   }))
 
   const git = resolveAgentSource('git')
+  // git.md ALONE, deliberately. Since Phase 2 the generated
+  // dist/skills/git/references/tracker/github/{op}.md files also open with a
+  // `## Operation: X` anchor, so a sink-wide corpus would make every lookup below
+  // match twice and 'sole' would throw. That is the right behaviour and this is the
+  // right corpus: git.md declares the **Input:** contract a command fence must
+  // satisfy; a reference carries mechanics. Unioning providers would let a key
+  // declared by one provider satisfy the forward check (DR-18).
   gitCorpus = [{ path: git.path, content: git.content }]
 
   // Build op→section map once [DR-24]: sole corpus (git.md), all declared ops.
@@ -522,65 +593,204 @@ describe('reverse: every required **Input:** value is passed by at least one cal
   })
 })
 
-// ── Direction 3: producer check ──────────────────────────────────────────────
+// ── Direction 3: producer check, PER OPERATION ───────────────────────────────
 //
-// Every entry in issue_capture_contract() has a greppable producer in git.md's
-// fetch-issue / fetch-issues-batch Output templates.
+// Every entry in issue_capture_contract() has a greppable producer in EACH of the
+// git.md operations the partial names as its producer — setup-task, fetch-issue,
+// fetch-issues-batch, per entry.
+//
+// Why per-op. The earlier form concatenated the fetch-issue and
+// fetch-issues-batch slices and searched the join. A join cannot distinguish
+// "both ops emit this" from "one op emits it and the other does not", so
+// `fetch-issues-batch` emitting no `### Handoff Values` block at all was invisible
+// here while plan.mds / dynamic-plan.mds batch flows captured three values from
+// it. That is GAP-15's shape, one seam over: a consumer with no producer.
 //
 // The corpus is git.md (via gitCorpus built in beforeAll), NOT DIST_FILES.
 // Searching DIST_FILES found only plan.md's own capture line — the consumer —
 // and mistook it for the producer. That vacuity hid the fact that ISSUE_ID and
 // ISSUE_URL had no producer at all (removed from plan capture list in c7bff85).
 //
-// The consumer (plan.md) is excluded by construction: we search only the two
-// fetching-op full sections from git.md, never the compiled command files.
-//
-// FILE-SCOPED SLICING (not extractOpSectionFromCorpus): the Output templates in
-// fetch-issue and fetch-issues-batch contain "## Issue #" headings that would
-// truncate the extracted section at the first \n## , cutting off the
-// <untrusted-issue-body> content. Per-op full-file slicing avoids truncation
-// (same pattern as AC-0.3 / Guard 10 in git-agent.test.ts).
+// The consumer (plan.md) is excluded by construction: we search only the named
+// producer-op full sections from git.md, never the compiled command files.
 
-describe('third direction: every issue_capture_contract() value has a producer in git.md', () => {
-  it('every contract entry has a greppable producer in fetch-issue / fetch-issues-batch Output (git.md sole corpus)', () => {
-    // File-scoped slicing: slice the full git.md content between ## Operation: anchors so
-    // that ## headings inside Output templates do not prematurely end the section.
-    const gitContent = gitCorpus[0]?.content ?? ''
-    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
+/**
+ * Named collector — returns `{label} → {op}` for every (contract entry, named
+ * producer op) pair with no producer in the given git.md body. Shared by the live
+ * guard and by both probes, so they exercise the real logic rather than a
+ * hand-written imitation.
+ *
+ * It takes a git.md BODY, not a corpus: both known-bad probes drive it with a
+ * mutated copy of that body, and a corpus-shaped signature would push the mutation
+ * into the fixture instead of the input under test.
+ */
+function collectMissingProducers(gitContent: string): string[] {
+  function fileSlice(op: string): string {
+    const start = gitContent.indexOf(`## Operation: ${op}`)
+    if (start === -1) return ''
+    const next = gitContent.indexOf('\n## Operation: ', start + 1)
+    return next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
+  }
 
-    function fileSlice(op: string): string {
-      const start = gitContent.indexOf(`## Operation: ${op}`)
-      if (start === -1) return ''
-      const next = gitContent.indexOf('\n## Operation: ', start + 1)
-      return next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
-    }
+  // One slice per producer op. NEVER concatenated: the join is what let a key
+  // present in one operation stand in for the operation that does not emit it.
+  const slices = new Map(ISSUE_PRODUCER_OPS.map(op => [op, fileSlice(op)] as const))
 
-    // Concatenate the two issue-fetching op slices — both may emit a given field.
-    const fetchIssueSec = fileSlice('fetch-issue')
-    const fetchBatchSec = fileSlice('fetch-issues-batch')
-    expect(
-      fetchIssueSec.length + fetchBatchSec.length,
-      'fetch-issue and fetch-issues-batch sections must be non-empty (corpus non-vacuity)',
-    ).toBeGreaterThan(0)
-    const producerContent = fetchIssueSec + '\n' + fetchBatchSec
-
-    const missing: string[] = []
-    for (const { label, producerPattern } of ISSUE_CAPTURE_CONTRACT) {
-      if (!producerContent.includes(producerPattern)) {
+  const missing: string[] = []
+  for (const { label, producerPattern, producerOps } of ISSUE_CAPTURE_CONTRACT) {
+    for (const op of producerOps) {
+      if (!(slices.get(op) ?? '').includes(producerPattern)) {
         missing.push(
-          `${label}: pattern "${producerPattern}" not found in git.md fetch-issue or fetch-issues-batch Output`,
+          `${label} → ${op}: pattern "${producerPattern}" not found in git.md ${op} Output`,
         )
       }
     }
+  }
+  return missing
+}
+
+describe('third direction: every issue_capture_contract() value has a producer in git.md', () => {
+  it('every contract entry has a greppable producer in EACH op the partial names (git.md sole corpus)', () => {
+    const gitContent = gitCorpus[0]?.content ?? ''
+    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
+    // Every named producer op must be a real section, or its slice is '' and the
+    // pairs that reference it would all report for the wrong reason.
+    for (const op of ISSUE_PRODUCER_OPS) {
+      expect(
+        gitContent.indexOf(`## Operation: ${op}`),
+        `${op} section must exist in the corpus (non-vacuity)`,
+      ).toBeGreaterThan(-1)
+    }
 
     expect(
-      missing,
-      `issue_capture_contract values missing from git.md producer sections (fetch-issue / fetch-issues-batch):\n` +
-      missing.join('\n'),
+      collectMissingProducers(gitContent),
+      'issue_capture_contract value(s) with no producer in an operation the partial names as ' +
+      'producing them. Either the Output template lost the line, or issue_capture_contract() ' +
+      'claims a scope the agent does not implement',
     ).toHaveLength(0)
   })
 
-  it('issue_capture_contract has 3 values (non-vacuous floor)', () => {
-    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(3)
+  it('the batch op is deliberately NOT a Handoff Values producer, and the partial says so', () => {
+    // The other half of the scoping decision: asserting that fetch-issues-batch
+    // omits the block is what stops someone "fixing" the per-op check by pasting
+    // a single-issue Handoff block into a many-issue Output template, where no
+    // one PR link line or branch token has a well-defined value.
+    const gitContent = gitCorpus[0]?.content ?? ''
+    const start = gitContent.indexOf('## Operation: fetch-issues-batch')
+    expect(start, 'fetch-issues-batch section must exist').toBeGreaterThan(-1)
+    const next = gitContent.indexOf('\n## Operation: ', start + 1)
+    const batch = next === -1 ? gitContent.slice(start) : gitContent.slice(start, next)
+
+    const HANDOFF_KEYS = ['ISSUE_ID', 'ISSUE_PR_LINK', 'ISSUE_BRANCH_TOKEN']
+    for (const { label, producerPattern, producerOps } of ISSUE_CAPTURE_CONTRACT) {
+      if (!HANDOFF_KEYS.includes(label)) continue
+      expect(
+        producerOps,
+        `${label} must be modelled as single-issue-only — a batch has no one value for it`,
+      ).not.toContain('fetch-issues-batch')
+      expect(
+        batch.includes(producerPattern),
+        `fetch-issues-batch must NOT emit "${producerPattern}"`,
+      ).toBe(false)
+    }
+
+    // …and the command layer states the same scope, so a batch flow knows the
+    // three are `(none)` rather than silently capturing nothing.
+    const planCmd = readFileSync(path.join(DIST_COMMANDS_DIR, 'plan.md'), 'utf-8')
+    expect(
+      planCmd,
+      'issue_capture_contract() must scope the Handoff Values to the single-issue operations',
+    ).toContain('is emitted by the **single-issue** operations only, `setup-task` and `fetch-issue`')
+  })
+
+  it('known-bad probe: the three Handoff Values have no producer in the pre-split baseline', () => {
+    // The committed pre-split capture — the tree as it stood before T2b appended
+    // the `### Handoff Values` block. Driving the REAL collector over it is the
+    // permanent record that this direction was RED for these three keys and that
+    // the producers, not the list, are what turned it green (PF-018, H10: no
+    // landed fix is reverted to manufacture the proof).
+    const baseline = readFileSync(
+      path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
+      'utf-8',
+    )
+    expect(baseline.length, 'baseline fixture must be non-empty').toBeGreaterThan(1000)
+
+    const missing = collectMissingProducers(baseline)
+    // Per-op now, so the three appear once per named producer op — six pairs, not
+    // three labels. The pair spelling is the point: it names WHICH operation was
+    // missing the block, which the concatenated form could not say.
+    expect(
+      missing.sort(),
+      'exactly the three Handoff Values, in each of the two single-issue ops, must be missing ' +
+      'from the baseline — the other three had producers all along, so a probe that reported ' +
+      'every pair would prove nothing',
+    ).toEqual([
+      'ISSUE_BRANCH_TOKEN → fetch-issue: pattern "- **Branch token**:" not found in git.md fetch-issue Output',
+      'ISSUE_BRANCH_TOKEN → setup-task: pattern "- **Branch token**:" not found in git.md setup-task Output',
+      'ISSUE_ID → fetch-issue: pattern "- **Issue ID**:" not found in git.md fetch-issue Output',
+      'ISSUE_ID → setup-task: pattern "- **Issue ID**:" not found in git.md setup-task Output',
+      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in git.md fetch-issue Output',
+      'ISSUE_PR_LINK → setup-task: pattern "- **PR link line**:" not found in git.md setup-task Output',
+    ])
+  })
+
+  it('known-bad probe: removing ONE op\'s producer line is reported for that op alone', () => {
+    // The defect the concatenated form could not see. Strip the PR-link line from
+    // fetch-issue only, in a COPY of the live corpus, and the collector must name
+    // that op — while setup-task, which still emits it, stays silent. Under the
+    // old join this seed was invisible: setup-task's copy satisfied the search.
+    const gitContent = gitCorpus[0]?.content ?? ''
+    const start = gitContent.indexOf('## Operation: fetch-issue\n')
+    expect(start, 'fetch-issue section must exist for the probe').toBeGreaterThan(-1)
+    const next = gitContent.indexOf('\n## Operation: ', start + 1)
+    const end = next === -1 ? gitContent.length : next
+    const seeded =
+      gitContent.slice(0, start) +
+      gitContent.slice(start, end).replace('- **PR link line**:', '- (PR link line removed):') +
+      gitContent.slice(end)
+
+    expect(seeded, 'the seed must actually change the corpus').not.toBe(gitContent)
+    expect(
+      collectMissingProducers(seeded),
+      'the collector must report the one op that lost the line, and only that op',
+    ).toEqual([
+      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in git.md fetch-issue Output',
+    ])
+  })
+
+  it('issue_capture_contract has 6 values (non-vacuous floor)', () => {
+    expect(ISSUE_CAPTURE_CONTRACT.length).toBe(6)
+    // The per-op form multiplies the checks; the floor above counts KEYS, so this
+    // records that the pair count it now ranges over is larger, never smaller.
+    const pairs = ISSUE_CAPTURE_CONTRACT.reduce((n, e) => n + e.producerOps.length, 0)
+    expect(
+      pairs,
+      'every contract entry must name at least one producer op — an entry with an empty roster ' +
+      'is checked against nothing',
+    ).toBeGreaterThanOrEqual(ISSUE_CAPTURE_CONTRACT.length)
+    for (const { label, producerOps } of ISSUE_CAPTURE_CONTRACT) {
+      expect(producerOps.length, `${label} must name at least one producer op`).toBeGreaterThan(0)
+    }
+  })
+
+  it('the compiled _tracker.mds define names exactly these six keys', () => {
+    // Two-sided: this file's table is the checker's view of the contract; the
+    // compiled define is what the commands actually instruct. A key added to one
+    // and not the other is the drift the seam exists to catch.
+    const planCmd = readFileSync(path.join(DIST_COMMANDS_DIR, 'plan.md'), 'utf-8')
+    const start = planCmd.indexOf("**Capture from the Git agent's Output block, as written:**")
+    expect(start, 'the compiled issue_capture_contract() body must be present in plan.md').toBeGreaterThan(-1)
+    const body = planCmd.slice(start, planCmd.indexOf('\n\n', start))
+
+    for (const label of ISSUE_CAPTURE_LABELS) {
+      expect(body, `issue_capture_contract() must name ${label}`).toContain(`\`${label}\``)
+    }
+    // Reverse direction: no seventh backticked ISSUE_*/ACCEPTANCE_* identifier in
+    // the define that this table does not know about.
+    const named = [...body.matchAll(/`((?:ISSUE|ACCEPTANCE)_[A-Z_]+)`/g)].map(m => m[1])
+    expect(
+      [...new Set(named)].sort(),
+      'the define and the checker table must name the same key set',
+    ).toEqual([...ISSUE_CAPTURE_LABELS].sort())
   })
 })

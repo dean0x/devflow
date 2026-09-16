@@ -122,6 +122,13 @@ describe('literal-agent-path guard: no src/assets/agents/ literals in new test f
     [path.join(ROOT, 'tests', 'seams'),   'tests/seams'],
     [path.join(ROOT, 'tests', 'goldens'), 'tests/goldens'],
     [path.join(ROOT, 'tests', 'guards'),  'tests/guards'],
+    // Added alongside the first file in tests/tracker/ so the guard is
+    // non-vacuous over that directory from its first commit (P2-S15).
+    [path.join(ROOT, 'tests', 'tracker'), 'tests/tracker'],
+    // Same rule, same commit as the first file in tests/dynamic/ (P2-S11).
+    [path.join(ROOT, 'tests', 'dynamic'), 'tests/dynamic'],
+    // Same rule, same commit as the first file in tests/installer/ (P2-S14).
+    [path.join(ROOT, 'tests', 'installer'), 'tests/installer'],
   ];
 
   it('no test file in seams/, goldens/, or guards/ contains a src/assets/agents/ literal (AC-0.7)', () => {
