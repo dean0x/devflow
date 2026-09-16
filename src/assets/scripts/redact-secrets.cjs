@@ -6,13 +6,31 @@
 // Installed as a top-level sibling of hud.sh under ~/.devflow/scripts/.
 //
 // Usage: node redact-secrets.cjs <input-file> <output-file>
+//        node redact-secrets.cjs --emit <input-file>
+//
+// The two modes exist because their sinks differ, not for convenience.
+//   <in> <out>  FILE sink. The caller gates the post with a shell `&&` chain and
+//               passes the scrubbed FILE to `--body-file`.
+//   --emit      TOOL-CALL sink (GAP-04). A tracker reached through a tool call has
+//               no `--body-file` and no shell operator between the scrub and the
+//               post, so the `&&` gate cannot exist. Instead the scrubbed bytes
+//               are printed behind a framing line only this script can produce:
+//                 D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]
+//                 <the scrubbed body>
+//               A body with no framing line above it is a body that was never
+//               scrubbed. On any failure stdout is EXACTLY `D11-FAIL <reason>`
+//               and carries ZERO body bytes.
 //
 // Exit codes:
 //   0  success (zero or more redactions made)
-//   1  usage error (wrong number of arguments)
+//   1  usage error (wrong arity, or an unrecognised flag)
 //   2  input file unreadable or larger than 1 MiB
 //   3  output file write failed
 //   4  internal / unexpected error
+//   5  --emit only: the gate refused — the second scrub pass was non-zero, or a
+//      nonce could not be generated. Distinct from 4 so a caller can tell "the
+//      scrub did not hold" from "the script broke": the first means the body must
+//      not be posted, the second means the run must be retried.
 //
 // Design constraints (binding):
 //   PF-011  writes via temp-sibling + rename (atomic same-fs write; readers see
@@ -30,6 +48,9 @@
 'use strict';
 
 const fs = require('fs');
+// Genuinely new in P3a-S11: no hashing or randomness helper exists anywhere else
+// under src/assets/scripts. frameEmit is the ONLY consumer.
+const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -37,6 +58,47 @@ const fs = require('fs');
 
 /** Maximum allowed input size in bytes (1 MiB). */
 const MAX_INPUT_BYTES = 1048576;
+
+/**
+ * Nonce width, in hex characters (16 random bytes).
+ *
+ * The nonce is per-invocation and REQUIRED (§14.9-3). Composed bodies contain
+ * untrusted issue and comment text, so a fixed `D11-OK` literal would be
+ * forgeable by anyone who can write an issue comment: they would paste a framing
+ * line into the body, and a consumer reading "the bytes after the D11-OK line"
+ * would post the attacker's half.
+ *
+ * Exported so the framing grammar's guard pins its width from here rather than
+ * from a retyped number.
+ */
+const NONCE_HEX_CHARS = 32;
+
+/** The `SCRUB: ` prefix — one spelling, shared by formatScrubLine and frameEmit. */
+const SCRUB_LINE_PREFIX = 'SCRUB: ';
+
+/** The exact text a clean pass produces. The second pass returning THIS is the gate. */
+const ZERO_SCRUB_LINE = SCRUB_LINE_PREFIX + '0 []';
+
+/**
+ * Every reason that may follow `D11-FAIL `.
+ *
+ * Bare lowercase tokens, never prose and never a path: stdout is read back by an
+ * agent and pasted into reports, so a reason carrying a tmpdir path or input
+ * bytes would travel with it. The human-readable diagnosis goes to stderr, which
+ * no recipe forwards.
+ *
+ * A closed registry rather than inline strings, for the reason
+ * compliance-compose.ts states about its token tables: a guard asserts the shape
+ * of every entry, and an entry added inline would not be covered by it.
+ */
+const D11_FAIL_REASONS = Object.freeze({
+  INPUT_UNREADABLE: 'input-unreadable',
+  INPUT_TOO_LARGE: 'input-too-large',
+  OUTPUT_UNWRITABLE: 'output-unwritable',
+  SECOND_PASS_NONZERO: 'second-pass-nonzero',
+  NONCE_UNAVAILABLE: 'nonce-unavailable',
+  INTERNAL: 'internal-error',
+});
 
 // ---------------------------------------------------------------------------
 // Shannon entropy
@@ -81,11 +143,23 @@ function shouldSkip(candidate) {
   if (candidate.includes('process.env.')) return true;
   if (candidate.includes('os.environ')) return true;
 
-  // Template / shell variable references (bounded alternation, no ReDoS risk)
-  if (/\$\{[^}]{0,300}\}/.test(candidate)) return true;   // ${VAR}
-  if (/\$[A-Za-z_][A-Za-z0-9_]*/.test(candidate)) return true; // $VAR
-  if (/\{\{[^}]{0,300}\}\}/.test(candidate)) return true; // {{ template }}
-  if (/<[^>]{0,300}>/.test(candidate)) return true;        // <placeholder>
+  // Template / shell variable references (bounded alternation, no ReDoS risk).
+  //
+  // ANCHORED, both ends (GAP-54). These four skips exist to keep AUTHOR fixtures
+  // readable — `api_key = "${DEPLOY_KEY}"` is documentation, not a credential. A
+  // value that merely CONTAINS a placeholder is a different thing: before the
+  // anchoring, `api_key = "<ref> a8Kd91jZx0Qw7Lp2Vn"` disarmed rule 8 — the only
+  // generic `key = value` rule — and provider-rendered bodies and remote issue
+  // text are exactly what newly flows into a composed comment sink. So the skip
+  // now fires only when the value IS the placeholder and nothing else.
+  //
+  // The `[REDACTED:` guard above stays a CONTAINS check on purpose: anchoring it
+  // would re-match every marker the first pass wrote, the second pass could never
+  // return zero, and --emit's gate would refuse every body.
+  if (/^\$\{[^}]{0,300}\}$/.test(candidate)) return true;      // ${VAR}
+  if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(candidate)) return true; // $VAR
+  if (/^\{\{[^}]{0,300}\}\}$/.test(candidate)) return true;    // {{ template }}
+  if (/^<[^>]{0,300}>$/.test(candidate)) return true;          // <placeholder>
 
   // Keyword / low-entropy values that are never real secrets
   if (/^(null|undefined|true|false|none|changeme|example)$/i.test(candidate)) return true;
@@ -301,7 +375,147 @@ function formatScrubLine(counts) {
   const entries = Object.entries(counts);
   const total = entries.reduce((sum, [, n]) => sum + n, 0);
   const parts = entries.map(([slug, n]) => slug + ':' + n);
-  return 'SCRUB: ' + total + ' [' + parts.join(',') + ']';
+  return SCRUB_LINE_PREFIX + total + ' [' + parts.join(',') + ']';
+}
+
+// ---------------------------------------------------------------------------
+// [DR-14] Three pure helpers, and main() is a dispatcher over them
+//
+// Without this split main() would parse arguments, run two scrub passes,
+// generate randomness, hash, manage a temp-file lifecycle, select between two
+// output framings and choose among four exit codes — nine responsibilities in
+// the D11 sink for every provider, with the only structural mitigation being
+// boundary-scoped. Each helper below is also the ONLY way to reach one arm:
+// parseArgs is observable without a subprocess, and the nonce-failure arm is
+// reachable through injection and through nothing else.
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {{ emit: true, inputPath: string }} EmitArgs
+ * @typedef {{ emit: false, inputPath: string, outputPath: string }} FileArgs
+ * @typedef {{ usage: string }} UsageError
+ */
+
+/**
+ * Parse argv into a mode and its positionals.
+ *
+ * THE FLAG IS READ BEFORE THE POSITIONALS ARE BOUND. Previously main() read
+ * argv[2]/argv[3] positionally with no flag handling, so `--emit` bound as a
+ * FILENAME and the run died at statSync with exit 2 — reporting "your input is
+ * missing" for what was actually an unsupported flag.
+ *
+ * Arity is exact in both modes. A third positional is a usage error rather than
+ * an ignored argument: `--emit in out` is a caller who believes they are writing
+ * a file, and silently printing the body to stdout instead would put a scrubbed
+ * comment body into a terminal log they never read.
+ *
+ * @param {string[]} argv  process.argv
+ * @returns {EmitArgs | FileArgs | UsageError}
+ */
+function parseArgs(argv) {
+  const FILE_USAGE = 'Usage: node redact-secrets.cjs <input-file> <output-file>';
+  const EMIT_USAGE = 'Usage: node redact-secrets.cjs --emit <input-file>';
+
+  let emit = false;
+  /** @type {string[]} */
+  const positionals = [];
+  for (const arg of argv.slice(2)) {
+    if (arg === '--emit') {
+      emit = true;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      return { usage: 'redact-secrets: unrecognised flag ' + arg + '\n' + FILE_USAGE + '\n' + EMIT_USAGE };
+    }
+    positionals.push(arg);
+  }
+
+  if (emit) {
+    if (positionals.length !== 1) return { usage: EMIT_USAGE };
+    return { emit: true, inputPath: positionals[0] };
+  }
+  if (positionals.length !== 2) return { usage: FILE_USAGE };
+  return { emit: false, inputPath: positionals[0], outputPath: positionals[1] };
+}
+
+/**
+ * Scrub, then scrub the RESULT again.
+ *
+ * The second pass is the gate: it re-scrubs what the first pass produced, so a
+ * zero second count is evidence that the first pass left nothing behind. Passing
+ * the ORIGINAL content twice would find the same secrets again and the gate would
+ * never open — the one wiring mistake that turns the whole mode off, which is why
+ * a test pins which content the second call receives.
+ *
+ * Nearly free: idempotency is already pinned by shouldSkip's `[REDACTED:`
+ * contains-check.
+ *
+ * @param {string} content
+ * @param {(c: string) => ScrubResult} [scrubFn]  Injectable so the refusal arm is
+ *   provable without a pathological fixture — the real rules ARE idempotent, so
+ *   no input reaches a non-zero second pass.
+ * @returns {{ text: string, first: Record<string, number>, second: Record<string, number> }}
+ */
+function scrubTwice(content, scrubFn) {
+  const doScrub = scrubFn || scrub;
+  const first = doScrub(content);
+  const second = doScrub(first.result);
+  return { text: first.result, first: first.counts, second: second.counts };
+}
+
+/** Default nonce source: 16 CSPRNG bytes as lowercase hex. */
+function defaultNonceSource() {
+  return crypto.randomBytes(NONCE_HEX_CHARS / 2).toString('hex');
+}
+
+/**
+ * Build the `D11-OK` framing line for a scrubbed body.
+ *
+ * The line carries four facts, and each answers a specific way the channel can
+ * fail between this process's stdout and the tool call that posts the body:
+ *   <nonce>   per-invocation, so the line cannot be forged from inside the body;
+ *   <sha256>  identifies these exact bytes;
+ *   <bytes>   [DR-06] the UTF-8 byte length, so a consumer can detect a
+ *             harness-TRUNCATED result. Truncation keeps line 1 intact, so a bare
+ *             "no framing line ⇒ do not post" gate passes while the body is
+ *             partial — a guard that appears to work while failing;
+ *   <n> […]   [DR-01] the FIRST pass's count and per-type payload. The second
+ *             pass is always zero by construction, so without this the only
+ *             signal that a real credential was present is computed and discarded,
+ *             and the user is never told to rotate it.
+ *
+ * formatScrubLine stays the sole producer of the `N [type:count,…]` text; this
+ * embeds it by stripping the shared prefix rather than re-deriving the format.
+ *
+ * @param {string} scrubbed  The scrubbed body.
+ * @param {string} scrubLine The FIRST pass's formatScrubLine output.
+ * @param {() => string} [nonceSource]
+ * @returns {{ emitLine: string, body: string } | { error: string }}
+ */
+function frameEmit(scrubbed, scrubLine, nonceSource) {
+  const source = nonceSource || defaultNonceSource;
+  let nonce;
+  try {
+    nonce = source();
+  } catch (/** @type {any} */ err) {
+    return { error: 'nonce generation failed: ' + (err.code || err.message) };
+  }
+  if (typeof nonce !== 'string' || !new RegExp('^[0-9a-f]{' + NONCE_HEX_CHARS + '}$').test(nonce)) {
+    // A short, empty or non-hex nonce is unforgeable-by-accident only; treating it
+    // as usable would ship a framing line whose one security property is absent.
+    return { error: 'nonce generation failed: malformed nonce' };
+  }
+
+  const sha256 = crypto.createHash('sha256').update(scrubbed, 'utf8').digest('hex');
+  const bytes = Buffer.byteLength(scrubbed, 'utf8');
+  const payload = scrubLine.startsWith(SCRUB_LINE_PREFIX)
+    ? scrubLine.slice(SCRUB_LINE_PREFIX.length)
+    : scrubLine;
+
+  return {
+    emitLine: 'D11-OK ' + nonce + ' ' + sha256 + ' ' + bytes + ' ' + payload,
+    body: scrubbed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -315,66 +529,171 @@ function formatScrubLine(counts) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {string[]} argv  process.argv
- * @returns {number | { scrubLine: string }}
+ * Read the input, enforcing the size bound.
+ *
+ * Shared by both modes so the two cannot drift on what "unreadable" means. The
+ * `message` is exactly the stderr text the file mode has always written — the
+ * mode-specific part is only which stdout framing (if any) accompanies it.
+ *
+ * @param {string} inputPath
+ * @returns {{ ok: true, content: string } | { ok: false, code: number, reason: string, message: string }}
  */
-function main(argv) {
-  const inputPath = argv[2];
-  const outputPath = argv[3];
-
-  if (!inputPath || !outputPath) {
-    process.stderr.write('Usage: node redact-secrets.cjs <input-file> <output-file>\n');
-    return 1;
-  }
-
-  // ---- stat input ----
+function readInput(inputPath) {
   let stat;
   try {
     stat = fs.statSync(inputPath);
   } catch (/** @type {any} */ err) {
-    process.stderr.write(
-      'redact-secrets: cannot stat input: ' + inputPath + ': ' + (err.code || err.message) + '\n',
-    );
-    return 2;
+    return {
+      ok: false,
+      code: 2,
+      reason: D11_FAIL_REASONS.INPUT_UNREADABLE,
+      message: 'redact-secrets: cannot stat input: ' + inputPath + ': ' + (err.code || err.message) + '\n',
+    };
   }
 
   if (stat.size > MAX_INPUT_BYTES) {
-    process.stderr.write(
-      'redact-secrets: input exceeds 1 MiB: ' + inputPath + '\n',
-    );
-    return 2;
+    return {
+      ok: false,
+      code: 2,
+      reason: D11_FAIL_REASONS.INPUT_TOO_LARGE,
+      message: 'redact-secrets: input exceeds 1 MiB: ' + inputPath + '\n',
+    };
   }
 
-  // ---- read input ----
-  let rawBuffer;
   try {
-    rawBuffer = fs.readFileSync(inputPath);
+    return { ok: true, content: fs.readFileSync(inputPath).toString('utf8') };
   } catch (/** @type {any} */ err) {
-    process.stderr.write(
-      'redact-secrets: cannot read input: ' + inputPath + ': ' + (err.code || err.message) + '\n',
-    );
-    return 2;
+    return {
+      ok: false,
+      code: 2,
+      reason: D11_FAIL_REASONS.INPUT_UNREADABLE,
+      message: 'redact-secrets: cannot read input: ' + inputPath + ': ' + (err.code || err.message) + '\n',
+    };
   }
+}
 
-  // ---- scrub ----
-  const content = rawBuffer.toString('utf8');
+/**
+ * The FILE-sink mode — byte-for-byte the behaviour that shipped before `--emit`.
+ *
+ * Deliberately calls `scrub` ONCE, not scrubTwice: the recipes, the Tracker
+ * agent's write chain and every `gh` call depend on this path's exact stdout and
+ * exit codes, and a second pass here would add a failure mode to a contract
+ * nothing asked to change.
+ *
+ * @param {FileArgs} args
+ * @param {string} content
+ * @returns {number | { scrubLine: string }}
+ */
+function runFileMode(args, content) {
   const { result, counts } = scrub(content);
 
   // ---- atomic write (PF-011: temp-sibling + rename) ----
-  const tmpPath = outputPath + '.tmp';
+  const tmpPath = args.outputPath + '.tmp';
   try {
     fs.writeFileSync(tmpPath, result, 'utf8');
-    fs.renameSync(tmpPath, outputPath);
+    fs.renameSync(tmpPath, args.outputPath);
   } catch (/** @type {any} */ err) {
     // Best-effort cleanup of the temp file; ignore errors (the temp may not exist)
     try { fs.unlinkSync(tmpPath); } catch (_) { /* intentionally ignored */ }
     process.stderr.write(
-      'redact-secrets: cannot write output: ' + outputPath + ': ' + (err.code || err.message) + '\n',
+      'redact-secrets: cannot write output: ' + args.outputPath + ': ' + (err.code || err.message) + '\n',
     );
     return 3;
   }
 
   return { scrubLine: formatScrubLine(counts) };
+}
+
+/**
+ * The TOOL-CALL-sink mode.
+ *
+ * Always returns an `{ emitLine, body, code }` triple, and `body` is `''` on
+ * every non-zero code. That is what makes "no body on any non-zero exit" a
+ * property of the type rather than a rule each arm has to remember: the boundary
+ * writes `emitLine + '\n' + body` unconditionally, so a failing arm cannot emit a
+ * body even by forgetting to suppress one.
+ *
+ * The scrubbed bytes are written to a per-invocation temp SIBLING of the input
+ * before being printed, and the sibling is removed in the same function. Two
+ * reasons: the PF-011 write discipline then has exactly one implementation in
+ * this script rather than one per mode, and the recipes lose their `mktemp` and
+ * their cleanup step — twelve call sites that each had to remember both, and had
+ * no `rm` that ran on the failure paths. The name is PID- AND nonce-scoped
+ * (fs-atomic.ts:40's rule, tightened): two agents scrubbing the same composed
+ * body in parallel worktrees must not share a temp path, and unlike
+ * fs-atomic.ts:44-49 there is no unlink-and-retry — a collision is a bug, not a
+ * condition to recover from.
+ *
+ * @param {EmitArgs} args
+ * @param {string} content
+ * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => string }} deps
+ * @returns {{ emitLine: string, body: string, code: number }}
+ */
+function runEmitMode(args, content, deps) {
+  const { text, first, second } = scrubTwice(content, deps.scrubFn);
+
+  // THE GATE. A non-zero second pass means the first pass did not hold, so the
+  // body is not publishable and no amount of re-running changes that.
+  const secondLine = formatScrubLine(second);
+  if (secondLine !== ZERO_SCRUB_LINE) {
+    process.stderr.write(
+      'redact-secrets: second scrub pass was non-zero (' + secondLine + ') — refusing to emit\n',
+    );
+    return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.SECOND_PASS_NONZERO, body: '', code: 5 };
+  }
+
+  const framed = frameEmit(text, formatScrubLine(first), deps.nonceSource);
+  if (framed.error !== undefined) {
+    process.stderr.write('redact-secrets: ' + framed.error + ' — refusing to emit\n');
+    return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.NONCE_UNAVAILABLE, body: '', code: 5 };
+  }
+
+  const nonce = framed.emitLine.split(' ')[1];
+  const tmpPath = args.inputPath + '.' + process.pid + '.' + nonce + '.emit.tmp';
+  try {
+    fs.writeFileSync(tmpPath, framed.body, { encoding: 'utf8', mode: 0o600 });
+  } catch (/** @type {any} */ err) {
+    process.stderr.write(
+      'redact-secrets: cannot write temp sibling: ' + tmpPath + ': ' + (err.code || err.message) + '\n',
+    );
+    return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.OUTPUT_UNWRITABLE, body: '', code: 3 };
+  } finally {
+    // Unconditional: the sibling is scratch space for the write discipline, and a
+    // scrubbed comment body left on disk is residue with the input's lifetime.
+    try { fs.unlinkSync(tmpPath); } catch (_) { /* intentionally ignored */ }
+  }
+
+  return { emitLine: framed.emitLine, body: framed.body, code: 0 };
+}
+
+/**
+ * @param {string[]} argv  process.argv
+ * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => string }} [deps]
+ *   Injected only by tests, and only to reach the two arms no fixture can: a
+ *   non-idempotent scrub and an unavailable nonce. Defaulted here rather than at
+ *   each use site so production has exactly one set of dependencies.
+ * @returns {number | { scrubLine: string } | { emitLine: string, body: string, code: number }}
+ */
+function main(argv, deps) {
+  const args = parseArgs(argv);
+  if (args.usage !== undefined) {
+    // The one failure that precedes mode selection, so no framing line can
+    // describe it: stdout stays entirely empty and stderr carries the usage.
+    process.stderr.write(args.usage + '\n');
+    return 1;
+  }
+
+  const read = readInput(args.inputPath);
+  if (!read.ok) {
+    process.stderr.write(read.message);
+    return args.emit
+      ? { emitLine: 'D11-FAIL ' + read.reason, body: '', code: read.code }
+      : read.code;
+  }
+
+  return args.emit
+    ? runEmitMode(args, read.content, deps || {})
+    : runFileMode(args, read.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,28 +702,76 @@ function main(argv) {
 // This is the ONLY place that writes to stdout and sets process.exitCode.
 // No other code path may call process.exit() or write to stdout.
 // (PF-014: single synchronous write, no pending cleanup, no buffered output)
+//
+// AMENDED for --emit, not bypassed. main()'s return widened from
+// `number | {scrubLine}` to also carry `{emitLine, body, code}`, and the write
+// became a TWO-BRANCH synchronous write — one branch per output shape. There are
+// still exactly two process.stdout.write sites in this file, and a guard asserts
+// that count: a third site is precisely how a body would reach stdout without
+// passing the gate.
+//
+// The emit branch writes `emitLine + '\n' + body` UNCONDITIONALLY, because a
+// failing emit result carries `body: ''` by construction. Suppressing the body
+// here instead would put the "no body on failure" property in this block, where
+// a future arm could forget it; putting it in the result keeps it a property of
+// every arm that can produce one.
+//
+// Guarded by `require.main === module` so the pure helpers above are importable
+// by their unit tests. Nothing else changes: `node redact-secrets.cjs …` still
+// enters here, and the block is still the only exit-code and stdout authority.
 // ---------------------------------------------------------------------------
 
-let exitCode = 0;
-let scrubLine = /** @type {string | null} */ (null);
+if (require.main === module) {
+  let exitCode = 0;
+  let scrubLine = /** @type {string | null} */ (null);
+  let emitted = /** @type {{ emitLine: string, body: string, code: number } | null} */ (null);
 
-try {
-  const mainResult = main(process.argv);
-  if (typeof mainResult === 'number') {
-    exitCode = mainResult;
-  } else {
-    scrubLine = mainResult.scrubLine;
-    exitCode = 0;
+  try {
+    const mainResult = main(process.argv);
+    if (typeof mainResult === 'number') {
+      exitCode = mainResult;
+    } else if (mainResult.emitLine !== undefined) {
+      emitted = /** @type {any} */ (mainResult);
+      exitCode = emitted.code;
+    } else {
+      scrubLine = /** @type {any} */ (mainResult).scrubLine;
+      exitCode = 0;
+    }
+  } catch (/** @type {any} */ err) {
+    process.stderr.write('redact-secrets: internal error: ' + err.message + '\n');
+    exitCode = 4;
   }
-} catch (/** @type {any} */ err) {
-  process.stderr.write('redact-secrets: internal error: ' + err.message + '\n');
-  exitCode = 4;
+
+  // Synchronous stdout writes (must complete before process exits) — one per
+  // output shape, and no third site anywhere in this file.
+  if (emitted !== null) {
+    process.stdout.write(emitted.emitLine + '\n' + emitted.body);
+  } else if (scrubLine !== null) {
+    process.stdout.write(scrubLine + '\n');
+  }
+
+  // Set exitCode (preferred over process.exit() — does not bypass event loop cleanup)
+  process.exitCode = exitCode;
 }
 
-// Synchronous stdout write (must complete before process exits)
-if (scrubLine !== null) {
-  process.stdout.write(scrubLine + '\n');
-}
+// ---------------------------------------------------------------------------
+// Exports — for the unit tests of the pure helpers only [DR-14]
+//
+// parseArgs' behaviour is otherwise observable only end-to-end, and the
+// nonce-failure arm is not observable at all: no argv and no fixture can make
+// crypto.randomBytes fail. Exporting the helpers is what makes those two arms
+// assertable instead of argued-from-construction.
+// ---------------------------------------------------------------------------
 
-// Set exitCode (preferred over process.exit() — does not bypass event loop cleanup)
-process.exitCode = exitCode;
+module.exports = {
+  NONCE_HEX_CHARS,
+  ZERO_SCRUB_LINE,
+  D11_FAIL_REASONS: Object.freeze(Object.values(D11_FAIL_REASONS)),
+  shouldSkip,
+  scrub,
+  formatScrubLine,
+  parseArgs,
+  scrubTwice,
+  frameEmit,
+  main,
+};
