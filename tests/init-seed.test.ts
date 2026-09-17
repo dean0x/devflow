@@ -840,37 +840,73 @@ describe('tracker seeding', () => {
 //
 // [DR-22] / [DR-10] / P3a-S15: the attempt counter, the presence sentinel and the
 // stale-conventions rename each have exactly ONE owner in src/core/tracker.ts,
-// and `devflow init` calls each exactly once. These are source-level assertions
-// because init.ts's Commander `.action()` body is not unit-reachable; they go red
-// if someone inlines an `fs.rm`, duplicates a call, or drops one.
+// and `devflow init` binds each exactly once — into buildTrackerLifecycleIO, the
+// single adapter persistManifestThenConvergeTracker drives. These are
+// source-level assertions because init.ts's Commander `.action()` body is not
+// unit-reachable; they go red if someone inlines an `fs.rm`, duplicates a
+// binding, drops one, or reaches an owner outside the seam.
+//
+// Non-vacuity (PF-018): each "never inlined" assertion is paired with a probe
+// showing the same pattern DOES match src/core/tracker.ts, so a renamed constant
+// can never make the absence check pass by matching nothing anywhere.
 
 describe('init.ts tracker lifecycle call sites', () => {
-  const INIT_SOURCE = path.join(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-    'src', 'cli', 'commands', 'init.ts',
-  );
+  const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
+  const INIT_SOURCE = path.join(SRC, 'cli', 'commands', 'init.ts');
+  const TRACKER_SOURCE = path.join(SRC, 'core', 'tracker.ts');
 
-  it('calls rearmTrackerInference exactly once and never inlines the removal [DR-22]', async () => {
+  it('binds rearmTrackerInference exactly once and never inlines the removal [DR-22]', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    expect((source.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
+    expect((source.match(/rearmInference: rearmTrackerInference,/g) ?? []).length).toBe(1);
     expect(source).not.toMatch(/\.tracker\.attempts/);
+    // Known-bad probe: the literal exists in the owner module, so the absence
+    // assertion above is a statement about init.ts, not about a dead pattern.
+    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.attempts/);
   });
 
-  it('converges the sentinel through applyTrackerSentinel exactly once [DR-10]', async () => {
+  it('binds applyTrackerSentinel exactly once and never inlines the sentinel path [DR-10]', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    expect((source.match(/applyTrackerSentinel\(/g) ?? []).length).toBe(1);
+    expect((source.match(/applySentinel: applyTrackerSentinel,/g) ?? []).length).toBe(1);
     expect(source).not.toMatch(/\.tracker\.enabled/);
+    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.enabled/);
   });
 
-  it('invokes the provider-change rename transition exactly once (P3a-S15)', async () => {
+  it('binds the provider-change rename transition exactly once (P3a-S15)', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    expect((source.match(/renameStaleTrackerConventions\(/g) ?? []).length).toBe(1);
+    expect((source.match(/renameStaleConventions: renameStaleTrackerConventions,/g) ?? []).length).toBe(1);
+  });
+
+  it('reaches every owner through the one injected lifecycle seam', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // Three owner calls in init.ts, each through `io.` — no direct invocation
+    // that would bypass persistManifestThenConvergeTracker's ordering gate.
+    expect((source.match(/\bio\.(rearmInference|applySentinel|renameStaleConventions)\(/g) ?? []).length).toBe(3);
+    expect((source.match(/\b(rearmTrackerInference|applyTrackerSentinel|renameStaleTrackerConventions)\(/g) ?? []).length).toBe(0);
+  });
+
+  it('writes the manifest only inside the tracker lifecycle seam (PF-015)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // The ordering invariant — converge only what the manifest persisted — is
+    // only real while the write and the three owners sit in one function, so the
+    // full-install path reaches the writer exclusively through the injected seam.
+    expect((source.match(/\bio\.writeManifest\(/g) ?? []).length).toBe(1);
+    // One definition, one call site.
+    expect((source.match(/persistManifestThenConvergeTracker\(/g) ?? []).length).toBe(2);
+    // Exactly one direct write remains: the --hud-only early return, which
+    // preserves the prior provider verbatim and therefore owes no convergence.
+    // A third write in init.ts would reopen the gap this seam closes.
+    expect((source.match(/await writeManifest\(/g) ?? []).length).toBe(1);
   });
 
   it('gates both wizard paths on the one shared shouldRunTrackerStep predicate', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    // Two call sites — Recommended and Advanced — and no second predicate.
-    expect((source.match(/shouldRunTrackerStep\(\{/g) ?? []).length).toBe(2);
+    // One predicate call, inside runTrackerStepAt — and two paths reaching it.
+    expect((source.match(/shouldRunTrackerStep\(\{/g) ?? []).length).toBe(1);
+    expect((source.match(/runTrackerStepAt\(\n?\s*'recommended'/g) ?? []).length).toBe(1);
+    expect((source.match(/runTrackerStepAt\('advanced'/g) ?? []).length).toBe(1);
+    // One prompt-step invocation total: the shared helper, never a hand-copied
+    // second call site.
+    expect((source.match(/await runTrackerStep\(\{/g) ?? []).length).toBe(1);
   });
 });
 
