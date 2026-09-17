@@ -605,7 +605,8 @@ async function buildUnitStagingTree(
   warn: (msg: string) => void,
 ): Promise<{ ok: true; stagingDir: string } | { ok: false; error: string }> {
   const stagingDir = stagingDirFor(referencesTarget, unit);
-  const sourceDir = underRoot(sourceRoot, unitSubdir(unit));
+  const subdir = unitSubdir(unit);
+  const sourceDir = underRoot(sourceRoot, subdir);
   const wanted = new Map(unit.files.map(relPath => [relPath.split('/').slice(-1)[0], relPath]));
   const landed = new Set<string>();
 
@@ -629,7 +630,7 @@ async function buildUnitStagingTree(
   }
 
   for (const entry of entries) {
-    const relPath = unitSubdir(unit) === '' ? entry.name : `${unitSubdir(unit)}/${entry.name}`;
+    const relPath = subdir === '' ? entry.name : `${subdir}/${entry.name}`;
 
     // Symlinks are skipped, never followed. copyDirectory follows them and preserves
     // source modes, which is why the overlay does its own copying: a link planted in the
