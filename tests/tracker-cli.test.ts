@@ -268,6 +268,153 @@ describe('devflow tracker --status re-arms the attempt counter (D-F)', () => {
   });
 });
 
+// ── `devflow tracker --set`, end to end ───────────────────────────────────────
+//
+// The Set branch drives four owners in one order — rename → persist → re-arm →
+// sentinel — and the ordering is the whole contract. Driven as a subprocess for
+// the same reason as the --status arm above: the Commander `.action()` body is
+// not unit-reachable, and the resolver unit tests at the top of this file end at
+// `nextState`, so every file the branch touches is otherwise unexercised.
+//
+// Each arm asserts the WHOLE end-state of the devflow dir (PF-015): a per-step
+// boolean cannot see a half-converged directory, which is exactly the shape a
+// dropped owner leaves behind.
+
+describe('devflow tracker --set converges every tracker artifact', () => {
+  let cli: string;
+  let tmpHome: string;
+  let devflowDir: string;
+
+  /** Seed a manifest whose tracker selection is `provider`. */
+  async function seedManifest(provider: string): Promise<void> {
+    await fs.writeFile(
+      path.join(devflowDir, 'manifest.json'),
+      JSON.stringify({
+        version: '2.0.0',
+        scope: 'user',
+        installedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        plugins: ['devflow-core-skills'],
+        features: {
+          ambient: false,
+          memory: false,
+          learning: false,
+          knowledge: false,
+          hud: false,
+          rules: false,
+          proxy: false,
+          tracker: { provider },
+        },
+      }, null, 2),
+      'utf-8',
+    );
+  }
+
+  function runSet(provider: string) {
+    return spawnSync('node', [cli, 'tracker', '--set', provider], {
+      encoding: 'utf-8',
+      timeout: 60000,
+      env: {
+        ...process.env,
+        HOME: tmpHome,
+        DEVFLOW_DIR: devflowDir,
+        FORCE_COLOR: '0',
+        NO_COLOR: '1',
+        CI: '1',
+      },
+    });
+  }
+
+  /** The persisted selection, read back from disk. */
+  async function persistedProvider(): Promise<string> {
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'),
+    ) as { features: { tracker: { provider: string } } };
+    return manifest.features.tracker.provider;
+  }
+
+  beforeEach(async () => {
+    cli = requireBuiltCli();
+    // PF-060: a seeded mkdtemp HOME; never the developer's real one.
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-set-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('jira → github: conventions moved aside, counter re-armed, sentinel removed', async () => {
+    await seedManifest('jira');
+    const conventions = path.join(devflowDir, 'tracker.md');
+    const backup = path.join(devflowDir, 'tracker.md.jira.bak');
+    const attempts = path.join(devflowDir, '.tracker.attempts');
+    const sentinel = path.join(devflowDir, '.tracker.enabled');
+    const seededConventions = '---\nprovider: jira\ninferred-from: seed\n---\n\n## Project\nsite: example\n';
+    await fs.writeFile(conventions, seededConventions, 'utf-8');
+    await fs.writeFile(attempts, '5\n', 'utf-8');
+    await fs.writeFile(sentinel, '', 'utf-8');
+
+    // PF-018: every artifact this run must change has to EXIST first, or its
+    // absence afterwards is the state the temp dir started in.
+    await expect(fs.readFile(conventions, 'utf-8')).resolves.toBe(seededConventions);
+    await expect(fs.readFile(attempts, 'utf-8')).resolves.toBe('5\n');
+    await expect(fs.access(sentinel)).resolves.toBeUndefined();
+    await expect(fs.access(backup)).rejects.toThrow();
+
+    const result = runSet('github');
+    expect(result.status, `tracker --set github failed:\n${result.stderr}`).toBe(0);
+
+    expect(await persistedProvider()).toBe('github');
+    // The stale conventions survive under the previous provider's name — the
+    // rename never destroys the user's inferred site and key (OD-15).
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe(seededConventions);
+    await expect(fs.access(conventions)).rejects.toThrow();
+    // [DR-22] the cap is handed back; [DR-10] github removes the sentinel, so
+    // the next SessionStart forks nothing.
+    await expect(fs.access(attempts)).rejects.toThrow();
+    await expect(fs.access(sentinel)).rejects.toThrow();
+    // The move is disclosed: a file that changed name with no receipt is a
+    // change the user cannot audit.
+    expect(result.stdout + result.stderr).toContain('tracker.md.jira.bak');
+  });
+
+  it('github → linear: the sentinel is written, which is the other direction [DR-10]', async () => {
+    await seedManifest('github');
+    const sentinel = path.join(devflowDir, '.tracker.enabled');
+    const attempts = path.join(devflowDir, '.tracker.attempts');
+    await fs.writeFile(attempts, '5\n', 'utf-8');
+    await expect(fs.access(sentinel)).rejects.toThrow();
+
+    const result = runSet('linear');
+    expect(result.status, `tracker --set linear failed:\n${result.stderr}`).toBe(0);
+
+    expect(await persistedProvider()).toBe('linear');
+    // Zero-byte presence sentinel — the hook's only gate reads its existence.
+    await expect(fs.stat(sentinel)).resolves.toMatchObject({ size: 0 });
+    await expect(fs.access(attempts)).rejects.toThrow();
+    // No conventions file was seeded, so the rename had nothing to move and
+    // must not have invented a backup.
+    await expect(fs.access(path.join(devflowDir, 'tracker.md.github.bak'))).rejects.toThrow();
+  });
+
+  it('a rejected ID exits non-zero and leaves every artifact untouched', async () => {
+    await seedManifest('linear');
+    const sentinel = path.join(devflowDir, '.tracker.enabled');
+    await fs.writeFile(sentinel, '', 'utf-8');
+
+    const result = runSet('jira-cloud');
+    expect(result.status, 'a near-miss ID must not exit 0').toBe(1);
+    expect(result.stdout + result.stderr).toContain('jira-cloud');
+
+    // Parse-at-the-boundary: the rejection happens before any I/O, so the
+    // selection and the sentinel it converged are exactly as they were.
+    expect(await persistedProvider()).toBe('linear');
+    await expect(fs.access(sentinel)).resolves.toBeUndefined();
+  });
+});
+
 // ── Call-site assertions for this command ─────────────────────────────────────
 //
 // [DR-22] The attempt counter has exactly ONE owner (rearmTrackerInference);
