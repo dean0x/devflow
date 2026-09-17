@@ -730,7 +730,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       expect(exitCode, `exit code for ${JSON.stringify(seed)}`).toBe(0);
       expect(emittedNothing(stdout), `node backend emitted for ${JSON.stringify(seed)}`).toBe(true);
     }
-  });
+  }, 20_000); // serial by design (ordering is the assertion): 8 spawns, ~1.45s alone, headroom for suite contention.
 
   // ---------------------------------------------------------------------------
   // Envelope, ordering, and the existing hook contracts
