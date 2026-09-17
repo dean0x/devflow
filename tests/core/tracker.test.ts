@@ -515,12 +515,50 @@ describe('tracker file lifecycle', () => {
     await expect(fs.access(path.join(devflowDir, 'tracker.md.github.bak'))).rejects.toThrow();
   });
 
-  it('never throws when the rename target cannot be written', async () => {
-    // Refuse-with-instruction is rejected: devflow init must never abort on a
-    // feature-state change (PF-009 isolation posture). A failed rename reports.
+  it('reports nothing to move when the devflow dir does not exist', async () => {
+    // There is no conventions file under a directory that does not exist, so this
+    // is the "nothing to move aside" branch — asserted exactly, rather than as a
+    // disjunction over both branches that no outcome could falsify.
     const missing = path.join(devflowDir, 'absent-dir');
     const transition = await renameStaleTrackerConventions(missing, 'jira', 'github');
-    expect(['none', 'failed']).toContain(transition.kind);
+    expect(transition.kind).toBe('none');
+  });
+
+  it('a second transition for the same provider keeps the first backup', async () => {
+    // OD-15: a .bak holds exactly what tracker.md held — the user's inferred site
+    // and project key, hand-correctable — which is why tracker.md is classified as
+    // user content on uninstall. jira->github->jira->github must therefore not
+    // replace the first copy with the second while init prints "moved aside".
+    const backup = trackerConventionsBackupPath(devflowDir, 'jira');
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'first generation\n', 'utf-8');
+    expect((await renameStaleTrackerConventions(devflowDir, 'jira', 'github')).kind).toBe('renamed');
+    // PF-018: the first backup must really be on disk, or the survival asserted
+    // below is the state the temp dir started in.
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe('first generation\n');
+
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'second generation\n', 'utf-8');
+    const second = await renameStaleTrackerConventions(devflowDir, 'jira', 'github');
+
+    expect(second.kind).toBe('failed');
+    if (second.kind !== 'failed') return;
+    // Both files survive, and the message names the one that blocked the move so
+    // the user can act on it (PF-009: report, never abort).
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe('first generation\n');
+    await expect(fs.readFile(trackerConventionsPath(devflowDir), 'utf-8'))
+      .resolves.toBe('second generation\n');
+    expect(second.error).toContain(backup);
+  });
+
+  it('refuses rather than overwrites whatever already occupies the backup path', async () => {
+    // EEXIST is the refusal, not "an earlier .bak specifically": anything sitting
+    // at the destination is something the move would have destroyed.
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'live\n', 'utf-8');
+    await fs.mkdir(trackerConventionsBackupPath(devflowDir, 'jira'));
+
+    const transition = await renameStaleTrackerConventions(devflowDir, 'jira', 'linear');
+
+    expect(transition.kind).toBe('failed');
+    await expect(fs.readFile(trackerConventionsPath(devflowDir), 'utf-8')).resolves.toBe('live\n');
   });
 
   // ── TRACKER_CONVENTIONS_BACKUP_NAMES (the uninstall classification set, OD-15) ──

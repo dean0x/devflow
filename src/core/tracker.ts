@@ -187,8 +187,9 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function isEnoent(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ENOENT';
+/** The errno of a rejected fs call, or undefined when the failure carries none. */
+function errnoCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null ? (err as { code?: string }).code : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,19 +403,31 @@ export type TrackerTransition =
   | { kind: 'failed'; error: string };
 
 /**
- * Rename a now-stale `~/.devflow/tracker.md` when the provider changes.
+ * Move a now-stale `~/.devflow/tracker.md` aside when the provider changes.
  *
  * P3a-S15 / AC-3.20 — the writer's repair. A conventions file inferred for one
  * provider is silently authoritative for the next one unless it is moved aside,
  * and the reader half (the provider-mismatch guard) then has nothing to disagree
- * with. Renaming to `tracker.md.{old}.bak` keeps the user's inferred content
+ * with. Landing it at `tracker.md.{old}.bak` keeps the user's inferred content
  * recoverable while the next session re-arms inference for the new provider.
  *
- * Refuse-with-instruction is REJECTED: `devflow init` must never abort on a
- * feature-state change (PF-009's isolation posture) — a failed init is strictly
- * worse than a renamed file. Without the rename the user sits in a permanent
- * DEGRADED whose only documented escape is deleting a machine-wide file that
- * re-arms inference for every repo.
+ * Every step REPORTS: `devflow init` must never abort on a feature-state change
+ * (PF-009's isolation posture), so both callers render a warning and carry on.
+ *
+ * D-TRACKER-BACKUP-EXCLUSIVE [OD-15]: the move is `link` then `unlink`, never
+ * `rename`. `rename(2)` replaces an existing destination without a word, so
+ * jira→github→jira→github destroyed the first `tracker.md.jira.bak` while init
+ * printed a line that reads as preservation — and a `.bak` holds exactly what
+ * `tracker.md` holds, which is the hand-correctable content uninstall classifies
+ * as user content. `link(2)` fails with EEXIST instead, so a second transition
+ * for one provider keeps BOTH copies and says which one blocked the move; the
+ * user resolves it by moving one aside, and the next run completes the change.
+ * Numbering the backups was the alternative and was rejected: it accumulates
+ * without bound and puts names in `~/.devflow` that
+ * `TRACKER_CONVENTIONS_BACKUP_NAMES` cannot enumerate, leaving files no uninstall
+ * list accounts for. Hard links in this directory are already load-bearing — the
+ * Tracker agent places `tracker.md` itself with `ln` for the same
+ * create-exclusive property.
  *
  * A provider change with no file on disk, and an unchanged provider, are both
  * `{kind:'none'}` — a transition is a change plus a file.
@@ -428,13 +441,36 @@ export async function renameStaleTrackerConventions(
 
   const from = trackerConventionsPath(devflowDir);
   const to = trackerConventionsBackupPath(devflowDir, previous);
+
   try {
-    await fs.rename(from, to);
-    return { kind: 'renamed', from, to, previous };
+    await fs.link(from, to);
   } catch (err) {
-    // Nothing to move aside — the common case on a provider change with no
-    // prior inference run.
-    if (isEnoent(err)) return { kind: 'none' };
-    return { kind: 'failed', error: `Could not move the stale tracker.md aside: ${errorMessage(err)}` };
+    switch (errnoCode(err)) {
+      // Nothing to move aside — the common case on a provider change with no
+      // prior inference run.
+      case 'ENOENT':
+        return { kind: 'none' };
+      case 'EEXIST':
+        return {
+          kind: 'failed',
+          error: `Kept the existing ${to} — moving ${from} aside would have destroyed it. ` +
+            `Move or delete one of the two, then re-run to finish the provider change.`,
+        };
+      default:
+        return { kind: 'failed', error: `Could not move the stale tracker.md aside: ${errorMessage(err)}` };
+    }
   }
+
+  try {
+    await fs.unlink(from);
+  } catch (err) {
+    // The backup exists and holds the content; only the stale name is still
+    // there, so the reader's mismatch guard still fires and nothing was lost.
+    return {
+      kind: 'failed',
+      error: `Copied the stale conventions to ${to} but could not remove ${from}: ${errorMessage(err)}`,
+    };
+  }
+
+  return { kind: 'renamed', from, to, previous };
 }
