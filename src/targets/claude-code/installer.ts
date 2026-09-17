@@ -714,9 +714,10 @@ type RecordPromotionState = (state: OverlayFailureState) => void;
 /**
  * Promote the flat cross-cutting set — one `rename` per document.
  *
- * There is no directory to swap. These documents land directly in `references/`, beside
- * hand-authored files the overlay must never replace or delete, so the unit is promoted one
- * `rename` per document and a mid-flight failure leaves it part new and part old
+ * There is no directory to swap. These documents land in `references/{unit.dir}` — the
+ * references root itself when `dir` is empty — beside hand-authored files the overlay must
+ * never replace or delete, so the unit is promoted one `rename` per document and a
+ * mid-flight failure leaves it part new and part old
  * (D-OVERLAY-FLAT-UNIT, recorded on {@link OverlayUnit}). That is a weaker guarantee than
  * {@link promoteProviderUnit}'s whole-directory swap, which is why the recorded state
  * names which documents carry this run's bytes rather than claiming the set is untouched.

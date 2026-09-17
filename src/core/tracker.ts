@@ -16,10 +16,13 @@
  *
  * D-TRACKER-OWNER [DR-22][DR-10]: the attempt counter and the presence sentinel
  *   have exactly ONE owner each — `rearmTrackerInference` and
- *   `applyTrackerSentinel`. `devflow init` and `devflow tracker --set` each call
- *   them exactly once. A bare "also delete this file" appended to an eleven-row
- *   edit list in a 2,100-line init.ts is the same policy expressed twice with no
- *   owner; these functions are the owner. Never inline an `fs.rm` at a call site.
+ *   `applyTrackerSentinel` — and every command that touches one goes through it.
+ *   The sentinel is converged by `devflow init` and `devflow tracker --set`; the
+ *   counter is re-armed by those two and by `devflow tracker --status`, which is
+ *   the command a capped user reaches for (D-F). A bare "also delete this file"
+ *   appended to an eleven-row edit list in a 2,100-line init.ts is the same
+ *   policy expressed twice with no owner; these functions are the owner. Never
+ *   inline an `fs.rm` at a call site.
  */
 
 import { promises as fs } from 'fs';
