@@ -56,6 +56,7 @@ import {
   TOOL_CALL_MECHANICS_CLAIMS,
   collectMissingMechanicsClaims,
   collectPerItemFetchVerbs,
+  type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
 
@@ -224,6 +225,134 @@ export function collectDefineBodies(source: string): Map<string, string> {
  */
 const MIN_DEFINE_CHARS = 80;
 
+/** A registered provider module: the sub-directory it is registered for, and its source. */
+interface ProviderModule {
+  readonly name: string;
+  readonly source: string;
+}
+
+/**
+ * One registered provider, named rather than assumed.
+ *
+ * A miss is a registry change and is raised as one: `find(...)!` would hand the
+ * arm below an `undefined` that surfaces as "cannot read properties of undefined"
+ * somewhere downstream instead of naming the provider that left the registry.
+ */
+function requireProvider(providers: readonly ProviderModule[], name: string): ProviderModule {
+  const found = providers.find(p => p.name === name);
+  if (found === undefined) {
+    throw new Error(
+      `\`${name}\` is not a registered provider module (registered: ` +
+      `${providers.map(p => p.name).join(', ')}) — this arm has no subject`,
+    );
+  }
+  return found;
+}
+
+/**
+ * The floor a cell's mechanics claim must clear.
+ *
+ * `**Mechanics held here:**` is a header EVERY define carries, so its presence is
+ * boilerplate and decides nothing about the cell beneath it. What §14.4 asks for is
+ * the sentence after the header: a cell whose header runs straight into nothing is
+ * the blank the rule forbids, wearing a filled cell's heading.
+ */
+const MIN_MECHANICS_CLAIM_CHARS = 40;
+
+/** A define body's mechanics claim — the text after the header, on the header's own line. */
+const MECHANICS_CLAIM_RE = /^\*\*Mechanics held here:\*\*(.*)$/m;
+
+/**
+ * Named collector: the instruction lines under a define's `### Process` heading.
+ *
+ * Numbered steps and bullets both count — `create-release` holds a fragment of the
+ * operation's step 5 and states it as bullets — and the heading itself never does:
+ * a `### Process` with nothing under it is the other half of a blank cell.
+ */
+export function collectProcessInstructions(body: string): string[] {
+  const instructions: string[] = [];
+  let inProcess = false;
+  for (const line of body.split('\n')) {
+    if (/^### /.test(line)) {
+      inProcess = /^### Process\b/.test(line);
+      continue;
+    }
+    if (inProcess && /^\s*(?:\d+[a-z]?\.|[-*])\s/.test(line)) instructions.push(line.trim());
+  }
+  return instructions;
+}
+
+/** A §14.4 cell whose capability the artifact fixes as undefined for one provider. */
+interface KnownUndefinedCell {
+  readonly op: string;
+  readonly provider: string;
+  readonly capability: string;
+}
+
+/**
+ * §14.4's known-undefined cells, as data.
+ *
+ * Every other cell of the op × provider matrix is `supported` and owes its
+ * mechanics. A cell listed here owes the instantiated
+ * `DEGRADED (unsupported by {provider})` literal instead, so no module can quietly
+ * claim a capability §14.4 fixes as absent.
+ *
+ * §14.4's other known-undefined cell is `transition` on GitHub, and it has no row
+ * here because the GitHub module declares no transition step at all: there is no
+ * cell body that would carry the literal, and a row over nothing grades nothing.
+ */
+const KNOWN_UNDEFINED_CELLS: readonly KnownUndefinedCell[] = [
+  { op: 'gather-release-evidence', provider: 'jira', capability: 'closing_refs_for_commit' },
+  { op: 'gather-release-evidence', provider: 'linear', capability: 'closing_refs_for_commit' },
+];
+
+/**
+ * Named collector: §14.4 matrix cells that answer nothing.
+ *
+ * One pass over the op ROSTER, so a cell is reported when its define is missing as
+ * well as when its define says nothing. What each cell owes is read from
+ * `KNOWN_UNDEFINED_CELLS` and not from what the body happens to contain: a
+ * predicate satisfied by a header every define carries decides no cell at all, and
+ * one that infers `supported` from the ABSENCE of a DEGRADED literal lets a
+ * provider drop the literal and stay green (PF-018, PF-064).
+ */
+export function collectBlankMatrixCells(provider: string, source: string): string[] {
+  const blanks: string[] = [];
+  const bodies = collectDefineBodies(source);
+  for (const op of TRACKER_OPS) {
+    const define = op.replace(/-/g, '_');
+    const body = bodies.get(define);
+    if (body === undefined) {
+      blanks.push(`${provider}/${op}: no \`@define ${define}()\` — the cell has no body at all`);
+      continue;
+    }
+    const claim = (MECHANICS_CLAIM_RE.exec(body)?.[1] ?? '').trim();
+    if (claim.length < MIN_MECHANICS_CLAIM_CHARS) {
+      blanks.push(
+        `${provider}/${op}: ${claim.length} ch behind the mechanics header, floor ` +
+        `${MIN_MECHANICS_CLAIM_CHARS} — a header with nothing behind it answers nothing`,
+      );
+    }
+    const undefinedCell = KNOWN_UNDEFINED_CELLS.find(c => c.op === op && c.provider === provider);
+    if (undefinedCell !== undefined) {
+      if (!body.includes(`DEGRADED (unsupported by ${provider})`)) {
+        blanks.push(
+          `${provider}/${op}: §14.4 fixes \`${undefinedCell.capability}\` as undefined here, so ` +
+          `the cell owes \`DEGRADED (unsupported by ${provider})\` and never names it`,
+        );
+      }
+      continue;
+    }
+    if (collectProcessInstructions(body).length === 0) {
+      blanks.push(
+        `${provider}/${op}: \`### Process\` holds no step — the cell claims to hold this op's ` +
+        `mechanics and holds a heading`,
+      );
+    }
+  }
+  return blanks;
+}
+
 describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', () => {
   /**
    * Every registered provider module, read from the registry rather than listed.
@@ -234,7 +363,7 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
    * non-vacuous at THREE providers, and a registry that lost one would otherwise
    * shrink the scan silently.
    */
-  const PROVIDERS: ReadonlyArray<{ readonly name: string; readonly source: string }> =
+  const PROVIDERS: readonly ProviderModule[] =
     VARIANT_MODULES
       .filter(mod => mod.kind === 'fanout' && mod.subdir.startsWith('tracker/'))
       .map(mod => ({
@@ -325,47 +454,80 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     ).toEqual([]);
   });
 
-  it('every §14.4 matrix cell is filled — `supported` or a named DEGRADED, no blanks', () => {
+  it('every §14.4 matrix cell is filled — stated mechanics or the named DEGRADED, no blanks', () => {
     // AC-3.8's third clause. The matrix's ROWS are the ops (file-set parity,
-    // structural) and its COLUMNS are the defines (asserted above); what neither
-    // covers is the CELL — a define that exists, is long enough, and still leaves
-    // the reader without an answer for its capability. §14.4's rule is that every
-    // cell reads `supported (mechanics …)` or `DEGRADED (unsupported by {provider})`,
-    // including the two known-undefined ones, so the cell content is checked as
-    // "this op's reference says what it does OR names why it cannot".
-    const blanks: string[] = [];
-    for (const provider of PROVIDERS) {
-      const bodies = collectDefineBodies(provider.source);
-      for (const [name, body] of bodies) {
-        const answers = /\*\*Mechanics held here:\*\*/.test(body);
-        const degrades = body.includes(`DEGRADED (unsupported by ${provider.name})`);
-        if (!answers && !degrades) blanks.push(`${provider.name}/${name}`);
-      }
-    }
+    // structural) and its COLUMNS are the providers (define-set parity, asserted
+    // above); what neither covers is the CELL — a define that exists, is long
+    // enough, and still leaves the reader without an answer for its capability.
+    // What each cell owes is DECLARED, in `KNOWN_UNDEFINED_CELLS`: a `supported`
+    // cell owes a mechanics sentence and the steps behind it, and a known-undefined
+    // cell owes `DEGRADED (unsupported by {provider})` by name.
+    const blanks = PROVIDERS.flatMap(p => collectBlankMatrixCells(p.name, p.source));
     expect(
       blanks,
       `matrix cell(s) that neither state what the operation does on this provider nor name why ` +
-      `it cannot. §14.4 forbids blanks, including for the two known-undefined cells — ` +
-      `\`closing_refs_for_commit\` on Linear and \`transition\` on GitHub — because a blank cell ` +
-      `is indistinguishable from an unasked question:\n  ${blanks.join('\n  ')}`,
+      `it cannot. A blank cell is indistinguishable from an unasked question:\n  ` +
+      blanks.join('\n  '),
     ).toEqual([]);
-    // The two known-undefined cells are asserted POSITIVELY, so "no blanks" cannot
-    // be satisfied by a module that quietly claims support it does not have.
+    // The declared cells must name a live column, or the DEGRADED arm grades nothing.
+    const registered = new Set(PROVIDERS.map(p => p.name));
     expect(
-      collectDefineBodies(PROVIDERS.find(p => p.name === 'linear')!.source).get('gather_release_evidence'),
-      'Linear\'s closing_refs_for_commit cell must be the named DEGRADED, not a claim of support',
-    ).toContain('DEGRADED (unsupported by linear)');
+      KNOWN_UNDEFINED_CELLS.filter(c => !registered.has(c.provider)),
+      'a known-undefined cell naming an unregistered provider is an arm over no module',
+    ).toEqual([]);
     expect(
-      collectDefineBodies(PROVIDERS.find(p => p.name === 'jira')!.source).get('gather_release_evidence'),
-      'and Jira\'s likewise',
-    ).toContain('DEGRADED (unsupported by jira)');
+      KNOWN_UNDEFINED_CELLS.filter(c => !TRACKER_OPS.some(op => op === c.op)),
+      'and one naming an op outside the roster is an arm over no define',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the matrix collector reports a blanked claim, a stepless cell and a dropped DEGRADED', () => {
+    // One seed per arm, each built inside this `it` from the shipped bytes, so no
+    // committed file is touched to show red. Every arm above needs a seed of its
+    // own: `**Mechanics held here:**` is a header every define carries, so a cell
+    // predicate that merely looks for it is satisfied by boilerplate and decides no
+    // cell at all, and nothing but a seeded module shows which arms still decide
+    // something (PF-018, PF-064).
+    const jira = requireProvider(PROVIDERS, 'jira');
+    expect(
+      collectBlankMatrixCells('jira', jira.source),
+      'the collector must be silent on the shipped module, or the seeds prove nothing',
+    ).toEqual([]);
+
+    const blankClaim = jira.source.replace(MECHANICS_CLAIM_RE, '**Mechanics held here:**');
+    expect(blankClaim, 'the claim-blanking seed must change the source').not.toBe(jira.source);
+    expect(
+      collectBlankMatrixCells('jira', blankClaim).filter(b => b.includes('behind the mechanics header')),
+      'a header with nothing behind it must be reported',
+    ).not.toEqual([]);
+
+    const stepless = jira.source.replace(
+      /^@define fetch_issue\(\):[\s\S]*?^@end$/m,
+      define => define.replace(/^\s*(?:\d+[a-z]?\.|[-*])\s.*$/gm, ''),
+    );
+    expect(stepless, 'the step-stripping seed must change the source').not.toBe(jira.source);
+    expect(
+      collectBlankMatrixCells('jira', stepless).filter(b => b.startsWith('jira/fetch-issue:')),
+      'a `### Process` heading with no step under it must be reported',
+    ).not.toEqual([]);
+
+    const supportClaimed = jira.source
+      .split('DEGRADED (unsupported by jira)')
+      .join('DEGRADED (a reason that is not the capability gap)');
+    expect(supportClaimed, 'the DEGRADED-dropping seed must change the source').not.toBe(jira.source);
+    expect(
+      collectBlankMatrixCells('jira', supportClaimed)
+        .filter(b => b.startsWith('jira/gather-release-evidence:')),
+      'a known-undefined cell that stops naming its DEGRADED must be reported — this is the cell ' +
+      'a module claiming support it does not have would leave behind',
+    ).not.toEqual([]);
   });
 
   it('known-bad probe: the same collectors report a dropped and an emptied define', () => {
     // Drives both collectors over seeded modules. Without it, the empty-difference
     // assertions above are equally green for collectors that return nothing (PF-018).
-    const jiraSource = PROVIDERS.find(p => p.name === 'jira')!.source;
-    const githubSource = PROVIDERS.find(p => p.name === 'github')!.source;
+    const jiraSource = requireProvider(PROVIDERS, 'jira').source;
+    const githubSource = requireProvider(PROVIDERS, 'github').source;
     const dropped = jiraSource.replace(/^@define fetch_issue\(\):/m, '@define fetch_issue_renamed():');
     expect(dropped, 'the seed must actually change the source').not.toBe(jiraSource);
     const githubNames = new Set(collectDefineNames(githubSource));
@@ -389,9 +551,9 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
       'an emptied define must fall below the body floor, or the non-emptiness arm is inert',
     ).toBeLessThan(MIN_DEFINE_CHARS);
     expect(
-      body.includes('**Mechanics held here:**'),
-      'and it must fall below the matrix-cell rule too — a heading with no body answers nothing',
-    ).toBe(false);
+      collectBlankMatrixCells('jira', emptied).filter(b => b.startsWith('jira/manage-debt:')),
+      'and it must fall foul of the matrix-cell rule too — an emptied define answers nothing',
+    ).not.toEqual([]);
   });
 });
 
@@ -902,6 +1064,33 @@ function jiraTree(): string {
   return TRACKER_OPS.map(op => readGenerated(jiraRel(op))).join('\n');
 }
 
+/** The shipped Jira corpus, read through this file's own fail-loud reader. */
+const JIRA_CORPUS: ProviderCorpus = {
+  label: JIRA_SUBDIR,
+  vocab: JIRA_VOCABULARY,
+  read: op => readGenerated(jiraRel(op)),
+  tree: jiraTree,
+};
+
+/**
+ * One op's text out of a corpus read once.
+ *
+ * The map is declared `Map<string, string>` and so is the reader `ProviderCorpus`
+ * takes, so a key outside `TRACKER_OPS` is a real possibility rather than one the
+ * literal-union inference of `as const` hides behind a `!`. A miss NAMES the op:
+ * without it the only signal is a `TypeError` several frames later (PF-069).
+ */
+function readFromCorpus(corpus: ReadonlyMap<string, string>, op: string): string {
+  const text = corpus.get(op);
+  if (text === undefined) {
+    throw new Error(
+      `${JIRA_SUBDIR}: no pre-read reference for op \`${op}\` — this probe's corpus is keyed by ` +
+      `TRACKER_OPS, so a claim naming an op outside the roster reaches nothing`,
+    );
+  }
+  return text;
+}
+
 describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
   for (const criterion of ['AC-3.3', 'AC-3.11', '\u00a714.3']) {
     it(`states every ${criterion} clause its mechanics own`, () => {
@@ -910,9 +1099,7 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
         claims.length,
         `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
       ).toBeGreaterThan(0);
-      const missing = collectMissingMechanicsClaims(
-        JIRA_SUBDIR, JIRA_VOCABULARY, op => readGenerated(jiraRel(op)), claims, jiraTree,
-      );
+      const missing = collectMissingMechanicsClaims(JIRA_CORPUS, claims);
       expect(
         missing,
         `${criterion} clause(s) absent from this provider's generated mechanics:\n  ` +
@@ -926,18 +1113,22 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
     // bytes, so no committed file is touched to show red, and it is done per ROW:
     // a pattern that has drifted off the shipped wording would otherwise sit in the
     // table matching nothing while the arms above passed on every other row.
-    const pristine = new Map(TRACKER_OPS.map(op => [op, readGenerated(jiraRel(op))]));
+    const pristine = new Map<string, string>(
+      TRACKER_OPS.map(op => [op, readGenerated(jiraRel(op))]),
+    );
     const tree = (): string => [...pristine.values()].join('\n');
-    const read = (op: string): string => pristine.get(op)!;
     expect(
-      collectMissingMechanicsClaims('pristine', JIRA_VOCABULARY, read, TOOL_CALL_MECHANICS_CLAIMS, tree),
+      collectMissingMechanicsClaims(
+        { label: 'pristine', vocab: JIRA_VOCABULARY, read: op => readFromCorpus(pristine, op), tree },
+        TOOL_CALL_MECHANICS_CLAIMS,
+      ),
       'the collector must be silent on the shipped mechanics, or the probe proves nothing',
     ).toEqual([]);
 
     for (const claim of TOOL_CALL_MECHANICS_CLAIMS) {
       const pattern = claim.pattern(JIRA_VOCABULARY);
-      const wounded = new Map(
-        [...pristine].map(([op, text]) => [op, text.replace(pattern, '')] as const),
+      const wounded = new Map<string, string>(
+        [...pristine].map(([op, text]) => [op, text.replace(pattern, '')]),
       );
       expect(
         [...wounded.values()].join('\n'),
@@ -945,11 +1136,13 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
         `deleting it was a no-op and the row cannot be shown live`,
       ).not.toBe(tree());
       const reported = collectMissingMechanicsClaims(
-        'wounded',
-        JIRA_VOCABULARY,
-        op => wounded.get(op)!,
+        {
+          label: 'wounded',
+          vocab: JIRA_VOCABULARY,
+          read: op => readFromCorpus(wounded, op),
+          tree: () => [...wounded.values()].join('\n'),
+        },
         TOOL_CALL_MECHANICS_CLAIMS,
-        () => [...wounded.values()].join('\n'),
       );
       expect(
         reported.some(v => v.includes(claim.label)),

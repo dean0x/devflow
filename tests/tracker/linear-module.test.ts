@@ -63,6 +63,7 @@ import {
   TOOL_CALL_MECHANICS_CLAIMS,
   collectMissingMechanicsClaims,
   collectPerItemFetchVerbs,
+  type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
 
@@ -643,15 +644,24 @@ describe('linear module: Known Unknowns and the filed probe issue (P3c-S3, GAP-4
     ).toContain(PROBE_ISSUE);
   });
 
-  it('known-bad probe: the same reads report a module with the section stripped', () => {
-    // Drives the two live predicates over a seeded copy, so a green above cannot be
-    // a green over a scan that recognises nothing (PF-018).
-    const stripped = source.split('## Known Unknowns').join('«removed»');
-    expect(stripped, 'the seed must actually change the source').not.toBe(source);
-    expect(stripped.includes('## Known Unknowns')).toBe(false);
-    const deReferenced = source.split(PROBE_ISSUE).join('«removed»');
-    expect(deReferenced, 'the issue reference seed must change the source').not.toBe(source);
-    expect(deReferenced.includes(PROBE_ISSUE)).toBe(false);
+  it('known-bad probe: the placement predicate reports a section moved below the first marker', () => {
+    // The only COMPUTED predicate in this block is the placement one — the rest are
+    // containment arms, which cannot pass over a corpus that says nothing. So it is
+    // the placement predicate that is driven over a seeded copy here, and the seed
+    // is the one relocation that matters: a section below the first marker ships the
+    // heading into every generated reference and truncates each op's section for
+    // every union-mode guard (PF-063).
+    const firstMarker = source.indexOf('<!-- op: ');
+    const relocated =
+      source.slice(0, firstMarker).split('## Known Unknowns').join('## A heading that is not it') +
+      source.slice(firstMarker) +
+      '\n## Known Unknowns\n';
+    expect(relocated, 'the relocation seed must change the source').not.toBe(source);
+    expect(
+      relocated.indexOf('## Known Unknowns'),
+      'the live arm reads "above the first marker"; over this copy it must read below it, or the ' +
+      'probe drives nothing',
+    ).toBeGreaterThan(relocated.indexOf('<!-- op: '));
   });
 });
 
@@ -802,6 +812,33 @@ const LINEAR_VOCABULARY: ProviderRefVocabulary = {
   refNoun: 'reference',
 };
 
+/** The shipped Linear corpus, read through this file's own fail-loud reader. */
+const LINEAR_CORPUS: ProviderCorpus = {
+  label: LINEAR_SUBDIR,
+  vocab: LINEAR_VOCABULARY,
+  read: op => readGenerated(linearRel(op)),
+  tree: linearTree,
+};
+
+/**
+ * One op's text out of a corpus read once.
+ *
+ * The map is declared `Map<string, string>` and so is the reader `ProviderCorpus`
+ * takes, so a key outside `TRACKER_OPS` is a real possibility rather than one the
+ * literal-union inference of `as const` hides behind a `!`. A miss NAMES the op:
+ * without it the only signal is a `TypeError` several frames later (PF-069).
+ */
+function readFromCorpus(corpus: ReadonlyMap<string, string>, op: string): string {
+  const text = corpus.get(op);
+  if (text === undefined) {
+    throw new Error(
+      `${LINEAR_SUBDIR}: no pre-read reference for op \`${op}\` — this probe's corpus is keyed by ` +
+      `TRACKER_OPS, so a claim naming an op outside the roster reaches nothing`,
+    );
+  }
+  return text;
+}
+
 describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
   for (const criterion of ['AC-3.3', 'AC-3.11', '\u00a714.3']) {
     it(`states every ${criterion} clause its mechanics own`, () => {
@@ -810,9 +847,7 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
         claims.length,
         `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
       ).toBeGreaterThan(0);
-      const missing = collectMissingMechanicsClaims(
-        LINEAR_SUBDIR, LINEAR_VOCABULARY, op => readGenerated(linearRel(op)), claims, linearTree,
-      );
+      const missing = collectMissingMechanicsClaims(LINEAR_CORPUS, claims);
       expect(
         missing,
         `${criterion} clause(s) absent from this provider's generated mechanics:\n  ` +
@@ -826,18 +861,22 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
     // bytes, so no committed file is touched to show red, and it is done per ROW:
     // a pattern that has drifted off the shipped wording would otherwise sit in the
     // table matching nothing while the arms above passed on every other row.
-    const pristine = new Map(TRACKER_OPS.map(op => [op, readGenerated(linearRel(op))]));
+    const pristine = new Map<string, string>(
+      TRACKER_OPS.map(op => [op, readGenerated(linearRel(op))]),
+    );
     const tree = (): string => [...pristine.values()].join('\n');
-    const read = (op: string): string => pristine.get(op)!;
     expect(
-      collectMissingMechanicsClaims('pristine', LINEAR_VOCABULARY, read, TOOL_CALL_MECHANICS_CLAIMS, tree),
+      collectMissingMechanicsClaims(
+        { label: 'pristine', vocab: LINEAR_VOCABULARY, read: op => readFromCorpus(pristine, op), tree },
+        TOOL_CALL_MECHANICS_CLAIMS,
+      ),
       'the collector must be silent on the shipped mechanics, or the probe proves nothing',
     ).toEqual([]);
 
     for (const claim of TOOL_CALL_MECHANICS_CLAIMS) {
       const pattern = claim.pattern(LINEAR_VOCABULARY);
-      const wounded = new Map(
-        [...pristine].map(([op, text]) => [op, text.replace(pattern, '')] as const),
+      const wounded = new Map<string, string>(
+        [...pristine].map(([op, text]) => [op, text.replace(pattern, '')]),
       );
       expect(
         [...wounded.values()].join('\n'),
@@ -845,11 +884,13 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
         `deleting it was a no-op and the row cannot be shown live`,
       ).not.toBe(tree());
       const reported = collectMissingMechanicsClaims(
-        'wounded',
-        LINEAR_VOCABULARY,
-        op => wounded.get(op)!,
+        {
+          label: 'wounded',
+          vocab: LINEAR_VOCABULARY,
+          read: op => readFromCorpus(wounded, op),
+          tree: () => [...wounded.values()].join('\n'),
+        },
         TOOL_CALL_MECHANICS_CLAIMS,
-        () => [...wounded.values()].join('\n'),
       );
       expect(
         reported.some(v => v.includes(claim.label)),
