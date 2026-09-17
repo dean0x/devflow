@@ -308,6 +308,10 @@ describe('config guard: session-start-context', () => {
     try {
       seedTrackerProvider(tmpHome, 'jira');
       mkMemoryDir(tmpDir);
+      // Section 3 is gated on the project root being inside a repository; an
+      // empty `.git` satisfies df_has_git_marker's `-e` walk without being a
+      // repository to `git rev-parse`.
+      fs.mkdirSync(path.join(tmpDir, '.git'));
 
       // (a) Identical output across a bare HOME and a tracker-configured one.
       const bare = runContextHook(sessionInput(tmpDir), otherHome);
