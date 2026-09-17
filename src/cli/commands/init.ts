@@ -62,6 +62,7 @@ import {
   parseTrackerId,
   rearmTrackerInference,
   renameStaleTrackerConventions,
+  DEFAULT_TRACKER_PROVIDER,
   type TrackerFeatureState,
   type TrackerProvider,
   type TrackerResult,
@@ -72,6 +73,7 @@ import {
   shouldRunTrackerStep,
   runTrackerStep,
   buildClackTrackerPrompts,
+  type TrackerStepMessage,
 } from './tracker-prompts.js';
 import {
   shouldRunAttributionStep,
@@ -367,6 +369,28 @@ export function resolveTrackerInitState(
   const parsed = parseTrackerId(trackerOption);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   return { ok: true, value: { provider: parsed.value } };
+}
+
+/**
+ * The outcome line for a provider that arrived as `--tracker <id>`.
+ *
+ * D-TRACKER-CLI-SURFACE [PF-029]: the Advanced path prints no end-of-wizard
+ * summary, and `--tracker` suppresses the wizard step that would otherwise
+ * print one, so the CLI-override arm is the only place the selection can
+ * surface there. Without this line `devflow init --advanced --tracker jira`
+ * changes the machine-wide provider with nothing on screen — the same
+ * unreachable-step failure the wizard gate exists to prevent, arrived at from
+ * the flag side. Recommended already has its surface in the summary note's
+ * Tracker row; both paths or the step is invisible on one.
+ *
+ * Pure — the caller renders. The summary half is `formatTrackerSummary`, the one
+ * spelling every tracker surface shares.
+ */
+export function trackerOverrideMessage(provider: TrackerProvider): TrackerStepMessage {
+  return {
+    level: provider === DEFAULT_TRACKER_PROVIDER ? 'info' : 'success',
+    text: `Tracker: ${formatTrackerSummary(provider)}`,
+  };
 }
 
 /** A message produced by an init lifecycle step. Emitted by the caller, never logged here. */
@@ -1326,8 +1350,13 @@ export const initCommand = new Command('init')
       if (advancedTracker !== undefined) {
         trackerProvider = advancedTracker.provider;
       } else if (cliTrackerOverride !== undefined) {
-        // --tracker passed explicitly — honour without prompting.
+        // --tracker passed explicitly — honour without prompting, and say so.
+        // The gate declined the step, and this path has no summary recap, so
+        // this line is the selection's ONLY surface (D-TRACKER-CLI-SURFACE).
         trackerProvider = cliTrackerOverride.provider;
+        const overrideLine = trackerOverrideMessage(trackerProvider);
+        if (overrideLine.level === 'success') p.log.success(overrideLine.text);
+        else p.log.info(overrideLine.text);
       }
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —

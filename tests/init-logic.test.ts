@@ -15,8 +15,11 @@ import {
   formatComplianceSummary,
   persistManifestThenConvergeTracker,
   buildTrackerLifecycleIO,
+  trackerOverrideMessage,
   type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
+import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
+import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import { writeManifest, type ManifestData } from '../src/core/manifest.js';
 import {
   applyTrackerSentinel,
@@ -2034,5 +2037,78 @@ describe('buildTrackerLifecycleIO', () => {
     expect(io.renameStaleConventions).toBe(renameStaleTrackerConventions)
     expect(io.rearmInference).toBe(rearmTrackerInference)
     expect(io.applySentinel).toBe(applyTrackerSentinel)
+  })
+})
+
+// ── trackerOverrideMessage + the Advanced --tracker arm (PF-029) ─────────────
+//
+// `devflow init --advanced --tracker jira` changes the machine-wide provider
+// through the CLI-override arm, which the wizard gate declines to prompt for.
+// The Advanced path prints no end-of-wizard summary, so without a line of its
+// own that arm is a machine-state change with nothing on screen — the
+// invisible-step failure PF-029 records, reached from the flag side.
+
+describe('trackerOverrideMessage', () => {
+  it('names the provider a --tracker override applied', () => {
+    expect(trackerOverrideMessage('jira')).toEqual({ level: 'success', text: 'Tracker: jira' })
+  })
+
+  it('marks the default, so "I chose this" reads differently from "nobody chose"', () => {
+    expect(trackerOverrideMessage('github')).toEqual({ level: 'info', text: 'Tracker: github (default)' })
+  })
+
+  it('spells the summary the way every other tracker surface does', () => {
+    // One formatter behind the Recommended summary row, the wizard step's note
+    // header and this line — not three hand-copied spellings (avoids PF-013).
+    expect(TRACKER_PROVIDER_IDS.length).toBeGreaterThan(0)
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(trackerOverrideMessage(id).text).toBe(`Tracker: ${formatTrackerSummary(id)}`)
+    }
+  })
+})
+
+describe('init.ts structural guard — the Advanced --tracker arm emits its outcome line', () => {
+  const INIT_SOURCE = path.resolve(import.meta.dirname, '../src/cli/commands/init.ts')
+  const ADVANCED_ANCHOR = '// ── Advanced path: full interactive flow ──'
+  const ARM_ANCHOR = '} else if (cliTrackerOverride !== undefined) {'
+
+  /**
+   * Named collector: the body of the Advanced path's `--tracker` override arm,
+   * from its `} else if` through the brace that closes it.
+   *
+   * Scoped to the arm, not the file: `trackerOverrideMessage` appearing anywhere
+   * in a 2,400-line init.ts says nothing about whether THIS arm emits anything.
+   * `null` when the arm is absent — reported, never passed off as nothing to check.
+   */
+  function overrideArmBody(source: string): string | null {
+    const advanced = source.indexOf(ADVANCED_ANCHOR)
+    if (advanced === -1) return null
+    const start = source.indexOf(ARM_ANCHOR, advanced)
+    if (start === -1) return null
+    const end = source.indexOf('\n      }', start)
+    if (end === -1) return null
+    return source.slice(start, end)
+  }
+
+  it('the arm renders the line — it is the selection\'s only surface on that path', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8')
+    const arm = overrideArmBody(source)
+    expect(arm, 'the Advanced --tracker override arm must be findable').not.toBeNull()
+    expect(arm).toContain('trackerProvider = cliTrackerOverride.provider')
+    expect(arm).toContain('trackerOverrideMessage')
+    expect(arm).toMatch(/p\.log\.(success|info)/)
+  })
+
+  it('known-bad probe: the collector reports a silent arm and a missing one', () => {
+    // The assertion above is evidence only while this collector can fail.
+    const silent =
+      `${ADVANCED_ANCHOR}\n` +
+      `      ${ARM_ANCHOR}\n` +
+      '        trackerProvider = cliTrackerOverride.provider;\n' +
+      '      }\n'
+    expect(overrideArmBody(silent)).toContain('trackerProvider = cliTrackerOverride.provider')
+    expect(overrideArmBody(silent)).not.toContain('trackerOverrideMessage')
+    expect(overrideArmBody('// no advanced path here')).toBeNull()
+    expect(overrideArmBody(`${ADVANCED_ANCHOR}\n// but no override arm`)).toBeNull()
   })
 })
