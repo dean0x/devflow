@@ -3,6 +3,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
+import { DEFAULT_TRACKER_PROVIDER } from '../src/core/tracker.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
@@ -1372,7 +1373,7 @@ export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestDat
       rules: true,
       proxy: false,
       compliance: { enabled: false, frameworks: [] },
-      tracker: { provider: 'github' },
+      tracker: { provider: DEFAULT_TRACKER_PROVIDER },
       flags: { tui: true, lsp: true, 'tool-search': true },
     },
     installedAt: '2026-01-01T00:00:00.000Z',

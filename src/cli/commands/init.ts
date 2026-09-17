@@ -690,8 +690,10 @@ export const initCommand = new Command('init')
             learning: false, rules: false, flags: {}, proxy: false,
             compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
             // Preserve the user's tracker selection: a HUD-only install must not
-            // silently reset a Jira/Linear user back to github.
-            tracker: existingHudManifest?.features.tracker ?? { provider: 'github' },
+            // silently reset a Jira/Linear user back to github. The fallback is
+            // the exported default, not a literal — the one constant every other
+            // module reads, so a moved default moves here too.
+            tracker: existingHudManifest?.features.tracker ?? { provider: DEFAULT_TRACKER_PROVIDER },
           },
           installedAt: now,
           updatedAt: now,
