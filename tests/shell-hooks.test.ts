@@ -430,6 +430,12 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
 
   it('capture-turn run with a CWD inside .devflow/ writes the queue at the repo root, not a nested .devflow/', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-anchor-'));
+    // capture-turn sources hook-log-init, whose devflow_log_dir does an
+    // unconditional `mkdir -p "$HOME/.devflow/logs/<slug>"` — one directory per
+    // distinct cwd, so an inherited HOME accumulates them on the developer's real
+    // machine forever (PF-060). Seeded, never empty (PF-018).
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-anchor-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     try {
       execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
       const real = fs.realpathSync(repo);
@@ -443,7 +449,11 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
         session_id: 'anchor-test',
         last_assistant_message: 'hello from a nested cwd',
       });
-      execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`bash "${STOP_HOOK}"`, {
+        input,
+        env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
       // Queue written at the REAL repo root .devflow/memory/ ...
       const rootQueue = path.join(real, '.devflow', 'memory', '.pending-turns.jsonl');
@@ -455,6 +465,7 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
       expect(fs.existsSync(path.join(nestedCwd, '.devflow'))).toBe(false);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
     }
   });
 });

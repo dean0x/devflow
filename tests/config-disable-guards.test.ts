@@ -33,9 +33,12 @@ function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): stri
  *
  * `session-start-context` reads user-scope state — the global learning.json and,
  * since Section 3, the tracker manifest and its `.tracker.enabled` sentinel — out
- * of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every hook invocation below therefore
+ * of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every hook in this file additionally
+ * sources `hook-log-init`, whose `devflow_log_dir` does an unconditional
+ * `mkdir -p "$HOME/.devflow/logs/<slug>"`. Every hook invocation below therefore
  * passes an explicit HOME and an explicit empty DEVFLOW_DIR, so no assertion in
- * this file can be decided by the state of the developer's real machine.
+ * this file can be decided by — or leave a directory behind on — the developer's
+ * real machine (PF-060).
  *
  * SEEDED, never empty (PF-018): the directory tree the hook actually reads is
  * created, so a green run here means the hook reached its gates and declined,
@@ -93,16 +96,20 @@ function parseHookOutput(rawOutput: string): string {
 describe('config guard: pre-compact-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('exits cleanly when feature config has memory: false', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
     expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // backup.json must NOT be written when disabled
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
@@ -112,7 +119,7 @@ describe('config guard: pre-compact-memory', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir);
     expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // pre-compact-memory creates backup.json
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(true);
@@ -122,16 +129,20 @@ describe('config guard: pre-compact-memory', () => {
 describe('config guard: session-start-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-memory');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('outputs nothing when feature config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output).toBe('');
   });
 
@@ -139,7 +150,7 @@ describe('config guard: session-start-memory', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // Should output the session JSON envelope
     expect(output.length).toBeGreaterThan(0);
     const additionalContext = parseHookOutput(output);
@@ -174,9 +185,13 @@ describe('decisions-usage-scan.cjs', () => {
 describe('config guard: capture-turn decisions scanner gating', () => {
   const HOOK = path.join(HOOKS_DIR, 'capture-turn');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('does NOT run scanner when feature config has learning: false', () => {
     mkMemoryDir(tmpDir);
@@ -191,7 +206,7 @@ describe('config guard: capture-turn decisions scanner gating', () => {
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
     const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner should not have run — cites stays at 0
     expect(updated.entries['ADR-001'].cites).toBe(0);
@@ -206,7 +221,7 @@ describe('config guard: capture-turn decisions scanner gating', () => {
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
     const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner ran — cites incremented
     expect(updated.entries['ADR-001'].cites).toBe(1);
