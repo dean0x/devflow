@@ -824,3 +824,135 @@ describe('shared provider-independent rules have exactly one author', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The comment-body cap: ONE value, at every emitted site
+// ---------------------------------------------------------------------------
+//
+// The matrix above pins the cap's PRESENCE per provider, which is the claim that
+// one provider is not quoting another's number. It cannot see the claim this
+// block makes: that the value is the SAME at every site inside one provider. A
+// cap written out at each site is a cap that can drift at one of them — the
+// archive threshold saying one number and the truncation floor another — while
+// the presence pin stays green on the sites that did not move.
+//
+// Both sides are DERIVED, so no number is spelled here. The declared side is the
+// body of that module's `comment_cap()` define; the emitted side is every
+// multi-digit literal in that provider's generated tree. The arm is therefore
+// also the check that the define is what the sites actually render: a site left
+// behind as a literal shows up as a second value the moment the define changes.
+//
+// Scoped to the providers that OWN a cap define. The CLI provider's tree carries
+// a date literal alongside its cap, so "every multi-digit literal is the cap" is
+// not true there; its cap is pinned by its matrix row above, and by the same
+// count-aware arm the day it acquires a define.
+
+/** A multi-digit literal — wide enough to be a cap, too wide to be a page bound. */
+const CAP_SHAPED = /[0-9]{4,6}/g;
+
+/** Named collector: every multi-digit literal in a corpus, as `{label}:{line}` → value. */
+export function collectCapSites(
+  corpus: readonly { readonly label: string; readonly text: string }[],
+): { site: string; value: string }[] {
+  const sites: { site: string; value: string }[] = [];
+  for (const entry of corpus) {
+    entry.text.split('\n').forEach((line, i) => {
+      for (const match of line.matchAll(CAP_SHAPED)) {
+        sites.push({ site: `${entry.label}:${i + 1}`, value: match[0] });
+      }
+    });
+  }
+  return sites;
+}
+
+/** The body of a module's `comment_cap()` define, or null when it declares none. */
+function declaredCap(source: string): string | null {
+  const open = source.indexOf('@define comment_cap():');
+  if (open === -1) return null;
+  const body = source.slice(source.indexOf('\n', open) + 1);
+  return body.slice(0, body.indexOf('\n@end')).trim();
+}
+
+describe('the comment-body cap renders one value at every emitted site', () => {
+  const owners = PROVIDERS
+    .map(provider => ({ provider, declared: declaredCap(readSource(provider.source)) }))
+    .filter((row): row is { provider: Provider; declared: string } => row.declared !== null);
+
+  it('the arm has owners, and each declares a usable cap (PF-018)', () => {
+    expect(
+      owners.map(o => o.provider.token).sort(),
+      'the cap define is owned by the tool-call providers — with none of them declaring one, ' +
+      'every arm below ranges over nothing',
+    ).toEqual(['jira', 'linear']);
+    for (const { provider, declared } of owners) {
+      expect(declared, `${provider.source}: comment_cap() must declare a value`).toMatch(/^[1-9][0-9]{3,5}$/);
+    }
+  });
+
+  it('every emitted site in an owner\'s tree renders the value its define declares', () => {
+    const problems: string[] = [];
+    for (const { provider, declared } of owners) {
+      const corpus = TRACKER_OPS.map(op => ({
+        label: `${provider.subdir}/${op}.md`,
+        text: readGenerated(`${provider.subdir}/${op}.md`),
+      }));
+      const sites = collectCapSites(corpus);
+      // Count-aware: the claim is about every site, so a tree with one site would
+      // make "they all agree" true by arithmetic rather than by evidence.
+      expect(
+        sites.length,
+        `${provider.subdir}: ${sites.length} cap site(s) — with fewer than two, agreement is not ` +
+        `a property of the corpus`,
+      ).toBeGreaterThan(1);
+      for (const { site, value } of sites) {
+        if (value !== declared) problems.push(`${site}: renders ${value}, define declares ${declared}`);
+      }
+    }
+    expect(
+      problems,
+      `a site renders a cap its module's define does not declare. Either the site was left ` +
+      `behind as a literal when the value moved, or a second number has been introduced — and ` +
+      `the truncation floor derives from this number, so two of them means one of the two ` +
+      `preservation orders is bounding against a cap the sink does not enforce:\n  ` +
+      problems.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('and the owners agree with each other, which is what BORROWED means', () => {
+    // The Linear module states its cap is borrowed from the sibling tool-call
+    // provider rather than measured. That sentence is only true while the two
+    // numbers are equal, and nothing else asserts it.
+    expect(
+      [...new Set(owners.map(o => o.declared))],
+      'the tool-call providers declare different caps, so the borrowed-cap statement in the ' +
+      'Linear module is describing a number that no longer matches its source',
+    ).toHaveLength(1);
+  });
+
+  it('known-bad probe: one site drifting is reported by the same collector', () => {
+    // The failure the presence-only pin could not see, driven through the real
+    // tree with exactly ONE occurrence mutated.
+    const { provider, declared } = owners[0];
+    const rel = `${provider.subdir}/manage-debt.md`;
+    const real = readGenerated(rel);
+    const drifted = real.replace(declared, `${declared.slice(0, -1)}8`);
+    expect(drifted, 'the drift seed must change the file').not.toBe(real);
+    const values = collectCapSites([{ label: rel, text: drifted }]).map(s => s.value);
+    expect(
+      [...new Set(values)].length,
+      'one drifted site must make the value set larger than one — otherwise the arm above is ' +
+      'satisfied by a tree the collector cannot read',
+    ).toBeGreaterThan(1);
+    expect(
+      values.filter(v => v !== declared),
+      'and the drifted value must be the one reported',
+    ).not.toEqual([]);
+
+    // …and the collector does not report the bounds that are not caps.
+    expect(
+      collectCapSites([{ label: 'seed.md', text: 'bounded `≤50` items × `≤2` pages = `≤100`' }]),
+      'a page or item bound is not a cap site — reporting them would make the value set plural ' +
+      'for every provider and the arm unfixable',
+    ).toEqual([]);
+  });
+});

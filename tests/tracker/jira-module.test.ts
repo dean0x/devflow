@@ -353,6 +353,61 @@ export function collectBlankMatrixCells(provider: string, source: string): strin
   return blanks;
 }
 
+/**
+ * The defines a provider module may declare BESIDES its ten operation sections.
+ *
+ * A REGISTRY, not a relaxation (ADR-025). The roster arm below still asserts the
+ * operation defines are exactly the op roster; this table is asserted in both
+ * directions beside it, so a provider that declares a define listed here for
+ * another provider is reported, and one that drops a define this table gives it
+ * is reported too. A define in neither list falls into the operation partition
+ * and the roster arm reports it — which is what keeps the widening to exactly the
+ * rows written here.
+ *
+ * `comment_cap` is deliberately not owned by every provider. It renders the
+ * comment-body cap, which is a number per SINK rather than a shared constant, and
+ * the two tool-call providers are the ones that render it from a define; the CLI
+ * provider states its own inline, including inside a shell fence where an MDS
+ * invocation would not expand at all.
+ */
+interface ModuleDefine {
+  readonly name: string;
+  /** The providers whose module declares it — exactly, in both directions. */
+  readonly providers: readonly string[];
+  /**
+   * What the body must look like. A value define cannot clear MIN_DEFINE_CHARS,
+   * whose subject is an operation section that kept its heading and lost its
+   * body, so it is held to its own shape instead of to nothing.
+   */
+  readonly bodyShape: RegExp;
+  readonly why: string;
+}
+
+const MODULE_DEFINES: readonly ModuleDefine[] = [
+  {
+    name: 'comment_cap',
+    providers: ['jira', 'linear'],
+    bodyShape: /^[1-9][0-9]{3,5}$/,
+    why:
+      'the comment-body cap. Written out at each site it is a value that can drift at one of ' +
+      'them while every other site and a presence-only guard stay green, and the truncation ' +
+      'floor derives from it — so the number has one owner per module and every site invokes it',
+  },
+];
+
+/** The registered non-operation define names. */
+const MODULE_DEFINE_NAMES = new Set(MODULE_DEFINES.map(d => d.name));
+
+/** Named collector: the define names that stand for an OPERATION section. */
+export function collectOpDefineNames(source: string): string[] {
+  return collectDefineNames(source).filter(name => !MODULE_DEFINE_NAMES.has(name));
+}
+
+/** Named collector: the registered non-operation define names a module declares. */
+export function collectModuleDefineNames(source: string): string[] {
+  return collectDefineNames(source).filter(name => MODULE_DEFINE_NAMES.has(name));
+}
+
 describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', () => {
   /**
    * Every registered provider module, read from the registry rather than listed.
@@ -404,8 +459,12 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // nobody emits or an operation one provider invented.
     const asymmetries: string[] = [];
     for (const [from, to] of PAIRS) {
-      const toNames = new Set(collectDefineNames(to.source));
-      for (const name of collectDefineNames(from.source)) {
+      // Scoped to the OPERATION defines. A registered module define is compared
+      // against its own row below instead, because `comment_cap` is owned by the
+      // two tool-call providers on purpose and comparing it here would read that
+      // deliberate ownership as an asymmetry.
+      const toNames = new Set(collectOpDefineNames(to.source));
+      for (const name of collectOpDefineNames(from.source)) {
         if (!toNames.has(name)) asymmetries.push(`${from.name} declares ${name}; ${to.name} does not`);
       }
     }
@@ -421,10 +480,10 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // Without this, every direction above is satisfiable by modules that agree
     // on a define set unrelated to the ops they are registered for.
     for (const provider of PROVIDERS) {
-      const names = collectDefineNames(provider.source);
+      const names = collectOpDefineNames(provider.source);
       expect(
         names.length,
-        `${provider.name}: ${names.length} define(s) for ${TRACKER_OPS.length} op(s)`,
+        `${provider.name}: ${names.length} op define(s) for ${TRACKER_OPS.length} op(s)`,
       ).toBe(TRACKER_OPS.length);
       // The build's own mapping: `setup-task` ⇒ `setup_task()`. Asserted rather than
       // assumed, because the section markers and the defines are matched by the author.
@@ -436,11 +495,51 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     }
   });
 
+  it('every registered module define is declared by exactly the providers that own it', () => {
+    // The other half of the partition. Without it the roster arm above would
+    // silently admit any define whose name happens to be in MODULE_DEFINE_NAMES,
+    // for any provider — the registry has to bind in both directions or it is a
+    // hole with a comment beside it.
+    expect(MODULE_DEFINES.length, 'an empty registry makes the partition a no-op (PF-018)')
+      .toBeGreaterThan(0);
+    const problems: string[] = [];
+    for (const entry of MODULE_DEFINES) {
+      expect(entry.why.trim().length, `${entry.name}: a row without a reason is a grep`)
+        .toBeGreaterThan(0);
+      expect(
+        entry.providers.every(name => PROVIDERS.some(p => p.name === name)),
+        `${entry.name} names a provider the registry does not carry`,
+      ).toBe(true);
+      for (const provider of PROVIDERS) {
+        const declares = collectModuleDefineNames(provider.source).includes(entry.name);
+        const owns = entry.providers.includes(provider.name);
+        if (declares !== owns) {
+          problems.push(`${provider.name}: ${declares ? 'declares' : 'does not declare'} ` +
+            `${entry.name}, but the registry says it ${owns ? 'owns' : 'does not own'} it`);
+        }
+      }
+      for (const provider of PROVIDERS.filter(p => entry.providers.includes(p.name))) {
+        const body = (collectDefineBodies(provider.source).get(entry.name) ?? '').trim();
+        if (!entry.bodyShape.test(body)) {
+          problems.push(`${provider.name}/${entry.name}: body ${JSON.stringify(body)} does not ` +
+            `match ${entry.bodyShape}`);
+        }
+      }
+    }
+    expect(
+      problems,
+      `module-define registry problem(s):\n  ${problems.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
   it('every define in every module has a non-empty body', () => {
     const thin: string[] = [];
     for (const provider of PROVIDERS) {
       const bodies = collectDefineBodies(provider.source);
-      for (const name of collectDefineNames(provider.source)) {
+      // Operation defines only: the floor's subject is a section that kept its
+      // heading and lost its body. A registered value define is held to its
+      // declared shape by the arm above instead.
+      for (const name of collectOpDefineNames(provider.source)) {
         const body = bodies.get(name) ?? '';
         if (body.trim().length < MIN_DEFINE_CHARS) {
           thin.push(`${provider.name}/${name}: ${body.trim().length} ch, floor ${MIN_DEFINE_CHARS}`);
@@ -530,15 +629,25 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     const githubSource = requireProvider(PROVIDERS, 'github').source;
     const dropped = jiraSource.replace(/^@define fetch_issue\(\):/m, '@define fetch_issue_renamed():');
     expect(dropped, 'the seed must actually change the source').not.toBe(jiraSource);
-    const githubNames = new Set(collectDefineNames(githubSource));
+    const githubNames = new Set(collectOpDefineNames(githubSource));
     expect(
-      collectDefineNames(dropped).filter(n => !githubNames.has(n)),
+      collectOpDefineNames(dropped).filter(n => !githubNames.has(n)),
       'a renamed define must be reported in the jira→github direction',
     ).toEqual(['fetch_issue_renamed']);
     expect(
-      collectDefineNames(githubSource).filter(n => !new Set(collectDefineNames(dropped)).has(n)),
+      collectOpDefineNames(githubSource).filter(n => !new Set(collectOpDefineNames(dropped)).has(n)),
       'and in the github→jira direction',
     ).toEqual(['fetch_issue']);
+
+    // …and the partition itself is driven by a seed: a module define renamed out
+    // of the registry must land in the OPERATION partition, where the roster arm
+    // reports it, rather than disappearing between the two.
+    const unregistered = jiraSource.replace('@define comment_cap():', '@define smuggled_cap():');
+    expect(unregistered, 'the smuggling seed must change the source').not.toBe(jiraSource);
+    expect(
+      collectOpDefineNames(unregistered).filter(n => !TRACKER_OPS.map(o => o.replace(/-/g, '_')).includes(n)),
+      'an unregistered non-op define must fall into the op partition, where the roster arm sees it',
+    ).toEqual(['smuggled_cap']);
 
     const emptied = jiraSource.replace(
       /^@define manage_debt\(\):[\s\S]*?^@end$/m,

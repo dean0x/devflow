@@ -50,7 +50,7 @@ Two facts this module ships are INHERITED rather than measured, and both are
 written down here because a borrowed number presented as a measurement is worse
 than an honest gap.
 
-1. **The `32767`-character comment cap is BORROWED.** It is the sibling
+1. **The `{comment_cap()}`-character comment cap is BORROWED.** It is the sibling
    tool-call provider's documented cap, adopted here as the conservative choice;
    this provider publishes no cap that any phase of this work measured. The
    consequence of it being wrong in the generous direction is a rejected post at
@@ -71,6 +71,17 @@ comment-body cap and rate-limit behaviour. It names this file and
 a measurement lands in one commit rather than being hunted for. A follow-up with
 no artifact and no owner is not a deliverable, which is exactly what GAP-40
 recorded about this number.
+
+The comment-body cap is a PROVIDER FACT and is stated once, as `comment_cap()`
+below; every site that renders it invokes the define. It is not in `_mcp.mds`
+with the shared rules because it is not provider-independent — the CLI provider's
+cap is a different number — and a value repeated at each site is a value that can
+drift at one of them while every other site and a presence-only guard stay green.
+`tests/provider-literals.test.ts` pins the rendered value at every emitted site.
+
+@define comment_cap():
+32767
+@end
 
 @define setup_task():
 ## Operation: setup-task
@@ -147,7 +158,7 @@ Load when the resolved tracker provider is `linear` and the operation is `manage
 ### Process
 
 1. Find or create the rolling "Tech Debt Backlog" item. `## Tech Debt` defaults to a **single rolling item**, so this operation looks for exactly one: use the *search* capability once with a structured filter over the resolved team and the tech-debt label. Absent ⇒ create it with the *create issue* capability, using only the field names `## Required Fields` allows.
-2. Check the item's description length against the `32767`-character cap; archive when it is over.
+2. Check the item's description length against the `{comment_cap()}`-character cap; archive when it is over.
 3. Extract items to add:
    - `## Fix Separately` entries from `\{REVIEW_DIR\}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
    - `## Deferred to Tech Debt` entries from `\{REVIEW_DIR\}/resolution-summary.md` (TECH_DEBT from Triage agent)
@@ -159,7 +170,7 @@ Load when the resolved tracker provider is `linear` and the operation is `manage
 
 ### Archiving at the cap
 
-Over `32767` characters the rolling item is closed and a successor is created, exactly as the provider-independent rule says — but the composed successor body is a POSTED body and goes through the same gate:
+Over `{comment_cap()}` characters the rolling item is closed and a successor is created, exactly as the provider-independent rule says — but the composed successor body is a POSTED body and goes through the same gate:
 
 1. Compose `Continued from \{OLD_REF\}` plus an empty `### Items` section.
 2. Create the successor through the gate below. Only on a clean gate does the successor become the item later posts target.
@@ -168,7 +179,7 @@ Over `32767` characters the rolling item is closed and a successor is created, e
 
 {posting_gate_head("every write below", " `$DEVFLOW_BODY_RAW` is the scrubber's input and nothing else ever reads it.")}
 4. Post through the *update description* capability with arguments (issue reference, description: \{SCRUBBED_BODY\}).
-5. Over the `32767` cap after redaction, truncate in **preservation order** — the first line, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the 32767-character cap after redaction — truncated/stub posted`.
+5. Over the `{comment_cap()}` cap after redaction, truncate in **preservation order** — the first line, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the {comment_cap()}-character cap after redaction — truncated/stub posted`.
 @end
 
 @define create_release():
@@ -282,7 +293,7 @@ This provider's comment format has **no HTML-comment node and no collapsed-block
 
 Inlining it instead would flatten a structured document into a wall of plain text that the reader cannot collapse and the next dedup scan cannot parse. A pointer that resolves is worth more than a dump that does not.
 
-Over the `32767`-character cap after redaction, truncate in **preservation order** — line 1 the marker, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the 32767-character cap after redaction — truncated/stub posted`. The pointer sentence is the last thing to go because it is the only line that still leads somewhere.
+Over the `{comment_cap()}`-character cap after redaction, truncate in **preservation order** — line 1 the marker, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the {comment_cap()}-character cap after redaction — truncated/stub posted`. The pointer sentence is the last thing to go because it is the only line that still leads somewhere.
 
 {query_safety()}
 
@@ -314,7 +325,7 @@ Load when the resolved tracker provider is `linear` and the operation is `post-w
    - This operation owns the `devflow:wave` namespace and no other. Match **line 1** of each comment for equality against `devflow:wave \{WAVE_ID\} · https://github.com/dean0x/devflow`; a marker on any later line **does not suppress**.
    - **The scan is a FULL scan, not a newest-first early exit.** A wave report's marker carries a wave id, and wave ids are not monotonic in comment order, so an early exit can miss the one comment that matters. Bound it at `≤5` pages and **fail closed**: if the bound is reached before the scan completes, report `TRUNCATED (\{n\} not processed)` and **DO NOT POST** — a duplicate wave report is a worse outcome than a missing one, because the next run cannot tell which is authoritative. This is the one place the fail-closed direction wins over post-with-warning, and the difference is the condition: an absent capability says nothing about whether a post happened, while a truncated scan says the evidence exists and was not read.
    - If found: skip — report `Skipped: wave report for \{WAVE_ID\} already posted`.
-3. Compose the comment: line 1 the marker `devflow:wave \{WAVE_ID\} · https://github.com/dean0x/devflow`, then the contents of `WAVE_REPORT_PATH`. Cap the composed content at `32767` characters; over the cap, truncate in **preservation order** — the marker, then the status and DEGRADED lines, then the pointer sentence — and end with `…truncated — full report in the local wave artifact \{WAVE_REPORT_PATH\} (not committed; ask the author)`.
+3. Compose the comment: line 1 the marker `devflow:wave \{WAVE_ID\} · https://github.com/dean0x/devflow`, then the contents of `WAVE_REPORT_PATH`. Cap the composed content at `{comment_cap()}` characters; over the cap, truncate in **preservation order** — the marker, then the status and DEGRADED lines, then the pointer sentence — and end with `…truncated — full report in the local wave artifact \{WAVE_REPORT_PATH\} (not committed; ask the author)`.
 4. Post it through `### Posting gate` below.
 
 {posting_gate_head("the write")}
