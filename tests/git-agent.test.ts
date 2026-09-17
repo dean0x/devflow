@@ -22,6 +22,7 @@ import {
   GIT_CROSS_CUTTING_DOCS,
   VARIANT_MODULES,
 } from '../src/core/mds-variants.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op:
@@ -35,7 +36,6 @@ import {
  */
 const TRACKER_OP_DECLARING_FILES =
   1 + VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/')).length;
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
