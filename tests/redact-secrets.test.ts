@@ -1121,19 +1121,68 @@ describe('placeholder-skip narrowing (GAP-54)', () => {
     expect(r.stdout.trim()).toBe('SCRUB: 0 []');
   });
 
-  it('shouldSkip: anchored for placeholders, contains-based for [REDACTED: (unit)', () => {
+  it('shouldSkip: anchored for placeholders, marker-STRIPPED for [REDACTED: (unit)', () => {
     expect(SCRUBBER.shouldSkip('${VAR}')).toBe(true);
     expect(SCRUBBER.shouldSkip('<placeholder>')).toBe(true);
     expect(SCRUBBER.shouldSkip('{{ template }}')).toBe(true);
     expect(SCRUBBER.shouldSkip('$VAR')).toBe(true);
     expect(SCRUBBER.shouldSkip('<x> AKIAIOSFODNN7EXAMPLE')).toBe(false);
     expect(SCRUBBER.shouldSkip('${VAR} plus a real secret')).toBe(false);
-    // Idempotency stays a CONTAINS check, or the double-run pin at :496-521 breaks.
+
+    // A value that is this script's OWN output — markers and nothing else — is
+    // skipped, which is what keeps the second pass at zero and the gate open.
+    expect(SCRUBBER.shouldSkip('[REDACTED:secret-assignment]')).toBe(true);
     expect(
-      SCRUBBER.shouldSkip('prefix [REDACTED:aws-key] suffix'),
-      'narrowing the [REDACTED: check to an anchored match would re-match every marker and the ' +
-      'second pass could never return zero — the gate would refuse every body',
+      SCRUBBER.shouldSkip('[REDACTED:github-token] [REDACTED:aws-key]'),
+      'two markers are still nothing but markers — an ANCHORED check would re-match this value, ' +
+      'the second pass could never return zero, and the gate would refuse every body',
     ).toBe(true);
+
+    // …while bytes surviving beside a marker are judged on those bytes.
+    expect(
+      SCRUBBER.shouldSkip('[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn'),
+      'a marker pasted next to a live credential must not disarm the rule — the same widening ' +
+      'GAP-54 anchored away for the four placeholder skips',
+    ).toBe(false);
+  });
+
+  it('a marker pasted beside a real credential does not defuse rule 8 (GAP-54)', () => {
+    // Remote issue text and provider-rendered bodies are exactly what flows into a
+    // composed comment, and `[REDACTED:` is a literal anyone can type into one.
+    const secret = 'a8Kd91jZx0Qw7Lp2Vn';
+    const fixture = `api_key = "[REDACTED:aws-key] ${secret}"\n`;
+    const r = runWithContent(fixture, tmpDir, 'gap54-marker.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.outputContent, 'the live credential must not survive').not.toContain(secret);
+    expect(r.outputContent).toBe('api_key = "[REDACTED:secret-assignment]"\n');
+    expect(r.stdout.trim()).toBe('SCRUB: 1 [secret-assignment:1]');
+  });
+
+  it('the marker-bearing line is still IDEMPOTENT — a second run changes nothing', () => {
+    // The property the whole `--emit` gate rests on: re-scrubbing this script's own
+    // output must report zero, or the second pass refuses every body.
+    const first = path.join(tmpDir, 'marker-idem-in.txt');
+    const firstOut = path.join(tmpDir, 'marker-idem-1.txt');
+    fs.writeFileSync(first, 'api_key = "[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn"\n', 'utf8');
+    expect(run(first, firstOut).exitCode).toBe(0);
+    const once = fs.readFileSync(firstOut, 'utf8');
+
+    const secondOut = path.join(tmpDir, 'marker-idem-2.txt');
+    const r2 = run(firstOut, secondOut);
+    expect(r2.exitCode).toBe(0);
+    expect(fs.readFileSync(secondOut, 'utf8')).toBe(once);
+    expect(r2.stdout.trim(), 'a non-zero second pass is exactly what closes the --emit gate')
+      .toBe('SCRUB: 0 []');
+  });
+
+  it('--emit still opens the gate on a body that carries markers', () => {
+    // End-to-end form of the idempotency claim: the second pass inside `--emit` is
+    // the gate, so a marker-bearing body must frame rather than refuse.
+    const p = writeInput('api_key = "[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn"\n', 'marker-emit.txt');
+    const r = runEmit(p);
+    expect(r.exitCode, `the gate refused a marker-bearing body.\n${r.stderr}`).toBe(0);
+    expect(r.framing).toMatch(FRAMING_RE);
+    expect(r.body).toBe('api_key = "[REDACTED:secret-assignment]"\n');
   });
 });
 

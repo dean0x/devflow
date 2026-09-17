@@ -139,12 +139,28 @@ function shannonEntropy(s) {
 // ---------------------------------------------------------------------------
 
 /**
+ * A marker this script's own passes write. The slug vocabulary is lowercase and
+ * hyphenated, so the class is bounded and the pattern cannot span two markers.
+ */
+const REDACTION_MARKER_RE = /\[REDACTED:[a-z][a-z-]{1,38}\]/g;
+
+/**
  * @param {string} candidate  The matched text (or value portion) to test.
  * @returns {boolean}
  */
 function shouldSkip(candidate) {
-  // Idempotency guard: already-redacted markers are never re-matched
-  if (candidate.includes('[REDACTED:')) return true;
+  // Idempotency guard, marker-STRIPPED rather than contains-based (GAP-54).
+  //
+  // A value this script already produced is markers and whitespace and nothing
+  // else, so removing them leaves nothing and the value is skipped — which is
+  // what keeps the second pass at zero and the `--emit` gate open. Bytes that
+  // SURVIVE the strip are not this script's output: `[REDACTED:` is a literal
+  // anyone can type into an issue comment, and a contains-check let one disarm
+  // rule 8 — the only generic `key = value` rule — for the whole line. An
+  // anchored check cannot serve here either: a value holding two markers would
+  // fail it, the second pass could never return zero, and the gate would refuse
+  // every body.
+  if (candidate.replace(REDACTION_MARKER_RE, '').trim() === '') return true;
 
   // Environment variable references (value is not the secret itself)
   if (candidate.includes('process.env.')) return true;
@@ -154,15 +170,11 @@ function shouldSkip(candidate) {
   //
   // ANCHORED, both ends (GAP-54). These four skips exist to keep AUTHOR fixtures
   // readable — `api_key = "${DEPLOY_KEY}"` is documentation, not a credential. A
-  // value that merely CONTAINS a placeholder is a different thing: before the
-  // anchoring, `api_key = "<ref> a8Kd91jZx0Qw7Lp2Vn"` disarmed rule 8 — the only
-  // generic `key = value` rule — and provider-rendered bodies and remote issue
-  // text are exactly what newly flows into a composed comment sink. So the skip
-  // now fires only when the value IS the placeholder and nothing else.
-  //
-  // The `[REDACTED:` guard above stays a CONTAINS check on purpose: anchoring it
-  // would re-match every marker the first pass wrote, the second pass could never
-  // return zero, and --emit's gate would refuse every body.
+  // value that merely CONTAINS a placeholder is a different thing: `api_key =
+  // "<ref> a8Kd91jZx0Qw7Lp2Vn"` would disarm rule 8 — the only generic
+  // `key = value` rule — and provider-rendered bodies and remote issue text are
+  // exactly what flows into a composed comment sink. So the skip fires only when
+  // the value IS the placeholder and nothing else.
   if (/^\$\{[^}]{0,300}\}$/.test(candidate)) return true;      // ${VAR}
   if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(candidate)) return true; // $VAR
   if (/^\{\{[^}]{0,300}\}\}$/.test(candidate)) return true;    // {{ template }}
@@ -462,8 +474,8 @@ function parseArgs(argv) {
  * never open — the one wiring mistake that turns the whole mode off, which is why
  * a test pins which content the second call receives.
  *
- * Nearly free: idempotency is already pinned by shouldSkip's `[REDACTED:`
- * contains-check.
+ * Nearly free: idempotency is already pinned by shouldSkip's marker-stripped
+ * skip, which passes over a value that is this script's own output.
  *
  * @param {string} content
  * @param {(c: string) => ScrubResult} [scrubFn]  Injectable so the refusal arm is
