@@ -101,7 +101,6 @@ import {
   splitVariantSections,
   AGENTS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
-  VARIANT_MODULES,
   resolveVariantModules,
   deferredReferenceModuleSources,
   type HostVariant,
@@ -615,10 +614,23 @@ function destsOf(plan: HostPlan): readonly string[] {
   return plan.variant === "skill-refs" ? plan.outputs.map(o => o.dest) : [plan.dest];
 }
 
+/**
+ * The registry this build resolves reference modules against: the shipped
+ * registry plus whatever the generation gate opens, from the one owner that
+ * answers that question (src/core/mds-variants.ts).
+ *
+ * Resolved once at module load, because the gate is a predicate over a module
+ * constant: every lookup in a single build run is measured against the same
+ * roster, and the plan pass reads one shared registry rather than a fresh copy
+ * per walked host. discoverHosts() computes its gated-shut set once for the
+ * same reason.
+ */
+const RESOLVED_MODULES = resolveVariantModules();
+
 /** The reference module registered for this host's source path, or null. */
 function referenceModuleFor(host: HostEntry): VariantModule | null {
   const rel = path.relative(ROOT, host.file).split(path.sep).join("/");
-  return resolveVariantModules().find(m => m.source === rel) ?? null;
+  return RESOLVED_MODULES.find(m => m.source === rel) ?? null;
 }
 
 /**
