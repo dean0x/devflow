@@ -371,7 +371,7 @@ const COMPOSED_FILE = [
   'site: https://example.test',
   '',
   '## Dedup Strategy',
-  'rank: 1',
+  'rung: entity-property',
   'evidence: probe reached the entity-property capability',
 ].join('\n');
 

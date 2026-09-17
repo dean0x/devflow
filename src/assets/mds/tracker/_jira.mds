@@ -1,7 +1,7 @@
 ---
 output-dir: dist/skills/git/references
 ---
-@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, aggregate_call_budget, reference_rendering_gate, ref_preflight_tail } from "./_mcp.mds"
+@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, dedup_ladder, aggregate_call_budget, reference_rendering_gate, ref_preflight_tail } from "./_mcp.mds"
 
 Jira tracker mechanics for the `devflow:git` skill.
 
@@ -25,7 +25,8 @@ the single-authority corpus is the divergence this split exists to prevent.
 
 The provider-independent rules the sections below carry are IMPORTED rather than
 written here: `posting_gate_head`, `query_safety`, `shipped_marker_rule`,
-`marker_namespace`, `aggregate_call_budget`, `reference_rendering_gate` and
+`marker_namespace`, `dedup_ladder`, `aggregate_call_budget`,
+`reference_rendering_gate` and
 `ref_preflight_tail` are authored once in `_mcp.mds` and expand in place. They are
 expanded per operation instead of being hoisted into the emitted contract for two
 reasons stated at their definitions — the sink-bypass guard requires every posting
@@ -206,14 +207,9 @@ The D4 degradation contract and the D11 comment-sink scrub state the rules; what
 - **There is no pre-emptive rung.** This provider publishes no remaining-request count, so there is no threshold at which the inter-item delay rises. A rung keyed on one would never engage, and a module that stated one would read as coverage while providing none.
 - **Unavailability:** the *add comment* or *list comments with authors* capability absent or denied — D4's "no remote" condition on this provider.
 
-### Dedup ladder — in order, first available rung wins
+{dedup_ladder()}
 
-The rungs differ only in what they can observe; the marker PREDICATE and the policy bounds are provider-independent and stay in the contract layer.
-
-1. **Entity property.** Where the *entity property read/write* capability is available, record the marker as an invisible property on the issue. Not a comment, so nothing to quote and nothing to mis-parse — the cleanest dedup this provider offers.
-2. **Edit in place.** Where the *edit comment in place* capability is available, update the existing devflow comment rather than adding a second one.
-3. **First-line marker with an author filter.** Resolve `accountId` from the *identify current user* capability — **hoisted once per spawn at Setup, never inside the loop** — then read the issue's comments through the *list comments with authors* capability and match only comments that account authored.
-4. **Post with a warning.** The *identify current user* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` and **post anyway**. A duplicate comment is worse than no comment only if nobody is told.
+**This provider lands on `authored-marker`** by default — the filter compares against the `accountId` *identify current user* resolves — and drops to `post-with-warning` when that capability is absent or denied. The rungs above are reachable wherever this server exposes them: an entity property is the cleanest dedup on offer, being no comment at all, with nothing to quote.
 
 {shipped_marker_rule()}
 
@@ -221,13 +217,13 @@ The rungs differ only in what they can observe; the marker PREDICATE and the pol
 
 ### Process
 
-**Setup (once, before the loop):** resolve the capability set, the current-user `accountId` from the *identify current user* capability, and the dedup rung. `## Dedup Strategy` may be read as a **hint that only narrows the probe order** — the live probe is the sole authority for which rung is reached and for the DEGRADED reason.
+**Setup (once, before the loop):** resolve the capability set, the current-user `accountId` from the *identify current user* capability, and the dedup rung.
 
 **Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$`, anchored at both ends of the STRING (a newline fails it) — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. {ref_preflight_tail()}
 
 **Hoist first where the provider allows it — the numbered path below is the FALLBACK.** One bounded *list by filter* read over the ≤50 keys per operation, markers matched in memory: one read instead of a hundred.
 
-{aggregate_call_budget("Rung 3 is this provider's default landing rung, and there each item's marker check is a paged comment listing rather than one call.")}
+{aggregate_call_budget("`authored-marker` is this provider's default landing rung, and there each item's marker check is a paged comment listing rather than one call.")}
 
 For each issue the hoist did not answer, within the operation's `≤50` bound:
 

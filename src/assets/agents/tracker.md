@@ -140,11 +140,11 @@ branch.
 | read project and issue-type metadata | `## Project` key, `## Issue Types`, `## Required Fields` |
 | enumerate and apply workflow transitions | `## Transitions` |
 | list issues by a structured filter | `## Wave Filter`, `## Iteration Policy` |
-| identify the current user | `## Assignee` |
-| read and write an entity property on an issue | `## Dedup Strategy` (rank 1) |
-| edit an existing comment in place | `## Dedup Strategy` (rank 2) |
-| create a link from an issue to an external URL | `## Dedup Strategy` (rank 3) |
-| create an attachment from a URL | `## Dedup Strategy` (rank 4) |
+| identify the current user | `## Assignee`, `## Dedup Strategy` (`authored-marker`) |
+| read and write an entity property on an issue | `## Dedup Strategy` (`entity-property`) |
+| edit an existing comment in place | `## Dedup Strategy` (`comment-edit-in-place`) |
+| create a link from an issue to an external URL | `## Dedup Strategy` (`entity-property`) |
+| create an attachment from a URL | `## Dedup Strategy` (`entity-property`) |
 
 **When a capability is unreachable**, note it with the canonical literal — never
 free prose:
@@ -226,7 +226,7 @@ re-derived per repository at call time, so the value here is a last resort.
 | `## Tech Debt` | global-safe | `single rolling item` | enum: `single rolling item` |
 | `## Wave Filter` | repo-derived | `tracker not configured` | structured filter fields only; no free-text query field is permitted |
 | `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row |
-| `## Dedup Strategy` | global-safe | probe live | enum: `entity-property` \| `comment-edit-in-place` \| `remote-link` \| `attachment-url` \| `post-with-warning`, recorded with its probe evidence |
+| `## Dedup Strategy` | global-safe | probe live | enum: `entity-property` \| `comment-edit-in-place` \| `authored-marker` \| `post-with-warning` — the reader's ladder rungs, strongest evidence first — recorded with its probe evidence |
 
 `### Substitutions` carries no value and has no sink gate — it is report-only,
 written by you when a scanned value was discarded.
@@ -239,11 +239,13 @@ correct if the pattern is ever widened for a new token shape, and it is named
 separately so widening one cannot silently relax the other. Defense in depth,
 not redundancy.
 
-**`## Dedup Strategy` is a hint, not a decision.** Record the rank the probe
-resolved *and the evidence for it*. A reader may use the recorded rank only to
-**narrow the probe order**; the **live probe is the sole authority** for whether
-dedup is available and for the reason it degrades. A rank recorded months ago on
-a server that has since changed must never be trusted as the answer.
+**`## Dedup Strategy` is a hint, not a decision.** Record the rung TOKEN the
+probe resolved *and the evidence for it* — a token from the enum above and never
+a bare number, because the reader's ladder is the same four rungs by name and a
+number means whatever its writer was counting. A reader may use the recorded rung
+only to **narrow the probe order**; the **live probe is the sole authority** for
+whether dedup is available and for the reason it degrades. A rung recorded months
+ago on a server that has since changed must never be trusted as the answer.
 
 ### Template
 
@@ -286,7 +288,7 @@ branch-token: <token shape>
 pr-link: <link shape>
 
 ## Dedup Strategy
-rank: <resolved rank>
+rung: <the resolved rung token>
 evidence: <what the probe observed>
 
 ### Substitutions

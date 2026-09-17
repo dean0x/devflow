@@ -1,7 +1,7 @@
 ---
 output-dir: dist/skills/git/references
 ---
-@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, aggregate_call_budget, reference_rendering_gate, ref_preflight_tail } from "./_mcp.mds"
+@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, dedup_ladder, aggregate_call_budget, reference_rendering_gate, ref_preflight_tail } from "./_mcp.mds"
 
 Linear tracker mechanics for the `devflow:git` skill.
 
@@ -25,7 +25,8 @@ the single-authority corpus is the divergence this split exists to prevent.
 
 The provider-independent rules the sections below carry are IMPORTED rather than
 written here: `posting_gate_head`, `query_safety`, `shipped_marker_rule`,
-`marker_namespace`, `aggregate_call_budget`, `reference_rendering_gate` and
+`marker_namespace`, `dedup_ladder`, `aggregate_call_budget`,
+`reference_rendering_gate` and
 `ref_preflight_tail` are authored once in `_mcp.mds` and expand in place. They are
 expanded per operation instead of being hoisted into the emitted contract for two
 reasons stated at their definitions — the sink-bypass guard requires every posting
@@ -244,14 +245,9 @@ The D4 degradation contract and the D11 comment-sink scrub state the rules; what
 - **There is no pre-emptive rung.** This provider does not publish a remaining-request count, so there is no threshold at which the inter-item delay rises. A rung keyed on one would never engage, and a module that stated one would read as coverage while providing none.
 - **Unavailability:** the *add comment* or *list comments with authors* capability absent or denied — D4's "no remote" condition on this provider.
 
-### Dedup ladder — this provider lands at rank 4
+{dedup_ladder()}
 
-The rungs differ only in what they can observe; the marker PREDICATE and the policy bounds are provider-independent and stay in the contract layer. On a **stock official server this provider reaches rank 4 and no higher**, and both reasons are facts about the server rather than choices made here:
-
-1. **Entity property** — unavailable: there is no capability that records an invisible property on an issue.
-2. **Edit in place** — unavailable on a stock server, so a second comment cannot be avoided by updating the first.
-3. **First-line marker with an author filter** — unreachable: there is **no viewer/"me" tool**, so the current-user identity an author filter compares against cannot be resolved at all. The URL-form remote link that would otherwise give idempotency is unreachable for the same class of reason — the attachment create this provider exposes takes a **binary payload**, not a URL.
-4. **Post with a warning — the rung this provider actually reaches.** Emit `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` on every run under this provider, whether the scan suppressed or posted: the match below is unauthenticated, so a suppression may be somebody's paste and a post may be a duplicate. Saying so is what makes posting the safe choice.
+**Rank 4, `post-with-warning`, is the only rung a stock official server reaches** — facts about the server: rungs 1 and 2 have no capability at all; there is **no viewer/"me" tool**, so the current-user identity rung 3 needs cannot be resolved; and the attachment create takes a **binary payload**, not a URL, so the URL-form remote link is unreachable too. Emit `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` on every run, suppressed or posted: the match below is unauthenticated, so a suppression may be somebody's paste and a post a duplicate.
 
 **Suppress only on positive evidence, and never on missing evidence.** The absent identity capability is **never a reason to suppress**: missing evidence is not evidence of a prior post, and a silently skipped release back-link is worse than a second one when the reader is told which it is. The *list comments with authors* capability absent or denied ⇒ post, with the reason above.
 
@@ -263,13 +259,13 @@ The rungs differ only in what they can observe; the marker PREDICATE and the pol
 
 ### Process
 
-**Setup (once, before the loop):** resolve the capability set and the reached rung. `## Dedup Strategy` may be read as a **hint that only narrows the probe order** — the live probe is the sole authority for which rung is reached and for the DEGRADED reason, so a recorded hint claiming a higher rung than the session exposes does not raise it.
+**Setup (once, before the loop):** resolve the capability set and the reached rung. A recorded hint claiming a higher rung than the session exposes does not raise it.
 
 **Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** ASCII-upper-normalise every entry of `SHIPPED_ISSUES`, then require **either** anchored form — the team-key form `^[A-Z][A-Z0-9]\{0,9\}-[1-9][0-9]\{0,8\}$` or the internal-id form `^[0-9A-F]\{8\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{12\}$`, each anchored at both ends of the STRING (a newline fails it) and never joined into one alternation, which would anchor one branch only. This provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a reference out of a query or a command. **Drop** every entry that satisfies neither and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match linear reference grammar)`. {ref_preflight_tail()}
 
 **Hoist first — the numbered path below is the FALLBACK.** One bounded *list by filter* read over the ≤50 references per operation, markers matched in memory: one read instead of a hundred.
 
-{aggregate_call_budget("Rung 4 is this provider's ONLY rung, so the paged comment listing is that path's common case, not its edge: each item's marker check is a page read, not one call.")}
+{aggregate_call_budget("`post-with-warning` is this provider's ONLY rung, so the paged comment listing is that path's common case, not its edge: each item's marker check is a page read, not one call.")}
 
 For each issue the hoist did not answer, within the operation's `≤50` bound:
 

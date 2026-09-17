@@ -89,6 +89,12 @@ Caller-supplied prose reaches the tracker as a QUERY here and nowhere else in th
 The namespace is **per comment kind**: this operation owns `devflow:shipped` and no other. A single global marker would make the three kinds mutually suppress — one kind's comment satisfying another kind's dedup predicate — so each operation owns its own namespace and callers pass inputs only.
 @end
 
+@define dedup_ladder():
+### Dedup ladder — in order, first available rung wins
+
+Rungs, strongest evidence first, each named for a CAPABILITY and never for a tool: **1 `entity-property`** (*entity property read/write*, or *create remote link* / *attachment create, URL form*) → **2 `comment-edit-in-place`** (*edit comment in place*) → **3 `authored-marker`** (*list comments with authors*, matching only what *identify current user* says this account authored — that identity resolved **once per spawn at Setup, never in the loop**) → **4 `post-with-warning`** (nothing above reachable ⇒ `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` and **post anyway**). `## Dedup Strategy` records one of these four TOKENS, a **hint that may only narrow the probe order** — the live probe is the sole authority for the rung reached and for the DEGRADED reason.
+@end
+
 @define aggregate_call_budget(rung_cost):
 **Aggregate call budget [DR-09] — the fallback's ceiling.** {rung_cost} The op-level cost is therefore a PRODUCT, and it is bounded: `≤50` items × `≤2` pages = **`≤100`** marker calls. Exceeding the budget ⇒ stop and report the remainder as `TRUNCATED (\{n\} not processed)`.
 @end
@@ -105,6 +111,7 @@ If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for p
 @export query_safety
 @export shipped_marker_rule
 @export marker_namespace
+@export dedup_ladder
 @export aggregate_call_budget
 @export reference_rendering_gate
 @export ref_preflight_tail
