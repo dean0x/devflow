@@ -1,5 +1,9 @@
 /**
- * Compliance feature e2e scenarios (S1–S18).
+ * Manifest-group feature e2e scenarios: compliance (S-series) and tracker (T-series).
+ *
+ * Both features are manifest-group state converged by `devflow init`, and both
+ * fan out across several artifacts, so they share one driver and one set of
+ * assertion rules.
  *
  * Each scenario drives `node dist/cli.js` against an isolated temp HOME so no
  * developer files are touched. Per PF-018: $HOME/.claude is seeded before any
@@ -1266,5 +1270,143 @@ describe('S20: compliance skill lifecycle is managed by converge, not the orphan
     let exists = false;
     try { await fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')); exists = true; } catch {}
     expect(exists, 'compliance skill must be removed after --no-compliance').toBe(false);
+  });
+});
+
+// ── T1 ────────────────────────────────────────────────────────────────────────
+//
+// The tracker selection lifecycle, driven through the real entry point.
+//
+// PF-015's rule: a convergence test that reconstructs init's sequence certifies
+// the author's model of the ordering rather than the shipped ordering, so these
+// arms run `devflow init` and read the directory it left behind.
+describe('T1: init --reset collapses the provider and converges every tracker artifact', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t1-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    // PF-018: seed .claude so init doesn't bail with "Claude Code not detected"
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('T1: a jira install + --reset → conventions moved aside, sentinel gone, manifest github', async () => {
+    // Base state: a real jira install, not a hand-written manifest — the
+    // previous provider this run has to notice is the one init itself persisted.
+    expect(run('init', '--recommended', '--tracker', 'jira').status).toBe(0);
+
+    const sentinel = path.join(devflowDir, '.tracker.enabled');
+    const conventions = path.join(devflowDir, 'tracker.md');
+    const backup = path.join(devflowDir, 'tracker.md.jira.bak');
+    const seededConventions = '---\nprovider: jira\ninferred-from: seed\n---\n\n## Project\nsite: example\n';
+    await fs.writeFile(conventions, seededConventions, 'utf-8');
+
+    // PF-018: the pre-state is asserted, or the post-state below is the state
+    // the temp dir started in and the run proved nothing.
+    expect(
+      ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
+    ).toEqual({ provider: 'jira' });
+    await expect(fs.access(sentinel)).resolves.toBeUndefined();
+
+    const result = run('init', '--reset');
+    expect(result.status, `init --reset failed:\n${result.stderr}`).toBe(0);
+
+    // The provider collapses to the off position…
+    expect(
+      ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
+    ).toEqual({ provider: 'github' });
+    // …and all three file owners converge against it. The rename fires because
+    // the lifecycle is handed the REAL prior manifest, never the --reset-gated
+    // seed: under --reset the seed already reads github, and github→github is
+    // not a transition, so a seed-fed rename would leave a jira conventions file
+    // sitting authoritative under a github install.
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe(seededConventions);
+    await expect(fs.access(conventions)).rejects.toThrow();
+    await expect(fs.access(sentinel)).rejects.toThrow();
+    // The move is disclosed — a renamed file with no receipt is unauditable.
+    expect(result.stdout + result.stderr).toContain('tracker.md.jira.bak');
+  });
+});
+
+// ── T2 ────────────────────────────────────────────────────────────────────────
+describe('T2: a failed manifest write converges no tracker artifact', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t2-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('T2: manifest path is a directory → warned, and .tracker.enabled is never written', async () => {
+    // A directory at the manifest path makes the atomic write's final rename
+    // fail — a real I/O failure at the one step the three owners are gated on,
+    // rather than a stub standing in for one.
+    const manifestPath = path.join(devflowDir, 'manifest.json');
+    await fs.mkdir(manifestPath, { recursive: true });
+
+    const result = run('init', '--recommended', '--tracker', 'jira');
+    // A feature-state failure must never fail the install itself.
+    expect(result.status, `init exited non-zero:\n${result.stderr}`).toBe(0);
+
+    const output = result.stdout + result.stderr;
+    expect(output).toContain('Failed to write installation manifest');
+    expect(output).toContain('was not persisted');
+
+    // The gate (PF-015): an unpersisted selection converges nothing, so the
+    // on-disk state stays internally consistent and the next init retries the
+    // whole transition from an unchanged starting point. A sentinel written for
+    // a provider the manifest never recorded is a per-session fork cost forever.
+    await expect(fs.access(path.join(devflowDir, '.tracker.enabled'))).rejects.toThrow();
+    await expect(fs.access(path.join(devflowDir, '.tracker.attempts'))).rejects.toThrow();
+    // Still a directory: nothing smuggled a selection past the failed write.
+    await expect(fs.stat(manifestPath)).resolves.toMatchObject({});
+    expect((await fs.stat(manifestPath)).isDirectory()).toBe(true);
+  });
+});
+
+// ── T3 ────────────────────────────────────────────────────────────────────────
+describe('T3: --hud-only preserves the tracker selection it did not ask about', () => {
+  let tmpHome: string;
+  let devflowDir: string;
+  let run: ReturnType<typeof makeRunner>;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t3-'));
+    devflowDir = path.join(tmpHome, '.devflow');
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    run = makeRunner(tmpHome, devflowDir);
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('T3: a prior linear selection survives a hud-only install', async () => {
+    expect(run('init', '--recommended', '--tracker', 'linear').status).toBe(0);
+    expect(
+      ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
+      'the pre-state must be the non-default provider, or the assertion below is satisfied by the default',
+    ).toEqual({ provider: 'linear' });
+
+    const result = run('init', '--hud-only');
+    expect(result.status, `init --hud-only failed:\n${result.stderr}`).toBe(0);
+
+    const features = (await readManifest(devflowDir)).features as Record<string, unknown>;
+    // The hud-only path writes its own minimal manifest. Dropping the carry-over
+    // resets every Jira/Linear user to github with nothing on screen.
+    expect(features.tracker).toEqual({ provider: 'linear' });
+    // Non-vacuity: this really was the hud-only manifest, not the full one left
+    // untouched — hud-only clears the plugin list and turns the rest off.
+    expect(features.hud).toBe(true);
+    expect((await readManifest(devflowDir)).plugins).toEqual([]);
   });
 });
