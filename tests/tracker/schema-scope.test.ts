@@ -152,9 +152,8 @@ describe('schema table: every section has a scope and a documented absent⇒defa
     }
     expect(
       blanks,
-      'GAP-17: four sections originally had no stated default. A blank cell reads as "whatever the ' +
-      'agent decides", which is precisely the silent-authority failure the sentinel rule exists ' +
-      `to prevent:\n  ${blanks.join('\n  ')}`,
+      'a blank cell reads as "whatever the agent decides", which is precisely the silent-authority ' +
+      `failure the sentinel rule exists to prevent:\n  ${blanks.join('\n  ')}`,
     ).toEqual([]);
   });
 
