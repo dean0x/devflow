@@ -73,9 +73,30 @@ function readGeneratedReference(relPath: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The seven payloads, verbatim from the register. Each targets a different sink:
- * command substitution (two spellings), flag injection, line injection, size,
- * credential-in-URL, and query-operator escape.
+ * The nine payloads. The first seven are verbatim from the register, each
+ * targeting a different sink: command substitution (two spellings), flag
+ * injection, line injection, size, credential-in-URL, and query-operator escape.
+ *
+ * THE LAST TWO ARE IDENTITY PAYLOADS, and they are the two the register's shell-
+ * and query-shaped rows cannot reach. `## Assignee` admits `none` and `self` and
+ * nothing else — §14.3's cell says so in the strongest form, "**never** a literal
+ * email address or account identifier" — and `## Required Fields` denies
+ * `assignee` beyond `self` by name. Neither prohibition contains a metacharacter,
+ * so every payload above is rejected by those two cells for a reason that has
+ * nothing to do with what they are actually guarding: an address or an opaque
+ * account id is well-formed, harmless-looking, and exactly what an author reaches
+ * for when the identify-current-user capability is unavailable. Pinning them is
+ * what makes those two cells' rejections load-bearing rather than incidental.
+ *
+ * THE accountId SPELLING IS THE COLON-BEARING ONE, deliberately. Atlassian issues
+ * both `712020:{uuid}` and a bare 24-hex form, and the bare form is
+ * shape-indistinguishable from a legitimate `## Reference Rendering` TEMPLATE
+ * token: 24 alphanumerics carry no metacharacter and sit inside that cell's
+ * `^[A-Za-z0-9 #{}/_.-]{1,60}$`. Pinning it would assert a rejection §14.3 does
+ * not owe and would be "fixed" by tightening a rendering template's shape gate
+ * against a string that is a perfectly good rendering template. The colon-bearing
+ * form is the real canonical identifier AND is rejected by every cell on its own
+ * terms, so it is the honest row.
  */
 const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]> = [
   ['backtick command substitution', 'PROJ`whoami`'],
@@ -85,6 +106,8 @@ const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]>
   ['500 characters', 'a'.repeat(500)],
   ['userinfo credential in URL', 'https://u:tok@host'],
   ['query operator escape', 'PROJ" OR project != "'],
+  ['literal email address', 'alice@example.com'],
+  ['tracker account identifier', '712020:5b10ac8d-82e0-5b22-cc7d-4ef5aabbccdd'],
 ];
 
 // ---------------------------------------------------------------------------
@@ -256,9 +279,41 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     ).toBeGreaterThan(expected.length);
   });
 
-  it('the payload table still has all seven rows (non-vacuity)', () => {
-    expect(HOSTILE_PAYLOADS).toHaveLength(7);
-    expect(new Set(HOSTILE_PAYLOADS.map(([, p]) => p)).size, 'payloads must be distinct').toBe(7);
+  it('the payload table still has all nine rows (non-vacuity)', () => {
+    expect(HOSTILE_PAYLOADS).toHaveLength(9);
+    expect(new Set(HOSTILE_PAYLOADS.map(([, p]) => p)).size, 'payloads must be distinct').toBe(9);
+  });
+
+  it('the two identity payloads reach the two cells the shell-shaped rows cannot', () => {
+    // Non-vacuity for the rows themselves, and it is the point of adding them: the
+    // seven register payloads are all rejected by `## Assignee` and
+    // `## Required Fields` for the wrong reason — a closed set rejects everything
+    // outside it, so a metacharacter payload never exercises "never a literal email
+    // address or account identifier". These two are well-formed, carry no
+    // metacharacter, and are what an author substitutes when identify-current-user
+    // comes back empty. If either cell ever gained a free-string arm they are the
+    // only payloads here that would notice.
+    const identity = ['alice@example.com', '712020:5b10ac8d-82e0-5b22-cc7d-4ef5aabbccdd'];
+    for (const payload of identity) {
+      expect(
+        /[`$;|&\n"'\\]/.test(payload),
+        `${JSON.stringify(payload)} must carry NO shell or query metacharacter, or it is just ` +
+        `another spelling of a row above`,
+      ).toBe(false);
+    }
+    for (const section of ['## Assignee', '## Required Fields']) {
+      const row = rows.find(r => r.section.replace(/`/g, '').startsWith(section));
+      expect(row, `${section} has no validator row — the identity payloads have no subject`)
+        .toBeDefined();
+      const validator = parseValidator(row!.validator);
+      for (const payload of identity) {
+        expect(
+          rejectionReasons(validator, payload),
+          `${section} must reject ${JSON.stringify(payload)} — §14.3 forbids a literal address ` +
+          `or account identifier there, and an assignee beyond \`self\` by name`,
+        ).not.toEqual([]);
+      }
+    }
   });
 
   it('every declared validator parses to at least one real check', () => {
