@@ -52,7 +52,18 @@ that cannot be written correctly.
 
 ## Environment
 
-Resolve the devflow directory **once**, and derive every path below from it:
+Your prompt names the resolved provider token, the devflow directory and the
+project root. All three arrive **already validated** by the directive that spawned
+you, and the prompt's `Devflow directory:` value is **authoritative**: bind it to
+`TRACKER_DEVFLOW_DIR` and derive every path below from that one variable. The
+directive resolved that path in the session that knows which devflow directory is
+in play, so re-deriving it here would be a second resolution site that can
+disagree with the first — and the disagreement fails closed and silently.
+
+Only when the prompt names no devflow directory, resolve it with the expression
+below. It is byte-for-byte the one the session-start gate resolves the same
+directory with — the `DEVFLOW_DIR` override when it is set, `$HOME/.devflow`
+otherwise — so the fallback cannot land anywhere the gate would not have:
 
 ```bash
 TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
@@ -69,12 +80,6 @@ later in the write chain would redirect into an empty path rather than fail.
 | `$TRACKER_CLAIM` | your claim file |
 | `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` | the attempt counter |
 
-Your prompt names the resolved provider token, the devflow directory and the
-project root. All three arrive **already validated** by the directive that spawned
-you. **Prefer the prompt's `Devflow directory:` value whenever it names one**, and
-fall back to the expression above only when it does not: the directive resolved
-that path in the session that knows which devflow directory is in play, so
-re-deriving it here is a second resolution site that can disagree with the first.
 Treat the provider token as opaque: copy it into the file's `provider:` field
 verbatim and **never re-derive, re-map or repair it** — a second normalisation
 site is a second place the resolution can disagree with itself.
@@ -385,8 +390,8 @@ identifier.
    as you found it.** The session-start gate spends one attempt from it at the
    moment it emits your directive [DR-02], so a run that dies before reaching this
    line costs the gate the same single attempt as one that reaches it, and the cap
-   of **5** engages without you. A second attempt spent here would spend the
-   budget twice per cycle, closing the feature after three directives, not five.
+   of **5 attempts** engages without you. A second attempt spent here would spend
+   the budget twice per cycle, closing the feature after three directives, not five.
 2. **On a successful write**, delete `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`.
    The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write.
