@@ -28,6 +28,7 @@ import * as path from 'path';
 import {
   installViaFileCopy,
   overlayGeneratedReferences,
+  planOverlayUnits,
   promoteUnitStagingTree,
   type OverlayFailure,
   type OverlayUnit,
@@ -159,6 +160,80 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
       'directory nor a references-root document is unrepresented, and the arms below that cover ' +
       'it are testing nothing',
     ).toEqual(['tracker/_mcp.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-OVERLAY-PROVIDER-SHAPE — which KIND of unit a manifest directory becomes
+// ---------------------------------------------------------------------------
+
+describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
+  /**
+   * The rule this one replaced: bucket by directory part, then call any non-empty
+   * directory part a provider directory.
+   *
+   * It is here as the known-bad probe. No arm that reads the INSTALLED tree discriminates
+   * the two rules — the directory parts sort `'' < tracker < tracker/{provider}`, so a
+   * mis-bucketed whole-subtree rename of `tracker/` runs BEFORE the provider units promote
+   * back into it and every file is present at the end either way — so the classification
+   * is the observation that separates them, and an arm asserting it is only a regression
+   * guard if the two rules really disagree on the input it uses (avoids PF-018).
+   */
+  function shapeBlindKind(subdir: string): OverlayUnit['kind'] {
+    return subdir === '' ? 'cross-cutting' : 'provider';
+  }
+
+  it('buckets a file landing directly in tracker/ as the flat set there, never as a provider', () => {
+    const units = planOverlayUnits([
+      'decision-markers.md',
+      'tracker/_mcp.md',
+      'tracker/github/setup-task.md',
+    ]);
+
+    expect(units).toEqual([
+      { kind: 'cross-cutting', dir: '', files: ['decision-markers.md'] },
+      { kind: 'cross-cutting', dir: 'tracker', files: ['tracker/_mcp.md'] },
+      { kind: 'provider', subdir: 'tracker/github', files: ['tracker/github/setup-task.md'] },
+    ]);
+
+    // `tracker` is the one directory part the two rules disagree on, which is what makes
+    // the assertion above discriminate the defect rather than restate a shape both rules
+    // get right. Under the replaced rule that unit is a provider directory, and its atomic
+    // swap is a rename of `tracker/` ITSELF over every provider directory beside it.
+    expect(
+      shapeBlindKind('tracker'),
+      'the replaced rule must really classify this differently, or the arm above proves nothing',
+    ).toBe('provider');
+    expect(shapeBlindKind('tracker/github'), 'the two rules must still agree here').toBe('provider');
+    expect(shapeBlindKind(''), 'the two rules must still agree here').toBe('cross-cutting');
+  });
+
+  it('classifies the REAL manifest the same way — tracker/ flat, each provider its own unit', async () => {
+    const units = planOverlayUnits(await requireBuiltReferences());
+
+    // The synthetic manifest above states the contract; this pins it to the shapes the
+    // build actually emits, so neither arm can pass on a shape nothing produces (PF-043).
+    expect(
+      units.flatMap(u => (u.kind === 'cross-cutting' && u.dir === 'tracker' ? [u.files] : [])),
+      'the real manifest carries no flat set in tracker/ — the shape under test is absent',
+    ).toEqual([['tracker/_mcp.md']]);
+
+    const flatDirs = units.flatMap(u => (u.kind === 'cross-cutting' ? [u.dir] : []));
+    expect(flatDirs, 'the references root is a flat set too').toContain('');
+
+    const providerSubdirs = units.flatMap(u => (u.kind === 'provider' ? [u.subdir] : []));
+    expect(
+      providerSubdirs.length,
+      'no provider unit at all — the discriminating half of this arm would be vacuous',
+    ).toBeGreaterThanOrEqual(1);
+    for (const subdir of providerSubdirs) {
+      expect(
+        subdir.split('/'),
+        `${subdir} is a provider unit but is not a tracker/{provider} directory`,
+      ).toHaveLength(2);
+      expect(subdir.startsWith('tracker/'), `${subdir} must live under tracker/`).toBe(true);
+    }
+    expect(providerSubdirs, 'tracker/ itself is never a provider unit').not.toContain('tracker');
   });
 });
 
@@ -461,6 +536,11 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
         `${staging} must carry this process's id — a shared name is a shared staging tree`,
       ).toContain(String(process.pid));
       // reliability-08. Whatever a crash strands has to land where the prune will find it.
+      // A MIS-BUCKETED unit shows up here too: a file landing directly in `tracker/`
+      // bucketed as a provider directory stages at `{target}/tracker.{token}.tmp`, a
+      // SIBLING of the converged subtree rather than a path inside it. Which kind each
+      // directory classifies as is pinned directly by the D-OVERLAY-PROVIDER-SHAPE arms
+      // above; this one is about where a staging tree lands, whichever kind produced it.
       expect(
         staging.startsWith(trackerRoot + path.sep),
         `${staging} must stage under ${trackerRoot}, the only subtree this module converges`,
@@ -806,6 +886,53 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     });
     expect(line.message).toContain('part new and part old');
     expect(line.message).not.toContain('left unchanged');
+  });
+
+  it('promotes a flat set into its directory even when that directory does not exist yet', async () => {
+    // The two flat directories the registry emits today both exist by the time promotion
+    // runs, for reasons that have nothing to do with the unit landing in them: the
+    // references root is created by overlayGeneratedReferences, and `tracker/` as a side
+    // effect of the flat arm's own staging path. A flat set landing anywhere else has
+    // neither, so the promotion has to create the directory it renames into — the same
+    // thing promoteProviderUnit does for its target's parent.
+    const flatProbeDir = 'shared';
+    expect(
+      generatedReferenceManifest().some(rel => rel.startsWith(`${flatProbeDir}/`)),
+      `${flatProbeDir}/ is a real generated directory now, so it exists before promotion and ` +
+      'this probe no longer drives a missing one. Pick a directory the build does not emit.',
+    ).toBe(false);
+
+    const unit: OverlayUnit = {
+      kind: 'cross-cutting',
+      dir: flatProbeDir,
+      files: [`${flatProbeDir}/glossary.md`, `${flatProbeDir}/decision-markers.md`],
+    };
+    // Spelled where the overlay itself stages a flat set — under the converged subtree,
+    // with a per-run token — so the probe does not preserve a location nothing produces.
+    const staging = path.join(target, 'tracker', `.cross-cutting.${flatProbeDir}.${process.pid}-mkdir.tmp`);
+    await fs.mkdir(staging, { recursive: true });
+    for (const rel of unit.files) {
+      await fs.writeFile(path.join(staging, path.basename(rel)), `# ${rel} from this run\n`, 'utf-8');
+    }
+    expect(
+      await exists(abs(target, flatProbeDir)),
+      'the destination directory must be absent, or this probe drives the path that already works',
+    ).toBe(false);
+
+    const promoted = await promoteUnitStagingTree(unit, target, staging);
+
+    // Proof of RED: without the mkdir the first rename is ENOENT, the promotion is reported
+    // as failed, and not one of the unit's documents reaches the installed skill.
+    expect(
+      promoted.ok,
+      'a flat set must create the directory it renames into rather than depend on another ' +
+      'unit having happened to make it',
+    ).toBe(true);
+    for (const rel of unit.files) {
+      expect(await fs.readFile(abs(target, rel), 'utf-8')).toContain(`# ${rel} from this run`);
+    }
+    // …and it is dropped on the way out, like every other completed promotion.
+    expect(await exists(staging), 'a completed promotion must leave no staging residue').toBe(false);
   });
 
   it('a restore that fails is reported as such, and its recovery copy survives the same run', async () => {

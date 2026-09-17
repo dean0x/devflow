@@ -494,8 +494,15 @@ function isProviderSubdir(subdir: string): boolean {
  * one such directory (beside the hand-authored references) and `tracker/` is another
  * (beside the provider directories); both take the flat arm, which is why that arm
  * carries the directory it lands in rather than assuming the root.
+ *
+ * Exported for the one property no arm reading the INSTALLED tree can discriminate:
+ * which KIND a directory becomes. The directory parts sort `'' < tracker <
+ * tracker/{provider}`, so a `tracker/` entry mis-bucketed as a provider renames the
+ * whole subtree into place BEFORE the provider units promote back into it, and the
+ * installed tree ends up complete under either rule. The classification itself is the
+ * observation that separates them (avoids PF-018).
  */
-function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
+export function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   const bySubdir = new Map<string, string[]>();
   for (const relPath of manifest) {
     const segments = relPath.split('/');
@@ -723,6 +730,14 @@ async function promoteCrossCuttingUnit(
   record: RecordPromotionState,
 ): Promise<void> {
   const destDir = underRoot(referencesTarget, unit.dir);
+  // The directory this set lands in, created rather than assumed — {@link promoteProviderUnit}
+  // does the same for its target's parent. The two flat directories the registry emits today
+  // exist by the time promotion runs for reasons that have nothing to do with the unit landing
+  // in them: the references root is created by {@link overlayGeneratedReferences}, and
+  // `tracker/` as a side effect of this arm's own staging path. A flat set landing anywhere
+  // else takes ENOENT on its first rename — a unit reported as failed for where it was asked
+  // to land rather than for anything wrong with the documents it carries.
+  await fs.mkdir(destDir, { recursive: true });
   for (const [index, relPath] of unit.files.entries()) {
     const basename = relPath.split('/').slice(-1)[0];
     await fs.rename(path.join(stagingDir, basename), path.join(destDir, basename));
