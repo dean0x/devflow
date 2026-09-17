@@ -83,6 +83,35 @@ export function collectAgentSecondLiterals(source: string): number[] {
   return [...source.matchAll(/\*\*(\d+) seconds\*\*/g)].map(m => Number(m[1]));
 }
 
+/** How far past `**Heartbeat**` the cadence may be stated. Bounded (PF-018). */
+const HEARTBEAT_WINDOW_CHARS = 400;
+
+/**
+ * Named collector: the work units the agent names as HEARTBEAT INTERVALS.
+ *
+ * The bound above is only a liveness bound if something refreshes the claim file
+ * while the run is alive. A heartbeat is therefore a CADENCE, and prose can state a
+ * cadence only by naming the unit of work between two touches ("once per capability
+ * probed", "once per section composed"). A sentence that names a single BOUNDARY —
+ * "touch it again at the probe → compose boundary" — states a checkpoint, and the
+ * collector returns `[]` for it: from that one touch the whole remaining run is
+ * measured, so a compose phase longer than the bound self-classifies as crashed and
+ * the next session's gate re-arms against an agent that is still live. That is the
+ * concurrency the claim exists to prevent, arriving through the timer instead of
+ * through the claim.
+ *
+ * Whitespace is normalised first because the agent hard-wraps: `once per` lands
+ * across a line break in the shipped text, and pinning where a sentence happens to
+ * break is what PF-057 warns against.
+ */
+export function collectHeartbeatIntervals(source: string): string[] {
+  const normalized = source.replace(/\s+/g, ' ');
+  const at = normalized.indexOf('**Heartbeat**');
+  if (at === -1) return [];
+  const block = normalized.slice(at, at + HEARTBEAT_WINDOW_CHARS);
+  return [...block.matchAll(/once per ([a-z]+(?: [a-z]+)?)/g)].map(m => m[1]);
+}
+
 // ---------------------------------------------------------------------------
 // The seam
 // ---------------------------------------------------------------------------
@@ -130,6 +159,31 @@ describe('tracker claim-staleness seam: the hook and the Tracker agent agree on 
     expect(
       collectAgentSecondLiterals('under **600 seconds** … at or over **900 seconds** …'),
     ).toEqual([600, 900]);
+  });
+
+  it('the Tracker agent refreshes the claim on a CADENCE, so the bound measures liveness', () => {
+    const intervals = collectHeartbeatIntervals(agentSource);
+    expect(
+      intervals,
+      'The Tracker agent names fewer than two heartbeat intervals. One touch at one boundary is ' +
+        'not a heartbeat: the bound is then measured from that single point for the whole rest ' +
+        'of the run, so a compose phase that outlives it is classified as a crash while the ' +
+        'agent is still working — and the hook re-arms against a live sibling.',
+    ).not.toHaveLength(0);
+    expect(intervals.length).toBeGreaterThanOrEqual(2);
+
+    // Known-bad, same it: a single-boundary sentence states a checkpoint and must
+    // be reported as stating no cadence, and an agent with no heartbeat at all
+    // must report [] rather than throw.
+    expect(
+      collectHeartbeatIntervals(
+        '3. **Heartbeat**: `touch` the claim file again at the probe → compose boundary, so a ' +
+          'slow run is never mistaken for a crashed one.',
+      ),
+    ).toEqual([]);
+    expect(collectHeartbeatIntervals('**Heartbeat**: touch it once per section composed.'))
+      .toEqual(['section composed']);
+    expect(collectHeartbeatIntervals('The agent states no heartbeat.')).toEqual([]);
   });
 
   it('the agent\'s stated bound equals the hook\'s TRACKER_PROCESSING_STALE_SECS', () => {

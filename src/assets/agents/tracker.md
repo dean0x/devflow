@@ -29,8 +29,10 @@ rather than into a message.
 
 You **read** and you write **one** file. Specifically:
 
-- You write exactly one path: `~/.devflow/tracker.md` — no other file, no
-  configuration, no manifest, no settings.
+- You write exactly one **content** path: `~/.devflow/tracker.md` — no
+  configuration, no manifest, no settings. The claim file, the attempt counter and
+  the staging file the write chain links from are lifecycle state under that same
+  directory; nothing outside it is yours to touch.
 - You run **no git command in the write path**, and no write-side git or forge
   command anywhere: you do not stage, record, publish or create anything in a
   repository or on a tracker. Your git use is read-only history sampling.
@@ -55,15 +57,16 @@ Resolve the devflow directory **once**, and derive every path below from it:
 ```bash
 TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
 TRACKER_FILE="$TRACKER_DEVFLOW_DIR/tracker.md"
+TRACKER_CLAIM="$TRACKER_DEVFLOW_DIR/.tracker.processing"
 ```
 
-Resolve both **once**, at the start, and reuse them. An unset `TRACKER_FILE` later
-in the write chain would redirect into an empty path rather than fail.
+Resolve all three **once**, at the start, and reuse them. An unset `TRACKER_FILE`
+later in the write chain would redirect into an empty path rather than fail.
 
 | Path | Role |
 |---|---|
 | `$TRACKER_FILE` | the file you write — **write-once** |
-| `{TRACKER_DEVFLOW_DIR}/.tracker.processing` | your claim file |
+| `$TRACKER_CLAIM` | your claim file |
 | `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` | the attempt counter |
 
 Your prompt names the resolved provider token, the devflow directory and the
@@ -78,18 +81,34 @@ site is a second place the resolution can disagree with itself.
 
 ## Step 0 — Claim the run
 
-1. If `{TRACKER_DEVFLOW_DIR}/.tracker.processing` exists, compare its age against
-   the claim-staleness bound of **600 seconds** — the same bound the session-start
-   gate applies, so one claim file is classified identically on both sides:
+1. If `$TRACKER_CLAIM` exists, compare its age against the claim-staleness bound
+   of **600 seconds** — the same bound the session-start gate applies, so one
+   claim file is classified identically on both sides:
    - **Fresh** (age under the bound) — another Tracker agent is live. **Exit
      silently**; change nothing, report nothing.
    - **Stale** (age at or over the bound) — a previous run crashed. Re-claim it by
      `touch`ing the claim file.
-2. Otherwise claim it atomically, so exactly one winner survives concurrent
-   sessions: `mv` a freshly created marker onto the claim path. If the `mv` fails,
-   another agent claimed first — **exit silently**.
-3. **Heartbeat**: `touch` the claim file again at the probe → compose boundary, so
-   a slow run is never mistaken for a crashed one.
+2. Otherwise claim it with a **create-exclusive** create, so exactly one winner
+   survives concurrent sessions:
+
+   ```bash
+   if ( set -o noclobber; : > "$TRACKER_CLAIM" ) 2>/dev/null; then :; else exit 0; fi
+   ```
+
+   The contended resource is the claim **path**, so the primitive has to be one
+   that **refuses when that path already exists** — `noclobber` here; `ln` of a
+   marker or `mkdir` of a lock directory refuse on the same terms. A rename does
+   not: `mv src dst` replaces an existing `dst` and exits 0, so both racers would
+   win and the loser branch would never be taken. The redirect failing **is** the
+   loser branch: another agent claimed first, so **exit silently**. The create is
+   also its own existence check, which leaves no window between step 1 and this
+   line.
+3. **Heartbeat**: `touch` the claim file **repeatedly** while you work — once per
+   capability probed, and once per section composed. The interval the staleness
+   bound is measured against is then one unit of work rather than the whole run. A
+   single touch at one boundary bounds nothing: a compose phase that outlives the
+   bound measured from it self-classifies as crashed, and the next session's gate
+   re-arms against an agent that is still live.
 
 **Vanished inputs**: if the claim file or `{TRACKER_DEVFLOW_DIR}` disappears
 mid-run — the user disabled or cleared the feature — stop without further writes.
@@ -277,31 +296,50 @@ Any line you cannot resolve becomes, verbatim:
 
 ## The write
 
-The write is **scrub-gated, create-exclusive, and fail-closed**. Compose the
-whole file first, then run this chain — and nothing else:
+The write is **scrub-gated, shape-gated, create-exclusive, and fail-closed**.
+Compose the whole file first, then run this chain — and nothing else:
 
 ```bash
-RAW="$(mktemp)" && SCRUBBED="$(mktemp)"
+umask 077
+RAW=""; SCRUBBED=""
+trap 'unlink "$RAW" 2>/dev/null; unlink "$SCRUBBED" 2>/dev/null' EXIT INT TERM
+RAW="$(mktemp)" \
+  && SCRUBBED="$(mktemp "$TRACKER_DEVFLOW_DIR/.tracker-staged.XXXXXX")" || exit 1
 cat > "$RAW" <<'EOF'
 <the composed file, literally>
 EOF
 node "$TRACKER_DEVFLOW_DIR/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED" \
-  && ( umask 077; set -o noclobber; cat > "$TRACKER_FILE" ) < "$SCRUBBED" \
+  && [ -s "$SCRUBBED" ] \
+  && grep -q '^provider: ' "$SCRUBBED" \
+  && grep -q '^## Dedup Strategy$' "$SCRUBBED" \
+  && ln "$SCRUBBED" "$TRACKER_FILE" \
   && chmod 600 "$TRACKER_FILE"
-GATE=$?; unlink "$RAW"; unlink "$SCRUBBED"; exit "$GATE"
+GATE=$?; exit "$GATE"
 ```
 
 Every part of that is load-bearing:
 
+- **`umask 077` for the whole block** — every file it creates, the scrubber's
+  output included, is CREATED `0600` rather than created world-readable and
+  narrowed a moment later. `chmod 600` stays as the second, independent control:
+  defense in depth, not redundancy.
 - **`mktemp` per invocation** — two concurrent runs never share a staging path.
-- **Both temp files are removed unconditionally, on every path.** `$RAW` holds the
-  PRE-scrub composition, so leaving it behind keeps exactly the bytes the gate
-  exists to remove, for the lifetime of the temp directory rather than of the run.
-  `unlink`, never a flagged `rm`, for the reason `## Finishing` step 3 gives.
-- **`GATE=$?` before the cleanup and `exit "$GATE"` after it.** The cleanup runs
-  whether the gate opened or refused, so without capturing the status first the
-  block reports `unlink`'s success and the gate's verdict becomes unreadable — an
-  exit code read after a later command is not evidence about the earlier one.
+  The scrubbed stage is taken **inside `$TRACKER_DEVFLOW_DIR`** because `ln` places
+  a file only within one filesystem, and the default temp directory is not
+  guaranteed to be on the same one.
+- **Each `mktemp` is a precondition, not an assumption** — `|| exit 1` before
+  anything is composed. A chain in which every link is load-bearing cannot have an
+  unchecked first link.
+- **Both temp files are removed by a `trap` on `EXIT INT TERM`** — on the refusal
+  paths and the signal paths, not only on the one where the chain runs to the end.
+  `$RAW` holds the PRE-scrub composition, so leaving it behind keeps exactly the
+  bytes the gate exists to remove, for the lifetime of the temp directory rather
+  than of the run. `unlink`, never a flagged `rm`, for the reason `## Finishing`
+  step 3 gives.
+- **`GATE=$?` immediately after the chain, and `exit "$GATE"`.** The trap fires
+  after that status is captured and fixed, so what the block reports is the gate's
+  verdict — an exit code read after a later command is not evidence about the
+  earlier one.
 - **The scrubber is addressed through `$TRACKER_DEVFLOW_DIR`**, the one resolution
   `## Environment` performs — never a second `${DEVFLOW_DIR:-$HOME/.devflow}` here.
   A second site can disagree with the first, and the disagreement fails closed
@@ -317,13 +355,20 @@ Every part of that is load-bearing:
   scrubber's framed stdout mode exists for comment sinks that have no such
   boundary — a different sink with a different problem. **Keep the two reasons
   apart; neither simplifies into the other.**
-- **`umask 077` in the same subshell** — the file is CREATED `0600` rather than
-  created world-readable and narrowed a moment later. `chmod 600` stays as the
-  second, independent control: defense in depth, not redundancy.
-- **`set -o noclobber` makes the write create-exclusive.** If it fails because the
-  file appeared, you lost a race: **read the existing file and report
-  `ALREADY_EXISTS`.** The failure is **not a lock wait** — do not unlink and
-  retry. Unlink-and-retry is correct for a staged atomic replace and exactly
+- **`[ -s "$SCRUBBED" ]` and the two `grep`s are the shape gate.** The scrubber's
+  exit status says it RAN, not that it produced a file worth keeping: an empty
+  composition scrubs to zero bytes and every link of the chain still exits 0. The
+  size test and the two greps — the frontmatter's first key and the LAST template
+  heading — bracket the composition at both ends, so a body that is empty,
+  truncated or not the template at all never reaches placement. Downstream reads
+  nothing but existence, so this is the line where the Iron Law is enforced rather
+  than asserted.
+- **`ln` places the file atomically and create-exclusively.** `link(2)` publishes
+  a file that is ALREADY complete, under a name that must not exist: there is no
+  instant at which `$TRACKER_FILE` holds a prefix of the content. It fails with
+  `EEXIST` when the path is taken — you lost a race: **read the existing file and
+  report `ALREADY_EXISTS`.** The failure is **not a lock wait** — do not unlink
+  and retry. Unlink-and-retry is correct for a staged atomic replace and exactly
   wrong for a write-once file, because the winner's content is the answer.
 - **`chmod 600` in the same chain** — the file may name a site and a project.
   Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
@@ -336,22 +381,18 @@ identifier.
 ## Finishing
 
 1. **On a write-less exit** — no capability reachable, capability denied, or the
-   scrub gate non-zero — increment `.tracker.attempts` **before** deleting the
-   claim file, in that order. Full path:
-   `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`. The counter is the only record that
-   a run happened and produced nothing; the session-start gate stops re-arming
-   after **5** attempts, and without this increment that cap never engages and
-   the directive is emitted forever. **Write it as one decimal-integer line and
-   nothing else** — no label, no JSON, no trailing prose — because the gate reads
-   it with the shell's `read` builtin and treats any non-digit byte as a
-   self-healed `0`. A count in another format is not a smaller count; it is no
-   count at all, and the cap it was meant to advance stays open.
+   scrub gate refused — **leave `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` exactly
+   as you found it.** The session-start gate spends one attempt from it at the
+   moment it emits your directive [DR-02], so a run that dies before reaching this
+   line costs the gate the same single attempt as one that reaches it, and the cap
+   of **5** engages without you. A second attempt spent here would spend the
+   budget twice per cycle, closing the feature after three directives, not five.
 2. **On a successful write**, delete `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`.
    The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write.
    Use `unlink` — a flagged `rm` is denied by devflow's recommended deny-list,
    and you run unattended with no one to answer the prompt (PF-003):
-   `unlink {TRACKER_DEVFLOW_DIR}/.tracker.processing`
+   `unlink "$TRACKER_CLAIM"`
    Crashing before this line leaves the claim file for the next run's stale
    recovery — the correct outcome for a partial run.
 4. End with the output block below. It is invisible in a background run, so the

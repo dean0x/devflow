@@ -28,10 +28,23 @@
  *     test cannot catch drift in its own oracle, so the oracle is shared.
  */
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { describe, it, expect, afterAll } from 'vitest';
+import { spawnSync } from 'child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
+import { homedir, tmpdir } from 'os';
 import * as path from 'path';
 
+import { scriptsDir } from '../src/core/assets.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
 import { loadShippedDefaults } from '../src/core/agent-models.js';
 import {
@@ -132,6 +145,232 @@ export function collectForeignProviderLiterals(content: string): string[] {
     .split('\n')
     .filter(l => tokens.some(t => t.test(l)))
     .map(l => l.trim());
+}
+
+/**
+ * Named collector: sites instructing a write that ADVANCES the attempt counter.
+ *
+ * The property is "this agent never advances `.tracker.attempts`", not "never
+ * touches it" — `## Finishing` step 2 still DELETES it on a successful write, and
+ * that delete is correct. So the predicate pairs an advancing verb with the counter
+ * (by basename or by the phrase the prose uses for it) inside one wrapped sentence,
+ * and the text is normalised first because the agent hard-wraps: a line-scoped
+ * matcher would miss a verb and its object split across two lines, and pinning
+ * where a sentence happens to break is what PF-057 warns against.
+ *
+ * NOT COVERED, deliberately (PF-064 — an absence guard is only ever as wide as its
+ * matcher, so the edge is written down rather than inferred from a green run): an
+ * instruction that names neither a listed verb nor the counter — "write one more
+ * than you read" would pass. A new spelling gets a row in the probe below, in the
+ * same commit as the prose that needs it (ADR-025).
+ */
+const COUNTER_ADVANCING_VERB =
+  /\b(increment|increments|incremented|bump|bumps|bumped|advance|advances|advanced|raise|raises|raised)\b/gi;
+const COUNTER_NAMED = /(\.tracker\.attempts|attempt counter)/i;
+const COUNTER_WINDOW_CHARS = 140;
+
+export function collectCounterIncrementSites(content: string): string[] {
+  const text = content.replace(/\s+/g, ' ');
+  const sites: string[] = [];
+  for (const match of text.matchAll(COUNTER_ADVANCING_VERB)) {
+    const at = match.index ?? 0;
+    const window = text.slice(Math.max(0, at - COUNTER_WINDOW_CHARS), at + COUNTER_WINDOW_CHARS);
+    if (COUNTER_NAMED.test(window)) sites.push(window.trim());
+  }
+  return sites;
+}
+
+/**
+ * Named collector: every ```bash fence in the agent, dedented to column 0.
+ *
+ * The agent's security controls are SHELL PROGRAMS that nothing type-checks and
+ * that review reads as prose — which is how four classic shell defects shipped
+ * together in six lines of the write chain (PF-066). Extracting the fences is what
+ * lets the guards below RUN them: a claim primitive is exclusive or it is not, and
+ * only an execution can tell the two spellings apart (PF-068 rule 3).
+ *
+ * Fences are matched with the <= 3-space indentation bound Markdown itself uses,
+ * so a fence nested inside a numbered list item is collected and dedented by its
+ * own opening indent rather than skipped.
+ */
+export function collectBashFences(content: string): string[] {
+  const fences: string[] = [];
+  let open: { indent: number; body: string[] } | null = null;
+  for (const line of content.split('\n')) {
+    if (open === null) {
+      const opening = /^( {0,3})```bash[ \t]*$/.exec(line);
+      if (opening) open = { indent: opening[1].length, body: [] };
+      continue;
+    }
+    if (/^ {0,3}```[ \t]*$/.test(line)) {
+      fences.push(open.body.join('\n'));
+      open = null;
+      continue;
+    }
+    open.body.push(line.slice(open.indent));
+  }
+  return fences;
+}
+
+const BASH_FENCES = collectBashFences(TRACKER_TEXT);
+
+/**
+ * The one fence matching `predicate`. Throws — never `.find(…)!` and never a skip:
+ * a renamed or deleted fence must fail by name here rather than make every arm
+ * below assert something about `undefined`.
+ */
+function oneFence(label: string, predicate: (fence: string) => boolean): string {
+  const hits = BASH_FENCES.filter(predicate);
+  if (hits.length !== 1) {
+    throw new Error(
+      `${TRACKER_SOURCE.path}: expected exactly one ${label} bash fence, found ${hits.length}. ` +
+      'The executed guards below run the agent\'s own shell; a fence that moved, was renamed or ' +
+      'was split is a change to a security control, not a formatting change.',
+    );
+  }
+  return hits[0];
+}
+
+/** `## Environment` — the one resolution of every path the other two fences use. */
+const ENV_FENCE = oneFence('environment', f => f.includes('TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR'));
+/** `## Step 0` — the claim. */
+const CLAIM_FENCE = oneFence('claim', f => f.includes('"$TRACKER_CLAIM"'));
+/** `## The write` — compose, scrub, shape-gate, place. */
+const WRITE_FENCE = oneFence('write-chain', f => f.includes('redact-secrets.cjs'));
+
+/** The heredoc slot the agent fills with the composed file. */
+const COMPOSED_PLACEHOLDER = '<the composed file, literally>';
+
+/** The last `## ` heading of the template — the shape gate's tail anchor. */
+const TEMPLATE_H2 = TRACKER_SCHEMA_SECTIONS.filter(section => section.startsWith('## '));
+const TEMPLATE_TAIL_HEADING = TEMPLATE_H2[TEMPLATE_H2.length - 1];
+
+/** A minimal composition that satisfies the chain's shape gate. No trailing newline:
+ *  the heredoc line the placeholder sits on supplies exactly one. */
+const COMPOSED_FILE = [
+  '---',
+  'provider: probe-token',
+  'inferred-from: /probe @ 2026-01-01T00:00:00Z',
+  '---',
+  '',
+  '## Project',
+  'site: https://example.test',
+  '',
+  '## Dedup Strategy',
+  'rank: 1',
+  'evidence: probe reached the entity-property capability',
+].join('\n');
+
+const SCRUBBER = 'redact-secrets.cjs';
+
+interface Sandbox {
+  /** An isolated `$HOME`. The chain writes under `$HOME/.devflow`; never the real one (PF-060). */
+  home: string;
+  devflowDir: string;
+  trackerFile: string;
+  /** Every path `mktemp` handed the chain, one per line (see `runShell`). */
+  tmplog: string;
+}
+
+const SANDBOXES: string[] = [];
+
+function makeSandbox(): Sandbox {
+  const home = mkdtempSync(path.join(tmpdir(), 'devflow-tracker-agent-'));
+  if (home === homedir() || !home.startsWith(tmpdir())) {
+    throw new Error(`refusing to run the agent's write chain against ${home} — not a temp root`);
+  }
+  SANDBOXES.push(home);
+  const devflowDir = path.join(home, '.devflow');
+  mkdirSync(path.join(devflowDir, 'scripts'), { recursive: true });
+  copyFileSync(path.join(scriptsDir(), SCRUBBER), path.join(devflowDir, 'scripts', SCRUBBER));
+  return {
+    home,
+    devflowDir,
+    trackerFile: path.join(devflowDir, 'tracker.md'),
+    tmplog: path.join(home, 'mktemp.log'),
+  };
+}
+
+afterAll(() => {
+  for (const home of SANDBOXES) rmSync(home, { recursive: true, force: true });
+});
+
+interface ShellRun {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Run a script under the sandbox's `$HOME`, with `DEVFLOW_DIR` deliberately unset
+ * so `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}` fallback is the thing
+ * under test.
+ *
+ * `instrument` wraps `mktemp` in a shell function that records every path it hands
+ * out. That is how the cleanup claim is checked at the paths mktemp REALLY chose:
+ * on macOS mktemp ignores `TMPDIR`, so a harness that points `TMPDIR` at a scratch
+ * directory and then inspects it finds nothing and reports the chain clean
+ * (PF-045, and the mis-measurement PF-066 records). The wrapper makes the
+ * `mktemp` status that of a pipeline, so the one arm that drives a mktemp FAILURE
+ * runs uninstrumented.
+ */
+function runShell(
+  script: string,
+  sandbox: Sandbox,
+  opts: { instrument?: boolean; stub?: string } = {},
+): ShellRun {
+  const { instrument = true, stub = '' } = opts;
+  const prelude = instrument
+    ? `TRACKER_TMPLOG=${JSON.stringify(sandbox.tmplog)}\n` +
+      'mktemp() { command mktemp "$@" | tee -a "$TRACKER_TMPLOG"; }\n'
+    : '';
+  // Built key by key rather than spread-and-delete: `DEVFLOW_DIR` must be ABSENT,
+  // so that `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}` fallback is
+  // what resolves the paths under test.
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && key !== 'DEVFLOW_DIR') env[key] = value;
+  }
+  env.HOME = sandbox.home;
+  const run = spawnSync('bash', ['-c', prelude + stub + script], { env, encoding: 'utf-8' });
+  return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
+}
+
+/**
+ * A `node` that terminates the shell instead of scrubbing — the PF-056 kill,
+ * delivered at the exact point the scrubber would run.
+ *
+ * A signal sent from outside would be deferred until the foreground command
+ * returned, so the stub raises it from inside: deterministic, with no sleep and no
+ * poll. What it models is the documented background outcome — the agent is killed
+ * with `$RAW`, the PRE-scrub composition, already on disk.
+ */
+const KILLED_MID_SCRUB = 'node() { command kill -TERM $$; }\n';
+
+/** Every path the instrumented `mktemp` handed out during a run. */
+function recordedTemps(sandbox: Sandbox): string[] {
+  if (!existsSync(sandbox.tmplog)) return [];
+  return readFileSync(sandbox.tmplog, 'utf-8').split('\n').filter(l => l.trim() !== '');
+}
+
+/** Files the chain staged inside `~/.devflow` and did not clean up. */
+function stagingResidue(sandbox: Sandbox): string[] {
+  return readdirSync(sandbox.devflowDir).filter(entry => entry.startsWith('.tracker-staged'));
+}
+
+/**
+ * The write chain, with the heredoc slot instantiated — what the agent actually
+ * runs. An empty body removes the placeholder LINE rather than blanking it, because
+ * a blank line is one byte and the size gate is about zero.
+ */
+function writeChain(body: string, fence: string = WRITE_FENCE): string {
+  if (!fence.includes(COMPOSED_PLACEHOLDER)) {
+    throw new Error(`the write fence no longer carries '${COMPOSED_PLACEHOLDER}' — nothing to compose into`);
+  }
+  const instantiated = body === ''
+    ? fence.replace(`${COMPOSED_PLACEHOLDER}\n`, '')
+    : fence.replace(COMPOSED_PLACEHOLDER, body);
+  return `${ENV_FENCE}\n${instantiated}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,8 +528,7 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     expect(TRACKER_TEXT).toContain('.tracker.attempts');
   });
 
-  it('claims atomically and makes the loser exit silently, never overwrite', () => {
-    expect(TRACKER_TEXT).toMatch(/\bmv\b/);
+  it('states the loser branch as an exit, not as a report', () => {
     expect(TRACKER_TEXT).toContain('exit silently');
   });
 
@@ -308,15 +546,38 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     expect(TRACKER_TEXT).toMatch(/\bunlink\b/);
   });
 
-  it('increments the counter BEFORE deleting the claim file on a write-less exit [DR-02]', () => {
-    // The ordering is the whole rule: 3a-1 ships the reader, the remover and the
-    // install-artifact entry, and 3a-3 ships the >= 5 cap. Without an incrementer
-    // in the one place that knows a run produced nothing, the cap never engages.
-    // Ordered and BOUNDED (PF-018: no unbounded [\s\S]*), and tolerant of where
-    // the prose wraps — a guard that breaks on a reflow gets "fixed" by deleting it.
-    expect(TRACKER_TEXT).toMatch(
-      /increment[\s\S]{0,60}?\.tracker\.attempts[\s\S]{0,40}?before[\s\S]{0,60}?claim/i,
-    );
+  it('spends NO attempt of its own on a write-less exit — the gate already spent one [DR-02]', () => {
+    // The counter has ONE incrementer, and it is the session-start gate, which
+    // increments on EMISSION precisely so a run that crashes before Finishing
+    // still costs an attempt [DR-02]. A second increment here makes every failed
+    // cycle cost two: 0→emit→1→agent→2→emit→3→agent→4→emit→5→agent→6, i.e. three
+    // directives against a cap documented as five.
+    expect(
+      collectCounterIncrementSites(TRACKER_TEXT),
+      'the agent must not advance .tracker.attempts: the session-start gate increments on ' +
+      'emission [DR-02], and two incrementers per cycle silently halve the OD-14 budget',
+    ).toEqual([]);
+    // Positive half: the agent has to SAY whose increment it is relying on, or the
+    // next reader restores the one this guard deletes. Bounded (PF-018).
+    expect(TRACKER_TEXT).toMatch(/write-less exit[\s\S]{0,400}?\[DR-02\]/);
+  });
+
+  it('known-bad probe: the increment collector reports the retired instruction', () => {
+    expect(
+      collectCounterIncrementSites(
+        'On a write-less exit, increment `.tracker.attempts` **before** deleting the claim file.\n',
+      ),
+      'the collector must fire on the exact sentence it exists to keep out',
+    ).toHaveLength(1);
+    expect(
+      collectCounterIncrementSites('Bump the attempt counter, then stop.\n'),
+      'a second spelling of the same instruction',
+    ).toHaveLength(1);
+    // …and must NOT fire on the two counter writes that remain correct: deleting
+    // it after a successful write, and the hook's increment stated as history.
+    expect(
+      collectCounterIncrementSites('On a successful write, delete `.tracker.attempts`.\n'),
+    ).toEqual([]);
   });
 
   it('deletes the counter on a successful write [DR-02]', () => {
@@ -358,14 +619,48 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
   });
 
   it('gates the write through the scrubber in a single && chain, fail-closed (AC-3.15)', () => {
-    expect(TRACKER_TEXT).toContain('redact-secrets.cjs');
-    expect(TRACKER_TEXT).toContain('mktemp');
-    expect(TRACKER_TEXT).toContain('chmod 600');
+    // Scoped to the CHAIN, not to the file: a literal that appears only in the
+    // surrounding prose satisfies nothing, and the chain is the control.
+    expect(WRITE_FENCE).toContain('redact-secrets.cjs');
+    expect(WRITE_FENCE).toContain('mktemp');
+    expect(WRITE_FENCE).toContain('chmod 600');
     expect(TRACKER_TEXT).toContain('TRACEABILITY: DEGRADED (redaction unavailable)');
     expect(
-      TRACKER_TEXT,
+      WRITE_FENCE,
       'a pipeline hides the scrubber exit status; the chain is what makes it fail-closed',
     ).toContain('&&');
+  });
+
+  it('gates placement on a NON-EMPTY, template-shaped body (reliability-02)', () => {
+    // The scrubber's status says it RAN. These three links say the thing it wrote
+    // is worth publishing — head anchor, tail anchor, and not zero bytes.
+    expect(WRITE_FENCE).toContain('[ -s "$SCRUBBED" ]');
+    const greps = WRITE_FENCE.split('\n').filter(l => /grep -q/.test(l));
+    expect(
+      greps,
+      'the shape gate brackets the composition at BOTH ends: the frontmatter key it opens with ' +
+      'and the last template heading it closes with, so a truncation at either end is caught',
+    ).toHaveLength(2);
+    // Both anchors are bound to the SHARED schema oracle, so renaming a template
+    // section tells you here that the chain's anchor has to move with it.
+    expect(greps.join('\n')).toContain(`'^${TRACKER_SCHEMA_FRONTMATTER_KEYS[0]}: '`);
+    expect(greps.join('\n')).toContain(`'^${TEMPLATE_TAIL_HEADING}$'`);
+  });
+
+  it('cleans both temp files from a trap on the same chain as the mktemps (reliability-09)', () => {
+    expect(
+      WRITE_FENCE,
+      'cleanup placed AFTER the chain runs only when the chain returns; this agent is killed ' +
+      'mid-run as a documented outcome (PF-056), and $RAW is the PRE-scrub composition',
+    ).toMatch(/^trap '[^']*unlink "\$RAW"[^']*unlink "\$SCRUBBED"[^']*' EXIT INT TERM$/m);
+    expect(
+      WRITE_FENCE.split('\n').filter(l => /\bmktemp\b/.test(l)),
+      'both staging paths come from mktemp — a hand-built temp name is a shared path',
+    ).toHaveLength(2);
+    expect(
+      WRITE_FENCE,
+      'each mktemp is a precondition, not an assumption: nothing is composed until both exist',
+    ).toContain('|| exit 1');
   });
 
   it('does NOT reach for --emit: that mode exists only for comment sinks', () => {
@@ -375,7 +670,15 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
   });
 
   it('writes create-exclusively and reports ALREADY_EXISTS, never a lock wait (§14.9 constraint 11)', () => {
-    expect(TRACKER_TEXT).toContain('set -o noclobber');
+    // Each refusing primitive is asserted at ITS OWN site. One `toContain` over the
+    // whole file would let the claim's noclobber satisfy a claim about the write —
+    // PF-064's corpus-reach failure, inside a single document.
+    expect(
+      WRITE_FENCE,
+      'link(2) publishes a file that is ALREADY complete under a name that must not exist, so ' +
+      '$TRACKER_FILE never holds a prefix of the content',
+    ).toContain('ln "$SCRUBBED" "$TRACKER_FILE"');
+    expect(CLAIM_FENCE, 'the claim refuses a taken path with an O_EXCL create').toContain('set -o noclobber');
     expect(TRACKER_TEXT).toContain('ALREADY_EXISTS');
     expect(
       TRACKER_TEXT,
@@ -395,6 +698,168 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
   it('does not chmod the shared parent directory', () => {
     const parentChmod = TRACKER_TEXT.split('\n').filter(l => /chmod\s+\d+\s+"?\$?\{?[A-Za-z_]*devflow/i.test(l));
     expect(parentChmod, '~/.devflow is 0755 and shared — narrowing it breaks every other feature').toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The agent's shell, EXECUTED
+//
+// Every guard below RUNS the fence it names, against an isolated `$HOME` under the
+// temp root, and asserts the OUTCOME rather than the wording. That is the standing
+// instruction from the two pitfalls this agent wrote: a claim primitive is
+// exclusive or it is not, and only a race can tell the two spellings apart
+// (PF-068); a shell chain inside a prompt is a program nothing type-checks, whose
+// defects are invisible to a reader of the prose and obvious to anyone who runs it
+// (PF-066). Each negative is paired with a known-bad spelling driven through the
+// SAME harness, so a green arm can never mean the harness stopped exercising
+// anything (PF-018).
+// ---------------------------------------------------------------------------
+
+describe('Tracker agent claim primitive, executed (PF-068)', () => {
+  it('refuses a path that is already taken — two claims, exactly one winner', () => {
+    const sandbox = makeSandbox();
+    const script = `${ENV_FENCE}\n${CLAIM_FENCE}\necho WON`;
+    const first = runShell(script, sandbox);
+    const second = runShell(script, sandbox);
+
+    expect(first.stdout.trim(), `the winner did not proceed: ${first.stderr}`).toBe('WON');
+    expect(
+      second.stdout.trim(),
+      'the second claimant proceeded — the claim excludes nobody, so both agents probe the ' +
+      'user\'s tracker and the loser deletes the claim while the winner is still running',
+    ).toBe('');
+    expect(second.status, 'the loser exits SILENTLY: no output AND no failure').toBe(0);
+    expect(existsSync(path.join(sandbox.devflowDir, '.tracker.processing'))).toBe(true);
+  });
+
+  it('known-bad probe: rename-to-claim produces TWO winners through the same harness', () => {
+    // `mv src dst` is rename(2): an existing destination is REPLACED and mv exits
+    // 0, so the loser branch is one the kernel never takes. The replaced claim file
+    // also resets the staleness clock the other agent is judged by. A guard that
+    // greps for the command name passes on both spellings, which is why the broken
+    // one is driven through the harness that must report it.
+    const sandbox = makeSandbox();
+    const renameClaim = 'MARKER="$(command mktemp)"\nmv "$MARKER" "$TRACKER_CLAIM" || exit 0\necho WON';
+    const script = `${ENV_FENCE}\n${renameClaim}`;
+    const first = runShell(script, sandbox, { instrument: false });
+    const second = runShell(script, sandbox, { instrument: false });
+    expect([first.stdout.trim(), second.stdout.trim()]).toEqual(['WON', 'WON']);
+  });
+});
+
+describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
+  it('publishes a complete 0600 file and leaves no staging behind', () => {
+    const sandbox = makeSandbox();
+    const run = runShell(writeChain(COMPOSED_FILE), sandbox);
+
+    expect(run.status, `the chain refused a well-formed composition: ${run.stderr}`).toBe(0);
+    expect(readFileSync(sandbox.trackerFile, 'utf-8')).toBe(`${COMPOSED_FILE}\n`);
+    expect(
+      statSync(sandbox.trackerFile).mode & 0o777,
+      'the file is CREATED 0600 — it may name a site and a project, and a world-readable window ' +
+      'closed a moment later is still a window',
+    ).toBe(0o600);
+    expect(stagingResidue(sandbox)).toEqual([]);
+
+    const temps = recordedTemps(sandbox);
+    expect(
+      temps,
+      'the instrumented mktemp recorded nothing — the harness is not driving the chain',
+    ).toHaveLength(2);
+    expect(
+      temps.filter(existsSync),
+      '$RAW holds the PRE-scrub composition: leaving it behind keeps exactly the bytes the gate ' +
+      'exists to remove, for the lifetime of the temp directory rather than of the run',
+    ).toEqual([]);
+  });
+
+  it('refuses an EMPTY composition — the scrubber exits 0 on zero bytes', () => {
+    const sandbox = makeSandbox();
+    const run = runShell(writeChain(''), sandbox);
+
+    expect(run.status, 'every link of the chain exits 0 on an empty body; the size test is the one that does not').not.toBe(0);
+    expect(
+      existsSync(sandbox.trackerFile),
+      'a zero-byte tracker.md satisfies the session-start existence gate forever, so it does not ' +
+      'fail the run — it retires the feature',
+    ).toBe(false);
+    expect(stagingResidue(sandbox)).toEqual([]);
+    expect(recordedTemps(sandbox).filter(existsSync)).toEqual([]);
+  });
+
+  it('refuses a TRUNCATED composition — the tail heading never arrived', () => {
+    const sandbox = makeSandbox();
+    const truncated = COMPOSED_FILE.split(`\n${TEMPLATE_TAIL_HEADING}`)[0];
+    expect(truncated, 'the fixture must actually lose the tail heading').not.toContain(TEMPLATE_TAIL_HEADING);
+
+    const run = runShell(writeChain(truncated), sandbox);
+    expect(run.status).not.toBe(0);
+    expect(existsSync(sandbox.trackerFile)).toBe(false);
+    expect(stagingResidue(sandbox)).toEqual([]);
+  });
+
+  it('known-bad probe: with the shape gate deleted, the same empty composition IS published', () => {
+    // The RED half of the two arms above. Without it, "no file was written" is
+    // equally consistent with a chain that never ran (PF-018).
+    const sandbox = makeSandbox();
+    const ungated = WRITE_FENCE.split('\n')
+      .filter(line => !/\[ -s "\$SCRUBBED" \]|grep -q/.test(line))
+      .join('\n');
+
+    const run = runShell(writeChain('', ungated), sandbox, { instrument: false });
+    expect(run.status, `the ungated chain should complete: ${run.stderr}`).toBe(0);
+    expect(existsSync(sandbox.trackerFile)).toBe(true);
+    expect(
+      statSync(sandbox.trackerFile).size,
+      'the ungated chain publishes a ZERO-BYTE tracker.md and reports success — the defect the ' +
+      'three gate links exist for',
+    ).toBe(0);
+  });
+
+  it('refuses a path already taken and leaves the winner\'s bytes untouched (ALREADY_EXISTS)', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(sandbox.trackerFile, 'the winner wrote this\n');
+
+    const run = runShell(writeChain(COMPOSED_FILE), sandbox);
+    expect(run.status, 'the write is create-exclusive: a taken name is a lost race, not a retry').not.toBe(0);
+    expect(
+      readFileSync(sandbox.trackerFile, 'utf-8'),
+      'the winner\'s content is the answer — never unlink and retry',
+    ).toBe('the winner wrote this\n');
+    expect(stagingResidue(sandbox)).toEqual([]);
+  });
+
+  it('removes the PRE-scrub composition when the run is KILLED at the scrub (PF-056)', () => {
+    const sandbox = makeSandbox();
+    const run = runShell(writeChain(COMPOSED_FILE), sandbox, { stub: KILLED_MID_SCRUB });
+
+    expect(run.status, 'a killed run never publishes').not.toBe(0);
+    expect(existsSync(sandbox.trackerFile)).toBe(false);
+    const temps = recordedTemps(sandbox);
+    expect(temps, 'the kill must land AFTER both staging files exist, or the arm proves nothing').toHaveLength(2);
+    expect(
+      temps.filter(existsSync),
+      'the trap is what covers this path: cleanup written after the chain never runs at all when ' +
+      'the shell is terminated, and $RAW is the unredacted body',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: with the trap removed, the killed run leaves both temp files on disk', () => {
+    const sandbox = makeSandbox();
+    const untrapped = WRITE_FENCE.split('\n')
+      .filter(line => !/^trap /.test(line))
+      .join('\n')
+      .replace('GATE=$?;', 'GATE=$?; unlink "$RAW"; unlink "$SCRUBBED";');
+
+    const run = runShell(writeChain(COMPOSED_FILE, untrapped), sandbox, { stub: KILLED_MID_SCRUB });
+    expect(run.status).not.toBe(0);
+    const temps = recordedTemps(sandbox);
+    expect(temps).toHaveLength(2);
+    expect(
+      temps.filter(existsSync),
+      'cleanup placed after the chain is the spelling this probe seeds: it runs on the refusal ' +
+      'paths and not on the kill path, which is the one the background watchdog produces',
+    ).toHaveLength(2);
   });
 });
 
