@@ -134,6 +134,19 @@ export const TRACKER_ENABLED_FILE = '.tracker.enabled';
 /** `~/.devflow/.tracker.processing` — the Tracker agent's atomic claim (install artifact). */
 export const TRACKER_CLAIM_FILE = '.tracker.processing';
 
+/**
+ * How many background inference attempts a machine gets before the SessionStart
+ * hook stops emitting the setup directive.
+ *
+ * Spelled twice for the reason the basenames above are (PF-013): the hook is the
+ * enforcer and cannot import from here, so `TRACKER_ATTEMPTS_MAX=5` is also a
+ * literal in src/assets/scripts/hooks/session-start-context. This constant is the
+ * number `devflow tracker --status` quotes back when it re-arms the counter, and
+ * tests/core/tracker.test.ts pins the two spellings together so the report cannot
+ * promise more tries than the hook grants.
+ */
+export const TRACKER_ATTEMPTS_MAX = 5;
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -141,7 +154,7 @@ export const TRACKER_CLAIM_FILE = '.tracker.processing';
 const REGISTRY_SET: ReadonlySet<string> = new Set<string>(TRACKER_PROVIDER_IDS);
 const VALID_IDS_LIST = TRACKER_PROVIDER_IDS.join(', ');
 
-/** Longest rejected value echoed back to the terminal. */
+/** Longest rejected value echoed back to the terminal, in CODE POINTS. */
 const MAX_ECHOED_VALUE = 40;
 
 function errorMessage(err: unknown): string {
@@ -172,8 +185,11 @@ export function describeTrackerValue(raw: string): string {
   // tests/guards/no-control-bytes.test.ts.
   // eslint-disable-next-line no-control-regex
   const stripped = raw.replace(/[\x00-\x1f\x7f]/g, '?');
-  return stripped.length > MAX_ECHOED_VALUE
-    ? `${stripped.slice(0, MAX_ECHOED_VALUE)}…`
+  // Cut by CODE POINT. `slice` cuts UTF-16 code units, so a cut landing inside an
+  // astral character (emoji, CJK ext-B) emits the lone surrogate half of it.
+  const points = [...stripped];
+  return points.length > MAX_ECHOED_VALUE
+    ? `${points.slice(0, MAX_ECHOED_VALUE).join('')}…`
     : stripped;
 }
 

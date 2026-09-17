@@ -19,12 +19,13 @@
 
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
-import * as path from 'path';
+import type { FileHandle } from 'fs/promises';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 
 import {
   DEFAULT_TRACKER_PROVIDER,
+  TRACKER_ATTEMPTS_MAX,
   TRACKER_PROVIDERS,
   applyTrackerSentinel,
   describeTrackerValue,
@@ -40,10 +41,8 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export type TrackerCliAction = 'set' | 'status';
-
 export interface TrackerCliActionMessage {
-  level: 'info' | 'success' | 'warn';
+  level: 'info' | 'success';
   text: string;
 }
 
@@ -55,49 +54,35 @@ export interface TrackerCliActionResult {
 // ── Pure resolver ──────────────────────────────────────────────────────────────
 
 /**
- * Pure resolver: maps (currentState × action) → (nextState, messages).
+ * Pure resolver for `--set`: maps (currentState × requested provider) →
+ * (nextState, messages).
  *
  * D: Pure function — no I/O, fully testable without filesystem access. The I/O
  *   layer (rename transition, manifest write, re-arm, sentinel) is always the
  *   caller's responsibility. `setProvider` must already have passed
  *   `parseTrackerId` at the CLI boundary.
  *
- * Semantics:
- *   set    — replace: the parsed provider becomes the selection (github included —
- *            `--set github` is the off switch; there is no --no-tracker, D-E)
- *   status — no-op:   returns the current selection unchanged, no messages
+ * Replace semantics: the parsed provider becomes the selection, github included —
+ * `--set github` is the off switch; there is no --no-tracker (D-E). The
+ * `--status` branch reads the manifest and reports it directly, so `--set` is
+ * the only action that reaches this resolver.
  */
 export function resolveTrackerCliAction(
   current: TrackerFeatureState,
-  action: TrackerCliAction,
   setProvider?: TrackerProvider,
 ): TrackerCliActionResult {
-  switch (action) {
-    case 'set': {
-      // Never invent a provider: an absent setProvider keeps the current one.
-      const provider = setProvider ?? current.provider;
-      if (provider === current.provider) {
-        return {
-          nextState: { provider },
-          messages: [{ level: 'info', text: `Tracker provider already ${provider}` }],
-        };
-      }
-      return {
-        nextState: { provider },
-        messages: [{ level: 'success', text: `Tracker provider set to ${provider}` }],
-      };
-    }
-
-    case 'status': {
-      return { nextState: { provider: current.provider }, messages: [] };
-    }
-
-    default: {
-      const _exhaustive: never = action;
-      void _exhaustive;
-      return { nextState: { provider: current.provider }, messages: [] };
-    }
+  // Never invent a provider: an absent setProvider keeps the current one.
+  const provider = setProvider ?? current.provider;
+  if (provider === current.provider) {
+    return {
+      nextState: { provider },
+      messages: [{ level: 'info', text: `Tracker provider already ${provider}` }],
+    };
   }
+  return {
+    nextState: { provider },
+    messages: [{ level: 'success', text: `Tracker provider set to ${provider}` }],
+  };
 }
 
 // ── Provenance (the --status surface) ──────────────────────────────────────────
@@ -117,23 +102,51 @@ export type TrackerProvenance =
 const PROVENANCE_SCAN_LINES = 40;
 
 /**
+ * How many leading BYTES of tracker.md are read.
+ *
+ * The line cap above bounds the SCAN, not the read: `String.prototype.split`'s
+ * limit truncates the resulting array once the whole file is already in memory.
+ * tracker.md is hand-editable and machine-wide, so its size is not devflow's to
+ * assume — this is the same bound the Tracker agent writes to and the Git agent
+ * loads, enforced at the one TypeScript reader (avoids PF-023: a bound is only
+ * real at the sink, and a file round-trip launders the writer's promise).
+ */
+const PROVENANCE_READ_BYTES = 8000;
+
+/**
+ * Read at most `limit` bytes from the head of a file.
+ *
+ * `undefined` for an absent, unreadable or non-file path — the caller reports
+ * that as `absent` (PF-014: never throws).
+ */
+async function readBoundedHead(filePath: string, limit: number): Promise<string | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await fs.open(filePath, 'r');
+    const buffer = Buffer.alloc(limit);
+    const { bytesRead } = await handle.read(buffer, 0, limit, 0);
+    return buffer.subarray(0, bytesRead).toString('utf-8');
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+/**
  * Read the provenance header of `~/.devflow/tracker.md`.
  *
  * Never throws (PF-014): an absent, unreadable, or directory path is `absent`.
- * Only the leading frontmatter block is scanned, and nothing read here is
- * trusted — every value is rendered through `describeTrackerValue`, because
- * tracker.md is hand-editable and machine-wide, so its content is third-party
- * input at every sink.
+ * Only the bounded head of the file is read and only the leading frontmatter
+ * block is scanned, and nothing read here is trusted — every value is rendered
+ * through `describeTrackerValue`, because tracker.md is hand-editable and
+ * machine-wide, so its content is third-party input at every sink.
  */
 export async function readTrackerProvenance(devflowDir: string): Promise<TrackerProvenance> {
-  let content: string;
-  try {
-    content = await fs.readFile(trackerConventionsPath(devflowDir), 'utf-8');
-  } catch {
-    return { kind: 'absent' };
-  }
+  const head = await readBoundedHead(trackerConventionsPath(devflowDir), PROVENANCE_READ_BYTES);
+  if (head === undefined) return { kind: 'absent' };
 
-  const lines = content.split('\n', PROVENANCE_SCAN_LINES);
+  const lines = head.split('\n', PROVENANCE_SCAN_LINES);
   if (lines[0]?.trim() !== '---') return { kind: 'present' };
 
   let provider: string | undefined;
@@ -173,7 +186,10 @@ interface TrackerOptions {
 
 export const trackerCommand = new Command('tracker')
   .description('Show or set the issue tracker provider')
-  .option('--status', 'Show the selected provider and the learned conventions file')
+  .option(
+    '--status',
+    'Show the selected provider and the learned conventions file, and re-arm background inference',
+  )
   .option('--set <id>', 'Set the issue tracker provider: github, jira, or linear')
   .action(async (options: TrackerOptions) => {
     const devflowDir = getDevFlowDirectory();
@@ -215,6 +231,21 @@ export const trackerCommand = new Command('tracker')
     // --status wins when both flags are passed, mirroring `devflow compliance`.
     if (options.status) {
       const provenance = await readTrackerProvenance(devflowDir);
+
+      // [D-F] Inspecting the status re-arms the attempt counter. --status is
+      // the command a capped user reaches for to find out why nothing is being
+      // learned, so it is the command that has to hand back another five
+      // tries; the alternative leaves the only escape a hand deletion of an
+      // undocumented dotfile. Every other --status in this CLI is a pure read,
+      // so this one reports the write it makes as a line of the note below — a
+      // machine-state change the output does not mention is a change the user
+      // cannot audit. Non-fatal exactly as on the --set path (avoids PF-009): a
+      // failed re-arm warns, it never aborts the report the user asked for.
+      const statusRearm = await rearmTrackerInference(devflowDir);
+      const inference = statusRearm.ok
+        ? `re-armed (${TRACKER_ATTEMPTS_MAX} attempts available)`
+        : 're-arm failed — see the warning below';
+
       const providerLabel = current.provider === DEFAULT_TRACKER_PROVIDER
         ? `${color.green(current.provider)} ${color.dim('(default)')}`
         : color.green(current.provider);
@@ -222,26 +253,19 @@ export const trackerCommand = new Command('tracker')
         [
           `Provider:    ${providerLabel}`,
           `Conventions: ${formatTrackerProvenance(provenance)}`,
-          `File:        ${path.join(devflowDir, 'tracker.md')}`,
+          `File:        ${trackerConventionsPath(devflowDir)}`,
+          `Inference:   ${inference}`,
         ].join('\n'),
         'Tracker Status',
       );
 
-      // [D-F] Inspecting the status re-arms the attempt counter. --status is
-      // the command a capped user reaches for to find out why nothing is being
-      // learned, so it is the command that has to hand back another five
-      // tries; the alternative leaves the only escape a hand deletion of an
-      // undocumented dotfile. Non-fatal exactly as on the --set path
-      // (avoids PF-009): a failed re-arm warns, it never aborts the report the
-      // user asked for.
-      const statusRearm = await rearmTrackerInference(devflowDir);
       if (!statusRearm.ok) p.log.warn(statusRearm.error);
 
       return;
     }
 
     // ── Set ────────────────────────────────────────────────────────────────────
-    const resolved = resolveTrackerCliAction(current, 'set', setProvider);
+    const resolved = resolveTrackerCliAction(current, setProvider);
 
     // P3a-S15: a conventions file inferred for the previous provider is stale the
     // moment the provider changes — move it aside so it can never be silently
@@ -271,7 +295,6 @@ export const trackerCommand = new Command('tracker')
     for (const msg of resolved.messages) {
       switch (msg.level) {
         case 'success': p.log.success(msg.text); break;
-        case 'warn': p.log.warn(msg.text); break;
         default: p.log.info(msg.text); break;
       }
     }

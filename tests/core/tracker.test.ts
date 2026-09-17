@@ -10,6 +10,7 @@
  *   - applyTrackerSentinel: written when provider != github, removed when it is [DR-10]
  *   - renameStaleTrackerConventions: the provider-change transition (P3a-S15 / AC-3.20)
  *   - TRACKER_PROVIDER_KEY_PATH: the shared TS<->shell manifest key path constant
+ *   - TRACKER_ATTEMPTS_MAX: the inference cap, cross-pinned against the hook literal
  *
  * Per PF-018: every table asserts its own row count so a payload deleted from the
  * table (or a registry that shrinks to nothing) fails RED instead of passing vacuously.
@@ -21,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
 import {
   TRACKER_PROVIDERS,
@@ -31,6 +33,7 @@ import {
   TRACKER_ATTEMPTS_FILE,
   TRACKER_ENABLED_FILE,
   TRACKER_CLAIM_FILE,
+  TRACKER_ATTEMPTS_MAX,
   parseTrackerId,
   normalizeTrackerFeature,
   describeTrackerValue,
@@ -153,6 +156,15 @@ describe('parseTrackerId (strict boundary parser)', () => {
   });
 });
 
+/**
+ * A UTF-16 string is well formed when every surrogate is one half of a pair.
+ * Truncating by code UNIT can leave the other half behind, and a lone surrogate
+ * is mojibake at every sink the value is echoed to.
+ */
+function hasLoneSurrogate(value: string): boolean {
+  return /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+}
+
 describe('describeTrackerValue', () => {
   it('replaces control characters and truncates long values', () => {
     expect(describeTrackerValue('jira[0m')).not.toContain('');
@@ -161,6 +173,23 @@ describe('describeTrackerValue', () => {
 
   it('passes a well-formed id through unchanged', () => {
     expect(describeTrackerValue('jira')).toBe('jira');
+  });
+
+  it('truncates by code point, so an astral character is never cut in half', () => {
+    // Known-bad probe for the detector itself: it must call a bare high surrogate
+    // broken and a whole pair fine, or the assertion below passes vacuously.
+    expect(hasLoneSurrogate('\uD83D')).toBe(true);
+    expect(hasLoneSurrogate('\uD83D\uDE00')).toBe(false);
+
+    // 39 BMP characters put the 40th UTF-16 code unit inside the first pair.
+    const rendered = describeTrackerValue(`${'x'.repeat(39)}${'\u{1F600}'.repeat(5)}`);
+    expect(hasLoneSurrogate(rendered)).toBe(false);
+  });
+
+  it('bounds an all-astral value at 40 code points plus the ellipsis', () => {
+    const rendered = describeTrackerValue('\u{1F600}'.repeat(60));
+    expect(hasLoneSurrogate(rendered)).toBe(false);
+    expect([...rendered]).toHaveLength(41);
   });
 });
 
@@ -379,5 +408,26 @@ describe('TRACKER_PROVIDER_KEY_PATH', () => {
     expect(manifest).not.toBeNull();
     expect(walked).toBe('jira');
     expect(manifest!.features.tracker.provider).toBe(walked);
+  });
+});
+
+// -- TRACKER_ATTEMPTS_MAX -- the cap, shared with the SessionStart hook --------
+//
+// The hook is the enforcer and cannot import from here (PF-013), so the literal
+// exists twice; `devflow tracker --status` quotes the constant, and this pin is
+// what stops it quoting a number the hook no longer enforces.
+
+describe('TRACKER_ATTEMPTS_MAX', () => {
+  const HOOK_SOURCE = path.join(
+    path.dirname(fileURLToPath(import.meta.url)), '..', '..',
+    'src', 'assets', 'scripts', 'hooks', 'session-start-context',
+  );
+
+  it('is the cap the SessionStart hook enforces', async () => {
+    const hook = await fs.readFile(HOOK_SOURCE, 'utf-8');
+    expect(hook).toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX}`);
+    // Non-vacuity: the match above is exact-literal, so a neighbouring cap must
+    // not satisfy it.
+    expect(hook).not.toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX + 1}`);
   });
 });

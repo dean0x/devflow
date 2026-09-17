@@ -36,7 +36,7 @@ const TRACKER_CLI_SOURCE = path.join(REPO_ROOT, 'src', 'cli', 'commands', 'track
 
 describe('resolveTrackerCliAction', () => {
   it('set replaces the provider and reports the change', () => {
-    const result = resolveTrackerCliAction({ provider: 'github' }, 'set', 'jira');
+    const result = resolveTrackerCliAction({ provider: 'github' }, 'jira');
     expect(result.nextState).toEqual({ provider: 'jira' });
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0].level).toBe('success');
@@ -44,35 +44,25 @@ describe('resolveTrackerCliAction', () => {
   });
 
   it('set to the provider already in the manifest is reported as a no-change', () => {
-    const result = resolveTrackerCliAction({ provider: 'jira' }, 'set', 'jira');
+    const result = resolveTrackerCliAction({ provider: 'jira' }, 'jira');
     expect(result.nextState).toEqual({ provider: 'jira' });
     expect(result.messages.some(m => m.text.toLowerCase().includes('already'))).toBe(true);
   });
 
   it('set back to github is honoured — github is the off switch (decision D-E)', () => {
     // There is no --no-tracker: `--set github` IS the way off.
-    const result = resolveTrackerCliAction({ provider: 'linear' }, 'set', 'github');
+    const result = resolveTrackerCliAction({ provider: 'linear' }, 'github');
     expect(result.nextState).toEqual({ provider: 'github' });
     expect(result.messages[0].text).toContain('github');
   });
 
-  it('set with no provider leaves the current state untouched', () => {
+  it('with no provider leaves the current state untouched and never aliases it', () => {
     // Defensive: the caller parses --set at the boundary, so this arm should be
-    // unreachable — it must still never invent a provider.
-    const result = resolveTrackerCliAction({ provider: 'linear' }, 'set');
+    // unreachable — it must still never invent a provider, and the state it
+    // hands back is a fresh object the caller can persist without sharing.
+    const current = { provider: 'linear' as const };
+    const result = resolveTrackerCliAction(current);
     expect(result.nextState).toEqual({ provider: 'linear' });
-  });
-
-  it('status → nextState unchanged, no messages', () => {
-    const current = { provider: 'jira' as const };
-    const result = resolveTrackerCliAction(current, 'status');
-    expect(result.nextState).toEqual(current);
-    expect(result.messages).toHaveLength(0);
-  });
-
-  it('never aliases the current state', () => {
-    const current = { provider: 'jira' as const };
-    const result = resolveTrackerCliAction(current, 'status');
     expect(result.nextState).not.toBe(current);
   });
 });
@@ -165,6 +155,27 @@ describe('tracker.md provenance (--status)', () => {
     expect(rendered.length).toBeLessThan(200);
   });
 
+  it('bounds the READ, not just the line scan, on an oversized tracker.md', async () => {
+    const trackerMd = path.join(devflowDir, 'tracker.md');
+    // A key pushed past the byte bound by one very long line is still inside the
+    // 40-line scan, so only a bounded READ can keep it out.
+    await fs.writeFile(trackerMd, `---\n${'x'.repeat(9000)}\nprovider: jira\n---\n`, 'utf-8');
+
+    const beyond = await readTrackerProvenance(devflowDir);
+
+    expect(beyond.kind).toBe('present');
+    if (beyond.kind !== 'present') return;
+    expect(beyond.provider).toBeUndefined();
+
+    // Non-vacuity: the identical shape inside the bound IS read, so the absence
+    // above is the bound and not a parser that stopped reading frontmatter.
+    await fs.writeFile(trackerMd, `---\n${'x'.repeat(10)}\nprovider: jira\n---\n`, 'utf-8');
+    const within = await readTrackerProvenance(devflowDir);
+    expect(within.kind).toBe('present');
+    if (within.kind !== 'present') return;
+    expect(within.provider).toBe('jira');
+  });
+
   it('never throws when the path is a directory rather than a file', async () => {
     await fs.mkdir(path.join(devflowDir, 'tracker.md'));
     const provenance = await readTrackerProvenance(devflowDir);
@@ -242,6 +253,10 @@ describe('devflow tracker --status re-arms the attempt counter (D-F)', () => {
     expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
     expect(result.stdout + result.stderr).toContain('jira');
 
+    // The write is disclosed in the report the user asked for: a --status that
+    // re-arms silently is a machine-state change with no receipt.
+    expect(result.stdout + result.stderr).toMatch(/Inference:\s+re-armed \(5 attempts available\)/);
+
     // The counter is gone: the next session start gets another five tries.
     await expect(fs.access(attempts)).rejects.toThrow();
 
@@ -279,6 +294,22 @@ describe('devflow tracker call sites', () => {
     expect((setBranch.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
     expect((source.match(/rearmTrackerInference\(/g) ?? []).length).toBe(2);
     expect(source).not.toMatch(/\.tracker\.attempts/);
+  });
+
+  it('discloses the re-arm in the --status help text and in the note it prints [D-F]', async () => {
+    const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
+
+    // The declaration spans lines, so match the description Commander prints
+    // rather than the line it happens to sit on.
+    const statusOption = /\.option\(\s*'--status',\s*'([^']*)'/.exec(source);
+    expect(statusOption, 'the --status option declaration must be findable').not.toBeNull();
+    expect(statusOption?.[1] ?? '').toMatch(/re-arm/i);
+
+    const statusStart = source.indexOf('if (options.status) {');
+    const setStart = source.indexOf('// ── Set ─');
+    expect(statusStart, 'the --status branch guard must be findable').toBeGreaterThan(0);
+    expect(setStart, 'the Set separator must follow the --status branch').toBeGreaterThan(statusStart);
+    expect(source.slice(statusStart, setStart)).toContain('Inference:');
   });
 
   it('converges the sentinel through applyTrackerSentinel exactly once [DR-10]', async () => {
