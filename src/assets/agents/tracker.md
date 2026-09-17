@@ -285,14 +285,28 @@ RAW="$(mktemp)" && SCRUBBED="$(mktemp)"
 cat > "$RAW" <<'EOF'
 <the composed file, literally>
 EOF
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED" \
-  && ( set -o noclobber; cat > "$TRACKER_FILE" ) < "$SCRUBBED" \
+node "$TRACKER_DEVFLOW_DIR/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED" \
+  && ( umask 077; set -o noclobber; cat > "$TRACKER_FILE" ) < "$SCRUBBED" \
   && chmod 600 "$TRACKER_FILE"
+GATE=$?; unlink "$RAW"; unlink "$SCRUBBED"; exit "$GATE"
 ```
 
 Every part of that is load-bearing:
 
 - **`mktemp` per invocation** — two concurrent runs never share a staging path.
+- **Both temp files are removed unconditionally, on every path.** `$RAW` holds the
+  PRE-scrub composition, so leaving it behind keeps exactly the bytes the gate
+  exists to remove, for the lifetime of the temp directory rather than of the run.
+  `unlink`, never a flagged `rm`, for the reason `## Finishing` step 3 gives.
+- **`GATE=$?` before the cleanup and `exit "$GATE"` after it.** The cleanup runs
+  whether the gate opened or refused, so without capturing the status first the
+  block reports `unlink`'s success and the gate's verdict becomes unreadable — an
+  exit code read after a later command is not evidence about the earlier one.
+- **The scrubber is addressed through `$TRACKER_DEVFLOW_DIR`**, the one resolution
+  `## Environment` performs — never a second `${DEVFLOW_DIR:-$HOME/.devflow}` here.
+  A second site can disagree with the first, and the disagreement fails closed
+  and silently: the scrubber is looked up under one root while the file is written
+  under another, `node` exits non-zero, and inference never writes anything.
 - **The quoted heredoc delimiter** (`<<'EOF'`) — the composed file carries scanned
   history strings and tracker text. An unquoted delimiter would expand them.
 - **A single `&&` chain, never a pipeline.** A pipeline hides the scrubber's exit
@@ -303,6 +317,9 @@ Every part of that is load-bearing:
   scrubber's framed stdout mode exists for comment sinks that have no such
   boundary — a different sink with a different problem. **Keep the two reasons
   apart; neither simplifies into the other.**
+- **`umask 077` in the same subshell** — the file is CREATED `0600` rather than
+  created world-readable and narrowed a moment later. `chmod 600` stays as the
+  second, independent control: defense in depth, not redundancy.
 - **`set -o noclobber` makes the write create-exclusive.** If it fails because the
   file appeared, you lost a race: **read the existing file and report
   `ALREADY_EXISTS`.** The failure is **not a lock wait** — do not unlink and
