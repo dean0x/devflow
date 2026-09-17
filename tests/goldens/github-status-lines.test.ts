@@ -3,10 +3,10 @@
  *
  * Measurements pinned to the current git-agent.md golden:
  *
- *   tests/fixtures/golden/git-agent.md          55,664 ch / 913 L   (== dist/agents/git.md)
+ *   tests/fixtures/golden/git-agent.md          58,782 ch / 918 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           65,187 ch / 1,218 L
+ *   Total (all three)                           68,305 ch / 1,223 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
