@@ -148,11 +148,11 @@
     },
     {
       "id": "generated-reference-manifest-size",
-      "floor": 24,
-      "pattern": "toBeGreaterThanOrEqual(24)",
+      "floor": 34,
+      "pattern": "toBeGreaterThanOrEqual(34)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "P2-S14 overlay: the generated reference manifest. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. RAISED 13 -> 24 in the Phase-3 3b commit that registers the Jira provider: 10 GitHub ops + 10 Jira ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 3 cross-cutting documents + the tool-call contract, whose generation gate the Jira registration opens. A floor may only rise, and here it rises by a whole provider at a time."
+      "description": "P2-S14 overlay: the generated reference manifest. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. RAISED 13 -> 24 in the Phase-3 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear: 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 3 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. A floor may only rise, and here it rises by a whole provider at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -164,19 +164,19 @@
     },
     {
       "id": "packed-reference-manifest-size",
-      "floor": 24,
-      "pattern": "toBeGreaterThanOrEqual(24)",
+      "floor": 34,
+      "pattern": "toBeGreaterThanOrEqual(34)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
-      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. RAISED 13 -> 24 alongside generated-reference-manifest-size in the 3b commit that registers the Jira provider — the two pin the same manifest at its two sinks (install and tarball) and must move together, or a provider could ship un-packed."
+      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. RAISED 13 -> 24 alongside generated-reference-manifest-size in the 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear — the two pin the same manifest at its two sinks (install and tarball) and must move together, or a provider could ship un-packed."
     },
     {
       "id": "capability-hoist-block-floor",
-      "floor": 39,
-      "pattern": "toBeGreaterThanOrEqual(39)",
+      "floor": 49,
+      "pattern": "toBeGreaterThanOrEqual(49)",
       "occurrences": 1,
       "sourceFile": "tests/guards/capability-hoist.test.ts",
-      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof. RAISED 29 -> 39 in the Phase-3 3b commit that adds the Jira provider: ten more per-op references, each with its own process block. A provider adds its whole roster at once, so the floor moves by a provider rather than by a file."
+      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof. RAISED 29 -> 39 in the Phase-3 3b commit that adds the Jira provider and 39 -> 49 in the 3c commit that adds Linear: ten more per-op references each time, each with its own process block. A provider adds its whole roster at once, so the floor moves by a provider rather than by a file."
     },
     {
       "id": "git-agent-guard-count",
@@ -226,7 +226,15 @@
       "pattern": "const BUDGET_LOADED_SET_JIRA = 88_660;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case tracker spawn under the JIRA provider — a NEW row, never a raise of budget-loaded-set or budget-loaded-set's Phase-3 companion. The GitHub row keeps bytes(tracker/_mcp.md) = 0 BY CONSTRUCTION (no github op file names the contract; the re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts proves it, and a byte-budget arm re-proves it), so folding a provider that DOES load the contract into that number would bill every GitHub user for bytes they never receive (GAP-02) and would do it by raising a ratcheted ceiling. Each MCP-backed provider is therefore priced on its own row. Measured on the tree at the 3b boundary: preloaded 68_299 (git.md 58_776 + git SKILL.md 6_581 + worktree-support SKILL.md 2_942) + tracker/_mcp.md 6_402 + max_op tracker/jira/{op}.md 6_087 (backlink-shipped-issues) + max over jira ops of the one-spawn load 7_821 (setup-task: its own mechanics plus learn-conventions.md) = 88_609; pinned at 88_660, headroom 51 — tighter than budget-git-md's 86 and budget-git-md-p3's 94. The gate went red once during authoring, on a 197-character rewrite of the contract's own truncation clause, and the response was to condense the clause rather than move this number. A companion assertion holds the delta over the GitHub ceiling to what this provider actually adds (the contract plus the difference between the two providers' per-op terms), so the number cannot be set freely. May be LOWERED after a pass that cuts the contract prose or the mechanics — that is the sanctioned response to it going red — and never raised. 3c adds a sibling entry for Linear; a registered provider with no such entry fails a named arm in the same file."
+      "description": "Max characters of the worst-case tracker spawn under the JIRA provider — a NEW row, never a raise of budget-loaded-set or budget-loaded-set's Phase-3 companion. The GitHub row keeps bytes(tracker/_mcp.md) = 0 BY CONSTRUCTION (no github op file names the contract; the re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts proves it, and a byte-budget arm re-proves it), so folding a provider that DOES load the contract into that number would bill every GitHub user for bytes they never receive (GAP-02) and would do it by raising a ratcheted ceiling. Each MCP-backed provider is therefore priced on its own row. Measured on the tree at the 3b boundary: preloaded 68_299 (git.md 58_776 + git SKILL.md 6_581 + worktree-support SKILL.md 2_942) + tracker/_mcp.md 6_402 + max_op tracker/jira/{op}.md 6_087 (backlink-shipped-issues) + max over jira ops of the one-spawn load 7_821 (setup-task: its own mechanics plus learn-conventions.md) = 88_609; pinned at 88_660, headroom 51 — tighter than budget-git-md's 86 and budget-git-md-p3's 94. The gate went red once during authoring, on a 197-character rewrite of the contract's own truncation clause, and the response was to condense the clause rather than move this number. A companion assertion holds the delta over the GitHub ceiling to what this provider actually adds (the contract plus the difference between the two providers' per-op terms), so the number cannot be set freely. May be LOWERED after a pass that cuts the contract prose or the mechanics — that is the sanctioned response to it going red — and never raised. budget-loaded-set-linear is the sibling row the 3c commit added; a registered provider with no such entry fails a named arm in the same file."
+    },
+    {
+      "id": "budget-loaded-set-linear",
+      "ceiling": 91000,
+      "pattern": "const BUDGET_LOADED_SET_LINEAR = 91_000;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "Max characters of the worst-case tracker spawn under the LINEAR provider — the THIRD row, a NEW entry and never a raise of budget-loaded-set-jira or of the GitHub row. Each MCP-backed provider is priced on its own row (D-LOADED-SET-PER-PROVIDER) because folding a provider that DOES load bytes(tracker/_mcp.md) into a row whose contract term is 0 by construction would bill every GitHub user for bytes they never receive (GAP-02) and would do it by raising a ratcheted ceiling. Measured on the tree at the 3c boundary: preloaded 68_299 (git.md 58_776 + git SKILL.md 6_581 + worktree-support SKILL.md 2_942) + tracker/_mcp.md 6_402 + max_op tracker/linear/{op}.md 7_679 (backlink-shipped-issues) + max over linear ops of the one-spawn load 8_571 (setup-task: its own mechanics plus learn-conventions.md) = 90_951; pinned at 91_000, headroom 49 — the same deliberate thinness as the Jira row's 51. This provider's max_op is the largest of the three for a recorded reason rather than by accident: backlink-shipped-issues is where the dedup ladder is stated, and on a stock official server three of its four rungs are unreachable (OD-12), so each rung's unavailability plus both halves of the rank-4 marker predicate (the first-line binding and the second discriminator) have to be written down — 2_672 ch more than GitHub's largest mechanics file, and content rather than slack. A companion assertion holds the delta over the GitHub ceiling to what this provider actually adds (the contract plus the difference between the two providers' per-op terms), so the number cannot be set freely. May be LOWERED after a pass that cuts the contract prose or the mechanics — that is the sanctioned response to it going red — and never raised."
     },
     {
       "id": "budget-skill-md",

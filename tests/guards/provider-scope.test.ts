@@ -167,6 +167,23 @@ const PROVIDER_OWNED_PATHS: readonly ProviderOwnedPath[] = [
       'the generated Jira per-op references — the emitted form of the module above. Scanned, not ' +
       'exempted: only the one token is admitted, so a Linear literal here is still reported.',
   },
+  {
+    prefix: 'src/assets/mds/tracker/_linear.mds',
+    token: 'linear',
+    justification:
+      'the Linear mechanics module. Its sections state which provider the Git agent loads them ' +
+      'for, and a mechanics file that cannot name its provider cannot state that. Its ' +
+      '`## Known Unknowns` prose names the provider too — the rank-4 statement is about this ' +
+      'provider specifically, and a rank stated without its subject is unreadable.',
+  },
+  {
+    prefix: 'dist/skills/git/references/tracker/linear/',
+    token: 'linear',
+    justification:
+      'the generated Linear per-op references — the emitted form of the module above. Scanned, ' +
+      'not exempted: only the one token is admitted, so a Jira literal here is still reported, ' +
+      'which is the half of ADR-025 that keeps the narrow widening narrow.',
+  },
 ];
 
 /** Is `path` owned by `token` — i.e. may it name that provider? */

@@ -670,7 +670,7 @@ describe('VARIANT_MODULES (shipped registry)', () => {
     const providerSubdirs = VARIANT_MODULES
       .map(m => m.subdir as string)
       .filter(subdir => subdir.startsWith('tracker/'));
-    expect(providerSubdirs).toEqual(['tracker/github', 'tracker/jira']);
+    expect(providerSubdirs).toEqual(['tracker/github', 'tracker/jira', 'tracker/linear']);
     for (const subdir of providerSubdirs) {
       const mod = VARIANT_MODULES.find(m => m.subdir === subdir)!;
       expect(

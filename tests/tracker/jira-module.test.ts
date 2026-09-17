@@ -7,12 +7,13 @@
  * providers, so it is the first commit in which parity is a property rather than
  * an aspiration. Three claims live here and nowhere else:
  *
- *   1. PARITY — file-set and define-set parity between `_github.mds` and
- *      `_jira.mds`, in BOTH directions, with every define non-empty (AC-3.8's
- *      two-provider half). File-set parity is STRUCTURAL: both registry rows read
- *      the same exported `TRACKER_OPS`, so a divergence is a compile error rather
- *      than a test failure. Define-set parity is asserted, because a define is a
- *      name inside a module body that no type sees.
+ *   1. PARITY — file-set and define-set parity across every registered provider
+ *      module, in BOTH directions, with every define non-empty. File-set parity is
+ *      STRUCTURAL: every registry row reads the same exported `TRACKER_OPS`, so a
+ *      divergence is a compile error rather than a test failure. Define-set parity
+ *      is asserted, because a define is a name inside a module body that no type
+ *      sees. §8.11 makes AC-3.8 non-vacuous at THREE providers, which is the state
+ *      of the scan below — it grew by a row, not by a rewrite.
  *   2. PROVIDER LITERALS — `32767` present; `60000` and `X-RateLimit-Remaining`
  *      absent; `Retry-After` present (AC-3.13). Jira has no pre-emptive remaining
  *      count, so a module that names one has copied GitHub's backpressure model
@@ -21,11 +22,11 @@
  *      budget [DR-09], the first-line namespaced marker (AC-3.14), the never-
  *      `COMPLETE` rule (AC-3.4), and the no-HTTP-fallback negative (AC-3.18).
  *
- * NOT here: the cross-provider three-column parity scan (`providers.length === 3`)
- * and `tests/provider-literals.test.ts` are 3c's, per §8.11 — with two providers
- * the third column does not exist and a scaffold for it would assert nothing. The
- * two-sided shape below is what 3c extends, and it is written so extending it is
- * adding a row to PROVIDERS rather than rewriting the loops.
+ * NOT here: the cross-provider LITERAL matrix is `tests/provider-literals.test.ts`',
+ * per P3c-S5, and Linear's own mechanics are `tests/tracker/linear-module.test.ts`'.
+ * What stayed is the parity scan, because parity is a property of the SET of
+ * providers and has no per-provider home: it lives in the file that first had two
+ * columns to compare, and it grew by one row when the third arrived.
  *
  * CORPUS, AND WHY BOTH SIDES ARE READ
  * -----------------------------------
@@ -49,7 +50,7 @@ import {
   generatedReferenceManifest,
   mcpContractIsGenerated,
 } from '../../src/core/mds-variants.js';
-import { ROOT } from '../helpers.js';
+import { PER_ITEM_FETCH_SHAPES, ROOT, collectPerItemFetchVerbs } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Sources and generated files
@@ -216,56 +217,72 @@ export function collectDefineBodies(source: string): Map<string, string> {
  */
 const MIN_DEFINE_CHARS = 80;
 
-describe('jira module: define-set parity with GitHub, both directions (AC-3.8)', () => {
-  const githubSource = readSource(GITHUB_MODULE);
-  const jiraSource = readSource(JIRA_MODULE);
-
+describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', () => {
   /**
-   * The two providers as a list, so 3c adds Linear as a row rather than as a
-   * rewrite. §8.11's three-column scan replaces the length assertion below with
-   * `providers.length === 3`; nothing else about the shape changes.
+   * Every registered provider module, read from the registry rather than listed.
+   *
+   * Derived, so a provider registered later joins the scan by construction and
+   * cannot ship with a define set nobody compared. The length assertion below is
+   * what keeps the derivation honest in the other direction: §8.11 makes AC-3.8
+   * non-vacuous at THREE providers, and a registry that lost one would otherwise
+   * shrink the scan silently.
    */
-  const PROVIDERS: ReadonlyArray<{ readonly name: string; readonly source: string }> = [
-    { name: 'github', source: githubSource },
-    { name: 'jira', source: jiraSource },
-  ];
+  const PROVIDERS: ReadonlyArray<{ readonly name: string; readonly source: string }> =
+    VARIANT_MODULES
+      .filter(mod => mod.kind === 'fanout' && mod.subdir.startsWith('tracker/'))
+      .map(mod => ({
+        name: mod.subdir.slice('tracker/'.length),
+        source: readSource(mod.source),
+      }));
 
-  it('the scan really holds two providers', () => {
+  /** Every ordered pair of distinct providers — both directions, by construction. */
+  const PAIRS = PROVIDERS.flatMap(a => PROVIDERS.filter(b => b.name !== a.name).map(b => [a, b] as const));
+
+  it('the scan really holds three providers', () => {
     expect(
       PROVIDERS.length,
-      'a one-provider parity scan is vacuous by construction (GAP-42) — it is satisfied by any ' +
-      'module at all, which is why Phase 2 asserted only the structural property',
-    ).toBe(2);
+      'a one- or two-provider parity scan is what §8.11 calls vacuous (GAP-42): with one column ' +
+      'it is satisfied by any module at all, and with two the "every provider agrees" claim is ' +
+      'just one comparison wearing a plural. Three is where it starts discriminating',
+    ).toBe(3);
+    expect(
+      PROVIDERS.map(p => p.name).sort(),
+      'and the columns must be the registered providers, not a hand-listed set beside them',
+    ).toEqual(['github', 'jira', 'linear']);
     for (const provider of PROVIDERS) {
       expect(provider.source.length, `${provider.name}: empty module source`).toBeGreaterThan(0);
     }
+    expect(
+      PAIRS.length,
+      'the ordered-pair set must cover every direction between every pair (3 × 2 = 6)',
+    ).toBe(PROVIDERS.length * (PROVIDERS.length - 1));
   });
 
-  it('every GitHub define has a same-named Jira define (direction 1)', () => {
-    const jiraNames = new Set(collectDefineNames(jiraSource));
-    const missing = collectDefineNames(githubSource).filter(name => !jiraNames.has(name));
+  it('every define of every provider has a same-named define in every other (both directions)', () => {
+    // One loop over ORDERED pairs replaces the two hand-written directions: with
+    // three providers there are six directions, and writing them out would be six
+    // places a message could drift. A define missing from one provider is an op
+    // whose reference for that provider is a heading with no mechanics — which
+    // reads downstream as `tracker mechanics unavailable` shipped as the normal
+    // path — and a define only one provider declares is either a section marker
+    // nobody emits or an operation one provider invented.
+    const asymmetries: string[] = [];
+    for (const [from, to] of PAIRS) {
+      const toNames = new Set(collectDefineNames(to.source));
+      for (const name of collectDefineNames(from.source)) {
+        if (!toNames.has(name)) asymmetries.push(`${from.name} declares ${name}; ${to.name} does not`);
+      }
+    }
     expect(
-      missing,
-      `define(s) GitHub declares and Jira does not. The two modules emit the same file set, so a ` +
-      `missing define is an op whose Jira reference is a heading with no mechanics — which reads ` +
-      `downstream as \`tracker mechanics unavailable\` shipped as the normal path:\n  ` +
-      missing.join('\n  '),
-    ).toEqual([]);
-  });
-
-  it('every Jira define has a same-named GitHub define (direction 2)', () => {
-    const githubNames = new Set(collectDefineNames(githubSource));
-    const extra = collectDefineNames(jiraSource).filter(name => !githubNames.has(name));
-    expect(
-      extra,
-      `define(s) Jira declares that GitHub does not. A provider-only define is either a section ` +
-      `marker nobody emits or an operation one provider invented — both are the asymmetry ` +
-      `file-set parity exists to forbid:\n  ${extra.join('\n  ')}`,
+      asymmetries,
+      `define-set asymmetr(ies) between providers. Every provider row emits the same file set by ` +
+      `construction, so a define one of them lacks is a file that ships with a heading and no ` +
+      `body:\n  ${asymmetries.join('\n  ')}`,
     ).toEqual([]);
   });
 
   it('the define roster matches the op roster, so parity is over the real subject', () => {
-    // Without this, both directions above are satisfiable by two modules that agree
+    // Without this, every direction above is satisfiable by modules that agree
     // on a define set unrelated to the ops they are registered for.
     for (const provider of PROVIDERS) {
       const names = collectDefineNames(provider.source);
@@ -283,7 +300,7 @@ describe('jira module: define-set parity with GitHub, both directions (AC-3.8)',
     }
   });
 
-  it('every define in both modules has a non-empty body', () => {
+  it('every define in every module has a non-empty body', () => {
     const thin: string[] = [];
     for (const provider of PROVIDERS) {
       const bodies = collectDefineBodies(provider.source);
@@ -296,24 +313,62 @@ describe('jira module: define-set parity with GitHub, both directions (AC-3.8)',
     }
     expect(
       thin,
-      `define(s) below the body floor. AC-3.8 pairs parity with non-emptiness for one reason: two ` +
-      `modules can agree perfectly on a set of empty defines:\n  ${thin.join('\n  ')}`,
+      `define(s) below the body floor. AC-3.8 pairs parity with non-emptiness for one reason: ` +
+      `three modules can agree perfectly on a set of empty defines:\n  ${thin.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('every §14.4 matrix cell is filled — `supported` or a named DEGRADED, no blanks', () => {
+    // AC-3.8's third clause. The matrix's ROWS are the ops (file-set parity,
+    // structural) and its COLUMNS are the defines (asserted above); what neither
+    // covers is the CELL — a define that exists, is long enough, and still leaves
+    // the reader without an answer for its capability. §14.4's rule is that every
+    // cell reads `supported (mechanics …)` or `DEGRADED (unsupported by {provider})`,
+    // including the two known-undefined ones, so the cell content is checked as
+    // "this op's reference says what it does OR names why it cannot".
+    const blanks: string[] = [];
+    for (const provider of PROVIDERS) {
+      const bodies = collectDefineBodies(provider.source);
+      for (const [name, body] of bodies) {
+        const answers = /\*\*Mechanics held here:\*\*/.test(body);
+        const degrades = body.includes(`DEGRADED (unsupported by ${provider.name})`);
+        if (!answers && !degrades) blanks.push(`${provider.name}/${name}`);
+      }
+    }
+    expect(
+      blanks,
+      `matrix cell(s) that neither state what the operation does on this provider nor name why ` +
+      `it cannot. §14.4 forbids blanks, including for the two known-undefined cells — ` +
+      `\`closing_refs_for_commit\` on Linear and \`transition\` on GitHub — because a blank cell ` +
+      `is indistinguishable from an unasked question:\n  ${blanks.join('\n  ')}`,
+    ).toEqual([]);
+    // The two known-undefined cells are asserted POSITIVELY, so "no blanks" cannot
+    // be satisfied by a module that quietly claims support it does not have.
+    expect(
+      collectDefineBodies(PROVIDERS.find(p => p.name === 'linear')!.source).get('gather_release_evidence'),
+      'Linear\'s closing_refs_for_commit cell must be the named DEGRADED, not a claim of support',
+    ).toContain('DEGRADED (unsupported by linear)');
+    expect(
+      collectDefineBodies(PROVIDERS.find(p => p.name === 'jira')!.source).get('gather_release_evidence'),
+      'and Jira\'s likewise',
+    ).toContain('DEGRADED (unsupported by jira)');
   });
 
   it('known-bad probe: the same collectors report a dropped and an emptied define', () => {
     // Drives both collectors over seeded modules. Without it, the empty-difference
     // assertions above are equally green for collectors that return nothing (PF-018).
+    const jiraSource = PROVIDERS.find(p => p.name === 'jira')!.source;
+    const githubSource = PROVIDERS.find(p => p.name === 'github')!.source;
     const dropped = jiraSource.replace(/^@define fetch_issue\(\):/m, '@define fetch_issue_renamed():');
     expect(dropped, 'the seed must actually change the source').not.toBe(jiraSource);
     const githubNames = new Set(collectDefineNames(githubSource));
     expect(
       collectDefineNames(dropped).filter(n => !githubNames.has(n)),
-      'a renamed define must be reported by direction 2',
+      'a renamed define must be reported in the jira→github direction',
     ).toEqual(['fetch_issue_renamed']);
     expect(
       collectDefineNames(githubSource).filter(n => !new Set(collectDefineNames(dropped)).has(n)),
-      'and by direction 1',
+      'and in the github→jira direction',
     ).toEqual(['fetch_issue']);
 
     const emptied = jiraSource.replace(
@@ -326,6 +381,10 @@ describe('jira module: define-set parity with GitHub, both directions (AC-3.8)',
       body.trim().length,
       'an emptied define must fall below the body floor, or the non-emptiness arm is inert',
     ).toBeLessThan(MIN_DEFINE_CHARS);
+    expect(
+      body.includes('**Mechanics held here:**'),
+      'and it must fall below the matrix-cell rule too — a heading with no body answers nothing',
+    ).toBe(false);
   });
 });
 
@@ -457,43 +516,11 @@ describe('jira module: provider literals (AC-3.13)', () => {
 // 5. [DR-08] The batch is ONE query — no per-item fetch verb
 // ---------------------------------------------------------------------------
 
-/**
- * Shapes that betray a per-item fetch inside `fetch-issues-batch`.
- *
- * Two classes, and both are needed. A TOOL-NAME verb (`getJiraIssue`, `get_issue`)
- * is what an author reaches for when writing against a server's catalogue; a
- * CAPABILITY name (`fetch by key`) is what an author reaches for when writing
- * against this repo's own capability-first doctrine. §14.4's [DR-08] row names
- * both — "`getJiraIssue`, `get_issue`, or any single-key fetch capability" — and a
- * guard covering only the first would be inert against the module this repo's own
- * rules steer an author towards writing.
- *
- * `fetch-issue` — the single-issue OPERATION's own name — is in the table for the
- * same reason, and it is the shape that actually caught something: "request the
- * same projection `fetch-issue` requests" was a harmless cross-reference in the
- * first draft, but "call `fetch-issue` for each key" is the per-item loop written
- * in devflow's own vocabulary, and no regex can tell those two apart. The batch
- * reference therefore names the sibling op by DESCRIPTION rather than by name,
- * which costs one word and leaves the guard unambiguous.
- */
-const PER_ITEM_FETCH_SHAPES: readonly RegExp[] = [
-  /\bget[_-]?jira[_-]?issue\b/i,
-  /\bget[_-]?issue\b/i,
-  /\bfetch[_-]?issue\b/i,
-  /\bfetch by key\b/i,
-];
-
-/** Named collector: per-item fetch shapes in a batch reference. */
-export function collectPerItemFetchVerbs(text: string): string[] {
-  const found: string[] = [];
-  for (const [i, line] of text.split('\n').entries()) {
-    for (const shape of PER_ITEM_FETCH_SHAPES) {
-      const match = shape.exec(line);
-      if (match !== null) found.push(`${i + 1}: ${match[0]}`);
-    }
-  }
-  return found;
-}
+// The shape table and its collector live in tests/helpers.ts: the same claim is
+// made per provider here and across every provider in
+// tests/provider-literals.test.ts, and two copies of the table would be two
+// authorities on what a per-item fetch looks like. The rationale for each shape
+// travels with the table.
 
 describe('jira module: fetch-issues-batch is one query [DR-08]', () => {
   const batch = readGenerated(jiraRel('fetch-issues-batch'));
@@ -693,9 +720,11 @@ describe('jira module: a dropped or unresolvable ref never reports COMPLETE (AC-
     ).toContain('TRACEABILITY: DEGRADED (no parseable refs for provider {p})');
     expect(
       backlink,
-      'AC-3.4: `PROJ-1 PROJ-2` is not digits-only, so the always-loaded entry gate drops every ' +
-      'entry. The status must then never be COMPLETE — a green COMPLETE over zero processed ' +
-      'issues is the report a release believes',
+      'AC-3.4: the always-loaded entry gate defers to the resolved provider\'s anchored reference ' +
+      'grammar, and `PROJ-1 PROJ-2` satisfies the github grammar under no reading — so under jira ' +
+      'the pre-flight either resolves them here or drops them, and a run that dropped every entry ' +
+      'must never report COMPLETE. A green COMPLETE over zero processed issues is the report a ' +
+      'release believes',
     ).toContain('never report the status as `COMPLETE`');
   });
 

@@ -435,10 +435,10 @@ export const GIT_CROSS_CUTTING_DOCS = [
  * the build rather than guessed at: the emitted filenames come from the op list,
  * not from the module's own basename, so there is nothing to fall back to.
  *
- * Every provider row reads the ONE shared {@link TRACKER_OPS} roster, so the two
- * providers below emit the same file set by construction. `_linear.mds` is Phase
- * 3c and is deliberately absent — an entry here with no module on disk would be
- * an artifact with no reachable consumer (ADR-003).
+ * Every provider row reads the ONE shared {@link TRACKER_OPS} roster, so the three
+ * providers below emit the same file set by construction — file-set parity is a
+ * compile-time property rather than an assertion two hand-listed arrays have to
+ * keep agreeing on.
  *
  * Registering a provider whose `subdir` is one of MCP_BACKED_PROVIDER_SUBDIRS is
  * also what opens the generation gate on the tool-call contract; see
@@ -454,6 +454,12 @@ export const VARIANT_MODULES = [
   {
     source: 'src/assets/mds/tracker/_jira.mds',
     subdir: 'tracker/jira',
+    kind: 'fanout',
+    ops: TRACKER_OPS,
+  },
+  {
+    source: 'src/assets/mds/tracker/_linear.mds',
+    subdir: 'tracker/linear',
     kind: 'fanout',
     ops: TRACKER_OPS,
   },

@@ -833,7 +833,12 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     expect(
       reasonSpellings('unsupported by {provider}'),
       'the template and each registered provider\'s cell, and nothing else',
-    ).toEqual(['unsupported by {provider}', 'unsupported by github', 'unsupported by jira']);
+    ).toEqual([
+      'unsupported by {provider}',
+      'unsupported by github',
+      'unsupported by jira',
+      'unsupported by linear',
+    ]);
     expect(
       reasonSpellings('redaction unavailable'),
       'a reason with no provider placeholder must instantiate to itself alone',

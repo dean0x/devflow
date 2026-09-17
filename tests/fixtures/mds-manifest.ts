@@ -103,12 +103,15 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
- * each fanning out into MANY output files instead of one. Four today:
+ * each fanning out into MANY output files instead of one. Five today:
  *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
  *     (kind 'fanout' — one file per entry of TRACKER_OPS)
  *   src/assets/mds/tracker/_jira.mds    → dist/skills/git/references/tracker/jira/*.md
  *     (kind 'fanout' — the same TRACKER_OPS roster, which is what makes file-set
  *      parity across providers a compile-time property)
+ *   src/assets/mds/tracker/_linear.mds  → dist/skills/git/references/tracker/linear/*.md
+ *     (kind 'fanout' — the same roster again; three providers is where the parity
+ *      scan stops being vacuous, §8.11)
  *   src/assets/mds/tracker/_mcp.mds     → dist/skills/git/references/tracker/_mcp.md
  *     (kind 'contract' — GENERATION IS GATED on a provider that reaches its
  *      tracker through a tool call being registered. `tracker/jira` is such a
@@ -133,6 +136,7 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
 export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_github.mds',
   'src/assets/mds/tracker/_jira.mds',
+  'src/assets/mds/tracker/_linear.mds',
   'src/assets/mds/tracker/_mcp.mds',
   'src/assets/mds/git/_references.mds',
 ] as const;

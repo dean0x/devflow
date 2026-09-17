@@ -675,6 +675,60 @@ export function collectTrackerNamingLines(content: string): string[] {
   return content.split('\n').filter(line => line.includes('references/tracker/'))
 }
 
+// ── Per-item fetch collector ([DR-08]) ───────────────────────────────────────
+//
+// §14.4 fixes `fetch_batch` as a SINGLE-QUERY capability for every provider, and
+// [DR-08] states the negative that keeps it one: no per-item fetch verb may appear
+// in any provider's `fetch-issues-batch` reference. The claim is made twice by
+// design — once per provider inside that provider's own suite, once across every
+// provider in tests/provider-literals.test.ts — so the shape table lives HERE
+// rather than in either of them. Two copies of the table would be two authorities
+// on what a per-item fetch looks like, which is the divergence [DR-19] forbids one
+// level down; and a test file cannot import another test file's export without
+// re-registering its suites.
+
+/**
+ * Shapes that betray a per-item fetch inside a `fetch-issues-batch` reference.
+ *
+ * Two classes, and both are needed. A TOOL-NAME verb (`getJiraIssue`, `get_issue`)
+ * is what an author reaches for when writing against a server's catalogue; a
+ * CAPABILITY name (`fetch by key`) is what an author reaches for when writing
+ * against this repo's own capability-first doctrine. §14.4's [DR-08] row names
+ * both — "`getJiraIssue`, `get_issue`, or any single-key fetch capability" — and a
+ * table covering only the first would be inert against the module this repo's own
+ * rules steer an author towards writing.
+ *
+ * `fetch-issue` — the single-issue OPERATION's own name — is in the table for the
+ * same reason, and it is the shape that actually caught something: "request the
+ * same projection `fetch-issue` requests" was a harmless cross-reference in a first
+ * draft, but "call `fetch-issue` for each key" is the per-item loop written in
+ * devflow's own vocabulary, and no regex can tell those two apart. A batch
+ * reference therefore names the sibling op by DESCRIPTION rather than by name,
+ * which costs one word and leaves the table unambiguous.
+ *
+ * Every entry carries a trailing `\b`, which is what keeps the op anchor line
+ * `## Operation: fetch-issues-batch` out of the results: the `s` after `issue` is
+ * a word character, so the plural is not the singular.
+ */
+export const PER_ITEM_FETCH_SHAPES: readonly RegExp[] = [
+  /\bget[_-]?jira[_-]?issue\b/i,
+  /\bget[_-]?issue\b/i,
+  /\bfetch[_-]?issue\b/i,
+  /\bfetch by key\b/i,
+]
+
+/** Named collector: per-item fetch shapes in a batch reference, as `{line}: {match}`. */
+export function collectPerItemFetchVerbs(text: string): string[] {
+  const found: string[] = []
+  for (const [i, line] of text.split('\n').entries()) {
+    for (const shape of PER_ITEM_FETCH_SHAPES) {
+      const match = shape.exec(line)
+      if (match !== null) found.push(`${i + 1}: ${match[0]}`)
+    }
+  }
+  return found
+}
+
 // ── ~/.devflow/tracker.md schema parsers (§14.3) ──────────────────────────────
 //
 // The schema has a WRITER (the Tracker agent's embedded template, 3a-2) and a

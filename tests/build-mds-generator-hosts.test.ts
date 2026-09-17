@@ -60,6 +60,7 @@ import {
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
 import {
+  MCP_BACKED_PROVIDER_SUBDIRS,
   MCP_CONTRACT_MODULE,
   TRACKER_OPS,
   VARIANT_MODULES,
@@ -789,8 +790,10 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
    *
    * ZERO on this tree, and that is the claim rather than an absence of one: the
    * contract module's gate is keyed on a provider that needs it being
-   * registered, `tracker/jira` is such a provider, so nothing is deferred. The
-   * arm below proves the predicate still discriminates.
+   * registered, and TWO such providers are, so nothing is deferred. The arm
+   * below proves the predicate still discriminates — against a registry with
+   * every gated sub-directory removed, because with more than one of them a
+   * probe that drops only the first leaves the gate open.
    */
   const EXPECTED_DEFERRED = deferredReferenceModuleSources().length;
 
@@ -833,7 +836,17 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     // on the roster. Ask the same owner about a registry with the tool-call
     // provider removed: the contract module must then be deferred. Without this,
     // a predicate welded to "nothing is ever gated" would read exactly the same.
-    const withoutToolCallProvider = VARIANT_MODULES.filter(mod => mod.subdir !== 'tracker/jira');
+    //
+    // The probe registry drops EVERY gated sub-directory, read from the gate's own
+    // subject rather than naming one provider: with two tool-call providers
+    // registered, dropping the first left the second holding the gate open and this
+    // arm reported the predicate as broken when it was the probe that had gone
+    // stale. A probe that names one member of a set the gate ranges over stops
+    // discriminating the moment the set grows.
+    const gatedSubdirs: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
+    const withoutToolCallProvider = VARIANT_MODULES.filter(
+      mod => !gatedSubdirs.includes(mod.subdir),
+    );
     expect(
       deferredReferenceModuleSources(withoutToolCallProvider),
       'the deferral predicate must still hold back the contract module for a registry with no ' +
