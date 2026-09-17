@@ -1043,15 +1043,35 @@ describe('--emit: framing and body end-to-end (AC-3.5)', () => {
     expect(a.framing.split(' ')[2]).toBe(b.framing.split(' ')[2]);
   });
 
-  it('leaves no temp sibling behind', () => {
+  it('writes nothing beside the input — the emit sink is stdout', () => {
     const p = writeInput('body\n', 'cleanup-input.txt');
     expect(runEmit(p).exitCode).toBe(0);
     const residue = fs.readdirSync(tmpDir).filter(f => f !== 'cleanup-input.txt');
     expect(
       residue,
-      'the emit path owns its own per-invocation temp sibling and must clean it up — the recipes ' +
-      'have no `rm` step to do it for them',
+      'the emit path prints the bytes it holds and owns no file. Anything it leaves beside the ' +
+      'input is a second on-disk copy of a comment body, with the input directory’s lifetime and ' +
+      'surviving a SIGKILL',
     ).toEqual([]);
+  });
+
+  it('an unwritable INPUT directory does not stop a clean scrub', () => {
+    // The emit path holds the bytes it returns and prints them, so it never needs
+    // to prove the input's directory is writable. Doing so turns a filesystem
+    // property into "this body cannot be published": a clean, fully gated body is
+    // refused and the caller degrades for a reason unrelated to scrubbing.
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'ro-'));
+    const p = path.join(dir, 'in.txt');
+    fs.writeFileSync(p, 'aws key: AKIAIOSFODNN7EXAMPLE\n', 'utf8');
+    fs.chmodSync(dir, 0o500);
+    try {
+      const r = runEmit(p);
+      expect(r.exitCode, `a read-only input directory refused a clean scrub.\n${r.stderr}`).toBe(0);
+      expect(r.framing).toMatch(FRAMING_RE);
+      expect(r.body).toBe('aws key: [REDACTED:aws-key]\n');
+    } finally {
+      fs.chmodSync(dir, 0o700);
+    }
   });
 
   it('does not write the output-file positional form’s artifact (there is no output path)', () => {
@@ -1061,8 +1081,26 @@ describe('--emit: framing and body end-to-end (AC-3.5)', () => {
   });
 });
 
+/** Named collector: registry reasons that no arm of the emit mode can produce. */
+function collectUnreachableReasons(
+  registry: readonly string[],
+  observed: readonly string[],
+): string[] {
+  return registry.filter((reason) => !observed.includes(reason));
+}
+
+/**
+ * TWO SHAPES, ONE PROPERTY: no failure ever writes body bytes.
+ *
+ * FRAMED refusals — the ones the mode owns and can name — are exactly
+ * `D11-FAIL <reason>` with an empty body. UNFRAMED refusals write nothing to
+ * stdout at all: the usage error precedes mode selection, and the internal error
+ * escapes main() before the boundary knows a mode, so neither can render a
+ * framing line. The consumer gates on the presence of `D11-OK`, so both shapes
+ * are one case to it and the unframed one is strictly stronger.
+ */
 describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', () => {
-  /** Every failure path, with the exit code it must produce. */
+  /** Every FRAMED failure path, with the exit code it must produce. */
   function assertNoBody(label: string, r: EmitResult, expectedCode: number): void {
     expect(r.exitCode, `${label}: must exit ${expectedCode}.\n${r.stderr}`).toBe(expectedCode);
     expect(
@@ -1085,20 +1123,6 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     const p = path.join(tmpDir, 'huge.txt');
     fs.writeFileSync(p, 'x'.repeat(1_048_577), 'utf8');
     assertNoBody('oversize input', runEmit(p), 2);
-  });
-
-  it('unwritable temp sibling ⇒ exit 3, no body', () => {
-    // The sibling lands beside the input, so a read-only input directory is the
-    // honest way to make the write fail without touching the input itself.
-    const dir = fs.mkdtempSync(path.join(tmpDir, 'ro-'));
-    const p = path.join(dir, 'in.txt');
-    fs.writeFileSync(p, 'body\n', 'utf8');
-    fs.chmodSync(dir, 0o500);
-    try {
-      assertNoBody('unwritable temp sibling', runEmit(p), 3);
-    } finally {
-      fs.chmodSync(dir, 0o700);
-    }
   });
 
   it('usage error ⇒ exit 1, and stdout is entirely empty', () => {
@@ -1131,6 +1155,43 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     expect(out.code).toBe(5);
     expect(out.body).toBe('');
     expect(out.emitLine).toBe('D11-FAIL nonce-unavailable');
+  });
+
+  it('the closed registry holds no reason no arm can produce', () => {
+    // The script's own argument for keeping `internal-error` OUT of the registry:
+    // a value in a closed vocabulary that no arm reaches is a reason a consumer
+    // can never see, and it reads as a live refusal to anyone auditing the set.
+    // Driven over the arms rather than asserted as a list, so deleting an arm
+    // without its reason (or adding a reason without its arm) is what goes red.
+    const reasonOf = (framing: string): string => framing.replace(/^D11-FAIL /, '');
+    const clean = writeInput('clean\n', 'registry-clean.txt');
+    const huge = path.join(tmpDir, 'registry-huge.txt');
+    fs.writeFileSync(huge, 'x'.repeat(1_048_577), 'utf8');
+
+    const observed = [
+      reasonOf(runEmit(path.join(tmpDir, 'registry-absent.txt')).framing),
+      reasonOf(runEmit(huge).framing),
+      reasonOf(emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', clean], {
+        scrubFn: (content) => ({
+          result: content + '\nAKIAIOSFODNN7EXAMPLE',
+          counts: { 'aws-key': 1 },
+        }),
+      })).emitLine),
+      reasonOf(emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', clean], {
+        nonceSource: () => { throw new Error('entropy pool empty'); },
+      })).emitLine),
+    ];
+
+    expect(observed.length, 'the failure-arm corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(
+      collectUnreachableReasons(SCRUBBER.D11_FAIL_REASONS, observed),
+      `reason(s) in the frozen registry that no arm of this mode emits. Observed: ${observed.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a reason no arm emits', () => {
+    expect(collectUnreachableReasons(['reached-reason', 'phantom-reason'], ['reached-reason']))
+      .toEqual(['phantom-reason']);
   });
 
   it('every D11-FAIL reason is a bare token — no path, no secret, no prose', () => {

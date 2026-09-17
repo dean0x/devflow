@@ -28,7 +28,7 @@
 //   0  success (zero or more redactions made)
 //   1  usage error (wrong arity, or an unrecognised flag)
 //   2  input file unreadable or larger than 1 MiB
-//   3  output file write failed
+//   3  output file write failed — the FILE sink only; `--emit` writes no file
 //   4  internal / unexpected error
 //   5  --emit only: the gate refused — the second scrub pass was non-zero, or a
 //      nonce could not be generated. Distinct from 4 so a caller can tell "the
@@ -36,8 +36,10 @@
 //      not be posted, the second means the run must be retried.
 //
 // Design constraints (binding):
-//   PF-011  writes via temp-sibling + rename (atomic same-fs write; readers see
-//           old-or-new, never a momentarily absent file)
+//   PF-011  the file sink — the one file this script writes — goes via
+//           temp-sibling + rename (atomic same-fs write; readers see old-or-new,
+//           never a momentarily absent file). `--emit` prints to stdout and
+//           touches no file, so it has nothing to protect
 //   PF-014  never call process.exit() inside any scope with pending cleanup or
 //           buffered output; main() returns an exit code; the single top-level
 //           boundary writes stdout SYNCHRONOUSLY then sets process.exitCode so
@@ -97,15 +99,24 @@ const ZERO_SCRUB_LINE = SCRUB_LINE_PREFIX + '0 []';
 const D11_FAIL_REASONS = Object.freeze({
   INPUT_UNREADABLE: 'input-unreadable',
   INPUT_TOO_LARGE: 'input-too-large',
-  OUTPUT_UNWRITABLE: 'output-unwritable',
   SECOND_PASS_NONZERO: 'second-pass-nonzero',
   NONCE_UNAVAILABLE: 'nonce-unavailable',
 });
 
-// No `internal-error` reason: the internal-error path is the top-level catch, which
-// fires BEFORE the boundary has written anything and knows no mode, so it leaves
-// stdout empty rather than framing a reason. Adding the token without an arm that
-// can emit it would put a value in a closed registry that nothing reaches.
+// EVERY reason here is emitted by an arm of the emit mode, and a test drives the
+// arms and compares what they produce against this registry. Two tokens a reader
+// might expect are deliberately absent:
+//
+//   internal-error     the top-level catch fires BEFORE the boundary has written
+//                      anything and knows no mode, so it leaves stdout empty
+//                      rather than framing a reason.
+//   output-unwritable  the emit mode's sink is stdout and it writes no file, so
+//                      no write of its own can fail. Exit 3 belongs to the file
+//                      mode, which returns a bare code and frames nothing.
+//
+// A token with no arm that can emit it is a value in a closed vocabulary that a
+// consumer can never see, and it reads as a live refusal to anyone auditing the
+// set.
 
 // ---------------------------------------------------------------------------
 // Shannon entropy
@@ -640,23 +651,18 @@ function runFileMode(args, content) {
  * writes `emitLine + '\n' + body` unconditionally, so a failing arm cannot emit a
  * body even by forgetting to suppress one.
  *
- * The scrubbed bytes are written to a per-invocation temp SIBLING of the input
- * before being printed, and the sibling is removed in the same function. Two
- * reasons: the PF-011 write discipline then has exactly one implementation in
- * this script rather than one per mode, and the recipes lose their `mktemp` and
- * their cleanup step — twelve call sites that each had to remember both, and had
- * no `rm` that ran on the failure paths. The name is PID- AND nonce-scoped
- * (fs-atomic.ts:40's rule, tightened): two agents scrubbing the same composed
- * body in parallel worktrees must not share a temp path, and unlike
- * fs-atomic.ts:44-49 there is no unlink-and-retry — a collision is a bug, not a
- * condition to recover from.
+ * THIS MODE TOUCHES NO FILE. It holds the bytes it returns and the boundary
+ * prints them, so there is nothing for a write discipline to protect: a scrubbed
+ * comment body put on disk is a second copy with the input directory's lifetime,
+ * and proving that directory writable would let a filesystem property refuse a
+ * clean, fully gated body. The file mode's temp-sibling + rename (PF-011) guards
+ * the one file this script does write.
  *
- * @param {EmitArgs} args
  * @param {string} content
- * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => string }} deps
+ * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => unknown }} deps
  * @returns {{ emitLine: string, body: string, code: number }}
  */
-function runEmitMode(args, content, deps) {
+function runEmitMode(content, deps) {
   const { text, first, second } = scrubTwice(content, deps.scrubFn);
 
   // THE GATE. A non-zero second pass means the first pass did not hold, so the
@@ -673,21 +679,6 @@ function runEmitMode(args, content, deps) {
   if (framed.error !== undefined) {
     process.stderr.write('redact-secrets: ' + framed.error + ' — refusing to emit\n');
     return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.NONCE_UNAVAILABLE, body: '', code: 5 };
-  }
-
-  const nonce = framed.emitLine.split(' ')[1];
-  const tmpPath = args.inputPath + '.' + process.pid + '.' + nonce + '.emit.tmp';
-  try {
-    fs.writeFileSync(tmpPath, framed.body, { encoding: 'utf8', mode: 0o600 });
-  } catch (/** @type {any} */ err) {
-    process.stderr.write(
-      'redact-secrets: cannot write temp sibling: ' + tmpPath + ': ' + (err.code || err.message) + '\n',
-    );
-    return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.OUTPUT_UNWRITABLE, body: '', code: 3 };
-  } finally {
-    // Unconditional: the sibling is scratch space for the write discipline, and a
-    // scrubbed comment body left on disk is residue with the input's lifetime.
-    try { fs.unlinkSync(tmpPath); } catch (_) { /* intentionally ignored */ }
   }
 
   return { emitLine: framed.emitLine, body: framed.body, code: 0 };
@@ -721,7 +712,7 @@ function main(argv, deps) {
   }
 
   return args.kind === 'emit'
-    ? runEmitMode(args, read.content, deps || {})
+    ? runEmitMode(read.content, deps || {})
     : runFileMode(args, read.content);
 }
 
