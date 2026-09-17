@@ -18,7 +18,11 @@ import { removeContextHook } from './context.js';
 import { applyProxyTeardownToSettings } from './proxy.js';
 import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
-import { TRACKER_CONVENTIONS_FILE, TRACKER_CONVENTIONS_BACKUP_NAMES } from '../../core/tracker.js';
+import {
+  TRACKER_CONVENTIONS_FILE,
+  TRACKER_CONVENTIONS_BACKUP_NAMES,
+  TRACKER_STAGED_PREFIX,
+} from '../../core/tracker.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -301,6 +305,55 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
   return items;
 }
 
+/** One Devflow-owned install artifact under `devflowDir`. */
+export interface InstallArtifactEntry {
+  /** Path relative to `devflowDir` — or, when `isPrefix`, a basename prefix. */
+  relPath: string;
+  /** Directories are removed recursively. */
+  isDir?: boolean;
+  /**
+   * `relPath` is a basename PREFIX matching every direct child of `devflowDir`
+   * that starts with it, not a path. For artifacts written under a per-run
+   * `mktemp` name, where the set of paths exists only on disk.
+   */
+  isPrefix?: boolean;
+}
+
+/**
+ * Expand `installArtifactPaths` against real disk.
+ *
+ * Exact entries pass through untouched; a prefix entry becomes one entry per
+ * matching direct child of `devflowDir`. This is the ONE place a prefix turns
+ * into paths, so the removal loop and the dry-run preview cannot disagree about
+ * what a prefix covers. An unreadable or absent `devflowDir` yields the exact
+ * entries alone — absent is the ordinary case here, never an error.
+ */
+export async function resolveInstallArtifactPaths(
+  devflowDir: string,
+): Promise<ReadonlyArray<{ relPath: string; isDir?: boolean }>> {
+  const resolved: Array<{ relPath: string; isDir?: boolean }> = [];
+  let children: string[] | null = null;
+
+  for (const entry of installArtifactPaths(devflowDir)) {
+    if (entry.isPrefix !== true) {
+      resolved.push({ relPath: entry.relPath, isDir: entry.isDir });
+      continue;
+    }
+    if (children === null) {
+      try {
+        children = await fs.readdir(devflowDir);
+      } catch {
+        children = [];
+      }
+    }
+    for (const child of children) {
+      if (child.startsWith(entry.relPath)) resolved.push({ relPath: child, isDir: entry.isDir });
+    }
+  }
+
+  return resolved;
+}
+
 /**
  * Single source of truth for Devflow-owned install artifacts under `devflowDir`.
  *
@@ -313,13 +366,19 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
  * @D8 Nothing returned here may overlap with `userContentPaths` — the two lists
  * are the whole of what Devflow puts in `~/.devflow`, and a name in both is
  * deleted whatever the user answers to the full-wipe prompt. Checked two ways:
- * mechanically, by intersecting the `relPath` sets of the two functions (so an
- * entry added to either list is covered the day it lands), and behaviourally, by
- * test 9f — every enumerated user item survives an artifact-only removal.
+ * mechanically, by intersecting the `relPath` sets of the two functions and
+ * checking no user path falls UNDER a prefix entry (so an entry added to either
+ * list is covered the day it lands), and behaviourally, by test 9f — every
+ * enumerated user item survives an artifact-only removal.
+ *
+ * Entries marked `isPrefix` name a FAMILY of per-invocation basenames rather
+ * than one path; `resolveInstallArtifactPaths` is what turns them into paths.
+ * Every consumer goes through that resolver, so a prefix entry is never treated
+ * as a literal filename.
  *
  * @param devflowDir - Absolute path to ~/.devflow (used to resolve cache dir).
  */
-export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPath: string; isDir?: boolean }> {
+export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallArtifactEntry> {
   return [
     // migration run-state — removed so migrations re-run cleanly on reinstall
     { relPath: 'migrations.json' },
@@ -344,6 +403,11 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPat
     { relPath: '.tracker.processing' },
     { relPath: '.tracker.attempts' },
     { relPath: '.tracker.enabled' },
+    // The agent's scrubbed staging file, one per invocation under a mktemp name
+    // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
+    // A prefix, because the names exist only on disk. Content is a scrubbed copy
+    // that was never placed, so it is machine state like the three above.
+    { relPath: TRACKER_STAGED_PREFIX, isPrefix: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
@@ -400,8 +464,10 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     }
   } catch { /* proxy.pid absent or unreadable — non-fatal */ }
 
-  // All install artifacts removed non-fatally (avoids PF-009).
-  for (const artifact of installArtifactPaths(devflowDir)) {
+  // All install artifacts removed non-fatally (avoids PF-009). Resolved against
+  // disk first, so a per-run staging basename is a real path by the time the
+  // containment guard below sees it.
+  for (const artifact of await resolveInstallArtifactPaths(devflowDir)) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     // Containment invariant: every artifact must resolve to a path STRICTLY inside
     // devflowDir. A derived relPath that ever collapsed to '' or '..' would turn the
@@ -517,7 +583,7 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
   //    Guard with fs.access so files that never existed don't pollute the preview.
   //    (F7: previously pushed unconditionally, inflating the dry-run list with
   //    paths that were never on disk.)
-  for (const artifact of installArtifactPaths(devflowDir)) {
+  for (const artifact of await resolveInstallArtifactPaths(devflowDir)) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     try {
       await fs.access(fullPath);

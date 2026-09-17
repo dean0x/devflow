@@ -142,16 +142,20 @@ export const TRACKER_PROVIDER_KEY_PATH = 'features.tracker.provider';
 // NOT the only spelling in the repository, and a rename that assumes it is will
 // miss three places these names are hardcoded (PF-013): the SessionStart hook's
 // Section 3 (shell) and the Tracker agent's prompt (prose), neither of which can
-// import from here, and uninstall.ts's install-artifact list, which spells every
-// ~/.devflow entry as a literal the way its siblings do. Each is cross-pinned
-// against these constants by tests — shell-hooks, tracker-agent, uninstall-logic
-// and core/tracker — so the spellings cannot drift silently, but they do have to
-// move together.
+// import from here, and uninstall.ts's install-artifact list, which spells the
+// fixed ~/.devflow entries as literals the way its siblings do. Each is
+// cross-pinned against these constants by tests — shell-hooks, tracker-agent,
+// uninstall-logic and core/tracker — so the spellings cannot drift silently, but
+// they do have to move together.
 //
-// The conventions-backup set is the exception, and deliberately so: its members
-// are one-per-provider, so uninstall imports TRACKER_CONVENTIONS_BACKUP_NAMES
-// rather than listing them — a literal list there would fall behind the registry
-// the day a fourth provider lands, leaving an unclassified file behind.
+// Two sets are the exception, and deliberately so, because neither is a fixed
+// list uninstall could keep in step by hand. The conventions backups are
+// one-per-provider, so uninstall imports TRACKER_CONVENTIONS_BACKUP_NAMES rather
+// than listing them: a literal list would fall behind the registry the day a
+// fourth provider lands. The staging files are one-per-invocation under a mktemp
+// name, so uninstall imports TRACKER_STAGED_PREFIX and resolves it against disk.
+// Either spelled by hand leaves a file behind that no uninstall list accounts
+// for, in a directory the run reports as swept.
 // ---------------------------------------------------------------------------
 
 /** `~/.devflow/tracker.md` — the inferred conventions file (USER CONTENT on uninstall). */
@@ -162,6 +166,24 @@ export const TRACKER_ATTEMPTS_FILE = '.tracker.attempts';
 export const TRACKER_ENABLED_FILE = '.tracker.enabled';
 /** `~/.devflow/.tracker.processing` — the Tracker agent's atomic claim (install artifact). */
 export const TRACKER_CLAIM_FILE = '.tracker.processing';
+/**
+ * `~/.devflow/.tracker-staged.XXXXXX` — the Tracker agent's scrubbed staging
+ * file (install artifact). A basename PREFIX, not a basename.
+ *
+ * The agent takes its stage with `mktemp` inside `~/.devflow`, one per
+ * invocation so two concurrent runs never share a path, and removes it from a
+ * `trap` on EXIT INT TERM. A SIGKILL outruns the trap, so a stage can outlive
+ * the run it belongs to — and an artifacts-only uninstall that removes exact
+ * paths walks straight past it while reporting the directory swept. It carries
+ * no user-authored content (it is a scrubbed, unplaced copy of what the agent
+ * was about to write), so it is an install artifact, never user content.
+ *
+ * Spelled twice for the reason the basenames above are (PF-013): the agent's
+ * prompt cannot import from here, so the mktemp template is also a literal in
+ * src/assets/agents/tracker.md, and tests/core/tracker.test.ts pins the two
+ * spellings together.
+ */
+export const TRACKER_STAGED_PREFIX = '.tracker-staged.';
 
 /**
  * How many background inference attempts a machine gets before the SessionStart

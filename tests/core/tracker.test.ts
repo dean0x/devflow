@@ -38,6 +38,7 @@ import {
   TRACKER_ATTEMPTS_FILE,
   TRACKER_ENABLED_FILE,
   TRACKER_CLAIM_FILE,
+  TRACKER_STAGED_PREFIX,
   TRACKER_ATTEMPTS_MAX,
   TRACKER_CONVENTIONS_BACKUP_NAMES,
   parseTrackerId,
@@ -56,10 +57,13 @@ import {
 } from '../../src/core/tracker.js';
 import { readManifest } from '../../src/core/manifest.js';
 
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
 /** The module under test, as source — read by the single-authority guard below. */
-const MODULE_SOURCE = path.join(
-  path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'core', 'tracker.ts',
-);
+const MODULE_SOURCE = path.join(REPO_ROOT, 'src', 'core', 'tracker.ts');
+
+/** The Tracker agent's prompt — the second spelling of the staging prefix (PF-013). */
+const TRACKER_AGENT_SOURCE = path.join(REPO_ROOT, 'src', 'assets', 'agents', 'tracker.md');
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -96,6 +100,18 @@ describe('TRACKER_PROVIDERS registry', () => {
     expect(TRACKER_ATTEMPTS_FILE).toBe('.tracker.attempts');
     expect(TRACKER_ENABLED_FILE).toBe('.tracker.enabled');
     expect(TRACKER_CLAIM_FILE).toBe('.tracker.processing');
+    expect(TRACKER_STAGED_PREFIX).toBe('.tracker-staged.');
+  });
+
+  it('the staged prefix is the one the Tracker agent stages under (PF-013)', async () => {
+    // The agent's prompt cannot import from here, so the mktemp template is a
+    // second spelling; an uninstall sweep keyed to a prefix the agent no longer
+    // uses walks past every orphaned stage while reporting ~/.devflow swept.
+    const agent = await fs.readFile(TRACKER_AGENT_SOURCE, 'utf-8');
+    expect(agent).toContain(`${TRACKER_STAGED_PREFIX}XXXXXX`);
+    // Non-vacuity: the match is exact-literal, so a neighbouring template must
+    // not satisfy it.
+    expect(agent).not.toContain(`${TRACKER_STAGED_PREFIX}XXXXXXX`);
   });
 });
 
