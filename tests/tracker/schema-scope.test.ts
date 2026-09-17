@@ -10,7 +10,7 @@
  * does not know about degrades to that section's NEUTRAL DEFAULT rather than to
  * DEGRADED, so the agent proceeds confidently on a value nobody wrote.
  *
- * FIVE CLAIMS, each able to fail on its own (PF-064):
+ * SIX CLAIMS, each able to fail on its own (PF-064):
  *   1. SCHEMA TABLE — every section has a scope and an absent⇒default, no blank
  *      cells, read out of the agent's own table.
  *   2. HEADINGS, BOTH DIRECTIONS [DR-21] — writer ↔ reader set equality with a
@@ -25,6 +25,11 @@
  *      pinned as a literal array, every live row emitted by a named site, no
  *      un-registered `DEGRADED (` in a generated reference, and every retired
  *      synonym absent.
+ *   6. THE READER'S RENDERING RULE (AC-3.11, §14.1) — the always-loaded contract
+ *      block states that a rendered ref is never `#`-prefixed under a non-github
+ *      provider, and names the Output templates' `#` as github's rendering. The
+ *      templates themselves are frozen by AC-3.1, so the rule is the only place
+ *      that distinction can live.
  *
  * Both halves of claim 2 bind to `TRACKER_SCHEMA_SECTIONS` in tests/helpers.ts
  * rather than to each other. A two-sided equality test cannot catch drift in its
@@ -952,5 +957,126 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       'a reason containing a path and an em-dash must come back whole',
     ).toEqual(['tracker.md required fields incomplete — edit ~/.devflow/tracker.md']);
     expect(collectDegradedReasons('no degradation here')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. The reader's rendering rule — the `#` is github's, not a literal (AC-3.11)
+// ---------------------------------------------------------------------------
+//
+// THE TENSION THIS CLAIM RESOLVES, recorded because it is not obvious and a later
+// reader will otherwise try to fix it the other way round.
+//
+// AC-3.1 freezes tests/fixtures/golden/github-status-lines.txt — the Phase-0
+// capture — as the proof that the GitHub path gains no prompt, no new file and no
+// altered byte. Line 48 of that fixture is `- **Issue**: #{number}`, so the
+// Output templates in git.md are UNEDITABLE for the life of this phase.
+//
+// AC-3.11 wants `- **Issue**: PROJ-123` under jira. Those two ACs meet on the
+// same bytes, and §14.1 is the arbiter: `#`-prefixing is a property of the GITHUB
+// rendering of ISSUE_REF, not of the field. So the resolution is a RULE in the
+// always-loaded reader block that reclassifies the templates' `#` as github's
+// rendering — zero template bytes changed, both ACs satisfied.
+//
+// It has to live in the always-loaded block and nowhere else. The templates are
+// always loaded, so a rule that only appears in a per-provider mechanics file
+// would be a rule a spawn might not have when it renders the template (PF-058).
+// That is also why this arm reads the CONTRACT BLOCK rather than the whole file:
+// the clause appearing somewhere in git.md is not the claim.
+
+/** One clause the reader block owes, and the shape that recognises it. */
+interface ContractClause {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly why: string;
+}
+
+const RENDERING_CLAUSES: readonly ContractClause[] = [
+  {
+    label: 'the non-github rendering takes `## Reference Rendering`\'s form',
+    pattern: /`## Reference Rendering`'s form/,
+    why:
+      'the section is already listed as one the contract reads; this is the clause that says what ' +
+      'the reader DOES with it, which is the half AC-3.11 needs',
+  },
+  {
+    label: 'a rendered ref is never `#`-prefixed under a non-github provider',
+    pattern: /never `#`-prefixed/,
+    why:
+      '§14.1 fixes ISSUE_REF as `#`-prefixed under github ONLY. Without this the templates are the ' +
+      'only instruction in scope and a jira spawn renders `#PROJ-123`, a reference no tracker resolves',
+  },
+  {
+    label: "the templates' `#` is named as github's rendering, not a literal",
+    pattern: /Output templates' `#` is github's rendering, not a literal/,
+    why:
+      'the reclassification IS the fix. The `#` cannot be edited out of the templates — AC-3.1 ' +
+      'freezes them byte-for-byte — so the always-loaded text has to say what it means instead',
+  },
+];
+
+/** Named collector: rendering clauses the reader block does not state. */
+export function collectMissingRenderingClauses(
+  label: string,
+  block: string,
+  clauses: readonly ContractClause[],
+): string[] {
+  return clauses
+    .filter(clause => !clause.pattern.test(block))
+    .map(clause => `${label}: missing ${clause.label} — ${clause.why}`);
+}
+
+describe('the reader block states the non-github rendering rule (AC-3.11, §14.1)', () => {
+  it('names the unprefixed provider-canonical form and reclassifies the templates\' `#`', () => {
+    const violations = collectMissingRenderingClauses(
+      PREAMBLE_CONTRACT_HEADING,
+      preambleContractBlock(),
+      RENDERING_CLAUSES,
+    );
+    expect(
+      violations,
+      `the always-loaded reader block is missing clause(s) AC-3.11 depends on:\n  ` +
+      violations.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the templates it reclassifies are really there, and really still carry the `#`', () => {
+    // Non-vacuity in the direction that matters: if the Output templates ever lost
+    // their `#{number}` slots, the rule above would be a rule about nothing and this
+    // whole claim would pass while asserting no live property. It would also mean
+    // AC-3.1's frozen fixture had been broken, which is the louder failure.
+    for (const slot of ['- **Issue**: #{number}', '- **Number**: #{number}', '### Issue #{number']) {
+      expect(
+        GIT_MD,
+        `the Output templates must still carry ${JSON.stringify(slot)} — it is frozen by the ` +
+        `Phase-0 capture (AC-3.1) and is what the reader block's rule reclassifies`,
+      ).toContain(slot);
+    }
+  });
+
+  it('known-bad probe: each clause, deleted from a copy, is reported by the same collector', () => {
+    // Mechanic (b) — built from the shipped bytes inside this `it`, per ROW, so a
+    // pattern that has drifted off the shipped wording cannot sit here matching
+    // nothing while the arm above passes on the other two (PF-018).
+    const pristine = preambleContractBlock();
+    expect(
+      collectMissingRenderingClauses('pristine', pristine, RENDERING_CLAUSES),
+      'the collector must be silent on the shipped block, or the probe proves nothing',
+    ).toEqual([]);
+
+    for (const clause of RENDERING_CLAUSES) {
+      const wounded = pristine.replace(clause.pattern, '');
+      expect(
+        wounded,
+        `the pattern for "${clause.label}" matched nothing in the shipped block, so deleting it ` +
+        `was a no-op and the row cannot be shown live`,
+      ).not.toBe(pristine);
+      expect(
+        collectMissingRenderingClauses('wounded', wounded, RENDERING_CLAUSES)
+          .map(v => v.split(' — ')[0]),
+        `removing "${clause.label}" must be reported by the same collector`,
+      ).toContain(`wounded: missing ${clause.label}`);
+    }
+    expect(RENDERING_CLAUSES.length, 'the clause table is empty (PF-018)').toBeGreaterThan(0);
   });
 });
