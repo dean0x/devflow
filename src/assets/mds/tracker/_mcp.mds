@@ -62,7 +62,7 @@ not live here, because the CLI provider's is a different number.
 
 `references/tracker/_mcp.md` governs {scope}; this operation names its steps and restates none of its rules.
 
-1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation.{compose_tail}
+1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation, under D11's removal `trap`.{compose_tail}
 2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
 3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
 @end

@@ -875,4 +875,24 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'on this line are byte-unchanged; net effect on the always-loaded file is 163 characters ' +
       'SHORTER, which is what funded the `## Tracker input contract` rendering rule (M2).',
   },
+
+  // ── #325, resolve pass: the D11 staging files gain a lifetime ──────────────
+  {
+    file: 'git-agent.md',
+    startLine: 59,
+    endLine: 59,
+    rationale:
+      'security-01/security-08. The D11 temp-file sentence stated CREATION and nothing else, so ' +
+      'the four staging files it names were created per invocation and removed on no path — and ' +
+      '`$DEVFLOW_BODY_RAW` holds precisely the bytes the scrub exists to delete, which makes the ' +
+      'staging area a second sink with no gate over it (PF-066). The line is MERGED with the ' +
+      '`DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` sentence that followed it, so all four names are ' +
+      'stated once, and extended with the removal: a `trap` armed before the first `mktemp`, a ' +
+      'plain `rm` because the permission layer these recipes run under refuses the flagged form, ' +
+      'and the gate status captured ahead of the removals so a cleanup cannot report the ' +
+      'scrubber\'s refusal as success. Every clause of the pre-split line survives in the merged ' +
+      'one — both `$(mktemp)` assignments, "never a fixed path", and the parallel-worktrees ' +
+      'reason — and `tests/guards/mcp-sink-bypass.test.ts` claim 5 now pins each property of the ' +
+      'removal with a known-bad probe per property.',
+  },
 ];

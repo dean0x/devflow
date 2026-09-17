@@ -82,8 +82,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 - When N > 0: report `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`. A leaked secret requires credential ROTATION; editing or deleting a comment is cleanup, not remediation (GitHub retains edit history and notifications already fired).
 - **Always post `$DEVFLOW_BODY` (scrubbed), never `$DEVFLOW_BODY_RAW`.**
 
-Create both temp files per invocation — `DEVFLOW_BODY_RAW="$(mktemp)"` and `DEVFLOW_BODY="$(mktemp)"` — never a fixed path: Git agents run in parallel across worktrees and share the filesystem.
-Create `DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` the same way.
+`DEVFLOW_BODY_RAW="$(mktemp)"` and `DEVFLOW_BODY="$(mktemp)"` per invocation, `DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` the same — never a fixed path: Git agents run in parallel across worktrees and share the filesystem. Remove all four on exit — a RAW file is the bytes the scrub exists to delete — with this armed before the first `mktemp`: `trap 'GATE=$?; rm -- "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" 2>/dev/null; exit "$GATE"' EXIT INT TERM`.
 
 ## Operations
 

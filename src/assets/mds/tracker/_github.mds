@@ -286,9 +286,10 @@ The D4 degradation contract and the D11 comment-sink scrub state the rules; what
 - **Backpressure rung:** `X-RateLimit-Remaining` < 50 — the point at which D4's inter-operation delay rises from 1s to 3s for the remainder of the batch.
 - **Unavailability:** `gh` absent or unauthenticated, or no remote — D4's "no remote" condition on this provider.
 
-**Scrub-then-post chain** — D11's `&&` discipline instantiated for GitHub. A pipeline's exit status would swallow a scrubber crash, so the chain is `&&` and never `|`:
+**Scrub-then-post chain** — D11's `&&` discipline instantiated for GitHub. A pipeline's exit status would swallow a scrubber crash, so the chain is `&&` and never `|`; and D11's removal rule is armed before the `mktemp` that opens the chain, so the raw body outlives no path:
 
 ```bash
+trap 'GATE=$?; rm -- "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" 2>/dev/null; exit "$GATE"' EXIT INT TERM
 node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh issue comment {number} --body-file "$DEVFLOW_BODY"
 ```

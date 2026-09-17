@@ -15,7 +15,7 @@
  * the mechanism only holds while every posting mechanic actually uses it. That is
  * a property of PROSE, and prose has no compiler. This file is its compiler.
  *
- * FOUR CLAIMS, kept separate so no one of them can carry the others (PF-064):
+ * FIVE CLAIMS, kept separate so no one of them can carry the others (PF-064):
  *   1. CONTRACT — the contract module states all four clauses: the
  *      `{SCRUBBED_BODY}` rule, `D11-OK`, `SECRET-EXPOSED` [DR-01] and the
  *      `<bytes>` verification [DR-06]. Asserted against the SOURCE `.mds`.
@@ -31,6 +31,16 @@
  *   4. PROBES — the forward collector is driven by seeded mechanics that omit
  *      exactly one clause each, so an inert collector is reported here rather
  *      than passing over a real corpus.
+ *   5. RESIDUE — the gate's guarantee is about the SINK, and the staging file is
+ *      a second sink: `$DEVFLOW_BODY_RAW` holds precisely the bytes the scrub
+ *      exists to delete (PF-066's second defect). So the always-loaded D11 block
+ *      is asserted to REMOVE every staging file it creates, and to remove them in
+ *      the one shape that works as shell — armed as a `trap` so a `D11-FAIL` path
+ *      is covered too, with a plain `rm` because a permission layer refuses the
+ *      flagged form, and with the gate's status captured ahead of the removals
+ *      (PF-066's third defect: cleanup that runs after the gate overwrites `$?`
+ *      and reports a refusal as success). Claim 5 is about the file-sink and
+ *      tool-call halves alike: one rule, in the block every spawn loads.
  *
  * SCOPE [E2]: the contract clauses are asserted against
  * `src/assets/mds/tracker/_mcp.mds`, the SOURCE, and not against the generated
@@ -52,13 +62,19 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
-import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import { compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
   MCP_CONTRACT_MODULE,
   mcpContractIsGenerated,
 } from '../../src/core/mds-variants.js';
-import { ROOT, walkFiles, type CorpusEntry } from '../helpers.js';
+import {
+  ROOT,
+  gitAgentSinkCorpus,
+  resolveAgentSource,
+  walkFiles,
+  type CorpusEntry,
+} from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Source reading
@@ -660,5 +676,238 @@ describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]'
       content: '## Operation: fetch-issue\nFetch by key and wrap the body in containment markers.\n',
     };
     expect(collectUngatedPostingMechanics([seeded])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. RESIDUE — the staging files are removed, and the removal works as shell
+// ---------------------------------------------------------------------------
+
+/**
+ * Every staging file the D11 recipes create, spelled as the shell quotes it.
+ *
+ * QUOTED, not bare: `$DEVFLOW_BODY` is a prefix of `$DEVFLOW_BODY_RAW`, so a bare
+ * substring test for the shorter name is satisfied by the longer one and the
+ * scrubbed body could drop out of the removal unnoticed. The quotes are also the
+ * shape the removal must actually use — an unquoted operand is a word-splitting
+ * bug in the one line that touches a path nobody chose.
+ */
+const D11_STAGING_FILES: readonly string[] = [
+  '"$DEVFLOW_BODY_RAW"',
+  '"$DEVFLOW_BODY"',
+  '"$DEVFLOW_NOTES_RAW"',
+  '"$DEVFLOW_NOTES"',
+];
+
+/** A flagged `rm` — `rm -f`, `rm -rf`, `rm --force`, in any spacing. */
+const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/;
+
+/**
+ * The always-loaded agent's removal line, fail-loud.
+ *
+ * ONE line by construction: a removal split across lines is a removal whose order
+ * relative to the gate cannot be read off the text, and the ordering is half the
+ * control. Throwing rather than returning undefined keeps every claim below from
+ * reporting "missing" about a line the search simply failed to locate.
+ */
+export function d11RemovalLine(agent: string): string {
+  const line = unescapeMds(agent)
+    .split('\n')
+    .find(l => l.includes('trap ') && l.includes('rm -- '));
+  if (line === undefined) {
+    throw new Error(
+      'the always-loaded D11 block states no removal for the staging files it creates. ' +
+      '$DEVFLOW_BODY_RAW holds exactly the bytes the scrub exists to delete, so an abandoned ' +
+      'one is a second sink with no gate over it (PF-066).',
+    );
+  }
+  return line;
+}
+
+/** One property the removal owes, and the failure it prevents. */
+interface RemovalClaim {
+  readonly label: string;
+  readonly holds: (line: string) => boolean;
+  readonly why: string;
+}
+
+const REMOVAL_CLAIMS: readonly RemovalClaim[] = [
+  {
+    label: 'names every staging file',
+    holds: line => D11_STAGING_FILES.every(f => line.includes(f)),
+    why:
+      'the RAW pair is the credential residue and the scrubbed pair is the litter; a removal ' +
+      'that names three of the four leaves the fourth behind on every invocation of every op',
+  },
+  {
+    label: 'is armed as a trap, on the abnormal exits too',
+    holds: line => /\btrap\b/.test(line) && /\bEXIT\b/.test(line) && /\bINT\b/.test(line),
+    why:
+      'a removal written as the last statement of a chain runs only when the chain reaches it — ' +
+      'so the `D11-FAIL` path, the path that matters most, is exactly the one that skips it',
+  },
+  {
+    label: 'removes with a plain `rm`',
+    holds: line => line.includes('rm -- ') && !FLAGGED_RM.test(line),
+    why:
+      'the flagged form is refused by the permission layer these recipes run under, and a ' +
+      'cleanup that cannot run is not one (PF-066: a control written as shell must work as shell)',
+  },
+  {
+    label: "captures the gate's status before removing and exits on it",
+    holds: line => {
+      const captured = line.indexOf('GATE=$?');
+      const removed = line.indexOf('rm -- ');
+      return captured !== -1 && removed !== -1 && captured < removed
+        && line.lastIndexOf('exit "$GATE"') > removed;
+    },
+    why:
+      'PF-066 defect (3): a removal placed after the gate overwrites `$?`, so the scrubber\'s ' +
+      'refusal is reported as success — the same swallowing the `&&` discipline forbids, ' +
+      'arriving by a different route',
+  },
+];
+
+/** Named collector: properties the removal line does not have. */
+export function collectMissingRemovalClaims(line: string): string[] {
+  return REMOVAL_CLAIMS.filter(c => !c.holds(line)).map(c => `missing: ${c.label} — ${c.why}`);
+}
+
+/**
+ * Named collector: lines anywhere in the sink class that remove a staging file
+ * with a FLAGGED `rm`.
+ *
+ * Class-wide rather than owner-only, because this is the half a second author
+ * gets wrong: the owner's line can be perfect while a provider reference spells
+ * its own instantiation with `rm -f`, and `rm -f` is the spelling every shell
+ * habit reaches for first.
+ */
+export function collectFlaggedRemovals(corpus: readonly CorpusEntry[]): string[] {
+  const offenders: string[] = [];
+  for (const entry of corpus) {
+    for (const [i, line] of unescapeMds(entry.content).split('\n').entries()) {
+      if (!FLAGGED_RM.test(line)) continue;
+      if (!D11_STAGING_FILES.some(f => line.includes(f))) continue;
+      offenders.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
+    }
+  }
+  return offenders;
+}
+
+/**
+ * The whole D11 sink class: the always-loaded agent, the generated references,
+ * and the hand-authored references of the `devflow:git` skill.
+ *
+ * The third of those is where the concrete GitHub chains live, and it is not
+ * under `dist/` — the skill installs it as authored — so a corpus built only from
+ * the compiled tree would never read the file that holds the most shell.
+ */
+function d11SinkClass(): CorpusEntry[] {
+  const corpus = gitAgentSinkCorpus();
+  const handAuthored = path.join(skillsDir(), 'git', 'references');
+  for (const file of walkFiles(handAuthored, f => f.endsWith('.md'), 1)) {
+    corpus.push({ path: file, content: readFileSync(file, 'utf-8') });
+  }
+  return corpus;
+}
+
+describe('residue: the D11 staging files are removed, in a shape that runs (PF-066)', () => {
+  it('the always-loaded block owns the removal, with every property that makes it work', () => {
+    const line = d11RemovalLine(resolveAgentSource('git').content);
+    const violations = collectMissingRemovalClaims(line);
+    expect(
+      violations,
+      `the D11 removal is stated but incomplete:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: each property, broken in turn, is reported by the same collector', () => {
+    // Mechanic (b): every bad shape is built from the shipped line inside this
+    // `it`, per PROPERTY — a claim whose predicate has drifted off the shipped
+    // wording would otherwise sit here matching nothing while the arm above passes
+    // on the other three (PF-018).
+    const pristine = d11RemovalLine(resolveAgentSource('git').content);
+    expect(
+      collectMissingRemovalClaims(pristine),
+      'the collector must be silent on the shipped line, or the probe below proves nothing',
+    ).toEqual([]);
+
+    const wounds: ReadonlyArray<{ label: string; line: string }> = [
+      {
+        label: 'names every staging file',
+        line: pristine.replace(' "$DEVFLOW_NOTES_RAW"', ''),
+      },
+      {
+        label: 'is armed as a trap, on the abnormal exits too',
+        line: pristine.replace(/trap '/, '').replace(/' EXIT INT TERM/, ''),
+      },
+      {
+        label: 'removes with a plain `rm`',
+        line: pristine.replace('rm -- ', 'rm -f -- '),
+      },
+      {
+        label: "captures the gate's status before removing and exits on it",
+        line: pristine.replace('GATE=$?; rm -- ', 'rm -- ').replace('; exit "$GATE"', '; GATE=$?'),
+      },
+    ];
+    for (const { label, line } of wounds) {
+      expect(line, `the wound for "${label}" changed nothing — the probe is inert`)
+        .not.toBe(pristine);
+      expect(
+        collectMissingRemovalClaims(line).map(v => v.split(' — ')[0]),
+        `breaking "${label}" must be reported by the same collector`,
+      ).toContain(`missing: ${label}`);
+    }
+    expect(REMOVAL_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThanOrEqual(4);
+
+    // …and the case the claims cannot express, because there is no line to test:
+    // the ORIGINAL defect, an agent that creates the staging files and removes
+    // none of them. The finder is what reports it, so the finder is driven too.
+    expect(
+      () => d11RemovalLine('## Comment-sink scrub (D11)\n`DEVFLOW_BODY_RAW="$(mktemp)"` per call.\n'),
+      'an agent with no removal at all must be reported by the finder, not read as a pass',
+    ).toThrow(/states no removal/);
+  });
+
+  it('no file in the sink class removes a staging file with a flagged `rm`', () => {
+    const corpus = d11SinkClass();
+    expect(
+      corpus.length,
+      'the sink class is empty — run `npm run build`; an absence arm over zero files reports ' +
+      'success about nothing (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      corpus.some(e => unescapeMds(e.content).includes('rm -- ')),
+      'no file in the sink class removes a staging file at all, so the flagged-form arm below ' +
+      'is an absence claim over ground that carries no removals',
+    ).toBe(true);
+    const offenders = collectFlaggedRemovals(corpus);
+    expect(
+      offenders,
+      'a staging file is removed with a flagged `rm`. The permission layer these recipes run ' +
+      `under refuses that form, so the cleanup silently never happens:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the flagged-form collector fires, and spares the plain form', () => {
+    for (const line of [
+      'trap \'GATE=$?; rm -f "$DEVFLOW_BODY_RAW"; exit "$GATE"\' EXIT',
+      'rm -rf "$DEVFLOW_NOTES_RAW"',
+      'rm --force "$DEVFLOW_BODY"',
+    ]) {
+      expect(
+        collectFlaggedRemovals([{ path: 'seed.md', content: line }]),
+        `"${line}" must be caught`,
+      ).toEqual([`seed.md:1: ${line}`]);
+    }
+    for (const line of [
+      'rm -- "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" 2>/dev/null',
+      'rm -rf build/            # not a staging file',
+    ]) {
+      expect(
+        collectFlaggedRemovals([{ path: 'seed.md', content: line }]),
+        `"${line}" must not be reported`,
+      ).toEqual([]);
+    }
   });
 });
