@@ -992,6 +992,16 @@ describe('jira module: a dropped or unresolvable ref never reports COMPLETE (AC-
       backlink,
       'the anchored per-provider grammar, never an alternation without anchors (§14.1)',
     ).toContain('^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$');
+    // The anchor's READING, not just its presence. This grammar ships into a
+    // prompt and is applied through `grep -E`, Python or by eye, and in those
+    // contexts `$` matches before a trailing newline — so a ref carrying one
+    // satisfies the gate and reaches a query. The Linear suite drives the payload
+    // table that proves the divergence; this pins the clause on the Jira side.
+    expect(
+      backlink,
+      'the anchor must be stated as binding the whole STRING, or a ref with a trailing newline ' +
+      'passes the pre-flight under the reading the agent actually applies',
+    ).toContain('anchored at both ends of the STRING (a newline fails it)');
     expect(
       backlink,
       'every ref dropped by the pre-flight ⇒ the aggregate reason [DR-04(c)]',

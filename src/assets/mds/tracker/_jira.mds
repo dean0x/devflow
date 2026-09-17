@@ -220,7 +220,7 @@ The rungs differ only in what they can observe; the marker PREDICATE and the pol
 
 **Setup (once, before the loop):** resolve the capability set, the current-user `accountId` from the *identify current user* capability, and the dedup rung. `## Dedup Strategy` may be read as a **hint that only narrows the probe order** — the live probe is the sole authority for which rung is reached and for the DEGRADED reason.
 
-**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$`, anchored at both ends — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. {ref_preflight_tail()}
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$`, anchored at both ends of the STRING (a newline fails it) — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. {ref_preflight_tail()}
 
 **Hoist first where the provider allows it — the numbered path below is the FALLBACK.** One bounded *list by filter* read over the ≤50 keys per operation, markers matched in memory: one read instead of a hundred.
 

@@ -416,7 +416,15 @@ const ACCEPTED_REFS: readonly string[] = [
 /**
  * Register row 25's payloads. Each targets a different sink: shell separators,
  * command substitution, flag injection (two spellings), traversal, size, a
- * zero-numbered key, and whitespace.
+ * zero-numbered key, whitespace, and the three LINE-TERMINATOR spellings.
+ *
+ * The terminator rows are the ones this file's own evaluation context hides. A
+ * ref is interpolated into a query and into a command, and the grammar that
+ * admits it is applied by an agent through `grep -E`, through Python, or by eye —
+ * and in those contexts `$` matches before a trailing newline, where in
+ * JavaScript it does not. A payload table driven only by `new RegExp(...).test`
+ * therefore reports a pass for the one input the shipped reading would let
+ * through.
  */
 const HOSTILE_REFS: ReadonlyArray<readonly [label: string, ref: string]> = [
   ['shell separator', '1; id'],
@@ -427,12 +435,38 @@ const HOSTILE_REFS: ReadonlyArray<readonly [label: string, ref: string]> = [
   ['300 characters', 'A'.repeat(300)],
   ['zero-numbered key', 'PROJ-0'],
   ['whitespace', ' '],
+  ['trailing newline', 'TEAM-123\n'],
+  ['trailing carriage return', 'TEAM-123\r'],
+  ['embedded newline', 'TEAM\n-123'],
 ];
 
-/** The normalisation the module states: ASCII-upper, then either anchored form. */
+/**
+ * An anchored form under the PERMISSIVE reading — the one a `grep -E`, Python or
+ * Ruby reader applies, where `$` matches at the end of the string OR immediately
+ * before a final newline.
+ *
+ * Modelled by stripping one trailing newline before the JavaScript test, which is
+ * exactly the difference between the two anchor semantics. Testing under the
+ * permissive reading is the conservative direction: a payload this rejects is
+ * rejected by every reader, and one it accepts is a payload some reader admits.
+ */
+function matchesPermissively(source: string, value: string): boolean {
+  return new RegExp(source).test(value.replace(/\n$/, ''));
+}
+
+/**
+ * The gate AS THE SHIPPED MODULE STATES IT: ASCII-upper, then either anchored
+ * form read permissively, with the module's own end-of-STRING clause refusing any
+ * value that carries a line terminator.
+ *
+ * The clause is modelled here rather than assumed, and the arm below pins that
+ * the shipped mechanics actually state it — a model that invented the refusal
+ * would grade the artifact against a rule the artifact does not carry.
+ */
 function acceptsRef(ref: string): boolean {
   const normalised = ref.replace(/[a-z]/g, c => c.toUpperCase());
-  return LINEAR_REF_GRAMMARS.some(source => new RegExp(source).test(normalised));
+  if (/[\n\r]/.test(normalised)) return false;
+  return LINEAR_REF_GRAMMARS.some(source => matchesPermissively(source, normalised));
 }
 
 describe('linear module: the anchored ref grammar and its UUID alternative (§14.1)', () => {
@@ -471,7 +505,38 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
       `hostile ref(s) accepted by the grammar this module states: ${accepted.join(', ')}. The ` +
       `anchored form is what keeps a ref out of a query and out of a command`,
     ).toEqual([]);
-    expect(HOSTILE_REFS.length, 'the hostile corpus is empty (PF-018)').toBe(8);
+    expect(HOSTILE_REFS.length, 'the hostile corpus is empty (PF-018)').toBe(11);
+  });
+
+  it('the mechanics state that an anchor binds the whole STRING, so a newline fails', () => {
+    // The clause `acceptsRef` models. Without it the payload table above would be
+    // grading the artifact against a rule only this file believes in.
+    expect(
+      linearTree(),
+      'the anchored forms ship into a prompt and are applied by `grep -E`, Python or by eye, ' +
+      'where `$` matches before a trailing newline. Unless the mechanics say the anchor binds ' +
+      'the whole string, a ref carrying one satisfies the gate and reaches a query and a command',
+    ).toContain('anchored at both ends of the STRING (a newline fails it)');
+  });
+
+  it('known-bad probe: the permissive reading alone admits a trailing newline', () => {
+    // The divergence itself, asserted rather than described. The first expectation
+    // is the shipped reading WITHOUT the clause; the second is the gate with it;
+    // the third is why a JavaScript-only model never reported the gap.
+    expect(
+      LINEAR_REF_GRAMMARS.some(source => matchesPermissively(source, 'TEAM-123\n')),
+      'a `grep -E` or Python reader accepts a trailing newline against these forms — if this is ' +
+      'false the permissive model has stopped modelling anything and the payload rows are inert',
+    ).toBe(true);
+    expect(
+      acceptsRef('TEAM-123\n'),
+      'and the stated clause is what refuses it',
+    ).toBe(false);
+    expect(
+      new RegExp(LINEAR_REF_GRAMMARS[0]).test('TEAM-123\n'),
+      "JavaScript's own `$` rejects it unaided, which is exactly why a test written in this " +
+      'file\'s evaluation context reported a pass over the one input that could get through',
+    ).toBe(false);
   });
 
   it('the per-ref DEGRADED reason names this provider, and the aggregate arm exists', () => {
