@@ -864,7 +864,7 @@ Post the wave completion summary as a comment on the tracking issue. Marker-base
 
 **Input:** `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional)
 
-- `TRACKING_ISSUE`: GitHub issue number for the parent tracking issue
+- `TRACKING_ISSUE`: tracker issue reference for the parent tracking issue
 - `WAVE_REPORT_PATH`: Repo-relative or absolute path to the wave-report.md file written by the wave orchestrator (repo-relative paths are resolved against WORKTREE_PATH when supplied, else the current worktree root)
 - `WAVE_ID`: Timestamped wave directory slug (e.g. `2026-08-20_1730`) — used as the dedup marker
 - `WORKTREE_PATH` (optional): See worktree-support skill
