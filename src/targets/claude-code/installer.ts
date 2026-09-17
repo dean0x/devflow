@@ -568,8 +568,11 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  * install.
  *
  * No staging name can collide with a manifest entry, and the prune reaches them all for
- * the same reason it reaches the `.old` backups: every staging basename begins with a dot
- * and ends `.tmp`, and no manifest path under `tracker/` descends into such a directory.
+ * the same reason it reaches the `.old` backups: it converges the `tracker/` subtree
+ * against the manifest BY PATH, so anything under it the manifest does not name is
+ * removed and no staging name has to be recognised as one. Not by spelling — a provider
+ * arm's basename is `{provider}.{token}.tmp`, which is not dot-prefixed, so a rule keyed
+ * on the name would reach the flat arm only.
  */
 function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
   if (unit.kind === 'provider') {
