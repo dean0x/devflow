@@ -1207,17 +1207,11 @@ const JIRA_VOCABULARY: ProviderRefVocabulary = {
   refNoun: 'key',
 };
 
-/** Every generated op file of this provider, concatenated. */
-function jiraTree(): string {
-  return TRACKER_OPS.map(op => readGenerated(jiraRel(op))).join('\n');
-}
-
 /** The shipped Jira corpus, read through this file's own fail-loud reader. */
 const JIRA_CORPUS: ProviderCorpus = {
   label: JIRA_SUBDIR,
   vocab: JIRA_VOCABULARY,
   read: op => readGenerated(jiraRel(op)),
-  tree: jiraTree,
 };
 
 /**
@@ -1267,7 +1261,7 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
     const tree = (): string => [...pristine.values()].join('\n');
     expect(
       collectMissingMechanicsClaims(
-        { label: 'pristine', vocab: JIRA_VOCABULARY, read: op => readFromCorpus(pristine, op), tree },
+        { label: 'pristine', vocab: JIRA_VOCABULARY, read: op => readFromCorpus(pristine, op) },
         TOOL_CALL_MECHANICS_CLAIMS,
       ),
       'the collector must be silent on the shipped mechanics, or the probe proves nothing',
@@ -1288,7 +1282,6 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
           label: 'wounded',
           vocab: JIRA_VOCABULARY,
           read: op => readFromCorpus(wounded, op),
-          tree: () => [...wounded.values()].join('\n'),
         },
         TOOL_CALL_MECHANICS_CLAIMS,
       );

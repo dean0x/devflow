@@ -909,7 +909,6 @@ const LINEAR_CORPUS: ProviderCorpus = {
   label: LINEAR_SUBDIR,
   vocab: LINEAR_VOCABULARY,
   read: op => readGenerated(linearRel(op)),
-  tree: linearTree,
 };
 
 /**
@@ -959,7 +958,7 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
     const tree = (): string => [...pristine.values()].join('\n');
     expect(
       collectMissingMechanicsClaims(
-        { label: 'pristine', vocab: LINEAR_VOCABULARY, read: op => readFromCorpus(pristine, op), tree },
+        { label: 'pristine', vocab: LINEAR_VOCABULARY, read: op => readFromCorpus(pristine, op) },
         TOOL_CALL_MECHANICS_CLAIMS,
       ),
       'the collector must be silent on the shipped mechanics, or the probe proves nothing',
@@ -980,7 +979,6 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
           label: 'wounded',
           vocab: LINEAR_VOCABULARY,
           read: op => readFromCorpus(wounded, op),
-          tree: () => [...wounded.values()].join('\n'),
         },
         TOOL_CALL_MECHANICS_CLAIMS,
       );

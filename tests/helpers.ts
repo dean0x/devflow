@@ -1601,13 +1601,13 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
 /**
  * One provider's generated mechanics corpus, as the claim collector reads it.
  *
- * All four members describe the SAME provider, so they travel as one value: four
- * positional arguments of which two are same-arity functions are four arguments a
- * call site can transpose silently.
+ * All three members describe the SAME provider, so they travel as one value: a
+ * label, a vocabulary and a reader bundled as one object rather than positional
+ * arguments a call site could reorder silently.
  *
- * `read` and `tree` are injected so the caller keeps its own fail-loud reader —
- * every provider suite already has one with a build hint, and a second reader here
- * would be a second place ENOENT tolerance could creep in.
+ * `read` is injected so the caller keeps its own fail-loud reader — every provider
+ * suite already has one with a build hint, and a second reader here would be a
+ * second place ENOENT tolerance could creep in.
  */
 export interface ProviderCorpus {
   /** The provider's reference sub-directory, which prefixes every reported line. */
@@ -1616,8 +1616,6 @@ export interface ProviderCorpus {
   readonly vocab: ProviderRefVocabulary
   /** One op's generated reference. */
   readonly read: (op: string) => string
-  /** Every op's generated reference concatenated — the subject of the op-less claims. */
-  readonly tree: () => string
 }
 
 /**
