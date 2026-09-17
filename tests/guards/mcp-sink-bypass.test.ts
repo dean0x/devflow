@@ -388,7 +388,8 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
  * subject — it was written to go red at exactly this moment and its message said
  * so. Providers are read from MCP_BACKED_PROVIDER_SUBDIRS rather than listed, so
  * a provider added later joins this corpus by construction; a sub-directory that
- * does not exist yet contributes nothing and the non-vacuity arm reports it.
+ * does not exist contributes nothing, and the ★ arm below names every member of
+ * the set so that absence is reported rather than absorbed.
  */
 function postingMechanicCorpus(): CorpusEntry[] {
   const corpus: CorpusEntry[] = [];
@@ -428,7 +429,7 @@ export function collectUngatedPostingMechanics(corpus: readonly CorpusEntry[]): 
 }
 
 describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]', () => {
-  it('★ the live corpus is non-empty, and holds at least one real posting mechanic', () => {
+  it('★ the live corpus reaches every tool-call provider and holds a real posting mechanic', () => {
     // PF-018, in the direction that matters now that a subject exists: every arm
     // below is an empty-difference assertion, and an empty corpus satisfies all of
     // them. So the corpus is asserted to be populated AND to contain a file that
@@ -440,6 +441,22 @@ describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]'
       'no provider mechanics file was read — run `npm run build`; a posting-mechanic guard over ' +
       'zero posting mechanics reports success about nothing',
     ).toBeGreaterThan(0);
+
+    // Corpus REACH, asserted PER MEMBER of the set the corpus ranges over. The
+    // length check above is satisfied by any ONE provider, so a tree that failed
+    // to generate — or was renamed — leaves every arm in this file green having
+    // never read it: the matcher and the predicate are proven over ground the
+    // corpus never covered, which is PF-064's second claim failing on its own.
+    // Named per member rather than counted, because a count is a second number to
+    // keep in step with the registry and it names nothing when it goes red.
+    for (const subdir of MCP_BACKED_PROVIDER_SUBDIRS) {
+      expect(
+        corpus.some(e => e.path.startsWith(`${subdir}/`)),
+        `no mechanics file was read under ${subdir} — every arm below would pass without ever ` +
+        'reading this provider. Run `npm run build`.',
+      ).toBe(true);
+    }
+
     const posting = corpus.filter(e => unescapeMds(e.content).includes('{SCRUBBED_BODY}'));
     expect(
       posting.map(e => e.path),
