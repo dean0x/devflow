@@ -527,7 +527,11 @@ function defaultNonceSource() {
  *
  * @param {string} scrubbed  The scrubbed body.
  * @param {string} scrubLine The FIRST pass's formatScrubLine output.
- * @param {() => string} [nonceSource]
+ * @param {() => unknown} [nonceSource]  `unknown` is the contract this function
+ *   implements: it type-checks what the source returns and refuses anything that
+ *   is not 32 hex characters, so declaring `() => string` would describe a
+ *   narrower contract than the code and force every malformed-nonce fixture to
+ *   cast past the check it exists to prove.
  * @returns {{ emitLine: string, body: string } | { error: string }}
  */
 function frameEmit(scrubbed, scrubLine, nonceSource) {
@@ -686,7 +690,7 @@ function runEmitMode(content, deps) {
 
 /**
  * @param {string[]} argv  process.argv
- * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => string }} [deps]
+ * @param {{ scrubFn?: (c: string) => ScrubResult, nonceSource?: () => unknown }} [deps]
  *   Injected only by tests, and only to reach the two arms no fixture can: a
  *   non-idempotent scrub and an unavailable nonce. Defaulted here rather than at
  *   each use site so production has exactly one set of dependencies.
