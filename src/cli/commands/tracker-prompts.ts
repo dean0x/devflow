@@ -4,10 +4,10 @@
  * CLI-layer module (ADR-013): prompt-rendering logic lives in src/cli/commands/,
  * core business logic stays in src/core/tracker.ts.
  *
- * Applies PF-029: the wizard gate keys on `modePromptShown` (was the Setup-mode
+ * avoids PF-029: the wizard gate keys on `modePromptShown` (was the Setup-mode
  * p.select prompt actually shown?), never on the mode name, so --recommended
  * (flag, no prompt) and the non-TTY fallback preserve their promptless contracts.
- * Applies PF-014: runTrackerStep never calls process.exit() or throws — callers
+ * avoids PF-014: runTrackerStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally safe.
  * Applies ADR-019's one-definition-seam corollary: the shared DI seam (PromptOutcome, WizardPromptIO, clackNote,
  * clackSelect) is imported from prompt-io.ts — never re-declared here.
