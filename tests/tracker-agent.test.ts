@@ -168,11 +168,22 @@ export function collectForeignProviderLiterals(content: string): string[] {
  * `rm -f` is denied by devflow's recommended deny-list, so an agent told to use one
  * stalls on a permission prompt it cannot answer — in the background, holding the
  * claim file, with the next session's gate reading that held claim as a live agent
- * (PF-003). `unlink` is the instruction; this collector is the other half.
+ * (PF-003). A plain `rm --` is the instruction; this collector is the other half.
  *
  * Short and long flags alike: the predicate is a dash after the verb, not a letter
  * after a dash, because `rm --force` is the same denied command as `rm -f` and the
  * narrower spelling let it through.
+ *
+ * The one dash-shaped token that is NOT a flag is the end-of-options `--`: PF-003's
+ * deny rule keys on the destructive SPELLINGS, `--` turns option parsing OFF rather
+ * than adding an option, and it is what every cleanup recipe in the Git corpus uses.
+ * So the dash-token is compared for EQUALITY with `--` rather than by a prefix test,
+ * which is what keeps `--force` reported. The token stops at a backtick as well as at
+ * whitespace, because the prompt spells the recipe inline as `rm --` in prose and a
+ * token that swallowed the closing backtick would read as a flag.
+ *
+ * Every dash-token on the line is examined, not the first: a line carrying the
+ * permitted spelling and a denied one is a denied line.
  *
  * NOT COVERED, deliberately (PF-064): a flag passed AFTER the operand
  * (`rm "$X" -f`). It is unnatural in a prompt and has never been written; a new
@@ -182,7 +193,7 @@ export function collectForeignProviderLiterals(content: string): string[] {
 export function collectFlaggedRm(content: string): string[] {
   return content
     .split('\n')
-    .filter(l => /\brm\s+-/.test(l))
+    .filter(line => [...line.matchAll(/\brm\s+(-[^\s`]*)/g)].some(match => match[1] !== '--'))
     .map(l => l.trim());
 }
 
@@ -821,15 +832,17 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     expect(TRACKER_TEXT).toContain('FINAL act');
   });
 
-  it('deletes the claim file with unlink, never a flagged rm (PF-003)', () => {
+  it('deletes the claim file with a plain rm, never a flagged one (PF-003)', () => {
     // `rm -f` is denied by devflow's recommended deny-list: an agent instructed to
     // use it stalls on a permission prompt it cannot answer, in the background,
     // leaving the claim file behind and the next session suppressed.
     expect(
       collectFlaggedRm(TRACKER_TEXT),
-      'use unlink; a flagged rm is denied and the agent runs unattended',
+      'use a plain `rm --`; a flagged rm is denied and the agent runs unattended',
     ).toEqual([]);
-    expect(TRACKER_TEXT).toMatch(/\bunlink\b/);
+    // The spelling itself, so "no flagged rm" cannot be satisfied by an agent that
+    // stopped naming a deletion mechanism at all. Same recipe as the Git corpus.
+    expect(TRACKER_TEXT).toContain('rm -- "$TRACKER_CLAIM"');
   });
 
   it('known-bad probe: the flagged-rm collector reports every seeded flag', () => {
@@ -837,9 +850,17 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
       expect(collectFlaggedRm(`${line}\n`), `"${line}" must be reported`).toHaveLength(1);
     }
     // …and not on the instruction that REPLACES it, nor on the prose naming the ban.
+    expect(
+      collectFlaggedRm('rm -- "$TRACKER_CLAIM"\n'),
+      'the end-of-options token is not a flag — it turns option parsing OFF',
+    ).toEqual([]);
+    expect(
+      collectFlaggedRm('rm -- "$A"; rm -rf "$B"\n'),
+      'a permitted spelling on the same line must not hide a denied one',
+    ).toHaveLength(1);
     expect(collectFlaggedRm('unlink "$TRACKER_CLAIM"\n')).toEqual([]);
     expect(
-      collectFlaggedRm('Use `unlink` — a flagged `rm` is denied by the deny-list.\n'),
+      collectFlaggedRm('Use a plain `rm --` — a flagged `rm` is denied by the deny-list.\n'),
       'the prose stating the ban must not read as the ban being broken',
     ).toEqual([]);
   });
@@ -994,7 +1015,7 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
       WRITE_FENCE,
       'cleanup placed AFTER the chain runs only when the chain returns; this agent is killed ' +
       'mid-run as a documented outcome (PF-056), and $RAW is the PRE-scrub composition',
-    ).toMatch(/^trap '[^']*unlink "\$RAW"[^']*unlink "\$SCRUBBED"[^']*' EXIT INT TERM$/m);
+    ).toMatch(/^trap '[^']*rm -- "\$RAW" "\$SCRUBBED"[^']*' EXIT INT TERM$/m);
     expect(
       WRITE_FENCE.split('\n').filter(l => /\bmktemp\b/.test(l)),
       'both staging paths come from mktemp — a hand-built temp name is a shared path',
@@ -1264,7 +1285,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
     const untrapped = WRITE_FENCE.split('\n')
       .filter(line => !/^trap /.test(line))
       .join('\n')
-      .replace('GATE=$?;', 'GATE=$?; unlink "$RAW"; unlink "$SCRUBBED";');
+      .replace('GATE=$?;', 'GATE=$?; rm -- "$RAW" "$SCRUBBED" 2>/dev/null;');
 
     const run = runShell(writeChain(COMPOSED_FILE, untrapped), sandbox, { stub: KILLED_MID_SCRUB });
     expect(run.status).not.toBe(0);

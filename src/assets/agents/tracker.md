@@ -309,7 +309,7 @@ Compose the whole file first, then run this chain — and nothing else:
 ```bash
 umask 077
 RAW=""; SCRUBBED=""
-trap 'unlink "$RAW" 2>/dev/null; unlink "$SCRUBBED" 2>/dev/null' EXIT INT TERM
+trap 'rm -- "$RAW" "$SCRUBBED" 2>/dev/null' EXIT INT TERM
 RAW="$(mktemp)" \
   && SCRUBBED="$(mktemp "$TRACKER_DEVFLOW_DIR/.tracker-staged.XXXXXX")" || exit 1
 cat > "$RAW" <<'EOF'
@@ -341,8 +341,8 @@ Every part of that is load-bearing:
   paths and the signal paths, not only on the one where the chain runs to the end.
   `$RAW` holds the PRE-scrub composition, so leaving it behind keeps exactly the
   bytes the gate exists to remove, for the lifetime of the temp directory rather
-  than of the run. `unlink`, never a flagged `rm`, for the reason `## Finishing`
-  step 3 gives.
+  than of the run. A plain `rm --`, never a flagged one, for the reason
+  `## Finishing` step 3 gives.
 - **`GATE=$?` immediately after the chain, and `exit "$GATE"`.** The trap fires
   after that status is captured and fixed, so what the block reports is the gate's
   verdict — an exit code read after a later command is not evidence about the
@@ -397,9 +397,10 @@ identifier.
 2. **On a successful write**, delete `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`.
    The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write.
-   Use `unlink` — a flagged `rm` is denied by devflow's recommended deny-list,
-   and you run unattended with no one to answer the prompt (PF-003):
-   `unlink "$TRACKER_CLAIM"`
+   Use a plain `rm --`: devflow's recommended deny-list denies the FLAGGED
+   spellings, and you run unattended with no one to answer the prompt (PF-003).
+   `--` ends the options, so a path is never read as one:
+   `rm -- "$TRACKER_CLAIM"`
    Crashing before this line leaves the claim file for the next run's stale
    recovery — the correct outcome for a partial run.
 4. End with the output block below. It is invisible in a background run, so the
