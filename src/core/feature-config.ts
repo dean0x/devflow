@@ -32,23 +32,31 @@ export interface FeatureConfig {
   knowledge: boolean;
   reviewPublication: ReviewPublication;
   /**
-   * The per-repo tracker provider override, as the RAW string the config file
-   * holds. Absent (`undefined`) means no override — and the key is then omitted
-   * from the written JSON, never written as `null` or as a default provider.
+   * The per-repo tracker provider override, as the RAW JSON value the config
+   * file holds. Absent (`undefined`) means no override, and the key is then
+   * omitted from the written JSON — devflow never manufactures a `null` or a
+   * default provider to stand in for it. A `null` a USER wrote is a present
+   * value like any other: preserved on write, `invalid` at the parse.
    *
-   * Deliberately raw and deliberately unvalidated HERE, unlike every sibling
-   * field: `updateFeature` is a read-modify-write over the whole config, so the
-   * value must survive a round trip byte-for-byte or an unrelated `devflow
-   * knowledge --disable` would silently erase a user's edit — including a
-   * misspelled one, whose erasure would also erase the DEGRADED that reports it.
-   * Repair is forbidden for this value (§14.9-6: reject, never repair), and a
-   * field that coerced on read could not preserve it.
+   * `unknown`, not `string`, and deliberately unvalidated HERE unlike every
+   * sibling field. Two properties rest on that:
+   *
+   *   - `updateFeature` is a read-modify-write over the whole config, so the
+   *     value must survive a round trip byte-for-byte or an unrelated `devflow
+   *     knowledge --disable` would silently erase a user's edit — including a
+   *     misspelled one, whose erasure would also erase the DEGRADED that reports
+   *     it. Repair is forbidden for this value (§14.9-6: reject, never repair),
+   *     and a field that coerced on read could not preserve it.
+   *   - {@link parseTrackerOverride} gives a present-but-wrong-typed value its
+   *     own `invalid` verdict. A `string` field would narrow the JSON before the
+   *     parser ever saw it, leaving that arm reachable from a direct call and
+   *     unreachable from the file a user actually edits (PF-043).
    *
    * NEVER consume this field directly — parse it with {@link parseTrackerOverride},
    * which routes through the same `parseTrackerId` the CLI boundary uses so there
    * is ONE authority on what a provider token may be (PF-023).
    */
-  tracker?: string;
+  tracker?: unknown;
 }
 
 /**
@@ -57,11 +65,12 @@ export interface FeatureConfig {
  * neither reviewPublication nor the per-repo tracker override must be togglable
  * as a boolean.
  *
- * The `-?` is load-bearing, not tidying: a mapped type over an OPTIONAL property
- * yields `K | undefined`, so the moment `tracker?: string` joined the interface a
- * bare mapping resolved to `'memory' | 'learning' | 'knowledge' | undefined` and
- * `updateFeature`'s computed index stopped compiling. Stripping the modifier
- * keeps the union to real keys, and any future optional field inherits the fix.
+ * The `-?` is load-bearing, not tidying: a homomorphic mapped type PRESERVES the
+ * optional modifier, so `tracker` stays optional in the mapped result and
+ * indexing that result by `keyof FeatureConfig` resolves to
+ * `'memory' | 'learning' | 'knowledge' | undefined`, which `updateFeature`'s
+ * computed index rejects. Stripping the modifier keeps the union to real keys,
+ * and any future optional field inherits the fix.
  */
 export type BooleanFeature = {
   [K in keyof FeatureConfig]-?: FeatureConfig[K] extends boolean ? K : never;
@@ -97,10 +106,10 @@ export function getConfigPath(projectRoot: string): string {
  */
 export function parseTrackerOverride(raw: unknown): TrackerConfigOverride {
   if (raw === undefined || raw === '') return { kind: 'absent' };
-  // `unknown`, not `string | undefined`, even though the field is typed: this is
-  // a boundary parse over hand-edited JSON, and a signature that promised a
-  // string would make the wrong-type arm unreachable to the compiler while it
-  // stays entirely reachable to a user with a text editor.
+  // `unknown` all the way from the field: this is a boundary parse over
+  // hand-edited JSON, and a signature that promised a string would make the
+  // wrong-type arm unreachable to the compiler while it stays entirely reachable
+  // to a user with a text editor.
   if (typeof raw !== 'string') {
     return { kind: 'invalid', raw: JSON.stringify(raw) ?? String(raw) };
   }
@@ -136,23 +145,29 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
   const reviewPublication: ReviewPublication =
     rp === 'auto' || rp === 'full' || rp === 'off' ? rp : 'auto';
 
-  // The per-repo tracker override is carried through VERBATIM, never coerced.
-  // Two reasons, and the second is the one a reader is likely to miss:
+  // The per-repo tracker override is carried through VERBATIM — never coerced,
+  // never type-filtered. Three reasons, and the last two are the ones a reader is
+  // likely to miss:
   //   (a) repair is forbidden for a provider value (§14.9-6), so there is no
   //       healed value to fall back to the way reviewPublication has 'auto';
   //   (b) coerceConfig feeds updateFeature's read-modify-write, so a value
   //       dropped here is a value DELETED from the file on the next unrelated
-  //       toggle — erasing both the user's edit and the DEGRADED that reports it.
-  // A non-string is dropped rather than stringified: JSON.stringify would then
-  // write back a quoted `"42"` that reads as a deliberate string next time.
-  const tracker = typeof p.tracker === 'string' && p.tracker !== '' ? p.tracker : undefined;
+  //       toggle — erasing both the user's edit and the DEGRADED that reports it;
+  //   (c) a non-string is a state parseTrackerOverride CLASSIFIES (`invalid`),
+  //       not a state this function repairs. Filtering by type here would leave
+  //       that arm reachable from a direct call to the parser and unreachable
+  //       from the file, which is the only place it can actually be written.
+  // Key PRESENCE is the whole rule: a present key is carried as written, and an
+  // absent one stays absent on disk. `hasOwnProperty` rather than `in` because
+  // the object comes from JSON.parse at a trust boundary.
+  const hasTracker = Object.prototype.hasOwnProperty.call(p, 'tracker');
 
   return {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
     learning,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
     reviewPublication,
-    ...(tracker === undefined ? {} : { tracker }),
+    ...(hasTracker ? { tracker: p.tracker } : {}),
   };
 }
 

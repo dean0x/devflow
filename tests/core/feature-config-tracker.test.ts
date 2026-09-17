@@ -222,4 +222,65 @@ describe('the per-repo tracker key round-trips through the config', () => {
       'a value the parse refuses is still the user’s edit — erasing it hides the DEGRADED',
     ).toBe('jira-cloud');
   });
+
+  /**
+   * The non-string rows, and the reason the field holds a raw JSON value rather
+   * than a string.
+   *
+   * `parseTrackerOverride` gives a present-but-wrong-typed value its own
+   * `invalid` verdict. A field that could only carry strings makes that verdict
+   * reachable from a direct call and unreachable from the file, so the whole
+   * class is silent for every user who can open a text editor — a parse arm
+   * exercised only by inputs the reader cannot produce (PF-043). And because
+   * `updateFeature` is a read-modify-write, a value dropped on read is a value
+   * DELETED from disk on the next unrelated toggle, taking the user's edit and
+   * the DEGRADED that reports it together.
+   */
+  const NON_STRING: readonly { label: string; value: unknown; raw: string }[] = [
+    { label: 'a number', value: 42, raw: '42' },
+    { label: 'a boolean', value: true, raw: 'true' },
+    { label: 'null', value: null, raw: 'null' },
+    { label: 'an array', value: ['jira'], raw: '["jira"]' },
+    { label: 'an object', value: { provider: 'jira' }, raw: '{"provider":"jira"}' },
+  ];
+
+  for (const { label, value, raw } of NON_STRING) {
+    it(`★ readConfig carries ${label} through, and the parse calls it invalid — not absent`, async () => {
+      seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: value }));
+      const config = await readConfig(tmpDir);
+      expect(config.tracker, 'the raw JSON value must reach the parser unchanged').toEqual(value);
+      expect(parseTrackerOverride(config.tracker)).toEqual({ kind: 'invalid', raw });
+    });
+
+    it(`★ updateFeature does not delete ${label}`, async () => {
+      seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: value }));
+      await updateFeature(tmpDir, 'knowledge', false);
+      const after = storedConfig();
+      expect(after.knowledge, 'the toggle must still take effect').toBe(false);
+      expect(
+        Object.prototype.hasOwnProperty.call(after, 'tracker'),
+        'an unrelated toggle deleted the key from disk — both the user’s edit and the ' +
+        '`unknown tracker provider` DEGRADED that would have reported it are gone',
+      ).toBe(true);
+      expect(after.tracker).toEqual(value);
+    });
+  }
+
+  it('readConfigIfPresent carries a non-string value too (the init-seed reader)', async () => {
+    seedConfig(JSON.stringify({ tracker: 42 }));
+    const config = await readConfigIfPresent(tmpDir);
+    expect(config, 'a present config must not read as null').not.toBeNull();
+    expect(parseTrackerOverride(config!.tracker)).toEqual({ kind: 'invalid', raw: '42' });
+  });
+
+  it('an empty-string override round-trips as written and still parses as absent', async () => {
+    // `""` is an unset key with a character in it: the verdict is `absent`, and
+    // the bytes are still the user's. One rule — a present key is carried —
+    // covers it, and costs less than a type-shaped exception that erases it.
+    seedConfig(JSON.stringify({ memory: true, tracker: '' }));
+    const config = await readConfig(tmpDir);
+    expect(parseTrackerOverride(config.tracker)).toEqual({ kind: 'absent' });
+    await updateFeature(tmpDir, 'memory', false);
+    expect(storedConfig().tracker).toBe('');
+  });
 });

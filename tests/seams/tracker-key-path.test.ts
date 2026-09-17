@@ -1,5 +1,9 @@
 /**
- * TS ↔ shell seam: `features.tracker.provider` is ONE key path with TWO readers.
+ * The tracker key paths and their readers — two keys, two readers each, and no
+ * compiler standing between either pair.
+ *
+ * Sections 1–3 — TS ↔ shell seam: `features.tracker.provider` is ONE key path
+ * with TWO readers.
  *
  * The tracker provider is read twice, in two languages, for two purposes:
  *
@@ -28,6 +32,15 @@
  * is sourced rather than by editing PATH: the variable is the backend switch
  * `json_field_file` actually reads, and PATH surgery to hide a tool is
  * platform-dependent (PF-045).
+ *
+ * Section 4 — TS ↔ prompt seam: the per-repo `tracker` key in the project's
+ * `.devflow/config.json`. Its readers are `readConfig` + `parseTrackerOverride`
+ * in TypeScript and the Git agent PROMPT, a generated artifact tsc never sees
+ * (the untyped-seam shape PF-024 names). The prompt reads the FILE, so the
+ * TypeScript side owes it two things and the second is the one a reader is
+ * likely to miss: classify the same bytes the same way, AND leave those bytes on
+ * disk — `updateFeature` is a read-modify-write over the whole config, so a
+ * value the TS reader drops is a value the prompt can never see again.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -37,6 +50,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { readManifest } from '../../src/core/manifest.js';
+import {
+  parseTrackerOverride,
+  readConfig,
+  updateFeature,
+} from '../../src/core/feature-config.js';
 import {
   DEFAULT_TRACKER_PROVIDER,
   TRACKER_PROVIDER_KEY_PATH,
@@ -317,5 +335,152 @@ describe('tracker key path: TS and shell readers agree on every manifest shape',
     expect(TRACKER_PROVIDER_KEY_PATH).toBe('features.tracker.provider');
     expect(fs.readFileSync(path.join(ROOT, 'src', 'core', 'tracker.ts'), 'utf-8'))
       .toContain(`TRACKER_PROVIDER_KEY_PATH = '${TRACKER_PROVIDER_KEY_PATH}'`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. The other key: `tracker` in the project's .devflow/config.json
+// ---------------------------------------------------------------------------
+
+const GIT_AGENT_HOST = path.join(ROOT, 'src', 'assets', 'agents', 'git.mds');
+
+/**
+ * Named collector: the prompt lines that name the per-repo config file.
+ *
+ * Unlike `collectKeyPathReadSites` above, comment lines are NOT skipped — the
+ * whole prompt is prose, and the contract this seam checks is stated in it. The
+ * collector exists so the two assertions below quote what the prompt says rather
+ * than restating it here, where it could drift.
+ */
+export function collectPerRepoKeySites(source: string): string[] {
+  return source
+    .split('\n')
+    .filter(line => line.includes('.devflow/config.json'))
+    .map(line => line.trim());
+}
+
+describe('per-repo tracker key: the prompt states the contract the parser implements', () => {
+  const sites = collectPerRepoKeySites(fs.readFileSync(GIT_AGENT_HOST, 'utf-8'));
+
+  it('the prompt names the key as a step of its resolution order', () => {
+    expect(
+      sites.length,
+      'the Git agent prompt never names .devflow/config.json — the per-repo key has no reader ' +
+      'and the parser below has no consumer',
+    ).toBeGreaterThan(0);
+    expect(
+      sites.some(line => line.includes('Resolution order')),
+      `no resolution-order line names .devflow/config.json:\n  ${sites.join('\n  ')}`,
+    ).toBe(true);
+  });
+
+  it('the prompt gives an out-of-map value its own DEGRADED reason', () => {
+    // This line is what makes `invalid` a state rather than a synonym for
+    // `absent`. If the prompt stopped naming it, the parser's third arm would
+    // have nothing downstream that can tell the two apart.
+    expect(
+      sites.some(line => line.includes('DEGRADED (unknown tracker provider)')),
+      `no line pairs .devflow/config.json with the unknown-provider DEGRADED:\n  ${sites.join('\n  ')}`,
+    ).toBe(true);
+  });
+
+  it('known-bad probe: the collector reports a live mention and stays empty otherwise', () => {
+    expect(collectPerRepoKeySites('- reads manifest.json only\n')).toEqual([]);
+    expect(collectPerRepoKeySites('  the .devflow/config.json value  \n'))
+      .toEqual(['the .devflow/config.json value']);
+  });
+});
+
+interface OverrideShape {
+  readonly label: string;
+  /** The JSON value the `tracker` key holds; the key is omitted when `present` is false. */
+  readonly raw: unknown;
+  readonly present?: boolean;
+  /**
+   * The verdict both readers must reach, pinned by hand. Deriving it from either
+   * reader would let the two agree on a wrong answer (Section 3's oracle rule).
+   */
+  readonly verdict: 'absent' | 'valid' | 'invalid';
+}
+
+const OVERRIDES: readonly OverrideShape[] = [
+  { label: 'key omitted', raw: undefined, present: false, verdict: 'absent' },
+  { label: 'empty string', raw: '', verdict: 'absent' },
+  { label: 'jira', raw: 'jira', verdict: 'valid' },
+  { label: 'linear', raw: 'linear', verdict: 'valid' },
+  { label: 'github (a CHOSEN provider, not an absence)', raw: 'github', verdict: 'valid' },
+  { label: 'an alias (jira-cloud)', raw: 'jira-cloud', verdict: 'invalid' },
+  { label: 'upper case (JIRA)', raw: 'JIRA', verdict: 'invalid' },
+  { label: 'a number', raw: 42, verdict: 'invalid' },
+  { label: 'a boolean', raw: true, verdict: 'invalid' },
+  { label: 'null', raw: null, verdict: 'invalid' },
+  { label: 'an array', raw: ['jira'], verdict: 'invalid' },
+  { label: 'an object', raw: { provider: 'jira' }, verdict: 'invalid' },
+];
+
+describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', () => {
+  let tmpRoot: string;
+
+  beforeAll(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-tracker-override-'));
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function configPath(root: string): string {
+    return path.join(root, '.devflow', 'config.json');
+  }
+
+  function seed(index: number, shape: OverrideShape): string {
+    const root = path.join(tmpRoot, `override-${index}`);
+    fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+    const body: Record<string, unknown> = { memory: true, learning: true, knowledge: true };
+    if (shape.present !== false) body.tracker = shape.raw;
+    fs.writeFileSync(configPath(root), JSON.stringify(body));
+    return root;
+  }
+
+  for (const [index, shape] of OVERRIDES.entries()) {
+    it(`${shape.label} → ${shape.verdict}, before and after \`devflow knowledge --disable\``, async () => {
+      const root = seed(index, shape);
+
+      expect(
+        parseTrackerOverride((await readConfig(root)).tracker).kind,
+        `the TypeScript reader classified ${shape.label} differently from the table`,
+      ).toBe(shape.verdict);
+
+      await updateFeature(root, 'knowledge', false);
+      const onDisk = JSON.parse(fs.readFileSync(configPath(root), 'utf-8')) as Record<string, unknown>;
+
+      expect(onDisk.knowledge, 'the toggle must still take effect').toBe(false);
+      expect(
+        Object.prototype.hasOwnProperty.call(onDisk, 'tracker'),
+        'an unrelated toggle changed whether the key exists on disk — the prompt reads the ' +
+        'FILE, so a key the CLI drops is a key the prompt can never see again',
+      ).toBe(shape.present !== false);
+      if (shape.present !== false) {
+        expect(onDisk.tracker, 'the value must round-trip as written, never normalised').toEqual(shape.raw);
+      }
+
+      expect(
+        parseTrackerOverride((await readConfig(root)).tracker).kind,
+        'the verdict changed across a toggle that has nothing to do with the tracker',
+      ).toBe(shape.verdict);
+    });
+  }
+
+  it('the table covers all three verdicts and at least one non-string (non-vacuity)', () => {
+    for (const verdict of ['absent', 'valid', 'invalid'] as const) {
+      expect(
+        OVERRIDES.some(shape => shape.verdict === verdict),
+        `no row exercises the \`${verdict}\` verdict`,
+      ).toBe(true);
+    }
+    expect(
+      OVERRIDES.some(shape => shape.present !== false && typeof shape.raw !== 'string'),
+      'every present row holds a string — the arm a string-typed field cannot carry is untested',
+    ).toBe(true);
   });
 });
