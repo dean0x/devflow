@@ -885,7 +885,7 @@ export function requireSchemaOracle(sections: readonly string[]): readonly strin
  * `## Project` carries two values (site and key) and is therefore ONE heading
  * with two validator rows — §14.3's table splits the rows, not the section.
  * `learned:` is deliberately absent from the frontmatter set below: it has no
- * stated consumer, and an unread key is residue (ADR-003 clause iii).
+ * stated consumer, and an unread key is residue (ADR-003).
  *
  * Its SHAPE is settled here, once, at import: exactly
  * `TRACKER_SCHEMA_SECTION_COUNT` distinct headings, no repeats. A consumer
@@ -1495,11 +1495,14 @@ export interface ProviderMechanicsClaim {
   /** The acceptance criterion this clause is the mechanical half of. */
   readonly criterion: string
   /**
-   * Generated op references that must EACH state the clause. An empty list means
-   * "somewhere in this provider's tree" — used only where the sentence's home is
-   * legitimately a property of the provider rather than of the operation.
+   * Generated op references that must EACH state the clause — at least one.
+   *
+   * A non-empty tuple, not `readonly string[]`: the collector below ranges over
+   * this list, so an empty one would report nothing while reading not one byte
+   * of any provider's mechanics — a row that can never fail (PF-018). The type
+   * refuses to spell it rather than a branch having to notice it.
    */
-  readonly ops: readonly string[]
+  readonly ops: readonly [string, ...string[]]
   /** The shape that recognises the clause, built from the provider's vocabulary. */
   readonly pattern: (vocab: ProviderRefVocabulary) => RegExp
   readonly why: string
@@ -1627,12 +1630,6 @@ export function collectMissingMechanicsClaims(
   const missing: string[] = []
   for (const claim of claims) {
     const pattern = claim.pattern(corpus.vocab)
-    if (claim.ops.length === 0) {
-      if (!pattern.test(corpus.tree())) {
-        missing.push(`${corpus.label} [${claim.criterion}]: missing ${claim.label} — ${claim.why}`)
-      }
-      continue
-    }
     for (const op of claim.ops) {
       if (!pattern.test(corpus.read(op))) {
         missing.push(

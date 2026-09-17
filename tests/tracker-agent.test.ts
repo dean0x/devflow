@@ -1368,13 +1368,13 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     expect(template!.length).toBeGreaterThan(0);
   });
 
-  it('carries exactly the §14.3 headings, in order, and at least 11 of them [DR-21]', () => {
+  it('carries exactly the §14.3 headings, in order [DR-21]', () => {
+    // The equality IS the whole claim. How many headings §14.3 fixes, and that
+    // none of them repeats, is settled at the oracle's construction in
+    // tests/helpers.ts and driven over every admitting mutation by
+    // tests/tracker/schema-oracle.test.ts.
     const headings = collectTrackerTemplateHeadings(template!);
     expect(headings).toEqual([...TRACKER_SCHEMA_SECTIONS]);
-    expect(
-      TRACKER_SCHEMA_SECTIONS.length,
-      'the two-sided equality test in 3a-4 binds to >= 11 sections',
-    ).toBeGreaterThanOrEqual(11);
   });
 
   it('known-bad probe: a renamed or dropped heading is reported', () => {
@@ -1384,7 +1384,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     expect(collectTrackerTemplateHeadings(dropped)).not.toEqual([...TRACKER_SCHEMA_SECTIONS]);
   });
 
-  it('declares provider: and inferred-from: and DROPS learned: (ADR-003 clause iii)', () => {
+  it('declares provider: and inferred-from: and DROPS learned: (ADR-003)', () => {
     for (const key of TRACKER_SCHEMA_FRONTMATTER_KEYS) {
       expect(template!, `template frontmatter must declare ${key}:`).toContain(`${key}:`);
     }
