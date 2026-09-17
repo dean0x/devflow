@@ -33,11 +33,13 @@ D11 clauses for itself, and a rule governing one operation stated in the contrac
 is charged to every spawn that never runs it. A copy of one of them written out
 here again is what `tests/provider-literals.test.ts` reports.
 
-Registering this module is also what OPENS the generation gate on
-`tracker/_mcp.md`: the tool-call contract is emitted only while a provider that
-reaches its tracker through a tool call is registered. Every posting mechanic
-below NAMES that contract and never restates its substance; on any conflict the
-contract wins.
+The generation gate on `tracker/_mcp.md` is held open by ANY registered provider
+that reaches its tracker through a tool call, and this module is one of them —
+the contract is emitted while at least one such provider is registered, which is
+what `MCP_BACKED_PROVIDER_SUBDIRS` in `src/core/mds-variants.ts` decides.
+Unregistering this module alone therefore does not shut it. Every posting
+mechanic below NAMES that contract and never restates its substance; on any
+conflict the contract wins.
 
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
