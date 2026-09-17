@@ -809,4 +809,41 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'once, so restating it here was the duplication GAP-37 forbids. Net effect on the ' +
       'always-loaded file is 33 characters SHORTER.',
   },
+  {
+    file: 'git-agent.md',
+    startLine: 555,
+    endLine: 555,
+    rationale:
+      '#325, Scrutinize pass. `gather-release-evidence`\'s `### SHIPPED_ISSUES` output template ' +
+      '— the PRODUCER instruction for the list the two entries below consume. It asked for ' +
+      '"issue numbers" in a provider-blind, always-loaded position, so under jira or linear it ' +
+      'asked the agent to EMIT a shape the resolved provider does not use, while the consuming ' +
+      'operation\'s step 0 had already been rewritten to validate entries against that ' +
+      'provider\'s own anchored grammar (the 850-853 entry). One word, "numbers" to ' +
+      '"references", matching §14.1\'s ISSUE_REF vocabulary and the `ensure-traceable-issue` ' +
+      'entry above. The `≤50` bound and the separator wording are byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 844,
+    endLine: 844,
+    rationale:
+      '#325, Scrutinize pass. `backlink-shipped-issues`\'s input-contract line, which sat four ' +
+      'lines above the step-0 gate the 850-853 entry relocated: the gate now defers to the ' +
+      'resolved provider\'s anchored grammar while the contract immediately above it still ' +
+      'called the entries "numbers" — the same file contradicting itself within one operation. ' +
+      'Same one-word rewrite; both separator spellings and the `SHIPPED_ISSUES` parameter name ' +
+      'are byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 861,
+    endLine: 861,
+    rationale:
+      '#325, Scrutinize pass. The same operation\'s loop header, "For each issue number in ' +
+      '`SHIPPED_ISSUES`". Under jira and linear the iteration is over keys, not numbers. The ' +
+      'rest of the line is byte-unchanged, the ≤50 cap and the TRUNCATED clause included — ' +
+      'among them "never report the status as `COMPLETE` while issues went unprocessed", which ' +
+      'is the release-facing half of the same gate and was deliberately left alone.',
+  },
 ];
