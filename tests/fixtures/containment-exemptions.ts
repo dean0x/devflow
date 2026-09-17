@@ -217,12 +217,16 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
     startLine: 715,
     endLine: 715,
     rationale:
-      'resolve-review-threads D4 clause, EXTENDED not cut. `:28` defers the backpressure rung to ' +
-      '"the resolved provider\'s reference", but D4 names TWO batch ops and only ' +
-      'backlink-shipped-issues has a generated reference — so a resolve-review-threads spawn ' +
-      'could never learn the rung and the 1s → 3s escalation was unimplementable for it. The ' +
-      'rung is stated here, on the line that already names `X-RateLimit-Remaining` < 10 for the ' +
-      'same op, so no new provider surface is introduced. Every pre-split byte is retained.',
+      'resolve-review-threads D4 clause, CUT to its op-specific arms. Both GitHub rate-limit ' +
+      'signals — the `X-RateLimit-Remaining` < 10 STOP and the < 50 backpressure rung — left ' +
+      'this line; what stays is the no-PR arm, the 4xx arm and the 5xx retry, which are this ' +
+      'op\'s own. `:25` and `:28` already hold the STOP rule and the 1s → 3s bound ' +
+      'provider-neutrally, and the thresholds they defer to now live in the `devflow:git` ' +
+      'skill\'s `references/github-api.md`, which SKILL.md\'s always-loaded throttling row ' +
+      'names — so the batch op that has no generated tracker reference can still reach both. ' +
+      'This makes resolve-review-threads state its rate limiting exactly as its sibling ' +
+      'backlink-shipped-issues does: one policy in the contract, one threshold in a GitHub ' +
+      'reference, and no restatement in always-loaded text.',
   },
   {
     file: 'git-agent.md',

@@ -25,6 +25,11 @@ Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 > to them. An unreadable probe is a stop too — `[ "" -lt 10 ]` is a shell error, and an
 > errored test skips the very branch that exists to stop us, so every probe below is
 > read through a digit-run `case` before it is compared.
+>
+> **The rung below that stop.** `X-RateLimit-Remaining` < 50 is D4's backpressure rung
+> for a batch op: still above the STOP threshold, so the fan-out continues — the
+> inter-operation delay rises from 1s to 3s for the remainder of the batch. A rung is
+> not a stop; reaching it is never a reason to report `THROTTLED`.
 
 ### Standard Throttling
 

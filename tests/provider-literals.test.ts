@@ -38,7 +38,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
-import { compiledSkillRefsDir } from '../src/core/assets.js';
+import { compiledSkillRefsDir, skillsDir } from '../src/core/assets.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
   MIN_VARIANT_PAIRS,
@@ -49,7 +49,6 @@ import {
   PER_ITEM_FETCH_SHAPES,
   ROOT,
   collectPerItemFetchVerbs,
-  extractOpSectionFromCorpus,
   resolveAgentSource,
 } from './helpers.js';
 
@@ -96,6 +95,24 @@ function readGenerated(relPath: string): string {
     throw new Error(
       `${relPath} is absent at ${abs} — run \`npm run build\` first (this guard reads compiled ` +
       `reference files and cannot be skipped)`,
+    );
+  }
+  return readFileSync(abs, 'utf-8');
+}
+
+/**
+ * The hand-authored GitHub API reference of the `devflow:git` skill.
+ *
+ * Read from `src/assets/skills/git/references/`, not from the compiled tree: this
+ * file is installed as authored and the build emits nothing for it, so a reader
+ * looking under `dist/` would find nothing and the pin would be inert.
+ */
+function readGithubApiReference(): string {
+  const abs = path.join(skillsDir(), 'git', 'references', GITHUB_API_FILE);
+  if (!existsSync(abs)) {
+    throw new Error(
+      `${GITHUB_API_FILE} is absent at ${abs} — it is the only reference a non-tracker GitHub ` +
+      `batch op can reach, so every pin against it would compare against nothing (PF-018)`,
     );
   }
   return readFileSync(abs, 'utf-8');
@@ -414,6 +431,7 @@ interface FileClaim {
 }
 
 const GITHUB_BACKLINK_FILE = 'tracker/github/backlink-shipped-issues.md';
+const GITHUB_API_FILE = 'github-api.md';
 
 const GITHUB_BACKLINK_CLAIMS: readonly FileClaim[] = [
   {
@@ -522,13 +540,15 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
     expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
   });
 
-  it('the STOP threshold is stated on the github path ONLY, per file and in the agent', () => {
+  it('the STOP threshold is stated on the github path ONLY, per file and never in the agent', () => {
     // The absence half, narrowed from the tree to the file — and extended to the
-    // always-loaded agent's own section for this op, which is where the misalignment
-    // actually lived. `resolve-review-threads` keeps both thresholds in git.md: PR
-    // review threads are hosted on GitHub under every provider, so that clause is a
-    // GitHub fact stated in the right place. Scoping to the op section is what lets
-    // this arm forbid the literal for THIS op without forbidding it for that one.
+    // WHOLE always-loaded agent, which is where the misalignment lived. No operation
+    // of git.md names a GitHub rate-limit header: D4 states the STOP rule and the
+    // 1s → 3s bound provider-neutrally, and both thresholds are GitHub facts that
+    // belong in a GitHub reference. The two batch ops D4 names reach them by two
+    // routes — `backlink-shipped-issues` through its generated tracker mechanics,
+    // `resolve-review-threads` (a non-tracker op, so it has none) through
+    // `references/github-api.md`, which SKILL.md's always-loaded throttling row names.
     const toolCall = PROVIDERS.filter(
       p => (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(p.subdir),
     );
@@ -543,31 +563,35 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
     }
 
     const git = resolveAgentSource('git');
-    const { content: section } = extractOpSectionFromCorpus(
-      [{ path: git.path, content: git.content }],
-      'backlink-shipped-issues',
-      { mode: 'sole' },
-    );
     expect(
-      section.length,
-      'the op section measured 0 characters — the absence assertion below would pass by reading ' +
-      'nothing',
+      git.content.length,
+      'the agent measured 0 characters — the absence assertion below would pass by reading nothing',
     ).toBeGreaterThan(0);
     expect(
-      section,
-      `${git.path}: this operation's always-loaded section names GitHub's rate-limit header. ` +
-      `Every spawn loads it whatever provider it resolved, and two of three providers publish no ` +
-      `such count — the signal belongs in ${GITHUB_BACKLINK_FILE}, which the always-loaded D4 ` +
-      `contract already defers to`,
-    ).not.toContain('X-RateLimit-Remaining');
-    // …and the control: the literal IS still in the agent, on the op whose GitHub
-    // hosting is unconditional. An absence arm that would also pass on an agent
-    // scrubbed of the threshold entirely is not measuring a relocation.
-    expect(
       git.content,
-      'resolve-review-threads must keep both thresholds — deleting them everywhere would satisfy ' +
-      'the arm above while disabling backpressure',
-    ).toContain('`X-RateLimit-Remaining` < 10');
+      `${git.path}: always-loaded text names GitHub's rate-limit header. Every spawn loads it ` +
+      `whatever provider it resolved, and two of three providers publish no such count — the ` +
+      `signal belongs in ${GITHUB_BACKLINK_FILE} for the tracker fan-out and in ` +
+      `${GITHUB_API_FILE} for the review-thread batch, both of which the always-loaded D4 ` +
+      `contract and the git skill defer to`,
+    ).not.toContain('X-RateLimit-Remaining');
+
+    // …and the control. An absence arm is equally green on a tree scrubbed of the
+    // thresholds entirely, which would disable backpressure rather than relocate it,
+    // so each threshold is asserted PRESENT at the destination the arm above names.
+    // Per destination rather than over a concatenation: a union is satisfied by one
+    // file carrying both, which is the state this split exists to prevent.
+    expect(
+      readGenerated(GITHUB_BACKLINK_FILE),
+      `${GITHUB_BACKLINK_FILE} is where the tracker fan-out reads its rung; without it the ` +
+      'always-loaded contract defers to a file that does not carry the signal',
+    ).toContain('`X-RateLimit-Remaining` < 50');
+    expect(
+      readGithubApiReference(),
+      `${GITHUB_API_FILE} is the only reference a resolve-review-threads spawn can reach for ` +
+      'this signal — it loads no tracker mechanics — so a rung missing here is a rung that op ' +
+      'can never learn',
+    ).toContain('`X-RateLimit-Remaining` < 50');
   });
 });
 

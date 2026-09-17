@@ -280,7 +280,7 @@ Load when the resolved tracker provider is `github` and the operation is `backli
 
 ### Provider signals (GitHub)
 
-The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's. The backpressure rung is stated only here and in the agent's `resolve-review-threads` clause — the two ops D4 names as batch ops; the secondary-rate-limit threshold is restated wherever an op's own D4 clause has to act on it.
+The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are GitHub's, for the tracker fan-out this operation owns.
 
 - **Secondary rate limit:** a 403 or 429 response with a rate-limit body, or an `X-RateLimit-Remaining` header < 10. Continuing to issue requests into one extends GitHub's penalty window, which is why D4 says STOP rather than wait.
 - **Backpressure rung:** `X-RateLimit-Remaining` < 50 — the point at which D4's inter-operation delay rises from 1s to 3s for the remainder of the batch.
