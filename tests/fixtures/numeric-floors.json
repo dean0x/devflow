@@ -281,7 +281,7 @@
       "ceiling": 800,
       "pattern": "const TRACKER_SECTION_MAX_CHARS = 800;",
       "occurrences": 1,
-      "sourceFile": "tests/shell-hooks.test.ts",
+      "sourceFile": "tests/shell-hooks-tracker.test.ts",
       "description": "EC-17 — max characters of the Section-3 tracker directive TEMPLATE as spelled in src/assets/scripts/hooks/session-start-context. additionalContext is re-sent on every qualifying session start, so the directive length is a per-session cost. Measured 722 at the pin, headroom 78. Pinned against the hook SOURCE rather than the emitted text because the emitted text carries two absolute paths whose length is a property of the caller tmpdir, not of the directive. May be LOWERED after a pass that actually cuts the text, never raised: a cap raised to fit whatever the directive grew into is not a cap."
     }
   ]
