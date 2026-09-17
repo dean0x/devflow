@@ -50,7 +50,14 @@ import {
   generatedReferenceManifest,
   mcpContractIsGenerated,
 } from '../../src/core/mds-variants.js';
-import { PER_ITEM_FETCH_SHAPES, ROOT, collectPerItemFetchVerbs } from '../helpers.js';
+import {
+  PER_ITEM_FETCH_SHAPES,
+  ROOT,
+  TOOL_CALL_MECHANICS_CLAIMS,
+  collectMissingMechanicsClaims,
+  collectPerItemFetchVerbs,
+  type ProviderRefVocabulary,
+} from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Sources and generated files
@@ -866,5 +873,89 @@ describe('jira module: query safety and the cross-cutting rules it invokes', () 
       'no Jira reference spells the gated body placeholder — either no op posts (and AC-3.5\'s ' +
       'forward arm has no subject) or the placeholder is spelled some other way',
     ).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. AC-3.3 / AC-3.11 / §14.3 — the clauses this provider's mechanics own
+// ---------------------------------------------------------------------------
+//
+// The claim TABLE lives in tests/helpers.ts: each of these sentences is made per
+// provider and is the SAME sentence for every tool-call provider, so a copy in
+// this suite and another in the sibling one would be two authorities on one
+// contract. The vocabulary below is the only per-provider part — this provider
+// renders a `key`, so its branch token is `KEY` (§14.1).
+//
+// All three AC-3.3 clauses shipped as prose in this module with no test
+// containing any of the three strings, so the criterion rested on nobody
+// condensing the paragraph away. AC-3.11's branch shape is here for the opposite
+// reason: the always-loaded agent deliberately does NOT restate it, so this file
+// is its only statement and its only possible pin.
+
+const JIRA_VOCABULARY: ProviderRefVocabulary = {
+  refToken: 'KEY',
+  refNoun: 'key',
+};
+
+/** Every generated op file of this provider, concatenated. */
+function jiraTree(): string {
+  return TRACKER_OPS.map(op => readGenerated(jiraRel(op))).join('\n');
+}
+
+describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
+  for (const criterion of ['AC-3.3', 'AC-3.11', '\u00a714.3']) {
+    it(`states every ${criterion} clause its mechanics own`, () => {
+      const claims = TOOL_CALL_MECHANICS_CLAIMS.filter(c => c.criterion === criterion);
+      expect(
+        claims.length,
+        `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
+      ).toBeGreaterThan(0);
+      const missing = collectMissingMechanicsClaims(
+        JIRA_SUBDIR, JIRA_VOCABULARY, op => readGenerated(jiraRel(op)), claims, jiraTree,
+      );
+      expect(
+        missing,
+        `${criterion} clause(s) absent from this provider's generated mechanics:\n  ` +
+        missing.join('\n  '),
+      ).toEqual([]);
+    });
+  }
+
+  it('known-bad probe: each clause, deleted from a copy, is reported by the same collector', () => {
+    // Mechanic (b) — the wounded copy is built inside this `it` from the shipped
+    // bytes, so no committed file is touched to show red, and it is done per ROW:
+    // a pattern that has drifted off the shipped wording would otherwise sit in the
+    // table matching nothing while the arms above passed on every other row.
+    const pristine = new Map(TRACKER_OPS.map(op => [op, readGenerated(jiraRel(op))]));
+    const tree = (): string => [...pristine.values()].join('\n');
+    const read = (op: string): string => pristine.get(op)!;
+    expect(
+      collectMissingMechanicsClaims('pristine', JIRA_VOCABULARY, read, TOOL_CALL_MECHANICS_CLAIMS, tree),
+      'the collector must be silent on the shipped mechanics, or the probe proves nothing',
+    ).toEqual([]);
+
+    for (const claim of TOOL_CALL_MECHANICS_CLAIMS) {
+      const pattern = claim.pattern(JIRA_VOCABULARY);
+      const wounded = new Map(
+        [...pristine].map(([op, text]) => [op, text.replace(pattern, '')] as const),
+      );
+      expect(
+        [...wounded.values()].join('\n'),
+        `the pattern for "${claim.label}" matched nothing in this provider's mechanics, so ` +
+        `deleting it was a no-op and the row cannot be shown live`,
+      ).not.toBe(tree());
+      const reported = collectMissingMechanicsClaims(
+        'wounded',
+        JIRA_VOCABULARY,
+        op => wounded.get(op)!,
+        TOOL_CALL_MECHANICS_CLAIMS,
+        () => [...wounded.values()].join('\n'),
+      );
+      expect(
+        reported.some(v => v.includes(claim.label)),
+        `removing "${claim.label}" must be reported by the same collector, got:\n  ` +
+        reported.join('\n  '),
+      ).toBe(true);
+    }
   });
 });

@@ -1273,3 +1273,165 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
   if (!match) return null
   return { block: match[0], inner: match[1], body: text.slice(match[0].length) }
 }
+
+// ── Tool-call provider mechanics claims (AC-3.3, AC-3.11, §14.3) ──────────────
+//
+// WHY HERE AND NOT IN EITHER PROVIDER SUITE. Each of these sentences is a claim
+// made per provider, so it needs a per-provider arm — and the claim is the SAME
+// claim for every tool-call provider, so a copy in each suite is two authorities
+// on one contract. The [DR-08] table above moved here for exactly this reason;
+// these follow it.
+//
+// WHAT THEY PIN, AND WHY PROSE ALONE WAS NOT ENOUGH.
+//
+//   AC-3.3 — "provider jira with no Jira MCP ⇒ a named DEGRADED at each tracker
+//   op, branch and PR still created, `Tracked (pending)` with the reason, NEVER a
+//   GitHub issue as fallback". All three clauses shipped as prose in both modules
+//   and no test contained any of the three strings, so the whole criterion rested
+//   on nobody condensing the paragraph. The GitHub-fallback clause is the one
+//   that matters most: silently opening an issue on a tracker the user does not
+//   use is worse than an honest gap, and it is the single most plausible thing an
+//   author reaches for when a capability probe comes back empty.
+//
+//   AC-3.11 — the branch shape `{type}/{KEY}-{slug}` with the type EXACT-matched
+//   against `## Issue Types`. The always-loaded agent deliberately does not
+//   restate this (the byte budget refuses a second copy, and GAP-37 forbids one),
+//   so each provider's own setup-task mechanics is the only statement of it and
+//   the only place it can be pinned.
+//
+//   §14.3 — a discarded `## Reference Rendering` token degrades to the documented
+//   default AND records the discard under `### Substitutions`. Both halves or
+//   neither: a default with no record is a silent substitution, and a record with
+//   no default is a report about nothing.
+//
+// The reference VOCABULARY differs per provider by design — jira renders a `KEY`,
+// linear a `REF` — so the two spellings are parameters of the table rather than
+// two tables. Nothing else varies: these clauses are contract text.
+
+/** The reference vocabulary one tool-call provider's mechanics use. */
+export interface ProviderRefVocabulary {
+  /** Branch-token placeholder in `{type}/{TOKEN}-{slug}` — `KEY` on jira, `REF` on linear. */
+  readonly refToken: string
+  /** How the mechanics name a bare reference in prose — `key` on jira, `reference` on linear. */
+  readonly refNoun: string
+}
+
+/** One sentence a tool-call provider's mechanics owe, and where it must appear. */
+export interface ProviderMechanicsClaim {
+  /** Short name, used in the failure message and by the per-row probe. */
+  readonly label: string
+  /** The acceptance criterion this clause is the mechanical half of. */
+  readonly criterion: string
+  /**
+   * Generated op references that must EACH state the clause. An empty list means
+   * "somewhere in this provider's tree" — used only where the sentence's home is
+   * legitimately a property of the provider rather than of the operation.
+   */
+  readonly ops: readonly string[]
+  /** The shape that recognises the clause, built from the provider's vocabulary. */
+  readonly pattern: (vocab: ProviderRefVocabulary) => RegExp
+  readonly why: string
+}
+
+export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
+  {
+    label: '`Tracked (pending)` carries the reason when the capability is missing',
+    criterion: 'AC-3.3',
+    ops: ['setup-task', 'ensure-traceable-issue'],
+    pattern: () => /`Tracked \(pending\)`/,
+    why:
+      'the traceability field has to say SOMETHING, and "pending with a reason" is the only ' +
+      'honest value: a blank field reads as "no issue was wanted" and a fabricated one reads as ' +
+      'an issue that exists. Both operations reach this state, so both must name the value',
+  },
+  {
+    label: 'the branch is still cut and the PR is still opened',
+    criterion: 'AC-3.3',
+    ops: ['setup-task'],
+    pattern: () => /\*\*The branch is still cut and the PR is still opened\*\*/,
+    why:
+      'D4\'s whole promise is that a traceability gap never aborts the caller\'s workflow. Without ' +
+      'this clause an author reading "the capability is absent ⇒ DEGRADED" has no instruction to ' +
+      'continue, and the natural reading of a DEGRADED precondition is to stop',
+  },
+  {
+    label: 'never a GitHub issue as a fallback',
+    criterion: 'AC-3.3',
+    ops: ['setup-task'],
+    pattern: () => /\*\*NEVER create a GitHub issue as a fallback\*\*/,
+    why:
+      'the single most plausible improvisation when a tracker capability comes back empty, and the ' +
+      'worst: a different tracker is not a degraded version of this one, and a stray issue on a ' +
+      'system the user does not watch is worse than an honest gap',
+  },
+  {
+    label: 'the same prohibition on the issue-creating operation',
+    criterion: 'AC-3.3',
+    ops: ['ensure-traceable-issue'],
+    pattern: () => /never creates a GitHub issue instead/,
+    why:
+      'setup-task delegates creation here, so a prohibition stated only there is a prohibition the ' +
+      'operation that actually creates issues never reads',
+  },
+  {
+    label: 'the branch shape is `{type}/{TOKEN}-{slug}`',
+    criterion: 'AC-3.11',
+    ops: ['setup-task'],
+    pattern: v => new RegExp(`\\{type\\}/\\{${v.refToken}\\}-\\{slug\\}`),
+    why:
+      'the requester\'s own journey. The always-loaded agent does not restate the shape — the byte ' +
+      'budget refuses a second copy and GAP-37 forbids one — so this file is its only statement',
+  },
+  {
+    label: 'the type comes from `## Issue Types` by exact match',
+    criterion: 'AC-3.11',
+    ops: ['setup-task'],
+    pattern: () => /`## Issue Types` by \*\*exact match\*\*/,
+    why:
+      'an inferred type is a value the tracker never enumerated, so the create call fails at the ' +
+      'far end or, worse, succeeds against a type that means something else in that project',
+  },
+  {
+    label: 'a discarded rendering token ⇒ the default AND a `### Substitutions` row',
+    criterion: '§14.3',
+    ops: [],
+    pattern: v =>
+      new RegExp(`render the ${v.refNoun}[^.]*?on its own line[^.]*?record the discard under \`### Substitutions\``),
+    why:
+      'both halves or neither. A default with no record is a silent substitution — the user sees a ' +
+      'reference they did not configure and nothing says why; a record with no default is a report ' +
+      'about a value that was never rendered',
+  },
+]
+
+/**
+ * Named collector: claims a tool-call provider's generated mechanics do not make.
+ *
+ * `read` is injected so the caller keeps its own fail-loud reader — every provider
+ * suite already has one with a build hint, and a second reader here would be a
+ * second place ENOENT tolerance could creep in.
+ */
+export function collectMissingMechanicsClaims(
+  label: string,
+  vocab: ProviderRefVocabulary,
+  read: (op: string) => string,
+  claims: readonly ProviderMechanicsClaim[],
+  tree: () => string,
+): string[] {
+  const missing: string[] = []
+  for (const claim of claims) {
+    const pattern = claim.pattern(vocab)
+    if (claim.ops.length === 0) {
+      if (!pattern.test(tree())) {
+        missing.push(`${label} [${claim.criterion}]: missing ${claim.label} — ${claim.why}`)
+      }
+      continue
+    }
+    for (const op of claim.ops) {
+      if (!pattern.test(read(op))) {
+        missing.push(`${label}/${op}.md [${claim.criterion}]: missing ${claim.label} — ${claim.why}`)
+      }
+    }
+  }
+  return missing
+}
