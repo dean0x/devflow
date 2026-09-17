@@ -1157,6 +1157,43 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     expect(out.emitLine).toBe('D11-FAIL nonce-unavailable');
   });
 
+  it('internal error ⇒ exit 4, and stdout is entirely empty', () => {
+    // The one framed-refusal-less failure besides the usage error: the top-level
+    // catch fires before the boundary has chosen an output shape and knows no
+    // mode, so no `D11-FAIL` line can describe it and stdout carries nothing at
+    // all. Strictly stronger than an empty body — the consumer's `D11-OK` gate
+    // reads it as the same refusal — but the claim needs asserting, not arguing.
+    //
+    // Injected through a `--require` preload rather than main()'s deps: the catch
+    // lives inside the `require.main === module` boundary and is reachable only in
+    // a subprocess. Breaking the digest fails frameEmit AFTER the gate has passed,
+    // which is the shape of an unexpected internal failure.
+    const preload = path.join(tmpDir, 'throw-on-hash.cjs');
+    fs.writeFileSync(
+      preload,
+      "require('crypto').createHash = () => { throw new Error('seeded internal error'); };\n",
+      'utf8',
+    );
+    const input = writeInput('clean body\n', 'internal-error.txt');
+    const spawnOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10_000 } as const;
+
+    const broken = spawnSync('node', ['--require', preload, SCRIPT, '--emit', input], spawnOpts);
+    expect(broken.status, `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
+    expect(
+      broken.stdout ?? '',
+      'an internal error must leave stdout entirely EMPTY — not a partial framing, not a body',
+    ).toBe('');
+    expect(broken.stderr, 'the diagnosis goes to stderr, which no recipe forwards')
+      .toContain('internal error');
+
+    // Control: the same spawn WITHOUT the preload frames and exits 0, so the arm
+    // above is evidence about the seeded throw and not about a spawn that never
+    // reached the script.
+    const control = spawnSync('node', [SCRIPT, '--emit', input], spawnOpts);
+    expect(control.status).toBe(0);
+    expect((control.stdout ?? '').split('\n')[0]).toMatch(FRAMING_RE);
+  });
+
   it('the closed registry holds no reason no arm can produce', () => {
     // The script's own argument for keeping `internal-error` OUT of the registry:
     // a value in a closed vocabulary that no arm reaches is a reason a consumer
