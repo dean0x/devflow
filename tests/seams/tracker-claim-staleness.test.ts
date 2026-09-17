@@ -32,7 +32,7 @@
  * spawned agent exits silently against a claim it considers fresh — an attempt is
  * burned against the OD-14 cap on every session until the cap closes the feature
  * permanently. Both failures are silent, and both are invisible to every other
- * guard in this repo: the hook's literal is pinned in `tests/shell-hooks.test.ts`
+ * guard in this repo: the hook's literal is pinned in `tests/shell-hooks-tracker.test.ts`
  * and the agent's prose is pinned in `tests/tracker-agent.test.ts`, but neither
  * file reads the other side. This is the only place they are compared.
  *
