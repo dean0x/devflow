@@ -20,6 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { runHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
@@ -31,30 +32,6 @@ const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 // ---------------------------------------------------------------------------
 // Harness helpers
 // ---------------------------------------------------------------------------
-
-/** Run a hook synchronously via stdin/stdout (mirrors shell-hooks.test.ts:1495) */
-function runHook(
-  hookPath: string,
-  input: object,
-  homeDir: string,
-  extraEnv: Record<string, string> = {}
-): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    const result = execSync(`bash "${hookPath}"`, {
-      input: JSON.stringify(input),
-      env: { ...process.env, HOME: homeDir, ...extraEnv },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { stdout: result.toString(), stderr: '', exitCode: 0 };
-  } catch (e: unknown) {
-    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
-    return {
-      stdout: err.stdout?.toString() ?? '',
-      stderr: err.stderr?.toString() ?? '',
-      exitCode: err.status ?? 1,
-    };
-  }
-}
 
 /** Run a hook with a custom PATH prefix (fake claude shim intercepts spawning) */
 function runHookWithFakeClaude(
