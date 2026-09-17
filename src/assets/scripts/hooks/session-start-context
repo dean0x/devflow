@@ -73,6 +73,28 @@ CONTEXT=""
 # hardcodes $HOME/.devflow and ignores this override.)
 TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
 
+# The shape gate for every path this hook interpolates into a directive.
+#
+# Sections 2 and 3 embed $PROJECT_ROOT — and Section 3 also $TRACKER_DEVFLOW_DIR —
+# inside a double-quoted `prompt: "..."` string the model reads out of
+# additionalContext. The provider and model TOKENS in those directives are admitted
+# by positive allowlists; these two are paths this hook does not choose, so they are
+# admitted on SHAPE instead: a double-quote closes the prompt string, a backslash
+# reads as an escape, and an LF or CR puts the rest of the path on its own line as
+# free text. Checked ONCE, here, where both values are resolved and above every
+# section that interpolates them, so no sink can embed a value no gate saw (PF-023 —
+# the invariant belongs at the convergence point all callers pass through, not in
+# whichever section someone remembered). `case` is a shell builtin, so the GitHub
+# path still forks zero times [DR-10]. CR and LF are spelled with bash's ANSI-C
+# quoting rather than as raw bytes: a literal control byte in a matcher is invisible
+# in a diff and hides the file from every grep-based guard in the repo.
+DIRECTIVE_PATHS_SAFE="yes"
+case "$PROJECT_ROOT$TRACKER_DEVFLOW_DIR" in
+  *'"'*|*'\'*|*$'\n'*|*$'\r'*)
+    DIRECTIVE_PATHS_SAFE=""
+    ;;
+esac
+
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEARNING_DIR="$DEVFLOW_DIR/learning"
 
@@ -140,6 +162,11 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     fi
   elif [ -s "$QUEUE_FILE" ]; then
     LEARNING_WORK="queue"
+  fi
+
+  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_PATHS_SAFE" ]; then
+    dbg "learning directive suppressed: interpolated path shape rejected"
+    LEARNING_WORK=""
   fi
 
   if [ -n "$LEARNING_WORK" ]; then
@@ -222,9 +249,31 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # uncapped would defeat the cap. `read` returns non-zero at an EOF with no
   # trailing newline but HAS assigned the variable, so its status is deliberately
   # not consulted — only the value's shape is.
+  #
+  # `-n 16` bounds the BYTES consumed, which the `case` below cannot: the file is
+  # user-scope and hand-editable, and one very long line would otherwise be pulled
+  # whole into a shell variable and pattern-matched whole on the SessionStart
+  # critical path. Sixteen characters is past every arm's decision point — a
+  # well-formed count never reaches two digits, and the out-of-range arm fires at
+  # seven — so every arm keeps the verdict it would have reached unbounded.
+  # `2>/dev/null` is spelled BEFORE the input redirect for the same reason it is
+  # on the write below: redirections apply left to right, and a failed open is
+  # reported by the shell itself, so silencing stderr afterwards would be too late.
   TRACKER_ATTEMPTS=""
   if [ -f "$TRACKER_ATTEMPTS_FILE" ]; then
-    IFS= read -r TRACKER_ATTEMPTS < "$TRACKER_ATTEMPTS_FILE" 2>/dev/null
+    if [ -r "$TRACKER_ATTEMPTS_FILE" ]; then
+      IFS= read -r -n 16 TRACKER_ATTEMPTS 2>/dev/null < "$TRACKER_ATTEMPTS_FILE"
+    else
+      # Present but unreadable is NOT a fresh start. Leaving the variable empty
+      # would take the '' arm below and read as "no attempt yet", so an EACCES on
+      # the counter would emit at every startup forever — the unbounded retry the
+      # cap exists to prevent, triggered by exactly the broken-I/O condition that
+      # also stops the agent from ever writing tracker.md. Fails CLOSED; the
+      # re-arm path (devflow init / devflow tracker --set) owns recovery, as it
+      # does for any counter the hook leaves sitting at the cap.
+      dbg "tracker attempt counter unreadable — treated as at the cap"
+      TRACKER_ATTEMPTS="$TRACKER_ATTEMPTS_MAX"
+    fi
   fi
   case "$TRACKER_ATTEMPTS" in
     '') TRACKER_ATTEMPTS=0 ;;
@@ -232,13 +281,32 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
       dbg "tracker attempt counter malformed — self-healed to 0"
       TRACKER_ATTEMPTS=0
       ;;
-    ??????*)
+    0) ;;  # a bare zero is a well-formed count, not a padded one
+    0*)
+      # A zero-padded count is ONE string that this hook's two consumers of it read
+      # in DIFFERENT BASES. `[ "$N" -ge "$MAX" ]` parses base 10, so `08` compares
+      # as eight; the `$(( N + 1 ))` that writes the next count is shell arithmetic,
+      # where a leading `0` means OCTAL and `08` is "value too great for base" — an
+      # error that escapes the write's own `2>/dev/null`, because expansion runs
+      # before redirection. Nothing in the padded shape says which reading was
+      # meant, so it self-heals to 0 with every other malformed value instead of
+      # being carried into the disagreement. This hook writes a bare decimal, so
+      # padding came from elsewhere. Placed BEFORE the digit-count arm so a
+      # six-character `000008` heals rather than reading as "six digits, at the cap".
+      dbg "tracker attempt counter zero-padded — self-healed to 0"
+      TRACKER_ATTEMPTS=0
+      ;;
+    ???????*)
       # Bounded before the comparison: `[ "$N" -ge 5 ]` on a value past intmax_t
       # prints "integer expression expected" to stderr and takes the FALSE branch,
-      # so an absurdly long counter would fail OPEN — uncapped — and leak a shell
-      # error. The arm matches SIX digits or more (the earlier arms have already
-      # taken every non-digit), and a count that matters needs one, so anything
-      # reaching here is past the cap by five orders of magnitude.
+      # so an unbounded digit string would fail OPEN — uncapped — and leak a shell
+      # error. `-n 16` above already puts that state out of reach; this arm is the
+      # semantic half and survives a change to the read bound. It matches SEVEN
+      # digits or more (the earlier arms have taken every non-digit and every
+      # zero-padded value), which is the shape CLAUDE.md documents as "at the cap",
+      # and a count that matters needs one digit, so anything reaching here is past
+      # the cap by six orders of magnitude. Six digits and fewer are compared as
+      # the integers they are.
       dbg "tracker attempt counter out of range — treated as at the cap"
       TRACKER_ATTEMPTS="$TRACKER_ATTEMPTS_MAX"
       ;;
@@ -306,6 +374,37 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     fi
   fi
 
+  # Gate 5 — the shape of the two PATHS the directive carries alongside the two
+  # allowlisted tokens. Decided once at the top of the file, where both values are
+  # resolved; consulted here because this is one of the two sinks that interpolate
+  # them, and a control stated once for the file is not a control at a sink that
+  # never consults it (PF-023).
+  if [ -n "$TRACKER_EMIT" ] && [ -z "$DIRECTIVE_PATHS_SAFE" ]; then
+    dbg "tracker directive suppressed: interpolated path shape rejected"
+    TRACKER_EMIT=""
+  fi
+
+  # Gate 6 — the increment must LAND. [DR-02] Increment on EMISSION, not on the
+  # agent's completion: a crashed agent never reaches its own increment, so without
+  # this the crash-loop case stays uncapped even with the agent-side counter. The
+  # agent DELETES the counter on a successful write, so a healthy path never
+  # accumulates. printf is a builtin and the redirect is the shell's — no fork.
+  # `2>/dev/null` is spelled FIRST: redirections are applied left to right, and a
+  # failed open on the counter path is reported by the shell itself, so silencing
+  # stderr after the failing redirect would be too late to keep the hook quiet.
+  #
+  # Emission is CONDITIONAL on the write: an increment that cannot persist is a cap
+  # that can never engage, and the very same unwritable ~/.devflow also stops the
+  # agent writing tracker.md while leaving an earlier install's sentinel in place.
+  # Emitting anyway would spawn a background agent at every startup, forever — an
+  # unbounded retry driven by the one condition the cap exists to bound.
+  if [ -n "$TRACKER_EMIT" ]; then
+    if ! printf '%s\n' "$(( TRACKER_ATTEMPTS + 1 ))" 2>/dev/null > "$TRACKER_ATTEMPTS_FILE"; then
+      dbg "tracker directive suppressed: attempt counter not writable"
+      TRACKER_EMIT=""
+    fi
+  fi
+
   if [ -n "$TRACKER_EMIT" ]; then
     # Allowlisted the same way LEARNING_MODEL is (§14.9 constraint 7). The tier is
     # a constant today — there is no tracker tuning config — so this `case` is an
@@ -318,17 +417,6 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
       opus|sonnet|haiku) ;;
       *) TRACKER_MODEL="sonnet" ;;
     esac
-
-    # [DR-02] Increment on EMISSION, not on the agent's completion: a crashed
-    # agent never reaches its own increment, so without this the crash-loop case
-    # stays uncapped even with the agent-side counter. The agent DELETES the
-    # counter on a successful write, so a healthy path never accumulates.
-    # printf is a builtin and the redirect is the shell's — no fork. `2>/dev/null`
-    # is spelled FIRST: redirections are applied left to right, and a failed open
-    # on the counter path is reported by the shell itself, so silencing stderr
-    # after the failing redirect would be too late to keep the hook quiet.
-    printf '%s\n' "$(( TRACKER_ATTEMPTS + 1 ))" 2>/dev/null > "$TRACKER_ATTEMPTS_FILE" \
-      || dbg "tracker attempt counter not writable"
 
     dbg "tracker directive emitted (provider=$TRACKER_PROVIDER model=$TRACKER_MODEL attempts=$TRACKER_ATTEMPTS/$TRACKER_ATTEMPTS_MAX)"
     TRACKER_SECTION="--- TRACKER SETUP ---
