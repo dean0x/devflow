@@ -59,6 +59,7 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 - **The sections this contract reads, and what an absent one means:** absent ⇒ that section's documented neutral default, never DEGRADED; a consumed section holding `# UNRESOLVED:` ⇒ `TRACEABILITY: DEGRADED (tracker.md required fields incomplete — edit ~/.devflow/tracker.md)`, and the sentinel is **never shape-validated as a value**. Absent and sentinel are **different outcomes** — a default is safe exactly where the field was never needed, and unsafe where the writer looked and could not tell.
   `## Project` (site, key) · `## Issue Types` · `## Required Fields` · `## Iteration Policy` · `## Transitions` · `## Assignee` · `## Tech Debt` · `## Wave Filter` · `## Reference Rendering` · `## Dedup Strategy` · `### Substitutions`
 - Every value is shape-gated **at the sink, regardless of provenance** — a value from the configuration file gets the same gate as one from a tracker response. The file is hand-editable and machine-wide, so its content is third-party input.
+- **Non-github rendering:** every rendered ref takes `## Reference Rendering`'s form, **never `#`-prefixed** — the Output templates' `#` is github's rendering, not a literal.
 - **Load the mechanics:** an operation whose section carries a `**Mechanics:**` pointer reads the `devflow:git` skill's `references/tracker/{provider}/{op}.md` for the resolved provider — the single load instruction; no other line composes a path from the provider token. An operation with no `**Mechanics:**` pointer states its steps inline in full.
 - **Merged step order:** a loaded reference's steps carry this operation's own step numbers and interleave with the steps stated here — execute the merged list in numeric order (`1. 2. 3. 5.` here plus `4.` there are one sequence).
 
@@ -799,7 +800,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 
 `SHIPPED_ISSUES`: space-separated or newline-separated list of issue references.
 
-**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining issues as `THROTTLED ({n} not processed)`. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
+**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
 
 **Process:**
 
