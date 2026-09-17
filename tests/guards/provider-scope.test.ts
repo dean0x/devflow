@@ -351,23 +351,38 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     ).toEqual(seeds.map(seed => seed.path));
   });
 
-  it('known-bad probe: an owned path may name ITS token and no other', () => {
+  it('known-bad probe: EVERY owned path may name ITS token and no other', () => {
     // The half ADR-025 is about. Ownership is per (path, token), so the Jira module
     // naming Linear is still a violation — the narrow widening did not become a
     // blanket one.
-    const owned = PROVIDER_OWNED_PATHS[0];
-    expect(
-      collectForeignProviderLiterals([
-        { path: owned.prefix, content: 'Resolve the jira project key.\n' },
-      ]),
-      `${owned.prefix} must be allowed to name "${owned.token}"`,
-    ).toEqual([]);
-    expect(
-      collectForeignProviderLiterals([
-        { path: owned.prefix, content: 'Fall back to the Linear team filter.\n' },
-      ]).map(v => v.split(' — ')[0]),
-      'and must NOT be allowed to name a different provider',
-    ).toEqual([`${owned.prefix}: "linear"`]);
+    //
+    // Driven over EVERY entry, not over PROVIDER_OWNED_PATHS[0]. Probing one member
+    // of a table the live arms range over stops discriminating the moment the table
+    // grows: the uncovered regression is an over-broad ROW — say
+    // `{prefix: '…/_linear.mds', token: 'jira'}` added to silence a leak — which
+    // satisfies the iterating arm above (the leak is why the row was added) while
+    // no probe ever asks it the foreign-token half. Indexing [0] also silently
+    // assumed which provider sits first in the table.
+    for (const owned of PROVIDER_OWNED_PATHS) {
+      expect(
+        collectForeignProviderLiterals([
+          { path: owned.prefix, content: `Resolve the ${owned.token} project key.\n` },
+        ]),
+        `${owned.prefix} must be allowed to name "${owned.token}"`,
+      ).toEqual([]);
+
+      const foreign = FOREIGN_PROVIDER_TOKENS.filter(t => t.name !== owned.token);
+      expect(foreign.length, 'a single-token registry cannot express the "no other" half')
+        .toBeGreaterThan(0);
+      for (const token of foreign) {
+        expect(
+          collectForeignProviderLiterals([
+            { path: owned.prefix, content: `Fall back to the ${token.name} team filter.\n` },
+          ]).map(v => v.split(' — ')[0]),
+          `${owned.prefix} must NOT be allowed to name "${token.name}"`,
+        ).toEqual([`${owned.prefix}: "${token.name}"`]);
+      }
+    }
   });
 
   it('known-bad probe: a seeded foreign literal is reported by the same collector', () => {
