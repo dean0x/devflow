@@ -114,11 +114,13 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  *      scan stops being vacuous, §8.11)
  *   src/assets/mds/tracker/_mcp.mds     → dist/skills/git/references/tracker/_mcp.md
  *     (kind 'contract' — GENERATION IS GATED on a provider that reaches its
- *      tracker through a tool call being registered. `tracker/jira` is such a
- *      provider, so the gate is open and this module compiles like any other. See
- *      MCP_CONTRACT_MODULE / mcpContractIsGenerated in src/core/mds-variants.ts,
- *      and DEFERRED_REFERENCE_MODULE_SOURCES below for the roster of what the gate
- *      currently holds back.)
+ *      tracker through a tool call being registered. Such a provider is
+ *      registered, so the gate is open and this module compiles like any other.
+ *      The gate and its roster live in src/core/mds-variants.ts, not here:
+ *      MCP_CONTRACT_MODULE / mcpContractIsGenerated decide whether it compiles,
+ *      GATED_REFERENCE_MODULE_SOURCES is the roster of modules the gate can hold
+ *      back, and deferredReferenceModuleSources() is the subset it holds back for
+ *      a given registry.)
  *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
  *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
  *

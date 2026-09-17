@@ -47,7 +47,8 @@ import {
   resolveVariantModules,
   generatedReferenceManifest,
   validateContractOutputName,
-  type VariantModule,
+  GATED_REFERENCE_MODULES,
+  GATED_REFERENCE_MODULE_SOURCES,
   type OutputNameError,
   type OutputDirError,
   type HostVariant,
@@ -704,13 +705,27 @@ describe('VARIANT_MODULES (shipped registry)', () => {
 // registry, rather than discovered when 3b turns it on.
 
 describe('the tool-call contract module is gated on a provider that needs it', () => {
-  /** A synthetic provider module shaped exactly like the one 3b will register. */
-  const SYNTHETIC_MCP_PROVIDER: VariantModule = {
-    source: 'src/assets/mds/tracker/_synthetic.mds',
-    subdir: MCP_BACKED_PROVIDER_SUBDIRS[0],
+  /**
+   * A synthetic provider module landing in `subdir`, shaped exactly like a
+   * registered tool-call provider.
+   *
+   * Built PER gated sub-directory below rather than once for
+   * MCP_BACKED_PROVIDER_SUBDIRS[0]: a probe that names ONE member of the set the
+   * gate ranges over proves the gate opens for that member and says nothing about
+   * the rest, so it stops discriminating the moment the set grows. The sibling
+   * probe in tests/build-mds-generator-hosts.test.ts reads the gate's own subject
+   * for the same reason.
+   */
+  const syntheticProviderIn = (subdir: string): VariantModule => ({
+    source: `src/assets/mds/${subdir}/_synthetic.mds`,
+    subdir,
     kind: 'fanout',
     ops: TRACKER_GITHUB_OPS,
-  };
+  });
+
+  /** One synthetic provider per gated sub-directory — the whole set, never a member of it. */
+  const SYNTHETIC_MCP_PROVIDERS: readonly VariantModule[] =
+    MCP_BACKED_PROVIDER_SUBDIRS.map(syntheticProviderIn);
 
   /** The shipped registry with every tool-call provider removed — the shut arm. */
   const CLI_ONLY_REGISTRY: readonly VariantModule[] = VARIANT_MODULES.filter(
@@ -721,8 +736,8 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     expect(
       mcpContractIsGenerated(VARIANT_MODULES),
       'a registered provider reaches its tracker through a tool call and its mechanics NAME the ' +
-      'contract, so the contract must be generated or ten references point at a file the install ' +
-      'does not carry',
+      'contract, so the contract must be generated or those references point at a file the ' +
+      'install does not carry',
     ).toBe(true);
   });
 
@@ -741,10 +756,26 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     ).toBeLessThan(VARIANT_MODULES.length);
     expect(mcpContractIsGenerated(CLI_ONLY_REGISTRY)).toBe(false);
     expect(
-      mcpContractIsGenerated([...CLI_ONLY_REGISTRY, SYNTHETIC_MCP_PROVIDER]),
-      'this is the whole mechanism: registering the provider module starts the contract being ' +
-      'generated, with no second edit anywhere',
-    ).toBe(true);
+      SYNTHETIC_MCP_PROVIDERS.length,
+      'an empty probe set asserts nothing about the open arm (PF-018)',
+    ).toBeGreaterThan(0);
+    for (const provider of SYNTHETIC_MCP_PROVIDERS) {
+      expect(
+        mcpContractIsGenerated([...CLI_ONLY_REGISTRY, provider]),
+        `this is the whole mechanism: registering a provider module in ${provider.subdir} starts ` +
+        'the contract being generated, with no second edit anywhere — and it must hold for EVERY ' +
+        'gated sub-directory, or the gate list carries an entry that opens nothing',
+      ).toBe(true);
+    }
+    // Known-bad probe: the gate is keyed on the gate list, not on "some tracker
+    // module exists". A provider outside the list must leave it shut, or the loop
+    // above would pass against an implementation that answers true unconditionally.
+    for (const subdir of ['tracker/github', 'tracker/unlisted']) {
+      expect(
+        mcpContractIsGenerated([...CLI_ONLY_REGISTRY, syntheticProviderIn(subdir)]),
+        `"${subdir}" is not in the gate list, so it must not open the gate`,
+      ).toBe(false);
+    }
   });
 
   it('every subdir in the gate list is a tracker provider directory, and github is NOT one', () => {
@@ -761,17 +792,85 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     ).not.toContain('tracker/github');
   });
 
+  it('the gate list covers every registered tool-call provider — a shrunk list is a silent hole', () => {
+    // Anchored on the REGISTRY, because every other arm in this section ranges
+    // over MCP_BACKED_PROVIDER_SUBDIRS and therefore stays green when a
+    // sub-directory LEAVES the list while its provider module stays registered.
+    // That drift costs nothing on the day it happens — the remaining entries hold
+    // the gate open — and becomes a contract withheld from a provider whose
+    // mechanics name it the next time the registry changes.
+    //
+    // Whether a provider's mechanics are tool calls or `gh` commands is not
+    // derivable from the registry; it is the fact MCP_BACKED_PROVIDER_SUBDIRS
+    // exists to record. So the CLI-backed ones are named here, and registering a
+    // second one means naming it here in the same edit.
+    const CLI_BACKED_PROVIDER_SUBDIRS: readonly string[] = ['tracker/github'];
+    const registeredProviders = VARIANT_MODULES
+      .map(mod => mod.subdir as string)
+      .filter(subdir => subdir.startsWith('tracker/'))
+      .filter(subdir => !CLI_BACKED_PROVIDER_SUBDIRS.includes(subdir));
+    expect(
+      registeredProviders.length,
+      'the probe must see registered tool-call providers, or it asserts nothing (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      [...registeredProviders].sort(),
+      'every registered provider that is not CLI-backed must be in the gate list, or its mechanics ' +
+      'name a contract the build is free to stop generating',
+    ).toEqual([...MCP_BACKED_PROVIDER_SUBDIRS].sort());
+  });
+
+  it('the gated roster and the resolver read ONE table — there is no second place to remember', () => {
+    // GATED_REFERENCE_MODULE_SOURCES is the source column of the same table
+    // resolveVariantModules loops over. What makes that checkable rather than
+    // asserted is the round trip: every roster entry must be a module the resolver
+    // appends exactly when its own predicate is open, and none may be in the
+    // unconditional registry — a roster entry no resolver appends is a module the
+    // build defers forever, and an unconditional module on the roster is one it
+    // reports as deferred while it ships.
+    expect(
+      GATED_REFERENCE_MODULES.length,
+      'an empty gate table asserts nothing about the resolver (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      GATED_REFERENCE_MODULE_SOURCES,
+      'the roster is the table read out, not a second list beside it',
+    ).toEqual(GATED_REFERENCE_MODULES.map(gated => gated.module.source));
+
+    const unconditional = VARIANT_MODULES.map(mod => mod.source as string);
+    const REGISTRIES: readonly (readonly VariantModule[])[] = [
+      VARIANT_MODULES,
+      CLI_ONLY_REGISTRY,
+      [...CLI_ONLY_REGISTRY, ...SYNTHETIC_MCP_PROVIDERS],
+    ];
+    for (const gated of GATED_REFERENCE_MODULES) {
+      expect(
+        unconditional,
+        `${gated.module.source} is gated, so the registry must not also carry it unconditionally`,
+      ).not.toContain(gated.module.source);
+      for (const registry of REGISTRIES) {
+        expect(
+          resolveVariantModules(registry).some(mod => mod.source === gated.module.source),
+          `the resolver must append ${gated.module.source} exactly when its own gate is open`,
+        ).toBe(gated.isGenerated(registry));
+      }
+    }
+  });
+
   it('resolveVariantModules appends the contract module only when the gate is open', () => {
     expect(
       resolveVariantModules(CLI_ONLY_REGISTRY),
       'a shut gate appends nothing at all',
     ).toEqual([...CLI_ONLY_REGISTRY]);
-    const opened = resolveVariantModules([...CLI_ONLY_REGISTRY, SYNTHETIC_MCP_PROVIDER]);
-    expect(opened).toContain(MCP_CONTRACT_MODULE);
-    expect(
-      opened.length,
-      'exactly one module is appended — a duplicated append would make two hosts claim one file',
-    ).toBe(CLI_ONLY_REGISTRY.length + 2);
+    for (const provider of SYNTHETIC_MCP_PROVIDERS) {
+      const opened = resolveVariantModules([...CLI_ONLY_REGISTRY, provider]);
+      expect(opened, `a provider in ${provider.subdir} must open the gate`)
+        .toContain(MCP_CONTRACT_MODULE);
+      expect(
+        opened.length,
+        'exactly one module is appended — a duplicated append would make two hosts claim one file',
+      ).toBe(CLI_ONLY_REGISTRY.length + 2);
+    }
     // And on the shipped registry, which already opens the gate: appended once.
     expect(
       resolveVariantModules(VARIANT_MODULES).filter(m => m.source === MCP_CONTRACT_MODULE.source),
@@ -779,7 +878,7 @@ describe('the tool-call contract module is gated on a provider that needs it', (
   });
 
   it('the appended module is idempotent: resolving twice appends once', () => {
-    const once = resolveVariantModules([...VARIANT_MODULES, SYNTHETIC_MCP_PROVIDER]);
+    const once = resolveVariantModules([...VARIANT_MODULES, ...SYNTHETIC_MCP_PROVIDERS]);
     const twice = resolveVariantModules(once);
     expect(
       twice.filter(m => m.source === MCP_CONTRACT_MODULE.source),

@@ -500,9 +500,9 @@ export const MCP_BACKED_PROVIDER_SUBDIRS = ['tracker/jira', 'tracker/linear'] as
  * The gate is not a phase marker; it is the answer to "does anyone load this?",
  * and it stays answerable in both directions:
  *
- *   - Open, as it is with `tracker/jira` registered: the provider's per-operation
- *     mechanics NAME this document, so it must exist or ten references point at a
- *     file the install does not carry.
+ *   - Open, as it is whenever a tool-call provider is registered: every such
+ *     provider's per-operation mechanics NAME this document, so it must exist or
+ *     those references point at a file the install does not carry.
  *   - Shut, as it is for a registry with GitHub alone: no reachable consumer
  *     exists, and generating it anyway would bill every GitHub user for a
  *     reference nothing they can reach ever loads (GAP-02). The byte-budget
@@ -535,24 +535,57 @@ export function mcpContractIsGenerated(
   return modules.some(mod => gated.includes(mod.subdir));
 }
 
+/** A conditionally-generated reference module, paired with the gate that opens it. */
+export interface GatedReferenceModule {
+  /** The module appended to the registry while its gate is open. */
+  readonly module: VariantModule;
+  /** Does this registry contain something that needs {@link GatedReferenceModule.module}? */
+  readonly isGenerated: (modules: readonly VariantModule[]) => boolean;
+}
+
 /**
- * The registry the build actually expands: {@link VARIANT_MODULES} plus the
- * contract module when, and only when, the gate is open.
+ * Every reference module whose GENERATION is conditional, each beside the
+ * predicate that answers for it.
+ *
+ * ONE table, read by both halves of the mechanism: {@link resolveVariantModules}
+ * appends the modules whose predicate says yes, and
+ * {@link GATED_REFERENCE_MODULE_SOURCES} is this table's source column. A module
+ * added here therefore reaches the resolver and the gated roster in the same
+ * edit. Naming the module inline in the resolver and again in the roster is how
+ * a roster and the code that produces it come to disagree the first time a
+ * second one is added — the same defect {@link deferredReferenceModuleSources}
+ * exists to keep out of its two callers.
+ */
+export const GATED_REFERENCE_MODULES: readonly GatedReferenceModule[] = [
+  { module: MCP_CONTRACT_MODULE, isGenerated: mcpContractIsGenerated },
+];
+
+/**
+ * The registry the build actually expands: {@link VARIANT_MODULES} plus every
+ * gated module whose own gate is open.
  *
  * Idempotent — resolving an already-resolved list appends nothing. Without that,
  * a caller that resolved twice would hand expandVariants two rows for one source
  * and get a `duplicate-output` refusal describing a bug it could not locate.
  *
+ * Each predicate is asked about the registry AS PASSED, never about the list the
+ * loop is building, so a gate can never be opened by a module an earlier gate
+ * appended.
+ *
  * @param modules - Registry to resolve (defaults to VARIANT_MODULES). Injectable
- *   so both sides of the gate are provable without a module on disk — which is
- *   the only way to assert the OPEN arm before 3b exists.
+ *   so both sides of every gate are provable against a registry that never has to
+ *   exist on disk.
  */
 export function resolveVariantModules(
   modules: readonly VariantModule[] = VARIANT_MODULES,
 ): readonly VariantModule[] {
-  if (!mcpContractIsGenerated(modules)) return modules;
-  if (modules.some(mod => mod.source === MCP_CONTRACT_MODULE.source)) return modules;
-  return [...modules, MCP_CONTRACT_MODULE];
+  let resolved: readonly VariantModule[] = modules;
+  for (const gated of GATED_REFERENCE_MODULES) {
+    if (!gated.isGenerated(modules)) continue;
+    if (resolved.some(mod => mod.source === gated.module.source)) continue;
+    resolved = [...resolved, gated.module];
+  }
+  return resolved;
 }
 
 /**
@@ -566,10 +599,13 @@ export function resolveVariantModules(
  * distinction the gated case would take the refusal path and no gated module
  * could ever exist.
  *
- * Derived from the gate's own subject, not hand-listed beside it: a second module
- * added to the gate is added here by construction.
+ * Derived from {@link GATED_REFERENCE_MODULES} — the same table
+ * {@link resolveVariantModules} loops over — rather than hand-listed beside it: a
+ * second module added to that table is on this roster by construction, and there
+ * is no second place to remember.
  */
-export const GATED_REFERENCE_MODULE_SOURCES: readonly string[] = [MCP_CONTRACT_MODULE.source];
+export const GATED_REFERENCE_MODULE_SOURCES: readonly string[] =
+  GATED_REFERENCE_MODULES.map(gated => gated.module.source);
 
 /**
  * The gated reference modules this registry does NOT generate — the build's
@@ -582,11 +618,11 @@ export const GATED_REFERENCE_MODULE_SOURCES: readonly string[] = [MCP_CONTRACT_M
  * gated module and exactly one answer, which is how a roster and the code that
  * produces it come to disagree the first time the answer changes.
  *
- * With `tracker/jira` registered the set is EMPTY, and that is the honest reading
- * rather than a missing roster: the one gated module has a consumer, so nothing
- * is held back. The guards therefore assert the build printed zero deferred
- * modules, and prove the predicate still has teeth by asking it about a registry
- * with the provider removed.
+ * With a tool-call provider registered the set is EMPTY, and that is the honest
+ * reading rather than a missing roster: the one gated module has a consumer, so
+ * nothing is held back. The guards therefore assert the build printed zero
+ * deferred modules, and prove the predicate still has teeth by asking it about a
+ * registry with every such provider removed.
  *
  * @param modules - Registry to measure (defaults to VARIANT_MODULES). Injectable
  *   so the non-empty arm is provable without unregistering a shipped provider.
