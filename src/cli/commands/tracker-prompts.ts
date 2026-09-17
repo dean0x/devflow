@@ -9,8 +9,8 @@
  * (flag, no prompt) and the non-TTY fallback preserve their promptless contracts.
  * avoids PF-014: runTrackerStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally safe.
- * Applies ADR-019's one-definition-seam corollary: the shared DI seam (PromptOutcome, WizardPromptIO, clackNote,
- * clackSelect) is imported from prompt-io.ts — never re-declared here.
+ * The shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) is
+ * defined once in prompt-io.ts and imported here, never re-declared.
  *
  * D-TRACKER-GATE: this step copies COMPLIANCE's gate, not ATTRIBUTION's.
  * Attribution is Advanced-only because it silently rewrites git metadata; a
