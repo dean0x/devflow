@@ -398,18 +398,23 @@ function formatScrubLine(counts) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ emit: true, inputPath: string }} EmitArgs
- * @typedef {{ emit: false, inputPath: string, outputPath: string }} FileArgs
- * @typedef {{ usage: string }} UsageError
+ * @typedef {{ kind: 'emit', inputPath: string }} EmitArgs
+ * @typedef {{ kind: 'file', inputPath: string, outputPath: string }} FileArgs
+ * @typedef {{ kind: 'usage', usage: string }} UsageError
  */
 
 /**
  * Parse argv into a mode and its positionals.
  *
- * THE FLAG IS READ BEFORE THE POSITIONALS ARE BOUND. Previously main() read
- * argv[2]/argv[3] positionally with no flag handling, so `--emit` bound as a
- * FILENAME and the run died at statSync with exit 2 — reporting "your input is
- * missing" for what was actually an unsupported flag.
+ * THE FLAG IS READ BEFORE THE POSITIONALS ARE BOUND, so `--emit` can never bind
+ * as a FILENAME and die at statSync with exit 2 — reporting "your input is
+ * missing" for what is actually an unsupported flag.
+ *
+ * `kind` is the DISCRIMINANT, and main() dispatches on it alone. The three
+ * shapes also differ in which fields they carry, but reading the mode off field
+ * presence makes a renamed field — or a fourth shape — resolve to an existing
+ * arm instead of failing, and the arms differ in whether the scrubbed body
+ * reaches stdout.
  *
  * Arity is exact in both modes. A third positional is a usage error rather than
  * an ignored argument: `--emit in out` is a caller who believes they are writing
@@ -432,17 +437,20 @@ function parseArgs(argv) {
       continue;
     }
     if (arg.startsWith('-')) {
-      return { usage: 'redact-secrets: unrecognised flag ' + arg + '\n' + FILE_USAGE + '\n' + EMIT_USAGE };
+      return {
+        kind: 'usage',
+        usage: 'redact-secrets: unrecognised flag ' + arg + '\n' + FILE_USAGE + '\n' + EMIT_USAGE,
+      };
     }
     positionals.push(arg);
   }
 
   if (emit) {
-    if (positionals.length !== 1) return { usage: EMIT_USAGE };
-    return { emit: true, inputPath: positionals[0] };
+    if (positionals.length !== 1) return { kind: 'usage', usage: EMIT_USAGE };
+    return { kind: 'emit', inputPath: positionals[0] };
   }
-  if (positionals.length !== 2) return { usage: FILE_USAGE };
-  return { emit: false, inputPath: positionals[0], outputPath: positionals[1] };
+  if (positionals.length !== 2) return { kind: 'usage', usage: FILE_USAGE };
+  return { kind: 'file', inputPath: positionals[0], outputPath: positionals[1] };
 }
 
 /**
@@ -683,7 +691,7 @@ function runEmitMode(args, content, deps) {
  */
 function main(argv, deps) {
   const args = parseArgs(argv);
-  if (args.usage !== undefined) {
+  if (args.kind === 'usage') {
     // The one failure that precedes mode selection, so no framing line can
     // describe it: stdout stays entirely empty and stderr carries the usage.
     process.stderr.write(args.usage + '\n');
@@ -693,12 +701,14 @@ function main(argv, deps) {
   const read = readInput(args.inputPath);
   if (!read.ok) {
     process.stderr.write(read.message);
-    return args.emit
+    // Each mode owns the SHAPE of its refusal: the tool-call sink frames every
+    // failure it can name, the file sink returns a bare code.
+    return args.kind === 'emit'
       ? { emitLine: 'D11-FAIL ' + read.reason, body: '', code: read.code }
       : read.code;
   }
 
-  return args.emit
+  return args.kind === 'emit'
     ? runEmitMode(args, read.content, deps || {})
     : runFileMode(args, read.content);
 }

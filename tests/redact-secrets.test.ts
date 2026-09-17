@@ -733,24 +733,40 @@ describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
     // no flag handling, so `--emit` bound as a FILENAME and the run died at
     // statSync with exit 2 — a silent misdiagnosis of "your input is missing".
     expect(SCRUBBER.parseArgs(['node', 'script', '--emit', '/tmp/in'])).toEqual({
-      emit: true,
+      kind: 'emit',
       inputPath: '/tmp/in',
     });
   });
 
   it('accepts the flag in either position', () => {
     expect(SCRUBBER.parseArgs(['node', 'script', '/tmp/in', '--emit'])).toEqual({
-      emit: true,
+      kind: 'emit',
       inputPath: '/tmp/in',
     });
   });
 
-  it('the two-positional form is unchanged', () => {
+  it('the two-positional form is the file mode', () => {
     expect(SCRUBBER.parseArgs(['node', 'script', '/tmp/in', '/tmp/out'])).toEqual({
-      emit: false,
+      kind: 'file',
       inputPath: '/tmp/in',
       outputPath: '/tmp/out',
     });
+  });
+
+  it('every result is TAGGED — the mode is read from `kind`, never from field presence', () => {
+    // main() dispatches on this tag. Discriminating by which optional field
+    // happens to be present makes a fourth shape — or a renamed field — read as
+    // an existing mode instead of failing, and the modes differ in whether the
+    // scrubbed body reaches stdout.
+    const ARGVS: ReadonlyArray<readonly string[]> = [
+      ['--emit', '/tmp/in'],
+      ['/tmp/in', '/tmp/out'],
+      ['--emit'],
+      ['--unknown', '/tmp/in', '/tmp/out'],
+    ];
+    expect(ARGVS.length, 'the argv corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(ARGVS.map((a) => SCRUBBER.parseArgs(['node', 'script', ...a]).kind))
+      .toEqual(['emit', 'file', 'usage', 'usage']);
   });
 
   it('refuses every wrong arity and every unknown flag, naming usage', () => {
@@ -767,7 +783,7 @@ describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
     const accepted: string[] = [];
     for (const args of WRONG) {
       const parsed = SCRUBBER.parseArgs(['node', 'script', ...args]);
-      if (parsed.usage === undefined) accepted.push(JSON.stringify(args));
+      if (parsed.kind !== 'usage') accepted.push(JSON.stringify(args));
     }
     expect(accepted, `argv shape(s) accepted that must be a usage error: ${accepted.join(', ')}`)
       .toEqual([]);
@@ -775,7 +791,7 @@ describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
 
   it('a flag-looking input path is refused rather than silently treated as a file', () => {
     // `--emit --emit` and `--help` must not become filenames.
-    expect(SCRUBBER.parseArgs(['node', 'script', '--help']).usage).toBeDefined();
+    expect(SCRUBBER.parseArgs(['node', 'script', '--help']).kind).toBe('usage');
   });
 });
 
