@@ -44,12 +44,14 @@ import { collectTrackerNamingLines, resolveAgentSource } from '../helpers.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Design-time derivation: 65_677 − 9_813 = 55_864, pinned at 55_900 (headroom 36).
- * formula: baseline_ch − projected_cut; the baseline is the post-Phase-0
- * merge-commit capture of dist/agents/git.md (65_677 ch / 66_180 bytes).
- * projected cut: tracker mechanics −9_400 · learn-conventions body −3_300 ·
- * marker legend −1_400 (the D4 and D11 rows stay, E10) · D10 step-order −1_113 ·
- * add-back +5_400.
+ * Design-time derivation: the post-Phase-0 merge-commit capture of
+ * dist/agents/git.md, less the cut Phase 2 projected for it — the tracker
+ * mechanics, the learn-conventions body, the marker legend (the D4 and D11 rows
+ * stay, E10) and the D10 step-order block, net of the add-back. That baseline is
+ * the one BUDGET_LOADED_SET below is pinned to, and it is stated there once.
+ * No per-component decomposition of the projected cut is recorded here: three
+ * successive re-derivations of those components disagreed (PF-057) and no
+ * printed row produces them.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a condensing pass that actually cut the artifact, never raised to fit
@@ -79,16 +81,18 @@ const BUDGET_GIT_MD = 55_750;
  * THE PHASE-3 git.md CEILING [DR-13(b)] — the gate, with BUDGET_GIT_MD above as
  * its declared base.
  *
- * 55_750 + 3_120 = 58_870, measured 58_782 (headroom 88 — the same deliberate
- * thinness Phase 2 chose, so the next content addition must again fund itself).
- * The 3_120 is the MEASURED growth of the preamble block, not an estimate: the
- * portion of git.md OUTSIDE the preamble has only ever been CUT on this branch,
- * never grown — the alignment pass deleted the GitHub rate-limit signal from
- * `backlink-shipped-issues`' D4 line and spent what that recovered on a preamble
- * rule. That direction is what the companion gate below is for: it holds the
- * portion outside the preamble to the UNRAISED Phase-2 number, and a cut there
- * widens its margin rather than consuming this ceiling. No per-pass
- * decomposition of that portion is recorded here — three successive
+ * A re-derivation of BUDGET_GIT_MD by the MEASURED growth of the preamble block,
+ * not an estimate — and mechanically so: the gate below holds the revision to
+ * that block's own length. Measured 58_782 against this ceiling (headroom 88 —
+ * the same deliberate thinness Phase 2 chose, so the next content addition must
+ * again fund itself). The portion of git.md OUTSIDE the preamble has only ever
+ * been CUT on this branch, never grown — the alignment pass deleted the GitHub
+ * rate-limit signal from `backlink-shipped-issues`' D4 line and spent what that
+ * recovered on a preamble rule. That direction is what the companion gate below
+ * is for: it holds the portion outside the preamble to the UNRAISED Phase-2
+ * number, and a cut there widens its margin rather than consuming this ceiling.
+ *
+ * No per-pass decomposition of that portion is recorded here — three successive
  * re-derivations of those components disagreed (PF-057), so re-run this file for
  * the current figures: the ceilings are the assertion, the printed table is the
  * record.
@@ -149,12 +153,14 @@ const BUDGET_GIT_MD_P3 = 58_870;
 const PREAMBLE_CHARS_P2 = 3_385;
 
 /**
- * 9_204 − 2_604 = 6_600.
- * cut: the D3 traceability template, the throttling recipe, the PR-comment
+ * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
+ * cut — the D3 traceability template, the throttling recipe, the PR-comment
  * section, the releases recipe, and the naming-conventions authority block.
- * (Measured at 9_205 ch on this tree — the file drifts by single characters;
- * the budget is derived from the artifact's 9_204 capture and is not re-derived
- * from whatever the file happens to be today.)
+ *
+ * Pinned to that derivation and deliberately NOT re-derived from whatever the
+ * file measures today, which drifts by single characters: a budget that follows
+ * the artifact asserts "the current size is the current size". Re-run this file
+ * for the current measurement — the printed table is the record.
  */
 const BUDGET_SKILL_MD = 6_600;
 
