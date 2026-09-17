@@ -383,10 +383,30 @@ describe('provider literals: fetch-issues-batch is one query on every provider [
 //     normalisation is what the wider grammar owes.
 //
 // Every claim is a row with its reason, and the probe below removes each row's own
-// sentence from a copy of the file and drives the same collector over it — so a
-// row whose pattern has stopped matching the shipped wording cannot pass quietly.
+// token from a copy of the file and drives the same collector over it — so a row
+// whose pattern has stopped matching the shipped wording cannot pass quietly.
+//
+// EVERY ROW PINS A TOKEN, NEVER A SENTENCE. These generated references are priced
+// against the per-provider loaded-set ceilings in tests/tracker/byte-budget.test.ts,
+// so a condensing pass over this prose is an expected event rather than a
+// hypothetical — and a row that pins a whole sentence makes the ceiling and the
+// guard contradict each other. The guard then loses in the only way that matters: it
+// goes RED naming a clause that is still present, because the rewrite moved a comma
+// or split one sentence into two. That is PF-057's mistake one level down, pinning
+// where a sentence happens to break.
+//
+// So each row's shape is the shortest phrase that carries its claim, and a claim
+// with two halves is TWO rows rather than one ordered regex with a bridge between
+// them: a bridge of hand-picked width has no contract behind it, and it silently
+// encodes the punctuation the halves are separated by today. Two constraints on the
+// token itself, both load-bearing here: it must be UNIQUE in the file, or the probe
+// below deletes one occurrence and the row stays green over the other; and it must
+// not be a phrase the file uses elsewhere in another sense — `before the loop` reads
+// as the normalisation rule and again in the `**Setup (once, before the loop)**`
+// heading, so pinning it would let the rule be deleted while the heading kept the
+// row green.
 
-/** One sentence a generated reference owes, and the shape that recognises it. */
+/** One token a generated reference owes, and the shape that recognises it. */
 interface FileClaim {
   readonly label: string;
   readonly pattern: RegExp;
@@ -397,23 +417,38 @@ const GITHUB_BACKLINK_FILE = 'tracker/github/backlink-shipped-issues.md';
 
 const GITHUB_BACKLINK_CLAIMS: readonly FileClaim[] = [
   {
-    label: 'the normalisation happens once, before the loop',
-    pattern: /normalise once, before the loop, never inside it/,
+    label: 'the normalisation happens once',
+    pattern: /[Nn]ormalise once/,
     why:
-      'a strip performed inside the per-issue loop is a strip an author can forget on one of the ' +
-      'two commands; the pre-flight is the single place every entry passes through',
+      'a strip performed per-command is a strip an author can forget on one of the two commands; ' +
+      'the pre-flight is the single place every entry passes through',
   },
   {
-    label: 'exactly one leading `#`, and only the stripped digits are interpolated',
-    pattern: /strip \*\*exactly one\*\* leading `#`[\s\S]{0,140}?interpolate only the stripped digits/,
+    label: 'and never inside the per-issue loop',
+    pattern: /[Nn]ever inside it/,
     why:
-      'GAP-18: the pre-flight IS the shell-injection guard for an interpolated ref. "Exactly one" ' +
-      'is the bound — a greedy strip would silently accept `##42` — and naming the stripped form ' +
-      'as the only one that reaches a command is what makes the gate cover the interpolation',
+      'the placement half of the same rule, and the half a reader can get wrong while still ' +
+      'normalising "once" per iteration. Pinned separately because a condensing pass may keep ' +
+      'either clause and drop the other',
+  },
+  {
+    label: 'exactly one leading `#` is stripped',
+    pattern: /[Ee]xactly one\*{0,2} leading `#`/,
+    why:
+      'GAP-18: the pre-flight IS the shell-injection guard for an interpolated ref, and "exactly ' +
+      'one" is its bound — a greedy strip would silently accept `##42`. The emphasis markers are ' +
+      'optional in the shape because bolding is presentation and the bound is the claim',
+  },
+  {
+    label: 'only the stripped digits reach a command',
+    pattern: /[Ii]nterpolate only the stripped digits/,
+    why:
+      'the bound above governs nothing unless the stripped form is named as the only one that is ' +
+      'interpolated — that is what makes the gate cover the commands rather than just the parse',
   },
   {
     label: 'the shell-comment reason the strip exists for',
-    pattern: /`#` at word start opens a shell comment/,
+    pattern: /opens a shell comment/,
     why:
       'without the reason the sentence reads as cosmetic normalisation and the next condensing ' +
       'pass deletes it. The failure it prevents is silent: a truncated `gh` command back-links ' +

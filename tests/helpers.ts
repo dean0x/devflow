@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, promises as fsp } from 'fs'
+import { readFileSync, readdirSync, existsSync, statSync, promises as fsp } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
@@ -49,11 +49,58 @@ export function requireDistFile(name: string, root: string = ROOT): string {
   }
 }
 
+/** One compile input and when it was last written. */
+interface CompileInput {
+  readonly file: string
+  readonly mtimeMs: number
+}
+
+/**
+ * Named collector: the most recently modified source `tsc` compiles into `dist/`.
+ *
+ * The input set is tsconfig.json's — `src/**` minus the `src/assets` tree, which
+ * is copied and never compiled — restated here as an extension filter plus that
+ * one exclusion rather than parsed out of the config. The scan is a CURRENCY
+ * check, not a build: over-reading a file tsc ignores can only report a stale
+ * dist one edit early, while under-reading one it compiles is the exact failure
+ * this exists to prevent, so the filter errs wide.
+ *
+ * Returns null when the tree holds no compile input at all, which the caller
+ * separates into "this root is not a source tree" and "the scan went empty".
+ */
+function newestCompileInput(srcDir: string): CompileInput | null {
+  const excluded = path.join(srcDir, 'assets') + path.sep
+  const files = walkFiles(
+    srcDir,
+    file => (file.endsWith('.ts') || file.endsWith('.json')) && !file.startsWith(excluded),
+  )
+  let newest: CompileInput | null = null
+  for (const file of files) {
+    const { mtimeMs } = statSync(file)
+    if (newest === null || mtimeMs > newest.mtimeMs) newest = { file, mtimeMs }
+  }
+  return newest
+}
+
 /**
  * Resolve the compiled CLI entrypoint and return its absolute path.
- * Throws — does NOT skip — when absent. A guard that silently skips on a
+ * Throws — does NOT skip — when absent OR STALE. A guard that silently skips on a
  * missing build artifact is not a guard: a skipped subprocess-CLI test proves
  * nothing about the CLI, and a SKIP mark reads as "fine" in a CI log.
+ *
+ * EXISTENCE IS NOT CURRENCY. This is the gate on the only executable coverage of
+ * a `devflow` action BODY, and a `dist/cli.js` older than the sources it was
+ * compiled from certifies a build nobody is shipping — PF-018's first mechanism
+ * in its quietest form, where the target exists but is not the one under review.
+ * So the artifact is compared against the newest compile input and a stale one
+ * fails LOUD, naming the build step, exactly as an absent one does.
+ *
+ * WHY MTIME AND NOT A CONTENT STAMP. The build writes no stamp (`npm run build`
+ * is `rm -rf dist && tsc && build-mds`), and mtime is sound for both orderings
+ * that actually occur: CI checks out, then builds into a freshly removed `dist/`,
+ * so every artifact is newer than every source; locally an edit after a build is
+ * precisely the state this reports. There is no cached-`dist/` restore step in
+ * either workflow that could invert the two.
  *
  * @param root - Repository root to resolve paths against (default: ROOT).
  *   Pass a temp-dir root in tests to verify throw behaviour without touching the real dist.
@@ -64,6 +111,30 @@ export function requireBuiltCli(root: string = ROOT): string {
     throw new Error(
       'dist/cli.js is absent — run `npm run build` first\n' +
       '  (this guard spawns the compiled CLI as a subprocess and cannot be skipped)',
+    )
+  }
+
+  const srcDir = path.join(root, 'src')
+  const newest = newestCompileInput(srcDir)
+  if (newest === null) {
+    // A hermetic temp root carries a `dist/` and no sources; there is nothing for
+    // it to be stale against, and the absence arm above is the only claim it can
+    // make. A root that HAS a `src/` and yields no compile input is a scan that
+    // went empty, which would make every currency check below vacuous (PF-018).
+    if (!existsSync(srcDir)) return cliPath
+    throw new Error(
+      `${srcDir} exists but holds no .ts/.json compile input — the currency check below ` +
+      'would pass by reading nothing, which is the vacuous-guard shape it exists to refuse',
+    )
+  }
+
+  const builtMs = statSync(cliPath).mtimeMs
+  if (builtMs < newest.mtimeMs) {
+    throw new Error(
+      'dist/cli.js is STALE — run `npm run build` first\n' +
+      `  ${path.relative(root, newest.file)} was modified after the CLI was compiled\n` +
+      '  (this guard spawns the compiled CLI as a subprocess: a stale artifact certifies\n' +
+      '   a build nobody is shipping, so it cannot be skipped and must not be tolerated)',
     )
   }
   return cliPath
@@ -740,14 +811,90 @@ export function collectPerItemFetchVerbs(text: string): string[] {
 export const TRACKER_TEMPLATE_FENCE_TAG = 'tracker-md-template'
 
 /**
+ * How many sections §14.3 fixes.
+ *
+ * A separate literal so the list below is checked against a NUMBER rather than
+ * against its own length. A drop-one edit that also decrements this constant is
+ * a deliberate schema change; one that does not is the accident the oracle
+ * refuses at import.
+ */
+export const TRACKER_SCHEMA_SECTION_COUNT = 11
+
+/**
+ * Named collector: the ways a candidate §14.3 heading list fails to be an oracle.
+ *
+ * Three mutation classes, each reported by name:
+ *   - DUPLICATE — the same heading twice. A duplicate inflates every length
+ *     comparison while the schema it describes has shrunk, which is how a
+ *     `>= 11` floor accepts a ten-section list.
+ *   - SHORT — fewer distinct headings than §14.3 fixes (drop-one).
+ *   - LONG — more (add-one).
+ *
+ * WHAT A CLEAN RESULT DOES NOT COVER, recorded beside the rule rather than left
+ * to be inferred (PF-064). A heading RENAMED here, in the Tracker agent's
+ * template and in the Git-agent's reader block, all in one commit, is well
+ * formed and passes. That is a declared NON-GOAL, not an oversight: §14.3 is a
+ * design artifact under `.devflow/docs/design/`, which is gitignored, so no
+ * committed file can arbitrate a synchronized rename. This list is a THIRD PARTY
+ * to the writer and the reader — it catches a schema that silently SHRINKS, and
+ * it is silent about one that is consistently re-spelled.
+ */
+export function collectSchemaOracleDefects(sections: readonly string[]): string[] {
+  const defects: string[] = []
+  const distinct = new Set<string>()
+  for (const section of sections) {
+    if (distinct.has(section)) defects.push(`duplicate heading: ${section}`)
+    distinct.add(section)
+  }
+  if (distinct.size !== TRACKER_SCHEMA_SECTION_COUNT) {
+    defects.push(
+      `${distinct.size} distinct heading(s); §14.3 fixes ${TRACKER_SCHEMA_SECTION_COUNT}`,
+    )
+  }
+  return defects
+}
+
+/**
+ * Check the §14.3 list's shape, then freeze it — or throw naming the defect.
+ *
+ * Fail-loud at import, on the same reasoning as `requireBuiltCli` above: every
+ * tracker-schema guard in the suite binds to this list, so a list that has
+ * quietly lost a section makes each of them compare against the wrong contract
+ * while staying green. A helper may throw, so it throws.
+ *
+ * Exported so the throw itself can be driven over a mutated list, rather than
+ * only the predicate behind it: a guard whose reporting arm has never been shown
+ * to fire is a guard nobody has seen work.
+ */
+export function requireSchemaOracle(sections: readonly string[]): readonly string[] {
+  const defects = collectSchemaOracleDefects(sections)
+  if (defects.length > 0) {
+    throw new Error(
+      'TRACKER_SCHEMA_SECTIONS is not a usable oracle — every tracker-schema guard binds ' +
+      'to it, so each would compare against a contract §14.3 does not state:\n  ' +
+      defects.join('\n  '),
+    )
+  }
+  return Object.freeze(sections)
+}
+
+/**
  * The `~/.devflow/tracker.md` section headings, in order, verbatim from §14.3.
  *
  * `## Project` carries two values (site and key) and is therefore ONE heading
  * with two validator rows — §14.3's table splits the rows, not the section.
  * `learned:` is deliberately absent from the frontmatter set below: it has no
  * stated consumer, and an unread key is residue (ADR-003 clause iii).
+ *
+ * Its SHAPE is settled here, once, at import: exactly
+ * `TRACKER_SCHEMA_SECTION_COUNT` distinct headings, no repeats. A consumer
+ * therefore compares against this list rather than re-deriving a floor of its
+ * own — a floor that counts duplicates is satisfied by a list that has dropped
+ * one section and repeated another. `tests/tracker/schema-oracle.test.ts` drives
+ * `collectSchemaOracleDefects` over each of those mutations, so the check above
+ * is shown live rather than assumed.
  */
-export const TRACKER_SCHEMA_SECTIONS: readonly string[] = [
+export const TRACKER_SCHEMA_SECTIONS: readonly string[] = requireSchemaOracle([
   '## Project',
   '## Issue Types',
   '## Required Fields',
@@ -759,7 +906,7 @@ export const TRACKER_SCHEMA_SECTIONS: readonly string[] = [
   '## Reference Rendering',
   '## Dedup Strategy',
   '### Substitutions',
-]
+])
 
 /** Frontmatter keys of the written file (§14.3). */
 export const TRACKER_SCHEMA_FRONTMATTER_KEYS: readonly string[] = ['provider', 'inferred-from']
@@ -1307,6 +1454,30 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
 // The reference VOCABULARY differs per provider by design — jira renders a `KEY`,
 // linear a `REF` — so the two spellings are parameters of the table rather than
 // two tables. Nothing else varies: these clauses are contract text.
+//
+// EVERY ROW PINS A TOKEN, NEVER A SENTENCE — and that is a standing rule, not a
+// style note. These generated mechanics are priced against the per-provider
+// loaded-set ceilings in tests/tracker/byte-budget.test.ts, of which
+// `budget-loaded-set-linear` is the thinnest and therefore the binding one, so a
+// condensing pass over this prose is an expected event rather than a hypothetical.
+// A row that pins a whole sentence makes the two forces contradict each other: the
+// ceiling demands the sentence be shortened and the guard forbids it from changing,
+// and the guard loses in the only way that matters — it goes RED reporting a clause
+// that is still present, because the rewrite moved a comma. That is PF-057's
+// mistake one level down: pinning where a sentence happens to break.
+//
+// So each row's shape recognises the SHORTEST phrase that carries its claim, and a
+// requirement whose halves must co-occur is written as SEVERAL rows over the same
+// op list rather than as one ordered regex bridging between phrases. The property
+// asserted is membership per operation file; adjacency inside one sentence is not
+// the property, and a bridge with a hand-picked width has no contract behind it.
+//
+// A token that can begin a sentence spells its first letter as `[Xx]`, because the
+// copy-edit these rows are written to survive — splitting one comma-spliced sentence
+// into two — CAPITALISES the word it promotes to the front. A case-sensitive token
+// would go red on exactly the rewrite the byte ceiling is asking for. The tolerance
+// is one letter and no more: `### Substitutions` is a heading name, and a wholesale
+// `/i` would admit a heading that does not exist.
 
 /** The reference vocabulary one tool-call provider's mechanics use. */
 export interface ProviderRefVocabulary {
@@ -1316,7 +1487,7 @@ export interface ProviderRefVocabulary {
   readonly refNoun: string
 }
 
-/** One sentence a tool-call provider's mechanics owe, and where it must appear. */
+/** One token a tool-call provider's mechanics owe, and where it must appear. */
 export interface ProviderMechanicsClaim {
   /** Short name, used in the failure message and by the per-row probe. */
   readonly label: string
@@ -1391,16 +1562,35 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
       'an inferred type is a value the tracker never enumerated, so the create call fails at the ' +
       'far end or, worse, succeeds against a type that means something else in that project',
   },
+  // §14.3's discarded-token rule, as THREE token rows over the two operations
+  // that render a reference — see the token-vs-sentence note above the table.
   {
-    label: 'a discarded rendering token ⇒ the default AND a `### Substitutions` row',
+    label: 'the fallback renders the reference itself',
     criterion: '§14.3',
-    ops: [],
-    pattern: v =>
-      new RegExp(`render the ${v.refNoun}[^.]*?on its own line[^.]*?record the discard under \`### Substitutions\``),
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: v => new RegExp(`[Rr]ender the ${v.refNoun}\\b`),
     why:
-      'both halves or neither. A default with no record is a silent substitution — the user sees a ' +
-      'reference they did not configure and nothing says why; a record with no default is a report ' +
-      'about a value that was never rendered',
+      'the DEFAULT half. Without it a discarded token leaves the operation with no instruction for ' +
+      'what to emit, and the natural reading of "the token was discarded" is to emit nothing',
+  },
+  {
+    label: 'the fallback reference goes on its own line',
+    criterion: '§14.3',
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: () => /on its own line/,
+    why:
+      'the documented shape of that default. A reference folded into surrounding prose is a ' +
+      'reference the tracker\'s own link detection may never see, which is the failure the section ' +
+      'was configured to avoid in the first place',
+  },
+  {
+    label: 'the discard is recorded under `### Substitutions`',
+    criterion: '§14.3',
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: () => /[Rr]ecord the discard under `### Substitutions`/,
+    why:
+      'the RECORD half — both halves or neither. A default with no record is a silent substitution: ' +
+      'the user sees a reference they did not configure and nothing says why',
   },
 ]
 
