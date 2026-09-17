@@ -18,8 +18,11 @@
 //                 D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]
 //                 <the scrubbed body>
 //               A body with no framing line above it is a body that was never
-//               scrubbed. On any failure stdout is EXACTLY `D11-FAIL <reason>`
-//               and carries ZERO body bytes.
+//               scrubbed. No failure ever writes body bytes: a failure the mode
+//               owns is EXACTLY `D11-FAIL <reason>` and nothing else, and the two
+//               that precede or escape mode selection — a usage error and an
+//               internal error — leave stdout entirely EMPTY. The consumer gates
+//               on the presence of `D11-OK`, so all three are one case to it.
 //
 // Exit codes:
 //   0  success (zero or more redactions made)
@@ -97,8 +100,12 @@ const D11_FAIL_REASONS = Object.freeze({
   OUTPUT_UNWRITABLE: 'output-unwritable',
   SECOND_PASS_NONZERO: 'second-pass-nonzero',
   NONCE_UNAVAILABLE: 'nonce-unavailable',
-  INTERNAL: 'internal-error',
 });
+
+// No `internal-error` reason: the internal-error path is the top-level catch, which
+// fires BEFORE the boundary has written anything and knows no mode, so it leaves
+// stdout empty rather than framing a reason. Adding the token without an arm that
+// can emit it would put a value in a closed registry that nothing reaches.
 
 // ---------------------------------------------------------------------------
 // Shannon entropy
