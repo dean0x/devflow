@@ -31,7 +31,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 
-import { agentsDir, scriptsDir } from '../../src/core/assets.js';
+import { scriptsDir } from '../../src/core/assets.js';
 import { ROOT, walkFiles, type CorpusEntry } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +62,48 @@ function scanCorpus(): CorpusEntry[] {
     // replace an invalid sequence and could mask the very byte being hunted.
     content: readFileSync(file).toString('latin1'),
   }));
+}
+
+/** How the extension-less hook class is spelled in a reach report. */
+const EXTENSIONLESS_CLASS = '(extension-less, under src/assets/scripts/)';
+
+/**
+ * Classes `isScannedFile` admits that the tree holds no member of today.
+ *
+ * `.js` is declared so a hand-authored Node script landing beside the `.cjs`
+ * hooks is scanned from its first commit rather than after someone notices. The
+ * tree has no `.js` file under `src/`, so the reach check cannot demand one.
+ *
+ * A NAMED list rather than a deletion from the declaration, and asserted below
+ * to be genuinely unpopulated: the day a `.js` file lands, the entry goes red and
+ * must be deleted, which restores the reach demand. An entry parked here that DOES
+ * have members would be an exemption hiding real coverage — the prohibition and
+ * its exemption registry are one authority (PF-067), so the exemption has to be
+ * as falsifiable as the rule.
+ */
+const UNPOPULATED_CLASSES: readonly string[] = ['.js'];
+
+/**
+ * Named collector: the file classes `isScannedFile` admits that the corpus does
+ * not actually hold.
+ *
+ * DERIVED from the declaration rather than from a hand-picked list of landmark
+ * files. A named list reaches whatever its author happened to name: with one
+ * `.ts`, one `.md`, one `.cjs` and one hook spelled out, `.mds`, `.js` and
+ * `.json` were admitted by `isScannedFile` and probed by nothing — so deleting
+ * `.mds` from SCANNED_EXTENSIONS dropped every command source, every reference
+ * module and the Git agent's generator host out of the scan with all three arms
+ * still green. That is PF-064's corpus claim failing while the matcher claim
+ * holds, and it is the exact failure this file's own preamble describes.
+ *
+ * The extension-less clause has no extension to derive from, so it is reported
+ * under its own name; together the two halves cover every branch of
+ * `isScannedFile`.
+ */
+export function collectUnreachedClasses(corpus: readonly CorpusEntry[]): string[] {
+  const unreached = SCANNED_EXTENSIONS.filter(ext => !corpus.some(e => e.path.endsWith(ext)));
+  if (!corpus.some(e => path.extname(e.path) === '')) unreached.push(EXTENSIONLESS_CLASS);
+  return unreached;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,20 +168,60 @@ describe('no-control-bytes: no shipped source file holds a raw control byte', ()
       corpus.length,
       'the control-byte scan corpus is empty — a guard over nothing forbids nothing',
     ).toBeGreaterThan(0);
-    // Name one file per shape the corpus is supposed to reach, so the scope
-    // cannot shrink silently: a TypeScript source, a prompt asset, a Node
-    // script, and an extension-less shell hook (the shape the extension list
-    // alone cannot see).
-    const paths = corpus.map(e => e.path);
-    for (const expected of [
-      path.join('src', 'core', 'tracker.ts'),
-      path.relative(ROOT, path.join(agentsDir(ROOT), 'tracker.md')),
-      path.relative(ROOT, path.join(SCRIPTS_DIR, 'redact-secrets.cjs')),
-      path.relative(ROOT, path.join(SCRIPTS_DIR, 'hooks', 'session-start-context')),
-    ]) {
-      expect(paths, `${expected} must be in the scan — the scope has silently shrunk`)
-        .toContain(expected);
-    }
+    expect(
+      SCANNED_EXTENSIONS.length,
+      'the extension declaration is empty — the reach check below would range over nothing',
+    ).toBeGreaterThan(0);
+
+    // Every class `isScannedFile` admits must be reached, derived from the
+    // declaration so the two cannot drift: an extension nobody can name a file
+    // for is an extension the scan does not cover, and removing one from the
+    // declaration drops its whole surface out of the sweep.
+    const unreached = collectUnreachedClasses(corpus);
+    const unexplained = unreached.filter(cls => !UNPOPULATED_CLASSES.includes(cls));
+    expect(
+      unexplained,
+      `file class(es) admitted by isScannedFile that the corpus does not reach — the scope has ` +
+      `silently shrunk, and every arm below is green about ground it never covered:\n  ` +
+      unexplained.join('\n  '),
+    ).toEqual([]);
+
+    // The exemption half of the same authority: a class listed as unpopulated
+    // that the tree now HAS a member of is an exemption suppressing live coverage.
+    const nowPopulated = UNPOPULATED_CLASSES.filter(cls => !unreached.includes(cls));
+    expect(
+      nowPopulated,
+      `class(es) listed in UNPOPULATED_CLASSES that the tree now holds a member of. Delete the ` +
+      `entry — the reach demand is what scans them:\n  ${nowPopulated.join('\n  ')}`,
+    ).toEqual([]);
+
+    // Known-bad probe, same collector (R1(b)): the assertions above are emptiness
+    // claims, so the collector must be shown to report a class that has gone
+    // unreached rather than to return `[]` unconditionally. Reported against the
+    // live baseline, so the probe stays about the class it drops.
+    //
+    // The `.mds` probe carries a second load, and it is the reason a class is
+    // named here at all: a DERIVED reach set shrinks together with its
+    // declaration, so deleting `.mds` from SCANNED_EXTENSIONS would leave the
+    // live arm above green over a corpus that no longer holds a single command
+    // source, reference module or generator host. Naming the class in the probe
+    // is what makes that deletion red — and `.mds` is the class whose loss costs
+    // the most, because the whole tracker mechanics surface is spelled in it.
+    const newlyUnreached = (subset: CorpusEntry[]): string[] =>
+      collectUnreachedClasses(subset).filter(cls => !unreached.includes(cls));
+    expect(
+      newlyUnreached(corpus.filter(e => !e.path.endsWith('.mds'))),
+      'dropping every .mds file from the corpus must be reported as an unreached class',
+    ).toEqual(['.mds']);
+    expect(
+      newlyUnreached(corpus.filter(e => path.extname(e.path) !== '')),
+      'dropping the extension-less hooks must be reported — that clause has no extension to ' +
+      'derive from, so it is the one class a purely extension-driven check would miss',
+    ).toEqual([EXTENSIONLESS_CLASS]);
+    expect(
+      collectUnreachedClasses([]),
+      'an empty corpus reaches no class at all',
+    ).toEqual([...SCANNED_EXTENSIONS, EXTENSIONLESS_CLASS]);
   });
 
   it('no raw control byte appears anywhere under src/ (and a seeded one is reported)', () => {
