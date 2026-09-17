@@ -689,3 +689,146 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
     ).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5. The plan command's traceable-issue path names no HOST
+// ---------------------------------------------------------------------------
+
+/**
+ * Collector 1 above cannot see this one. `github` is not a FOREIGN token — it is
+ * the default provider — so a `GitHub issue` literal in a provider-neutral
+ * sentence passes every arm of the Jira/Linear scan while saying the same wrong
+ * thing to a Jira user: `/plan` asks "create a GitHub issue for this plan?" and
+ * then spawns `ensure-traceable-issue`, whose mechanics create a Jira one.
+ *
+ * The scope is the plan command, source and compiled, because that is where the
+ * prompt the user answers lives. Widening it to every command is the right
+ * response to the literal turning up elsewhere; loosening the token is not.
+ */
+const PLAN_COMMAND_ARTIFACTS: readonly { readonly path: string; readonly file: string }[] = [
+  { path: 'src/assets/commands/plan.mds', file: path.join(ROOT, 'src', 'assets', 'commands', 'plan.mds') },
+  { path: 'dist/commands/plan.md', file: path.join(DIST_COMMANDS, 'plan.md') },
+];
+
+const PLAN_COMMAND_PATHS: readonly string[] = PLAN_COMMAND_ARTIFACTS.map(a => a.path);
+
+/**
+ * The authored host and its compiled form, read directly.
+ *
+ * Both are needed and neither substitutes for the other: the `.mds` is what an
+ * author edits, and the `.md` is what a session loads. A pin on one alone is
+ * satisfied by a literal the other still carries.
+ */
+function planCorpus(): CorpusEntry[] {
+  return PLAN_COMMAND_ARTIFACTS.map(a => ({ path: a.path, content: readFileSync(a.file, 'utf-8') }));
+}
+
+/**
+ * `PLAN_USAGE_ALLOWLIST` — the usage synopsis, and nothing else.
+ *
+ * The synopsis annotates a literal `#42` argument, and `#42` IS GitHub's issue
+ * grammar: naming the host there tells the reader which provider the example is
+ * written for rather than promising them that provider. Every other site is a
+ * sentence about what the operation DOES, which is provider-independent.
+ *
+ * A region rather than a line, for the reason `PROVIDER_MAP_ALLOWLIST` is one: a
+ * line-scoped exemption goes stale on a rewrap.
+ */
+const PLAN_USAGE_ALLOWLIST = { from: '## Usage', to: '## Input' } as const;
+
+/** The host literal the traceable-issue path must not carry. */
+const HOST_ISSUE_LITERAL = 'GitHub issue';
+
+/** Everything outside the usage synopsis. */
+function stripPlanUsage(content: string): string {
+  const start = content.indexOf(PLAN_USAGE_ALLOWLIST.from);
+  if (start === -1) return content;
+  const end = content.indexOf(PLAN_USAGE_ALLOWLIST.to, start);
+  return end === -1 ? content.slice(0, start) : content.slice(0, start) + content.slice(end);
+}
+
+/** Named collector: host-issue literals outside the plan command's usage synopsis. */
+export function collectHostIssueLiterals(corpus: CorpusEntry[]): string[] {
+  const violations: string[] = [];
+  for (const entry of corpus) {
+    if (!PLAN_COMMAND_PATHS.includes(entry.path)) continue;
+    for (const line of stripPlanUsage(entry.content).split('\n')) {
+      if (line.includes(HOST_ISSUE_LITERAL)) {
+        violations.push(`${entry.path}: ${line.trim().slice(0, 90)}`);
+      }
+    }
+  }
+  return violations;
+}
+
+describe('provider-scope: the plan command promises a tracker issue, not a host issue', () => {
+  const corpus = planCorpus();
+
+  it('both plan artifacts are scanned and non-empty', () => {
+    expect(corpus.map(e => e.path)).toEqual(PLAN_COMMAND_PATHS);
+    for (const entry of corpus) {
+      expect(
+        entry.content.length,
+        `${entry.path} is empty — a guard over nothing forbids nothing; run \`npm run build:mds\``,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('the usage allowlist is still needed: the synopsis really does carry the literal', () => {
+    // The staleness half. If the synopsis ever stops naming the host, the exemption
+    // is deleted rather than carried — the failure mode an unnoticed exemption is.
+    for (const file of PLAN_COMMAND_PATHS) {
+      const entry = corpus.find(e => e.path === file)!;
+      expect(
+        entry.content.includes(HOST_ISSUE_LITERAL),
+        `${file}: the usage synopsis no longer names the host — delete PLAN_USAGE_ALLOWLIST`,
+      ).toBe(true);
+      expect(
+        stripPlanUsage(entry.content).length,
+        `${file}: the usage region was not found — the synopsis anchors changed`,
+      ).toBeLessThan(entry.content.length);
+    }
+  });
+
+  it('no host-issue literal on the traceable-issue path, in source or compiled form', () => {
+    const violations = collectHostIssueLiterals(corpus);
+    expect(
+      violations,
+      `The plan command asks the user about, and describes, the issue \`ensure-traceable-issue\` ` +
+      `creates — and that operation resolves its provider at spawn time. Naming the host here ` +
+      `promises a Jira or Linear user an issue they will not get:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a seeded literal, and spares the synopsis', () => {
+    const seededOutside: CorpusEntry[] = PLAN_COMMAND_PATHS.map(p => ({
+      path: p,
+      content: `## Usage\n/plan #42 (GitHub issue)\n## Input\nCreate or enrich a GitHub issue?\n`,
+    }));
+    expect(
+      collectHostIssueLiterals(seededOutside),
+      'a literal below the synopsis must be reported in both artifacts',
+    ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
+
+    expect(
+      collectHostIssueLiterals([
+        { path: PLAN_COMMAND_PATHS[0], content: '## Usage\n/plan #42 (GitHub issue)\n## Input\nok\n' },
+      ]),
+      'the synopsis is the exemption, so a literal inside it must be silent',
+    ).toEqual([]);
+
+    expect(
+      collectHostIssueLiterals([{ path: 'dist/commands/implement.md', content: 'a GitHub issue\n' }]),
+      'the collector is scoped to the plan command — another command is not its business',
+    ).toEqual([]);
+
+    // …and over the REAL bytes, so the live arm's silence is evidence about this
+    // command's current text rather than about a synopsis-shaped fixture.
+    expect(
+      collectHostIssueLiterals(
+        planCorpus().map(e => ({ ...e, content: `${e.content}\nCreate or enrich a GitHub issue?\n` })),
+      ),
+      'a regression appended to the shipped bytes must be reported in both artifacts',
+    ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
+  });
+});

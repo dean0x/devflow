@@ -433,11 +433,11 @@ Closes {ISSUE_REF}
 
 Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\{n\}`.
 
-**Create or enrich GitHub issue:**
+**Create or enrich tracker issue:**
 
 When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
 
-When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a GitHub issue for this plan?" — skip the spawn entirely if the user declines.
+When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a tracker issue for this plan?" — skip the spawn entirely if the user declines.
 
 Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 
@@ -450,7 +450,7 @@ INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
 REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
 PLAN_ARTIFACT_PATH: {the design artifact path written above}
 LABELS: feature
-The Git agent will create a GitHub issue (or enrich an existing one) using the D3 template,
+The Git agent will create a tracker issue (or enrich an existing one) using the D3 template,
 post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.
 Return the issue number."
 ```
@@ -529,7 +529,7 @@ Display completion summary:
 ├─ Block 6: Output
 │  └─ Phase 14: Output
 │     ├─ Store design artifact (.devflow/docs/design/)
-│     ├─ Create GitHub issue (optional)
+│     ├─ Create tracker issue (optional)
 │     └─ Report summary + next step
 │
 ```
