@@ -79,7 +79,7 @@ const BUDGET_GIT_MD = 55_750;
  * THE PHASE-3 git.md CEILING [DR-13(b)] — the gate, with BUDGET_GIT_MD above as
  * its declared base.
  *
- * 55_750 + 3_120 = 58_870, measured 58_772 (headroom 98 — the same deliberate
+ * 55_750 + 3_120 = 58_870, measured 58_782 (headroom 88 — the same deliberate
  * thinness Phase 2 chose, so the next content addition must again fund itself).
  * The 3_120 is the MEASURED growth of the preamble block, not an estimate: the
  * portion of git.md OUTSIDE the preamble started this change byte-identical
@@ -206,7 +206,7 @@ const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_
  * by this phase: no github operation file names the tool-call contract (the
  * re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts PROVES that rather
  * than assuming it), so `MCP_TERM` stays 0 by construction and the GitHub row keeps
- * its 117 ch of headroom. Folding a provider that DOES load the contract into that
+ * its 107 ch of headroom. Folding a provider that DOES load the contract into that
  * number would have billed every GitHub user for bytes they never receive — the
  * exact defect GAP-02 recorded — and would have done it by raising a ratcheted
  * ceiling, which §14.5 forbids outright.
@@ -216,18 +216,18 @@ const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_
  * GitHub one cannot absorb theirs.
  *
  * MEASURED, term by term, on this tree:
- *     dist/agents/git.md                             58_772
+ *     dist/agents/git.md                             58_782
  *   + skills/git/SKILL.md                             6_581
  *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       68_295
+ *   = the always-preloaded set                       68_305
  *   + references/tracker/_mcp.md                      6_402   ← 0 on the GitHub path
  *   + max_op references/tracker/jira/{op}.md          6_087   (backlink-shipped-issues)
  *   + max over jira ops of the one-spawn load         7_821   (setup-task: its own
  *                                                              mechanics + learn-conventions.md)
- *   =                                                88_605
+ *   =                                                88_615
  *
- * Pinned at 88_660 — 55 ch of headroom, tighter than Phase 2's 86 and the Phase-3
- * git.md ceiling's 98, so the next addition to the contract or to a Jira mechanics
+ * Pinned at 88_660 — 45 ch of headroom, tighter than Phase 2's 86 and the Phase-3
+ * git.md ceiling's 88, so the next addition to the contract or to a Jira mechanics
  * file must fund itself with a cut rather than reach for slack. It is deliberately
  * NOT re-derived upward from a later measurement: this gate already went red once
  * during authoring — a 197 ch rewrite of the contract's truncation clause — and the
@@ -256,17 +256,17 @@ const BUDGET_LOADED_SET_JIRA = 88_660;
  * it by raising a ratcheted ceiling.
  *
  * MEASURED, term by term, on this tree:
- *     dist/agents/git.md                             58_772
+ *     dist/agents/git.md                             58_782
  *   + skills/git/SKILL.md                             6_581
  *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       68_295
+ *   = the always-preloaded set                       68_305
  *   + references/tracker/_mcp.md                      6_402   ← 0 on the GitHub path
  *   + max_op references/tracker/linear/{op}.md        7_706   (backlink-shipped-issues)
  *   + max over linear ops of the one-spawn load       8_571   (setup-task: its own
  *                                                              mechanics + learn-conventions.md)
- *   =                                                90_974
+ *   =                                                90_984
  *
- * Pinned at 91_000 — 26 ch of headroom, the thinnest of the three rows and the
+ * Pinned at 91_000 — 16 ch of headroom, the thinnest of the three rows and the
  * binding constraint on any addition to the always-loaded agent: a character added
  * to git.md is a character added to this row, so the next such addition must fund
  * itself with a cut rather than reach for slack.
