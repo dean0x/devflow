@@ -38,6 +38,7 @@ import {
   TRACKER_ATTEMPTS_MAX,
   TRACKER_CONVENTIONS_BACKUP_NAMES,
   parseTrackerId,
+  isTrackerProvider,
   normalizeTrackerFeature,
   describeTrackerValue,
   trackerConventionsPath,
@@ -51,6 +52,11 @@ import {
   type TrackerProvider,
 } from '../../src/core/tracker.js';
 import { readManifest } from '../../src/core/manifest.js';
+
+/** The module under test, as source — read by the single-authority guard below. */
+const MODULE_SOURCE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'core', 'tracker.ts',
+);
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +93,116 @@ describe('TRACKER_PROVIDERS registry', () => {
     expect(TRACKER_ATTEMPTS_FILE).toBe('.tracker.attempts');
     expect(TRACKER_ENABLED_FILE).toBe('.tracker.enabled');
     expect(TRACKER_CLAIM_FILE).toBe('.tracker.processing');
+  });
+});
+
+// ── The registry is the ONE authority on the provider domain (PF-049) ─────────
+//
+// `TrackerProvider` is a projection of TRACKER_PROVIDERS, so the type domain and
+// the runtime domain are the same set by construction. Nothing at RUNTIME can
+// tell a derived union from a hand-listed one — both produce identical values —
+// so the guard is over the DECLARATIONS, each collector carrying a known-bad
+// probe so it cannot pass vacuously (PF-018).
+
+/**
+ * Named collector: the right-hand side of the exported `TrackerProvider` alias.
+ *
+ * Scoped to the declaration rather than to the file, so "the word `typeof`
+ * appears somewhere in tracker.ts" can never satisfy the assertion below.
+ * `null` when the alias is absent — reported, never silently passed.
+ */
+function providerAliasBody(source: string): string | null {
+  const marker = 'export type TrackerProvider =';
+  const start = source.indexOf(marker);
+  if (start === -1) return null;
+  const end = source.indexOf(';', start + marker.length);
+  if (end === -1) return null;
+  return source.slice(start + marker.length, end).trim();
+}
+
+/**
+ * Named collector: the registry declaration, from `export const TRACKER_PROVIDERS`
+ * through the `;` that closes it. The rows carry no `;`, so the first `;\n` after
+ * the marker is the terminator. `null` when the declaration is absent.
+ */
+function registryDeclaration(source: string): string | null {
+  const marker = 'export const TRACKER_PROVIDERS';
+  const start = source.indexOf(marker);
+  if (start === -1) return null;
+  const end = source.indexOf(';\n', start);
+  if (end === -1) return null;
+  return source.slice(start, end + 1);
+}
+
+describe('the provider domain is derived from the registry (PF-049)', () => {
+  let source: string;
+
+  beforeEach(async () => {
+    source = await fs.readFile(MODULE_SOURCE, 'utf-8');
+  });
+
+  it('declares TrackerProvider as a projection of TRACKER_PROVIDERS, never a hand-listed union', () => {
+    const body = providerAliasBody(source);
+    expect(body).not.toBeNull();
+    expect(body).toContain('typeof TRACKER_PROVIDERS');
+    // A literal here would be a second hand-maintained authority: `'asana'` added
+    // to the union alone typechecks at every consumer while parseTrackerId rejects
+    // it and providerChoices() never offers it.
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(body, `the union must not spell ${id} by hand`).not.toContain(`'${id}'`);
+    }
+  });
+
+  it('pins the registry rows with `as const satisfies`, so the ids stay literal', () => {
+    const declaration = registryDeclaration(source);
+    expect(declaration).not.toBeNull();
+    // `satisfies` checks every row against the row shape; `as const` is what stops
+    // the ids widening to `string` and collapsing the derived domain.
+    expect(declaration).toContain('as const satisfies');
+    expect(declaration).toContain('TrackerProviderDefinition');
+  });
+
+  it('known-bad probe: both collectors report a hand-listed union and registry', () => {
+    // The two assertions above are evidence only while these collectors can fail.
+    const handListed =
+      "export type TrackerProvider = 'github' | 'jira' | 'linear';\n" +
+      'export const TRACKER_PROVIDERS: readonly TrackerProviderDefinition[] = [\n' +
+      "  { id: 'github', label: 'GitHub', hint: 'x' },\n" +
+      '];\n';
+    expect(providerAliasBody(handListed)).toBe("'github' | 'jira' | 'linear'");
+    expect(providerAliasBody(handListed)).not.toContain('typeof TRACKER_PROVIDERS');
+    expect(registryDeclaration(handListed)).not.toContain('as const satisfies');
+    // An absent declaration is reported, never passed off as "nothing to check".
+    expect(providerAliasBody('// no tracker types here')).toBeNull();
+    expect(registryDeclaration('// no tracker registry here')).toBeNull();
+  });
+});
+
+describe('isTrackerProvider (the one runtime membership test)', () => {
+  it('accepts every registry id', () => {
+    expect(TRACKER_PROVIDER_IDS.length).toBeGreaterThan(0);
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(isTrackerProvider(id), `expected ${id} to be admitted`).toBe(true);
+    }
+  });
+
+  it('rejects every non-string and every value outside the registry', () => {
+    const REJECTED: Array<[label: string, value: unknown]> = [
+      ['undefined', undefined],
+      ['null', null],
+      ['a number', 3],
+      ['an object', {}],
+      ['an array holding a valid id', ['jira']],
+      ['an unknown id', 'asana'],
+      ['a suffixed variant', 'jira-cloud'],
+      ['an uppercase id', 'JIRA'],
+      ['a padded id', 'jira '],
+      ['the empty string', ''],
+    ];
+    expect(REJECTED.length).toBe(10);
+    for (const [label, value] of REJECTED) {
+      expect(isTrackerProvider(value), `expected ${label} to be rejected`).toBe(false);
+    }
   });
 });
 

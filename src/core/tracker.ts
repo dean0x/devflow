@@ -40,11 +40,61 @@ export type TrackerResult<T> =
   | { ok: false; error: string };
 
 // ---------------------------------------------------------------------------
-// Domain types
+// Provider registry — the ONE authority on the closed provider set
 // ---------------------------------------------------------------------------
 
-/** The closed provider domain. Never widened by user input. */
-export type TrackerProvider = 'github' | 'jira' | 'linear';
+/**
+ * The shape of one registry row.
+ *
+ * `id` is `string` here, not `TrackerProvider`: this interface is the constraint
+ * `TRACKER_PROVIDERS` is checked against and `TrackerProvider` is derived FROM
+ * that registry, so narrowing `id` here would make the two circular and hand the
+ * domain back to a second authority. The rows keep their literal ids — `as const`
+ * on the registry is what preserves them.
+ */
+export interface TrackerProviderDefinition {
+  /** Registry ID — the token accepted by `--tracker` and `devflow tracker --set`. */
+  readonly id: string;
+  /** Human-readable label rendered in prompts (static, never echoes user input). */
+  readonly label: string;
+  /** One-line hint shown in the init wizard select. */
+  readonly hint: string;
+}
+
+/**
+ * Canonical issue-tracker provider registry.
+ *
+ * D-TRACKER-ONE-DOMAIN [PF-049]: this table is the SINGLE authority on the closed
+ * provider set, and `TrackerProvider` below is a projection of it. A provider
+ * therefore exists for the type system exactly when it has a row here: there is no
+ * hand-listed union that can admit an id `parseTrackerId` rejects and the wizard
+ * never offers. `as const satisfies` is what buys both halves — `satisfies` checks
+ * every row against `TrackerProviderDefinition` while `as const` keeps the ids as
+ * literals rather than widening them to `string` (the same pattern
+ * `VARIANT_MODULES` uses in src/core/mds-variants.ts).
+ *
+ * Labels and hints are stamped verbatim into rendered prompts — no user input is
+ * ever written. The validated ID selects a hardcoded path prefix from a static
+ * map at every consumer; the input string is never concatenated into a path.
+ *
+ * Hints deliberately avoid the token "MCP": transport must not leak into
+ * user-facing text (standing prohibition).
+ */
+export const TRACKER_PROVIDERS = [
+  { id: 'github', label: 'GitHub', hint: 'GitHub Issues through the gh CLI' },
+  { id: 'jira',   label: 'Jira',   hint: 'Atlassian Jira issues and projects' },
+  { id: 'linear', label: 'Linear', hint: 'Linear issues and projects' },
+] as const satisfies readonly TrackerProviderDefinition[];
+
+/**
+ * The closed provider domain, projected from the registry. Never widened by user
+ * input, and never spelled a second time.
+ */
+export type TrackerProvider = (typeof TRACKER_PROVIDERS)[number]['id'];
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
 
 /**
  * Named domain type for the tracker feature state.
@@ -61,35 +111,6 @@ export type TrackerProvider = 'github' | 'jira' | 'linear';
 export interface TrackerFeatureState {
   provider: TrackerProvider;
 }
-
-export interface TrackerProviderDefinition {
-  /** Registry ID — the token accepted by `--tracker` and `devflow tracker --set`. */
-  id: TrackerProvider;
-  /** Human-readable label rendered in prompts (static, never echoes user input). */
-  label: string;
-  /** One-line hint shown in the init wizard select. */
-  hint: string;
-}
-
-// ---------------------------------------------------------------------------
-// Provider registry
-// ---------------------------------------------------------------------------
-
-/**
- * Canonical issue-tracker provider registry.
- *
- * Labels and hints are stamped verbatim into rendered prompts — no user input is
- * ever written. The validated ID selects a hardcoded path prefix from a static
- * map at every consumer; the input string is never concatenated into a path.
- *
- * Hints deliberately avoid the token "MCP": transport must not leak into
- * user-facing text (standing prohibition).
- */
-export const TRACKER_PROVIDERS: readonly TrackerProviderDefinition[] = [
-  { id: 'github', label: 'GitHub', hint: 'GitHub Issues through the gh CLI' },
-  { id: 'jira',   label: 'Jira',   hint: 'Atlassian Jira issues and projects' },
-  { id: 'linear', label: 'Linear', hint: 'Linear issues and projects' },
-];
 
 /** Registry IDs in registry order. */
 export const TRACKER_PROVIDER_IDS: readonly TrackerProvider[] =
@@ -175,6 +196,18 @@ function isEnoent(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * The one runtime membership test for the provider domain.
+ *
+ * Byte-exact against the registry: no trim, no case folding, no alias. Both the
+ * strict parser and the tolerant normaliser narrow through this, so the domain
+ * the compiler enforces and the domain the boundary enforces are the same set by
+ * construction rather than by two casts that happen to agree.
+ */
+export function isTrackerProvider(value: unknown): value is TrackerProvider {
+  return typeof value === 'string' && REGISTRY_SET.has(value);
+}
+
+/**
  * Render an untrusted provider token for a terminal message.
  *
  * Rejected values are echoed so the user can see what they typed, so they are
@@ -217,13 +250,13 @@ export function parseTrackerId(input: string): TrackerResult<TrackerProvider> {
   if (input === '') {
     return { ok: false, error: `Missing tracker provider ID. Valid IDs: ${VALID_IDS_LIST}` };
   }
-  if (!REGISTRY_SET.has(input)) {
+  if (!isTrackerProvider(input)) {
     return {
       ok: false,
       error: `Unknown tracker provider ID: "${describeTrackerValue(input)}". Valid IDs: ${VALID_IDS_LIST}`,
     };
   }
-  return { ok: true, value: input as TrackerProvider };
+  return { ok: true, value: input };
 }
 
 /**
@@ -247,10 +280,9 @@ export function normalizeTrackerFeature(raw: unknown): TrackerFeatureState {
   }
 
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.provider !== 'string') return DEFAULT;
-  if (!REGISTRY_SET.has(obj.provider)) return DEFAULT;
+  if (!isTrackerProvider(obj.provider)) return DEFAULT;
 
-  return { provider: obj.provider as TrackerProvider };
+  return { provider: obj.provider };
 }
 
 // ---------------------------------------------------------------------------
