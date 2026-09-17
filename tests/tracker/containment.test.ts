@@ -52,6 +52,7 @@ import {
   CONTAINMENT_EXEMPTIONS,
   type ContainmentExemption,
 } from '../fixtures/containment-exemptions.js';
+import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
 // Fail-loud reads
@@ -406,15 +407,6 @@ function generatedTrackerFiles(): Map<string, string> {
   }
   return found;
 }
-
-/**
- * Minimum characters a generated reference must carry.
- *
- * A zero-byte file is already refused by splitVariantSections' empty-section arm;
- * this floor catches the next shape up — a file that kept its heading and lost its
- * body, which compiles and ships and reads downstream as "mechanics unavailable".
- */
-const MIN_REFERENCE_CHARS = 80;
 
 describe('containment: structural parity — every op has a file and every file has an op', () => {
   const files = generatedTrackerFiles();
@@ -791,6 +783,26 @@ export const MCP_SHARED_LITERAL_REGISTRY: readonly McpSharedLiteral[] = [
   },
 ];
 
+/**
+ * One registry entry, addressed by its sentence and raised by name when absent.
+ *
+ * `find(...)!` would hand the probe below an `undefined` that surfaces as "cannot
+ * read properties of undefined" one line later, naming neither the registry nor
+ * the sentence that left it — and the sentence leaving the registry is exactly the
+ * change this probe exists to notice.
+ */
+function requireRegistryEntry(sentence: string): McpSharedLiteral {
+  const found = MCP_SHARED_LITERAL_REGISTRY.find(e => e.sentence === sentence);
+  if (found === undefined) {
+    throw new Error(
+      `MCP_SHARED_LITERAL_REGISTRY holds no entry for ${JSON.stringify(sentence)} (registered: ` +
+      `${MCP_SHARED_LITERAL_REGISTRY.map(e => JSON.stringify(e.sentence)).join(', ')}) — ` +
+      `this arm has no subject`,
+    );
+  }
+  return found;
+}
+
 /** The generated tool-call contract, read fail-loud. */
 function contractFile(): string {
   return requireFile('tool-call contract', path.join(REFS_DIR, 'tracker', '_mcp.md'));
@@ -906,9 +918,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
     // [DR-19]'s named known-bad, verbatim in intent. Driven through the SAME
     // collector the negative arm uses, over the real provider corpus plus one
     // seeded file, so a collector that had stopped reporting takes this red too.
-    const rule = MCP_SHARED_LITERAL_REGISTRY.find(
-      e => e.sentence === 'Everything after line 1 is `{SCRUBBED_BODY}`.',
-    )!;
+    const rule = requireRegistryEntry('Everything after line 1 is `{SCRUBBED_BODY}`.');
     const seeded = [
       ...providerReferenceCorpus().filter(e => e.label !== 'tracker/_mcp.md'),
       {
