@@ -9,10 +9,22 @@ and the sub-directory come from `VARIANT_MODULES` in `src/core/mds-variants.ts`,
 and the two must agree in both directions or the build fails. Everything above
 the first section marker is module-level prose and is emitted nowhere.
 
+The op roster is the SAME exported list the other provider modules read, so
+file-set parity across providers is a compile-time property rather than an
+assertion: a provider cannot gain or lose an operation without every provider
+moving with it. Define-set parity — one `@define` per op, named identically
+across modules — is what the cross-provider parity scan in `tests/tracker/jira-module.test.ts`
+asserts over all three, because a define name is visible to no type.
+
 Each section states what the Git agent loads it for. An operation's contract —
 its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
 clause — is never restated here: that is the agent's, and a second copy outside
 the single-authority corpus is the divergence this split exists to prevent.
+
+Headings below each section's own anchor are `###` by grammar, not by taste: a
+column-0 `## ` line outside a fence terminates the section for every guard that
+reads it through `extractOpSectionFromCorpus`, and everything under it becomes
+invisible while the bytes stay on disk (PF-063).
 
 @define setup_task():
 ## Operation: setup-task
